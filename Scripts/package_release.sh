@@ -36,6 +36,26 @@ fail()  { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
 VERSION="$(grep -m1 '"MARKETING_VERSION"' Project.swift | sed -E 's/.*: *"([^"]+)".*/\1/')"
 [[ -n "$VERSION" ]] || fail "could not read MARKETING_VERSION from Project.swift"
 
+# The CLI cannot read a bundle, so `ControlAPI.releaseVersion` carries the version as a source
+# constant and has to be bumped by hand. Nothing enforced that, and v0.9.2 shipped an installer named
+# 0.9.2 containing a `mimic` that reported 0.9.1 — the version is the one thing a user checks to know
+# whether a fix reached them, so a release that lies about it is worse than no release.
+CLI_VERSION="$(grep -m1 'static let releaseVersion' Sources/Domain/Control/ControlResult.swift \
+  | sed -E 's/.*"([^"]+)".*/\1/')"
+[[ "$CLI_VERSION" == "$VERSION" ]] || fail \
+  "version mismatch: MARKETING_VERSION is $VERSION but ControlAPI.releaseVersion is $CLI_VERSION.
+Update Sources/Domain/Control/ControlResult.swift to match, then run this again."
+
+# Tuist writes MARKETING_VERSION into the generated project, so a bump that has not been regenerated
+# builds the *previous* version under the new name — which is exactly how 0.9.2 first shipped.
+if [[ -f Mimic.xcodeproj/project.pbxproj ]]; then
+  GENERATED_VERSION="$(grep -m1 -o 'MARKETING_VERSION = [^;]*' Mimic.xcodeproj/project.pbxproj \
+    | sed -E 's/MARKETING_VERSION = //')"
+  [[ "$GENERATED_VERSION" == "$VERSION" ]] || fail \
+    "the generated Xcode project is stale: it has MARKETING_VERSION $GENERATED_VERSION, Project.swift has $VERSION.
+Run 'tuist install && tuist generate', then this again."
+fi
+
 BUILD_DIR="$ROOT_DIR/.artifacts/package"
 STAGE_DIR="$BUILD_DIR/root"
 SCRIPTS_DIR="$BUILD_DIR/scripts"
