@@ -129,6 +129,7 @@ import SwiftUI
 #Preview("DSDrawer — Edges") {
     @Previewable @State var showRight = true
     @Previewable @State var showBottom = true
+    @Previewable @State var bottomHeight: CGFloat = 120
 
     VStack(spacing: 0) {
         HStack(spacing: 0) {
@@ -157,45 +158,20 @@ import SwiftUI
             }
         }
 
-        DSDrawer(edge: .bottom, isPresented: $showBottom, identifier: "preview.bottom") {
-            Text("Bottom drawer")
+        DSDrawer(
+            edge: .bottom,
+            isPresented: $showBottom,
+            size: $bottomHeight,
+            minSize: 80,
+            maxSize: 300,
+            defaultSize: 160,
+            identifier: "preview.bottom"
+        ) {
+            Text("Bottom drawer (resizable)")
                 .font(DSTypography.body)
-                .frame(maxWidth: .infinity)
-                .frame(height: 120)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(DSColors.secondary)
         }
-    }
-    .frame(width: 600, height: 400)
-}
-
-// MARK: - DSSplitPane
-
-#Preview("DSSplitPane — Vertical") {
-    @Previewable @State var showSecondary = true
-    @Previewable @State var secondaryHeight: CGFloat = 140
-
-    DSSplitPane(
-        axis: .vertical,
-        isSecondaryPresented: $showSecondary,
-        secondaryThickness: $secondaryHeight,
-        minimumPrimaryThickness: 120,
-        minimumSecondaryThickness: 80,
-        defaultSecondaryThickness: 140,
-        identifier: "preview.split"
-    ) {
-        VStack {
-            Text("Primary pane")
-                .font(DSTypography.body)
-            Button(showSecondary ? "Hide secondary" : "Show secondary") {
-                showSecondary.toggle()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } secondary: {
-        Text("Secondary pane — drag the divider, or drag it shut")
-            .font(DSTypography.body)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DSColors.secondary)
     }
     .frame(width: 600, height: 400)
 }
