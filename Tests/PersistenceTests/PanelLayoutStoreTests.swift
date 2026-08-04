@@ -21,7 +21,6 @@ struct PanelLayoutStoreTests {
         // The trap this guards: `UserDefaults.double(forKey:)` returns 0 for a missing key, which
         // would collapse both panels to nothing on first launch.
         #expect(layout.requestLogHeight > 0)
-        #expect(layout.inspectorWidth > 0)
     }
 
     @Test("An arrangement survives a save and reload")
@@ -29,7 +28,6 @@ struct PanelLayoutStoreTests {
         let defaults = Self.makeDefaults()
         let saved = PanelLayout(
             requestLogHeight: 340,
-            inspectorWidth: 320,
             isRequestLogVisible: false,
             isInspectorVisible: true
         )
@@ -55,16 +53,13 @@ struct PanelLayoutStoreTests {
     @Test("A large stored size is kept — the window decides what fits, not the store")
     func largeSizesSurviveTheStore() {
         let defaults = Self.makeDefaults()
-        // Someone on a 6K display who dragged a panel out past 900pt. The store used to clamp this to
-        // 400 on the way in *and* on the way out, so the arrangement was not merely refused, it was
-        // destroyed. Whoever lays the panel out narrows it when a window is too small — for the
-        // request log that is `maximumRequestLogHeight`, for the inspector it is now SwiftUI's own
-        // column — and the preference survives either way.
-        defaults.set(900.0, forKey: "panel.inspector.width")
+        // Someone on a 6K display who dragged the panel out past 1000pt. The store used to clamp this
+        // to 400 on the way in *and* on the way out, so the arrangement was not merely refused, it was
+        // destroyed. Narrowing an oversized value to fit is now the split view's job, and it does it
+        // without writing back — so the preference survives a spell in a smaller window.
         defaults.set(1_200.0, forKey: "panel.requestLog.height")
 
         let layout = PanelLayoutStore(defaults: defaults).load()
-        #expect(layout.inspectorWidth == 900)
         #expect(layout.requestLogHeight == 1_200)
     }
 
@@ -78,54 +73,57 @@ struct PanelLayoutStoreTests {
         #expect(layout.requestLogHeight == PanelLayoutStore.Bounds.storedSizeLimit)
     }
 
-    @Test("The request log may grow until the centre pane hits its minimum")
-    func layoutLimitsLeaveRoomForTheCentre() {
-        // 900pt of column, 240pt reserved for the editor.
-        #expect(PanelLayoutStore.maximumRequestLogHeight(containerHeight: 900) == 660)
+    @Test("Both panes keep a usable floor, and the two floors cannot exceed a real window")
+    func floorsLeaveRoomForBothPanes() {
+        // These two are the split view items' `minimumThickness` values, so together they are the
+        // shortest editor column the layout can produce. A pair that did not fit a small window would
+        // make the divider undraggable rather than merely tight.
+        let combined = PanelLayoutStore.Bounds.minimumCentreHeight
+            + PanelLayoutStore.Bounds.minimumRequestLogHeight
+        #expect(combined <= 400)
+        #expect(PanelLayoutStore.Bounds.minimumRequestLogHeight > 0)
+        #expect(PanelLayoutStore.Bounds.minimumCentreHeight > 0)
     }
 
-    @Test("A window too small for the reserve still leaves the panel its minimum")
-    func layoutLimitsNeverGoBelowTheFloor() {
-        // The subtraction goes negative here; the floor has to win, or the panel would be told its
-        // maximum is smaller than its minimum and collapse.
-        #expect(
-            PanelLayoutStore.maximumRequestLogHeight(containerHeight: 100)
-                == PanelLayoutStore.Bounds.minimumRequestLogHeight
-        )
-    }
-
-    @Test("An unmeasured container does not clamp anything")
-    func unmeasuredContainerIsUnbounded() {
-        // Zero means "not laid out yet". Treating that as a real bound would squash a restored panel
-        // to its minimum for a frame on every launch.
-        #expect(
-            PanelLayoutStore.maximumRequestLogHeight(containerHeight: 0)
-                == PanelLayoutStore.Bounds.storedSizeLimit
-        )
+    @Test("The inspector's bounds are constants, not stored values")
+    func inspectorBoundsAreConstants() {
+        // `panel.inspector.width` used to be read at launch and written straight back untouched, so
+        // the store held a number nothing decided. AppKit restores that column with the window; only
+        // the floor and the preferred width are ours to state.
+        #expect(PanelLayoutStore.Bounds.minimumInspectorWidth > 0)
+        #expect(PanelLayoutStore.Bounds.idealInspectorWidth >= PanelLayoutStore.Bounds.minimumInspectorWidth)
     }
 
     @Test("A nonsensical stored size falls back to the default")
     func nonsenseSizesFallBack() {
         let defaults = Self.makeDefaults()
         defaults.set(0.0, forKey: "panel.requestLog.height")
-        defaults.set(Double.nan, forKey: "panel.inspector.width")
 
         let layout = PanelLayoutStore(defaults: defaults).load()
         #expect(layout.requestLogHeight == PanelLayout.default.requestLogHeight)
-        #expect(layout.inspectorWidth == PanelLayout.default.inspectorWidth)
+
+        let nonFinite = Self.makeDefaults()
+        nonFinite.set(Double.nan, forKey: "panel.requestLog.height")
+        #expect(
+            PanelLayoutStore(defaults: nonFinite).load().requestLogHeight
+                == PanelLayout.default.requestLogHeight
+        )
     }
 
     @Test("Saving records what was chosen, bar the sanity ceiling")
     func savingKeepsTheChosenSize() {
         let defaults = Self.makeDefaults()
-        PanelLayoutStore(defaults: defaults).save(
-            PanelLayout(requestLogHeight: 9_000, inspectorWidth: 640)
-        )
-        let reloaded = PanelLayoutStore(defaults: defaults).load()
-        // 640 is a perfectly reasonable inspector on a large display and comes back untouched.
-        #expect(reloaded.inspectorWidth == 640)
+        PanelLayoutStore(defaults: defaults).save(PanelLayout(requestLogHeight: 640))
+        // 640 is a perfectly reasonable panel on a large display and comes back untouched.
+        #expect(PanelLayoutStore(defaults: defaults).load().requestLogHeight == 640)
+
+        let absurd = Self.makeDefaults()
+        PanelLayoutStore(defaults: absurd).save(PanelLayout(requestLogHeight: 9_000))
         // 9000 is not a window anyone has.
-        #expect(reloaded.requestLogHeight == PanelLayoutStore.Bounds.storedSizeLimit)
+        #expect(
+            PanelLayoutStore(defaults: absurd).load().requestLogHeight
+                == PanelLayoutStore.Bounds.storedSizeLimit
+        )
     }
 
     @Test("Two stores over different suites do not see each other")

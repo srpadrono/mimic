@@ -46,28 +46,19 @@ struct DSComponentRenderingTests {
     }
 
     private struct DrawerHarness: View {
-        @State private var showFixed = true
-        @State private var showResizable = true
-        @State private var drawerSize: CGFloat = 180
+        @State private var showTrailing = true
+        @State private var showBottom = true
 
         var body: some View {
             VStack(spacing: 16) {
-                DSDrawer(edge: .trailing, isPresented: $showFixed, identifier: "fixed") {
-                    Text("Fixed drawer")
+                DSDrawer(edge: .trailing, isPresented: $showTrailing, identifier: "trailing") {
+                    Text("Trailing drawer")
                         .padding()
                 }
                 .frame(height: 120)
 
-                DSDrawer(
-                    edge: .bottom,
-                    isPresented: $showResizable,
-                    size: $drawerSize,
-                    minSize: 120,
-                    maxSize: 240,
-                    defaultSize: 160,
-                    identifier: "resizable"
-                ) {
-                    Text("Resizable drawer")
+                DSDrawer(edge: .bottom, isPresented: $showBottom, identifier: "bottom") {
+                    Text("Bottom drawer")
                         .padding()
                 }
                 .frame(height: 240)
@@ -79,23 +70,14 @@ struct DSComponentRenderingTests {
     private struct EdgeDrawerHarness: View {
         @State private var showLeading = true
         @State private var showTop = true
-        @State private var leadingSize: CGFloat = 180
-        @State private var topSize: CGFloat = 140
 
         var body: some View {
             VStack(spacing: 16) {
                 HStack(spacing: 0) {
-                    DSDrawer(
-                        edge: .leading,
-                        isPresented: $showLeading,
-                        size: $leadingSize,
-                        minSize: 120,
-                        maxSize: 240,
-                        defaultSize: 160,
-                        identifier: "leading"
-                    ) {
+                    DSDrawer(edge: .leading, isPresented: $showLeading, identifier: "leading") {
                         Text("Leading drawer")
                             .padding()
+                            .frame(width: 160)
                     }
 
                     Text("Canvas")
@@ -104,17 +86,10 @@ struct DSComponentRenderingTests {
                 .frame(height: 180)
 
                 VStack(spacing: 0) {
-                    DSDrawer(
-                        edge: .top,
-                        isPresented: $showTop,
-                        size: $topSize,
-                        minSize: 100,
-                        maxSize: 220,
-                        defaultSize: 150,
-                        identifier: "top"
-                    ) {
+                    DSDrawer(edge: .top, isPresented: $showTop, identifier: "top") {
                         Text("Top drawer")
                             .padding()
+                            .frame(height: 100)
                     }
 
                     Text("Inspector")
@@ -126,27 +101,38 @@ struct DSComponentRenderingTests {
         }
     }
 
-    private struct DrawerDividerHarness: View {
+    /// Hosts a `DSSplitPane` so the representable is actually made, laid out and updated — which is
+    /// where `NSHostingController` sizing, the initial collapse state and the position restore all
+    /// have to agree. A pure unit test cannot reach any of that.
+    private struct SplitPaneHarness: View {
         let axis: Axis
-        let edge: DSDrawerEdge
-        @State private var size: CGFloat = 180
-        @State private var isPresented = true
+        let startsCollapsed: Bool
+        @State private var isSecondaryPresented: Bool
+        @State private var thickness: CGFloat = 150
+
+        init(axis: Axis, startsCollapsed: Bool = false) {
+            self.axis = axis
+            self.startsCollapsed = startsCollapsed
+            _isSecondaryPresented = State(initialValue: !startsCollapsed)
+        }
 
         var body: some View {
-            DSDrawerDivider(
+            DSSplitPane(
                 axis: axis,
-                size: $size,
-                isPresented: $isPresented,
-                minSize: 120,
-                maxSize: 240,
-                defaultSize: 180,
-                edge: edge,
-                anchor: 220
-            )
-            .frame(
-                width: axis == .horizontal ? 18 : 220,
-                height: axis == .vertical ? 18 : 220
-            )
+                isSecondaryPresented: $isSecondaryPresented,
+                secondaryThickness: $thickness,
+                minimumPrimaryThickness: 120,
+                minimumSecondaryThickness: 80,
+                defaultSecondaryThickness: 150,
+                identifier: "harness"
+            ) {
+                Text("Primary")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } secondary: {
+                Text("Secondary")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: 500, height: 420)
         }
     }
 
@@ -204,17 +190,23 @@ struct DSComponentRenderingTests {
         #expect(size.height >= 0)
     }
 
-    @Test("Drawer edges and divider helpers stay consistent")
+    @Test("Split panes render on both axes, collapsed and revealed")
+    func rendersSplitPanes() {
+        let vertical = render(SplitPaneHarness(axis: .vertical))
+        let horizontal = render(SplitPaneHarness(axis: .horizontal))
+        // A pane that starts collapsed must not load its content into a zero-height frame and trap;
+        // `NSSplitViewItem` defers the view load until it is uncollapsed, and this is the only place
+        // that path is exercised.
+        let collapsed = render(SplitPaneHarness(axis: .vertical, startsCollapsed: true))
+
+        #expect(vertical.height >= 0)
+        #expect(horizontal.width >= 0)
+        #expect(collapsed.height >= 0)
+    }
+
+    @Test("Drawer edges stay consistent")
     func drawerHelpersAndAdditionalEdges() {
         let edgeSize = render(EdgeDrawerHarness())
-        let horizontalDividerSize = render(
-            DrawerDividerHarness(axis: .horizontal, edge: .leading),
-            size: CGSize(width: 40, height: 220)
-        )
-        let verticalDividerSize = render(
-            DrawerDividerHarness(axis: .vertical, edge: .bottom),
-            size: CGSize(width: 220, height: 40)
-        )
 
         #expect(DSDrawerEdge.leading.swiftUIEdge == .leading)
         #expect(DSDrawerEdge.trailing.swiftUIEdge == .trailing)
@@ -229,8 +221,6 @@ struct DSComponentRenderingTests {
         #expect(!DSDrawerEdge.top.dividerLeads)
         #expect(DSDrawerEdge.bottom.dividerLeads)
         #expect(edgeSize.height >= 0)
-        #expect(horizontalDividerSize.height >= 0)
-        #expect(verticalDividerSize.width >= 0)
     }
 
     @Test("JSON editor renders valid and invalid content in both themes")
@@ -271,65 +261,6 @@ struct DSComponentRenderingTests {
         #expect(DSJSONEditor.prettyPrint("plain text") == nil)
         #expect(await DSJSONEditor.validateAsync(#"{"ok":true}"#))
         #expect(await DSJSONEditor.validateAsync("{") == false)
-    }
-
-    @Test("Drawer divider helpers cover resize math and cursor paths")
-    func drawerDividerHelpers() {
-        #expect(DSDrawerDivider.lineThickness(isDragging: false) == 1)
-        #expect(DSDrawerDivider.lineThickness(isDragging: true) == 2.5)
-        #expect(DSDrawerDivider.anchorValue(
-            forFrame: CGRect(x: 10, y: 20, width: 200, height: 100), edge: .bottom
-        ) == 120)
-        #expect(DSDrawerDivider.size(
-            forLocation: CGPoint(x: 0, y: 140), anchor: 300, edge: .bottom, maxSize: 240
-        ) == 160)
-        #expect(DSDrawerDivider.size(
-            forLocation: CGPoint(x: 0, y: 400), anchor: 300, edge: .bottom, maxSize: 240
-        ) == 0)
-        #expect(DSDrawerDivider.size(
-            forLocation: CGPoint(x: 0, y: 0), anchor: 300, edge: .bottom, maxSize: 240
-        ) == 240)
-        #expect(DSDrawerDivider.size(
-            forLocation: CGPoint(x: 200, y: 0), anchor: 0, edge: .leading, maxSize: 240
-        ) == 200)
-
-        let snapClosed = DSDrawerDivider.dragEndState(
-            size: 40,
-            minSize: 120,
-            defaultSize: 180,
-            snapCloseThreshold: 72
-        )
-        #expect(snapClosed.isPresented == false)
-        #expect(snapClosed.size == 180)
-
-        let snapMinimum = DSDrawerDivider.dragEndState(
-            size: 90,
-            minSize: 120,
-            defaultSize: 180,
-            snapCloseThreshold: 72
-        )
-        #expect(snapMinimum.shouldSnapToMinimum)
-        #expect(snapMinimum.isPresented == nil)
-        #expect(snapMinimum.size == 90)
-
-        let keepOpen = DSDrawerDivider.dragEndState(
-            size: 140,
-            minSize: 120,
-            defaultSize: 180,
-            snapCloseThreshold: 72
-        )
-        #expect(keepOpen.shouldSnapToMinimum == false)
-        #expect(keepOpen.isPresented == nil)
-
-        // `handleHover` is now a pure predicate. It used to push and pop `NSCursor`, and this test
-        // exercised a *balanced* pair — which is exactly why it never caught the bug: the cursor
-        // stack has no owner, SwiftUI does not promise an `onHover(false)` when a view is removed,
-        // and the divider is removed under the pointer every time a drawer snaps closed. The pop
-        // never ran and the resize cursor stuck over the whole window. The cursor is `.pointerStyle`'s
-        // business now, scoped to the view's lifetime, so there is no unbalanced call to make.
-        #expect(DSDrawerDivider.handleHover(hovering: true, axis: .horizontal))
-        #expect(DSDrawerDivider.handleHover(hovering: false, axis: .vertical) == false)
-        _ = DSAnimation.drawerToggle
     }
 
     @Test("Token values and color mappings stay consistent")

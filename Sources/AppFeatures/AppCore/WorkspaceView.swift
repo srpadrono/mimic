@@ -36,27 +36,10 @@ struct WorkspaceView: View {
     @State private var showJourneyTemplatePicker = false
     @State private var showNewJourneySheet = false
     @State private var isAddJourneyHovered = false
+    /// How tall the request log is. Two-way with `DSSplitPane`, which reports a *settled* size rather
+    /// than every frame of a drag — so this can be persisted on change without writing `UserDefaults`
+    /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
-    /// Read at launch, written back untouched, never used for layout.
-    ///
-    /// The inspector is a real column now (`.inspector`), and SwiftUI owns its width: it restores it
-    /// with the window, and there is no binding to observe or drive. So this is not `@State` — it is
-    /// a value carried across a save so that `PanelLayoutStore`'s record keeps its shape and an
-    /// older arrangement still loads. Making it observable would be a lie about who decides the width.
-    ///
-    /// Two behaviours did not survive the move: dragging the inspector past its minimum to snap it
-    /// closed, and double-clicking its divider to restore the default width. The column's own
-    /// divider does neither. That is the price of the toolbar being divided at the inspector's edge
-    /// the way Xcode divides it.
-    private let storedInspectorWidth: CGFloat
-    /// How tall the editor column is *below the jump bar* — the space the centre pane and the request
-    /// log actually share, and therefore what bounds how far the log can be dragged. Measured on that
-    /// pair rather than on the whole column, so `minimumCentreHeight` means the height the centre pane
-    /// keeps rather than that height minus whatever chrome happens to sit above it.
-    ///
-    /// Starts at zero, meaning "not measured yet" — the store treats that as unbounded so a restored
-    /// panel is not briefly squashed to its minimum on every launch.
-    @State private var editorHeight: CGFloat = 0
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -79,16 +62,18 @@ struct WorkspaceView: View {
         _showHARImport = State(initialValue: initialShowHARImport)
         _showOpenAPIImport = State(initialValue: initialShowOpenAPIImport)
         _drawerHeight = State(initialValue: initialDrawerHeight ?? saved.requestLogHeight)
-        storedInspectorWidth = saved.inspectorWidth
     }
 
     /// Writes the current arrangement back. Called on each change rather than at quit, because a
     /// crash or a force-quit should not be the thing that loses your layout.
+    ///
+    /// The inspector is absent on purpose. It is a real `.inspector` column and AppKit restores its
+    /// width with the window, so a copy kept here would be a second, staler answer to a question
+    /// something else already owns — which is exactly what `panel.inspector.width` had become.
     private func persistLayout() {
         layoutStore.save(
             PanelLayout(
                 requestLogHeight: drawerHeight,
-                inspectorWidth: storedInspectorWidth,
                 isRequestLogVisible: showDrawer,
                 isInspectorVisible: showInspector
             )
@@ -138,8 +123,19 @@ struct WorkspaceView: View {
                         }
                     )
 
-                    // The pair that shares the space below the jump bar, measured together.
-                    VStack(spacing: 0) {
+                    // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
+                    // pair — so the divider between them is the same divider the navigator and the
+                    // inspector already wear, and the centre pane's floor is a constraint AppKit
+                    // enforces rather than a ceiling this view recomputes from a measured container.
+                    DSSplitPane(
+                        axis: .vertical,
+                        isSecondaryPresented: $showDrawer,
+                        secondaryThickness: $drawerHeight,
+                        minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
+                        minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
+                        defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
+                        identifier: "requestLog"
+                    ) {
                         CenterPaneView(
                             content: CenterPaneContent.forTab(
                                 navigatorTab,
@@ -147,37 +143,17 @@ struct WorkspaceView: View {
                                 journeyID: appState.selectedJourneyID
                             )
                         )
+                        // Re-injected because the pane is hosted: `NSHostingController` starts a new
+                        // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
+                        // this the editor traps on a missing `AppState` the moment it appears.
+                        .environment(appState)
                         // Paired, like every other container identifier in this window. Naming a
                         // container without `.contain` renames every descendant, which would take
                         // the whole editor out of the accessibility tree.
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("centerPane")
-
-                        DSDrawer(
-                            edge: .bottom,
-                            isPresented: $showDrawer,
-                            size: $drawerHeight,
-                            minSize: PanelLayoutStore.Bounds.minimumRequestLogHeight,
-                            maxSize: PanelLayoutStore.maximumRequestLogHeight(
-                                containerHeight: editorHeight
-                            ),
-                            defaultSize: PanelLayout.default.requestLogHeight,
-                            identifier: "requestLog"
-                        ) {
-                            requestLogPanel
-                        }
-                    }
-                    // Measured rather than guessed: a panel's real ceiling is "whatever leaves the
-                    // centre pane usable", which is a property of the window, not a constant.
-                    //
-                    // Measured *here* rather than on the detail column, which is what it used to be.
-                    // On the column it included the jump bar, so dragging the log to its maximum left
-                    // the centre pane 24pt short of the 240 the floor promises; and once the inspector
-                    // became a real column the same measurement also spanned the inspector, making its
-                    // width meaningless. Height is the only dimension anything reads, so this reports
-                    // height alone.
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                        editorHeight = $0
+                    } secondary: {
+                        requestLogPanel
                     }
                 }
                 // A real column, not a trailing drawer inside the detail view.
@@ -192,7 +168,7 @@ struct WorkspaceView: View {
                     inspectorPanel
                         .inspectorColumnWidth(
                             min: PanelLayoutStore.Bounds.minimumInspectorWidth,
-                            ideal: PanelLayout.default.inspectorWidth,
+                            ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
                             max: 640
                         )
                         // `.contain` for the same reason the sidebar needs it: a bare identifier on a
@@ -249,11 +225,12 @@ struct WorkspaceView: View {
                             projectName: appState.currentProject?.name,
                             requestCount: appState.requestLogs.count,
                             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+                            // No `withAnimation`: the request log is an `NSSplitViewItem` now, and
+                            // AppKit animates the reveal through its own animator. Wrapping the flag
+                            // in a SwiftUI animation would only animate the flag.
                             onShowUnmatched: {
-                                withAnimation(DSAnimation.drawerToggle) {
-                                    showDrawer = true
-                                    showUnmatchedOnly = true
-                                }
+                                showDrawer = true
+                                showUnmatchedOnly = true
                             }
                         )
                     }
@@ -270,7 +247,7 @@ struct WorkspaceView: View {
                     // macOS app that has them puts them — Xcode included.
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button {
-                            withAnimation(DSAnimation.drawerToggle) { showDrawer.toggle() }
+                            showDrawer.toggle()
                         } label: {
                             Label("Toggle request log", systemImage: "rectangle.bottomhalf.inset.filled")
                         }

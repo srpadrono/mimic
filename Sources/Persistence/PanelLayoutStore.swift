@@ -10,27 +10,28 @@ import Foundation
 /// Backed by `UserDefaults` rather than the project database on purpose: this is a property of *this
 /// machine's window*, not of the mock configuration, so it must not travel through project
 /// export/import or make a project file dirty.
+///
+/// The inspector's *width* is deliberately not here. It is an `.inspector` column, which means AppKit
+/// restores it with the window; a copy in this store was read at launch and written straight back
+/// untouched, so `panel.inspector.width` had become a value nothing decided and nothing consulted.
+/// Two records of one number is how they drift.
 public struct PanelLayout: Equatable, Sendable {
     public var requestLogHeight: CGFloat
-    public var inspectorWidth: CGFloat
     public var isRequestLogVisible: Bool
     public var isInspectorVisible: Bool
 
     public static let `default` = PanelLayout(
         requestLogHeight: 220,
-        inspectorWidth: 280,
         isRequestLogVisible: true,
         isInspectorVisible: true
     )
 
     public init(
         requestLogHeight: CGFloat = PanelLayout.default.requestLogHeight,
-        inspectorWidth: CGFloat = PanelLayout.default.inspectorWidth,
         isRequestLogVisible: Bool = PanelLayout.default.isRequestLogVisible,
         isInspectorVisible: Bool = PanelLayout.default.isInspectorVisible
     ) {
         self.requestLogHeight = requestLogHeight
-        self.inspectorWidth = inspectorWidth
         self.isRequestLogVisible = isRequestLogVisible
         self.isInspectorVisible = isInspectorVisible
     }
@@ -48,7 +49,6 @@ public final class PanelLayoutStore: @unchecked Sendable {
 
     private enum Key {
         static let requestLogHeight = "panel.requestLog.height"
-        static let inspectorWidth = "panel.inspector.width"
         static let requestLogVisible = "panel.requestLog.visible"
         static let inspectorVisible = "panel.inspector.visible"
     }
@@ -64,17 +64,25 @@ public final class PanelLayoutStore: @unchecked Sendable {
     /// usable", which depends on the window. So the ceiling moved to layout time (see
     /// `WorkspaceView`), the floor stayed here, and the store now records what you actually chose.
     public enum Bounds {
-        /// Below this a drag snaps the panel closed instead of shrinking it further.
+        /// The request log's floor. Handed to `NSSplitViewItem.minimumThickness`, so a drag stops
+        /// here and a further drag collapses the pane — AppKit's behaviour, not a threshold this
+        /// codebase compares against.
         public static let minimumRequestLogHeight: CGFloat = 120
-        public static let minimumInspectorWidth: CGFloat = 220
 
         /// What the centre pane keeps no matter how far the request log is dragged. Enough for the
         /// editor's header and a few rows — it scrolls, so it does not need room for a whole form.
         ///
-        /// There is no width counterpart. The inspector is a `.inspector` column now and SwiftUI
-        /// clamps it against the window itself; a constant here would have described a drag this
-        /// store no longer sees.
+        /// This is the *other* item's `minimumThickness`, which is why there is no longer a
+        /// `maximumRequestLogHeight` beside it: a panel's ceiling is whatever leaves this much
+        /// behind, and expressing it as the neighbour's floor means the split view enforces it
+        /// during the drag instead of a view recomputing it from a measured container one frame late.
         public static let minimumCentreHeight: CGFloat = 240
+
+        /// The inspector's floor and preferred width, handed to `.inspectorColumnWidth`. They are
+        /// constants rather than stored values because AppKit restores that column's width with the
+        /// window — see the note on `PanelLayout`.
+        public static let minimumInspectorWidth: CGFloat = 220
+        public static let idealInspectorWidth: CGFloat = 280
 
         /// A last-resort sanity ceiling for a stored value, guarding against a hand-edited plist
         /// rather than against a normal drag. Layout does the real clamping.
@@ -92,10 +100,6 @@ public final class PanelLayoutStore: @unchecked Sendable {
             requestLogHeight: size(
                 forKey: Key.requestLogHeight,
                 default: PanelLayout.default.requestLogHeight
-            ),
-            inspectorWidth: size(
-                forKey: Key.inspectorWidth,
-                default: PanelLayout.default.inspectorWidth
             ),
             isRequestLogVisible: flag(
                 forKey: Key.requestLogVisible,
@@ -118,23 +122,8 @@ public final class PanelLayoutStore: @unchecked Sendable {
             Double(layout.requestLogHeight.clamped(to: 0...Bounds.storedSizeLimit)),
             forKey: Key.requestLogHeight
         )
-        defaults.set(
-            Double(layout.inspectorWidth.clamped(to: 0...Bounds.storedSizeLimit)),
-            forKey: Key.inspectorWidth
-        )
         defaults.set(layout.isRequestLogVisible, forKey: Key.requestLogVisible)
         defaults.set(layout.isInspectorVisible, forKey: Key.inspectorVisible)
-    }
-
-    // MARK: - Layout-time limits
-
-    /// How tall the request log may be dragged inside a container of `containerHeight`.
-    ///
-    /// Zero means "not measured yet" — at that point there is nothing to clamp against, and returning
-    /// the floor would briefly squash a restored panel to its minimum on every launch.
-    public static func maximumRequestLogHeight(containerHeight: CGFloat) -> CGFloat {
-        guard containerHeight > 0 else { return Bounds.storedSizeLimit }
-        return max(Bounds.minimumRequestLogHeight, containerHeight - Bounds.minimumCentreHeight)
     }
 
     // MARK: - Reading
