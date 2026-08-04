@@ -301,16 +301,41 @@ struct HARParserTests {
         #expect(HARParser.extractPath(from: "/already/path") == "/already/path")
     }
 
-    @Test("Decodes base64 response content and redacts secrets")
-    func decodesBase64AndRedactsSecrets() async throws {
-        let payload = #"{"authorization":"Bearer secret-token","api_key":"12345"}"#
+    @Test("Decodes base64 response content and reproduces the body verbatim")
+    func decodesBase64AndKeepsBodyVerbatim() async throws {
+        // Every key in this payload was mangled by the redaction pass this replaced. The
+        // sensitive-key match was a substring, so `author` matched on "auth", `keywords` and
+        // `monkey` on "key", `shipping` and `typing` on "pin" — ordinary fields in ordinary
+        // responses. `sessionCount` matched too and came back *quoted*, turning a number into a
+        // string under a client that had every right to expect a number.
+        let payload = #"{"author":"Jane Roe","keywords":["a","b"],"shipping":"express","sessionCount":42,"typing":true,"monkey":"George"}"#
+        let body = try await importedResponseBody(payload: payload, path: "/api/articles")
+
+        #expect(body == payload)
+        #expect(!body.contains("REDACTED"))
+    }
+
+    @Test("A captured credential is imported as captured, not rewritten")
+    func credentialsAreImportedAsCaptured() async throws {
+        // The deliberate trade after redaction was removed: an import reproduces the capture, so a
+        // real token lands in the project rather than a placeholder that would make the mock answer
+        // something the real server never said. `SECURITY.md` states it, and the import review sheet
+        // is where a user is expected to catch it.
+        let payload = #"{"access_token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln","token_type":"Bearer"}"#
+        let body = try await importedResponseBody(payload: payload, path: "/oauth/token")
+
+        #expect(body == payload)
+    }
+
+    /// Round-trips a payload through a minimal single-entry HAR, base64-encoded as browsers export it.
+    private func importedResponseBody(payload: String, path: String) async throws -> String {
         let encoded = Data(payload.utf8).base64EncodedString()
         let harJSON = """
         {
             "log": {
                 "entries": [
                     {
-                        "request": { "method": "GET", "url": "https://example.com/api/secure" },
+                        "request": { "method": "GET", "url": "https://example.com\(path)" },
                         "response": {
                             "status": 200,
                             "content": {
@@ -325,9 +350,6 @@ struct HARParserTests {
         }
         """
         let candidates = try await HARParser.parse(data: Data(harJSON.utf8))
-        let body = try #require(candidates.first?.responseBody)
-
-        #expect(body.contains(#""authorization":"[REDACTED]""#))
-        #expect(body.contains(#""api_key":"[REDACTED]""#))
+        return try #require(candidates.first?.responseBody)
     }
 }

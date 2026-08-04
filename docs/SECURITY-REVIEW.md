@@ -147,9 +147,15 @@ The old pattern anchored quotes on both sides of the key name, so `"token"` was 
 `"refresh_token"`, `"id_token"` and `"client_secret"` passed through — and imported mocks get
 committed to repositories.
 
-**Fixed.** Substring matching on the key name, non-string values (`"token": 123456`), and bare JWTs
-are all covered now. It remains best-effort, and `SECURITY.md` says so rather than implying a
-guarantee.
+**Fixed, then reverted — the fix was worse than the finding.** Substring matching on the key name
+caught `refresh_token`, but it also caught `author`, `keywords`, `shipping`, `shopping`, `mapping`,
+`typing` and `monkey`, replacing ordinary values with `[REDACTED]` in the majority of real captures.
+Widening it to non-string values added a second defect: the replacement was quoted, so
+`"sessionCount": 42` imported as `"sessionCount": "[REDACTED]"` and changed the JSON type.
+
+The whole pass is gone. Imported bodies are now reproduced verbatim, credential headers are still
+dropped, and the import review sheet carries the responsibility. This finding is accepted rather than
+fixed: see the revised section in `SECURITY.md`.
 
 ### 8. No size cap on imported files — low
 

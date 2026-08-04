@@ -153,70 +153,30 @@ public enum HARParser {
         ImportCandidateBuilder.suggestName(method: method, path: path)
     }
 
-    /// Decode response body, handling base64 encoding and stripping sensitive tokens.
+    /// Decode response body, handling base64 encoding.
+    ///
+    /// The body is reproduced exactly as captured. An importer that edits the payload defeats the
+    /// point of importing: the mock has to answer what the real server answered, byte for byte, or
+    /// the client under test is being tested against something that never happened.
+    ///
+    /// This used to run a redaction pass here, and it did more harm than the leak it guarded. The
+    /// key match was a *substring*, so `author`, `keywords`, `shipping`, `shopping`, `mapping`,
+    /// `typing`, `opinion` and `monkey` all had their values replaced with `[REDACTED]` — ordinary
+    /// fields, in the majority of real captures. Worse, the scalar branch quoted its replacement, so
+    /// `"sessionCount": 42` came back as `"sessionCount": "[REDACTED]"` and changed the JSON type
+    /// under a client that had every right to expect a number.
+    ///
+    /// A capture therefore now lands with whatever it contained, credentials included. That is the
+    /// deliberate trade: see `SECURITY.md`. Review an imported mock before committing it.
     private static func decodeResponseBody(_ content: HARContent?) -> String? {
         guard let content, let text = content.text, !text.isEmpty else { return nil }
 
-        let decoded: String
         if content.encoding?.lowercased() == "base64",
            let data = Data(base64Encoded: text),
            let str = String(data: data, encoding: .utf8) {
-            decoded = str
-        } else {
-            decoded = text
+            return str
         }
-
-        return redactSensitiveValues(decoded)
-    }
-
-    /// Redact bearer tokens, API keys, and other secrets from response bodies
-    /// (common when APIs echo back request headers like httpbin's /anything).
-    ///
-    /// Best-effort, and worth being honest about what that means: this is pattern matching over
-    /// someone else's JSON, so it catches the shapes that show up in practice and cannot promise to
-    /// catch everything. It is a net, not a guarantee. Review an imported mock before committing it.
-    ///
-    /// The key match is a *substring* match on purpose. An earlier version anchored both quotes, so
-    /// `"token"` was redacted but `"refresh_token"`, `"id_token"` and `"client_secret"` sailed
-    /// through — the near-misses are exactly the ones worth catching, since an imported mock is
-    /// committed to a repository and shared.
-    /// Key names that make a value a secret. Matched as a *substring* of the JSON key.
-    static let sensitiveKeyFragment = "key|secret|token|password|passwd|credential|auth|session|signature|otp|pin"
-
-    static func redactSensitiveValues(_ body: String) -> String {
-        var result = body
-
-        // "Bearer <token>" → "Bearer [REDACTED]", wherever it appears.
-        // Bound to a `let` rather than written inline: a bare regex literal in argument position is
-        // ambiguous with the division operator, and this one ends in `=*/`, which a parser that has
-        // not committed to "this is a regex" reads as the end of a block comment.
-        let bearer = /Bearer\s+[A-Za-z0-9\-._~+\/]+=*/
-        result = result.replacing(bearer, with: "Bearer [REDACTED]")
-
-        // A bare JWT — three base64url segments — is recognisable without a key name around it.
-        let jwt = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+/
-        result = result.replacing(jwt, with: "[REDACTED_JWT]")
-
-        // A sensitive JSON key with a string value.
-        if let stringValued = try? Regex<(Substring, Substring, Substring)>(
-            #""([A-Za-z0-9_.\-]*(?:\#(sensitiveKeyFragment))[A-Za-z0-9_.\-]*)"(\s*:\s*)"[^"]*""#
-        ).ignoresCase() {
-            result = result.replacing(stringValued) { match in
-                "\"\(match.1)\"\(match.2)\"[REDACTED]\""
-            }
-        }
-
-        // The same, with a non-string value — `"token": 123456`, `"secret": null`. The old pattern
-        // required quotes around the value and so missed these entirely.
-        if let scalarValued = try? Regex<(Substring, Substring, Substring)>(
-            #""([A-Za-z0-9_.\-]*(?:\#(sensitiveKeyFragment))[A-Za-z0-9_.\-]*)"(\s*:\s*)(?:true|false|null|-?[0-9]+(?:\.[0-9]+)?)"#
-        ).ignoresCase() {
-            result = result.replacing(scalarValued) { match in
-                "\"\(match.1)\"\(match.2)\"[REDACTED]\""
-            }
-        }
-
-        return result
+        return text
     }
 
     /// Flattens HAR's header list, dropping anything ``ImportHeaderPolicy`` says must not be replayed.

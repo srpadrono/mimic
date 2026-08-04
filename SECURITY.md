@@ -97,14 +97,26 @@ session cookie for a staging API. Two consequences:
   because there they are your traffic on your screen.
 - **Screenshots and exported projects are not redacted.** Check before sharing.
 
-### Imported captures are cleaned, but not guaranteed clean
+### Imported captures carry whatever was captured
 
-Importing a HAR or an OpenAPI spec drops credential headers (`Authorization`, `Cookie`, `Set-Cookie`)
-and makes a best-effort pass over response bodies for bearer tokens, JWTs, and JSON keys that look
-like secrets.
+Importing a HAR or an OpenAPI spec drops credential *headers* — `Authorization`, `Proxy-Authorization`,
+`Cookie` and `Set-Cookie` are not copied onto the mock, because a header is framing and dropping one
+does not change the payload the client reads.
 
-That pass is pattern matching over someone else's JSON. It catches the shapes that occur in practice
-and cannot promise to catch everything. **Review an imported mock before committing it.**
+**Response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands with the
+real token in it.
+
+There used to be a redaction pass over imported bodies, and it was removed because it broke more than
+it protected. The key match was a substring, so `author`, `keywords`, `shipping`, `shopping`,
+`mapping`, `typing` and `monkey` all had their values replaced with `[REDACTED]` — ordinary fields in
+ordinary responses. A numeric match came back quoted, turning `"sessionCount": 42` into
+`"sessionCount": "[REDACTED]"` and changing the JSON type under a client entitled to a number. An
+importer that edits the payload produces a mock answering something the real server never said, which
+defeats the purpose of importing a capture at all.
+
+**Review an imported mock before committing it.** The import sheet shows every candidate before it
+lands, and that review is now the only thing standing between a captured credential and your
+repository.
 
 ## Hardening in the serving path
 
