@@ -1,0 +1,137 @@
+import SwiftUI
+import DesignSystem
+
+/// A request or response body, laid out so it can actually be read.
+///
+/// The previous rendering put the raw body in a horizontal `ScrollView` with a single `Text`, which
+/// meant a minified JSON payload — which is what a mock returns almost every time — arrived as one
+/// endless line you scrolled sideways through. Here the body is re-indented, coloured, and wrapped,
+/// so the shape of the payload is visible at a glance and long values break instead of running off
+/// the edge.
+struct RequestBodyView: View {
+    let payload: String
+    /// Highlights every occurrence. Empty means no highlighting.
+    let searchText: String
+    let identifier: String
+
+    @State private var rendered: Rendered?
+
+    /// The formatted body plus what the formatter had to say about it.
+    struct Rendered: Sendable, Equatable {
+        var text: AttributedString
+        var matchCount: Int
+        /// `false` when the body was too large to format and is shown verbatim.
+        var isFormatted: Bool
+    }
+
+    /// What `.task(id:)` watches. A struct rather than a concatenated string so recomputing does not
+    /// mean building a second copy of a 64 KB body just to compare it.
+    private struct RenderKey: Equatable {
+        let payload: String
+        let searchText: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            if let rendered {
+                if !rendered.isFormatted {
+                    Text("Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB.")
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.labelTertiary)
+                }
+
+                // The count lives here rather than next to the search field because only this view
+                // knows what its own body contains — and "no matches" in the response is a useful
+                // answer, not a failed search.
+                if !searchText.isEmpty {
+                    Text(Self.matchSummary(rendered.matchCount))
+                        .font(DSTypography.caption)
+                        .foregroundStyle(rendered.matchCount == 0 ? DSColors.labelTertiary : DSColors.warning)
+                        .accessibilityIdentifier("requestLog.body.\(identifier).matches")
+                }
+
+                Text(rendered.text)
+                    .font(DSTypography.codeSmall)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Take the full height the wrapped text needs. Inside a `ScrollView` the text
+                    // would otherwise be handed a proposed height and truncate to it, which is the
+                    // vertical version of the bug this view exists to fix.
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("requestLog.body.\(identifier)")
+            } else {
+                // Only ever seen for a body large enough to take a frame to format.
+                DSLoadingPlaceholder(identifier: "requestLog.body.\(identifier)")
+            }
+        }
+        .padding(DSSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DSColors.tertiary.opacity(0.3))
+        .task(id: RenderKey(payload: payload, searchText: searchText)) {
+            let payload = payload
+            let searchText = searchText
+            // Detached rather than a plain `await`: with approachable concurrency a nonisolated
+            // async function stays on the caller's actor, and tokenising 64 KB on the main actor is
+            // exactly the hitch this is meant to avoid.
+            rendered = await Task.detached {
+                Self.render(payload: payload, searchText: searchText)
+            }.value
+        }
+    }
+
+    nonisolated static func matchSummary(_ count: Int) -> String {
+        count == 0 ? "No matches in this body" : "\(count) match\(count == 1 ? "" : "es")"
+    }
+
+    // MARK: - Rendering
+
+    nonisolated static func render(payload: String, searchText: String) -> Rendered {
+        let withinLimit = payload.utf8.count <= JSONFormatter.formattingLimit
+        let formatted = withinLimit ? (JSONFormatter.prettyPrinted(payload) ?? payload) : payload
+
+        var text = withinLimit ? coloured(formatted) : AttributedString(formatted)
+        let matches = highlight(searchText, in: &text)
+
+        return Rendered(text: text, matchCount: matches, isFormatted: withinLimit)
+    }
+
+    nonisolated static func coloured(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        for token in JSONFormatter.tokenize(text) {
+            var run = AttributedString(token.text)
+            run.foregroundColor = color(for: token.kind)
+            result.append(run)
+        }
+        return result
+    }
+
+    nonisolated static func color(for kind: JSONFormatter.TokenKind) -> Color {
+        switch kind {
+        case .key: DSColors.Syntax.key
+        case .string: DSColors.Syntax.string
+        case .number: DSColors.Syntax.number
+        case .literal: DSColors.Syntax.literal
+        case .punctuation: DSColors.Syntax.punctuation
+        case .plain: DSColors.labelPrimary
+        }
+    }
+
+    /// Marks every occurrence of `term`, returning how many there were.
+    @discardableResult
+    nonisolated static func highlight(_ term: String, in text: inout AttributedString) -> Int {
+        // An empty term matches at every index; without this guard the loop below never advances.
+        guard !term.isEmpty else { return 0 }
+
+        var matches = 0
+        var searchStart = text.startIndex
+
+        while searchStart < text.endIndex,
+              let found = text[searchStart...].range(of: term, options: .caseInsensitive) {
+            text[found].backgroundColor = DSColors.Syntax.searchHit
+            matches += 1
+            searchStart = found.upperBound
+        }
+
+        return matches
+    }
+}

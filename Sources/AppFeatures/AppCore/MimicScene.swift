@@ -1,0 +1,163 @@
+import AppKit
+import Domain
+import Persistence
+import SwiftUI
+
+public struct MimicScene: Scene {
+    @State private var appState: AppState
+
+    public init() {
+        #if DEBUG
+        if Self.shouldResetForTesting(arguments: ProcessInfo.processInfo.arguments) {
+            UITestSupport.resetAppIfNeeded()
+        }
+        #endif
+        let appState = AppState()
+        _appState = State(wrappedValue: appState)
+
+        // Started here, not from a view's `onAppear`: windowless runs never present a view, and the
+        // whole point of the control plane is that `mimic` can reach the session either way.
+        HeadlessMode.applyActivationPolicyIfNeeded()
+        // The session's own store, not a second connection to the same file.
+        ControlPlaneCoordinator.shared.start(
+            appState: appState,
+            repository: appState.repository
+        )
+    }
+
+    public var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(appState)
+                #if DEBUG
+                .onAppear(perform: UITestSupport.activateAppIfNeeded)
+                #endif
+        }
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                // "New Project…" opens the new-project sheet. It used to be wired straight to
+                // `closeProject`, so the menu item named after creating a project did not create one
+                // — it closed the one you were in and left you at the welcome window to press the
+                // real button. ⌘N on a project you were working in therefore threw away your place,
+                // under a label that promised the opposite. The ellipsis is now honest too: this
+                // opens a dialog.
+                Button("New Project\u{2026}") { appState.showNewProjectSheet = true }
+                    .keyboardShortcut("n", modifiers: .command)
+
+                // Closing is its own command now, and says so. ⇧⌘W rather than ⌘W, because ⌘W is
+                // AppKit's close-the-window and taking it would leave no way to close the window.
+                Button("Close Project") { appState.closeProject() }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+                    .disabled(appState.currentProject == nil)
+            }
+
+            CommandMenu("Server") {
+                Button(serverToggleTitle) {
+                    Self.toggleServer(
+                        serverState: appState.serverState,
+                        start: appState.startServer,
+                        stop: appState.stopServer
+                    )
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!canToggleServer)
+            }
+
+            // ⌘1 / ⌘2, the shape of shortcut Xcode gives its navigators. `appState.navigatorRequest`
+            // rather than a direct binding because the menu lives at scene level, above the window
+            // that owns the sidebar's state.
+            CommandGroup(after: .sidebar) {
+                ForEach(NavigatorTab.allCases) { tab in
+                    Button(tab.title) { appState.navigatorRequest = tab }
+                        .keyboardShortcut(
+                            KeyEquivalent(tab.shortcut),
+                            modifiers: .command
+                        )
+                        .disabled(appState.currentProject == nil)
+                }
+            }
+
+            CommandMenu("Journeys") {
+                // Selects the navigator's Journeys tab. It used to open a window of its own, which
+                // meant journeys had two homes and neither was obviously the real one — you could be
+                // looking at the list in the sidebar and open a second copy of it on top.
+                //
+                // Same destination as View ▸ Journeys (⌘2), reached by a second accelerator because
+                // this is the menu people look in for journeys. Two menu items may share an action;
+                // what they must not share is a key equivalent — AppKit honours only the first, which
+                // is how the Window ▸ Journeys item once showed ⌘⇧J and did nothing.
+                Button("Show Journeys") { appState.navigatorRequest = .journeys }
+                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .disabled(appState.currentProject == nil)
+
+
+                Divider()
+
+                Button("Restart Active Journey", action: appState.restartActiveJourney)
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .disabled(appState.activeJourney == nil)
+
+                Button("Advance Active Journey", action: appState.advanceActiveJourney)
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    .disabled(appState.activeJourney == nil)
+
+                Button("Deactivate Journey") { appState.activateJourney(id: nil) }
+                    .disabled(appState.activeJourney == nil)
+            }
+        }
+
+        // No second window. Journeys live in the navigator, next to the endpoints they override.
+        //
+        // They used to have a dedicated `Window`, on the reasoning that a journey is authored once
+        // and then watched while the workspace stays on the endpoint you are debugging. What that
+        // produced was two homes for one feature and no way to tell which was authoritative: the
+        // sidebar's Journeys tab and the window showed the same list, so opening the window put a
+        // duplicate of the panel you were already looking at on top of it. Whichever one you edited,
+        // the other was also correct, which is the definition of a confusing interface.
+        //
+        // The navigator is the surviving home — it is where a journey belongs, because a journey
+        // rewrites what every endpoint returns and you want to see that beside the endpoints.
+    }
+
+    private var serverToggleTitle: String {
+        Self.serverToggleTitle(for: appState.serverState)
+    }
+
+    private var canToggleServer: Bool {
+        Self.canToggleServer(
+            hasCurrentProject: appState.currentProject != nil,
+            serverState: appState.serverState
+        )
+    }
+
+    static func shouldResetForTesting(arguments: [String]) -> Bool {
+        arguments.contains("-MimicResetForTesting")
+    }
+
+    static func serverToggleTitle(for serverState: ServerState) -> String {
+        switch serverState {
+        case .running: "Stop Server"
+        default: "Start Server"
+        }
+    }
+
+    static func canToggleServer(hasCurrentProject: Bool, serverState: ServerState) -> Bool {
+        guard hasCurrentProject else { return false }
+        switch serverState {
+        case .stopped, .running, .error: return true
+        case .starting, .stopping: return false
+        }
+    }
+
+    static func toggleServer(
+        serverState: ServerState,
+        start: () -> Void,
+        stop: () -> Void
+    ) {
+        switch serverState {
+        case .running: stop()
+        case .stopped, .error: start()
+        default: break
+        }
+    }
+}

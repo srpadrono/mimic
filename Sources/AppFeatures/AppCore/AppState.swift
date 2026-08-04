@@ -1,0 +1,557 @@
+import Domain
+import Foundation
+import Observation
+import Persistence
+import SpecImport
+
+/// The root observable for a live editing session: it owns the mock server runtime and the
+/// project workspace, and is the single place endpoint/scenario/journey mutations are coordinated.
+///
+/// Mutations are applied by `ProjectCommandExecutor` in Domain — the same pure code the CLI and the
+/// control API use. The methods here keep their existing signatures for views and tests, but they no
+/// longer carry their own copy of the rules, so the window and `mimic` cannot drift apart.
+@Observable
+@MainActor
+final class AppState {
+    let server: MockServerRuntime
+    let projects: ProjectWorkspace
+    /// The store this session reads and writes.
+    ///
+    /// Exposed so the control plane can reuse it. Opening a second `DatabaseQueue` on the same
+    /// SQLite file — even inside one process — makes concurrent writes contend and fail with
+    /// `SQLITE_BUSY`, which surfaced as an autosave that intermittently reported "Save failed".
+    let repository: any ProjectRepository
+
+    var showNewEndpointSheet = false
+    /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
+    /// and an open workspace — File ▸ New Project has to work from either.
+    var showNewProjectSheet = false
+    /// A menu or CLI request to switch the sidebar to a given navigator. Consumed by `WorkspaceView`
+    /// and reset, because the menu sits above the window that owns the sidebar's state.
+    ///
+    /// This is how Journeys ▸ Show Journeys arrives too. There used to be a separate `showJourneys`
+    /// flag that opened a window; journeys have one home now, so there is one request.
+    var navigatorRequest: NavigatorTab?
+    /// The journey being edited in the navigator.
+    var selectedJourneyID: UUID?
+
+    private var syncConfigurationOnNextProjectChange = false
+
+    var serverState: ServerState { server.serverState }
+    var serverConfiguration: ServerConfiguration {
+        get { server.serverConfiguration }
+        set { server.serverConfiguration = newValue }
+    }
+    var requestLogs: [RequestLog] {
+        get { server.requestLogs }
+        set { server.requestLogs = newValue }
+    }
+    var portConflictAlert: PortConflictAlertData? {
+        get { server.portConflictAlert }
+        set { server.portConflictAlert = newValue }
+    }
+    var genericStartError: String? {
+        get { server.genericStartError }
+        set { server.genericStartError = newValue }
+    }
+
+    /// Presentation binding for the port-conflict alert — setting `false` dismisses it.
+    /// Lets views bind directly (`$appState.isShowingPortConflict`) instead of building ad-hoc `Binding(get:set:)`.
+    var isShowingPortConflict: Bool {
+        get { server.portConflictAlert != nil }
+        set { if !newValue { server.portConflictAlert = nil } }
+    }
+
+    /// Presentation binding for the generic server-error alert — setting `false` dismisses it.
+    var isShowingGenericStartError: Bool {
+        get { server.genericStartError != nil }
+        set { if !newValue { server.genericStartError = nil } }
+    }
+    var currentProject: MockProject? {
+        get { projects.currentProject }
+        set { projects.currentProject = newValue }
+    }
+    var recentProjects: [RecentProjectEntry] { projects.recentProjects }
+    var autosaveStatus: AutosaveStatus { projects.autosaveStatus }
+
+    // MARK: - Journeys
+
+    var journeys: [Journey] { currentProject?.journeys ?? [] }
+    var activeJourney: Journey? { currentProject?.activeJourney }
+
+    /// Live run progress for the active journey, refreshed from the engine.
+    ///
+    /// The engine owns the cursor while it is serving, so this is a published mirror rather than a
+    /// computed property: reading it would otherwise require an `await` from a view body.
+    var activeJourneyStatus: JourneyStatus? { server.journeyStatus }
+
+    /// Designated initializer — the single composition point for a session.
+    /// `server` is injectable so tests can substitute a fake-engine-backed runtime, and the
+    /// repository is the `ProjectRepository` port (not a concrete store) so persistence is swappable.
+    init(
+        server: MockServerRuntime = MockServerRuntime(),
+        projectRepository: any ProjectRepository,
+        recentProjectsStore: RecentProjectsStore,
+        panelLayoutStore: PanelLayoutStore = PanelLayoutStore()
+    ) {
+        self.server = server
+        self.panelLayoutStore = panelLayoutStore
+        repository = projectRepository
+        projects = ProjectWorkspace(
+            projectRepository: projectRepository,
+            recentProjectsStore: recentProjectsStore
+        )
+        bindProjectWorkspace()
+        syncConfigurationOnNextProjectChange = true
+        _ = projects.loadLastOpenedProject()
+    }
+
+    /// Production composition root — wires GRDB persistence and the live recent-projects store.
+    ///
+    /// The store used to be opened with `try!`, so a database that was locked, unwritable, or on a
+    /// full disk killed the app on launch with a fatal error. Launching right after quitting hit
+    /// exactly that. A local development tool should not take its own life over a busy file: it now
+    /// falls back to an in-memory store and says so, which leaves the app usable and the failure
+    /// impossible to miss.
+    convenience init() {
+        let isResettingForTests = ProcessInfo.processInfo.arguments.contains("-MimicResetForTesting")
+        let opened = Self.openStore()
+        let defaults = Self.resolveDefaults(
+            environmentSuite: ProcessInfo.processInfo.environment["MIMIC_DEFAULTS_SUITE"],
+            isResettingForTests: isResettingForTests
+        )
+        self.init(
+            projectRepository: opened.repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            // Same defaults instance as recents, so a UI test run cannot inherit — or overwrite —
+            // the developer's real window arrangement.
+            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+        )
+        storeFailure = opened.failure
+    }
+
+    /// Why the on-disk store could not be opened, or `nil` when it opened normally.
+    ///
+    /// Non-nil means the session is running in memory: everything works, and nothing survives quit.
+    var storeFailure: String?
+
+    var isShowingStoreFailure: Bool {
+        get { storeFailure != nil }
+        set { if !newValue { storeFailure = nil } }
+    }
+
+    /// Where the panels were left last time. Held here because this is the one place that knows
+    /// which `UserDefaults` suite the session is running against.
+    let panelLayoutStore: PanelLayoutStore
+
+    /// The store for this session — the real one, or a UI test run's own.
+    ///
+    /// A UI test run must never open `mimic.sqlite`. It used to: the suite launched the real app,
+    /// which opened the real database, and the reset helper then deleted that file at the start of
+    /// every test. Running the suite locally therefore destroyed the developer's projects, silently,
+    /// and left the runner's own fixtures in their place.
+    ///
+    /// `UITestSupport.databaseURL` names the run's store, and it is the same value the reset deletes,
+    /// so the file the suite opens and the file the suite removes cannot drift apart.
+    private static func openStore() -> ProjectStore.Opened {
+        #if DEBUG
+        if let testDatabaseURL = UITestSupport.databaseURL() {
+            return ProjectStore.open(makeOnDisk: {
+                try DatabaseFactory.makeAppDatabaseQueue(
+                    environment: [DatabaseFactory.databasePathEnvironmentKey: testDatabaseURL.path]
+                )
+            })
+        }
+        #endif
+        return ProjectStore.open()
+    }
+
+    /// The defaults suite for this session: a test-provided one, a fresh one when resetting for
+    /// tests, or the real one.
+    static func resolveDefaults(
+        environmentSuite: String?,
+        isResettingForTests: Bool,
+        makeUserDefaults: (String) -> UserDefaults? = UserDefaults.init(suiteName:),
+        now: () -> Int = { Int(Date().timeIntervalSince1970) }
+    ) -> UserDefaults {
+        if let suite = environmentSuite, let testDefaults = makeUserDefaults(suite) {
+            return testDefaults
+        }
+        if isResettingForTests {
+            return makeUserDefaults("devxa.Mimic.UITests.\(now())") ?? .standard
+        }
+        return .standard
+    }
+
+    #if DEBUG
+    static func preview() -> AppState {
+        let dbQueue = try! DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+        let store = RecentProjectsStore(defaults: UserDefaults(suiteName: "preview.\(UUID().uuidString)")!)
+        return AppState(projectRepository: repository, recentProjectsStore: store)
+    }
+    #endif
+
+    func startServer() { server.startServer() }
+    func stopServer() { server.stopServer() }
+    func retryStartOnNextPort(from port: Int) { server.retryStartOnNextPort(from: port) }
+
+    // MARK: - Endpoints
+
+    func addEndpoint(name: String, method: HTTPMethod = .get, path: String) -> Endpoint? {
+        run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
+    }
+
+    func updateEndpoint(_ updated: Endpoint) {
+        // A whole-value replacement, which the editor produces; the executor's spec API is for
+        // partial edits, so this one stays a direct write.
+        _ = mutateCurrentProject {
+            guard let index = $0.endpoints.firstIndex(where: { $0.id == updated.id }) else { return }
+            $0.endpoints[index] = updated
+        }
+    }
+
+    func deleteEndpoint(id: UUID) {
+        _ = run(.endpointDelete(endpoint: .id(id)))
+    }
+
+    func duplicateEndpoint(id: UUID) -> Endpoint? {
+        run(.endpointDuplicate(endpoint: .id(id)))?.endpoint
+    }
+
+    func updateActiveScenario(
+        endpointID: UUID,
+        statusCode: Int? = nil,
+        headers: [String: String]? = nil,
+        body: String? = nil
+    ) {
+        guard let endpoint = currentProject?.endpoints.first(where: { $0.id == endpointID }),
+              let activeID = endpoint.activeScenarioID
+        else { return }
+
+        _ = run(.scenarioUpdate(
+            endpoint: .id(endpointID),
+            scenario: .id(activeID),
+            spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body)
+        ))
+    }
+
+    func updateEndpointDelay(id: UUID, delayMs: Int) {
+        _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(delayMs: delayMs)))
+    }
+
+    func updateEndpointGroupTag(id: UUID, groupTag: String?) {
+        // The executor treats an empty string as "clear", which is also how the CLI spells it.
+        _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(groupTag: groupTag ?? "")))
+    }
+
+    func updateGlobalDelay(delayMs: Int) {
+        server.serverConfiguration.globalDelayMs = delayMs
+        _ = run(.serverConfigure(port: nil, globalDelayMs: delayMs))
+    }
+
+    func commitImportedCandidates(_ candidates: [ImportCandidate]) {
+        _ = mutateCurrentProject {
+            for candidate in candidates.filter(\.isSelected) {
+                let scenario = Scenario(
+                    name: "Imported",
+                    statusCode: candidate.statusCode,
+                    headers: candidate.responseHeaders,
+                    body: candidate.responseBody,
+                    bodyContentType: candidate.responseContentType
+                )
+                var endpoint = Endpoint(
+                    name: candidate.suggestedName,
+                    method: candidate.method,
+                    path: candidate.path,
+                    scenarios: [scenario],
+                    activeScenarioID: scenario.id
+                )
+                endpoint.groupTag = candidate.suggestedGroupTag
+                endpoint.graphqlOperation = candidate.graphqlOperation
+                $0.endpoints.append(endpoint)
+            }
+        }
+    }
+
+    // MARK: - Scenarios
+
+    func addScenario(endpointID: UUID, name: String, statusCode: Int = 200) -> Scenario? {
+        run(.scenarioCreate(
+            endpoint: .id(endpointID),
+            name: name,
+            spec: ScenarioSpec(statusCode: statusCode)
+        ))?.scenario
+    }
+
+    func setActiveScenario(endpointID: UUID, scenarioID: UUID) {
+        _ = run(.scenarioActivate(endpoint: .id(endpointID), scenario: .id(scenarioID)))
+    }
+
+    func duplicateScenario(endpointID: UUID, scenarioID: UUID) -> Scenario? {
+        guard let source = currentProject?.endpoints
+            .first(where: { $0.id == endpointID })?
+            .scenarios
+            .first(where: { $0.id == scenarioID })
+        else { return nil }
+
+        return run(.scenarioCreate(
+            endpoint: .id(endpointID),
+            name: "\(source.name) (Copy)",
+            spec: ScenarioSpec(
+                statusCode: source.statusCode,
+                headers: source.headers,
+                body: source.body,
+                contentType: source.bodyContentType
+            )
+        ))?.scenario
+    }
+
+    func deleteScenario(endpointID: UUID, scenarioID: UUID) {
+        _ = run(.scenarioDelete(endpoint: .id(endpointID), scenario: .id(scenarioID)))
+    }
+
+    func renameScenario(endpointID: UUID, scenarioID: UUID, name: String) {
+        _ = run(.scenarioUpdate(
+            endpoint: .id(endpointID),
+            scenario: .id(scenarioID),
+            spec: ScenarioSpec(name: name)
+        ))
+    }
+
+    // MARK: - Journeys
+
+    @discardableResult
+    func addJourney(name: String) -> Journey? {
+        run(.journeyCreate(name: name, spec: nil))?.journey
+    }
+
+    @discardableResult
+    func addJourney(fromTemplate templateID: String, name: String? = nil) -> Journey? {
+        run(.journeyAddTemplate(templateID: templateID, name: name))?.journey
+    }
+
+    @discardableResult
+    func duplicateJourney(id: UUID) -> Journey? {
+        run(.journeyDuplicate(journey: .id(id)))?.journey
+    }
+
+    func deleteJourney(id: UUID) {
+        _ = run(.journeyDelete(journey: .id(id)))
+        if selectedJourneyID == id { selectedJourneyID = journeys.first?.id }
+    }
+
+    func updateJourney(id: UUID, spec: JourneySpec) {
+        _ = run(.journeyUpdate(journey: .id(id), spec: spec))
+    }
+
+    @discardableResult
+    func addJourneyStep(journeyID: UUID, spec: JourneyStepSpec, at index: Int? = nil) -> Journey? {
+        run(.journeyStepAdd(journey: .id(journeyID), step: spec, atIndex: index))?.journey
+    }
+
+    func updateJourneyStep(journeyID: UUID, stepID: UUID, spec: JourneyStepSpec) {
+        _ = run(.journeyStepUpdate(journey: .id(journeyID), step: .id(stepID), spec: spec))
+    }
+
+    func removeJourneyStep(journeyID: UUID, stepID: UUID) {
+        _ = run(.journeyStepRemove(journey: .id(journeyID), step: .id(stepID)))
+    }
+
+    /// Appends the steps reproducing a run of requests the server already answered.
+    ///
+    /// One command rather than one per step: one user action should be one mutation and one save.
+    /// Autosaves in quick succession cancel each other, which surfaces as a spurious "Save failed" —
+    /// and capturing a session is a dozen of them at once.
+    @discardableResult
+    func addJourneySteps(journeyID: UUID, capturing logs: [RequestLog]) -> Journey? {
+        let steps = JourneyStepSpec.capturing(logs)
+        guard !steps.isEmpty else { return nil }
+        return run(.journeyStepsAdd(journey: .id(journeyID), steps: steps, atIndex: nil))?.journey
+    }
+
+    /// Creates a journey from a run of observed requests — the way a flow usually starts.
+    ///
+    /// Created *with* its steps in a single command rather than create-then-append, for the same
+    /// one-action-one-save reason as ``addJourneySteps(journeyID:capturing:)``.
+    @discardableResult
+    func addJourney(name: String, capturing logs: [RequestLog]) -> Journey? {
+        run(.journeyCreate(
+            name: name,
+            spec: JourneySpec(steps: JourneyStepSpec.capturing(logs))
+        ))?.journey
+    }
+
+    /// How many steps a selection would actually produce, for the capture sheet to report before the
+    /// user commits. Not `logs.count`: requests a journey already answered are dropped, and a run of
+    /// identical polls collapses into one repeating step.
+    static func capturedStepCount(_ logs: [RequestLog]) -> Int {
+        JourneyStepSpec.capturing(logs).count
+    }
+
+    /// Names a journey captured from a run after the resource its *earliest* call touches — the call
+    /// the flow starts with, which is what people name a flow after.
+    ///
+    /// Chronological, not whichever row happens to be first in the selection: the log draws
+    /// newest-first by default, so "the first one handed over" is normally the last thing that
+    /// happened.
+    static func journeyName(capturing logs: [RequestLog]) -> String {
+        let capturable = logs.filter { $0.outcome != .journey }
+        guard let first = capturable.min(by: { $0.timestamp < $1.timestamp }) else {
+            return "Captured flow"
+        }
+        return journeyName(capturing: first)
+    }
+
+    /// Names a new journey after the resource the first captured call touches, which is nearly always
+    /// what the flow is about.
+    static func journeyName(capturing log: RequestLog) -> String {
+        let path = log.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? log.path
+        let resource = path
+            .split(separator: "/")
+            .map(String.init)
+            .last { segment in
+                let lower = segment.lowercased()
+                let isVersion = lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber)
+                return lower != "api" && !isVersion && !segment.allSatisfy(\.isNumber)
+            }
+        guard let resource else { return "Captured flow" }
+        // Sentence case, not title case: "Account summary flow" reads better next to a lowercase
+        // "flow" than "Account Summary Flow" does.
+        let words = resource.replacingOccurrences(of: "-", with: " ")
+        return "\(words.prefix(1).uppercased())\(words.dropFirst()) flow"
+    }
+
+    func moveJourneyStep(journeyID: UUID, stepID: UUID, to index: Int) {
+        _ = run(.journeyStepMove(journey: .id(journeyID), step: .id(stepID), toIndex: index))
+    }
+
+    /// Selects the journey that overlays endpoint resolution. Passing `nil` clears it.
+    ///
+    /// Pushing the project to the engine is what resets the cursor, so activating always begins a
+    /// clean run — the same guarantee `mimic journey activate` gives.
+    func activateJourney(id: UUID?) {
+        _ = mutateCurrentProject { project in
+            guard let id else {
+                project.activeJourneyID = nil
+                return
+            }
+            guard project.journeys.contains(where: { $0.id == id }) else { return }
+            project.activeJourneyID = id
+        }
+    }
+
+    func restartActiveJourney() { server.restartJourney() }
+    func advanceActiveJourney() { server.advanceJourney() }
+
+    /// The last error a journey edit produced, for surfacing in the UI. Cleared on the next success.
+    var lastCommandError: String?
+
+    var isShowingCommandError: Bool {
+        get { lastCommandError != nil }
+        set { if !newValue { lastCommandError = nil } }
+    }
+
+    // MARK: - Projects
+
+    func createProject(name: String, port: Int = 8080) {
+        stopServerForProjectChange()
+        syncConfigurationOnNextProjectChange = true
+        _ = projects.createProject(name: name, port: port)
+    }
+
+    func openProject(id: UUID) {
+        stopServerForProjectChange()
+        syncConfigurationOnNextProjectChange = true
+        _ = projects.openProject(id: id)
+    }
+
+    /// The server serves *the open project*, so it cannot outlive one.
+    ///
+    /// It used to. Opening or creating another project left the engine bound to the previous
+    /// project's port, still reporting "running" — so the window showed a live server for a
+    /// configuration you had left, while the project actually in front of you answered nothing. The
+    /// status well would read `localhost:8080` next to a project configured for 9000.
+    ///
+    /// Stopping rather than rebinding, because that is what Xcode does when you switch what you are
+    /// working on: the previous run ends, and starting the new one is a decision you make. Silently
+    /// moving a live server to a different port would mean a request you sent a moment ago and one
+    /// you send now go to different places with nothing on screen having changed.
+    private func stopServerForProjectChange() {
+        guard currentProject != nil, serverState != .stopped else { return }
+        server.stopServer()
+    }
+    func saveCurrentProject() { projects.saveCurrentProject() }
+    func duplicateProject(id: UUID) { projects.duplicateProject(id: id) }
+    func deleteProject(id: UUID) {
+        if currentProject?.id == id {
+            stopServerForProjectChange()
+            syncConfigurationOnNextProjectChange = true
+        }
+        projects.deleteProject(id: id)
+    }
+    func closeProject() {
+        stopServerForProjectChange()
+        syncConfigurationOnNextProjectChange = true
+        projects.closeProject()
+    }
+    func scheduleAutosave() { projects.scheduleAutosave() }
+
+    // MARK: - Command plumbing
+
+    /// Applies a control command to the open project, persisting and pushing to the engine on success.
+    ///
+    /// This is the seam that keeps the GUI honest: a menu item and a CLI invocation run the same
+    /// Domain code, so a rule can only be implemented once.
+    @discardableResult
+    private func run(_ command: ControlCommand) -> ControlResult? {
+        guard var project = currentProject else { return nil }
+        do {
+            guard let outcome = try ProjectCommandExecutor.apply(command, to: &project) else { return nil }
+            if outcome.didMutate {
+                project.modifiedAt = Date()
+                currentProject = project
+                projects.scheduleAutosave()
+            }
+            lastCommandError = nil
+            return outcome.result
+        } catch let error as ControlError {
+            lastCommandError = error.message
+            return nil
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func bindProjectWorkspace() {
+        projects.onCurrentProjectChanged = { [weak self] project in
+            guard let self else { return }
+            if syncConfigurationOnNextProjectChange {
+                server.applyProject(project)
+                syncConfigurationOnNextProjectChange = false
+            } else {
+                server.updateMocks(
+                    endpoints: project?.endpoints ?? [],
+                    journey: project?.activeJourney
+                )
+            }
+        }
+        server.updateMocks(
+            endpoints: projects.currentProject?.endpoints ?? [],
+            journey: projects.currentProject?.activeJourney
+        )
+    }
+
+    @discardableResult
+    private func mutateCurrentProject(
+        autosave: Bool = true,
+        _ mutation: (inout MockProject) -> Void
+    ) -> Bool {
+        let updated = projects.mutateCurrentProject(mutation)
+        if updated && autosave {
+            projects.scheduleAutosave()
+        }
+        return updated
+    }
+}

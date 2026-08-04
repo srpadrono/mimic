@@ -1,0 +1,82 @@
+name: CI
+
+# Deliberately Linux-only.
+#
+# Mimic is a macOS app, but only the SwiftUI layer actually needs a Mac. The domain rules, the mock
+# engine, persistence, the control plane, spec import and the CLI are plain Swift — Vapor's native
+# home is Linux — so `Package.swift` builds them and roughly 80% of the suite runs here, on a free
+# 1x runner, instead of a macOS one billed at 10x.
+#
+# What is *not* covered here: the app bundle, SwiftUI, and XCUITests. Those need Xcode. Run
+# `./Scripts/ci.sh` locally before landing UI changes, or enable the self-hosted job at the bottom.
+#
+# CURRENTLY MANUAL-ONLY. GitHub Actions cannot start a job on this account — runs are created and die
+# in about two seconds with zero steps executed, on Linux and macOS alike, because of a billing
+# block. That is not a workflow error: the same commands pass in the `swift:6.2` container this job
+# uses. Rather than mark every commit with a red X that says nothing about the code, the automatic
+# triggers are off. Restore them by putting back the `push`/`pull_request` block below once the
+# account's payment or spending limit is resolved.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+
+concurrency:
+  # A newer push makes an in-flight run irrelevant; cancel rather than queue behind it.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: swift:6.2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
+      # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
+      - name: Install SQLite headers
+        run: |
+          apt-get update
+          apt-get install -y libsqlite3-dev
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build --build-tests
+
+      # Domain, Persistence, MockServerEngine, ControlPlane, SpecImport and MimicCLICore — including
+      # the tests that bind real sockets and serve real HTTP.
+      - name: Test
+        run: swift test --skip-build
+
+  # The macOS half — the app bundle, SwiftUI and XCUITests — needs Xcode and therefore a Mac.
+  # Hosted macOS runners bill at 10x, so this is left disabled. To turn it on, register a self-hosted
+  # runner on a Mac with Xcode 26 and remove the `if: false`.
+  macos:
+    name: Build and test (macOS, self-hosted)
+    if: false
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve and generate
+        run: |
+          tuist install
+          tuist generate --no-open
+
+      - name: Build, test, and gate
+        run: ./Scripts/ci.sh
