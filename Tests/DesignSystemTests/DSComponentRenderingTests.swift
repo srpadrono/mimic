@@ -140,7 +140,8 @@ struct DSComponentRenderingTests {
                 minSize: 120,
                 maxSize: 240,
                 defaultSize: 180,
-                edge: edge
+                edge: edge,
+                anchor: 220
             )
             .frame(
                 width: axis == .horizontal ? 18 : 220,
@@ -276,24 +277,21 @@ struct DSComponentRenderingTests {
     func drawerDividerHelpers() {
         #expect(DSDrawerDivider.lineThickness(isDragging: false) == 1)
         #expect(DSDrawerDivider.lineThickness(isDragging: true) == 2.5)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 12, height: 8), edge: .leading) == 12)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 12, height: 8), edge: .trailing) == -12)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 12, height: 8), edge: .top) == 8)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 12, height: 8), edge: .bottom) == -8)
-        #expect(DSDrawerDivider.clampedSize(startingAt: 100, delta: -150, maxSize: 240) == 0)
-        #expect(DSDrawerDivider.clampedSize(startingAt: 100, delta: 200, maxSize: 240) == 240)
-
-        let changed = DSDrawerDivider.dragChangeState(
-            isDragging: false,
-            currentSize: 180,
-            dragStartSize: 0,
-            translation: CGSize(width: 20, height: 0),
-            edge: .leading,
-            maxSize: 240
-        )
-        #expect(changed.isDragging)
-        #expect(changed.dragStartSize == 180)
-        #expect(changed.size == 200)
+        #expect(DSDrawerDivider.anchorValue(
+            forFrame: CGRect(x: 10, y: 20, width: 200, height: 100), edge: .bottom
+        ) == 120)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 140), anchor: 300, edge: .bottom, maxSize: 240
+        ) == 160)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 400), anchor: 300, edge: .bottom, maxSize: 240
+        ) == 0)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 0), anchor: 300, edge: .bottom, maxSize: 240
+        ) == 240)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 200, y: 0), anchor: 0, edge: .leading, maxSize: 240
+        ) == 200)
 
         let snapClosed = DSDrawerDivider.dragEndState(
             size: 40,

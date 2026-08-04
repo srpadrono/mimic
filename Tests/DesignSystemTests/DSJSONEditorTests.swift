@@ -236,41 +236,62 @@ struct DSDrawerDividerTests {
         #expect(DSDrawerDivider.lineColor(isDragging: false, isHovered: false) == DSColors.panelSeparator)
     }
 
-    @Test("Divider drag delta and clamping account for edge direction")
-    func dividerDragDeltaAndClamping() {
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 24, height: 10), edge: .leading) == 24)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 24, height: 10), edge: .trailing) == -24)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 8, height: 16), edge: .top) == 16)
-        #expect(DSDrawerDivider.dragDelta(translation: CGSize(width: 8, height: 16), edge: .bottom) == -16)
-        #expect(DSDrawerDivider.clampedSize(startingAt: 120, delta: -200, maxSize: 300) == 0)
-        #expect(DSDrawerDivider.clampedSize(startingAt: 120, delta: 250, maxSize: 300) == 300)
-        #expect(DSDrawerDivider.clampedSize(startingAt: 120, delta: 30, maxSize: 300) == 150)
+    @Test("Divider anchors on the edge a resize cannot move")
+    func dividerAnchorValue() {
+        let frame = CGRect(x: 100, y: 200, width: 400, height: 300)
+        #expect(DSDrawerDivider.anchorValue(forFrame: frame, edge: .bottom) == 500)
+        #expect(DSDrawerDivider.anchorValue(forFrame: frame, edge: .top) == 200)
+        #expect(DSDrawerDivider.anchorValue(forFrame: frame, edge: .trailing) == 500)
+        #expect(DSDrawerDivider.anchorValue(forFrame: frame, edge: .leading) == 100)
     }
 
-    @Test("Divider drag state tracks first and subsequent drags")
-    func dividerDragChangeState() {
-        let firstDrag = DSDrawerDivider.dragChangeState(
-            isDragging: false,
-            currentSize: 180,
-            dragStartSize: 0,
-            translation: CGSize(width: 40, height: 0),
-            edge: .leading,
-            maxSize: 260
-        )
-        #expect(firstDrag.isDragging)
-        #expect(firstDrag.dragStartSize == 180)
-        #expect(firstDrag.size == 220)
+    @Test("Divider size follows the pointer and clamps at both ends")
+    func dividerSizeForLocation() {
+        // Bottom drawer anchored at y=800: the pointer 220pt above it means a 220pt drawer.
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 580), anchor: 800, edge: .bottom, maxSize: 400
+        ) == 220)
+        // Dragged past the ceiling and past the floor.
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 100), anchor: 800, edge: .bottom, maxSize: 400
+        ) == 400)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 900), anchor: 800, edge: .bottom, maxSize: 400
+        ) == 0)
+        // Each edge grows away from its own anchor.
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 0, y: 260), anchor: 200, edge: .top, maxSize: 400
+        ) == 60)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 640, y: 0), anchor: 900, edge: .trailing, maxSize: 400
+        ) == 260)
+        #expect(DSDrawerDivider.size(
+            forLocation: CGPoint(x: 180, y: 0), anchor: 100, edge: .leading, maxSize: 400
+        ) == 80)
+    }
 
-        let continuedDrag = DSDrawerDivider.dragChangeState(
-            isDragging: true,
-            currentSize: firstDrag.size,
-            dragStartSize: firstDrag.dragStartSize,
-            translation: CGSize(width: -300, height: 0),
-            edge: .leading,
-            maxSize: 260
+    /// The guard on the crash. Resizing must depend only on where the pointer *is*.
+    ///
+    /// The divider used to resize by `DragGesture.translation`, added to an anchor kept in `@State`.
+    /// Because a layout pass can re-deliver a drag event, that anchor could be re-captured from a
+    /// size the same drag had already moved, applying the delta twice and then again — a layout loop
+    /// that AppKit ends by aborting the process out of `_postWindowNeedsUpdateConstraints`. It only
+    /// showed up with content in the drawer, because an empty panel's geometry stops changing.
+    ///
+    /// A pure function of the pointer position cannot accumulate: feed it the same event a hundred
+    /// times and it answers the same size, so a re-delivery is a no-op rather than a step.
+    @Test("Repeating a drag event does not move the drawer")
+    func dividerResizeIsIdempotent() {
+        let location = CGPoint(x: 0, y: 580)
+        let first = DSDrawerDivider.size(
+            forLocation: location, anchor: 800, edge: .bottom, maxSize: 400
         )
-        #expect(continuedDrag.dragStartSize == 180)
-        #expect(continuedDrag.size == 0)
+
+        for _ in 0..<100 {
+            #expect(DSDrawerDivider.size(
+                forLocation: location, anchor: 800, edge: .bottom, maxSize: 400
+            ) == first)
+        }
     }
 
     @Test("Divider drag end snaps closed, to minimum, or keeps size")
@@ -330,23 +351,27 @@ struct DSDrawerDividerTests {
             minSize: 120,
             maxSize: 240,
             defaultSize: 180,
-            edge: .leading
+            edge: .leading,
+            // A leading drawer growing rightward from x=100, so the size is the pointer's x less 100.
+            anchor: 100
         )
 
         divider.updateHoverState(true)
 
-        divider.updateDragState(with: CGSize(width: 30, height: 0))
+        divider.updateDragState(toward: CGPoint(x: 310, y: 0))
         #expect(size == 210)
 
         divider.finishDragging()
         #expect(size == 210)
         #expect(isPresented)
 
-        divider.updateDragState(with: CGSize(width: -110, height: 0))
+        // Below `minSize` but above the close threshold: snaps back out to the minimum.
+        divider.updateDragState(toward: CGPoint(x: 200, y: 0))
         divider.finishDragging()
         #expect(size == 120)
 
-        divider.updateDragState(with: CGSize(width: -240, height: 0))
+        // Far enough in to count as dismissing the panel.
+        divider.updateDragState(toward: CGPoint(x: 120, y: 0))
         divider.finishDragging()
         #expect(size == 180)
         #expect(isPresented == false)

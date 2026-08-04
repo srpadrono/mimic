@@ -102,6 +102,9 @@ public struct DSDrawer<Content: View>: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Where the drawer's attached edge currently sits, in global coordinates.
+    @State private var dragAnchor: CGFloat = 0
+
     public var body: some View {
         if isPresented {
             drawerBody
@@ -117,13 +120,24 @@ public struct DSDrawer<Content: View>: View {
 
     @ViewBuilder
     private var drawerBody: some View {
-        if edge.isHorizontal {
-            HStack(spacing: 0) { parts }
-                .frame(maxHeight: .infinity)
-        } else {
-            VStack(spacing: 0) { parts }
-                .frame(maxWidth: .infinity)
+        Group {
+            if edge.isHorizontal {
+                HStack(spacing: 0) { parts }
+                    .frame(maxHeight: .infinity)
+            } else {
+                VStack(spacing: 0) { parts }
+                    .frame(maxWidth: .infinity)
+            }
         }
+        // The divider resizes by absolute pointer position, so it needs to know where the drawer's
+        // fixed edge is. Measuring it here rather than tracking it in the gesture is what keeps the
+        // drag idempotent — see `DSDrawerDivider.size(forLocation:anchor:edge:maxSize:)`.
+        //
+        // This settles immediately instead of oscillating, because the edge being measured is the
+        // one a resize does not move: dragging changes the drawer's *other* side.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            DSDrawerDivider.anchorValue(forFrame: proxy.frame(in: .global), edge: edge)
+        } action: { dragAnchor = $0 }
     }
 
     @ViewBuilder
@@ -171,7 +185,8 @@ public struct DSDrawer<Content: View>: View {
                 minSize: minSize,
                 maxSize: maxSize,
                 defaultSize: defaultSize,
-                edge: edge
+                edge: edge,
+                anchor: dragAnchor
             )
         } else {
             Rectangle()
@@ -207,9 +222,11 @@ struct DSDrawerDivider: View {
     let defaultSize: CGFloat
     let edge: DSDrawerEdge
 
+    /// The drawer's attached edge in global coordinates — the fixed side a resize never moves.
+    let anchor: CGFloat
+
     @State private var isHovered: Bool
     @State private var isDragging: Bool
-    @State private var dragStartSize: CGFloat
 
     init(
         axis: Axis,
@@ -218,7 +235,8 @@ struct DSDrawerDivider: View {
         minSize: CGFloat,
         maxSize: CGFloat,
         defaultSize: CGFloat,
-        edge: DSDrawerEdge
+        edge: DSDrawerEdge,
+        anchor: CGFloat
     ) {
         self.axis = axis
         self._size = size
@@ -227,9 +245,9 @@ struct DSDrawerDivider: View {
         self.maxSize = maxSize
         self.defaultSize = defaultSize
         self.edge = edge
+        self.anchor = anchor
         _isHovered = State(initialValue: false)
         _isDragging = State(initialValue: false)
-        _dragStartSize = State(initialValue: 0)
     }
 
     var body: some View {
@@ -309,7 +327,7 @@ struct DSDrawerDivider: View {
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .global)
-            .onChanged { updateDragState(with: $0.translation) }
+            .onChanged { updateDragState(toward: $0.location) }
             .onEnded(handleDragEnded)
     }
 
@@ -317,18 +335,13 @@ struct DSDrawerDivider: View {
         isHovered = Self.handleHover(hovering: hovering, axis: axis)
     }
 
-    func updateDragState(with translation: CGSize) {
-        let result = Self.dragChangeState(
-            isDragging: isDragging,
-            currentSize: size,
-            dragStartSize: dragStartSize,
-            translation: translation,
-            edge: edge,
-            maxSize: maxSize
-        )
-        isDragging = result.isDragging
-        dragStartSize = result.dragStartSize
-        size = result.size
+    func updateDragState(toward location: CGPoint) {
+        isDragging = true
+        // No anchor yet means the drawer has not been measured, and a size derived from an anchor of
+        // zero would collapse the panel on the first drag. Better to ignore the event than to act on
+        // a position we cannot interpret; the next layout pass supplies the anchor.
+        guard anchor > 0 else { return }
+        size = Self.size(forLocation: location, anchor: anchor, edge: edge, maxSize: maxSize)
     }
 
     func handleDragEnded(_: DragGesture.Value) {
@@ -371,34 +384,50 @@ struct DSDrawerDivider: View {
         hovering
     }
 
-    static func dragDelta(translation: CGSize, edge: DSDrawerEdge) -> CGFloat {
-        switch edge {
-        case .bottom: -translation.height
-        case .top: translation.height
-        case .trailing: -translation.width
-        case .leading: translation.width
-        }
-    }
-
-    static func clampedSize(startingAt dragStartSize: CGFloat, delta: CGFloat, maxSize: CGFloat) -> CGFloat {
-        min(max(dragStartSize + delta, 0), maxSize)
-    }
-
-    static func dragChangeState(
-        isDragging: Bool,
-        currentSize: CGFloat,
-        dragStartSize: CGFloat,
-        translation: CGSize,
+    /// The size implied by the pointer being *at* `location` — never by how far it has travelled.
+    ///
+    /// This is the whole fix for a crash, so it is worth being precise about. The divider used to
+    /// resize from `DragGesture.translation`, which is cumulative: `size = sizeWhenTheDragBegan +
+    /// translation`. That needs an anchor (`sizeWhenTheDragBegan`) held in `@State`, and `@State`
+    /// captured during a gesture is not safe to depend on — writing it re-runs layout, layout can
+    /// re-deliver the gesture, and a re-delivery re-captures the anchor from a size the same drag
+    /// had already moved. The delta then applies twice, and again, and the panel's height walks away
+    /// under a `maxSize` that clamps it back. Each round trip dirties the window's constraints, and
+    /// AppKit aborts a window that needs more constraint passes than it has views —
+    /// `NSInternalInconsistencyException` out of `_postWindowNeedsUpdateConstraints`, which is a
+    /// `SIGABRT` while you are still holding the mouse down.
+    ///
+    /// Reading the pointer's absolute position removes the anchor and with it the accumulation:
+    /// handling the same event twice yields the same size, so the loop has nothing to feed on. This
+    /// is the pattern Apple's own guidance gives for a layout-affecting drag — `.location` in a
+    /// known coordinate space, not `.translation`.
+    ///
+    /// `anchor` is the drawer's *attached* edge in global coordinates, which is the one edge a
+    /// resize cannot move: a bottom drawer grows upward from the window's bottom, a trailing drawer
+    /// leftward from its right. That is what makes a global pointer position mean a size at all.
+    static func size(
+        forLocation location: CGPoint,
+        anchor: CGFloat,
         edge: DSDrawerEdge,
         maxSize: CGFloat
-    ) -> (isDragging: Bool, dragStartSize: CGFloat, size: CGFloat) {
-        let nextDragStartSize = isDragging ? dragStartSize : currentSize
-        let delta = dragDelta(translation: translation, edge: edge)
-        return (
-            isDragging: true,
-            dragStartSize: nextDragStartSize,
-            size: clampedSize(startingAt: nextDragStartSize, delta: delta, maxSize: maxSize)
-        )
+    ) -> CGFloat {
+        let proposed: CGFloat = switch edge {
+        case .bottom: anchor - location.y
+        case .top: location.y - anchor
+        case .trailing: anchor - location.x
+        case .leading: location.x - anchor
+        }
+        return min(max(proposed, 0), max(maxSize, 0))
+    }
+
+    /// The drawer edge that a resize leaves in place, in global coordinates.
+    static func anchorValue(forFrame frame: CGRect, edge: DSDrawerEdge) -> CGFloat {
+        switch edge {
+        case .bottom: frame.maxY
+        case .top: frame.minY
+        case .trailing: frame.maxX
+        case .leading: frame.minX
+        }
     }
 
     static func dragEndState(

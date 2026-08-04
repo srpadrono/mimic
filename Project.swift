@@ -10,7 +10,7 @@ let sharedSettings: Settings = .settings(
         "MACOSX_DEPLOYMENT_TARGET": "26.0",
         "DEVELOPMENT_TEAM": "KW6369JJL9",
         // Surfaced by `mimic state` as `appVersion`, so a caller can tell which build it is driving.
-        "MARKETING_VERSION": "0.9.1",
+        "MARKETING_VERSION": "0.9.2",
         "CURRENT_PROJECT_VERSION": "1",
     ],
     configurations: [

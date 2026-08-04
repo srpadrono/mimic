@@ -22,6 +22,18 @@ final class AppState {
     /// `SQLITE_BUSY`, which surfaced as an autosave that intermittently reported "Save failed".
     let repository: any ProjectRepository
 
+    #if DEBUG
+    /// How many of these have been built this process — the guard on a bug that cost 100% of a core.
+    ///
+    /// Constructing one is expensive: it opens the SQLite store, runs the migrations and restores
+    /// the last-opened project. `MimicScene.init` used to do that inline, and SwiftUI re-runs a
+    /// scene's initialiser on every `MimicApp.body` evaluation, so this climbed by about 150 a
+    /// second for as long as the app was open. `sceneInitDoesNotRebuildAppState` watches it.
+    ///
+    /// Main-actor confined: every `AppState.init` is.
+    nonisolated(unsafe) static var instancesCreated = 0
+    #endif
+
     var showNewEndpointSheet = false
     /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
     /// and an open workspace — File ▸ New Project has to work from either.
@@ -94,6 +106,9 @@ final class AppState {
         recentProjectsStore: RecentProjectsStore,
         panelLayoutStore: PanelLayoutStore = PanelLayoutStore()
     ) {
+        #if DEBUG
+        Self.instancesCreated += 1
+        #endif
         self.server = server
         self.panelLayoutStore = panelLayoutStore
         repository = projectRepository

@@ -421,6 +421,32 @@ struct AppStateAndViewTests {
         #expect(String(describing: type(of: scene)).isEmpty == false)
     }
 
+    /// `MimicScene.init` runs on every `MimicApp.body` evaluation, so it must not build an
+    /// `AppState`.
+    ///
+    /// It used to. Each evaluation opened the SQLite store, ran the migrations and restored the
+    /// open project, and because `AppState.init` reads `currentProject` and then writes it, the
+    /// write invalidated the body that was still running — an unbounded loop that re-entered this
+    /// initialiser about 150 times a second and held a core at 100%. The window stopped answering
+    /// the pointer, which is what it looks like from the outside: a window you cannot resize, and
+    /// an app that dies if you keep trying.
+    ///
+    /// Constructing the scene repeatedly must therefore keep handing back the one session-owned
+    /// state, never a fresh one.
+    @Test("Repeatedly building the scene builds no further AppState")
+    func sceneInitDoesNotRebuildAppState() {
+        // Touch the session first, so the one legitimate construction is behind us.
+        let expected = AppSession.shared.appState
+        let created = AppState.instancesCreated
+
+        for _ in 0..<100 {
+            _ = MimicScene()
+        }
+
+        #expect(AppState.instancesCreated == created)
+        #expect(AppSession.shared.appState === expected)
+    }
+
     @Test("Mimic app helpers derive server menu behavior")
     func mimicAppHelpers() {
         #expect(MimicScene.serverToggleTitle(for: .stopped) == "Start Server")

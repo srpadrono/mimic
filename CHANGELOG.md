@@ -3,6 +3,44 @@
 Notable changes per release. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-08-04
+
+### Fixed
+
+- **The app no longer rebuilds itself continuously.** Opening a project used to put Mimic into a loop
+  that held a full CPU core for as long as the window was open.
+
+  Every evaluation of the app's body constructed a whole new `AppState` — which opens the SQLite
+  store, runs the migrations and restores the open project — and then discarded it. Because that
+  initialiser reads `currentProject` and then writes it, each pass invalidated the body that was
+  still running, so the next pass began immediately. Measured on a running window with nothing
+  touching it: about 150 database opens a second, indefinitely. macOS reports it as a CPU limit and
+  a disk-write limit, both naming the same stack.
+
+  Everything the window does happens on the main thread, so a main thread that never finishes is a
+  window that answers the pointer late or not at all — resizing, dragging a divider, and clicking all
+  degrade together. The session is now built once per process.
+
+- **Resizing the request log no longer accumulates.** The panel divider resized from the drag's
+  *translation* — a cumulative distance — added to a starting size held in view state. A layout pass
+  can re-deliver a drag event, and a re-delivery re-read that starting size from a height the same
+  drag had already moved, applying the distance twice and then again. Each round dirtied the window's
+  constraints, and AppKit aborts a window that needs more constraint passes than it has views.
+
+  It needed content in the panel to keep the geometry changing, which is why it showed up when the
+  request log had traffic in it and not on an empty one.
+
+  The divider now resizes from where the pointer *is*, measured against the panel's attached edge —
+  the one edge a resize cannot move. Handling the same event twice produces the same height, so a
+  re-delivery is a no-op rather than a step. This is the pattern Apple's guidance gives for a
+  drag that affects layout.
+
+### Known issues
+
+- With the sidebar, request log and inspector all open, the window will not resize below roughly
+  1560pt wide, because the inspector's current width acts as a floor on the window rather than its
+  minimum. Hiding the inspector releases it. Not yet fixed.
+
 ## [0.9.1] — 2026-08-04
 
 ### Fixed

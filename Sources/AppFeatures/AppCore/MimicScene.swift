@@ -6,23 +6,25 @@ import SwiftUI
 public struct MimicScene: Scene {
     @State private var appState: AppState
 
+    /// Nothing here may be expensive, and nothing here may mutate observable state.
+    ///
+    /// `MimicApp.body` re-runs this initialiser on every evaluation, and `State(wrappedValue:)`
+    /// *evaluates* its argument each time while keeping only the first result. This used to build a
+    /// whole `AppState` inline — so every evaluation opened the SQLite store, ran the migrations and
+    /// reloaded the open project, then threw the result away.
+    ///
+    /// That was not merely wasteful, it was self-sustaining: `AppState.init` reads
+    /// `projects.currentProject` (binding the server's mocks) and then writes it
+    /// (`loadLastOpenedProject`). A read followed by a write of the same observable property, inside
+    /// a body evaluation, invalidates the body that is still running — so the app re-evaluated,
+    /// re-opened the database and re-invalidated, about 150 times a second, forever. It only bit
+    /// when a project was open, because `loadLastOpenedProject` returns early when there is nothing
+    /// to restore; that is why it looked intermittent.
+    ///
+    /// The session is created once by `AppSession.shared`, so from the second evaluation on this
+    /// initialiser reads a stored reference and does nothing else.
     public init() {
-        #if DEBUG
-        if Self.shouldResetForTesting(arguments: ProcessInfo.processInfo.arguments) {
-            UITestSupport.resetAppIfNeeded()
-        }
-        #endif
-        let appState = AppState()
-        _appState = State(wrappedValue: appState)
-
-        // Started here, not from a view's `onAppear`: windowless runs never present a view, and the
-        // whole point of the control plane is that `mimic` can reach the session either way.
-        HeadlessMode.applyActivationPolicyIfNeeded()
-        // The session's own store, not a second connection to the same file.
-        ControlPlaneCoordinator.shared.start(
-            appState: appState,
-            repository: appState.repository
-        )
+        _appState = State(wrappedValue: AppSession.shared.appState)
     }
 
     public var body: some Scene {
