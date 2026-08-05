@@ -37,9 +37,12 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
   -configuration Release CODE_SIGN_IDENTITY=- build \
   | grep -E "error:|BUILD" || true
 
-# UI tests are not part of CI — XCUITest needs an interactive session to be granted automation
-# permission — but they are runnable here, which is the point of having a local gate.
-step "UI tests (local only)"
+# UI tests do run in CI now. The macOS job pre-authorises UI automation with
+# `automationmodetool enable-automationmode-without-authentication`, which is the piece that used to
+# make this local-only. Kept here because a local run is still the fastest way to see a failure — and
+# because this machine's automation service wedges periodically, at which point CI is the only place
+# the suite runs at all.
+step "UI tests"
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
   test -destination 'platform=macOS' -only-testing:MimicUITests \
   | grep -E "error:|Test Case|TEST (SUCCEEDED|FAILED)" || true

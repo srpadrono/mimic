@@ -53,21 +53,36 @@ After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && t
 
 ### What CI actually covers
 
-**CI is currently manual-only** (`workflow_dispatch`). GitHub Actions will not start a job on this
-account: runs are created and die in ~2s having executed zero steps, on Linux and macOS alike,
-because of a billing block. That is not a workflow error — the same commands pass in the `swift:6.2`
-container the job uses. Do not debug the YAML in response to those failures; verify in Docker
-instead. The automatic triggers are commented out in `.github/workflows/ci.yml` and can be restored
-once the account is unblocked.
+CI runs on every pull request and on every push to `main`, in two jobs split by what actually needs a
+Mac. Both are free: GitHub does not meter standard hosted runners on public repositories, macOS
+included.
 
-When it does run, CI is Linux-only and builds through [`Package.swift`](Package.swift) rather than
-Tuist: the domain rules, mock engine, persistence, control plane, spec import and CLI are plain
-Swift, so 455 of the tests run on a free runner instead of a macOS one billed at 10×. Both manifests
-point at the same directories, so they cannot drift in what they compile — only in how targets are
-declared.
+**Linux** builds through [`Package.swift`](Package.swift) rather than Tuist — the domain rules, mock
+engine, persistence, control plane, spec import and CLI are plain Swift, so most of the suite reports
+back in a couple of minutes. Both manifests point at the same directories, so they cannot drift in
+what they compile, only in how targets are declared.
 
-What CI does **not** cover, because it needs Xcode: the app bundle, SwiftUI, the app-level suites, the
-Release gate, and XCUITest. Run `./Scripts/ci.sh` locally before landing UI changes.
+**macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
+app-level suites, **the XCUITest suite**, and the Release gate. The image label is load-bearing —
+macOS 26 and Swift 6.2 are the compile floor, not a preference.
+
+Two things about the macOS job are worth knowing before you edit it:
+
+- **`sudo automationmodetool enable-automationmode-without-authentication` is what makes XCUITest
+  possible at all.** Since Monterey, macOS asks a human to approve UI automation before a runner may
+  drive another app. Nobody is at the keyboard on CI, so without it the runner fails to initialise
+  and reports `Timed out while enabling automation mode` with *zero tests executed* — which reads
+  like a broken suite rather than a missing permission. The same message appears locally when the
+  SIP-protected `automationmode-writer` service wedges; see the note in the UI test section.
+- **Everything is signed ad-hoc (`CODE_SIGN_IDENTITY=-`).** The project carries a `DEVELOPMENT_TEAM`
+  for local builds, and a hosted runner has none of that team's certificates. It does not need them:
+  a macOS app only has to be signed *somehow* to launch.
+
+This was not always possible. While the repo was private, every run died in about two seconds with
+zero steps executed, on Linux and macOS alike, because of a billing block — which is why the triggers
+used to be commented out and the macOS job disabled. Making the repo public resolved it.
+
+`./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing.
 
 When touching anything the Linux build compiles, remember it is not macOS: `URLSession` lives in
 `FoundationNetworking`, the BSD socket calls live in `Glibc` rather than `Darwin`, and some C types

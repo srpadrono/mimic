@@ -1,26 +1,21 @@
 name: CI
 
-# Deliberately Linux-only.
+# Two runners, split by what actually needs a Mac.
 #
-# Mimic is a macOS app, but only the SwiftUI layer actually needs a Mac. The domain rules, the mock
-# engine, persistence, the control plane, spec import and the CLI are plain Swift — Vapor's native
-# home is Linux — so `Package.swift` builds them and roughly 80% of the suite runs here, on a free
-# 1x runner, instead of a macOS one billed at 10x.
+# The domain rules, the mock engine, persistence, the control plane, spec import and the CLI are
+# plain Swift — Vapor's native home is Linux — so `Package.swift` builds them on a Linux runner and
+# most of the suite reports back in a couple of minutes. The app bundle, SwiftUI, the app-level
+# suites, the Release gate and XCUITest need Xcode, so they run on macOS.
 #
-# What is *not* covered here: the app bundle, SwiftUI, and XCUITests. Those need Xcode. Run
-# `./Scripts/ci.sh` locally before landing UI changes, or enable the self-hosted job at the bottom.
-#
-# CURRENTLY MANUAL-ONLY. GitHub Actions cannot start a job on this account — runs are created and die
-# in about two seconds with zero steps executed, on Linux and macOS alike, because of a billing
-# block. That is not a workflow error: the same commands pass in the `swift:6.2` container this job
-# uses. Rather than mark every commit with a red X that says nothing about the code, the automatic
-# triggers are off. Restore them by putting back the `push`/`pull_request` block below once the
-# account's payment or spending limit is resolved.
+# Both are free: GitHub does not meter standard hosted runners on public repositories, macOS
+# included. That was not always true here — while this repo was private, every run died in about two
+# seconds with zero steps executed, which is why the automatic triggers used to be commented out and
+# the macOS job was `if: false`. Making the repo public resolved it.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  # pull_request:
 
 concurrency:
   # A newer push makes an in-flight run irrelevant; cancel rather than queue behind it.
@@ -28,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  linux:
     name: Build and test (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -62,21 +57,100 @@ jobs:
       - name: Test
         run: swift test --skip-build
 
-  # The macOS half — the app bundle, SwiftUI and XCUITests — needs Xcode and therefore a Mac.
-  # Hosted macOS runners bill at 10x, so this is left disabled. To turn it on, register a self-hosted
-  # runner on a Mac with Xcode 26 and remove the `if: false`.
   macos:
-    name: Build and test (macOS, self-hosted)
-    if: false
-    runs-on: [self-hosted, macOS]
-    timeout-minutes: 60
+    name: Build and test (macOS)
+    runs-on: macos-26
+    # The Release build alone is several minutes on a 3-core runner, and the UI suite launches the
+    # real app once per test.
+    timeout-minutes: 120
+
     steps:
       - uses: actions/checkout@v4
+
+      # macOS 26 and Swift 6.2 are the floor: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and the
+      # macOS 26 SDK are both required to compile at all, so the image label is load-bearing rather
+      # than a preference. Printed so a green run says which Xcode produced it.
+      - name: Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      # The one thing that makes macOS XCUITest possible on a hosted runner.
+      #
+      # Since Monterey, macOS asks a human to approve UI automation before a test runner may drive
+      # another app. Nobody is at the keyboard here, so the request is never answered and the runner
+      # fails to initialise at all: `Timed out while enabling automation mode`, zero tests executed —
+      # which reads like a broken suite rather than a missing permission. This is the supported way
+      # to pre-authorise it, and it is why the UI tests can run here at all.
+      - name: Allow UI automation without an interactive prompt
+        run: sudo automationmodetool enable-automationmode-without-authentication
+
+      # Tuist generates the workspace; nothing in the repo is a checked-in Xcode project.
+      - name: Install Tuist
+        run: brew install --quiet tuist
+
+      # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run
+      # from rebuilding Vapor and GRDB from source every time.
+      - name: Cache Tuist dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/tuist
+            Tuist/.build
+          key: ${{ runner.os }}-tuist-${{ hashFiles('Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
+          restore-keys: ${{ runner.os }}-tuist-
 
       - name: Resolve and generate
         run: |
           tuist install
           tuist generate --no-open
 
-      - name: Build, test, and gate
-        run: ./Scripts/ci.sh
+      # Ad-hoc signing throughout. The project carries a DEVELOPMENT_TEAM for local builds, but a
+      # hosted runner has none of that team's certificates — and none are needed, because a macOS app
+      # only has to be signed *somehow* to launch, which is what `-` means.
+      - name: Build (Debug)
+        run: |
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
+            -configuration Debug -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY=- build
+
+      # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
+      # rendering tests. The rest of the suite already ran on Linux.
+      - name: Test (unit suites)
+        run: |
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
+            test -destination 'platform=macOS' -skip-testing:MimicUITests \
+            CODE_SIGN_IDENTITY=-
+
+      # The reason this job exists. XCUITest is the only thing that exercises the real window — the
+      # accessibility tree, the panel layout, and every flow a user actually takes.
+      #
+      # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
+      # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
+      # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
+      - name: Test (UI)
+        run: |
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
+            test -destination 'platform=macOS' -only-testing:MimicUITests \
+            -retry-tests-on-failure -test-iterations 2 \
+            CODE_SIGN_IDENTITY=-
+
+      # Release compiles with whole-module optimisation and different warnings-as-errors, so it
+      # catches things Debug does not. Run after the tests so a compile-only failure does not hide a
+      # test result.
+      - name: Build (Release)
+        run: |
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
+            -configuration Release CODE_SIGN_IDENTITY=- build
+
+      # The result bundle is the only way to read a UI failure after the fact — it holds the failure
+      # screenshots and the automatic UI hierarchy captures.
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
