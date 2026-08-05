@@ -241,9 +241,25 @@ set of rules, because they used to follow none and the window read as three unre
 - **Panel geometry is a preference.** Sizes and visibility go through `PanelLayoutStore`, which takes
   an injected `UserDefaults` so a UI test run cannot overwrite a real window arrangement. Never reach
   for `@AppStorage` here: it binds to `.standard` and would do exactly that.
-- **`DSDrawer`'s `defaultSize` is an explicit parameter**, never read from the size binding. SwiftUI
-  re-runs `init` on every body evaluation, so reading the binding captures the *current* size — which
-  silently turns "restore the default" into a no-op.
+- **Anything a user drags is an `NSSplitViewItem`.** All three resizable panels are now split-view
+  panes: the navigator via `NavigationSplitView`, the inspector via `.inspector`, and the request log
+  via `DSSplitPane`. They match because they are the same mechanism, not because three sets of numbers
+  were matched by hand — which is what the window used to do, and why one divider lit up blue on hover
+  while the other two did nothing, one restored a default on double-click while the other two did not,
+  and one forgot your size every time you dragged it shut.
+
+  Do not resize a panel with a `DragGesture` writing a `@Binding<CGFloat>` into a `.frame`. That is a
+  control loop — the gesture writes state, the state changes layout, the layout re-measures what the
+  gesture reads — and SwiftUI promises no ordering between those steps. The old request-log divider
+  crashed inside it (`NSInternalInconsistencyException` out of `_postWindowNeedsUpdateConstraints`,
+  with the mouse still down), and rewriting it to use absolute pointer position made the loop
+  idempotent without removing it.
+
+  Three things `DSSplitPane` documents at length, because each one costs a day if you meet it cold: a
+  SwiftUI pane claims every point of its own bounds, so a 1pt divider has no grab target left and will
+  not drag at all; a pane holding its thickness above priority 490 outranks AppKit's own drag; and a
+  custom `NSSplitView` installed from `loadView` needs `splitView(_:shouldHideDividerAt:)` guarded or
+  the app will not launch.
 
 ## UI Changes — Definition of Done
 
