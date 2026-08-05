@@ -87,8 +87,14 @@ jobs:
         run: sudo automationmodetool enable-automationmode-without-authentication
 
       # Tuist generates the workspace; nothing in the repo is a checked-in Xcode project.
+      #
+      # Pinned, not `brew install tuist`. Homebrew hands out whatever is current — it produced 4.202.6
+      # against the 4.152.0 this project is developed on, and `tuist install` failed outright. A
+      # generator that silently tracks upstream turns "someone else released" into "our CI is red".
       - name: Install Tuist
-        run: brew install --quiet tuist
+        uses: jdx/mise-action@v2
+        with:
+          tools: tuist@4.152.0
 
       # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run
       # from rebuilding Vapor and GRDB from source every time.
@@ -103,8 +109,19 @@ jobs:
 
       - name: Resolve and generate
         run: |
+          tuist version
           tuist install
           tuist generate --no-open
+
+      # Tuist reports failures as an unhelpful "Error" and writes the reason to a session log the
+      # runner throws away. Without this a failure here says nothing at all.
+      - name: Tuist logs on failure
+        if: failure()
+        run: |
+          for f in ~/.local/state/tuist/sessions/*/logs.txt; do
+            echo "── $f"
+            tail -100 "$f"
+          done
 
       # Ad-hoc signing throughout. The project carries a DEVELOPMENT_TEAM for local builds, but a
       # hosted runner has none of that team's certificates — and none are needed, because a macOS app
