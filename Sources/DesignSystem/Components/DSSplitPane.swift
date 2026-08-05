@@ -114,6 +114,23 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         // stack around this view meaningless.
         if !size.width.isFinite { size.width = fallback.width }
         if !size.height.isFinite { size.height = fallback.height }
+
+        // Never claim to fit in less than the two minimums, because the split view cannot.
+        //
+        // Offered less, `NSSplitView` does not shrink the panes below their `minimumThickness` — it
+        // overflows, and the overflow goes *upward*: the first pane's content is laid out above the
+        // pane, under the window's toolbar, where it draws but cannot be clicked. On a 900x450 window
+        // that is what hid the journey editor's "Add step" button, so the step sheet never opened and
+        // two UI tests failed on a symptom several layers from the cause.
+        //
+        // Reporting the honest floor lets the stack above clip at the bottom instead, which is
+        // recoverable — the divider still moves and the panes are still reachable.
+        let floor = minimumPrimaryThickness + minimumSecondaryThickness
+        if axis == .vertical {
+            size.height = max(size.height, floor)
+        } else {
+            size.width = max(size.width, floor)
+        }
         return size
     }
 
@@ -246,9 +263,11 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         let secondaryItem = NSSplitViewItem(viewController: secondaryHost)
         secondaryItem.minimumThickness = minimumSecondaryThickness
         secondaryItem.canCollapse = true
-        // Dragging a panel shut is a deliberate act; having it vanish because the window got shorter
-        // is not. A window too short for both narrows this pane instead.
-        secondaryItem.canCollapseFromWindowResize = false
+        // A window too short to hold both panes has to give somewhere, and a collapsed request log is
+        // the recoverable outcome — the alternative is the pair overflowing the window and taking the
+        // editor's own controls out of reach under the toolbar. `false` here is what turned a cramped
+        // window into an unusable one.
+        secondaryItem.canCollapseFromWindowResize = true
         secondaryItem.holdingPriority = Self.secondaryHoldingPriority
         secondaryItem.isCollapsed = initialSecondaryCollapsed
         secondaryItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
