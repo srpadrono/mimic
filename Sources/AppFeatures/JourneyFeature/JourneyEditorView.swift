@@ -19,8 +19,6 @@ struct JourneyEditorView: View {
     let isActive: Bool
     let status: JourneyStatus?
 
-    @State private var editingStepID: UUID?
-    @State private var showNewStepSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,25 +38,8 @@ struct JourneyEditorView: View {
         // would take `journeyEditor.name`, `journeyEditor.addStepButton` and every `journeyStep-n`
         // out of the tree. Declaring the container here keeps them addressable whoever wraps it.
         .accessibilityElement(children: .contain)
-        .sheet(isPresented: $showNewStepSheet) {
-            JourneyStepSheet(step: nil) { spec in
-                appState.addJourneyStep(journeyID: journey.id, spec: spec)
-            }
-        }
-        .sheet(item: editingStep) { step in
-            JourneyStepSheet(step: step) { spec in
-                appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
-            }
-        }
     }
 
-    /// Binding shim so a step can be presented as a sheet item by id.
-    private var editingStep: Binding<JourneyStep?> {
-        Binding(
-            get: { journey.steps.first { $0.id == editingStepID } },
-            set: { editingStepID = $0?.id }
-        )
-    }
 
     // MARK: - Header
 
@@ -138,7 +119,7 @@ struct JourneyEditorView: View {
                 size: .small,
                 identifier: "journeyEditor.addStep"
             ) {
-                showNewStepSheet = true
+                appState.journeyStepEdit = JourneyStepEdit(journeyID: journey.id, step: nil)
             }
             .accessibilityIdentifier("journeyEditor.addStepButton")
             .accessibilityLabel("Add step")
@@ -284,7 +265,7 @@ struct JourneyEditorView: View {
                     + "than once — that is how a call fails and then succeeds.",
                 actionTitle: "Add step\u{2026}",
                 identifier: "journeyEditor.steps",
-                action: { showNewStepSheet = true }
+                action: { appState.journeyStepEdit = JourneyStepEdit(journeyID: journey.id, step: nil) }
             )
         } else {
             List {
@@ -295,10 +276,10 @@ struct JourneyEditorView: View {
                         progress: status?.steps.first { $0.id == step.id }
                     )
                     .contentShape(Rectangle())
-                    .onTapGesture { editingStepID = step.id }
+                    .onTapGesture { appState.journeyStepEdit = JourneyStepEdit(journeyID: journey.id, step: step) }
                     .contextMenu {
                         Button {
-                            editingStepID = step.id
+                            appState.journeyStepEdit = JourneyStepEdit(journeyID: journey.id, step: step)
                         } label: {
                             Label("Edit step\u{2026}", systemImage: "pencil")
                         }

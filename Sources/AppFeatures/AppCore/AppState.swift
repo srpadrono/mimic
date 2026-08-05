@@ -35,6 +35,16 @@ final class AppState {
     #endif
 
     var showNewEndpointSheet = false
+
+    /// The journey step waiting to be edited, or created when `step` is nil. Non-nil *is* "the step
+    /// sheet is up".
+    ///
+    /// It lives here rather than in `JourneyEditorView` because the editor is inside a hosted split
+    /// pane, and a SwiftUI modal cannot present from there — it begins a modal session the window
+    /// never shows, so "Add step" did nothing at all. `WorkspaceView` presents it instead, outside
+    /// that boundary, which is where every sheet that works already lives. `showNewEndpointSheet`
+    /// above is the same arrangement for the same reason.
+    var journeyStepEdit: JourneyStepEdit?
     /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
     /// and an open workspace — File ▸ New Project has to work from either.
     var showNewProjectSheet = false

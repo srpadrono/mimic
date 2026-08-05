@@ -297,6 +297,19 @@ struct WorkspaceView: View {
         } message: { alertData in
             Text("Another process is using port \(alertData.conflictingPort). Try port \(alertData.suggestedPort) instead?")
         }
+        // Presented here rather than in `JourneyEditorView`, because that view lives inside a hosted
+        // split pane and a SwiftUI modal cannot present from there — it starts a modal session the
+        // window never shows, so "Add step" silently did nothing. Every sheet in this file works for
+        // the same reason it is in this file.
+        .sheet(item: $appState.journeyStepEdit) { request in
+            JourneyStepSheet(step: request.step) { spec in
+                if let step = request.step {
+                    appState.updateJourneyStep(journeyID: request.journeyID, stepID: step.id, spec: spec)
+                } else {
+                    _ = appState.addJourneyStep(journeyID: request.journeyID, spec: spec)
+                }
+            }
+        }
         // New endpoint sheet
         .sheet(isPresented: $appState.showNewEndpointSheet) {
             NewEndpointSheet { name, method, path in
