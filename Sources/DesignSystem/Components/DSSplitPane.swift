@@ -72,11 +72,11 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         self.secondary = secondary()
     }
 
-    public func makeNSViewController(context: Context) -> DSSplitPaneController {
+    public func makeNSViewController(context: Context) -> DSSplitPaneController<Primary, Secondary> {
         let controller = DSSplitPaneController(
             isVertical: axis == .horizontal,
-            primary: AnyView(primary),
-            secondary: AnyView(secondary),
+            primary: primary,
+            secondary: secondary,
             minimumPrimaryThickness: minimumPrimaryThickness,
             minimumSecondaryThickness: minimumSecondaryThickness,
             defaultSecondaryThickness: defaultSecondaryThickness,
@@ -102,7 +102,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     /// negotiation one level up.
     public func sizeThatFits(
         _ proposal: ProposedViewSize,
-        nsViewController: DSSplitPaneController,
+        nsViewController: DSSplitPaneController<Primary, Secondary>,
         context: Context
     ) -> CGSize? {
         let fallback = CGSize(
@@ -117,14 +117,17 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         return size
     }
 
-    public func updateNSViewController(_ controller: DSSplitPaneController, context: Context) {
+    public func updateNSViewController(
+        _ controller: DSSplitPaneController<Primary, Secondary>,
+        context: Context
+    ) {
         // Bindings are values captured when the closure was made, so they are re-attached on every
         // update rather than only at construction — a stale one would write into a state container
         // SwiftUI has already replaced.
         attachCallbacks(to: controller)
         controller.apply(
-            primary: AnyView(primary),
-            secondary: AnyView(secondary),
+            primary: primary,
+            secondary: secondary,
             isSecondaryCollapsed: !isSecondaryPresented,
             // A whole panel sliding open is the largest motion in the window. `DSEmptyState` gates a
             // 4% scale on this setting; a panel cannot be exempt from what a 4% scale respects.
@@ -132,7 +135,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         )
     }
 
-    private func attachCallbacks(to controller: DSSplitPaneController) {
+    private func attachCallbacks(to controller: DSSplitPaneController<Primary, Secondary>) {
         controller.onSecondaryThicknessChange = { thickness in
             guard secondaryThickness != thickness else { return }
             secondaryThickness = thickness
@@ -149,22 +152,27 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
 /// The `NSSplitViewController` behind `DSSplitPane`. Public only because it is the representable's
 /// `NSViewControllerType`; nothing outside the design system should need to name it.
 ///
-/// **Not generic.** It installs `DSHairlineSplitView` from `loadView`, which needs an `@objc`
-/// override; the panes are erased to `AnyView` so this class can stay non-generic, which costs a
-/// little diffing on two views that change rarely.
+/// Generic, and that matters: a pane's `rootView` is typed, so SwiftUI can diff an update against
+/// the previous value and the `@State` inside that pane survives it.
 ///
-/// Installing a custom split view is what makes the divider grabbable at all — see
-/// `DSHairlineSplitView` — and it is also what makes `splitView(_:shouldHideDividerAt:)` below
-/// mandatory. Without that guard the app does not launch.
-public final class DSSplitPaneController: NSSplitViewController {
+/// This was briefly erased to `AnyView` so the class could be non-generic, on a guess that generics
+/// were behind a `loadView` crash. They were not — the crash was `splitView(_:shouldHideDividerAt:)`
+/// indexing an empty array, guarded below — and the erasure cost something real. A fresh
+/// `AnyView(content)` on every update is a value SwiftUI cannot match against the old one, so it
+/// rebuilt the pane and reset its state. The visible symptom was a sheet that would not open:
+/// pressing "Add step" set the journey editor's `@State` flag and the next update threw it away
+/// before anything could present. Every `@State` in a pane was affected; the sheet is only where it
+/// happened to be noticed — by CI, not by hand.
+///
+public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSplitViewController {
 
     /// Called when the secondary pane settles at a new thickness — not on every event of a drag.
     var onSecondaryThicknessChange: (CGFloat) -> Void = { _ in }
     /// Called when the user collapses or reveals the secondary pane themselves.
     var onSecondaryCollapseChange: (Bool) -> Void = { _ in }
 
-    private let primaryHost: DSPaneViewController
-    private let secondaryHost: DSPaneViewController
+    private let primaryHost: DSPaneViewController<Primary>
+    private let secondaryHost: DSPaneViewController<Secondary>
     private let minimumPrimaryThickness: CGFloat
     private let minimumSecondaryThickness: CGFloat
     private let defaultSecondaryThickness: CGFloat
@@ -189,8 +197,8 @@ public final class DSSplitPaneController: NSSplitViewController {
 
     init(
         isVertical: Bool,
-        primary: AnyView,
-        secondary: AnyView,
+        primary: Primary,
+        secondary: Secondary,
         minimumPrimaryThickness: CGFloat,
         minimumSecondaryThickness: CGFloat,
         defaultSecondaryThickness: CGFloat,
@@ -306,7 +314,7 @@ public final class DSSplitPaneController: NSSplitViewController {
 
     // MARK: SwiftUI → AppKit
 
-    func apply(primary: AnyView, secondary: AnyView, isSecondaryCollapsed: Bool, animated: Bool) {
+    func apply(primary: Primary, secondary: Secondary, isSecondaryCollapsed: Bool, animated: Bool) {
         applyExternally {
             primaryHost.rootView = primary
             secondaryHost.rootView = secondary
@@ -424,15 +432,15 @@ final class DSHairlineSplitView: NSSplitView {
 /// split view decides how big a pane is, and left to itself the hosting view reports an ideal size
 /// and argues with the divider about how much room it is owed — and the controller gives no way to
 /// reach the view it makes.
-final class DSPaneViewController: NSViewController {
-    private let hostingView: NSHostingView<AnyView>
+final class DSPaneViewController<Content: View>: NSViewController {
+    private let hostingView: NSHostingView<Content>
 
-    var rootView: AnyView {
+    var rootView: Content {
         get { hostingView.rootView }
         set { hostingView.rootView = newValue }
     }
 
-    init(rootView: AnyView) {
+    init(rootView: Content) {
         hostingView = NSHostingView(rootView: rootView)
         hostingView.sizingOptions = []
         // A hosting view still publishes an intrinsic content size and defends it at the default
