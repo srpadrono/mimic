@@ -17,6 +17,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default. Nothing here publishes anything, and a public repository runs this workflow
+# against code from strangers, so the token it hands them should be able to do as little as possible.
+permissions:
+  contents: read
+
+# Every third-party action is pinned to a commit, not a tag. A tag is a moving pointer its owner can
+# repoint at any time, and these run with repository context on pull requests — including forks. The
+# trailing comment is the human-readable version; the SHA is what actually runs.
+
 concurrency:
   # A newer push makes an in-flight run irrelevant; cancel rather than queue behind it.
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,7 +39,7 @@ jobs:
     container: swift:6.2
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
       # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
@@ -43,7 +52,7 @@ jobs:
         run: swift --version
 
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
@@ -65,7 +74,7 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # macOS 26 and Swift 6.2 are the floor: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and the
       # macOS 26 SDK are both required to compile at all, so the image label is load-bearing rather
@@ -97,12 +106,12 @@ jobs:
       # passing one is accepted, warned about, and ignored, which installs nothing and leaves `tuist`
       # off PATH for a step that then fails with exit 127.
       - name: Install Tuist
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
 
       # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run
       # from rebuilding Vapor and GRDB from source every time.
       - name: Cache Tuist dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/tuist
@@ -170,7 +179,7 @@ jobs:
       # screenshots and the automatic UI hierarchy captures.
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: xcresult
           path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult

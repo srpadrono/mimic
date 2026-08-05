@@ -1,0 +1,19 @@
+# Keeps the workflow's pinned action SHAs from rotting.
+#
+# Pinning to a commit is what stops a tag being repointed under us, but it also means a fix upstream
+# never arrives on its own. Dependabot opens a PR when one does, and rewrites both the SHA and the
+# `# v4` comment beside it, so the pin stays readable.
+#
+# Only GitHub Actions. Swift packages are resolved by Tuist from `Tuist/Package.swift`, which
+# Dependabot does not understand — those are updated by hand with `tuist install`.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
