@@ -88,6 +88,35 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         return controller
     }
 
+    /// Take the space offered, not the split view's own fitting size.
+    ///
+    /// Returning `nil` here means "use the default", and the default for a representable is the
+    /// controller view's fitting size. An `NSSplitView`'s fitting size is the sum of what its panes
+    /// demand — so as soon as the request log is restored or dragged to any real height, the pane
+    /// asks SwiftUI for *more room than the column has*. SwiftUI grants it, the stack overflows, and
+    /// the jump bar above is pushed down while the bottom of the log is clipped off the window.
+    ///
+    /// It also silently disables growing the panel: the split view is already past the edge, so
+    /// AppKit clamps any drag that would make the secondary pane larger. The panel drags smaller and
+    /// refuses to drag bigger, which looks like a broken divider and is really a broken size
+    /// negotiation one level up.
+    public func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsViewController: DSSplitPaneController,
+        context: Context
+    ) -> CGSize? {
+        let fallback = CGSize(
+            width: minimumPrimaryThickness,
+            height: minimumPrimaryThickness + minimumSecondaryThickness
+        )
+        var size = proposal.replacingUnspecifiedDimensions(by: fallback)
+        // An unbounded proposal is a question, not an offer: answering `.infinity` would make the
+        // stack around this view meaningless.
+        if !size.width.isFinite { size.width = fallback.width }
+        if !size.height.isFinite { size.height = fallback.height }
+        return size
+    }
+
     public func updateNSViewController(_ controller: DSSplitPaneController, context: Context) {
         // Bindings are values captured when the closure was made, so they are re-attached on every
         // update rather than only at construction — a stale one would write into a state container
