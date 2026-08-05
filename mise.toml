@@ -1,0 +1,11 @@
+# The version of Tuist that generates this workspace.
+#
+# Pinned because the generator decides what the Xcode project *is*, so an unpinned one turns
+# "somebody upstream released" into "the project no longer builds". CI installed 4.202.6 from
+# Homebrew against the 4.152.0 this project is developed on, and `tuist install` failed outright.
+#
+# CI reads this file through `jdx/mise-action`. Locally it is optional: if you use mise, `mise install`
+# gives you the same version, and if you installed Tuist another way nothing here affects you — but
+# `tuist version` should agree with this number before you trust a generated project.
+[tools]
+tuist = "4.152.0"

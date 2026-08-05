@@ -143,6 +143,14 @@ struct WorkspaceView: View {
                                 journeyID: appState.selectedJourneyID
                             )
                         )
+                        // Anchored to the top, not centred. A pane is exactly as tall as the split
+                        // view gives it, and an editor taller than that — the journey editor has no
+                        // scroll view — is centred by default, which pushes its *first* row above the
+                        // pane and out of sight under the toolbar. That row carries "Add step", so on
+                        // a short window the control was drawn nowhere and clicked nothing: two UI
+                        // tests failed on it, and a user with a small window would have seen the same.
+                        // Clipping the bottom of a long editor is recoverable; losing the top is not.
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         // Re-injected because the pane is hosted: `NSHostingController` starts a new
                         // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
                         // this the editor traps on a missing `AppState` the moment it appears.
@@ -154,6 +162,7 @@ struct WorkspaceView: View {
                         .accessibilityIdentifier("centerPane")
                     } secondary: {
                         requestLogPanel
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
                 // A real column, not a trailing drawer inside the detail view.

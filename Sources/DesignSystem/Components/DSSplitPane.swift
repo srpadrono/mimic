@@ -72,11 +72,11 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         self.secondary = secondary()
     }
 
-    public func makeNSViewController(context: Context) -> DSSplitPaneController {
+    public func makeNSViewController(context: Context) -> DSSplitPaneController<Primary, Secondary> {
         let controller = DSSplitPaneController(
             isVertical: axis == .horizontal,
-            primary: AnyView(primary),
-            secondary: AnyView(secondary),
+            primary: primary,
+            secondary: secondary,
             minimumPrimaryThickness: minimumPrimaryThickness,
             minimumSecondaryThickness: minimumSecondaryThickness,
             defaultSecondaryThickness: defaultSecondaryThickness,
@@ -102,7 +102,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     /// negotiation one level up.
     public func sizeThatFits(
         _ proposal: ProposedViewSize,
-        nsViewController: DSSplitPaneController,
+        nsViewController: DSSplitPaneController<Primary, Secondary>,
         context: Context
     ) -> CGSize? {
         let fallback = CGSize(
@@ -114,17 +114,37 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         // stack around this view meaningless.
         if !size.width.isFinite { size.width = fallback.width }
         if !size.height.isFinite { size.height = fallback.height }
+
+        // Never claim to fit in less than the two minimums, because the split view cannot.
+        //
+        // Offered less, `NSSplitView` does not shrink the panes below their `minimumThickness` — it
+        // overflows, and the overflow goes *upward*: the first pane's content is laid out above the
+        // pane, under the window's toolbar, where it draws but cannot be clicked. On a 900x450 window
+        // that is what hid the journey editor's "Add step" button, so the step sheet never opened and
+        // two UI tests failed on a symptom several layers from the cause.
+        //
+        // Reporting the honest floor lets the stack above clip at the bottom instead, which is
+        // recoverable — the divider still moves and the panes are still reachable.
+        let floor = minimumPrimaryThickness + minimumSecondaryThickness
+        if axis == .vertical {
+            size.height = max(size.height, floor)
+        } else {
+            size.width = max(size.width, floor)
+        }
         return size
     }
 
-    public func updateNSViewController(_ controller: DSSplitPaneController, context: Context) {
+    public func updateNSViewController(
+        _ controller: DSSplitPaneController<Primary, Secondary>,
+        context: Context
+    ) {
         // Bindings are values captured when the closure was made, so they are re-attached on every
         // update rather than only at construction — a stale one would write into a state container
         // SwiftUI has already replaced.
         attachCallbacks(to: controller)
         controller.apply(
-            primary: AnyView(primary),
-            secondary: AnyView(secondary),
+            primary: primary,
+            secondary: secondary,
             isSecondaryCollapsed: !isSecondaryPresented,
             // A whole panel sliding open is the largest motion in the window. `DSEmptyState` gates a
             // 4% scale on this setting; a panel cannot be exempt from what a 4% scale respects.
@@ -132,7 +152,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         )
     }
 
-    private func attachCallbacks(to controller: DSSplitPaneController) {
+    private func attachCallbacks(to controller: DSSplitPaneController<Primary, Secondary>) {
         controller.onSecondaryThicknessChange = { thickness in
             guard secondaryThickness != thickness else { return }
             secondaryThickness = thickness
@@ -149,22 +169,27 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
 /// The `NSSplitViewController` behind `DSSplitPane`. Public only because it is the representable's
 /// `NSViewControllerType`; nothing outside the design system should need to name it.
 ///
-/// **Not generic.** It installs `DSHairlineSplitView` from `loadView`, which needs an `@objc`
-/// override; the panes are erased to `AnyView` so this class can stay non-generic, which costs a
-/// little diffing on two views that change rarely.
+/// Generic, and that matters: a pane's `rootView` is typed, so SwiftUI can diff an update against
+/// the previous value and the `@State` inside that pane survives it.
 ///
-/// Installing a custom split view is what makes the divider grabbable at all — see
-/// `DSHairlineSplitView` — and it is also what makes `splitView(_:shouldHideDividerAt:)` below
-/// mandatory. Without that guard the app does not launch.
-public final class DSSplitPaneController: NSSplitViewController {
+/// This was briefly erased to `AnyView` so the class could be non-generic, on a guess that generics
+/// were behind a `loadView` crash. They were not — the crash was `splitView(_:shouldHideDividerAt:)`
+/// indexing an empty array, guarded below — and the erasure cost something real. A fresh
+/// `AnyView(content)` on every update is a value SwiftUI cannot match against the old one, so it
+/// rebuilt the pane and reset its state. The visible symptom was a sheet that would not open:
+/// pressing "Add step" set the journey editor's `@State` flag and the next update threw it away
+/// before anything could present. Every `@State` in a pane was affected; the sheet is only where it
+/// happened to be noticed — by CI, not by hand.
+///
+public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSplitViewController {
 
     /// Called when the secondary pane settles at a new thickness — not on every event of a drag.
     var onSecondaryThicknessChange: (CGFloat) -> Void = { _ in }
     /// Called when the user collapses or reveals the secondary pane themselves.
     var onSecondaryCollapseChange: (Bool) -> Void = { _ in }
 
-    private let primaryHost: DSPaneViewController
-    private let secondaryHost: DSPaneViewController
+    private let primaryHost: DSPaneViewController<Primary>
+    private let secondaryHost: DSPaneViewController<Secondary>
     private let minimumPrimaryThickness: CGFloat
     private let minimumSecondaryThickness: CGFloat
     private let defaultSecondaryThickness: CGFloat
@@ -189,8 +214,8 @@ public final class DSSplitPaneController: NSSplitViewController {
 
     init(
         isVertical: Bool,
-        primary: AnyView,
-        secondary: AnyView,
+        primary: Primary,
+        secondary: Secondary,
         minimumPrimaryThickness: CGFloat,
         minimumSecondaryThickness: CGFloat,
         defaultSecondaryThickness: CGFloat,
@@ -238,9 +263,11 @@ public final class DSSplitPaneController: NSSplitViewController {
         let secondaryItem = NSSplitViewItem(viewController: secondaryHost)
         secondaryItem.minimumThickness = minimumSecondaryThickness
         secondaryItem.canCollapse = true
-        // Dragging a panel shut is a deliberate act; having it vanish because the window got shorter
-        // is not. A window too short for both narrows this pane instead.
-        secondaryItem.canCollapseFromWindowResize = false
+        // A window too short to hold both panes has to give somewhere, and a collapsed request log is
+        // the recoverable outcome — the alternative is the pair overflowing the window and taking the
+        // editor's own controls out of reach under the toolbar. `false` here is what turned a cramped
+        // window into an unusable one.
+        secondaryItem.canCollapseFromWindowResize = true
         secondaryItem.holdingPriority = Self.secondaryHoldingPriority
         secondaryItem.isCollapsed = initialSecondaryCollapsed
         secondaryItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
@@ -306,7 +333,7 @@ public final class DSSplitPaneController: NSSplitViewController {
 
     // MARK: SwiftUI → AppKit
 
-    func apply(primary: AnyView, secondary: AnyView, isSecondaryCollapsed: Bool, animated: Bool) {
+    func apply(primary: Primary, secondary: Secondary, isSecondaryCollapsed: Bool, animated: Bool) {
         applyExternally {
             primaryHost.rootView = primary
             secondaryHost.rootView = secondary
@@ -420,39 +447,34 @@ final class DSHairlineSplitView: NSSplitView {
 
 /// Hosts one pane's SwiftUI content.
 ///
-/// Deliberately not `NSHostingController`: `sizingOptions` has to be `[]` on the hosting *view* — the
-/// split view decides how big a pane is, and left to itself the hosting view reports an ideal size
-/// and argues with the divider about how much room it is owed — and the controller gives no way to
-/// reach the view it makes.
-final class DSPaneViewController: NSViewController {
-    private let hostingView: NSHostingView<AnyView>
-
-    var rootView: AnyView {
-        get { hostingView.rootView }
-        set { hostingView.rootView = newValue }
-    }
-
-    init(rootView: AnyView) {
-        hostingView = NSHostingView(rootView: rootView)
-        hostingView.sizingOptions = []
-        // A hosting view still publishes an intrinsic content size and defends it at the default
-        // compression resistance of 750 — above the 490 AppKit uses for a divider drag, so a pane
-        // could in principle refuse to shrink. The split view is the authority on how big a pane is;
-        // these priorities say so. (Belt and braces: the one-way divider this was reached for turned
-        // out to be a mis-aimed grab, not a priority fight. It is still the correct setting.)
-        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            hostingView.setContentCompressionResistancePriority(.defaultLow, for: axis)
-            hostingView.setContentHuggingPriority(.defaultLow, for: axis)
-        }
-        super.init(nibName: nil, bundle: nil)
+/// An `NSHostingController`, not a plain `NSViewController` wrapped around an `NSHostingView`. The
+/// difference is not cosmetic: a hosting *view* draws SwiftUI, but a hosting *controller* is what
+/// puts SwiftUI in the view-controller chain, and modal presentation goes through that chain. With a
+/// bare hosting view, `.sheet` inside a pane has nothing to present from — the journey editor's "Add
+/// step" sheet simply never appeared, with no error anywhere, and only the UI suite noticed.
+///
+/// `sizingOptions = []` because the split view decides how big a pane is. Left to itself the
+/// controller reports its content's ideal size and argues with the divider about how much room it is
+/// owed.
+final class DSPaneViewController<Content: View>: NSHostingController<Content> {
+    override init(rootView: Content) {
+        super.init(rootView: rootView)
+        sizingOptions = []
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required dynamic init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func loadView() {
-        view = hostingView
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // A hosting view publishes an intrinsic content size and defends it at the default
+        // compression resistance of 750 — above the 490 AppKit uses for a divider drag. The split
+        // view is the authority on how big a pane is; these priorities say so.
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            view.setContentCompressionResistancePriority(.defaultLow, for: axis)
+            view.setContentHuggingPriority(.defaultLow, for: axis)
+        }
     }
 }
