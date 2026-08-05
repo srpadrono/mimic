@@ -428,39 +428,34 @@ final class DSHairlineSplitView: NSSplitView {
 
 /// Hosts one pane's SwiftUI content.
 ///
-/// Deliberately not `NSHostingController`: `sizingOptions` has to be `[]` on the hosting *view* — the
-/// split view decides how big a pane is, and left to itself the hosting view reports an ideal size
-/// and argues with the divider about how much room it is owed — and the controller gives no way to
-/// reach the view it makes.
-final class DSPaneViewController<Content: View>: NSViewController {
-    private let hostingView: NSHostingView<Content>
-
-    var rootView: Content {
-        get { hostingView.rootView }
-        set { hostingView.rootView = newValue }
-    }
-
-    init(rootView: Content) {
-        hostingView = NSHostingView(rootView: rootView)
-        hostingView.sizingOptions = []
-        // A hosting view still publishes an intrinsic content size and defends it at the default
-        // compression resistance of 750 — above the 490 AppKit uses for a divider drag, so a pane
-        // could in principle refuse to shrink. The split view is the authority on how big a pane is;
-        // these priorities say so. (Belt and braces: the one-way divider this was reached for turned
-        // out to be a mis-aimed grab, not a priority fight. It is still the correct setting.)
-        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            hostingView.setContentCompressionResistancePriority(.defaultLow, for: axis)
-            hostingView.setContentHuggingPriority(.defaultLow, for: axis)
-        }
-        super.init(nibName: nil, bundle: nil)
+/// An `NSHostingController`, not a plain `NSViewController` wrapped around an `NSHostingView`. The
+/// difference is not cosmetic: a hosting *view* draws SwiftUI, but a hosting *controller* is what
+/// puts SwiftUI in the view-controller chain, and modal presentation goes through that chain. With a
+/// bare hosting view, `.sheet` inside a pane has nothing to present from — the journey editor's "Add
+/// step" sheet simply never appeared, with no error anywhere, and only the UI suite noticed.
+///
+/// `sizingOptions = []` because the split view decides how big a pane is. Left to itself the
+/// controller reports its content's ideal size and argues with the divider about how much room it is
+/// owed.
+final class DSPaneViewController<Content: View>: NSHostingController<Content> {
+    override init(rootView: Content) {
+        super.init(rootView: rootView)
+        sizingOptions = []
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required dynamic init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func loadView() {
-        view = hostingView
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // A hosting view publishes an intrinsic content size and defends it at the default
+        // compression resistance of 750 — above the 490 AppKit uses for a divider drag. The split
+        // view is the authority on how big a pane is; these priorities say so.
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            view.setContentCompressionResistancePriority(.defaultLow, for: axis)
+            view.setContentHuggingPriority(.defaultLow, for: axis)
+        }
     }
 }
