@@ -32,7 +32,20 @@ struct JourneyEditorView: View {
             DSDivider(style: .standard, identifier: "journeyEditor.behavior")
             JourneyRunControls(journey: journey, isActive: isActive, status: status)
             DSDivider(identifier: "journeyEditor.run")
+            // Allowed to compress to nothing, and that is the whole point.
+            //
+            // Everything above this is a fixed height — the name row carrying "Add step", the
+            // behaviour controls, the run strip. The step area is not: with no steps it draws a
+            // `DSEmptyState`, which is tall and, without this, refuses to give any of it back. In a
+            // short window the stack then needed more room than the pane had and SwiftUI centred the
+            // overflow, which pushes the *top* row out of sight under the toolbar. "Add step" was
+            // drawn nowhere and could not be clicked, on CI and on any small window alike.
+            //
+            // Yielding here means the fixed rows keep their space and the step area takes what is
+            // left, which is the order that matters: you can always scroll a list, and you cannot
+            // reach a button that is not on screen.
             stepList
+                .frame(minHeight: 0, maxHeight: .infinity)
         }
         .background(DSColors.dominant)
         // The centre pane tags this view with an identifier of its own, and a bare
