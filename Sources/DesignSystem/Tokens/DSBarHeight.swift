@@ -42,4 +42,13 @@ public enum DSBarHeight {
     /// 22 — a column-header strip above a table. Quieter than a panel header because it labels
     /// columns rather than naming the panel, which is `DSColors.band`'s job rather than this one's.
     public static let columnHeader: CGFloat = 22
+
+    /// 38 — the journey run bar, which carries five 24pt controls and a sentence.
+    ///
+    /// A **floor**, never a fixed height, and the distinction is load-bearing: `JourneyRunControls`
+    /// folds to a second line at pane width, and a fixed height holds the folded layout at one row's
+    /// worth of space and draws over whatever is underneath. That was a real defect, and the
+    /// redesign's own spec — 38pt fixed, `white-space: nowrap` — is verbatim the shape that caused
+    /// it. Named here rather than written as a literal so the next person meets the note.
+    public static let journeyRunBar: CGFloat = 38
 }
