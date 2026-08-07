@@ -83,6 +83,15 @@ struct WorkspaceView: View {
     var body: some View {
         @Bindable var appState = appState
 
+        // The window's floor, not a preference. Below this the request log's Path column collapses —
+        // its other columns are fixed and total 380pt — and because the row is an `HStack`, an
+        // over-committed one pushes its *leading* edge out of view rather than truncating, so the
+        // method badges leave the window before anything visibly runs out of room. `WelcomeWindow`
+        // carries its own, much smaller, floor for the same reason: they share this scene, and a
+        // workspace-sized minimum would make the welcome screen 1140pt wide.
+        //
+        // `.windowResizability(.contentMinSize)` on the scene is what turns this into something
+        // AppKit enforces on the drag rather than a number a view hopes for.
         VStack(spacing: 0) {
             NavigationSplitView {
                 navigator
@@ -267,6 +276,10 @@ struct WorkspaceView: View {
             }
 
         }
+        .frame(
+            minWidth: PanelLayoutStore.Bounds.minimumWindowContentWidth,
+            minHeight: PanelLayoutStore.Bounds.minimumWindowContentHeight
+        )
         // Port conflict alert
         .alert(
             "Port \(appState.portConflictAlert?.conflictingPort ?? 0) already in use",

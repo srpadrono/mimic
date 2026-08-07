@@ -81,8 +81,45 @@ public final class PanelLayoutStore: @unchecked Sendable {
         /// The inspector's floor and preferred width, handed to `.inspectorColumnWidth`. They are
         /// constants rather than stored values because AppKit restores that column's width with the
         /// window — see the note on `PanelLayout`.
-        public static let minimumInspectorWidth: CGFloat = 220
-        public static let idealInspectorWidth: CGFloat = 280
+        ///
+        /// **260, not 220, and the number is measured.** The inspector's three-mode rail sets
+        /// Request · Scenarios · Overview at 12pt semibold with 9pt padding each side; read back from
+        /// AppKit those are 66.4, 76.4 and 73.0pt, which with the active-mode dot, the inter-item
+        /// gaps and `DSPanelHeader`'s 24pt of insets totals **256.7pt**. At 220 the rail overflowed on
+        /// the first inward drag — and an over-committed `HStack` in this window does not truncate,
+        /// it pushes its *leading* edge out of view, which is the "narios instead of Scenarios" bug
+        /// `DSPanelHeader` documents. 260 clears it with three points to spare.
+        ///
+        /// Raising a floor is safe here precisely *because* this is not a stored value: AppKit
+        /// restores the column width and the split view clamps it against this minimum, so an
+        /// existing install that had dragged to 230 comes back at 260 rather than being stranded.
+        /// The request log's height is stored, and that one is clamped on read below.
+        ///
+        /// Ideal moves 280 → 320 to match the redesign's default.
+        public static let minimumInspectorWidth: CGFloat = 260
+        public static let idealInspectorWidth: CGFloat = 320
+
+        /// The narrowest the window's content may get, handed to `WorkspaceView`'s `minWidth` and
+        /// enforced by `.windowResizability(.contentMinSize)`.
+        ///
+        /// Two independent constraints converge near this number, both from measured advances rather
+        /// than estimates:
+        ///
+        /// - The request log's header carries **394.3pt** of incompressible controls — title, count,
+        ///   method popup, unmatched toggle, Clear, dividers and insets — plus a filter field with a
+        ///   160pt floor. That saturates the centre pane at a 1174pt window.
+        /// - The log's row carries **380pt** of fixed columns once Latency is cut, and Path needs a
+        ///   180pt minimum to show `/api/v1/orders/{id}` (146.8pt at 12.5pt SF Mono). With the
+        ///   navigator at 300 and the inspector at its 260 floor, that needs 1120.
+        ///
+        /// 1140 clears both. Below it the Path column collapses and, because the row is an `HStack`,
+        /// the method badges leave the window before anything visibly runs out of room.
+        public static let minimumWindowContentWidth: CGFloat = 1140
+
+        /// Toolbar, one panel header, the centre pane's floor and the request log's floor, plus the
+        /// dividers between them. Enough that the window can never be dragged to a state where the
+        /// log is present but has no rows in it.
+        public static let minimumWindowContentHeight: CGFloat = 600
 
         /// A last-resort sanity ceiling for a stored value, guarding against a hand-edited plist
         /// rather than against a normal drag. Layout does the real clamping.
@@ -99,7 +136,8 @@ public final class PanelLayoutStore: @unchecked Sendable {
         PanelLayout(
             requestLogHeight: size(
                 forKey: Key.requestLogHeight,
-                default: PanelLayout.default.requestLogHeight
+                default: PanelLayout.default.requestLogHeight,
+                floor: Bounds.minimumRequestLogHeight
             ),
             isRequestLogVisible: flag(
                 forKey: Key.requestLogVisible,
@@ -133,14 +171,21 @@ public final class PanelLayoutStore: @unchecked Sendable {
     /// `UserDefaults.double(forKey:)` returns 0 for a missing key, which is indistinguishable from a
     /// deliberately stored zero — hence the explicit `object(forKey:)` check.
     ///
-    /// Only the sanity ceiling is applied. A size that is too large for the *current* window is not
-    /// nonsense — it is a preference that a bigger window will honour again — so narrowing it is
-    /// layout's job, not the store's.
-    private func size(forKey key: String, default fallback: CGFloat) -> CGFloat {
+    /// Only the sanity ceiling and the floor are applied. A size that is too *large* for the current
+    /// window is not nonsense — it is a preference that a bigger window will honour again — so
+    /// narrowing it is layout's job, not the store's.
+    ///
+    /// A size below the floor is different, and this is the case a raised floor creates. The request
+    /// log's minimum went up with the redesign; without the clamp, an install that had dragged the
+    /// log to 100pt would restore a value the split view no longer permits, and AppKit resolves that
+    /// by snapping on the first interaction — so the panel appears to jump for no reason the user
+    /// caused. Clamping on read means the stored preference is honoured where it can be and quietly
+    /// corrected where it cannot.
+    private func size(forKey key: String, default fallback: CGFloat, floor: CGFloat = 0) -> CGFloat {
         guard defaults.object(forKey: key) != nil else { return fallback }
         let stored = CGFloat(defaults.double(forKey: key))
         guard stored.isFinite, stored > 0 else { return fallback }
-        return stored.clamped(to: 0...Bounds.storedSizeLimit)
+        return stored.clamped(to: floor...Bounds.storedSizeLimit)
     }
 
     private func flag(forKey key: String, default fallback: Bool) -> Bool {

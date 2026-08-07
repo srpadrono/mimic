@@ -23,6 +23,51 @@ struct PanelLayoutStoreTests {
         #expect(layout.requestLogHeight > 0)
     }
 
+    @Test("A stored height below the floor is clamped on read, not restored and then snapped")
+    func storedHeightBelowTheFloorIsClamped() {
+        let defaults = Self.makeDefaults()
+        // Written by a build whose floor was lower than today's. Not hand-edited nonsense — a
+        // perfectly good preference that the current split view no longer permits.
+        defaults.set(Double(60), forKey: "panel.requestLog.height")
+
+        let loaded = PanelLayoutStore(defaults: defaults).load()
+
+        #expect(loaded.requestLogHeight == PanelLayoutStore.Bounds.minimumRequestLogHeight)
+        // The failure this prevents is not a crash: AppKit would restore the 60, then snap the pane
+        // to its minimum on the first interaction, so the panel appears to jump for no reason the
+        // user caused.
+        #expect(loaded.requestLogHeight >= PanelLayoutStore.Bounds.minimumRequestLogHeight)
+    }
+
+    @Test("A stored height above the floor is honoured exactly — the clamp is a floor, not a resize")
+    func storedHeightAboveTheFloorIsUntouched() {
+        let defaults = Self.makeDefaults()
+        defaults.set(Double(700), forKey: "panel.requestLog.height")
+
+        // Too tall for a small window is not nonsense; it is a preference a bigger window will
+        // honour again, so narrowing it stays layout's job rather than the store's.
+        #expect(PanelLayoutStore(defaults: defaults).load().requestLogHeight == 700)
+    }
+
+    @Test("The measured bounds the redesign's width policy depends on")
+    func boundsMatchTheRecordedWidthPolicy() {
+        // These are not preferences, they are the arithmetic in docs/redesign/decisions.md §1.
+        // Changing one without re-measuring is how the request log quietly loses its Path column.
+        #expect(PanelLayoutStore.Bounds.minimumInspectorWidth == 260)
+        #expect(PanelLayoutStore.Bounds.minimumWindowContentWidth == 1140)
+
+        // The floor has to leave room for the navigator, the inspector at its own floor, the log's
+        // 380pt of fixed columns and a 180pt minimum path.
+        let navigator: CGFloat = 300
+        let logFixedColumns: CGFloat = 380
+        let minimumPath: CGFloat = 180
+        let needed = navigator
+            + PanelLayoutStore.Bounds.minimumInspectorWidth
+            + logFixedColumns
+            + minimumPath
+        #expect(PanelLayoutStore.Bounds.minimumWindowContentWidth >= needed)
+    }
+
     @Test("An arrangement survives a save and reload")
     func roundTrip() {
         let defaults = Self.makeDefaults()

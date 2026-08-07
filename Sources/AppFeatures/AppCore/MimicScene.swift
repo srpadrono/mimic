@@ -35,6 +35,19 @@ public struct MimicScene: Scene {
                 .onAppear(perform: UITestSupport.activateAppIfNeeded)
                 #endif
         }
+        // `.contentMinSize`, not `.contentSize`. Both propagate the content's minimum to the window,
+        // but `.contentSize` also pins the *maximum* to the content's — which would stop the window
+        // being zoomed or filled, on an app whose whole job is watching a log scroll.
+        //
+        // The floors themselves live on the two branches of `ContentView`, because they share this
+        // scene and want very different numbers: `WorkspaceView` needs 1140pt before its request log
+        // starts losing columns, and `WelcomeWindow` is a 640pt list of recent projects. A scene-level
+        // constant would make the welcome screen as wide as the workspace.
+        .windowResizability(.contentMinSize)
+        // The redesign's reference size. Only a starting point — AppKit restores the real one per
+        // window — but a first launch that opens at the size the design was drawn at is worth the
+        // one line.
+        .defaultSize(width: 1487, height: 944)
         .commands {
             CommandGroup(replacing: .newItem) {
                 // "New Project…" opens the new-project sheet. It used to be wired straight to
