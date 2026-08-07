@@ -282,4 +282,39 @@ struct ContrastTests {
             }
         }
     }
+
+    @Test("A filled 4xx/5xx swatch clears the floor — the log's primary signal")
+    func filledStatusSwatchClearsTheFloor() {
+        // The construction that was already shipping below the floor in four places: a semantic hue
+        // as text on a tint of itself. Plain `warning` measures 4.00:1 here and plain `destructive`
+        // 3.99:1, both on `surfaceSidebar` in light. `DSStatusCodeBadge` draws the deep variants.
+        let surfaces: [(String, Color)] = [
+            ("content", DSColors.surfaceContent),
+            ("sidebar", DSColors.surfaceSidebar),
+            ("elevated", DSColors.surfaceElevated),
+        ]
+        for dark in [false, true] {
+            for (name, surface) in surfaces {
+                let client = ratio(DSColors.warningDeep, onFill: DSColors.warning, alpha: 0.14,
+                                   over: surface, dark: dark)
+                #expect(client >= floor, "4xx swatch on \(name) \(dark ? "dark" : "light"): \(String(format: "%.2f", client)):1")
+
+                let server = ratio(DSColors.destructiveDeep, onFill: DSColors.destructive, alpha: 0.14,
+                                   over: surface, dark: dark)
+                #expect(server >= floor, "5xx swatch on \(name) \(dark ? "dark" : "light"): \(String(format: "%.2f", server)):1")
+            }
+        }
+    }
+
+    @Test("The plain semantics still fail on their own fill — which is why the deep variants exist")
+    func plainSemanticsFailOnTheirOwnFill() {
+        // Guards both deep tokens against being simplified away. If either of these starts passing,
+        // the palette moved and the deep variant can be re-derived rather than assumed.
+        let w = ratio(DSColors.warning, onFill: DSColors.warning, alpha: 0.14,
+                      over: DSColors.surfaceSidebar, dark: false)
+        let d = ratio(DSColors.destructive, onFill: DSColors.destructive, alpha: 0.14,
+                      over: DSColors.surfaceSidebar, dark: false)
+        #expect(w < floor)
+        #expect(d < floor)
+    }
 }

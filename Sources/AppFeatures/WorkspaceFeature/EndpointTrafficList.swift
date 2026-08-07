@@ -294,29 +294,10 @@ private struct EndpointTrafficRow: View {
     /// carries the class of the code, it just stops shouting it.
     @ViewBuilder
     private var statusPill: some View {
-        if let code = log.responseStatusCode {
-            pill(text: "\(code)", color: DSColors.httpStatusColor(for: code), isFilled: code >= 400)
-        } else {
-            // No code at all is a failure by definition, so it keeps the fill.
-            pill(text: "\u{2014}", color: DSColors.destructive, isFilled: true)
-        }
-    }
-
-    private func pill(text: String, color: Color, isFilled: Bool) -> some View {
-        Text(text)
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(color)
-            // Horizontal inset belongs to the fill: without one, the bare code sits flush with the
-            // path below it instead of 4pt to its right. The vertical inset is paid on both so a row
-            // does not change height with its status code.
-            .padding(.horizontal, isFilled ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                if isFilled {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                }
-            }
+        DSStatusCodeBadge(
+            log.responseStatusCode.map { .code($0) } ?? .transportFailure,
+            identifier: "endpointTraffic.status.\(log.id.uuidString)"
+        )
     }
 
     /// What VoiceOver reads for the row. Named `spokenLabel` rather than `accessibilityLabel` so it

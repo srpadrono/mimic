@@ -118,23 +118,9 @@ struct JourneyStepRow: View {
             // against "a badge that is always on", which is right, but that is exactly what the
             // conditional prevents: withholding the fill at 500 too meant a failing step was the one
             // row in the app where a failure did *not* announce itself.
-            Text("\(response.statusCode)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.httpStatusColor(for: response.statusCode))
-                .lineLimit(1)
-                .padding(.horizontal, response.statusCode >= 400 ? DSSpacing.xs : 0)
-                .padding(.vertical, 1)
-                .background {
-                    if response.statusCode >= 400 {
-                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                            .fill(DSColors.httpStatusColor(for: response.statusCode).opacity(0.12))
-                    }
-                }
-                // The one `.fixedSize()` left in this row, and the only one that is bounded:
-                // `EndpointValidator.serveableStatusCodes` runs 200–599, so this is three
-                // monospaced digits — 20.4pt — whatever the step does. It cannot be the thing that
-                // overflows the row, and a status code truncated to "5…" would be worse than useless.
-                .fixedSize()
+            // A transport failure is a *different* outcome case in this enum, handled below, so a
+            // `.respond` always has a real code.
+            DSStatusCodeBadge(code: response.statusCode, identifier: "journeyStep.status")
         case let .networkFailure(failure):
             HStack(spacing: DSSpacing.xs) {
                 Image(systemName: failure == .connectionDrop ? "bolt.horizontal.circle" : "clock.badge.exclamationmark")

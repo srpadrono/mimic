@@ -347,17 +347,7 @@ struct ScenarioRow: View {
             // block of green down the panel that carried no information, because nothing in it was
             // any louder than anything else. Same rule, and the same `>= 400` seam, as the traffic
             // list in `EndpointTrafficList`.
-            Text("\(scenario.statusCode)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.httpStatusColor(for: scenario.statusCode))
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background {
-                    if scenario.statusCode >= 400 {
-                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                            .fill(DSColors.httpStatusColor(for: scenario.statusCode).opacity(0.12))
-                    }
-                }
+            DSStatusCodeBadge(code: scenario.statusCode, identifier: "scenario.status.\(scenario.id.uuidString)")
 
             if isActive {
                 Text("Active")

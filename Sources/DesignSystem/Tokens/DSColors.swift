@@ -252,6 +252,17 @@ public nonisolated enum DSColors {
     public static let warningDeep = Color(light: .init(red: 0.512, green: 0.317, blue: 0.0),
                                           dark: .init(red: 1.0, green: 0.624, blue: 0.039))
 
+    /// ``destructive`` when it is text on a `destructive @ 14%` fill — a 5xx status swatch.
+    ///
+    /// The same wall as ``warningDeep``, and this one is already shipping below the floor: plain
+    /// `destructive` on its own 12% fill measures **3.99:1** over `surfaceSidebar` in light. The
+    /// request log, the traffic list, the scenario list and the journey step row all draw it.
+    ///
+    /// Both arms move here, unlike `warningDeep` — light down 10%, dark up 3% — because the dark case
+    /// fails too, at 4.37 on `surfaceElevated`.
+    public static let destructiveDeep = Color(light: .init(red: 0.72, green: 0.09, blue: 0.072),
+                                              dark: .init(red: 1.0, green: 0.514, blue: 0.483))
+
     // MARK: - Journeys
 
     /// A journey's chrome, progress and fills.

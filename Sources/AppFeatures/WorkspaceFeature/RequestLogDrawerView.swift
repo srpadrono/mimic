@@ -967,20 +967,9 @@ struct RequestLogTableRow: View {
 
     @ViewBuilder
     private var statusPill: some View {
-        let code = log.responseStatusCode ?? 0
-        let color = DSColors.httpStatusColor(for: code)
-        // Filled only when it is a failure. Every row has a status, so filling all of them made a
-        // column of swatches in which nothing stood out — which is the opposite of what colour on a
-        // status code is for. The traffic list in the inspector follows the same rule.
-        let isFailure = code >= 400
-        Text("\(code)")
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(color)
-            .padding(.horizontal, isFailure ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                    .fill(isFailure ? color.opacity(0.12) : Color.clear)
-            }
+        DSStatusCodeBadge(
+            log.responseStatusCode.map { .code($0) } ?? .transportFailure,
+            identifier: "requestLog.status.\(log.id.uuidString)"
+        )
     }
 }

@@ -209,18 +209,13 @@ struct RequestDetailInspector: View {
                 )
                 .accessibilityIdentifier("requestDetail.failure")
         } else {
-            let code = log.responseStatusCode ?? 0
-            let color = DSColors.httpStatusColor(for: code)
-            Text("\(code)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(color)
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                )
-                .accessibilityIdentifier("requestDetail.status")
+            // A fifth copy of the status pill lived here, and it was the one that disagreed: it
+            // filled *every* code, so a 200 in the request detail wore the swatch that means "stop
+            // and look" everywhere else in the window.
+            DSStatusCodeBadge(
+                log.responseStatusCode.map { .code($0) } ?? .transportFailure,
+                identifier: "requestDetail.status"
+            )
         }
     }
 
