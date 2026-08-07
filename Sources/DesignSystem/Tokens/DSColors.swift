@@ -290,11 +290,11 @@ public nonisolated enum DSColors {
         case "PUT":              Color(light: .init(red: 0.520, green: 0.328, blue: 0.055),
                                        dark: .init(red: 1.0, green: 0.694, blue: 0.306))
         case "PATCH":            Color(light: .init(red: 0.505, green: 0.239, blue: 0.697),
-                                       dark: .init(red: 0.749, green: 0.478, blue: 0.969))
+                                       dark: .init(red: 0.809, green: 0.538, blue: 1.0))
         case "DELETE":           Color(light: .init(red: 0.663, green: 0.196, blue: 0.196),
-                                       dark: .init(red: 1.0, green: 0.392, blue: 0.392))
+                                       dark: .init(red: 1.0, green: 0.512, blue: 0.512))
         case "HEAD", "OPTIONS":  Color(light: .init(red: 0.371, green: 0.371, blue: 0.386),
-                                       dark: .init(red: 0.627, green: 0.627, blue: 0.647))
+                                       dark: .init(red: 0.657, green: 0.657, blue: 0.677))
         default:                 .secondary
         }
     }
@@ -324,7 +324,7 @@ public nonisolated enum DSColors {
     public enum Syntax {
         /// Object keys — the thing you actually look for in a payload.
         public static let key = Color(light: .init(red: 0.46, green: 0.14, blue: 0.70),
-                                      dark: .init(red: 0.749, green: 0.478, blue: 0.969))
+                                      dark: .init(red: 0.809, green: 0.538, blue: 1.0))
 
         /// String values.
         public static let string = Color(light: .init(red: 0.0, green: 0.44, blue: 0.42),

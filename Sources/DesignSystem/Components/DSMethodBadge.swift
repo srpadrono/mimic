@@ -51,7 +51,7 @@ public struct DSMethodBadge: View {
             .frame(width: size.badgeWidth, height: size.height)
             .background {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .fill(color.opacity(0.16))
+                    .fill(color.opacity(0.13))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
