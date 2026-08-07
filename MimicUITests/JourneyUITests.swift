@@ -58,6 +58,19 @@ struct JourneysNavigatorPage {
     var addStepButton: XCUIElement { app.buttons["journeyEditor.addStepButton"] }
     var stepList: XCUIElement { app.tables["journeyEditor.stepList"].firstMatch }
 
+    /// The journey editor's overflow menu, which replaced the jump bar's journey crumb.
+    ///
+    /// By label first: the menu sits inside `center.journeyEditor`, a `.contain`-paired named
+    /// container, and per AGENTS.md rule 8 that preserves a leaf's label but not reliably its
+    /// identifier.
+    var jumpMenu: XCUIElement {
+        let byLabel = app.menuButtons["Go to another journey"].firstMatch
+        if byLabel.exists { return byLabel }
+        let asButton = app.buttons["Go to another journey"].firstMatch
+        if asButton.exists { return asButton }
+        return app.descendants(matching: .any).matching(identifier: "journeyEditor.jumpMenu").firstMatch
+    }
+
     var activateButton: XCUIElement { app.buttons["journeyRun.activateButton"] }
     var deactivateButton: XCUIElement { app.buttons["journeyRun.deactivateButton"] }
     var restartButton: XCUIElement { app.buttons["journeyRun.restartButton"] }
@@ -368,6 +381,39 @@ final class JourneyUITests: XCTestCase {
             "An invalid path should be explained rather than silently accepted"
         )
         XCTAssertTrue(stepSheet.pathField.exists, "The sheet should stay open so the path can be fixed")
+    }
+
+    /// The journey editor's overflow menu moves between journeys, which the jump bar's journey crumb
+    /// used to do (issue #25).
+    ///
+    /// The menu only draws when there is more than one journey to move between — a menu whose single
+    /// item is the thing you are already looking at is a control that does nothing when you use it —
+    /// so this test needs two templates before the control exists at all.
+    ///
+    /// Note what is deliberately *not* asserted here: back/forward. The jump bar drew arrows on this
+    /// tab and they were dead, because the history they steer is over endpoints while this pane
+    /// renders a journey. They were not re-homed, so there is nothing to test.
+    @MainActor
+    func testJourneyEditorOverflowJumpsToAnotherJourney() throws {
+        launchWithProject()
+        showJourneysNavigator()
+        addTemplate("retry-after-failure", activate: false)
+        addTemplate("payment-retry", activate: false)
+        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 10))
+
+        XCTAssertTrue(journeys.jumpMenu.waitForExistence(timeout: 5),
+                      "With two journeys the editor header should offer a jump menu")
+        journeys.jumpMenu.click()
+
+        let target = app.menuItems["Retry after failure"].firstMatch
+        XCTAssertTrue(target.waitForExistence(timeout: 3),
+                      "The jump menu should list the project's other journeys")
+        target.click()
+
+        XCTAssertTrue(
+            journeys.editorName.waitForExistence(timeout: 5),
+            "Choosing another journey should open it in the editor"
+        )
     }
 
     @MainActor

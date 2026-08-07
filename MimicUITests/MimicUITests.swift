@@ -250,6 +250,22 @@ struct EndpointEditorPage {
         return app.descendants(matching: .any).matching(identifier: "endpointEditor.path").firstMatch
     }
 
+    /// The centre pane's history pair, which replaced the jump bar's.
+    ///
+    /// Targeted by **label**, not by `editor.navigation.back`. The buttons sit inside two
+    /// `.contain`-paired named containers — `centerPane` and `endpointEditor` — and per AGENTS.md
+    /// rule 8 `.contain` preserves a leaf's label and value but not reliably its identifier. The
+    /// identifiers are set anyway and the fallback below picks them up wherever SwiftUI does not
+    /// flatten the subtree.
+    var backButton: XCUIElement { historyButton(label: "Go back", identifier: "editor.navigation.back") }
+    var forwardButton: XCUIElement { historyButton(label: "Go forward", identifier: "editor.navigation.forward") }
+
+    private func historyButton(label: String, identifier: String) -> XCUIElement {
+        let byLabel = app.buttons[label].firstMatch
+        if byLabel.exists { return byLabel }
+        return app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
     func headerKeyField(at index: Int) -> XCUIElement {
         app.textFields["endpointEditor.headerKey.\(index)"]
     }
@@ -1210,6 +1226,61 @@ final class MimicUITests: XCTestCase {
                       "/api/users should be visible after clearing search")
         XCTAssertTrue(postsPath.waitForExistence(timeout: 3),
                       "/api/posts should be visible after clearing search")
+    }
+
+    // MARK: - Centre-pane navigation (issue #25)
+
+    /// Back and forward walk the endpoint history, and the pair survives having no selection.
+    ///
+    /// This is what the jump bar's arrows did before it was deleted to put the four panel headers on
+    /// one baseline. Two things are asserted that the bar got for free and an editor header does not:
+    /// that the controls exist at all inside `endpointEditor`'s `.contain` container, and that they
+    /// are still reachable when the centre pane has nothing to edit — which is the exact moment Back
+    /// matters, because you just deleted the endpoint you were on.
+    @MainActor
+    func testCentrePaneHistoryWalksBackAndForward() throws {
+        launchApp()
+        createProjectViaUI(name: "History Test")
+        createEndpointViaUI(name: "First", path: "/api/first")
+        createEndpointViaUI(name: "Second", path: "/api/second")
+
+        XCTAssertTrue(endpointEditor.backButton.waitForExistence(timeout: 5),
+                      "The editor header should carry a Back control")
+
+        // Creating the second endpoint selected it, so Back returns to the first.
+        endpointEditor.backButton.click()
+        XCTAssertTrue(app.staticTexts["/api/first"].waitForExistence(timeout: 5),
+                      "Back should return to the previously selected endpoint")
+
+        XCTAssertTrue(endpointEditor.forwardButton.waitForExistence(timeout: 3),
+                      "Forward should be available after going back")
+        endpointEditor.forwardButton.click()
+        XCTAssertTrue(app.staticTexts["/api/second"].waitForExistence(timeout: 5),
+                      "Forward should return to the endpoint we came from")
+    }
+
+    /// The overflow menu offers the sibling endpoints the jump bar's endpoint crumb used to.
+    ///
+    /// This was the one capability the bar had with no equivalent anywhere else in the window, so it
+    /// is the one that most needed re-homing rather than dropping.
+    @MainActor
+    func testEditorOverflowJumpsToSiblingEndpoint() throws {
+        launchApp()
+        createProjectViaUI(name: "Jump Test")
+        createEndpointViaUI(name: "Alpha", path: "/api/alpha")
+        createEndpointViaUI(name: "Beta", path: "/api/beta")
+
+        XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5))
+        endpointEditor.moreMenu.click()
+
+        // By label: menu items are leaves, and the current one carries ", selected".
+        let alphaItem = app.menuItems["Alpha"].firstMatch
+        XCTAssertTrue(alphaItem.waitForExistence(timeout: 3),
+                      "The overflow menu should list sibling endpoints")
+        alphaItem.click()
+
+        XCTAssertTrue(app.staticTexts["/api/alpha"].waitForExistence(timeout: 5),
+                      "Choosing a sibling should open it in the editor")
     }
 
     // MARK: - 24. Request Log Drawer Shows Header and Empty State
