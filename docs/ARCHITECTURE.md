@@ -140,3 +140,41 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   the command or response shapes.
 - Build/test commands: see [CONTRIBUTING.md](../CONTRIBUTING.md). All unit suites run via the
   `Mimic-Workspace` scheme; the portable modules also build and test with plain `swift test`.
+
+## Window geometry
+
+The three panes are `NSSplitViewItem`s, and their floors are constraints AppKit enforces rather than
+numbers a view recomputes. Two of them are load-bearing on the *content* above them, so they are
+recorded here rather than left in `PanelLayoutStore`:
+
+| Bound | Value | Why that number |
+|---|---|---|
+| Minimum window content width | 1140 | Two constraints converge: the request log's header is 394pt of incompressible controls plus a filter field with a 160pt floor, and its row carries 380pt of fixed columns plus a 180pt minimum path. Both are measured SF Pro/SF Mono advances, not estimates. |
+| `minimumInspectorWidth` | 260 | The inspector's three-mode rail measures 256.7pt at 12pt semibold. At the previous 220 it overflowed on the first inward drag, and an over-committed `HStack` in this window pushes its *leading* edge out of view rather than truncating. |
+| Navigator default | 300 | Its trailing slot is capped at 60pt for the same reason: at 90 the path column truncates on ordinary routes like `/api/v1/orders/{id}`. |
+
+A raised floor strands anyone whose persisted width sits below it, so `PanelLayoutStore` clamps on
+read rather than honouring a stored value it no longer allows.
+
+**Column yield order in the request log is Scenario → Answered by → Time.** Method and Path never
+yield. Surplus from a hidden panel goes to Path, since it is the only column whose content is
+unbounded.
+
+## Material
+
+macOS 26 gives the toolbar and a sidebar split item its system material on recompile, whether or not
+the app opts in. So the decision is not whether to adopt it but which surfaces to let it own:
+
+- **Material** — the window toolbar, and the navigator.
+- **Opaque** — the centre editor, the request log, and the inspector body. These are where a payload
+  is read, and a translucent surface under 11pt monospaced text is a legibility cost with no
+  compensating gain.
+
+This is what Xcode does, and it is the position the design handoff's own Liquid Glass notes reach.
+
+One consequence worth stating because it changes what a test can assert: a contrast ratio computed
+against the navigator's background is an approximation against the material's substrate, not a
+measurement. `ContrastTests` records that assumption for those pairings instead of pinning a number.
+
+Full reasoning, and the questions this replaced, in
+[docs/redesign/decisions.md](redesign/decisions.md).

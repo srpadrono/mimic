@@ -32,10 +32,30 @@ Real limitations, not planned work:
   to mock one service and leave the rest live.
 - **Beta, and versioned below 1.0.** The interface and the stored project format may still change
   between releases.
-- **CI can't run.** The workflow is correct and passes locally in the container it targets, but
-  GitHub Actions won't start a job on this account — see [the note in the README](../README.md#testing).
 - **One active journey per project.** Enough for a test case; not enough to model two independent
   clients against one server.
+
+## Deliberately deferred
+
+Cut from the 2026 workspace redesign with the reasoning recorded, rather than forgotten. Each is
+reopenable — see [redesign/decisions.md](redesign/decisions.md).
+
+- **Request latency, everywhere it appears.** The column, the bar, the p95 scale, the inspector's
+  latency row, the Overview card's median and `mimic log stats`. All of it reads a field the app has
+  never recorded, and adding one touches the Domain model, the engine, the database schema, the
+  redaction path, the wire format and the CLI. On a mock server the honest reading is either the
+  delay the user configured — already visible in the editor — or 1–5ms of in-process overhead.
+  Worth revisiting only if **record mode** lands, since that is the only thing that would produce
+  timings worth charting.
+- **The server segment's traffic sparkline.** Needs a ≤4Hz ticker running whether or not anyone is
+  looking, costs ~30pt in the tightest part of the toolbar, and reports what the request count
+  beside it already states.
+- **The two-line "stream" layout for the request log.** A reasonable user preference alongside the
+  default table — the log header has room for a Stream/Table toggle — but not specified, and not
+  part of this pass.
+- **Import review.** The redesign does not cover it. It is ported onto the new tokens and radii so
+  it does not ship visibly older than the rest of the window, but its structure — a flag column
+  empty on most rows, four fixed columns, sixty candidates to review — needs its own pass.
 
 ## Under consideration
 

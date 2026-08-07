@@ -20,6 +20,15 @@ behind the module boundaries. Then [docs/JOURNEYS.md](docs/JOURNEYS.md) for the 
 matching, and [docs/ROADMAP.md](docs/ROADMAP.md) for what is deliberately not built yet.
 [CONTRIBUTING.md](CONTRIBUTING.md) holds the build and test gates.
 
+> **A workspace redesign is in progress on `redesign/workspace`.**
+> [docs/redesign/decisions.md](docs/redesign/decisions.md) records the open questions the design
+> handoff left and what was decided — including the measured width policy, the rules in this file it
+> amends, and why the latency feature was cut.
+> [docs/redesign/test-inventory.md](docs/redesign/test-inventory.md) maps every XCUITest query to the
+> issue that changes it; consult it before editing any view the suite targets.
+> While that branch is live the testing loop is: unit suites in full per issue, **only the UI tests
+> that issue affects**, and the entire XCUITest suite once at the end.
+
 ## Build & Test Commands
 
 ```bash
@@ -232,13 +241,31 @@ set of rules, because they used to follow none and the window read as three unre
   Nobody chose 31, or 33, or 46. A bar that genuinely fits no rung (the request detail's identity row
   wraps to two lines, so it measures 46–59) stays content-sized and says so in a comment, so the next
   audit does not re-flag it.
-- **A bar inside a pane takes `DSColors.band`; a panel's own header takes `DSColors.secondary`.**
-  Column-header strips, section headers and the jump bar are the first kind. `band` is a tint, not the
-  separator — the 0.5pt `DSColors.separator` rule each of them closes with does the separating, at
-  ΔL\* ~10 against the band's 1.4–7.3. That is what Xcode's jump bar and AppKit's own table header do,
-  and it is why the band being subtle in light mode is not a bug. Never wash the panel surface with a
-  fraction of *itself*: `secondary.opacity(0.6)` over `secondary` is `secondary`, which is how the
-  request log's column strip spent months being exactly the colour it was trying to differ from.
+
+  **A row's height is not a bar's height.** `listRow` 30, `logRow` 28 and `groupHeader` 18 live in a
+  sibling `DSRowHeight`, because a rung ladder that mixes chrome with content stops being a ladder —
+  the whole point of `DSBarHeight` is that a *bar* asks it for a number. The journey run bar's 38 is a
+  named member rather than a literal, and it is a `minHeight` floor, never a fixed height:
+  `JourneyRunControls` folds to two lines at pane width, and a fixed height holds the folded layout at
+  one row's worth of space and draws over whatever is underneath.
+- **A bar inside a pane takes `DSColors.band`; a panel's own header takes `DSColors.secondary` —
+  unless its host is a material or the sidebar surface, in which case it takes no fill at all.**
+  Column-header strips and section headers over the editor canvas are the first kind. `band` is a
+  tint, not the separator — the 0.5pt `DSColors.separator` rule each of them closes with does the
+  separating, at ΔL\* ~10 against the band's 1.4–7.3. That is what Xcode's jump bar and AppKit's own
+  table header do, and it is why the band being subtle in light mode is not a bug.
+
+  The exception was measured, not assumed: the redesign's `surfacePanelHeader` `#F0F0F2` on
+  `surfaceSidebar` `#F1F1F3` is **ΔL\* 0.30** — five times fainter than the faintest case this token
+  was ever allowed — and it lands on the navigator's header, the inspector's header and every
+  `DSSectionHeader` inside the inspector. A fill that faint is not a quiet fill, it is no fill drawn
+  expensively. So on those hosts the rule below does the whole job and the tab or mode pills carry
+  the weight, which is exactly what an `NSTableHeaderView` does. See
+  [docs/redesign/decisions.md](docs/redesign/decisions.md).
+
+  Never wash the panel surface with a fraction of *itself*: `secondary.opacity(0.6)` over `secondary`
+  is `secondary`, which is how the request log's column strip spent months being exactly the colour
+  it was trying to differ from.
 - **A panel's own controls are not part of its content.** The sidebar's search field used to be the
   first row *inside* the scrolling list, so it scrolled away exactly when a long list made it useful.
   Chrome is pinned above the scroll view.
