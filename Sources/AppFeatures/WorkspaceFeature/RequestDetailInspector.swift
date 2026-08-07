@@ -125,14 +125,17 @@ struct RequestDetailInspector: View {
                 case .body: bodyContent
                 }
             }
-            .background(DSColors.dominant)
+            .background(DSColors.surfaceContent)
 
             copyBar
         }
         // The panel carries its own surface rather than inheriting one from `DSDrawer`. Without it
         // the tab row and the find field sit on whatever is behind them — which is the window's bare
         // background the moment this view is hosted anywhere else.
-        .background(DSColors.secondary)
+        //
+        // `surfaceSidebar`, not the panel-header colour it used to share: this is the inspector's
+        // body, and the two were one token until the surfaces were split.
+        .background(DSColors.surfaceSidebar)
         // The tab is per-request state: carrying "Body" over to the next request you click is right,
         // but carrying a search term for a payload you are no longer looking at is not.
         .onChange(of: log.id) { _, _ in searchText = "" }
@@ -505,7 +508,9 @@ struct RequestDetailInspector: View {
             // with the status bar beneath it — that bar is gone, and the copy bar is now the bottom
             // edge of the inspector column.
             .frame(height: DSBarHeight.panelHeader)
-            .background(DSColors.secondary)
+            // No fill. This bar sits on `surfaceSidebar`, where the panel-header colour measures
+            // ΔL* 0.30 — see `DSSurfaceHost`. The rule above it does the separating, and the three
+            // copy buttons carry the weight.
         }
     }
 

@@ -153,7 +153,7 @@ import SwiftUI
                     .font(DSTypography.body)
                     .frame(width: 180)
                     .frame(maxHeight: .infinity)
-                    .background(DSColors.secondary)
+                    .background(DSColors.surfacePanelHeader)
             }
         }
 
@@ -162,7 +162,7 @@ import SwiftUI
                 .font(DSTypography.body)
                 .frame(maxWidth: .infinity)
                 .frame(height: 120)
-                .background(DSColors.secondary)
+                .background(DSColors.surfacePanelHeader)
         }
     }
     .frame(width: 600, height: 400)
@@ -195,7 +195,7 @@ import SwiftUI
         Text("Secondary pane — drag the divider, or drag it shut")
             .font(DSTypography.body)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DSColors.secondary)
+            .background(DSColors.surfacePanelHeader)
     }
     .frame(width: 600, height: 400)
 }

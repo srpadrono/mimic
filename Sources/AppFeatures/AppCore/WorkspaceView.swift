@@ -564,7 +564,8 @@ struct WorkspaceView: View {
                     )
                 },
                 selection: navigatorTabBinding,
-                identifier: "navigator"
+                identifier: "navigator",
+                host: .sidebar
             ) {
                 switch navigatorTab {
                 case .endpoints:

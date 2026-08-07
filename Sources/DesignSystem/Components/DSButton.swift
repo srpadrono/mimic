@@ -19,7 +19,7 @@ public enum DSButtonSize {
 ///
 /// The four variants have to be tellable apart at rest, not only when you hover them, and not only
 /// by hue. They used to differ by tint alone on the same shape — and worse, two of them collided:
-/// `secondary` filled with `DSColors.secondary`, which *is* the sidebar/inspector/sheet surface, so
+/// `secondary` filled with `DSColors.surfacePanelHeader`, which *is* a panel surface, so
 /// it rendered as bare text on every panel it was placed on, while `ghost` — the variant whose whole
 /// promise is "no chrome" — was the one wearing a border. So each variant now differs in
 /// construction:

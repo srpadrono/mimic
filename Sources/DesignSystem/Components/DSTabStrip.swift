@@ -57,13 +57,21 @@ public struct DSTabStrip: View {
     /// bottom edge was visibly heavier under the tabs than under the title beside them, with a hard
     /// edge where the strip ended.
     private let drawsChrome: Bool
+    private let host: DSSurfaceHost
 
-    public init(tabs: [Tab], selection: Binding<String>, identifier: String, drawsChrome: Bool = true) {
+    public init(
+        tabs: [Tab],
+        selection: Binding<String>,
+        identifier: String,
+        drawsChrome: Bool = true,
+        host: DSSurfaceHost = .content
+    ) {
         self.tabs = tabs
         self._selection = selection
         self.identifier = identifier
         self.accessory = nil
         self.drawsChrome = drawsChrome
+        self.host = host
     }
 
     /// With a trailing control — an "add" button, usually.
@@ -81,6 +89,7 @@ public struct DSTabStrip: View {
         selection: Binding<String>,
         identifier: String,
         drawsChrome: Bool = true,
+        host: DSSurfaceHost = .content,
         @ViewBuilder accessory: () -> Accessory
     ) {
         self.tabs = tabs
@@ -88,6 +97,7 @@ public struct DSTabStrip: View {
         self.identifier = identifier
         self.accessory = AnyView(accessory())
         self.drawsChrome = drawsChrome
+        self.host = host
     }
 
     public var body: some View {
@@ -128,7 +138,10 @@ public struct DSTabStrip: View {
         .padding(.trailing, drawsChrome ? DSSpacing.md : DSSpacing.xs)
         .padding(.vertical, DSSpacing.xs)
         .frame(height: drawsChrome ? DSBarHeight.panelHeader : nil)
-        .background(drawsChrome ? DSColors.secondary : Color.clear)
+        // No fill on a sidebar host — see `DSSurfaceHost`. The navigator is the strip's only
+        // production home and it is exactly that case: over `surfaceSidebar` this bar's colour is
+        // ΔL* 0.30, so the selected tab's own pill carries the weight and the rule below separates.
+        .background(drawsChrome ? host.chromeFill : nil)
         .overlay(alignment: .bottom) {
             if drawsChrome {
                 Rectangle()
@@ -207,7 +220,7 @@ public struct DSTabStrip: View {
                     Circle()
                         .fill(DSColors.httpStatusColor(for: 404))
                         .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(DSColors.secondary, lineWidth: 1.5))
+                        .overlay(Circle().stroke(DSColors.surfaceSidebar, lineWidth: 1.5))
                         .offset(x: 3, y: -1)
                         .allowsHitTesting(false)
                 }

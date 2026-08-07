@@ -196,7 +196,7 @@ struct EndpointEditorView: View {
         // the whole editor would grow past the pane's trailing edge instead of letting the cards
         // truncate inside it.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.dominant)
+        .background(DSColors.surfaceContent)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { syncFromModel() }
         .onChange(of: endpoint.activeScenarioID) { syncFromModel() }
@@ -249,7 +249,7 @@ struct EndpointEditorView: View {
         // Fixed, not padded. With vertical padding the row grew to whatever its tallest control was,
         // so giving the menu a real hit target would have silently made the header 34pt.
         .frame(height: DSBarHeight.panelHeader)
-        .background(DSColors.secondary)
+        .background(DSColors.surfacePanelHeader)
         .overlay(alignment: .bottom) {
             Rectangle()
                 // `separator`, the weight every horizontal bar in this window ends with.
@@ -683,7 +683,7 @@ struct EndpointEditorView: View {
         }
         .padding(.bottom, DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.secondary.opacity(0.35))
+        .background(DSColors.surfacePanelHeader.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.lg)

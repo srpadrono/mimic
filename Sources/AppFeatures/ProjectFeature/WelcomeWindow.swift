@@ -92,7 +92,7 @@ struct WelcomeWindow: View {
             leftColumn
                 .frame(width: 280)
                 .frame(maxHeight: .infinity)
-                .background(DSColors.dominant)
+                .background(DSColors.surfaceContent)
 
             // `.strong`, now that it means something: this separates the window's two full-height
             // columns, which is the heaviest job a rule in this app does. `.standard` reads as an
@@ -102,7 +102,7 @@ struct WelcomeWindow: View {
             // MARK: - Right column: recent projects
             rightColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DSColors.secondary)
+                .background(DSColors.surfaceSidebar)
         }
         .frame(minWidth: 640, minHeight: 380)
         .alert(

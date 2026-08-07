@@ -51,7 +51,7 @@ struct JourneyEditorView: View {
             stepList
                 .frame(minHeight: 0, maxHeight: .infinity)
         }
-        .background(DSColors.dominant)
+        .background(DSColors.surfaceContent)
         // The centre pane tags this view with an identifier of its own, and a bare
         // `.accessibilityIdentifier` on a container renames every descendant to match it — which
         // would take `journeyEditor.name`, `journeyEditor.addStepButton` and every `journeyStep-n`
@@ -177,7 +177,7 @@ struct JourneyEditorView: View {
         // The shared panel-header height, so this bar lines up with the sidebar's and the
         // inspector's across the window instead of being a private number.
         .frame(height: DSBarHeight.panelHeader)
-        .background(DSColors.secondary)
+        .background(DSColors.surfacePanelHeader)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)

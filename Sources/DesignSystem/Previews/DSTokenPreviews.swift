@@ -36,9 +36,9 @@ import SwiftUI
 
 #Preview("Colors") {
     VStack(alignment: .leading, spacing: DSSpacing.sm) {
-        colorRow("Dominant", DSColors.dominant)
-        colorRow("Secondary", DSColors.secondary)
-        colorRow("Tertiary", DSColors.surfaceWell)
+        colorRow("Content", DSColors.surfaceContent)
+        colorRow("Sidebar", DSColors.surfaceSidebar)
+        colorRow("Well", DSColors.surfaceWell)
         colorRow("Surface Elevated", DSColors.surfaceElevated)
         colorRow("Accent", DSColors.accent)
         colorRow("Accent Subtle", DSColors.accentSubtle)

@@ -97,7 +97,7 @@ public struct DSDrawer<Content: View>: View {
                 alignment: .topLeading
             )
             .clipped()
-            .background(DSColors.secondary)
+            .background(DSColors.surfaceContent)
 
         if showDivider && !edge.dividerLeads {
             dividerView

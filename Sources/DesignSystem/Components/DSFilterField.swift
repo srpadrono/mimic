@@ -164,7 +164,7 @@ public struct DSFilterField: View {
                     // case `DSButton`'s secondary variant states a hairline for: a control stays
                     // visible on any surface only when it does not borrow that surface's colour.
                     Capsule()
-                        .fill(DSColors.secondary)
+                        .fill(DSColors.surfacePanelHeader)
                         .stroke(DSColors.border, lineWidth: 0.5)
                 }
             }

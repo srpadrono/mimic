@@ -84,7 +84,7 @@ struct CenterPaneView: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .frame(height: DSBarHeight.panelHeader)
-        .background(DSColors.secondary)
+        .background(DSColors.surfacePanelHeader)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)

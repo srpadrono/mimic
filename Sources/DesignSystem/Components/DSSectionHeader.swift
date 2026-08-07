@@ -18,14 +18,17 @@ public struct DSSectionHeader<Trailing: View>: View {
     private let title: String
     private let identifier: String
     private let trailingAction: Trailing?
+    private let host: DSSurfaceHost
 
     public init(
         _ title: String,
         identifier: String,
+        host: DSSurfaceHost = .content,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
         self.identifier = identifier
+        self.host = host
         self.trailingAction = trailing()
     }
 
@@ -57,7 +60,11 @@ public struct DSSectionHeader<Trailing: View>: View {
         // why it blends toward `tertiary` — the panel's own surface *is* secondary, so a wash of
         // secondary was a band against itself: invisible, and the sections ran together as one
         // undifferentiated list.
-        .background(DSColors.band)
+        // `band` on a content host. On a sidebar host it takes no fill for the same reason a panel
+        // header does not: the inspector's own surface is `surfaceSidebar`, and a band over it lands
+        // ΔL* 0.30 away — the exact defect this token's note warns about, arriving from the other
+        // direction. See `DSSurfaceHost`.
+        .background(host == .content ? DSColors.band : nil)
         .overlay(alignment: .bottom) {
             Rectangle()
                 // `separator` at full strength, not `separator.opacity(0.6)`. The latter lands at
@@ -77,9 +84,10 @@ public struct DSSectionHeader<Trailing: View>: View {
 }
 
 extension DSSectionHeader where Trailing == EmptyView {
-    public init(_ title: String, identifier: String) {
+    public init(_ title: String, identifier: String, host: DSSurfaceHost = .content) {
         self.title = title
         self.identifier = identifier
+        self.host = host
         self.trailingAction = nil
     }
 }

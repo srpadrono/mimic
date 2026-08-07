@@ -151,7 +151,10 @@ struct InspectorPanelView: View {
             DSPanelHeader(
                 headerTitle,
                 subtitle: headerSubtitle,
-                identifier: "inspector"
+                identifier: "inspector",
+                // The inspector's body is `surfaceSidebar`, where the panel-header fill measures
+                // ΔL* 0.30 — invisible. This header separates with its rule alone.
+                host: .sidebar
             ) {
                 switch mode {
                 case .request:

@@ -28,17 +28,20 @@ public struct DSPanelHeader<Accessory: View>: View {
     private let title: String
     private let subtitle: String?
     private let identifier: String
+    private let host: DSSurfaceHost
     private let accessory: Accessory?
 
     public init(
         _ title: String,
         subtitle: String? = nil,
         identifier: String,
+        host: DSSurfaceHost = .content,
         @ViewBuilder accessory: () -> Accessory
     ) {
         self.title = title
         self.subtitle = subtitle
         self.identifier = identifier
+        self.host = host
         self.accessory = accessory()
     }
 
@@ -81,7 +84,10 @@ public struct DSPanelHeader<Accessory: View>: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .frame(height: Self.height)
-        .background(DSColors.secondary)
+        // No fill at all on a sidebar host — see `DSSurfaceHost`. Over `surfaceSidebar` this bar's
+        // colour measures ΔL* 0.30, which is not a quiet fill, it is no fill drawn expensively. The
+        // rule below does the separating there, as it does in an `NSTableHeaderView`.
+        .background(host.chromeFill)
         .overlay(alignment: .bottom) {
             Rectangle()
                 // `separator`, not `panelSeparator`. One rule for the whole window: a horizontal
@@ -98,10 +104,16 @@ public struct DSPanelHeader<Accessory: View>: View {
 }
 
 extension DSPanelHeader where Accessory == EmptyView {
-    public init(_ title: String, subtitle: String? = nil, identifier: String) {
+    public init(
+        _ title: String,
+        subtitle: String? = nil,
+        identifier: String,
+        host: DSSurfaceHost = .content
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.identifier = identifier
+        self.host = host
         self.accessory = nil
     }
 }

@@ -432,7 +432,7 @@ final class DSHairlineSplitView: NSSplitView {
         // The band belongs to the pane after it, so it takes that pane's surface and the seam is the
         // hairline closing the pane before it. Drawn rather than left to `dividerColor`, because
         // AppKit would paint the whole band as divider and the window would grow a gutter.
-        NSColor(DSColors.secondary).setFill()
+        NSColor(DSColors.surfacePanelHeader).setFill()
         rect.fill()
 
         let seam = isVertical
