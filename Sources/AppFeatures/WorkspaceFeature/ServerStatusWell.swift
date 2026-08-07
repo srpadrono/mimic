@@ -59,7 +59,7 @@ struct ServerStatusWell: View {
         .padding(.vertical, 3)
         .background {
             Capsule()
-                .fill(DSColors.tertiary)
+                .fill(DSColors.surfaceWell)
                 .strokeBorder(DSColors.border, lineWidth: 0.5)
         }
         // A floor as well as a ceiling. Xcode's activity view keeps its width whether it is reporting

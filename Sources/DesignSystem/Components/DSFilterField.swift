@@ -89,7 +89,7 @@ public struct DSFilterField: View {
         .frame(height: 20)
         .background {
             Capsule()
-                .fill(DSColors.tertiary)
+                .fill(DSColors.surfaceWell)
                 .stroke(DSColors.border, lineWidth: 0.5)
         }
         // Paired deliberately: an identifier alone on a container overrides its descendants', and

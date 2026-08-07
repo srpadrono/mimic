@@ -16,7 +16,7 @@ import SwiftUI
 /// flipping the same derived flag, so the animation in force at that moment is the non-repeating one
 /// and the opacity settles instead of starting a fresh infinite cycle.
 ///
-/// **The trough stays legible.** The bars used to fade to 30% of `DSColors.tertiary`, which on the
+/// **The trough stays legible.** The bars used to fade to 30% of `DSColors.surfaceWell`, which on the
 /// canvas is very nearly the canvas: half of every cycle showed an empty panel, which reads as
 /// "nothing is happening" rather than "something is on its way".
 public struct DSLoadingPlaceholder: View {
@@ -76,7 +76,7 @@ public struct DSLoadingPlaceholder: View {
     /// and compared back against `.infinity`, which is a sentinel doing an optional's job.
     private func placeholderBar(width: CGFloat?, height: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-            .fill(DSColors.tertiary)
+            .fill(DSColors.surfaceWell)
             .frame(maxWidth: width ?? .infinity, minHeight: height, maxHeight: height)
     }
 }

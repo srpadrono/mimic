@@ -66,7 +66,7 @@ struct RequestBodyView: View {
         }
         .padding(DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.tertiary.opacity(0.3))
+        .background(DSColors.surfaceWell.opacity(0.3))
         .task(id: RenderKey(payload: payload, searchText: searchText)) {
             let payload = payload
             let searchText = searchText

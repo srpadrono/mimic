@@ -38,7 +38,7 @@ import SwiftUI
     VStack(alignment: .leading, spacing: DSSpacing.sm) {
         colorRow("Dominant", DSColors.dominant)
         colorRow("Secondary", DSColors.secondary)
-        colorRow("Tertiary", DSColors.tertiary)
+        colorRow("Tertiary", DSColors.surfaceWell)
         colorRow("Surface Elevated", DSColors.surfaceElevated)
         colorRow("Accent", DSColors.accent)
         colorRow("Accent Subtle", DSColors.accentSubtle)

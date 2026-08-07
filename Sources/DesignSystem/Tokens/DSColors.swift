@@ -8,23 +8,84 @@ import SwiftUI
 /// background work that formats a request body — which is precisely the work that must not run on
 /// the main actor.
 public nonisolated enum DSColors {
-    // MARK: - Surface roles (60/30/10 rule)
+    // MARK: - Surface roles
 
-    /// Main window background, editor canvas
+    /// The centre editor, the request log's body, and the window behind them.
+    ///
+    /// **New value, not yet applied here.** `#FCFCFD` / `#1A1A1C` against ``dominant``'s
+    /// `#F8F8FA` / `#1C1C1E` — lighter in light mode, darker in dark. The migration of the five
+    /// call sites that draw ``dominant`` is a judgement call per site and belongs to the follow-on
+    /// issue, not to the rename that landed this token.
+    ///
+    /// The lighter light value is what buys the headroom ``rowStripe`` needs; see that token's note.
+    public static let surfaceContent = Color(light: .init(red: 0.988, green: 0.988, blue: 0.992),
+                                             dark: .init(red: 0.102, green: 0.102, blue: 0.110))
+
+    /// The navigator and the inspector — one shared material.
+    ///
+    /// **On macOS 26 the navigator does not take this fill at all.** A sidebar split item is handed
+    /// the system material on recompile whether the app opts in or not, and the decision recorded in
+    /// `docs/redesign/decisions.md` is to let it: fighting the framework to paint a flat colour under
+    /// a translucent surface is work with no payoff. This value is the inspector's body, and the
+    /// navigator's substrate for the purposes of reasoning about contrast — not a fill anyone draws
+    /// over a sidebar.
+    public static let surfaceSidebar = Color(light: .init(red: 0.945, green: 0.945, blue: 0.953),
+                                             dark: .init(red: 0.137, green: 0.137, blue: 0.145))
+
+    /// Every panel's own 30pt header, **where its host is ``surfaceContent``**.
+    ///
+    /// Byte-identical to the ``secondary`` it replaces — `#F0F0F2` / `#2C2C2E` in both appearances —
+    /// which is what made renaming its call sites a provably zero-pixel change.
+    ///
+    /// The qualifier matters and is the one place the redesign's own spec was wrong. Over
+    /// ``surfaceSidebar`` this measures **ΔL\* 0.30**, five times fainter than the faintest band this
+    /// palette has ever allowed, which would have made the navigator's header, the inspector's header
+    /// and every `DSSectionHeader` inside the inspector invisible in light mode. On those hosts a
+    /// header takes **no fill** and the 0.5pt rule below it does the whole job — which is what
+    /// `NSTableHeaderView` does. See ``band``.
+    public static let surfacePanelHeader = Color(light: .init(red: 0.941, green: 0.941, blue: 0.949),
+                                                 dark: .init(red: 0.173, green: 0.173, blue: 0.180))
+
+    /// Filter fields, input wells, recessed areas.
+    ///
+    /// Byte-identical to the ``tertiary`` it replaces — `#E8E8EC` / `#3A3A3C`.
+    public static let surfaceWell = Color(light: .init(red: 0.910, green: 0.910, blue: 0.925),
+                                          dark: .init(red: 0.227, green: 0.227, blue: 0.235))
+
+    /// Popovers, sheets, cards, and a lifted list row.
+    ///
+    /// **New value, not yet applied.** `#FFFFFF` / `#2C2C2E`. In dark this is the same value as
+    /// ``surfacePanelHeader``, deliberately: elevation there is carried by the shadow, not the fill,
+    /// because a near-black surface has nowhere brighter to go that does not read as grey plastic.
+    ///
+    /// The token has exactly one reference today and it is a preview, so every sheet and popover the
+    /// design puts on it is currently drawing something else. Applying it is its own issue.
+    public static let surfaceElevated = Color(light: .init(red: 1.0, green: 1.0, blue: 1.0),
+                                              dark: .init(red: 0.173, green: 0.173, blue: 0.180))
+
+    // MARK: - Superseded surface names
+
+    /// Main window background, editor canvas.
+    ///
+    /// - Note: Superseded by ``surfaceContent``, which is a *different* value. Kept until its five
+    ///   call sites are migrated one at a time, because each is a judgement about whether that
+    ///   surface is really the content canvas.
     public static let dominant = Color(light: .init(red: 0.973, green: 0.973, blue: 0.980),
                                        dark: .init(red: 0.110, green: 0.110, blue: 0.118))
 
-    /// Sidebar, inspector, toolbars — elevated surface
-    public static let secondary = Color(light: .init(red: 0.941, green: 0.941, blue: 0.949),
-                                        dark: .init(red: 0.173, green: 0.173, blue: 0.180))
+    /// Sidebar, inspector, toolbars — elevated surface.
+    ///
+    /// - Note: Superseded. This one name did two jobs, which is why it cannot be renamed
+    ///   mechanically: some of its call sites are a panel's own header (``surfacePanelHeader``, the
+    ///   same value) and some are the sidebar or inspector body (``surfaceSidebar``, a different
+    ///   one). Splitting them is a per-site decision.
+    public static let secondary = surfacePanelHeader
 
-    /// Input fields, wells, recessed areas
-    public static let tertiary = Color(light: .init(red: 0.910, green: 0.910, blue: 0.925),
-                                       dark: .init(red: 0.227, green: 0.227, blue: 0.235))
-
-    /// Popovers, sheets — slightly brighter than secondary
-    public static let surfaceElevated = Color(light: .init(red: 0.961, green: 0.961, blue: 0.969),
-                                              dark: .init(red: 0.200, green: 0.200, blue: 0.208))
+    /// Input fields, wells, recessed areas.
+    ///
+    /// - Note: Superseded by ``surfaceWell``, which is the identical value. No call sites remain;
+    ///   kept only so an in-flight branch does not fail to compile.
+    public static let tertiary = surfaceWell
 
     /// The band a bar wears when it sits *inside* a pane rather than above one — a column-header
     /// strip, a section divider, the jump bar. A panel's own header takes ``secondary``; this is one
@@ -62,7 +123,7 @@ public nonisolated enum DSColors {
     /// goes further — measured on a light screen, an `NSTableHeaderView` and the table beneath it are
     /// both pure white, separated by a single `gridColor` hairline. A band you have to look for is the
     /// right amount of band.
-    public static let band = tertiary.opacity(0.5)
+    public static let band = surfaceWell.opacity(0.5)
 
     /// The wash on every other row of a dense table.
     ///
@@ -88,7 +149,7 @@ public nonisolated enum DSColors {
     /// So a more visible zebra is not a change to this token. It is a change to ``warning`` and
     /// ``success`` first, to buy the headroom, and this token second. Both are already pushed a long
     /// way down for light mode; moving them again is a palette decision, not a layout one.
-    public static let rowStripe = tertiary.opacity(0.25)
+    public static let rowStripe = surfaceWell.opacity(0.25)
 
     /// Primary accent — electric blue
     public static let accent = Color(light: .init(red: 0.039, green: 0.518, blue: 1.0),

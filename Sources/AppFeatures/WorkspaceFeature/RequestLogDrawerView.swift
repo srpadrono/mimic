@@ -437,7 +437,7 @@ struct RequestLogDrawerView: View {
                     // whose useful width depends on the window, and 150 was simultaneously too wide
                     // for a narrow drawer and too narrow to read a path in a wide one.
                     .headerControlWell(
-                        fill: DSColors.tertiary,
+                        fill: DSColors.surfaceWell,
                         stroke: DSColors.border,
                         minWidth: 120,
                         idealWidth: 160

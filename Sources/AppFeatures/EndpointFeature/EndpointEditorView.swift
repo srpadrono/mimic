@@ -75,7 +75,7 @@ private extension View {
             .frame(height: EditorField.height)
             .background {
                 RoundedRectangle(cornerRadius: EditorField.cornerRadius)
-                    .fill(DSColors.tertiary)
+                    .fill(DSColors.surfaceWell)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: EditorField.cornerRadius)
@@ -409,7 +409,7 @@ struct EndpointEditorView: View {
                 .frame(maxWidth: .infinity, minHeight: EditorField.height, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: EditorField.cornerRadius)
-                        .fill(DSColors.tertiary.opacity(0.5))
+                        .fill(DSColors.surfaceWell.opacity(0.5))
                 )
             }
         }

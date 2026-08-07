@@ -64,7 +64,7 @@ public struct DSTextField: View {
                 .focused($isFocused)
                 .background {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(DSColors.tertiary)
+                        .fill(DSColors.surfaceWell)
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)

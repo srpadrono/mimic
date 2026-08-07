@@ -220,7 +220,7 @@ private struct DSButtonStyle: ButtonStyle {
             // and the system blue measures 3.64:1 there. See the token for why only this moved.
             case .primary: shade(DSColors.accentFill)
             case .destructive: shade(DSColors.destructive)
-            case .secondary: unfilled(rest: DSColors.tertiary)
+            case .secondary: unfilled(rest: DSColors.surfaceWell)
             case .ghost: unfilled(rest: .clear)
             }
         }

@@ -9,7 +9,7 @@ import SwiftUI
 /// the macOS behaviour: an overlay scroller while you scroll, and nothing when the content fits.
 /// (It also replaces `ScrollView(_:showsIndicators:)`, which is deprecated.)
 ///
-/// The well is the same construction as `DSTextField` and `DSFilterField` — `DSColors.tertiary`
+/// The well is the same construction as `DSTextField` and `DSFilterField` — `DSColors.surfaceWell`
 /// behind a 0.5pt `DSColors.border` hairline at `DSCornerRadius.sm`, with `DSSpacing.sm` of inset —
 /// so a code block and a text field sitting in the same sheet are recognisably the same kind of
 /// surface. The inset used to be `DSSpacing.sm + 2` on one axis only, which is not a token and did
@@ -35,7 +35,7 @@ public struct DSCodeBlock: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(DSColors.tertiary)
+                .fill(DSColors.surfaceWell)
         }
         .overlay {
             // `strokeBorder`, not `stroke`: a centred stroke puts half its width outside the shape,
