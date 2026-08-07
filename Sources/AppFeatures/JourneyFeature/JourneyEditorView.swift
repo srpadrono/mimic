@@ -18,9 +18,13 @@ struct JourneyEditorView: View {
     let journey: Journey
     let isActive: Bool
     let status: JourneyStatus?
+    /// Back/forward and journey-to-journey movement, injected. Defaulted so previews and tests can
+    /// build the editor without wiring navigation they do not exercise.
+    var navigation: CenterPaneNavigation = CenterPaneNavigation()
 
     @State private var editingStepID: UUID?
     @State private var showNewStepSheet = false
+    @State private var isJumpMenuHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,9 +86,20 @@ struct JourneyEditorView: View {
     /// ones — a 20pt title, then the summary, then the behaviour controls — which spent ~90pt before
     /// the first step and, at centre-pane width, was not even a fixed height: the title had no line
     /// limit, so a long journey name wrapped and pushed everything below it down.
+    ///
+    /// It now also carries the centre pane's navigation, since the 24pt jump bar that used to sit
+    /// above it was deleted to put all four panel headers on one baseline.
     @ViewBuilder
     private var header: some View {
         HStack(spacing: DSSpacing.sm) {
+            // No back/forward pair here, deliberately. The jump bar drew one on both tabs and it was
+            // dead on this one: the history it steers is `NavigationHistory<UUID>` over *endpoints*,
+            // and its handlers write `selectedEndpointID`, but on the Journeys tab the centre pane
+            // renders `.journey(journeyID)`. So the arrows looked live, enabled and clickable, and
+            // moved nothing you could see. Re-homing them here would have carried that bug forward
+            // into a more prominent position. Journeys get lateral movement instead — see
+            // `journeyJumpMenu` — and if journey history is ever wanted it needs its own stack.
+
             // 13, matching the endpoint editor's header in the same slot at the same 30pt height.
             // This was `subheading` (14 medium) against that one's `codeLarge` (13 regular), so
             // switching navigator tabs changed the size *and* the weight of the title in the same
@@ -155,6 +170,8 @@ struct JourneyEditorView: View {
             }
             .accessibilityIdentifier("journeyEditor.addStepButton")
             .accessibilityLabel("Add step")
+
+            journeyJumpMenu
         }
         .padding(.horizontal, DSSpacing.md)
         // The shared panel-header height, so this bar lines up with the sidebar's and the
@@ -167,6 +184,40 @@ struct JourneyEditorView: View {
                 .frame(height: 0.5)
         }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Journey-to-journey movement, which the jump bar's journey crumb used to offer.
+    ///
+    /// Drawn only when there is more than one journey to move between — a menu whose single item is
+    /// the thing you are already looking at is a control that does nothing when you use it, which is
+    /// the rule the crumbs held too.
+    ///
+    /// Geometry copied from `EndpointEditorView.moreMenu` rather than shared, because that one is
+    /// private to its view: 22pt target, 13pt glyph, `sm` hover well, `labelSecondary` →
+    /// `labelPrimary`. If a third one appears, extract it.
+    @ViewBuilder
+    private var journeyJumpMenu: some View {
+        if !navigation.usableSections.isEmpty {
+            Menu {
+                CenterPaneJumpSections(navigation: navigation)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isJumpMenuHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22, height: 22)
+            .background {
+                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
+                    .fill(isJumpMenuHovered ? DSColors.accentSubtle : Color.clear)
+            }
+            .onHover { isJumpMenuHovered = $0 }
+            .animation(.easeOut(duration: DSAnimation.micro), value: isJumpMenuHovered)
+            .help("Go to another journey")
+            .accessibilityIdentifier("journeyEditor.jumpMenu")
+            .accessibilityLabel("Go to another journey")
+        }
     }
 
     // MARK: - Behaviour

@@ -10,6 +10,9 @@ import DesignSystem
 struct CenterPaneView: View {
     @Environment(AppState.self) private var appState
     let content: CenterPaneContent
+    /// Back/forward and the lateral moves, injected rather than derived here — the editors stay
+    /// decoupled from `AppState`, and this view is the bridge that already knows both sides.
+    var navigation: CenterPaneNavigation = CenterPaneNavigation()
 
     var body: some View {
         switch content {
@@ -34,6 +37,7 @@ struct CenterPaneView: View {
                 endpoint: endpoint,
                 activeScenario: activeScenario,
                 globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                navigation: navigation,
                 actions: EndpointEditorActions(
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
@@ -43,13 +47,50 @@ struct CenterPaneView: View {
                 )
             )
         } else {
-            DSEmptyState(
-                systemImage: NavigatorTab.endpoints.systemImage,
-                heading: "No endpoint selected",
-                message: "Select an endpoint from the sidebar to view and edit its configuration.",
-                identifier: "center.noSelection"
-            )
+            // The header stays when the content does not — AGENTS.md's rule, and here it is
+            // load-bearing rather than cosmetic. The jump bar this replaced rendered a "No endpoint"
+            // crumb and kept its arrows live, so Back still worked after you deleted the endpoint you
+            // were on. That is the single case Back exists for. An editor header that disappears with
+            // its selection would take the only way out with it.
+            VStack(spacing: 0) {
+                emptySelectionHeader
+
+                DSEmptyState(
+                    systemImage: NavigatorTab.endpoints.systemImage,
+                    heading: "No endpoint selected",
+                    message: "Select an endpoint from the sidebar to view and edit its configuration.",
+                    identifier: "center.noSelection"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
+    }
+
+    /// The 30pt bar the centre pane keeps when it has no endpoint to show.
+    ///
+    /// Carries only the history pair. There is no title: the empty state directly beneath already
+    /// says what is going on, and repeating it here would be the second copy of one sentence.
+    @ViewBuilder
+    private var emptySelectionHeader: some View {
+        HStack(spacing: DSSpacing.sm) {
+            EditorHistoryControls(
+                canGoBack: navigation.canGoBack,
+                canGoForward: navigation.canGoForward,
+                onBack: navigation.onBack,
+                onForward: navigation.onForward
+            )
+
+            Spacer(minLength: DSSpacing.sm)
+        }
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: DSBarHeight.panelHeader)
+        .background(DSColors.secondary)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(DSColors.separator)
+                .frame(height: 0.5)
+        }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Journeys
@@ -61,7 +102,8 @@ struct CenterPaneView: View {
             JourneyEditorView(
                 journey: journey,
                 isActive: appState.activeJourney?.id == journey.id,
-                status: appState.activeJourney?.id == journey.id ? appState.activeJourneyStatus : nil
+                status: appState.activeJourney?.id == journey.id ? appState.activeJourneyStatus : nil,
+                navigation: navigation
             )
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("center.journeyEditor")

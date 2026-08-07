@@ -142,13 +142,13 @@ public struct DSFilterField: View {
                     // is never discovered — which is what a look at the running sidebar found.
                     //
                     // `chevron.up.chevron.down`, not a lone `chevron.down`: this picks one of N values
-                    // and shows the one in force, which is a pop-up, and it is the same mark
-                    // `BreadcrumbJumpBar` puts on a crumb that has siblings. 8pt is the window's
+                    // and shows the one in force, which is a pop-up. 8pt is the window's
                     // menu-indicator size and the floor below which the mark becomes a smudge.
                     //
-                    // It takes the pill's own colour rather than dropping to `labelTertiary` the way
-                    // the breadcrumb's does. There a title carries the message and the chevron only
-                    // annotates it; here there is no title to annotate.
+                    // It takes the pill's own colour rather than dropping to `labelTertiary`. The
+                    // breadcrumb jump bar — which held the same mark until it was deleted — could
+                    // afford tertiary because a crumb's title carried the message and the chevron only
+                    // annotated it. Here there is no title to annotate, so the mark is the message.
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 8, weight: .semibold))
                 }
@@ -170,22 +170,29 @@ public struct DSFilterField: View {
             }
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-            // `.button` + `.plain`, the same pairing `BreadcrumbJumpBar`'s crumb menu wears, and for
-            // the same reason: the label above draws every pixel of this control — its own foreground,
-            // its own capsule, its own chevron — so the button style must contribute nothing.
+            // `.button` + `.plain`, and this file is now the only holder of the pairing — the
+            // breadcrumb jump bar's crumb menu wore it too and was deleted, so the reasoning is
+            // restated here in full rather than left pointing at a file that no longer exists.
             //
-            // `.plain` and not the `.borderless` that Apple's deprecation message for
-            // `.menuStyle(.borderlessButton)` literally names ("use `menuStyle(.button)` and
-            // `buttonStyle(.borderless)`"). That recipe is right about the *menu* style; it is the
-            // wrong half to copy for a label that draws itself, because `.borderless` supplies a
-            // system accent tint to content whose colour this pill sets and switches on `isScoped`.
+            // **Why `.button` and not `.borderlessButton`.** A borderless *menu* is realised as an
+            // `NSPopUpButton`, which draws its own indicator *before* the label and ignores
+            // `.menuIndicator(.hidden)`. On the breadcrumb that put a stray chevron in front of every
+            // clickable crumb and swallowed the compact one the label drew after the title. Any menu
+            // whose label is a word you read wants `.button`; a menu whose label is a bare glyph — the
+            // editors' `ellipsis` overflow — is the one case where `.borderlessButton` is correct,
+            // because there the bordered style would only add a permanent well around the glyph.
             //
-            // The note it replaces cited the deprecation message and stopped there, so nothing in
-            // this file ever addressed the only thing that actually differed from the breadcrumb —
-            // one word — while a comment on each side defended its own. That is what was fixed. What
-            // is *not* claimed: that the style was why a look at the running sidebar found this pill
-            // rendering as a bare glyph. The fill below is a proven cause of that on its own, and the
-            // two were not isolated from each other.
+            // **Why `.plain` and not `.borderless`.** Apple's deprecation message for
+            // `.menuStyle(.borderlessButton)` literally names the pair ("use `menuStyle(.button)` and
+            // `buttonStyle(.borderless)`"). That recipe is right about the *menu* style and is the
+            // wrong half to copy for a label that draws itself: the label above draws every pixel of
+            // this control — its own foreground, its own capsule, its own chevron — and `.borderless`
+            // supplies a system accent tint to content whose colour this pill sets and switches on
+            // `isScoped`.
+            //
+            // What is *not* claimed: that the style was why a look at the running sidebar found this
+            // pill rendering as a bare glyph. The fill below is a proven cause of that on its own, and
+            // the two were not isolated from each other.
             .menuStyle(.button)
             .buttonStyle(.plain)
             // The chevron is drawn above; the system indicator would be a second one.
@@ -202,8 +209,9 @@ public struct DSFilterField: View {
 
         /// Accent whenever a scope is in force, because a filter quietly hiding rows has to say so
         /// without being pointed at. Otherwise the same lift every other menu-shaped control in the
-        /// window gives the pointer — `DSPanelHeaderButton`, the breadcrumb's crumbs and the editor's
-        /// more menu all go `labelSecondary` → `labelPrimary`; this pill was the one that stayed inert.
+        /// window gives the pointer — `DSPanelHeaderButton`, the editors' more menu and the centre
+        /// pane's history arrows all go `labelSecondary` → `labelPrimary`; this pill was the one that
+        /// stayed inert.
         private var foreground: Color {
             if isScoped { return DSColors.accentText }
             return isHovered ? DSColors.labelPrimary : DSColors.labelSecondary

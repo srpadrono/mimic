@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// The heights a horizontal bar of chrome is allowed to be.
 ///
-/// The window had ten. Two were declared — `DSPanelHeader.height` (30) and `BreadcrumbJumpBar.height`
+/// The window had ten. Two were declared — `DSPanelHeader.height` (30) and the breadcrumb jump bar's
 /// (24) — and the rest were emergent: a `.padding(.vertical, sm)` wrapped around whatever AppKit's
 /// `.controlSize(.small)` happened to measure, or a bare `22` written twice in two files. Nobody
 /// chose 31, or 34, or 46; they fell out of other decisions, and a reader could not tell which
@@ -19,9 +19,15 @@ public enum DSBarHeight {
     /// view it is not using. The ladder is the thing a bar consults; the header is one of its callers.
     public static let panelHeader: CGFloat = 30
 
-    /// 24 — secondary chrome that sits *inside* a pane rather than above one. The breadcrumb jump
-    /// bar, which would read as a fourth panel header at 30, and `DSSectionHeader` when it carries no
-    /// trailing action. With one it grows to ``controlRow``, because the action is a 22pt control.
+    /// 24 — secondary chrome that sits *inside* a pane rather than above one. `DSSectionHeader` when
+    /// it carries no trailing action; with one it grows to ``controlRow``, because the action is a
+    /// 22pt control.
+    ///
+    /// The rung was introduced for the breadcrumb jump bar, which sat above the centre editor and
+    /// would have read as a fourth panel header at 30. That bar is gone — it was the only thing
+    /// keeping the window's four panel headers off a shared baseline, and its navigation moved into
+    /// the editor headers themselves. `DSSectionHeader` is the sole consumer now, and it takes this
+    /// as a **floor** rather than a fixed height.
     public static let secondaryBar: CGFloat = 24
 
     /// 32 — a row of small controls: 20pt controls with `DSSpacing.sm` above and below.

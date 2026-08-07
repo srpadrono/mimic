@@ -92,6 +92,9 @@ struct EndpointEditorView: View {
     let endpoint: Endpoint
     let activeScenario: Scenario?
     let globalDelayMs: Int
+    /// Back/forward and the lateral moves the jump bar used to carry. Defaulted so previews and
+    /// tests can build the editor without wiring navigation they do not exercise.
+    var navigation: CenterPaneNavigation = CenterPaneNavigation()
     let actions: EndpointEditorActions
 
     @State private var statusCodeString = ""
@@ -117,11 +120,18 @@ struct EndpointEditorView: View {
     @FocusState private var isGroupTagFocused: Bool
     @FocusState private var isDelayFocused: Bool
 
-    init(endpoint: Endpoint, activeScenario: Scenario?, globalDelayMs: Int, actions: EndpointEditorActions) {
+    init(
+        endpoint: Endpoint,
+        activeScenario: Scenario?,
+        globalDelayMs: Int,
+        navigation: CenterPaneNavigation = CenterPaneNavigation(),
+        actions: EndpointEditorActions
+    ) {
         self.init(
             endpoint: endpoint,
             activeScenario: activeScenario,
             globalDelayMs: globalDelayMs,
+            navigation: navigation,
             actions: actions,
             initialStatusCodeString: "",
             initialResponseBody: "",
@@ -135,6 +145,7 @@ struct EndpointEditorView: View {
         endpoint: Endpoint,
         activeScenario: Scenario?,
         globalDelayMs: Int,
+        navigation: CenterPaneNavigation = CenterPaneNavigation(),
         actions: EndpointEditorActions,
         initialStatusCodeString: String,
         initialResponseBody: String,
@@ -145,6 +156,7 @@ struct EndpointEditorView: View {
         self.endpoint = endpoint
         self.activeScenario = activeScenario
         self.globalDelayMs = globalDelayMs
+        self.navigation = navigation
         self.actions = actions
         _statusCodeString = State(initialValue: initialStatusCodeString)
         _responseBody = State(initialValue: initialResponseBody)
@@ -200,11 +212,20 @@ struct EndpointEditorView: View {
 
     /// Method, path, and the endpoint's own actions — the identity of what is being edited.
     ///
-    /// The group tag used to be repeated above the path as a dead caption. It is a crumb in the jump
-    /// bar now, where it is also a menu you can steer with.
+    /// Now also the centre pane's navigation. The jump bar above this header was deleted so all four
+    /// panel headers could start at the same y; its back/forward pair moved here, and its sideways
+    /// moves into ``moreMenu``. The pair leads the row for the same reason Xcode's jump bar puts it
+    /// first — history is about the pane, not about the thing in it.
     @ViewBuilder
     private var endpointHeader: some View {
         HStack(spacing: DSSpacing.sm) {
+            EditorHistoryControls(
+                canGoBack: navigation.canGoBack,
+                canGoForward: navigation.canGoForward,
+                onBack: navigation.onBack,
+                onForward: navigation.onForward
+            )
+
             DSMethodBadge(method: endpoint.method.rawValue, identifier: "editor.method")
 
             // `.lineLimit(1)` and `.truncationMode(.middle)`, and no layout priority. A negative one
@@ -239,13 +260,12 @@ struct EndpointEditorView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// The endpoint's own actions.
+    /// The endpoint's own actions, and the lateral moves the jump bar used to offer.
     ///
-    /// `.borderlessButton`, deliberately — and this is the one place in the app where the *opposite*
-    /// choice from `BreadcrumbJumpBar` is correct. The breadcrumb needs `.button` because its label
-    /// is a word you read and a pop-up draws its indicator ahead of the label. Here the label is a
-    /// bare ellipsis, so the default bordered style only adds a permanent rounded well around it —
-    /// chrome Xcode does not draw on an inline "more" control either.
+    /// `.borderlessButton`, deliberately. The label here is a bare ellipsis, so the default bordered
+    /// style only adds a permanent rounded well around it — chrome Xcode does not draw on an inline
+    /// "more" control either. (`DSFilterField.ScopeMenu` takes `.button` + `.plain` instead, because
+    /// its label is a *word* and a pop-up draws its indicator ahead of the label.)
     ///
     /// The hover well is the affordance instead: an ellipsis that never responds to the pointer
     /// reads as decoration. It sits on the `Menu`, not inside the label — a `Menu` renders its own
@@ -263,6 +283,14 @@ struct EndpointEditorView: View {
                 showDeleteConfirmation = true
             } label: {
                 Label("Delete endpoint\u{2026}", systemImage: "trash")
+            }
+
+            // The jump bar's sideways moves. Last, and behind a divider, because they navigate away
+            // from this endpoint while everything above acts on it — and because a destructive item
+            // should not be the thing your pointer passes over on the way to a routine jump.
+            if !navigation.usableSections.isEmpty {
+                Divider()
+                CenterPaneJumpSections(navigation: navigation)
             }
         } label: {
             Image(systemName: "ellipsis")

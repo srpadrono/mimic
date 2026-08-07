@@ -99,9 +99,10 @@ struct RequestDetailInspector: View {
             // floated in the middle of a panel where every other row starts at 12 — which reads as a
             // control nobody finished placing rather than as a deliberate centre.
             //
-            // `.infinity`, never a number. `maxWidth` caps *and* expands, and a numeric cap here would
-            // do to this control what it did to the breadcrumb crumbs: make every one of them exactly
-            // as wide as the cap, whatever the row could actually give them.
+            // `.infinity`, never a number. `maxWidth` caps *and* expands, so a numeric cap here would
+            // make every segment exactly as wide as the cap, whatever the row could actually give
+            // them. The breadcrumb jump bar learned that one the expensive way — a 200pt cap on each
+            // crumb turned its path into widely-spaced words — and the rule outlived the bar.
             .frame(maxWidth: .infinity)
             .padding(.horizontal, DSSpacing.md)
             .padding(.vertical, DSSpacing.sm)

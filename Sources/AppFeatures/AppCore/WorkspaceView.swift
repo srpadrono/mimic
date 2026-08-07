@@ -102,28 +102,12 @@ struct WorkspaceView: View {
                 // that cost the inspector 220pt of height — taken from the one panel whose job is
                 // showing you a payload, and given to a log that was not using the corner.
                 VStack(spacing: 0) {
-                    // Xcode's jump bar. Sits above the editor area rather than inside any one
-                    // editor, because it describes where you are, not what you are editing.
-                    BreadcrumbJumpBar(
-                        crumbs: breadcrumbs,
-                        canGoBack: endpointHistory.canGoBack,
-                        canGoForward: endpointHistory.canGoForward,
-                        onSelectOption: handleBreadcrumbSelection,
-                        onBack: {
-                            if let previous = endpointHistory.goBack() {
-                                isNavigatingHistory = true
-                                selectedEndpointID = previous
-                            }
-                        },
-                        onForward: {
-                            if let next = endpointHistory.goForward() {
-                                isNavigatingHistory = true
-                                selectedEndpointID = next
-                            }
-                        }
-                    )
-
-                    // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
+                    // No jump bar above this. It used to sit here at 24pt, which made the centre
+                    // column the one pane whose first row did not start at the same y as the other
+                    // three — 54pt of stacked chrome against everyone else's 30. Its sideways moves
+                    // now live in each editor's own overflow menu; see `CenterPaneNavigation`.
+                    //
+                    // The pair that shares the centre column, as one `NSSplitViewItem`
                     // pair — so the divider between them is the same divider the navigator and the
                     // inspector already wear, and the centre pane's floor is a constraint AppKit
                     // enforces rather than a ceiling this view recomputes from a measured container.
@@ -141,7 +125,8 @@ struct WorkspaceView: View {
                                 navigatorTab,
                                 endpointID: selectedEndpointID,
                                 journeyID: appState.selectedJourneyID
-                            )
+                            ),
+                            navigation: centerPaneNavigation
                         )
                         // Anchored to the top, not centred. A pane is exactly as tall as the split
                         // view gives it, and an editor taller than that — the journey editor has no
@@ -397,56 +382,71 @@ struct WorkspaceView: View {
 
     // MARK: - Breadcrumb
 
-    /// Where you are, as a trail you can steer with.
+    /// Where the centre pane can go from here.
     ///
-    /// Every level past the first is a menu over its siblings, so moving to another endpoint in the
-    /// same group — or another scenario on this endpoint — never means a round trip to the sidebar.
-    private var breadcrumbs: [BreadcrumbJumpBar.Crumb] {
-        var crumbs: [BreadcrumbJumpBar.Crumb] = [
-            BreadcrumbJumpBar.Crumb(
-                id: "project",
-                title: appState.currentProject?.name ?? "Mimic",
-                systemImage: "shippingbox"
-            )
-        ]
+    /// The lateral moves the jump bar used to offer as crumb menus, minus the two that did not earn
+    /// a second home: the project crumb carried no options at all, and the scenario crumb's job is
+    /// taken by the inspector's Scenarios list today and by `DSScenarioControl` in the editor's own
+    /// title row shortly. See ``CenterPaneNavigation``.
+    private var centerPaneNavigation: CenterPaneNavigation {
+        CenterPaneNavigation(
+            canGoBack: endpointHistory.canGoBack,
+            canGoForward: endpointHistory.canGoForward,
+            jumpSections: jumpSections,
+            onBack: {
+                if let previous = endpointHistory.goBack() {
+                    isNavigatingHistory = true
+                    selectedEndpointID = previous
+                }
+            },
+            onForward: {
+                if let next = endpointHistory.goForward() {
+                    isNavigatingHistory = true
+                    selectedEndpointID = next
+                }
+            },
+            onJump: handleCenterPaneJump
+        )
+    }
 
+    private var jumpSections: [CenterPaneNavigation.JumpSection] {
         switch navigatorTab {
         case .journeys:
             let journeys = appState.journeys
-            crumbs.append(
-                BreadcrumbJumpBar.Crumb(
+            return [
+                CenterPaneNavigation.JumpSection(
                     id: "journey",
-                    title: journeys.first { $0.id == appState.selectedJourneyID }?.name ?? "No journey",
-                    systemImage: "arrow.triangle.branch",
+                    title: "Journeys",
                     options: journeys.map {
-                        BreadcrumbJumpBar.Option(
+                        CenterPaneNavigation.Option(
                             id: $0.id,
                             title: $0.name,
                             isSelected: $0.id == appState.selectedJourneyID
                         )
                     }
                 )
-            )
+            ]
 
         case .endpoints:
             let endpoints = currentEndpoints
             guard let endpoint = endpoints.first(where: { $0.id == selectedEndpointID }) else {
-                crumbs.append(BreadcrumbJumpBar.Crumb(id: "endpoint", title: "No endpoint"))
-                return crumbs
+                return []
             }
 
-            // The group crumb only earns its place when there are groups to move between.
+            var sections: [CenterPaneNavigation.JumpSection] = []
+
+            // The group section only earns its place when there are groups to move between.
             let groups = Set(endpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
             if let group = endpoint.groupTag, !group.isEmpty, groups.count > 1 {
-                crumbs.append(
-                    BreadcrumbJumpBar.Crumb(
+                sections.append(
+                    CenterPaneNavigation.JumpSection(
                         id: "group",
-                        title: group,
+                        title: "Groups",
                         options: groups.compactMap { name in
                             // A group is not a thing you can select, so each option stands for the
                             // first endpoint in it — the same landing a sidebar click would give.
                             endpoints.first { $0.groupTag == name }.map {
-                                BreadcrumbJumpBar.Option(id: $0.id, title: name, isSelected: name == group)
+                                CenterPaneNavigation.Option(id: $0.id, title: name, isSelected: name == group)
                             }
                         }
                     )
@@ -454,44 +454,25 @@ struct WorkspaceView: View {
             }
 
             let siblings = endpoints.filter { $0.groupTag == endpoint.groupTag }
-            crumbs.append(
-                BreadcrumbJumpBar.Crumb(
+            sections.append(
+                CenterPaneNavigation.JumpSection(
                     id: "endpoint",
-                    title: endpoint.name,
+                    title: endpoint.groupTag.map { $0.isEmpty ? "Endpoints" : "Endpoints in \($0)" }
+                        ?? "Endpoints",
                     options: siblings.map {
-                        BreadcrumbJumpBar.Option(id: $0.id, title: $0.name, isSelected: $0.id == endpoint.id)
+                        CenterPaneNavigation.Option(id: $0.id, title: $0.name, isSelected: $0.id == endpoint.id)
                     }
                 )
             )
 
-            if !endpoint.scenarios.isEmpty {
-                crumbs.append(
-                    BreadcrumbJumpBar.Crumb(
-                        id: "scenario",
-                        title: endpoint.scenarios.first { $0.id == endpoint.activeScenarioID }?.name
-                            ?? "No scenario",
-                        options: endpoint.scenarios.map {
-                            BreadcrumbJumpBar.Option(
-                                id: $0.id,
-                                title: $0.name,
-                                isSelected: $0.id == endpoint.activeScenarioID
-                            )
-                        }
-                    )
-                )
-            }
+            return sections
         }
-
-        return crumbs
     }
 
-    private func handleBreadcrumbSelection(crumbID: String, optionID: UUID) {
-        switch crumbID {
+    private func handleCenterPaneJump(sectionID: String, optionID: UUID) {
+        switch sectionID {
         case "group", "endpoint":
             selectedEndpointID = optionID
-        case "scenario":
-            guard let endpointID = selectedEndpointID else { return }
-            appState.setActiveScenario(endpointID: endpointID, scenarioID: optionID)
         case "journey":
             appState.selectedJourneyID = optionID
         default:
