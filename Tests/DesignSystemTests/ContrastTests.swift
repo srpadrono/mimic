@@ -214,4 +214,72 @@ struct ContrastTests {
             }
         }
     }
+
+    // MARK: - Semantic on a tint of itself
+
+    @Test("successDeep and warningDeep clear the floor on the fills they exist for")
+    func deepSemanticsClearTheirOwnFills() {
+        for dark in [false, true] {
+            // The server segment's running state: 10% at rest, 16% on hover.
+            for a in [0.10, 0.16] {
+                let r = ratio(DSColors.successDeep, onFill: DSColors.success, alpha: a,
+                              over: DSColors.surfaceContent, dark: dark)
+                #expect(r >= floor, "successDeep on success @\(a) \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+            // The unmatched toggle: 13% at rest, 20% pressed. The pressed state is the one that
+            // fails first and the one the plain `warning` token could not clear.
+            for a in [0.13, 0.20] {
+                let r = ratio(DSColors.warningDeep, onFill: DSColors.warning, alpha: a,
+                              over: DSColors.surfacePanelHeader, dark: dark)
+                #expect(r >= floor, "warningDeep on warning @\(a) \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+        }
+    }
+
+    @Test("The plain warning token is NOT usable on its own fill — which is why warningDeep exists")
+    func plainWarningFailsOnItsOwnFill() {
+        // Guards against someone "simplifying" warningDeep away. The handoff lists this exact pairing
+        // under "measured and passing"; it is 3.92:1 at rest and 3.58:1 pressed, in light.
+        let r = ratio(DSColors.warning, onFill: DSColors.warning, alpha: 0.20,
+                      over: DSColors.surfacePanelHeader, dark: false)
+        #expect(r < floor, "if this now passes, the palette moved and warningDeep can be re-derived")
+    }
+
+    @Test("accentText already clears the accent glass fill — no accentOnGlass token is needed")
+    func accentTextClearsTheGlassFill() {
+        // The handoff mints `accentOnGlass` on the claim that `accentText` is short of 4.5:1 on an
+        // `accent @ 15%` fill in dark. Measured, it is ~5.8:1. Recorded so the token is not
+        // reintroduced on the same false premise.
+        let r = ratio(DSColors.accentText, onFill: DSColors.accent, alpha: 0.15,
+                      over: DSColors.surfaceContent, dark: true)
+        #expect(r >= floor, "accentText on accent@15% dark: \(String(format: "%.2f", r)):1")
+    }
+
+    @Test("A journey's text reads on a journey's fill, on every surface one is drawn over")
+    func journeyTextClearsTheJourneyFill() {
+        for dark in [false, true] {
+            for (name, surface) in [("content", DSColors.surfaceContent),
+                                    ("sidebar", DSColors.surfaceSidebar),
+                                    ("elevated", DSColors.surfaceElevated)] {
+                // The token's own alpha, not a guessed one: 11% light, 15% dark. Reading it back
+                // rather than restating it is what makes this a test of the shipped value.
+                let a = alpha(DSColors.Journey.fill, dark: dark)
+                let r = ratio(DSColors.Journey.text, onFill: DSColors.Journey.accent, alpha: a,
+                              over: surface, dark: dark)
+                #expect(r >= floor, "journey text on fill @\(a) over \(name) \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+        }
+    }
+
+    @Test("Semantic text still reads on a selected row, where the accent wash sits under everything")
+    func semanticsClearTheFloorOnASelectedRow() {
+        for dark in [false, true] {
+            for (name, color) in [("success", DSColors.success), ("warning", DSColors.warning),
+                                  ("destructive", DSColors.destructive)] {
+                let r = ratio(color, onFill: DSColors.accent, alpha: 0.10,
+                              over: DSColors.surfaceContent, dark: dark)
+                #expect(r >= floor, "\(name) on rowSelected \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+        }
+    }
 }

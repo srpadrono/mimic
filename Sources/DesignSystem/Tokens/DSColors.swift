@@ -228,6 +228,79 @@ public nonisolated enum DSColors {
     public static let warning = Color(light: .init(red: 0.602, green: 0.373, blue: 0.0),
                                       dark: .init(red: 1.0, green: 0.624, blue: 0.039))
 
+    // MARK: - Semantic, on a tint of themselves
+
+    /// ``success`` when it is text on a `success @ 10–16%` fill — the server segment's running state.
+    ///
+    /// The plain token is short there. Measured on the composited fill rather than on the surface
+    /// behind it: `success` itself lands at 4.47:1 in light, which fails by three hundredths, and this
+    /// clears at **6.95:1**. A hue and a tint of itself can only separate so far, and this palette has
+    /// three constructions that hit that wall — see also ``warningDeep`` and the method badges.
+    public static let successDeep = Color(light: .init(red: 0.039, green: 0.361, blue: 0.137),
+                                          dark: .init(red: 0.361, green: 0.878, blue: 0.486))
+
+    /// ``warning`` when it is text on a `warning @ 13–20%` fill — the request log's unmatched toggle.
+    ///
+    /// **The handoff lists this pairing under "measured and passing". It is not.** Computed on the
+    /// composited fill: `warning` on `warning @ 13%` over `surfacePanelHeader` measures **3.92:1** in
+    /// light, and **3.58:1** in the pressed state at 20%. Both fail, on a control that is the log's
+    /// primary filter.
+    ///
+    /// Light is the whole problem — dark already clears it at 5.28 / 4.52 — so only the light variant
+    /// moves, 15% down the same hue. That lands at 5.02:1 at rest and **4.58:1 pressed**, which is the
+    /// state that had to be solved for rather than the one you notice first.
+    public static let warningDeep = Color(light: .init(red: 0.512, green: 0.317, blue: 0.0),
+                                          dark: .init(red: 1.0, green: 0.624, blue: 0.039))
+
+    // MARK: - Journeys
+
+    /// A journey's chrome, progress and fills.
+    ///
+    /// Aliases of the accent rather than a hue of their own, and deliberately so. The handoff's build
+    /// order opens with "de-purple the journeys, it is a token swap" — but there is no purple. Journeys
+    /// have always been blue, at eleven call sites; the only two purples in this file are the PATCH
+    /// badge and ``Syntax/key``, both of which the handoff preserves. The step was a no-op against a
+    /// palette that was never drawn.
+    ///
+    /// Naming them anyway is worth one indirection: it makes "journey" a role that could be re-hued
+    /// later without hunting for accent call sites that happen to be about journeys, which is exactly
+    /// the search that made the handoff think a purple existed.
+    public enum Journey {
+        /// Fills, dots and progress. Never text.
+        public static let accent = DSColors.accent
+        /// The journey as a *word* — a name, a step label, "Active".
+        ///
+        /// `accentText`, not the `accentOnGlass` the handoff proposes. That token is justified there by
+        /// the claim that `accentText` is "short of 4.5:1" on an `accent @ 15%` fill in dark. Measured,
+        /// it is **5.80:1** — comfortably clear. A token minted to fix a problem that does not exist is
+        /// a token nobody can later tell the purpose of, so it is not added.
+        public static let text = DSColors.accentText
+        /// The wash behind an active journey's card or chip.
+        ///
+        /// **Appearance-aware, and the asymmetry is load-bearing.** 11% in light, 15% in dark — the
+        /// design's own numbers, and the measurement says why they cannot be one value: `Journey.text`
+        /// on an 18% fill over `surfaceSidebar` in light is **4.42:1**, the only cell in the whole
+        /// grid that fails. At 11% the same pairing is 4.81. A percentage of a near-black surface
+        /// moves the composite far less than the same percentage of a near-white one, which is the
+        /// general reason wash tokens in this palette rarely share an alpha across appearances.
+        ///
+        /// 15% is the dark ceiling, not a preference: at 18% the elevated case lands at exactly 4.50,
+        /// which is the floor with nothing spare.
+        public static let fill = Color(light: DSColors.accent.opacity(0.11),
+                                       dark: DSColors.accent.opacity(0.15))
+        /// The stroke around one.
+        public static let stroke = DSColors.accent.opacity(0.32)
+    }
+
+    // MARK: - Row surfaces
+
+    /// The accent wash on a selected row in a dense table — the request log.
+    ///
+    /// Paired with a 3pt leading rail in ``accent``, drawn *inside* the row so selection does not shift
+    /// the content. The wash alone is not enough to survive Differentiate Without Color; the rail is
+    /// what carries it.
+    public static let rowSelected = accent.opacity(0.10)
+
     // MARK: - Server state colors
 
     /// Server idle / stopped state
@@ -390,6 +463,14 @@ public enum DSServerState {
 // MARK: - Color convenience for light/dark adaptive colors
 
 private nonisolated extension Color {
+    /// For tokens whose two arms are already `Color`s — an opacity applied to another token, say —
+    /// rather than raw sRGB components.
+    init(light: Color, dark: Color) {
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            NSColor(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light)
+        })
+    }
+
     init(light: NSColor, dark: NSColor) {
         self.init(nsColor: NSColor(name: nil) { appearance in
             if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
