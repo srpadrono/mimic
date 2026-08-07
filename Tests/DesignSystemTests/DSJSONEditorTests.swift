@@ -232,8 +232,11 @@ struct DSPanelHeaderTests {
     func headerHeightIsShared() {
         // The number matters less than the fact that there is exactly one of it. Before this, the
         // sidebar had no header, the request log had a tall one, and the inspector a third size.
-        #expect(DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height)
-        #expect(DSPanelHeader<EmptyView>.height > 0)
+        // Two type parameters now — the header gained a leading accessory slot for the tab strip
+        // and the inspector's mode rail. The assertion is unchanged in substance: the height belongs
+        // to the ladder, not to any particular specialisation of the view.
+        #expect(DSPanelHeader<EmptyView, EmptyView>.height == DSPanelHeader<Text, Text>.height)
+        #expect(DSPanelHeader<EmptyView, EmptyView>.height > 0)
     }
 
     @Test("A header renders with and without a trailing accessory")

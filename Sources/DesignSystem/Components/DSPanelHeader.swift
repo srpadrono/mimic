@@ -16,7 +16,7 @@ import SwiftUI
 ///   already looking at, not a headline competing with the content.
 /// - **Controls are trailing and compact.** Anything that needs more room than that belongs in the
 ///   panel body, not in its chrome.
-public struct DSPanelHeader<Accessory: View>: View {
+public struct DSPanelHeader<Leading: View, Accessory: View>: View {
     /// Shared across every panel so headers line up across the window. Matches the height of a
     /// small control plus its padding, which is the smallest a row with buttons can honestly be.
     ///
@@ -29,6 +29,7 @@ public struct DSPanelHeader<Accessory: View>: View {
     private let subtitle: String?
     private let identifier: String
     private let host: DSSurfaceHost
+    private let leading: Leading?
     private let accessory: Accessory?
 
     public init(
@@ -36,22 +37,40 @@ public struct DSPanelHeader<Accessory: View>: View {
         subtitle: String? = nil,
         identifier: String,
         host: DSSurfaceHost = .content,
+        @ViewBuilder leading: () -> Leading,
         @ViewBuilder accessory: () -> Accessory
     ) {
         self.title = title
         self.subtitle = subtitle
         self.identifier = identifier
         self.host = host
+        self.leading = leading()
         self.accessory = accessory()
     }
 
     public var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            Text(title)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColors.labelSecondary)
-                .fixedSize()
-                .accessibilityIdentifier("ds.panelheader.title.\(identifier)")
+            // The leading slot: a tab strip, a breadcrumb, a mode rail. It comes *before* the title
+            // rather than replacing it, because a panel that has both — the request log has a title
+            // and a filter row — should not have to choose which one is "the header".
+            //
+            // Not wrapped in its own identifier. Naming a container here would rename every control
+            // inside it, which is the flattening AGENTS.md rule 8 documents; the slot's contents keep
+            // their own names and their own labels.
+            if let leading {
+                leading
+            }
+
+            if !title.isEmpty {
+                Text(title)
+                    // 12pt semibold, up from 10pt medium. A panel's own name was the quietest text in
+                    // its own bar — quieter than the count beside it — which is why three panels grew
+                    // their own louder title rows before this component existed.
+                    .font(DSTypography.controlLabel)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .fixedSize()
+                    .accessibilityIdentifier("ds.panelheader.title.\(identifier)")
+            }
 
             if let subtitle {
                 // The subtitle yields, the title does not. With `.fixedSize()` here too, a long one
@@ -65,7 +84,9 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // header stopped reporting its count. Plain compression truncates only when the row
                 // genuinely runs out of room, which is the behaviour wanted.
                 Text(subtitle)
-                    .font(DSTypography.caption)
+                    // SF Mono with tabular figures: this slot is a count, and a count that shifts
+                    // width as it climbs from 9 to 10 makes the whole row twitch while traffic runs.
+                    .font(DSTypography.Figure.small)
                     // `labelSecondary`, not tertiary. This slot is where a panel states its count —
                     // "5 requests", "3 scenarios" — and `DSTabStrip` justifies its number-less badge
                     // on exactly that. It is text a user reads, and 36% alpha measures 2.48:1 on
@@ -103,7 +124,30 @@ public struct DSPanelHeader<Accessory: View>: View {
     }
 }
 
-extension DSPanelHeader where Accessory == EmptyView {
+extension DSPanelHeader where Leading == EmptyView {
+    /// A header with trailing controls and no leading accessory — the common shape.
+    public init(
+        _ title: String,
+        subtitle: String? = nil,
+        identifier: String,
+        host: DSSurfaceHost = .content,
+        @ViewBuilder accessory: () -> Accessory
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.identifier = identifier
+        self.host = host
+        self.leading = nil
+        self.accessory = accessory()
+    }
+}
+
+/// There is deliberately no "leading accessory, no trailing controls" convenience. Both slots take a
+/// single `@ViewBuilder` closure, so a trailing-closure call site could not tell the two overloads
+/// apart — `DSPanelHeader("x", identifier: "y") { … }` is ambiguous. A header that wants only a
+/// leading slot passes `accessory: { EmptyView() }` explicitly, which is one extra line at the two
+/// call sites that need it and no guessing at any of the others.
+extension DSPanelHeader where Leading == EmptyView, Accessory == EmptyView {
     public init(
         _ title: String,
         subtitle: String? = nil,
@@ -114,6 +158,7 @@ extension DSPanelHeader where Accessory == EmptyView {
         self.subtitle = subtitle
         self.identifier = identifier
         self.host = host
+        self.leading = nil
         self.accessory = nil
     }
 }
