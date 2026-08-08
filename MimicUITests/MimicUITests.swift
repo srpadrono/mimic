@@ -1774,6 +1774,73 @@ final class MimicUITests: XCTestCase {
             _ = workspace.autosaveSavingIndicator.waitForNonExistence(timeout: 4)
         }
     }
+
+    // MARK: - Command palette (issue #49)
+
+    /// \u{2318}\u{21E7}P opens the palette, and it lists commands nothing here typed in by hand.
+    ///
+    /// **NOT YET EXECUTED.** Written on a machine whose Automation Mode is disabled, so XCUITest
+    /// cannot start at all. Recorded as owed in `docs/redesign/test-inventory.md`, not as passing.
+    @MainActor
+    func testCommandPaletteOpensAndFiltersFromTheCatalog() throws {
+        launchApp()
+        createProjectViaUI(name: "Palette Project")
+        XCTAssertTrue(workspace.assertVisible())
+
+        app.typeKey("p", modifierFlags: [.command, .shift])
+
+        let field = app.textFields["commandPalette.query"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Cmd-Shift-P should open the palette")
+
+        // Asserting on a specific catalog command rather than on a row count: the count is whatever
+        // the catalog holds today, and would break on every command added afterwards.
+        field.typeText("serverst")
+        XCTAssertTrue(
+            app.staticTexts["commandPalette.row.serverStart"].waitForExistence(timeout: 3),
+            "Typing a command's prefix should surface it"
+        )
+    }
+
+    /// Escape leaves without running anything. **NOT YET EXECUTED** — see above.
+    @MainActor
+    func testCommandPaletteEscapeDismissesWithoutRunning() throws {
+        launchApp()
+        createProjectViaUI(name: "Palette Escape")
+        XCTAssertTrue(workspace.assertVisible())
+
+        app.typeKey("p", modifierFlags: [.command, .shift])
+        let field = app.textFields["commandPalette.query"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+
+        app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
+
+        // `waitForNonExistence` rather than reading `exists` straight after the keystroke: dismissal
+        // is animated, so the immediate read races the animation and can pass for the wrong reason.
+        XCTAssertTrue(field.waitForNonExistence(timeout: 3), "esc should close the palette")
+    }
+
+    /// A command needing arguments must not run on Return, and the footer must say why.
+    /// **NOT YET EXECUTED** — see above.
+    @MainActor
+    func testCommandPaletteRefusesCommandsThatNeedArguments() throws {
+        launchApp()
+        createProjectViaUI(name: "Palette Args")
+        XCTAssertTrue(workspace.assertVisible())
+
+        app.typeKey("p", modifierFlags: [.command, .shift])
+        let field = app.textFields["commandPalette.query"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+
+        field.typeText("projectrename")
+        XCTAssertTrue(
+            app.staticTexts["commandPalette.needsArguments"].waitForExistence(timeout: 3),
+            "A command with a required parameter should say it needs arguments"
+        )
+
+        // Return is inert for such a command, so the palette is still open afterwards.
+        app.typeKey(XCUIKeyboardKey.return, modifierFlags: [])
+        XCTAssertTrue(field.exists, "Return must not run a command that has no arguments yet")
+    }
 }
 
 // MARK: - XCUIElement Helpers

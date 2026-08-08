@@ -318,6 +318,21 @@ struct WorkspaceView: View {
             Text("Another process is using port \(alertData.conflictingPort). Try port \(alertData.suggestedPort) instead?")
         }
         // New endpoint sheet
+        .sheet(isPresented: $appState.showCommandPalette) {
+            CommandPaletteView(
+                entries: CommandPalette.entries,
+                // No fallback command. If an entry cannot be constructed the right answer is to do
+                // nothing — substituting some default would run an operation the user did not pick,
+                // and `ping` in particular would look like success. `CommandPaletteView` already
+                // refuses to fire Return for an entry that needs arguments, so this is the second
+                // guard on the same rule rather than the only one.
+                onRun: { entry in
+                    guard let command = CommandPalette.command(for: entry) else { return }
+                    appState.runFromPalette(command)
+                },
+                onDismiss: { appState.showCommandPalette = false }
+            )
+        }
         .sheet(isPresented: $appState.showNewEndpointSheet) {
             NewEndpointSheet { name, method, path in
                 if let endpoint = appState.addEndpoint(name: name, method: method, path: path) {

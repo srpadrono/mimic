@@ -38,6 +38,9 @@ final class AppState {
     /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
     /// and an open workspace — File ▸ New Project has to work from either.
     var showNewProjectSheet = false
+    /// The command palette (⌘⇧P). Scene-level state, because the menu item that opens it lives above
+    /// the window that draws it.
+    var showCommandPalette = false
     /// A menu or CLI request to switch the sidebar to a given navigator. Consumed by `WorkspaceView`
     /// and reset, because the menu sits above the window that owns the sidebar's state.
     ///
@@ -517,6 +520,35 @@ final class AppState {
     func scheduleAutosave() { projects.scheduleAutosave() }
 
     // MARK: - Command plumbing
+
+    /// Runs a command chosen from the command palette, and reports whether anything happened.
+    ///
+    /// The palette is a second front end onto the vocabulary the CLI and control API already use, so
+    /// project-scoped commands go straight to `run` and therefore to `ProjectCommandExecutor` — the
+    /// same pure Domain code, no rule implemented twice.
+    ///
+    /// The exceptions are the genuinely stateful operations `AGENTS.md` names as living outside the
+    /// executor: server lifecycle and the request log. They are handled here rather than being taught
+    /// to the executor, because that boundary is the reason the executor stays pure.
+    @discardableResult
+    func runFromPalette(_ command: ControlCommand) -> Bool {
+        switch command {
+        case .serverStart:
+            startServer()
+            return true
+        case .serverStop:
+            stopServer()
+            return true
+        case .reset:
+            requestLogs = []
+            return true
+        default:
+            // A read-only command (`state`, `endpointList`, `ping`) returns a result the palette has
+            // nowhere to show, so it counts as handled without claiming a mutation. Surfacing those
+            // results is what the palette's own output pane would be for, and there isn't one yet.
+            return run(command) != nil
+        }
+    }
 
     /// Applies a control command to the open project, persisting and pushing to the engine on success.
     ///

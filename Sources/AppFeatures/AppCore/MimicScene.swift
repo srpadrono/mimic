@@ -72,6 +72,14 @@ public struct MimicScene: Scene {
                     .disabled(appState.currentProject == nil)
             }
 
+            // ⌘⇧P, the palette shortcut people arrive with from other editors. Not ⇧⌘O, which is
+            // Xcode's Open Quickly and means "find a file" rather than "run a command".
+            CommandGroup(after: .toolbar) {
+                Button("Command Palette\u{2026}") { appState.showCommandPalette = true }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .disabled(appState.currentProject == nil)
+            }
+
             CommandMenu("Server") {
                 Button(serverToggleTitle) {
                     Self.toggleServer(
