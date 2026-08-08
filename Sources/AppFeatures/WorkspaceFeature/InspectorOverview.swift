@@ -74,43 +74,19 @@ struct InspectorOverview: View {
                     row("Journeys", value: "\(summary.journeyCount)")
                 }
 
-                section("Active journey") {
-                    if let name = summary.activeJourneyName {
-                        row("Name", value: name, valueColor: DSColors.accentText)
-                        if let progress = summary.activeJourneyProgress {
-                            row("Progress", value: progress)
-                        }
-                        // `DSButton`'s ghost variant, not `.buttonStyle(.link)` and no longer a
-                        // hand-rolled `.plain` button either. Link style was the only AppKit link in
-                        // the window: it draws its own blue and its own underline-on-hover, neither of
-                        // which matches the accent text buttons around it, and it gave a ~13pt-tall
-                        // hit target. What replaced it — accent text, 20pt tall, `accentSubtle` under
-                        // the pointer — was `DSButton(.ghost, .small)` written out by hand, down to
-                        // the corner radius. So it is that now, and the copy bar's three are too.
-                        // "Show", not "Open". It used to open the standalone journeys window; it now
-                        // switches the navigator to its Journeys tab, which is where journeys live.
-                        // "Open" promises a window, and a label that names the wrong outcome is worse
-                        // than a vague one — you press it expecting somewhere new and the sidebar
-                        // changes underneath you instead.
-                        DSButton(
-                            "Show journeys",
-                            variant: .ghost,
-                            size: .small,
-                            identifier: "inspector.overview.openJourneys",
-                            action: onShowJourneys
-                        )
-                        .accessibilityIdentifier("inspector.overview.openJourneys")
-                        // A control that acts on the journey above it, so it starts where that
-                        // journey's name does rather than at the panel edge. Subtracting the button's
-                        // own horizontal padding — `sm` at this size — keeps the text on the seam.
-                        .padding(.leading, InspectorRowMetrics.overviewValueInset - DSSpacing.sm)
-                        .padding(.trailing, DSSpacing.md)
-                        .padding(.vertical, DSSpacing.xs + 1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        note("None — endpoints answer directly.")
-                    }
-                }
+                // The one section that becomes a card, and only while a journey is running.
+                //
+                // The design draws every section as a card on `surfaceElevated`. Most of them do not
+                // earn it: this panel is already a label/value list on section bands, which is the
+                // treatment `AGENTS.md` prescribes and which the request detail beside it uses — so
+                // cards there would be chrome added to say nothing new.
+                //
+                // An active journey is different. It *overrides every endpoint in the project*, so
+                // it is the rare piece of state that has earned a fill, and the card is what stops
+                // "a journey is answering right now" reading like one more row of configuration.
+                // When none is active the section stays a plain band, because there is nothing to
+                // shout about.
+                activeJourneySection
 
                 section("Traffic") {
                     row("Requests", value: "\(summary.requestCount)")
@@ -215,6 +191,98 @@ struct InspectorOverview: View {
         case .running: DSColors.serverRunning
         case .error: DSColors.destructive
         default: DSColors.labelSecondary
+        }
+    }
+
+    /// The active journey, drawn as a card while one is running.
+    @ViewBuilder
+    private var activeJourneySection: some View {
+        if summary.activeJourneyName != nil {
+            section("Active journey") {
+                        if let name = summary.activeJourneyName {
+                            row("Name", value: name, valueColor: DSColors.accentText)
+                            if let progress = summary.activeJourneyProgress {
+                                row("Progress", value: progress)
+                            }
+                            // `DSButton`'s ghost variant, not `.buttonStyle(.link)` and no longer a
+                            // hand-rolled `.plain` button either. Link style was the only AppKit link in
+                            // the window: it draws its own blue and its own underline-on-hover, neither of
+                            // which matches the accent text buttons around it, and it gave a ~13pt-tall
+                            // hit target. What replaced it — accent text, 20pt tall, `accentSubtle` under
+                            // the pointer — was `DSButton(.ghost, .small)` written out by hand, down to
+                            // the corner radius. So it is that now, and the copy bar's three are too.
+                            // "Show", not "Open". It used to open the standalone journeys window; it now
+                            // switches the navigator to its Journeys tab, which is where journeys live.
+                            // "Open" promises a window, and a label that names the wrong outcome is worse
+                            // than a vague one — you press it expecting somewhere new and the sidebar
+                            // changes underneath you instead.
+                            DSButton(
+                                "Show journeys",
+                                variant: .ghost,
+                                size: .small,
+                                identifier: "inspector.overview.openJourneys",
+                                action: onShowJourneys
+                            )
+                            .accessibilityIdentifier("inspector.overview.openJourneys")
+                            // A control that acts on the journey above it, so it starts where that
+                            // journey's name does rather than at the panel edge. Subtracting the button's
+                            // own horizontal padding — `sm` at this size — keeps the text on the seam.
+                            .padding(.leading, InspectorRowMetrics.overviewValueInset - DSSpacing.sm)
+                            .padding(.trailing, DSSpacing.md)
+                            .padding(.vertical, DSSpacing.xs + 1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            note("None — endpoints answer directly.")
+                        }
+                    }
+            .background {
+                RoundedRectangle(cornerRadius: DSCornerRadius.lgPlus)
+                    .fill(DSColors.accent.opacity(0.11))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: DSCornerRadius.lgPlus)
+                    .stroke(DSColors.accent.opacity(0.34), lineWidth: 0.5)
+            }
+            .padding(.horizontal, DSSpacing.smPlus)
+            .padding(.vertical, DSSpacing.xs)
+        } else {
+            section("Active journey") {
+                        if let name = summary.activeJourneyName {
+                            row("Name", value: name, valueColor: DSColors.accentText)
+                            if let progress = summary.activeJourneyProgress {
+                                row("Progress", value: progress)
+                            }
+                            // `DSButton`'s ghost variant, not `.buttonStyle(.link)` and no longer a
+                            // hand-rolled `.plain` button either. Link style was the only AppKit link in
+                            // the window: it draws its own blue and its own underline-on-hover, neither of
+                            // which matches the accent text buttons around it, and it gave a ~13pt-tall
+                            // hit target. What replaced it — accent text, 20pt tall, `accentSubtle` under
+                            // the pointer — was `DSButton(.ghost, .small)` written out by hand, down to
+                            // the corner radius. So it is that now, and the copy bar's three are too.
+                            // "Show", not "Open". It used to open the standalone journeys window; it now
+                            // switches the navigator to its Journeys tab, which is where journeys live.
+                            // "Open" promises a window, and a label that names the wrong outcome is worse
+                            // than a vague one — you press it expecting somewhere new and the sidebar
+                            // changes underneath you instead.
+                            DSButton(
+                                "Show journeys",
+                                variant: .ghost,
+                                size: .small,
+                                identifier: "inspector.overview.openJourneys",
+                                action: onShowJourneys
+                            )
+                            .accessibilityIdentifier("inspector.overview.openJourneys")
+                            // A control that acts on the journey above it, so it starts where that
+                            // journey's name does rather than at the panel edge. Subtracting the button's
+                            // own horizontal padding — `sm` at this size — keeps the text on the seam.
+                            .padding(.leading, InspectorRowMetrics.overviewValueInset - DSSpacing.sm)
+                            .padding(.trailing, DSSpacing.md)
+                            .padding(.vertical, DSSpacing.xs + 1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            note("None — endpoints answer directly.")
+                        }
+                    }
         }
     }
 }
