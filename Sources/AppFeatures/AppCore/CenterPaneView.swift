@@ -43,7 +43,15 @@ struct CenterPaneView: View {
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
                     onUpdateScenario: { appState.updateActiveScenario(endpointID: endpointID, statusCode: $0, headers: $1, body: $2) },
                     onUpdateDelay: { appState.updateEndpointDelay(id: endpointID, delayMs: $0) },
-                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) }
+                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) },
+                    onActivateScenario: { appState.setActiveScenario(endpointID: endpointID, scenarioID: $0) }
+                    // No `onCreateScenario` yet, so the control omits "New scenario…". The design
+                    // asks for it, and it is deliberately deferred rather than faked: `NewScenarioSheet`
+                    // is presented by `InspectorPanelView` from its own local state, and adding a
+                    // second presenter here is the thing `ContentView` warns about a few files over —
+                    // "one sheet with one presenter is what stops the two branches drifting into two
+                    // slightly different dialogs". Re-homing that presenter belongs with the inspector
+                    // rebuild, which is already rewriting the panel that owns it.
                 )
             )
         } else {

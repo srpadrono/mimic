@@ -243,6 +243,18 @@ struct EndpointEditorView: View {
 
             Spacer(minLength: DSSpacing.sm)
 
+            // The active scenario, permanently, beside the thing it answers for. This is the fix for
+            // "scenario switching is invisible": it used to be stated only in a jump-bar crumb that
+            // has since been deleted and in one of the inspector's three modes.
+            DSScenarioControl(
+                options: endpoint.scenarios.map {
+                    DSScenarioControl.Option(id: $0.id, name: $0.name, statusCode: $0.statusCode)
+                },
+                activeID: endpoint.activeScenarioID,
+                onSelect: actions.onActivateScenario,
+                onCreate: actions.onCreateScenario
+            )
+
             moreMenu
         }
         .padding(.horizontal, DSSpacing.md)

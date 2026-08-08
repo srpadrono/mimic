@@ -317,4 +317,33 @@ struct ContrastTests {
         #expect(w < floor)
         #expect(d < floor)
     }
+
+    @Test("A status code on the scenario control's accent fill clears the floor")
+    func statusCodeOnScenarioControlFill() {
+        // The handoff specifies this code "in the status colour". Measured on the composited
+        // `accent @ 11%` fill, the plain hues are 4.10:1 for a 2xx, 4.10 for a 4xx and 4.41 for a
+        // 5xx in light — all three below the floor. `httpStatusDeepColor` is what the control draws.
+        for dark in [false, true] {
+            for code in [200, 301, 404, 500] {
+                let r = ratio(DSColors.httpStatusDeepColor(for: code),
+                              onFill: DSColors.accent, alpha: 0.11,
+                              over: DSColors.surfacePanelHeader, dark: dark)
+                #expect(r >= floor, "status \(code) on the scenario control \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+            // And on its hover fill, which is deeper still.
+            for code in [200, 404, 500] {
+                let r = ratio(DSColors.httpStatusDeepColor(for: code),
+                              onFill: DSColors.accent, alpha: 0.16,
+                              over: DSColors.surfacePanelHeader, dark: dark)
+                #expect(r >= floor, "status \(code) on hover \(dark ? "dark" : "light"): \(String(format: "%.2f", r)):1")
+            }
+        }
+    }
+
+    @Test("The plain status colours still fail there — which is why the deep helper exists")
+    func plainStatusColoursFailOnTheAccentFill() {
+        let r = ratio(DSColors.httpStatusColor(for: 200), onFill: DSColors.accent, alpha: 0.11,
+                      over: DSColors.surfacePanelHeader, dark: false)
+        #expect(r < floor, "if this passes now, httpStatusDeepColor can be re-derived")
+    }
 }

@@ -434,6 +434,26 @@ public nonisolated enum DSColors {
 
     // MARK: - HTTP status code color
 
+    /// The status colour when the code is text **on a tinted fill** rather than on a plain surface.
+    ///
+    /// Every class needs this, not just the failures. On the scenario control's `accent @ 11%` fill
+    /// the plain hues measure 4.10:1 (2xx), 4.10 (4xx) and 4.41 (5xx) in light — all three below the
+    /// floor, which is exactly the defect the handoff's spec would have shipped by saying the code is
+    /// drawn "in the status colour".
+    ///
+    /// 3xx is the interesting one: its plain colour *is* ``accent``, so on an accent fill it would be
+    /// a hue on a tint of itself — the construction this palette fails at most reliably. It takes
+    /// ``accentText`` here.
+    public static func httpStatusDeepColor(for statusCode: Int) -> Color {
+        switch statusCode {
+        case 200..<300: successDeep
+        case 300..<400: accentText
+        case 400..<500: warningDeep
+        case 500..<600: destructiveDeep
+        default: labelSecondary
+        }
+    }
+
     /// Maps an HTTP status code to a semantic color.
     public static func httpStatusColor(for statusCode: Int) -> Color {
         switch statusCode {

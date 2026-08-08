@@ -250,6 +250,19 @@ struct EndpointEditorPage {
         return app.descendants(matching: .any).matching(identifier: "endpointEditor.path").firstMatch
     }
 
+    /// The active-scenario control in the editor's title row.
+    ///
+    /// By label. It is a `Menu` inside `endpointEditor`, a `.contain`-paired named container, so per
+    /// AGENTS.md rule 8 the identifier may not survive — and a SwiftUI `Menu` realises as a
+    /// `MenuButton` rather than a `Button`, which is the other half of the same trap.
+    var scenarioControl: XCUIElement {
+        let asMenu = app.menuButtons["Active scenario"].firstMatch
+        if asMenu.exists { return asMenu }
+        let asButton = app.buttons["Active scenario"].firstMatch
+        if asButton.exists { return asButton }
+        return app.descendants(matching: .any).matching(identifier: "editor.scenarioControl").firstMatch
+    }
+
     /// The centre pane's history pair, which replaced the jump bar's.
     ///
     /// Targeted by **label**, not by `editor.navigation.back`. The buttons sit inside two
@@ -1226,6 +1239,30 @@ final class MimicUITests: XCTestCase {
                       "/api/users should be visible after clearing search")
         XCTAssertTrue(postsPath.waitForExistence(timeout: 3),
                       "/api/posts should be visible after clearing search")
+    }
+
+    // MARK: - Scenario control (issue #39)
+
+    /// The active scenario is stated in the editor's own header, and switching from there applies.
+    ///
+    /// The behaviour this covers is the one the redesign calls out by name: before it, an endpoint's
+    /// active scenario was visible only in the inspector's scenario list — one of three modes that
+    /// panel shows — so you could edit a response without ever seeing which scenario you were editing.
+    @MainActor
+    func testEditorHeaderShowsAndSwitchesTheActiveScenario() throws {
+        launchApp()
+        createProjectViaUI(name: "Scenario Header")
+        createEndpointViaUI(name: "Switchable", path: "/api/switchable")
+
+        XCTAssertTrue(endpointEditor.scenarioControl.waitForExistence(timeout: 5),
+                      "The editor header should state the active scenario")
+
+        // A new endpoint ships with one scenario, so the control names it rather than showing "None".
+        let value = endpointEditor.scenarioControl.value as? String ?? ""
+        XCTAssertFalse(value.contains("None"),
+                       "A new endpoint has a default scenario, so the control should name it — got \(value)")
+        XCTAssertTrue(value.contains("200"),
+                      "The control should show what the active scenario returns — got \(value)")
     }
 
     // MARK: - Centre-pane navigation (issue #25)
