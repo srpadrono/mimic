@@ -88,7 +88,16 @@ public struct MimicScene: Scene {
                         stop: appState.stopServer
                     )
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                // ⌘R, not ⇧⌘R. The three R bindings only make sense stated together:
+                //
+                //   ⌘R    start/stop the mock server
+                //   ⌥⌘R   restart the active journey
+                //   ⇧⌘R   (free)
+                //
+                // Starting the server is this app's Run, and ⌘R is Run in the app this one is
+                // measured against. It was on ⇧⌘R for no recorded reason while ⌘R sat unused, which
+                // put the primary action one modifier further away than the secondary one beside it.
+                .keyboardShortcut("r", modifiers: .command)
                 .disabled(!canToggleServer)
             }
 

@@ -300,3 +300,37 @@ reach a loopback port, so the token and the `Origin`/`Host` checks are what actu
   written once, so the window and the script cannot drift.
 - **Operations are data.** A command is a value (`ControlCommand`), which is what makes it replayable,
   diffable, and self-describing.
+
+## Keyboard shortcuts in the window
+
+Every shortcut the app binds, in one table — because `README.md` claimed a "full keyboard path" and,
+measured, two of the five it implied were unbuilt and one was bound somewhere other than where the
+claim suggested.
+
+| Shortcut | Action |
+|---|---|
+| `⌘N` | New project… |
+| `⇧⌘W` | Close project |
+| `⇧⌘P` | Command palette |
+| `⌘R` | Start / stop the mock server |
+| `⌘1` / `⌘2` | Endpoints / Journeys navigator |
+| `⇧⌘J` | Show journeys |
+| `⌥⌘R` | Restart the active journey |
+| `⌥⌘→` | Advance the active journey |
+
+**The three R bindings are the ones worth stating together**, because they are easy to get wrong
+individually: `⌘R` runs the server, `⌥⌘R` restarts the journey, and `⇧⌘R` is free. The server toggle
+used to be on `⇧⌘R` for no recorded reason while `⌘R` sat unused — which put the app's *primary*
+action one modifier further away than the secondary action next to it. Starting the mock server is
+this app's Run, and `⌘R` is Run in the app this one is measured against.
+
+`⌘W` is deliberately left to AppKit. Taking it for "close project" would leave no way to close the
+window.
+
+### Not yet bound
+
+- **`⌘F`** does not focus a filter field. The navigator and request-log filters are reachable only by
+  clicking. This is an acceptance criterion of the command-palette issue and is not done.
+- **Arrow keys do not move through the request log.** Rows are tap targets inside a `LazyVStack`
+  rather than a `List` — deliberately, for the row heights and the multi-select behaviour — so there
+  is no responder chain to arrow through. Making this work is a real change, not a binding.
