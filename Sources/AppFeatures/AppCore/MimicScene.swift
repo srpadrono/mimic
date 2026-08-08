@@ -78,6 +78,13 @@ public struct MimicScene: Scene {
                 Button("Command Palette\u{2026}") { appState.showCommandPalette = true }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                     .disabled(appState.currentProject == nil)
+
+                // ⌘F goes to the navigator's filter, which is the one the window pins above a list
+                // that can grow past the pane. The request log's filter is a different control and
+                // is not wired yet; `docs/CLI.md` says so rather than leaving it to be discovered.
+                Button("Filter Endpoints") { appState.focusFilterRequest += 1 }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(appState.currentProject == nil)
             }
 
             CommandMenu("Server") {

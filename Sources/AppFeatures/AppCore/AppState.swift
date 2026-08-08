@@ -41,6 +41,12 @@ final class AppState {
     /// The command palette (⌘⇧P). Scene-level state, because the menu item that opens it lives above
     /// the window that draws it.
     var showCommandPalette = false
+    /// Bumped by ⌘F to put the keyboard in the navigator's filter field.
+    ///
+    /// A counter rather than a `Bool`, because the interesting event is *pressing ⌘F again*. A flag
+    /// set to true stays true, so a second press after the user has clicked elsewhere would change
+    /// nothing and the shortcut would appear to work exactly once per launch.
+    var focusFilterRequest = 0
     /// A menu or CLI request to switch the sidebar to a given navigator. Consumed by `WorkspaceView`
     /// and reset, because the menu sits above the window that owns the sidebar's state.
     ///

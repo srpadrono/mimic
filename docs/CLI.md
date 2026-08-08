@@ -312,6 +312,7 @@ claim suggested.
 | `⌘N` | New project… |
 | `⇧⌘W` | Close project |
 | `⇧⌘P` | Command palette |
+| `⌘F` | Filter endpoints (focuses the navigator's filter field) |
 | `⌘R` | Start / stop the mock server |
 | `⌘1` / `⌘2` | Endpoints / Journeys navigator |
 | `⇧⌘J` | Show journeys |
@@ -329,8 +330,9 @@ window.
 
 ### Not yet bound
 
-- **`⌘F`** does not focus a filter field. The navigator and request-log filters are reachable only by
-  clicking. This is an acceptance criterion of the command-palette issue and is not done.
+- **`⌘F` reaches the navigator's filter only.** The request log's filter is a separate control and is
+  still click-only. The shortcut goes where a list can grow past its pane, which is the case the
+  keyboard actually helps with.
 - **Arrow keys do not move through the request log.** Rows are tap targets inside a `LazyVStack`
   rather than a `List` — deliberately, for the row heights and the multi-select behaviour — so there
   is no responder chain to arrow through. Making this work is a real change, not a binding.

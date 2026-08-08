@@ -4,6 +4,16 @@ import DesignSystem
 
 /// Sidebar — endpoint list with search filtering and group collapse/expand.
 struct SidebarView: View {
+    /// ⌘F lands here. Owned by the sidebar rather than by `AppState`, because focus is a property of
+    /// the view that has the field; `AppState` only carries the *request*.
+    @FocusState private var isFilterFocused: Bool
+
+    /// Bumped by ⌘F. A plain parameter, **not** `@Environment(AppState.self)` — this view is
+    /// constructed directly by the rendering tests, and an environment lookup for a missing
+    /// `@Observable` is a hard trap, not a nil. Reaching for the environment here took the whole
+    /// AppFeatures suite from 174 tests to 1 with `Fatal error: No Observable object of type
+    /// AppState found`, which reads as an unrelated crash rather than as a new dependency.
+    var focusFilterRequest: Int = 0
     let projectName: String?
     let endpoints: [Endpoint]
     @Binding var selectedEndpointID: UUID?
@@ -26,6 +36,7 @@ struct SidebarView: View {
     }
 
     public init(
+        focusFilterRequest: Int = 0,
         projectName: String?,
         endpoints: [Endpoint],
         selectedEndpointID: Binding<UUID?>,
@@ -34,6 +45,7 @@ struct SidebarView: View {
         onAddEndpoint: @escaping () -> Void
     ) {
         self.init(
+            focusFilterRequest: focusFilterRequest,
             projectName: projectName,
             endpoints: endpoints,
             selectedEndpointID: selectedEndpointID,
@@ -46,6 +58,7 @@ struct SidebarView: View {
     }
 
     init(
+        focusFilterRequest: Int = 0,
         projectName: String?,
         endpoints: [Endpoint],
         selectedEndpointID: Binding<UUID?>,
@@ -55,6 +68,7 @@ struct SidebarView: View {
         initialSearchText: String,
         initialCollapsedSections: Set<String>
     ) {
+        self.focusFilterRequest = focusFilterRequest
         self.projectName = projectName
         self.endpoints = endpoints
         self._selectedEndpointID = selectedEndpointID
@@ -77,8 +91,10 @@ struct SidebarView: View {
                     scopeID: $methodScopeID,
                     scopes: Self.methodScopes,
                     placeholder: "Filter endpoints",
-                    identifier: "sidebar.filter"
+                    identifier: "sidebar.filter",
+                    focused: $isFilterFocused
                 )
+                .onChange(of: focusFilterRequest) { _, _ in isFilterFocused = true }
                 .padding(.horizontal, DSSpacing.sm)
                 .padding(.vertical, DSSpacing.sm)
             }

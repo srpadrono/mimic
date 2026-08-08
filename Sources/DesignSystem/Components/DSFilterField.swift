@@ -36,18 +36,45 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
 
+    /// Lets a caller put the keyboard in this field — ⌘F, in practice.
+    ///
+    /// Optional, and defaulted, because most call sites do not drive focus and should not have to
+    /// declare a `FocusState` to say so. `@FocusState.Binding` cannot be made optional directly, so
+    /// this is a plain closure-free wrapper: the caller passes its own binding and the field applies
+    /// `.focused()` only when one is present. Without the `if`, a synthesised always-false binding
+    /// would *steal* focus back from whatever the user clicked into.
+    private let externalFocus: FocusState<Bool>.Binding?
+
     public init(
         text: Binding<String>,
         scopeID: Binding<String>,
         scopes: [Scope],
         placeholder: String,
-        identifier: String
+        identifier: String,
+        focused: FocusState<Bool>.Binding? = nil
     ) {
+        self.externalFocus = focused
         self._text = text
         self._scopeID = scopeID
         self.scopes = scopes
         self.placeholder = placeholder
         self.identifier = identifier
+    }
+
+    /// The field itself, with focus attached only when the caller asked for it.
+    @ViewBuilder
+    private var filterTextField: some View {
+        let field = TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(DSTypography.codeSmall)
+            .accessibilityIdentifier("\(identifier).field")
+            .accessibilityLabel(placeholder)
+
+        if let externalFocus {
+            field.focused(externalFocus)
+        } else {
+            field
+        }
     }
 
     public var body: some View {
@@ -61,11 +88,7 @@ public struct DSFilterField: View {
             // No magnifying glass. Xcode's filter bar has none, and here it would land immediately
             // beside the scope pill — two glyphs fighting over the same corner, one of which only
             // repeats what the placeholder already says.
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(DSTypography.codeSmall)
-                .accessibilityIdentifier("\(identifier).field")
-                .accessibilityLabel(placeholder)
+            filterTextField
 
             if !text.isEmpty {
                 DSClearButton(

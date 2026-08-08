@@ -625,6 +625,7 @@ struct WorkspaceView: View {
             switch navigatorTab {
             case .endpoints:
                 SidebarView(
+                    focusFilterRequest: appState.focusFilterRequest,
                     projectName: appState.currentProject?.name,
                     endpoints: currentEndpoints,
                     selectedEndpointID: $selectedEndpointID,
