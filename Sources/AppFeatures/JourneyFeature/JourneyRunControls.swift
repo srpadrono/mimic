@@ -53,7 +53,16 @@ struct JourneyRunControls: View {
         // A floor rather than a fixed height, because of the `ViewThatFits` above. The stacked
         // candidate is two rows and needs about 52; pinning the frame would hold it at one row's worth
         // of space and let it draw over whatever is underneath.
-        .frame(minHeight: DSBarHeight.controlRow)
+        // `journeyRunBar` (38), up from `controlRow` (32) — the redesign's number, and it fits: this
+        // row carries five controls and a sentence, where `controlRow` was sized for a row of small
+        // pickers.
+        //
+        // Still a **floor**, never a fixed height, and that is the part the redesign gets wrong. Its
+        // spec is "38pt, white-space: nowrap", which is verbatim the shape that caused the overdraw
+        // bug this `minHeight` exists to prevent: these controls fold to a second line at pane width,
+        // and a fixed height holds the folded layout at one row's worth of space and draws it over
+        // the step list below.
+        .frame(minHeight: DSBarHeight.journeyRunBar)
     }
 
     // MARK: - Controls

@@ -238,15 +238,36 @@ struct JourneyEditorView: View {
                 autoAdvanceToggle
             }
 
-            Grid(alignment: .leading, horizontalSpacing: DSSpacing.md, verticalSpacing: DSSpacing.sm) {
-                GridRow {
+            // The folded form: the three *definition* settings behind one popup, `autoAdvance`
+            // still inline.
+            //
+            // The redesign puts all of these behind a popup and justifies it as a layout rescue —
+            // "at this pane width three inline label+value pairs overflow and wrap mid-phrase". That
+            // bug was already fixed, by the `ViewThatFits` above. As a *hierarchy* decision it is
+            // still right: match mode, on-completion and unscripted are authoring properties that
+            // round-trip through `JourneySpec`, set once and read rarely.
+            //
+            // But the redesign counts three settings and there are four. `autoAdvance` is the only
+            // one that is a run control rather than a definition — it is the switch the
+            // `maintenance-window` template is built around, and the one people change mid-run — so
+            // it stays where the hand already is.
+            HStack(spacing: DSSpacing.md) {
+                Menu {
                     matchModePicker
                     completionPicker
-                }
-                GridRow {
                     unmatchedPicker
-                    autoAdvanceToggle
+                } label: {
+                    Text("Behaviour: \(matchModeSummary)")
+                        .font(DSTypography.label)
                 }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Match mode, completion, and how unscripted calls are answered")
+                .accessibilityIdentifier("journeyEditor.behaviourMenu")
+                .accessibilityLabel("Journey behaviour settings")
+
+                autoAdvanceToggle
             }
         }
         .font(DSTypography.label)
@@ -259,6 +280,15 @@ struct JourneyEditorView: View {
         // candidate is two rows of pickers and needs about 56, and a fixed 32 would hold the container
         // at one row's worth of space while the grid drew straight over the step list below it.
         .frame(minHeight: DSBarHeight.controlRow)
+    }
+
+    /// What the folded Behaviour popup shows on its own label, so the setting most likely to
+    /// surprise you is readable without opening it.
+    private var matchModeSummary: String {
+        switch journey.matchMode {
+        case .orderedPerEndpoint: "Ordered per route"
+        case .strictSequence: "Strict sequence"
+        }
     }
 
     /// `.small` and `.fixedSize()` on all four: one height down the row, and a control that reports

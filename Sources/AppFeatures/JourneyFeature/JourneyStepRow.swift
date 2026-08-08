@@ -17,15 +17,30 @@ struct JourneyStepRow: View {
     /// Run progress for this step, when a run is in flight.
     let progress: JourneyStepProgress?
 
-    /// The method column. Sized for `OPTIONS`, the widest method there is — the previous 58pt was
-    /// sized for `DELETE` and let the longest badge spill over the path beside it. Matches the
-    /// request log's method column, so the two lists line up when both are on screen.
-    private static let methodColumnWidth: CGFloat = 62
+    /// The method column, matching `DSMethodBadge`'s own width so the two agree.
+    ///
+    /// 44, down from 62. The badge used to be sized for `OPTIONS` at full length; with `DELETE` →
+    /// `DEL` and `OPTIONS` → `OPT` it is 44, and leaving this column at 62 would reserve 18pt of
+    /// nothing between every badge and the path beside it — the exact ragged gap a fixed-width badge
+    /// exists to prevent.
+    private static let methodColumnWidth: CGFloat = 44
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
+            // The timeline rail, drawn behind the marker rather than as a separate column. A run is
+            // a sequence, and a rail is what says so without spending a column on it — the numbers
+            // beside it already carry the order, so this only has to make the order *visible*.
+            //
+            // Full height either side of the node, and clipped by the row: the first and last rows
+            // then show half a rail each, which is what makes the line read as continuous through the
+            // list rather than as a tick per row.
             marker
                 .frame(width: 16)
+                .background {
+                    Rectangle()
+                        .fill(DSColors.accent.opacity(isExhausted || isCurrent ? 0.35 : 0.18))
+                        .frame(width: 1.5)
+                }
 
             Text("\(index + 1)")
                 .font(DSTypography.caption)
