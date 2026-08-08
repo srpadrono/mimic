@@ -39,7 +39,35 @@ extension MockServerEngineProtocol {
 final class MockServerRuntime {
     var serverState: ServerState = .stopped
     var serverConfiguration: ServerConfiguration = .default
-    var requestLogs: [RequestLog] = []
+    var requestLogs: [RequestLog] = [] {
+        didSet { recountUnmatchedIfReplaced(oldValue) }
+    }
+
+    /// How many logged requests nothing answered, maintained incrementally.
+    ///
+    /// **`WorkspaceView.body` used to compute this by scanning the whole log, twice** — once for the
+    /// toolbar and once for the inspector's overview — and that body re-evaluates on *every served
+    /// request*, because appending to `requestLogs` invalidates it. At the 1000-entry cap that is two
+    /// thousand-element scans per request, for a number that changes by at most one.
+    ///
+    /// Kept correct across all three ways the log changes: an append (below), an eviction at the cap
+    /// (below), and a wholesale replacement — `requestLogs = []` from the Clear button, or a restore.
+    /// The last one cannot be tracked incrementally, so `didSet` recounts, which is fine because it
+    /// happens when a human presses a button rather than when a request arrives.
+    private(set) var unmatchedCount: Int = 0
+
+    /// Recount only when the array was replaced wholesale rather than appended to.
+    ///
+    /// The cheap discriminator is the count: `appendLog` maintains the tally itself, so if the log
+    /// grew by exactly one it has already been accounted for.
+    private func recountUnmatchedIfReplaced(_ oldValue: [RequestLog]) {
+        guard !isAppending else { return }
+        unmatchedCount = requestLogs.count { $0.outcome.isMissingConfiguration }
+    }
+
+    /// Set while `appendLog` is mutating, so `didSet` does not undo its incremental bookkeeping with
+    /// the O(n) scan this whole property exists to avoid.
+    private var isAppending = false
     var portConflictAlert: PortConflictAlertData?
     var genericStartError: String?
 
@@ -159,9 +187,20 @@ final class MockServerRuntime {
     }
 
     private func appendLog(_ entry: RequestLog) {
+        isAppending = true
+        defer { isAppending = false }
+
         requestLogs.append(entry)
+        if entry.outcome.isMissingConfiguration { unmatchedCount += 1 }
+
         if requestLogs.count > Self.maxRequestLogEntries {
-            requestLogs.removeFirst(requestLogs.count - Self.maxRequestLogEntries)
+            let overflow = requestLogs.count - Self.maxRequestLogEntries
+            // Decrement for what is evicted, rather than recounting. Past request 1,001 this runs on
+            // every single request, so a scan here would be the very thing the counter avoids.
+            for evicted in requestLogs.prefix(overflow) where evicted.outcome.isMissingConfiguration {
+                unmatchedCount -= 1
+            }
+            requestLogs.removeFirst(overflow)
         }
     }
 }

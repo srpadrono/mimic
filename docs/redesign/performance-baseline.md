@@ -61,3 +61,41 @@ swift test --filter RequestLogPerformanceTests
 
 Thresholds are deliberately loose. A benchmark that fails on a busy laptop teaches people to ignore
 it; these catch an accidental O(n²), not a few milliseconds.
+
+## What #24 changed, and what it did not
+
+The six measurements above still want Instruments. But three of the four whole-log scans in
+`WorkspaceView.body` did not need a profiler to justify removing, because they were **provably
+redundant** rather than merely slow — and `body` re-evaluates on *every served request*, since
+appending to `requestLogs` invalidates it.
+
+| Scan | Was | Now |
+|---|---|---|
+| Toolbar unmatched badge | `count { isMissingConfiguration }` — O(n) | `MockServerRuntime.unmatchedCount` — O(1) |
+| Overview unmatched count | the same scan, a second time | the same O(1) read |
+| Endpoint traffic | `.enumerated().filter().sorted().map()` — O(n log n) **plus two array allocations** | `count(where:)` — O(n), no allocation |
+| Selected-request lookup | `first(where:)` — O(n) | unchanged; see below |
+
+The third row is the one worth naming, because it is not a performance bug so much as a leftover.
+`EndpointTrafficQuery.logs(forEndpoint:in:)` built a fully sorted array of matching entries, and its
+only caller read `.isEmpty` and `.count` from it. The panel that rendered those rows was retired in
+#26; the sort outlived it by four issues. At the 1000-entry cap that is an O(n log n) sort per served
+request to produce a single integer.
+
+Two sibling helpers went with it. `summary(for:)` and `statusBreakdown(for:)` had **no production
+caller at all** after #26 — only tests, which kept passing and so kept them looking alive. That is
+the failure mode worth remembering here: a green test is not evidence that the code beneath it is
+reachable. `Tests/WorkspaceFeatureTests/EndpointTrafficTests.swift` lost three quarters of its length
+and covers strictly more of what ships.
+
+**The unmatched tally is maintained incrementally**, which needs care at exactly three points: an
+append, an eviction at the cap, and a wholesale replacement (the Clear button, or a restore). The
+first two are tracked arithmetically; the third cannot be, so `didSet` recounts — which is correct
+because it happens when a human presses a button, not when a request arrives. All three are covered
+in `MockServerRuntimeTests`, and each test asserts the tally equals the full scan it replaced.
+
+**The selected-request lookup was left alone deliberately.** It is O(n), but it only runs while a row
+is selected, it allocates nothing, and a UUID comparison across 1000 elements is not what a profiler
+would flag first. Replacing it with an index would add a second structure to keep in step with the
+eviction path — the exact bookkeeping that makes the tally above worth testing three ways — for a
+saving nobody has measured. It stays until item 1 of the list above says otherwise.

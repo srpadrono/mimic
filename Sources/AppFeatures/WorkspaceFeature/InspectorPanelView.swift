@@ -21,7 +21,10 @@ struct InspectorPanelView: View {
     let onDuplicateScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDeleteScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     /// Every request the selected endpoint answered. Already filtered by the caller.
-    let endpointTraffic: [RequestLog]
+    /// How many requests this endpoint has answered. A count, not the entries: the panel that
+    /// rendered them is gone, and passing the array meant sorting one per body evaluation to read
+    /// its length.
+    let endpointTrafficCount: Int
     /// Opens one of those requests in the request detail.
     /// Show this endpoint's traffic — scopes the request log to it rather than opening a panel.
     let onShowEndpointTraffic: (UUID) -> Void
@@ -57,7 +60,7 @@ struct InspectorPanelView: View {
         endpoint: Endpoint?,
         requestDetail: RequestDetailInspector.Context? = nil,
         overview: InspectorOverview.Summary? = nil,
-        endpointTraffic: [RequestLog] = [],
+        endpointTrafficCount: Int = 0,
         onShowJourneys: @escaping () -> Void = {},
         onCloseRequestDetail: @escaping () -> Void = {},
         onShowEndpointTraffic: @escaping (UUID) -> Void = { _ in },
@@ -69,7 +72,7 @@ struct InspectorPanelView: View {
         self.endpoint = endpoint
         self.requestDetail = requestDetail
         self.overview = overview
-        self.endpointTraffic = endpointTraffic
+        self.endpointTrafficCount = endpointTrafficCount
         self.onShowJourneys = onShowJourneys
         self.onCloseRequestDetail = onCloseRequestDetail
         self.onShowEndpointTraffic = onShowEndpointTraffic
@@ -201,14 +204,14 @@ struct InspectorPanelView: View {
                     // as the count below, which is the question anyone was actually asking:
                     // "has anything called this endpoint?"
                     HStack(spacing: DSSpacing.xs) {
-                        if let endpoint, !endpointTraffic.isEmpty {
+                        if let endpoint, endpointTrafficCount > 0 {
                             Button {
                                 onShowEndpointTraffic(endpoint.id)
                             } label: {
                                 HStack(spacing: DSSpacing.xxs) {
                                     Image(systemName: "waveform.path.ecg")
                                         .font(.system(size: 10, weight: .medium))
-                                    Text("\(endpointTraffic.count)")
+                                    Text("\(endpointTrafficCount)")
                                         .font(DSTypography.Figure.small)
                                 }
                                 .foregroundStyle(DSColors.accentText)
@@ -231,7 +234,7 @@ struct InspectorPanelView: View {
                             .animation(.easeOut(duration: DSAnimation.micro), value: isTrafficCountHovered)
                             .help("Show this endpoint's requests in the log")
                             .accessibilityIdentifier("inspector.endpointTrafficCount")
-                            .accessibilityLabel("\(endpointTraffic.count) requests answered by this endpoint")
+                            .accessibilityLabel("\(endpointTrafficCount) requests answered by this endpoint")
                         }
 
                         if let endpoint {

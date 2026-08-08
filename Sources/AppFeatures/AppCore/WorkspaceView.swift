@@ -205,7 +205,7 @@ struct WorkspaceView: View {
                         DSServerSegment(
                             serverState: appState.serverState,
                             requestCount: appState.requestLogs.count,
-                            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+                            unmatchedCount: appState.unmatchedRequestCount,
                             onStart: appState.startServer,
                             onStop: appState.stopServer,
                             // No `withAnimation`: the request log is an `NSSplitViewItem`, and AppKit
@@ -717,9 +717,9 @@ struct WorkspaceView: View {
             // the one mode you might want while working on something, unreachable while working on
             // something. Precedence is unchanged; only availability is.
             overview: inspectorOverview,
-            endpointTraffic: endpoint.map {
-                EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
-            } ?? [],
+            endpointTrafficCount: endpoint.map {
+                EndpointTrafficQuery.count(forEndpoint: $0.id, in: appState.requestLogs)
+            } ?? 0,
             onShowJourneys: { navigatorTab = .journeys },
             onCloseRequestDetail: { selectedLogIDs = [] },
             onShowEndpointTraffic: { endpointID in
@@ -779,7 +779,7 @@ struct WorkspaceView: View {
                     : "Step \((status.currentStepIndex ?? 0) + 1) of \(status.totalSteps)"
             },
             requestCount: appState.requestLogs.count,
-            unmatchedCount: appState.requestLogs.count { $0.outcome.isMissingConfiguration }
+            unmatchedCount: appState.unmatchedRequestCount
         )
     }
 

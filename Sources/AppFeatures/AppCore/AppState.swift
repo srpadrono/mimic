@@ -54,6 +54,10 @@ final class AppState {
         get { server.serverConfiguration }
         set { server.serverConfiguration = newValue }
     }
+    /// How many logged requests nothing answered. Maintained incrementally by the runtime — reading
+    /// it costs nothing, which matters because two views read it on every body evaluation.
+    var unmatchedRequestCount: Int { server.unmatchedCount }
+
     var requestLogs: [RequestLog] {
         get { server.requestLogs }
         set { server.requestLogs = newValue }

@@ -5,6 +5,11 @@ import Domain
 
 /// Answering "has anything actually called this endpoint?" from the request log the app already
 /// keeps — every `RequestLog` records the endpoint that answered it.
+///
+/// This suite used to be four times longer, covering a sort order, a summary string and a status
+/// breakdown. All three belonged to the traffic panel retired in #26, and all three kept passing
+/// afterwards with no production caller left — which is the failure mode worth naming: a green test
+/// is not evidence that the code under it is reachable. They went when the count replaced them.
 @Suite("Endpoint traffic")
 struct EndpointTrafficTests {
 
@@ -33,139 +38,45 @@ struct EndpointTrafficTests {
         )
     }
 
-    // MARK: - Filtering
+    // MARK: - Counting
 
-    @Test("Only the requests this endpoint answered come back")
-    func filtersByMatchedEndpoint() {
+    @Test("Only the requests this endpoint answered are counted")
+    func countsOnlyMatchingEndpoint() {
         let endpointID = UUID()
-        let mine = Self.log(endpointID: endpointID, path: "/mine")
-        let anotherEndpoint = Self.log(endpointID: UUID(), path: "/theirs")
-        let unmatched = Self.log(path: "/not-mocked", status: 404, outcome: .unmatched)
-        // A journey step answers without a matched endpoint, exactly as an unmatched call does —
-        // both must stay out of this endpoint's history.
-        let journey = Self.log(path: "/scripted", outcome: .journey)
+        let other = UUID()
 
-        let result = EndpointTrafficQuery.logs(
-            forEndpoint: endpointID,
-            in: [anotherEndpoint, mine, unmatched, journey]
-        )
-
-        #expect(result.map(\.id) == [mine.id])
-    }
-
-    @Test("An endpoint nothing has called has no traffic")
-    func filtersToNothingWhenUnused() {
-        let unused = UUID()
-
-        #expect(EndpointTrafficQuery.logs(forEndpoint: unused, in: []).isEmpty)
-        #expect(EndpointTrafficQuery.logs(forEndpoint: unused, in: [Self.log(endpointID: UUID())]).isEmpty)
-    }
-
-    // MARK: - Ordering
-
-    @Test("Requests come back newest first")
-    func ordersNewestFirst() {
-        let endpointID = UUID()
-        let oldest = Self.log(endpointID: endpointID, secondsAfterAnchor: 0)
-        let middle = Self.log(endpointID: endpointID, secondsAfterAnchor: 30)
-        let newest = Self.log(endpointID: endpointID, secondsAfterAnchor: 60)
-
-        // Arrival order — the order the request log itself keeps, since it appends.
-        let result = EndpointTrafficQuery.logs(forEndpoint: endpointID, in: [oldest, middle, newest])
-
-        #expect(result.map(\.id) == [newest.id, middle.id, oldest.id])
-    }
-
-    @Test("Requests sharing a timestamp keep a stable, arrival-reversed order")
-    func breaksTimestampTiesDeterministically() {
-        // `sorted(by:)` promises nothing about equal elements, so without an explicit tie-break the
-        // list could reorder itself between redraws — which reads as a bug, not as sorting.
-        let endpointID = UUID()
-        let first = Self.log(endpointID: endpointID, path: "/first")
-        let second = Self.log(endpointID: endpointID, path: "/second")
-
-        let result = EndpointTrafficQuery.logs(forEndpoint: endpointID, in: [first, second])
-
-        #expect(result.map(\.path) == ["/second", "/first"])
-    }
-
-    // MARK: - Summary
-
-    @Test("The summary counts requests and pluralises")
-    func summaryPluralises() {
-        let one = [Self.log()]
-        let twelve = (0..<12).map { Self.log(secondsAfterAnchor: TimeInterval($0)) }
-
-        #expect(EndpointTrafficQuery.summary(for: one) == "1 request")
-        #expect(EndpointTrafficQuery.summary(for: twelve) == "12 requests")
-    }
-
-    @Test("No traffic reads as a sentence rather than \"0 requests\"")
-    func summaryForEmptyInput() {
-        #expect(EndpointTrafficQuery.summary(for: []) == "No requests")
-    }
-
-    @Test("The failure clause appears only when something actually failed")
-    func summaryReportsFailures() {
-        let answered = Self.log(status: 200)
-        let unmatched = Self.log(status: 404, outcome: .unmatched)
-        let dropped = Self.log(status: nil, failureLabel: "connection-drop")
-
-        #expect(EndpointTrafficQuery.summary(for: [answered, answered]) == "2 requests")
-        #expect(EndpointTrafficQuery.summary(for: [answered, unmatched]) == "2 requests \u{00B7} 1 failed")
-        #expect(EndpointTrafficQuery.summary(for: [answered, dropped]) == "2 requests \u{00B7} 1 failed")
-        #expect(EndpointTrafficQuery.summary(for: [unmatched, dropped]) == "2 requests \u{00B7} 2 failed")
-    }
-
-    @Test("A configured 500 is an answer, not a failure")
-    func serverErrorIsNotAFailure() {
-        // The mock was told to return 500 and did. Counting it as a failure would put a warning on
-        // the one panel meant to say the endpoint is behaving as configured.
-        #expect(EndpointTrafficQuery.summary(for: [Self.log(status: 500)]) == "1 request")
-    }
-
-    // MARK: - Status breakdown
-
-    @Test("Status codes are counted, most frequent first")
-    func breaksDownStatusCodes() {
         let logs = [
-            Self.log(status: 404),
-            Self.log(status: 200),
-            Self.log(status: 500),
-            Self.log(status: 200),
-            Self.log(status: 404),
-            Self.log(status: 200),
+            Self.log(endpointID: endpointID),
+            Self.log(endpointID: other),
+            Self.log(endpointID: endpointID),
+            Self.log(endpointID: nil)
         ]
 
-        let breakdown = EndpointTrafficQuery.statusBreakdown(for: logs)
-
-        #expect(breakdown.map { $0.code } == [200, 404, 500])
-        #expect(breakdown.map { $0.count } == [3, 2, 1])
+        #expect(EndpointTrafficQuery.count(forEndpoint: endpointID, in: logs) == 2)
+        #expect(EndpointTrafficQuery.count(forEndpoint: other, in: logs) == 1)
     }
 
-    @Test("Equally common codes are ordered by code, so the row cannot reshuffle")
-    func breaksCountTiesByCode() {
-        // A dictionary has no order of its own; without the tie-break these three would come out in
-        // whatever order hashing produced on the day.
-        let logs = [Self.log(status: 503), Self.log(status: 201), Self.log(status: 404)]
+    @Test("An endpoint nothing has called counts zero")
+    func countsZeroWhenNothingMatched() {
+        let unused = UUID()
 
-        #expect(EndpointTrafficQuery.statusBreakdown(for: logs).map { $0.code } == [201, 404, 503])
+        #expect(EndpointTrafficQuery.count(forEndpoint: unused, in: []) == 0)
+        #expect(EndpointTrafficQuery.count(forEndpoint: unused, in: [Self.log(endpointID: UUID())]) == 0)
     }
 
-    @Test("A failed connection contributes no status code")
-    func excludesFailuresFromBreakdown() {
-        // A dropped connection has no status. Folding it in as a 0 would put a pill on screen for a
-        // status no server ever sent; the summary's failure clause reports it instead.
-        let logs = [Self.log(status: 200), Self.log(status: nil, failureLabel: "timeout(30000ms)")]
+    /// An unmatched call and a journey-answered call both carry a nil `matchedEndpointID`. Neither
+    /// belongs to any endpoint's history, and counting them against one would put a number beside an
+    /// endpoint that never ran.
+    @Test("Requests no endpoint answered belong to no endpoint")
+    func unattributedRequestsCountAgainstNobody() {
+        let endpointID = UUID()
 
-        let breakdown = EndpointTrafficQuery.statusBreakdown(for: logs)
+        let logs = [
+            Self.log(endpointID: endpointID),
+            Self.log(endpointID: nil, status: 404, outcome: .unmatched),
+            Self.log(endpointID: nil, outcome: .journey)
+        ]
 
-        #expect(breakdown.map { $0.code } == [200])
-        #expect(breakdown.map { $0.count } == [1])
-    }
-
-    @Test("No requests means no breakdown")
-    func breakdownForEmptyInput() {
-        #expect(EndpointTrafficQuery.statusBreakdown(for: []).isEmpty)
+        #expect(EndpointTrafficQuery.count(forEndpoint: endpointID, in: logs) == 1)
     }
 }

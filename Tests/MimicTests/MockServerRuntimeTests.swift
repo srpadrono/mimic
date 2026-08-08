@@ -212,6 +212,67 @@ struct MockServerRuntimeTests {
         #expect(updatedEndpoints.first?.map(\.name) == ["Users", "Posts"])
     }
 
+    // MARK: - The unmatched tally
+
+    @Test("Unmatched count tracks appends without rescanning the log")
+    func unmatchedCountTracksAppends() async throws {
+        let engine = FakeEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        engine.emit(RequestLog(method: .get, path: "/a", responseStatusCode: 200, outcome: .endpoint))
+        engine.emit(RequestLog(method: .get, path: "/b", responseStatusCode: 404, outcome: .unmatched))
+        engine.emit(RequestLog(method: .get, path: "/c", responseStatusCode: 404, outcome: .unmatched))
+
+        try await waitUntil { manager.requestLogs.last?.path == "/c" }
+
+        #expect(manager.unmatchedCount == 2)
+        // The tally and a full scan must agree. This is the assertion that actually protects the
+        // optimisation: it is the O(n) answer the view used to compute inline.
+        #expect(manager.unmatchedCount == manager.requestLogs.count { $0.outcome.isMissingConfiguration })
+    }
+
+    @Test("Unmatched count decrements as entries are evicted at the cap")
+    func unmatchedCountFollowsEviction() async throws {
+        let engine = FakeEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        // Every entry unmatched, so eviction is guaranteed to drop unmatched ones. If the counter
+        // only ever incremented, it would read `max + 5` here while the log holds `max`.
+        for index in 0..<(MockServerRuntime.maxRequestLogEntries + 5) {
+            engine.emit(
+                RequestLog(method: .get, path: "/miss/\(index)", responseStatusCode: 404, outcome: .unmatched)
+            )
+        }
+
+        let lastPath = "/miss/\(MockServerRuntime.maxRequestLogEntries + 4)"
+        try await waitUntil { manager.requestLogs.last?.path == lastPath }
+
+        #expect(manager.unmatchedCount == MockServerRuntime.maxRequestLogEntries)
+        #expect(manager.unmatchedCount == manager.requestLogs.count { $0.outcome.isMissingConfiguration })
+    }
+
+    @Test("Clearing the log resets the unmatched count")
+    func unmatchedCountResetsOnClear() async throws {
+        let engine = FakeEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        engine.emit(RequestLog(method: .get, path: "/x", responseStatusCode: 404, outcome: .unmatched))
+        try await waitUntil { manager.unmatchedCount == 1 }
+
+        // The Clear button's path: a wholesale replacement, which no incremental bookkeeping can
+        // follow, so `didSet` recounts. A counter that only tracked appends would stay at 1 with an
+        // empty log, and the toolbar would show a badge for traffic that is no longer there.
+        manager.requestLogs = []
+        #expect(manager.unmatchedCount == 0)
+
+        // And a restore, the other wholesale write.
+        manager.requestLogs = [
+            RequestLog(method: .get, path: "/y", responseStatusCode: 404, outcome: .unmatched),
+            RequestLog(method: .get, path: "/z", responseStatusCode: 200, outcome: .endpoint)
+        ]
+        #expect(manager.unmatchedCount == 1)
+    }
+
     @Test("Request logs are appended and capped at the maximum")
     func requestLogsAreTrimmedToMaximum() async throws {
         let engine = FakeEngine()
