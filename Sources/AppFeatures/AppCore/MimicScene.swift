@@ -44,6 +44,12 @@ public struct MimicScene: Scene {
         // starts losing columns, and `WelcomeWindow` is a 640pt list of recent projects. A scene-level
         // constant would make the welcome screen as wide as the workspace.
         .windowResizability(.contentMinSize)
+        // `.unified`, which is what produces the tall single-band toolbar the redesign draws — and on
+        // macOS 26 it is also what lets the sidebar's material run up under the titlebar, which is
+        // the "bleed" the handoff attributes to `titlebarAppearsTransparent`. That API is the
+        // pre-Big-Sur mechanism and is not what does this any more; the toolbar style plus a
+        // full-height sidebar split item is.
+        .windowToolbarStyle(.unified)
         // The redesign's reference size. Only a starting point — AppKit restores the real one per
         // window — but a first launch that opens at the size the design was drawn at is worth the
         // one line.
