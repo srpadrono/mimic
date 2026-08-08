@@ -99,6 +99,15 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 navigator
+                    // The split view's own modifier, never a `.frame`. AGENTS.md is explicit:
+                    // anything a user drags is an `NSSplitViewItem`, and handing the column a frame
+                    // fights the drag rather than configuring it — which is how one divider ended up
+                    // behaving differently from the other two.
+                    .navigationSplitViewColumnWidth(
+                        min: 220,
+                        ideal: PanelLayoutStore.Bounds.idealNavigatorWidth,
+                        max: 420
+                    )
                     // `.contain` matters: a bare `.accessibilityIdentifier` on a container *overrides*
                     // its descendants' identifiers. The search field survived this only because it used
                     // to live inside a `List`, whose rows form their own accessibility elements; once it

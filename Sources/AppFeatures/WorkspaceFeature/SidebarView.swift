@@ -184,6 +184,11 @@ struct SidebarView: View {
                                 // of width to draw nothing. Xcode sets its navigator group counts as
                                 // plain secondary text, which is what this is now.
                         }
+                        // The named rung, not whatever a 10pt glyph and an 11pt label
+                        // happen to measure. A group header names a section rather than being
+                        // one, so it takes the shortest height that seats 11pt without wedging.
+                        .frame(height: DSRowHeight.groupHeader)
+
                         .accessibilityIdentifier("sidebar.group.\(section.name)")
                     }
                 }
@@ -423,11 +428,22 @@ struct EndpointSidebarRow: View {
                     // instead of truncating, in the rows the comment above says need it most. The
                     // path carries `.layoutPriority(1)` instead, and this cap keeps a long name from
                     // crowding it.
-                    .frame(maxWidth: 120, alignment: .trailing)
+                    // 80, down from 120. Measured: the navigator's default is 300pt, and after 16pt
+                    // of insets, a 44pt badge and a 9pt gap, a 120pt trailing slot leaves the path
+                    // 103pt — about 13 characters at 12.5pt SF Mono, where `/api/v1/orders/{id}`
+                    // needs 147. At 80 the path gets 143 and an ordinary route survives.
+                    .frame(maxWidth: 80, alignment: .trailing)
+                    // Tail, not middle — and this is the one place they differ on purpose. Middle
+                    // truncation is for a *path*, where both ends carry meaning ("/api/v1/…/cancel"
+                    // still tells you what it is). A name reads left to right and its head is the
+                    // identifying part, so "Account sum…" beats "Accou…mary".
             }
         }
-        .padding(.vertical, 3)
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+        // `DSRowHeight.listRow`, not vertical padding around whatever the content measures. The row
+        // used to be "3pt either side of a 16pt badge" = 22, which is why a column of them read
+        // tighter than the request log beside it. A named rung means the two lists agree.
+        .frame(height: DSRowHeight.listRow)
+        .dsHoverHighlight(cornerRadius: DSCornerRadius.mdPlus)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("endpoint-\(endpoint.id.uuidString)")
     }

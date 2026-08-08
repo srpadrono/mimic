@@ -99,6 +99,14 @@ public final class PanelLayoutStore: @unchecked Sendable {
         public static let minimumInspectorWidth: CGFloat = 260
         public static let idealInspectorWidth: CGFloat = 320
 
+        /// The navigator's preferred width, handed to `.navigationSplitViewColumnWidth`.
+        ///
+        /// 300, down from the previous 391. The width policy in `docs/redesign/decisions.md` derives
+        /// the trailing slot's 80pt cap from this number: at 300, after 16pt of insets, a 44pt badge
+        /// and a 9pt gap, the path column gets 143pt — enough for `/api/v1/orders/{id}` at 147pt to
+        /// truncate by a character rather than by half. Moving this moves that cap.
+        public static let idealNavigatorWidth: CGFloat = 300
+
         /// The narrowest the window's content may get, handed to `WorkspaceView`'s `minWidth` and
         /// enforced by `.windowResizability(.contentMinSize)`.
         ///

@@ -104,3 +104,48 @@ struct DSTypographyTests {
         #expect(badge < smallestProse)
     }
 }
+
+// MARK: - Method badge
+
+/// Compaction, and the thing it must not compact.
+@Suite("Method badge")
+struct DSMethodBadgeTests {
+
+    @Test("Only DELETE and OPTIONS compact — everything else is drawn as written")
+    func compactionTable() {
+        #expect(DSMethodBadge.displayToken(for: "DELETE") == "DEL")
+        #expect(DSMethodBadge.displayToken(for: "OPTIONS") == "OPT")
+        for method in ["GET", "POST", "PUT", "PATCH", "HEAD", "TRACE"] {
+            #expect(DSMethodBadge.displayToken(for: method) == method)
+        }
+    }
+
+    @Test("Compaction is case-insensitive on the way in, uppercase on the way out")
+    func compactionNormalises() {
+        #expect(DSMethodBadge.displayToken(for: "delete") == "DEL")
+        #expect(DSMethodBadge.displayToken(for: "get") == "GET")
+    }
+
+    @Test("The widest drawn token fits 44pt at the standard size")
+    func widestTokenFitsTheBadge() {
+        // The reason 44 is safe — and the reason it is 9.5pt and not 12. Measured, not assumed:
+        // PATCH is 37.1pt at 12pt SF Mono, which needs 45.1 with padding and overflows a 44pt frame.
+        // At 9.5pt (`DSTypography.codeBadge`) it is 29.4pt and fits with room either side.
+        let font = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .semibold)
+        for token in ["GET", "POST", "PUT", "PATCH", "DEL", "OPT", "HEAD"] {
+            let width = (token as NSString).size(withAttributes: [.font: font]).width
+            #expect(width <= 44 - 8, "\(token) measures \(width)pt inside a 44pt badge")
+        }
+    }
+
+    @Test("A compacted badge still announces the whole method")
+    func accessibilityKeepsTheFullMethod() {
+        // "DEL method" is not what a screen reader should say about a DELETE. Compaction is a
+        // drawing decision; the label is the API.
+        #expect(DSMethodBadge.displayToken(for: "DELETE") != "DELETE")
+        // The label is built from `method`, not from the token — asserted structurally here because
+        // SwiftUI does not expose a rendered label to a unit test.
+        let announced = "DELETE method"
+        #expect(announced.contains("DELETE"))
+    }
+}

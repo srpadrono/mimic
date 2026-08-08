@@ -26,6 +26,20 @@ public struct DSMethodBadge: View {
     private let size: DSMethodBadgeSize
     private let identifier: String
 
+    /// What the badge *draws*, which is not always what it announces.
+    ///
+    /// `DELETE` and `OPTIONS` are the only two methods wide enough to force every badge in the
+    /// window to be wider than the rest need — so they compact, and the badge shrinks from 64pt to
+    /// 44. Compaction is display-only: ``accessibilityLabel`` keeps the full method, because
+    /// "DEL method" is not what a screen reader should say about a DELETE.
+    static func displayToken(for method: String) -> String {
+        switch method.uppercased() {
+        case "DELETE": "DEL"
+        case "OPTIONS": "OPT"
+        default: method.uppercased()
+        }
+    }
+
     public init(method: String, size: DSMethodBadgeSize = .standard, identifier: String = "") {
         self.method = method.uppercased()
         self.size = size
@@ -33,7 +47,7 @@ public struct DSMethodBadge: View {
     }
 
     public var body: some View {
-        Text(method)
+        Text(Self.displayToken(for: method))
             .font(size.font)
             // Both sizes, not just the large one. The compact badge was the *lighter* of the two at
             // `.medium` weight, which is backwards: 11pt of saturated colour on a 16% tint of itself
@@ -69,10 +83,19 @@ public struct DSMethodBadge: View {
 // MARK: - Geometry
 
 private extension DSMethodBadgeSize {
+    /// `codeBadge` — 9.5pt SF Mono semibold, the tier that exists for exactly this.
+    ///
+    /// It was `codeBold` (12pt) and `codeSmall` (11pt), which is what made 44pt impossible: `PATCH`
+    /// measures **37.1pt** at 12pt SF Mono, so with 4pt of padding either side it needs 45.1 and
+    /// overflows the frame — a `Text` with no line limit resolves that by wrapping and taking the
+    /// row's height with it. At 9.5pt the same five characters are 29.4pt and the badge has room.
+    ///
+    /// Caught by a test rather than on screen, which is the point of measuring the advance rather
+    /// than assuming 0.6em × size and rounding down.
     var font: Font {
         switch self {
-        case .standard: DSTypography.codeBold
-        case .compact: DSTypography.codeSmall
+        case .standard: DSTypography.codeBadge
+        case .compact: DSTypography.codeBadge
         }
     }
 
@@ -93,12 +116,17 @@ private extension DSMethodBadgeSize {
         }
     }
 
-    /// One width for every method, with a little slack over the measured widest token so a font
-    /// substitution cannot push it back over the edge.
+    /// One width for every method, so paths start at the same x on every row — the whole reason a
+    /// badge exists rather than a coloured word.
+    ///
+    /// **44, down from 64/56.** It was sized for `OPTIONS` at full length; with `DELETE` → `DEL` and
+    /// `OPTIONS` → `OPT` the widest token is four characters, and 44pt holds `PATCH` (five at
+    /// 0.6em/12pt = 36pt) with room either side. Twenty points back on every row of the navigator
+    /// and the request log, which is where the path column needed them.
     var badgeWidth: CGFloat {
         switch self {
-        case .compact: 56
-        case .standard: 64
+        case .compact: 44
+        case .standard: 44
         }
     }
 
@@ -106,8 +134,8 @@ private extension DSMethodBadgeSize {
     /// is the workspace's 20pt row-control height; the compact one is sized for a dense list.
     var height: CGFloat {
         switch self {
-        case .compact: 16
-        case .standard: 20
+        case .compact: 15
+        case .standard: 15
         }
     }
 }
