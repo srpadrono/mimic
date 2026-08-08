@@ -237,12 +237,15 @@ public actor MimicControlService: ControlHost {
         // MARK: Logs
 
         case let .logList(limit, unmatchedOnly):
-            var entries = requestLogs
             // Filtering before the limit is the useful order: "the last 20 requests I have no mock
             // for", not "whichever of the last 20 happened to be unmatched".
-            if unmatchedOnly == true {
-                entries = entries.filter(\.outcome.isMissingConfiguration)
-            }
+            //
+            // `RequestLogFilter`, shared with the window and with `AppControlHost`. This was the
+            // *third* implementation of the same predicate — headless, in-app, and in the drawer —
+            // which meant `mimic log list --unmatched` against a daemon and the same command against
+            // a running window were two separate answers to one question.
+            var entries = RequestLogFilter(unmatchedOnly: unmatchedOnly == true)
+                .apply(to: requestLogs)
             if let limit { entries = Array(entries.suffix(max(0, limit))) }
             // Redacted on the way out: these are the app-under-test's real credentials, and the log is
             // the one command that hands captured traffic to a caller. See `redactingCredentials()`.

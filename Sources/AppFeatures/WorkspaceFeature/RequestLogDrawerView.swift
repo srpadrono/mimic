@@ -76,26 +76,13 @@ enum RequestLogQuery {
         sortField: SortField,
         sortAscending: Bool
     ) -> [RequestLog] {
-        var filteredLogs = logs
-
-        // "Show me only the calls I have not mocked" — the fastest way to find a missing
-        // configuration, and the reason this filter is a toggle rather than a search term.
-        if unmatchedOnly {
-            filteredLogs = filteredLogs.filter(\.outcome.isMissingConfiguration)
-        }
-
-        if let methodFilter {
-            filteredLogs = filteredLogs.filter { $0.method == methodFilter }
-        }
-
-        if !filterText.isEmpty {
-            let query = filterText.lowercased()
-            filteredLogs = filteredLogs.filter { log in
-                log.path.lowercased().contains(query)
-                    || "\(log.responseStatusCode ?? 0)".contains(query)
-                    || log.outcome.label.lowercased().contains(query)
-            }
-        }
+        // One predicate, in Domain, shared with the control plane's `logList`. This used to be three
+        // inline filters here and a fourth copy of the unmatched rule in `AppControlHost`.
+        var filteredLogs = RequestLogFilter(
+            unmatchedOnly: unmatchedOnly,
+            method: methodFilter,
+            text: filterText
+        ).apply(to: logs)
 
         filteredLogs.sort { left, right in
             let result: Bool

@@ -150,10 +150,12 @@ final class AppControlHost: ControlHost {
         // MARK: Logs
 
         case let .logList(limit, unmatchedOnly):
-            var entries = appState.requestLogs
-            if unmatchedOnly == true {
-                entries = entries.filter(\.outcome.isMissingConfiguration)
-            }
+            // `RequestLogFilter`, not a second copy of the predicate. This branch and
+            // `RequestLogQuery.process` used to each implement "what counts as unmatched", in two
+            // modules, agreeing by coincidence — so the window and the script could have answered the
+            // same question differently and nothing would have caught it.
+            var entries = RequestLogFilter(unmatchedOnly: unmatchedOnly == true)
+                .apply(to: appState.requestLogs)
             if let limit { entries = Array(entries.suffix(max(0, limit))) }
             // Redacted on the way out. `appState.requestLogs` keeps the real values, because in the
             // app's own window they are the developer's own traffic on the developer's own screen —
