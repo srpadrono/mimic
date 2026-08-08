@@ -217,6 +217,14 @@ struct WorkspaceView: View {
                             }
                         )
 
+                        // Only while a journey is running, and beside the server segment because
+                        // the two together are the answer to "what is this app doing right now".
+                        // The width policy budgets for it: the chip caps its name at 140pt, so the
+                        // leading cluster stays bounded at the minimum window width.
+                        if let status = appState.activeJourneyStatus {
+                            DSJourneyChip(status: status)
+                        }
+
                         // Import stays here because it acts on the *project*, not on one panel.
                         //
                         // "Add endpoint" used to sit beside it and no longer does: the navigator
