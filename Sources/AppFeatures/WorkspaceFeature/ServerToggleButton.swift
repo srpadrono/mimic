@@ -7,6 +7,11 @@ import DesignSystem
 /// - **Stopped/Error:** muted play icon
 /// - **Running:** green power icon with pulse glow
 /// - **Starting/Stopping:** spinning progress indicator
+/// - Note: **No longer mounted.** `DSServerSegment` replaced it in the toolbar, fusing the run
+///   control with the address and the counters that `ServerStatusWell` used to show in the principal
+///   slot. The view body is kept only until its rendering tests can be re-pointed — the XCUITest and
+///   AppFeatures runners are unavailable — and `performAction` stays regardless, because it is the
+///   shared rule the segment calls rather than reimplementing.
 struct ServerToggleButton: View {
     let serverState: ServerState
     let onStart: () -> Void

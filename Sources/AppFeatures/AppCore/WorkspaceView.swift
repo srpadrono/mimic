@@ -199,10 +199,21 @@ struct WorkspaceView: View {
                     // narrows, which is what makes Xcode's toolbar read as clusters rather than a
                     // row of loose buttons.
                     ToolbarItemGroup(placement: .navigation) {
-                        ServerToggleButton(
+                        // One object, not two at opposite ends of the bar. The run control and the
+                        // state it produces were never in the same glance before this.
+                        DSServerSegment(
                             serverState: appState.serverState,
+                            requestCount: appState.requestLogs.count,
+                            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
                             onStart: appState.startServer,
-                            onStop: appState.stopServer
+                            onStop: appState.stopServer,
+                            // No `withAnimation`: the request log is an `NSSplitViewItem`, and AppKit
+                            // animates the reveal through its own animator. Wrapping the flag in a
+                            // SwiftUI animation would only animate the flag.
+                            onShowUnmatched: {
+                                showDrawer = true
+                                showUnmatchedOnly = true
+                            }
                         )
 
                         // Import stays here because it acts on the *project*, not on one panel.
@@ -235,21 +246,10 @@ struct WorkspaceView: View {
                     // as three islands — the fault was that everything *else* was pinned to the two
                     // far edges, so the centre had nothing around it. With the content actions moved
                     // into this column the bar now reads as one row.
-                    ToolbarItem(placement: .principal) {
-                        ServerStatusWell(
-                            serverState: appState.serverState,
-                            projectName: appState.currentProject?.name,
-                            requestCount: appState.requestLogs.count,
-                            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
-                            // No `withAnimation`: the request log is an `NSSplitViewItem` now, and
-                            // AppKit animates the reveal through its own animator. Wrapping the flag
-                            // in a SwiftUI animation would only animate the flag.
-                            onShowUnmatched: {
-                                showDrawer = true
-                                showUnmatchedOnly = true
-                            }
-                        )
-                    }
+                    // No principal item any more. It held `ServerStatusWell`, which said the same
+                    // thing the segment now says at the leading edge — and having the address in the
+                    // centre while the run control sat at the far left is what made the toolbar read
+                    // as separate islands.
 
                     // The autosave indicator is empty while idle, so it must not be allowed to
                     // change the toolbar's layout when it flickers into view for two seconds. A
