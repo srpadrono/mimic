@@ -148,7 +148,8 @@ struct WorkspaceView: View {
                                 endpointID: selectedEndpointID,
                                 journeyID: appState.selectedJourneyID
                             ),
-                            navigation: centerPaneNavigation
+                            navigation: centerPaneNavigation,
+                            onStartEmptyJourney: { showNewJourneySheet = true }
                         )
                         // Anchored to the top, not centred. A pane is exactly as tall as the split
                         // view gives it, and an editor taller than that — the journey editor has no

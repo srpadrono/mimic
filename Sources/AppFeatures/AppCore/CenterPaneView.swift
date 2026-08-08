@@ -13,6 +13,10 @@ struct CenterPaneView: View {
     /// Back/forward and the lateral moves, injected rather than derived here — the editors stay
     /// decoupled from `AppState`, and this view is the bridge that already knows both sides.
     var navigation: CenterPaneNavigation = CenterPaneNavigation()
+    /// Opens the new-journey sheet, which `WorkspaceView` presents. Injected rather than reached for
+    /// through `AppState`: the sheet has one presenter, and adding a second here is what
+    /// `ContentView` warns about two files over.
+    var onStartEmptyJourney: () -> Void = {}
 
     var body: some View {
         switch content {
@@ -115,6 +119,25 @@ struct CenterPaneView: View {
             )
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("center.journeyEditor")
+        } else if appState.journeys.isEmpty {
+            // The gallery *is* the empty state. Journeys are the app's most valuable idea and its
+            // least obvious, and the nine templates teach it better than any paragraph — but they
+            // sat two clicks deep, so the screen a new user actually met said "No journeys yet" and
+            // offered nothing to look at.
+            //
+            // Only when there are none. With a journey in the project the pane means "you have not
+            // selected one", which is a different sentence and a different answer.
+            JourneyTemplateGallery(
+                templates: JourneyTemplates.all,
+                onCreate: { template in
+                    if let journey = appState.addJourney(fromTemplate: template.id) {
+                        appState.selectedJourneyID = journey.id
+                    }
+                },
+                onStartEmpty: onStartEmptyJourney
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("center.journeyGallery")
         } else {
             DSEmptyState(
                 systemImage: NavigatorTab.journeys.systemImage,
