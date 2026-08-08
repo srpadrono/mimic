@@ -23,7 +23,8 @@ struct InspectorPanelView: View {
     /// Every request the selected endpoint answered. Already filtered by the caller.
     let endpointTraffic: [RequestLog]
     /// Opens one of those requests in the request detail.
-    let onSelectTrafficLog: (UUID) -> Void
+    /// Show this endpoint's traffic — scopes the request log to it rather than opening a panel.
+    let onShowEndpointTraffic: (UUID) -> Void
 
     /// The endpoint the add-scenario sheet is adding to, captured when the sheet opens.
     ///
@@ -36,47 +37,12 @@ struct InspectorPanelView: View {
     /// view that no longer exists. Carrying the id makes the sheet a function of what was clicked
     /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
-    @State private var endpointTab: EndpointTab = .scenarios
 
     /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
         let id: UUID
     }
 
-    /// Which question the inspector is answering about the selected endpoint.
-    ///
-    /// Xcode's inspector does this: same selection, several tabs, because "what is this" and "what
-    /// has happened to this" are different questions. Mimic already recorded which endpoint answered
-    /// each request — `RequestLog.matchedEndpointID` — but never offered a way to ask. Finding out
-    /// whether anything had actually called the endpoint in front of you meant going to the log and
-    /// filtering by hand.
-    enum EndpointTab: String, CaseIterable, Identifiable {
-        case scenarios
-        case traffic
-
-        var id: String { rawValue }
-
-        var systemImage: String {
-            switch self {
-            case .scenarios: "square.stack.3d.up"
-            case .traffic: "waveform.path.ecg"
-            }
-        }
-
-        var title: String {
-            switch self {
-            case .scenarios: "Scenarios"
-            case .traffic: "Traffic"
-            }
-        }
-
-        var help: String {
-            switch self {
-            case .scenarios: "Show this endpoint's scenarios"
-            case .traffic: "Show the requests this endpoint answered"
-            }
-        }
-    }
 
     public init(
         endpoint: Endpoint?,
@@ -85,12 +51,11 @@ struct InspectorPanelView: View {
         endpointTraffic: [RequestLog] = [],
         onShowJourneys: @escaping () -> Void = {},
         onCloseRequestDetail: @escaping () -> Void = {},
-        onSelectTrafficLog: @escaping (UUID) -> Void = { _ in },
+        onShowEndpointTraffic: @escaping (UUID) -> Void = { _ in },
         onAddScenario: @escaping (_ endpointID: UUID, _ name: String) -> Void,
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
-        onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
-        initialEndpointTab: EndpointTab = .scenarios
+        onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     ) {
         self.endpoint = endpoint
         self.requestDetail = requestDetail
@@ -98,12 +63,11 @@ struct InspectorPanelView: View {
         self.endpointTraffic = endpointTraffic
         self.onShowJourneys = onShowJourneys
         self.onCloseRequestDetail = onCloseRequestDetail
-        self.onSelectTrafficLog = onSelectTrafficLog
+        self.onShowEndpointTraffic = onShowEndpointTraffic
         self.onAddScenario = onAddScenario
         self.onSetActiveScenario = onSetActiveScenario
         self.onDuplicateScenario = onDuplicateScenario
         self.onDeleteScenario = onDeleteScenario
-        _endpointTab = State(initialValue: initialEndpointTab)
     }
 
     /// What the panel is showing, so the header and the content cannot disagree about it.
@@ -167,38 +131,32 @@ struct InspectorPanelView: View {
                         action: onCloseRequestDetail
                     )
                 case .scenarios:
-                    // The tabs ride in the header rather than in a row of their own. A second 30pt
-                    // strip under the title would have cost the inspector a tenth of its height to
-                    // say something the title already says.
+                    // No nested tab strip any more. It offered Scenarios and Traffic, and the mode
+                    // rail the redesign puts in this header has room for three items at ~282pt
+                    // against a 260pt floor — a fourth would not fit. The Traffic *answer* survives
+                    // as the count below, which is the question anyone was actually asking:
+                    // "has anything called this endpoint?"
                     HStack(spacing: DSSpacing.xs) {
-                        DSTabStrip(
-                            tabs: EndpointTab.allCases.map { tab in
-                                DSTabStrip.Tab(
-                                    id: tab.id,
-                                    systemImage: tab.systemImage,
-                                    help: tab.help,
-                                    // The count answers "did anything actually call this?" without
-                                    // making you switch tabs to find out.
-                                    badge: tab == .traffic && !endpointTraffic.isEmpty
-                                        ? endpointTraffic.count
-                                        : nil
-                                )
-                            },
-                            selection: endpointTabBinding,
-                            identifier: "inspector",
-                            // No chrome: this strip sits inside a `DSPanelHeader`, which already
-                            // draws the bar, the `secondary` surface and the 0.5pt bottom rule.
-                            // Drawing them twice composites the hairline with itself — whatever
-                            // `DSColors.separator` is, two of it read roughly twice as dark — so the
-                            // header's bottom edge was visibly heavier under the tabs than under the
-                            // title, with a hard edge at the strip's boundary.
-                            drawsChrome: false
-                        )
-                        .fixedSize()
+                        if let endpoint, !endpointTraffic.isEmpty {
+                            Button {
+                                onShowEndpointTraffic(endpoint.id)
+                            } label: {
+                                HStack(spacing: DSSpacing.xxs) {
+                                    Image(systemName: "waveform.path.ecg")
+                                        .font(.system(size: 10, weight: .medium))
+                                    Text("\(endpointTraffic.count)")
+                                        .font(DSTypography.Figure.small)
+                                }
+                                .foregroundStyle(DSColors.accentText)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show this endpoint's requests in the log")
+                            .accessibilityIdentifier("inspector.endpointTrafficCount")
+                            .accessibilityLabel("\(endpointTraffic.count) requests answered by this endpoint")
+                        }
 
-                        // Only on the tab it acts on — a "+" above a traffic list would have
-                        // nothing to add to.
-                        if endpointTab == .scenarios, let endpoint {
+                        if let endpoint {
                             DSPanelHeaderButton(
                                 systemImage: "plus",
                                 help: "Add scenario",
@@ -220,20 +178,12 @@ struct InspectorPanelView: View {
                 }
             case .scenarios:
                 if let endpoint {
-                    switch endpointTab {
-                    case .scenarios:
-                        ScenarioListView(
-                            endpoint: endpoint,
-                            onSetActive: onSetActiveScenario,
-                            onDuplicate: onDuplicateScenario,
-                            onDelete: onDeleteScenario
-                        )
-                    case .traffic:
-                        EndpointTrafficList(
-                            logs: endpointTraffic,
-                            onSelect: onSelectTrafficLog
-                        )
-                    }
+                    ScenarioListView(
+                        endpoint: endpoint,
+                        onSetActive: onSetActiveScenario,
+                        onDuplicate: onDuplicateScenario,
+                        onDelete: onDeleteScenario
+                    )
                 }
             case .overview:
                 if let overview {
@@ -254,20 +204,16 @@ struct InspectorPanelView: View {
         }
     }
 
-    /// What the header calls the panel. With an endpoint selected the tab is the more specific
-    /// answer, so it wins — a header reading "Scenarios" above a list of requests would be a lie.
-    private var headerTitle: String {
-        mode == .scenarios ? endpointTab.title : mode.title
-    }
+    /// What the header calls the panel.
+    ///
+    /// It used to defer to the nested tab when an endpoint was selected, because the panel could be
+    /// showing either scenarios or traffic and a header reading "Scenarios" above a list of requests
+    /// would have been a lie. With the Traffic tab retired there is only one thing this mode shows,
+    /// so the mode's own title is the honest answer again.
+    private var headerTitle: String { mode.title }
 
     /// `DSTabStrip` speaks in raw ids so it can live in the design system without knowing what an
     /// inspector is; the enum stays on this side of that boundary.
-    private var endpointTabBinding: Binding<String> {
-        Binding(
-            get: { endpointTab.id },
-            set: { endpointTab = EndpointTab(rawValue: $0) ?? .scenarios }
-        )
-    }
 
     /// The path of whatever the panel is describing — but only where the panel does not already say
     /// it.

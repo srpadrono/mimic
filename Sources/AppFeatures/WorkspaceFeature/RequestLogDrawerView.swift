@@ -73,6 +73,7 @@ enum RequestLogQuery {
         methodFilter: HTTPMethod?,
         filterText: String,
         unmatchedOnly: Bool = false,
+        endpointScope: UUID? = nil,
         sortField: SortField,
         sortAscending: Bool
     ) -> [RequestLog] {
@@ -81,6 +82,7 @@ enum RequestLogQuery {
         var filteredLogs = RequestLogFilter(
             unmatchedOnly: unmatchedOnly,
             method: methodFilter,
+            endpointID: endpointScope,
             text: filterText
         ).apply(to: logs)
 
@@ -203,6 +205,12 @@ struct RequestLogDrawerView: View {
     /// toolbar's unmatched badge can switch it on, the way Xcode's warning count jumps you to the
     /// issue navigator rather than just telling you a number.
     @Binding var unmatchedOnly: Bool
+    /// Restrict the log to one endpoint's traffic.
+    ///
+    /// This is what replaced the inspector's Traffic tab: rather than a second list of the same
+    /// rows in a 320pt panel, the question "has anything called this endpoint?" scopes the log the
+    /// user is already watching. Non-nil is also what draws the scope chip that clears it.
+    @Binding var endpointScope: UUID?
     /// Creates a mock for a request that matched nothing. Optional so the drawer stays usable in
     /// previews and tests that do not care about it.
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
@@ -229,6 +237,7 @@ struct RequestLogDrawerView: View {
         onClear: @escaping () -> Void,
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
+        endpointScope: Binding<UUID?> = .constant(nil),
         onCreateEndpoint: ((HTTPMethod, String) -> Void)? = nil,
         journeys: [Journey] = [],
         onAddToJourney: (([RequestLog], UUID) -> Void)? = nil,
@@ -257,6 +266,7 @@ struct RequestLogDrawerView: View {
         onClear: @escaping () -> Void,
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
+        endpointScope: Binding<UUID?> = .constant(nil),
         onCreateEndpoint: ((HTTPMethod, String) -> Void)? = nil,
         journeys: [Journey] = [],
         onAddToJourney: (([RequestLog], UUID) -> Void)? = nil,
@@ -271,6 +281,7 @@ struct RequestLogDrawerView: View {
         self.onClear = onClear
         _selectedLogIDs = selectedLogIDs
         _unmatchedOnly = unmatchedOnly
+        _endpointScope = endpointScope
         self.onCreateEndpoint = onCreateEndpoint
         self.journeys = journeys
         self.onAddToJourney = onAddToJourney
@@ -314,6 +325,11 @@ struct RequestLogDrawerView: View {
         .onChange(of: filterText) { _, _ in updateLogs(debounce: true) }
         .onChange(of: methodFilter) { _, _ in updateLogs() }
         .onChange(of: unmatchedOnly) { _, _ in updateLogs() }
+        // Every filter needs a trigger, and this one arrives from *another panel* — the inspector's
+        // endpoint traffic count — so it is the one most easily forgotten. Without it the scope is
+        // set, the drawer opens, and the rows do not change: a feature that builds, tests green, and
+        // silently does nothing.
+        .onChange(of: endpointScope) { _, _ in updateLogs() }
         .onChange(of: sortField) { _, _ in updateLogs() }
         .onChange(of: sortAscending) { _, _ in updateLogs() }
         // The newest entry's identity, not the count. `MockServerRuntime` caps the buffer at 1000 and
@@ -378,6 +394,45 @@ struct RequestLogDrawerView: View {
         )
     }
 
+    // MARK: - Endpoint scope chip
+
+    /// The way out of an endpoint scope.
+    ///
+    /// Drawn only while one is set, and it is the whole reason the scope is safe to offer: a filter
+    /// applied from *another panel* is the kind a user does not remember turning on, so it has to
+    /// announce itself where the rows are and clear in one click. Without this the log would look
+    /// like it had lost most of its traffic.
+    @ViewBuilder
+    private var endpointScopeChip: some View {
+        if let scope = endpointScope {
+            let name = endpoints.first { $0.id == scope }?.name ?? "this endpoint"
+            Button {
+                endpointScope = nil
+            } label: {
+                HStack(spacing: DSSpacing.xxs) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 9, weight: .medium))
+                    Text(name)
+                        .font(DSTypography.metaSmall)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(DSColors.accentText)
+                .headerControlWell(
+                    fill: DSColors.accent.opacity(0.11),
+                    stroke: DSColors.accent.opacity(0.27)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Showing only this endpoint's requests. Click to clear.")
+            .accessibilityIdentifier("drawer.endpointScope")
+            .accessibilityLabel("Showing only requests answered by \(name). Activate to clear.")
+        }
+    }
+
     // MARK: - Toolbar
 
     /// The drawer's single row of chrome.
@@ -390,6 +445,10 @@ struct RequestLogDrawerView: View {
     private var drawerToolbar: some View {
         DSPanelHeader("Request log", subtitle: countSubtitle, identifier: "requestLog") {
             HStack(spacing: DSSpacing.sm) {
+                // First, because it is the filter a user is least likely to have set deliberately —
+                // it arrives from the inspector, in another panel.
+                endpointScopeChip
+
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
                         Text("All").tag(HTTPMethod?.none)
@@ -545,6 +604,7 @@ struct RequestLogDrawerView: View {
         let currentMethod = methodFilter
         let currentText = filterText
         let currentUnmatchedOnly = unmatchedOnly
+        let currentScope = endpointScope
         let currentField = sortField
         let currentAsc = sortAscending
 
@@ -559,6 +619,7 @@ struct RequestLogDrawerView: View {
                     methodFilter: currentMethod,
                     filterText: currentText,
                     unmatchedOnly: currentUnmatchedOnly,
+                    endpointScope: currentScope,
                     sortField: currentField,
                     sortAscending: currentAsc
                 )

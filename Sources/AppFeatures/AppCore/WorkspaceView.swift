@@ -22,6 +22,10 @@ struct WorkspaceView: View {
     /// Restricts the request log to calls nothing answered. Lives here so the toolbar's unmatched
     /// badge can turn it on from outside the panel.
     @State private var showUnmatchedOnly = false
+    /// Restrict the request log to one endpoint's traffic. What the inspector's retired Traffic tab
+    /// became: the question is answered in the log the user is already watching rather than in a
+    /// second list of the same rows.
+    @State private var logEndpointScope: UUID?
     /// Which navigator the sidebar is showing, and therefore what the centre pane edits.
     @State private var navigatorTab: NavigatorTab = .endpoints
     /// Back/forward across endpoints you have looked at.
@@ -642,6 +646,7 @@ struct WorkspaceView: View {
             onClear: { appState.requestLogs = [] },
             selectedLogIDs: $selectedLogIDs,
             unmatchedOnly: $showUnmatchedOnly,
+            endpointScope: $logEndpointScope,
             onCreateEndpoint: { method, path in
                 if let endpoint = appState.addEndpoint(
                     name: EndpointFromLog.suggestedName(method: method, path: path),
@@ -692,7 +697,13 @@ struct WorkspaceView: View {
             } ?? [],
             onShowJourneys: { navigatorTab = .journeys },
             onCloseRequestDetail: { selectedLogIDs = [] },
-            onSelectTrafficLog: { selectedLogIDs = [$0] },
+            onShowEndpointTraffic: { endpointID in
+                // Scope the log rather than open a panel, and make sure it is on screen — a filter
+                // applied to a hidden drawer is a click that appears to do nothing.
+                logEndpointScope = endpointID
+                showUnmatchedOnly = false
+                showDrawer = true
+            },
             onAddScenario: { _ = appState.addScenario(endpointID: $0, name: $1) },
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
