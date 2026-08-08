@@ -494,7 +494,8 @@ struct ControlCommandExecutionTests {
         for command: ControlCommand in [
             .ping, .state, .serverStart(port: nil), .serverStop, .serverStatus,
             .projectList, .projectClose, .journeyActivate(journey: nil), .journeyRestart,
-            .journeyAdvance, .journeyStatus, .logList(limit: nil, unmatchedOnly: nil), .logClear,
+            .journeyAdvance, .journeyStatus, .logList(limit: nil, unmatchedOnly: nil, journeyOnly: nil), .logClear,
+            .endpointCreateFromLog(entryID: UUID()),
             .reset(scope: .all), .describeCommands,
         ] {
             #expect(try ProjectCommandExecutor.apply(command, to: &project) == nil, "\(command) should be host-scoped")
@@ -582,7 +583,7 @@ struct ControlWireFormatTests {
             .journeyStepRemove(journey: .name("J"), step: .index(1)),
             .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
             .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
-            .logList(limit: 50, unmatchedOnly: true), .logClear,
+            .logList(limit: 50, unmatchedOnly: true, journeyOnly: nil), .logClear,
         ]
 
         for command in commands {
@@ -636,7 +637,7 @@ struct ControlWireFormatTests {
             "journeyStepsAdd",
             "journeyStepUpdate", "journeyStepRemove", "journeyStepMove", "journeyActivate",
             "journeyRestart", "journeyAdvance", "journeyStatus",
-            "logList", "logClear",
+            "logList", "logClear", "endpointCreateFromLog",
         ]
         #expect(Set(names) == expected)
     }

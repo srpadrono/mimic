@@ -335,6 +335,10 @@ struct LogCommand: AsyncParsableCommand {
             quickest way to find a route your client calls but you have not mocked yet:
 
               mimic log list --unmatched --format text
+
+            `--journey-only` narrows it to requests an active journey answered. Note the two are not
+            complements: a request a journey deliberately blocked is neither unmatched nor served by
+            one, so it appears under neither flag.
             """
         )
 
@@ -344,11 +348,14 @@ struct LogCommand: AsyncParsableCommand {
         @Flag(name: .long, help: "Only requests that matched nothing — the mocks you are missing.")
         var unmatched: Bool = false
 
+        @Flag(name: .customLong("journey-only"), help: "Only requests an active journey answered.")
+        var journeyOnly: Bool = false
+
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
             try Output(options).emit(
-                await options.client().send(.logList(limit: limit, unmatchedOnly: unmatched ? true : nil))
+                await options.client().send(.logList(limit: limit, unmatchedOnly: unmatched ? true : nil, journeyOnly: journeyOnly ? true : nil))
             )
         }
     }

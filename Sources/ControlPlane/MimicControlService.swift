@@ -236,7 +236,7 @@ public actor MimicControlService: ControlHost {
 
         // MARK: Logs
 
-        case let .logList(limit, unmatchedOnly):
+        case let .logList(limit, unmatchedOnly, journeyOnly):
             // Filtering before the limit is the useful order: "the last 20 requests I have no mock
             // for", not "whichever of the last 20 happened to be unmatched".
             //
@@ -244,12 +244,24 @@ public actor MimicControlService: ControlHost {
             // *third* implementation of the same predicate — headless, in-app, and in the drawer —
             // which meant `mimic log list --unmatched` against a daemon and the same command against
             // a running window were two separate answers to one question.
-            var entries = RequestLogFilter(unmatchedOnly: unmatchedOnly == true)
-                .apply(to: requestLogs)
+            var entries = RequestLogFilter(
+                unmatchedOnly: unmatchedOnly == true,
+                journeyOnly: journeyOnly == true
+            ).apply(to: requestLogs)
             if let limit { entries = Array(entries.suffix(max(0, limit))) }
             // Redacted on the way out: these are the app-under-test's real credentials, and the log is
             // the one command that hands captured traffic to a caller. See `redactingCredentials()`.
             return .init(logs: entries.map { $0.redactingCredentials() })
+
+        case .endpointCreateFromLog:
+            // Deliberately unsupported here. This service answers for a *headless* run, where the
+            // request log exists but the window's `AppState` does not — and resolving an entry id
+            // needs the same log the host holds. `AppControlHost` implements it; a daemon caller
+            // gets a clear refusal rather than a silently different answer.
+            throw ControlError(
+                code: "log.entryUnavailable",
+                message: "create-from-log needs a running window. In a headless run, create the endpoint directly with `mimic endpoint create <METHOD> <PATH>`."
+            )
 
         case .logClear:
             let count = requestLogs.count

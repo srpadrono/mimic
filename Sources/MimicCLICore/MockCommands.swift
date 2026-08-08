@@ -11,7 +11,7 @@ struct EndpointCommand: AsyncParsableCommand {
           mimic endpoint create GET /account-summary --status 200 --body '{"balance":10}'
           mimic endpoint delete GET /account-summary
         """,
-        subcommands: [List.self, Get.self, Create.self, Update.self, Delete.self, Duplicate.self]
+        subcommands: [List.self, Get.self, Create.self, CreateFromLog.self, Update.self, Delete.self, Duplicate.self]
     )
 
     struct List: AsyncParsableCommand {
@@ -98,6 +98,37 @@ struct EndpointCommand: AsyncParsableCommand {
                 throw CLIFailure.commandFailed(updated.error ?? .internalFailure("Response update failed."))
             }
             try Output(options).emit(try await client.send(.endpointGet(endpoint: .id(endpoint.id))))
+        }
+    }
+
+    struct CreateFromLog: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "create-from-log",
+            abstract: "Add an endpoint that would have answered a logged request.",
+            discussion: """
+            The one-step version of "this call had no mock, give it one". Takes an entry id from
+            `mimic log list` and creates an endpoint with that request's method and route:
+
+              mimic log list --unmatched --format json | jq -r '.logs[0].id' | xargs mimic endpoint create-from-log
+
+            The query string is stripped, because a query is not part of a route here — an endpoint
+            created from `/orders?page=2` has to answer `/orders?page=3` as well.
+
+            Needs a running window: the request log is the app's, not the store's, so a headless
+            daemon cannot resolve the id. Create the endpoint directly there instead.
+            """
+        )
+
+        @Argument(help: "The log entry id, from `mimic log list`.")
+        var entryID: String
+
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            guard let id = UUID(uuidString: entryID) else {
+                throw ValidationError("\(entryID) is not a log entry id. Take one from `mimic log list`.")
+            }
+            try Output(options).emit(await options.client().send(.endpointCreateFromLog(entryID: id)))
         }
     }
 

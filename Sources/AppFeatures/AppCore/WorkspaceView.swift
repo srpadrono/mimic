@@ -644,7 +644,7 @@ struct WorkspaceView: View {
             unmatchedOnly: $showUnmatchedOnly,
             onCreateEndpoint: { method, path in
                 if let endpoint = appState.addEndpoint(
-                    name: "\(method.rawValue) \(path)",
+                    name: EndpointFromLog.suggestedName(method: method, path: path),
                     method: method,
                     path: path
                 ) {

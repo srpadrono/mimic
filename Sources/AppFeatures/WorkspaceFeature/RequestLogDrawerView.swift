@@ -119,11 +119,11 @@ enum RequestLogQuery {
 
     /// The path to mock for a logged request: the query string is dropped, because it is a property
     /// of the call and not of the route.
+    /// Moved to `Domain.EndpointFromLog`, because `MimicCLICore` cannot reach `AppFeatures` and
+    /// `mimic endpoint create-from-log` has to derive exactly the same route. Kept as a forwarder so
+    /// existing call sites and their tests do not all move in the same commit.
     nonisolated static func mockablePath(from path: String) -> String {
-        // `split` omits empty subsequences, so a query-only path such as "?a=1" would otherwise come
-        // back as "a=1" — not a route at all. Cut at the separator instead.
-        let withoutQuery = path.firstIndex(of: "?").map { String(path[path.startIndex..<$0]) } ?? path
-        return withoutQuery.hasPrefix("/") ? withoutQuery : "/"
+        EndpointFromLog.mockablePath(from: path)
     }
 
     /// How many logged requests had nothing configured for them.

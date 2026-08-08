@@ -122,6 +122,7 @@ Addressed by route, so nothing needs a UUID:
 mimic endpoint list
 mimic endpoint get GET /account-summary
 mimic endpoint create GET /account-summary --status 200 --body '{"balance":10}'
+mimic endpoint create-from-log <ENTRY-ID>   # give an unmatched call a mock, in one step
 mimic endpoint create POST /login --body-file login.json --header 'X-Trace: abc'
 mimic endpoint update GET /account-summary --status 500 --delay 250
 mimic endpoint delete GET /account-summary
@@ -197,12 +198,17 @@ save them as a journey.
 ```bash
 mimic log list [--limit N]
 mimic log list --unmatched          # only calls nothing is configured for
+mimic log list --journey-only       # only calls an active journey answered
 mimic log clear
 ```
 
 Each entry names what answered it — `endpoint`, `journey`, `unmatched`, or `blockedByJourney` — so a
 test can assert which part of a flow responded, and `--unmatched` answers *"what is my client calling
 that I have not mocked?"* directly:
+
+`--unmatched` and `--journey-only` are **not** complements. A request an active journey deliberately
+blocked is neither unmatched nor served by one, so it appears under neither flag — which is the
+distinction `RequestOutcome.blockedByJourney` exists to keep.
 
 ```
 2026-07-30T14:20:22Z  GET   /user/profile        404   Unmatched

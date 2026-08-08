@@ -102,7 +102,15 @@ public enum ControlCommand: Codable, Sendable, Equatable {
 
     // MARK: Request log
 
-    case logList(limit: Int?, unmatchedOnly: Bool?)
+    case logList(limit: Int?, unmatchedOnly: Bool?, journeyOnly: Bool?)
+
+    /// Create an endpoint that would have answered a logged request.
+    ///
+    /// The one operation here that cannot be executed by `ProjectCommandExecutor`: the request log is
+    /// host state, not part of `MockProject`. The host resolves the entry, derives the draft with
+    /// `EndpointFromLog`, and then issues an ordinary `.endpointCreate` — so the executor stays the
+    /// only place a project changes, and the window and the CLI produce identical endpoints.
+    case endpointCreateFromLog(entryID: UUID)
     case logClear
 }
 

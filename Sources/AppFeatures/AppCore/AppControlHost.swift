@@ -147,15 +147,41 @@ final class AppControlHost: ControlHost {
                     ?? JourneyStatus.make(journey: journey, state: nil)
             ))
 
+        case let .endpointCreateFromLog(entryID):
+            // The one command that cannot go through `ProjectCommandExecutor`, because the request
+            // log is host state rather than part of `MockProject`. So this host does the only thing
+            // it uniquely can — resolve the id — and then issues an ordinary project command, which
+            // keeps the executor the single place a project changes.
+            //
+            // Same shape the capture-a-journey flow already uses.
+            guard let log = appState.requestLogs.first(where: { $0.id == entryID }) else {
+                return .failure(ControlError(
+                    code: "log.entryNotFound",
+                    message: "No logged request with id \(entryID). Take one from `mimic log list`."
+                ))
+            }
+            let draft = EndpointFromLog.draft(from: log)
+            // Back through `perform`, not `execute`: the project-scoped executor runs at the top of
+            // this function, so re-entering it is what routes the derived draft through
+            // `ProjectCommandExecutor` exactly as a hand-typed `endpoint create` would.
+            return perform(.endpointCreate(
+                name: draft.name,
+                method: draft.method,
+                path: draft.path,
+                spec: nil
+            ))
+
         // MARK: Logs
 
-        case let .logList(limit, unmatchedOnly):
+        case let .logList(limit, unmatchedOnly, journeyOnly):
             // `RequestLogFilter`, not a second copy of the predicate. This branch and
             // `RequestLogQuery.process` used to each implement "what counts as unmatched", in two
             // modules, agreeing by coincidence — so the window and the script could have answered the
             // same question differently and nothing would have caught it.
-            var entries = RequestLogFilter(unmatchedOnly: unmatchedOnly == true)
-                .apply(to: appState.requestLogs)
+            var entries = RequestLogFilter(
+                unmatchedOnly: unmatchedOnly == true,
+                journeyOnly: journeyOnly == true
+            ).apply(to: appState.requestLogs)
             if let limit { entries = Array(entries.suffix(max(0, limit))) }
             // Redacted on the way out. `appState.requestLogs` keeps the real values, because in the
             // app's own window they are the developer's own traffic on the developer's own screen —

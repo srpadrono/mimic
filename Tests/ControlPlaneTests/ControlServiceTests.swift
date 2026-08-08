@@ -83,7 +83,7 @@ struct ControlServiceTests {
         #expect(state.state?.mode == "headless")
         #expect(state.state?.apiVersion == ControlAPI.version)
 
-        let logs = try await Self.ok(service, .logList(limit: nil, unmatchedOnly: nil))
+        let logs = try await Self.ok(service, .logList(limit: nil, unmatchedOnly: nil, journeyOnly: nil))
         #expect(logs.logs?.isEmpty == true)
     }
 
@@ -323,7 +323,7 @@ struct ControlServiceTests {
         var logs: [RequestLog] = []
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while ContinuousClock.now < deadline {
-            logs = try await Self.ok(service, .logList(limit: nil, unmatchedOnly: nil)).logs ?? []
+            logs = try await Self.ok(service, .logList(limit: nil, unmatchedOnly: nil, journeyOnly: nil)).logs ?? []
             if logs.count >= 2 { break }
             try? await Task.sleep(for: .milliseconds(25))
         }

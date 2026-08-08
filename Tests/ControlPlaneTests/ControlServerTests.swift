@@ -358,7 +358,7 @@ struct ControlServerTests {
                 responseHeaders: ["Set-Cookie": "session=rotated"]
             ))
 
-            let reply = try await Self.post(.logList(limit: nil, unmatchedOnly: nil), baseURL: baseURL)
+            let reply = try await Self.post(.logList(limit: nil, unmatchedOnly: nil, journeyOnly: nil), baseURL: baseURL)
             let logged = try #require(reply.response.result?.logs?.first)
 
             #expect(logged.requestHeaders["Authorization"] == RequestLog.redactionPlaceholder)

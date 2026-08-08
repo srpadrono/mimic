@@ -587,4 +587,42 @@ struct AppLauncherTests {
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: 0) }
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: -5) }
     }
+
+    // MARK: - Log filtering and create-from-log (issue #46)
+
+    @Test("`log list` accepts --unmatched and --journey-only, together and apart")
+    func logListFlags() throws {
+        var cmd = try LogCommand.List.parse([])
+        #expect(cmd.unmatched == false)
+        #expect(cmd.journeyOnly == false)
+
+        cmd = try LogCommand.List.parse(["--unmatched"])
+        #expect(cmd.unmatched)
+        #expect(cmd.journeyOnly == false)
+
+        cmd = try LogCommand.List.parse(["--journey-only"])
+        #expect(cmd.journeyOnly)
+        #expect(cmd.unmatched == false)
+
+        // Not mutually exclusive at the parser. They are different questions — a call blocked by a
+        // journey is neither — so asking both is a legitimate, if empty, request.
+        cmd = try LogCommand.List.parse(["--unmatched", "--journey-only", "--limit", "5"])
+        #expect(cmd.unmatched)
+        #expect(cmd.journeyOnly)
+        #expect(cmd.limit == 5)
+    }
+
+    @Test("`endpoint create-from-log` takes an entry id and rejects anything that is not one")
+    func createFromLogParsing() throws {
+        let id = UUID()
+        let cmd = try EndpointCommand.CreateFromLog.parse([id.uuidString])
+        #expect(cmd.entryID == id.uuidString)
+
+        // A caller that pipes the wrong field in gets told which field it wanted, rather than a
+        // stack trace or a silently-created endpoint named after a path.
+        #expect(throws: (any Error).self) {
+            var bad = try EndpointCommand.CreateFromLog.parse(["/api/orders"])
+            try bad.run()
+        }
+    }
 }

@@ -37,6 +37,7 @@ public enum CommandCatalog {
         .init(name: "endpointList", summary: "List endpoints in the open project.", parameters: [], cli: "mimic endpoint list"),
         .init(name: "endpointGet", summary: "Show one endpoint.", parameters: ["endpoint"], cli: "mimic endpoint get <METHOD> <PATH>"),
         .init(name: "endpointCreate", summary: "Add an endpoint with a default 200 scenario.", parameters: ["name?", "method", "path", "spec?"], cli: "mimic endpoint create <METHOD> <PATH> [--name N] [--delay MS] [--group G] [--graphql-operation OP]"),
+        .init(name: "endpointCreateFromLog", summary: "Add an endpoint that would have answered a logged request.", parameters: ["entryID"], cli: "mimic endpoint create-from-log <ENTRY-ID>"),
         .init(name: "endpointUpdate", summary: "Change endpoint fields.", parameters: ["endpoint", "spec"], cli: "mimic endpoint update <METHOD> <PATH> [--new-path P] [--delay MS] [--group G] [--graphql-operation OP]"),
         .init(name: "endpointDelete", summary: "Remove an endpoint.", parameters: ["endpoint"], cli: "mimic endpoint delete <METHOD> <PATH>"),
         .init(name: "endpointDuplicate", summary: "Copy an endpoint and its scenarios.", parameters: ["endpoint"], cli: "mimic endpoint duplicate <METHOD> <PATH>"),
@@ -68,7 +69,7 @@ public enum CommandCatalog {
         .init(name: "journeyStatus", summary: "Report where the active journey stands.", parameters: [], cli: "mimic journey status"),
 
         // Logs
-        .init(name: "logList", summary: "Read served requests, newest last.", parameters: ["limit?", "unmatchedOnly?"], cli: "mimic log list [--limit N] [--unmatched]"),
+        .init(name: "logList", summary: "Read served requests, newest last.", parameters: ["limit?", "unmatchedOnly?", "journeyOnly?"], cli: "mimic log list [--limit N] [--unmatched] [--journey-only]"),
         .init(name: "logClear", summary: "Clear the request log.", parameters: [], cli: "mimic log clear"),
     ]
 }
