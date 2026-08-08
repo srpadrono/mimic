@@ -5,12 +5,24 @@ import DesignSystem
 
 // MARK: - Column & Sort Constants
 
+/// The fixed columns, and the arithmetic the window's minimum width rests on.
+///
+/// 50 + 120 + 78 + 44 + 56 = **348pt**, plus 2 x 16pt insets = 380. That is the number
+/// `PanelLayoutStore.Bounds.minimumWindowContentWidth` is derived from: with the navigator at 300
+/// and the inspector at its 260 floor, a 1140pt window leaves Path 180pt, which fits
+/// `/api/v1/orders/{id}` at 147pt.
+///
+/// The redesign specified a 120pt Latency column on top of these. It was cut, and that cut is what
+/// makes 1140 viable at all — with it the fixed total was 500 and Path reached zero at 1120.
 private enum LogColumns {
-    static let method: CGFloat = 62
-    static let endpoint: CGFloat = 110
-    static let scenario: CGFloat = 90
-    static let status: CGFloat = 52
-    static let time: CGFloat = 58
+    static let method: CGFloat = 50
+    /// "Answered by", not "Endpoint": three of the four values it shows are outcomes rather than
+    /// endpoint names — unmatched, blocked by a journey, answered by a journey step — so the header
+    /// asks the question the reader is actually asking.
+    static let answeredBy: CGFloat = 120
+    static let scenario: CGFloat = 78
+    static let status: CGFloat = 44
+    static let time: CGFloat = 56
     // path is flexible — takes remaining space
 }
 
@@ -212,6 +224,16 @@ struct RequestLogDrawerView: View {
     /// rows in a 320pt panel, the question "has anything called this endpoint?" scopes the log the
     /// user is already watching. Non-nil is also what draws the scope chip that clears it.
     @Binding var endpointScope: UUID?
+
+    /// One row's worth of what the table needs, precomputed.
+    ///
+    /// Carries its own index so the stripe parity does not need `enumerated()` — which allocated a
+    /// copy of the whole log every time the body ran, and the body runs on every served request.
+    struct RowModel: Identifiable, Equatable {
+        let id: UUID
+        let index: Int
+        let log: RequestLog
+    }
     /// Creates a mock for a request that matched nothing. Optional so the drawer stays usable in
     /// previews and tests that do not care about it.
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
@@ -231,6 +253,11 @@ struct RequestLogDrawerView: View {
     /// Where a ⇧-click measures its range from: the last row clicked without ⇧. Held here rather than
     /// derived from the selection, because a set has no notion of which end the user started at.
     @State private var selectionAnchorID: UUID?
+    /// Derived from `sortedAndFilteredLogs` and `selectedLogIDs`, recomputed only when one of them
+    /// changes rather than on every body evaluation. See `tableBody`.
+    @State private var rowModels: [RowModel] = []
+    @State private var displayOrderSnapshot: [UUID] = []
+    @State private var selectionSnapshot: [RequestLog] = []
 
     public init(
         requestLogs: [RequestLog],
@@ -337,6 +364,15 @@ struct RequestLogDrawerView: View {
         // set, the drawer opens, and the rows do not change: a feature that builds, tests green, and
         // silently does nothing.
         .onChange(of: endpointScope) { _, _ in updateLogs() }
+        // The selection is the other input to the snapshots, and it changes far more often than the
+        // log does — every click. Only the selection array needs rebuilding here; the row models and
+        // the display order depend on the sorted array alone.
+        .onChange(of: selectedLogIDs) { _, _ in
+            selectionSnapshot = Self.selectedLogs(
+                selectedLogIDs: selectedLogIDs,
+                sortedAndFilteredLogs: sortedAndFilteredLogs
+            )
+        }
         .onChange(of: sortField) { _, _ in updateLogs() }
         .onChange(of: sortAscending) { _, _ in updateLogs() }
         // The newest entry's identity, not the count. `MockServerRuntime` caps the buffer at 1000 and
@@ -558,6 +594,21 @@ struct RequestLogDrawerView: View {
         }
     }
 
+    /// Recompute the three derived arrays the table reads.
+    ///
+    /// Called when the sorted array changes and when the selection changes — the only two inputs
+    /// they depend on. Everything here is O(n) once, rather than O(n) on every body evaluation.
+    private func rebuildRowSnapshots() {
+        rowModels = sortedAndFilteredLogs.enumerated().map {
+            RowModel(id: $0.element.id, index: $0.offset, log: $0.element)
+        }
+        displayOrderSnapshot = sortedAndFilteredLogs.map(\.id)
+        selectionSnapshot = Self.selectedLogs(
+            selectedLogIDs: selectedLogIDs,
+            sortedAndFilteredLogs: sortedAndFilteredLogs
+        )
+    }
+
     /// The request count, or `nil` when there is nothing to count — an empty panel does not need a
     /// "0 requests" label to tell you it is empty.
     private var countSubtitle: String? {
@@ -573,7 +624,7 @@ struct RequestLogDrawerView: View {
         HStack(spacing: 0) {
             columnHeader("Method", field: .method, width: LogColumns.method)
             columnHeader("Path", field: .path, width: nil)
-            columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
+            columnHeader("Answered by", field: .endpoint, width: LogColumns.answeredBy)
             columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
             columnHeader("Status", field: .status, width: LogColumns.status)
             columnHeader("Time", field: .timestamp, width: LogColumns.time)
@@ -608,18 +659,22 @@ struct RequestLogDrawerView: View {
 
     @ViewBuilder
     private var tableBody: some View {
-        // Both resolved once for the whole table. A row's context menu has to know the entire
-        // selection, and working that out inside the row would be O(rows²) on a log that holds a
-        // thousand of them.
-        let selection = Self.selectedLogs(
-            selectedLogIDs: selectedLogIDs,
-            sortedAndFilteredLogs: sortedAndFilteredLogs
-        )
-        let displayOrder = sortedAndFilteredLogs.map(\.id)
+        // Read from state, not recomputed here. These three lines used to allocate the whole log on
+        // **every body evaluation** — an O(n) filter for the selection, an O(n) map for the display
+        // order, and an `Array(...enumerated())` that copies it again — and this body re-evaluates
+        // on every served request, because appending to the log invalidates it.
+        //
+        // They now recompute only when the sorted array or the selection actually changes, which is
+        // where they were always conceptually tied. At the shipped 1000-entry cap that is three
+        // thousand-element allocations per request turned into none.
+        let selection = selectionSnapshot
+        let displayOrder = displayOrderSnapshot
 
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(sortedAndFilteredLogs.enumerated()), id: \.element.id) { index, log in
+                ForEach(rowModels, id: \.id) { row in
+                    let index = row.index
+                    let log = row.log
                     RequestLogTableRow(
                         log: log,
                         rowIndex: index,
@@ -683,6 +738,7 @@ struct RequestLogDrawerView: View {
             
             if !Task.isCancelled {
                 self.sortedAndFilteredLogs = result
+                self.rebuildRowSnapshots()
             }
         }
     }
@@ -946,7 +1002,7 @@ struct RequestLogTableRow: View {
             // both "unconfigured" and "a journey answered", which is exactly the distinction someone
             // debugging a missing mock needs.
             endpointCell
-                .frame(width: LogColumns.endpoint, alignment: .leading)
+                .frame(width: LogColumns.answeredBy, alignment: .leading)
                 .accessibilityIdentifier("requestLog.endpointName.\(log.id.uuidString)")
 
             // Scenario
@@ -1012,7 +1068,10 @@ struct RequestLogTableRow: View {
                 .accessibilityIdentifier("requestLog.addToJourneyMenu.\(log.id.uuidString)")
             }
         }
-        .frame(height: 26)
+        // `DSRowHeight.logRow`, not a literal. 28, up from 26 — the redesign raised it to seat a
+        // latency bar that was then cut, and the two points were kept because the row still gained a
+        // column and 26 was already the tightest in the window.
+        .frame(height: DSRowHeight.logRow)
         .background(rowBackground)
         .overlay(alignment: .leading) {
             if isSelected {
@@ -1046,12 +1105,22 @@ struct RequestLogTableRow: View {
         } else {
             switch log.outcome {
             case .unmatched:
-                Text(RequestOutcome.unmatched.label)
+                // `warningDeep`, not the plain amber. The same 3.90:1 correction the unmatched
+                // toggle needed — and this cell sits on a striped row, which is worse.
+                Label(RequestOutcome.unmatched.label, systemImage: "exclamationmark.triangle.fill")
+                    .labelStyle(.titleAndIcon)
                     .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.httpStatusColor(for: 404))
+                    .foregroundStyle(DSColors.warningDeep)
                     .lineLimit(1)
             case .blockedByJourney:
-                Text(RequestOutcome.blockedByJourney.label)
+                // Distinguishable from a plain endpoint name, which it was not: both were
+                // `labelSecondary` text, so "an active journey deliberately refused this" read
+                // exactly like "this endpoint answered it". `RequestOutcome`'s own doc comment is
+                // explicit that this is "distinct from unmatched: the configuration is deliberate,
+                // not missing" — so it takes the journey glyph rather than the warning triangle, and
+                // stays quiet rather than amber.
+                Label(RequestOutcome.blockedByJourney.label, systemImage: "arrow.triangle.branch")
+                    .labelStyle(.titleAndIcon)
                     .font(DSTypography.caption)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
