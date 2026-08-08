@@ -65,6 +65,16 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   - `JourneyResolver` / `JourneyRunState` / `MockResolver` — journey resolution as a pure function
   - `ControlCommand` / `ProjectCommandExecutor` — the command language and its pure interpreter
   - `CommandCatalog` — runtime self-description; `JourneyTemplates` — the built-in journey library
+  - `RequestLogFilter` — the request log's filter predicate. In Domain rather than in the drawer that
+    draws it, so the window and `mimic log list` narrow traffic by one rule instead of two. It carries
+    `endpointID`, which the CLI does not yet expose; see the known gap in [ROADMAP.md](ROADMAP.md).
+  - `EndpointFromLog` — turns a logged request into a draft `Endpoint`, so "I saw this call go
+    unanswered" becomes a configured mock without retyping the path
+
+  Two types the redesign planned and did not build: `RequestLogStatistics` and `TrafficWindow`
+  belonged to the server segment's traffic sparkline, which needs a ≤4Hz ticker running whether or not
+  anyone is watching. It was deferred rather than deleted — see [ROADMAP.md](ROADMAP.md) — and the
+  types went with it. Nothing else was written against them.
 - **MockServerEngine** — `MockServerEngine` actor owns the Vapor app + a `MockRouteStore` snapshot of
   the live configuration *and the journey cursor*; serves requests by asking Domain to `plan`, applies
   the delay or the transport failure, and yields one `RequestLog` per request to a single `logStream`.

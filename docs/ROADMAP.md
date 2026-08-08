@@ -26,6 +26,13 @@ Real limitations, not planned work:
   operation. Two calls that differ only in their body or in an auth header cannot be told apart. The
   matcher already receives both, so this is a feature that hasn't been built rather than a design
   wall.
+- **The request log's endpoint filter is window-only.** `RequestLogFilter` lives in Domain and carries
+  `endpointID`, and the inspector's traffic count uses it to scope the log to one endpoint. But
+  `mimic log list` exposes only `--unmatched` and `--journey-only`, so a script cannot ask the
+  question the window answers with a click. This is the one place the redesign left the two surfaces
+  unequal, and it is a small addition rather than a design problem: the filter is already in the
+  shared module, so the work is a flag, a `ControlCommand` associated value, a `CommandCatalog`
+  descriptor and a parse test.
 - **No dynamic responses.** Bodies are static text: no templating, no echoing request values back,
   no counters beyond a journey step's `repeatCount`.
 - **No passthrough.** Mimic can't proxy unmatched requests to a real backend, which is the usual way

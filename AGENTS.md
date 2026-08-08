@@ -218,6 +218,19 @@ problem.
   **A conditional cell in a table needs an `else` that draws something** — `Color.clear` is enough.
   Audit for this by finding every `@ViewBuilder` containing an `if` with no `else`, then checking
   whether its call site wraps it in a fixed frame; that pair is the whole bug.
+- **A control with a fixed width in a row that has to compress is the same bug as `.fixedSize()`,
+  reached from the other direction.** A 44pt method badge is fine until the column holding it is 62pt
+  and the row is asked to fold; then the badge keeps its 44 and something else pays. This redesign
+  introduced it twice — once in the journey step row, once in the request log — and both times the
+  symptom appeared in a *neighbouring* column, which is why it survives review. Give the row a
+  `ViewThatFits` ladder and let every fixed member of it be measured against the string it actually
+  has to hold: `PATCH` is 37.1pt at 12pt SF Mono, so a 44pt badge clips it once padding is paid, and
+  the fix was to drop the badge's type to `DSTypography.codeBadge` rather than to widen the column.
+- **A progress indicator derived from the cursor rather than from per-step state lies at the edges.**
+  "Step 3 of 7" computed from a journey's current index reads correctly while running and wrongly the
+  moment the journey is held, restarted, or finished — the cursor is a position, not a history, and it
+  cannot distinguish "not yet reached" from "already passed". Progress that a user reads as truth has
+  to come from state each step owns.
 - **`.fixedSize()` on a string in a row is a latent clipping bug.** It makes the row demand more width
   than its container has, and an `HStack` resolves that by pushing its *leading* edge out of view —
   `DSPanelHeader` rendered "narios" instead of "Scenarios" for exactly this reason. Long strings get
@@ -263,6 +276,13 @@ set of rules, because they used to follow none and the window read as three unre
   the weight, which is exactly what an `NSTableHeaderView` does. See
   [docs/redesign/decisions.md](docs/redesign/decisions.md).
 
+  **There are five surface tokens, and they are the whole vocabulary**: `surfaceContent` (the editor
+  canvas), `surfaceSidebar` (the navigator), `surfacePanelHeader`, `surfaceWell` (an inset field or
+  code area) and `surfaceElevated` (a sheet or popover). Two of them are byte-identical to the tokens
+  they replaced — `surfacePanelHeader` to the old `secondary`, `surfaceWell` to the old `tertiary` —
+  which is deliberate: the redesign renamed them for what they are *for* rather than for how dark they
+  are, and a rename that also changes a value hides the change inside the churn.
+
   Never wash the panel surface with a fraction of *itself*: `secondary.opacity(0.6)` over `secondary`
   is `secondary`, which is how the request log's column strip spent months being exactly the colour
   it was trying to differ from.
@@ -280,6 +300,11 @@ set of rules, because they used to follow none and the window read as three unre
   goes to the inspector (`InspectorPanelView.Mode`, precedence: request → endpoint → overview) and the
   drawer stays a list. A panel whose height is a user preference cannot also be the place a payload is
   read.
+- **Panel width floors are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#window-geometry),
+  not chosen here.** The 1140pt window floor, the inspector's 260 and the navigator's 300 are each
+  derived from a measured string advance, and the derivation is the part worth keeping — a number
+  without it gets "tidied" by the next person who thinks 250 looks rounder. Panels shrink gracefully
+  to those floors and stop; below them AppKit refuses rather than letting a column truncate silently.
 - **Panel geometry is a preference.** Sizes and visibility go through `PanelLayoutStore`, which takes
   an injected `UserDefaults` so a UI test run cannot overwrite a real window arrangement. Never reach
   for `@AppStorage` here: it binds to `.standard` and would do exactly that.

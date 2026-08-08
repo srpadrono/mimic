@@ -86,7 +86,10 @@ step a `repeatCount` above 1 when a drop needs to survive the client's own retry
   moves to the first step that has not.
 - **Held** (`autoAdvance: false`) — the current step keeps answering until something advances it
   explicitly. This is how "the backend is in maintenance mode until I say otherwise" works;
-  `mimic journey advance` is the switch that lifts it.
+  `mimic journey advance` is the switch that lifts it. In the window this lives in the **journey run
+  bar**, beside Restart and Advance, rather than in a per-step field — it is a property of how the run
+  behaves, and the run bar is where someone watching a run is already looking. The bar folds to two
+  lines at pane width, which is why its 38pt is a `minHeight` floor and never a fixed height.
 - **On completion** — `stop` (later requests fall through) or `restart` (the run resets and the
   journey replays, for soak tests).
 
@@ -109,6 +112,13 @@ mimic journey deactivate            # back to plain endpoint mocking
 
 Nine ready-made journeys cover the scenarios teams reproduce most often. Each is also a worked
 example of the step vocabulary, so it is a good starting point for writing your own.
+
+**In the window, the template gallery *is* the empty state.** Open the Journeys navigator in a project
+with none and you get the nine templates laid out to pick from, not the words "No journeys yet". That
+is deliberate: journeys are the app's most valuable idea and its least obvious, and nine worked
+examples teach the step vocabulary better than any paragraph — but they used to sit two clicks deep,
+so the screen a new user actually met offered nothing to look at. Once a project *has* a journey the
+pane means "you have not selected one", which is a different sentence and gets a different answer.
 
 ```bash
 mimic journey templates

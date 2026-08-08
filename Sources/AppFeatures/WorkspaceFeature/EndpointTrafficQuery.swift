@@ -22,8 +22,10 @@ import Domain
 /// built was filtered, **sorted**, and re-materialised on every body evaluation, then discarded
 /// unread. On a busy server that is an O(n log n) sort per served request for a single integer.
 ///
-/// The scoping itself is `RequestLogFilter.endpointID`, in Domain — so the CLI can ask the same
-/// question the window does.
+/// The scoping itself is `RequestLogFilter.endpointID`, in Domain. **The CLI cannot reach it yet** —
+/// `mimic log list` exposes `--unmatched` and `--journey-only` but no `--endpoint-id`, so this is one
+/// of the few filters the window has and a script does not. Recorded as a known gap in
+/// `docs/ROADMAP.md`; the field is already in the right module for the flag to be a small addition.
 enum EndpointTrafficQuery {
     /// How many requests this endpoint answered.
     ///
