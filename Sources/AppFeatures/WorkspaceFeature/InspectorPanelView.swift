@@ -38,6 +38,14 @@ struct InspectorPanelView: View {
     /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
     @State private var isTrafficCountHovered = false
+    /// A mode the user picked, overriding the derivation until the selection changes.
+    ///
+    /// Deliberately **not** a persisted pin. The design specifies one, and a pin adds a fourth
+    /// provenance string, a new incoherent state (pinned to Request with no request selected) and a
+    /// stored boolean — for a problem the rail already solves, since clicking a mode is itself the
+    /// way to stop the panel following you. If people still ask for a lock after using this, it is
+    /// cheap to add; `PanelLayoutStore` is where it would live, never the project database.
+    @State private var manualMode: Mode?
 
     /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
@@ -99,12 +107,54 @@ struct InspectorPanelView: View {
         return .empty
     }
 
-    var mode: Mode {
+    /// What the panel would show on its own, from the selection alone.
+    var derivedMode: Mode {
         Self.mode(
             hasRequestDetail: requestDetail != nil,
             hasEndpoint: endpoint != nil,
             hasOverview: overview != nil
         )
+    }
+
+    /// What it actually shows: the user's choice if they made one and it still has content,
+    /// otherwise the derivation.
+    ///
+    /// The fallback matters. Without it, picking Scenarios and then clearing the endpoint selection
+    /// leaves the panel on a mode with nothing in it — the manual override becomes a trap rather
+    /// than a convenience.
+    var mode: Mode {
+        guard let manualMode, isAvailable(manualMode) else { return derivedMode }
+        return manualMode
+    }
+
+    private func isAvailable(_ mode: Mode) -> Bool {
+        switch mode {
+        case .request: requestDetail != nil
+        case .scenarios: endpoint != nil
+        case .overview: overview != nil
+        case .empty: true
+        }
+    }
+
+    /// Why this panel is showing what it is showing.
+    private var provenance: String {
+        if manualMode != nil, isAvailable(mode) {
+            return "Showing \(mode.title.lowercased()) — chosen, not following the selection"
+        }
+        switch mode {
+        case .request: return "Following the request log selection"
+        case .scenarios: return "Following the selected endpoint"
+        case .overview: return "No selection — showing project state"
+        case .empty: return "Nothing selected"
+        }
+    }
+
+    private var railItems: [DSModeRail<Mode>.Item] {
+        [
+            .init(id: .request, title: "Request", isEnabled: requestDetail != nil),
+            .init(id: .scenarios, title: "Scenarios", isEnabled: endpoint != nil),
+            .init(id: .overview, title: "Overview", isEnabled: overview != nil),
+        ]
     }
 
     public var body: some View {
@@ -114,12 +164,25 @@ struct InspectorPanelView: View {
             // with its content reads as a rendering glitch, and it made the three panels line up
             // differently depending on what you had clicked.
             DSPanelHeader(
-                headerTitle,
-                subtitle: headerSubtitle,
+                // No title: the rail names the mode, and a title repeating it would cost the row its
+                // width twice over. Same reason the navigator's header is a tab strip.
+                "",
+                subtitle: nil,
                 identifier: "inspector",
                 // The inspector's body is `surfaceSidebar`, where the panel-header fill measures
                 // ΔL* 0.30 — invisible. This header separates with its rule alone.
-                host: .sidebar
+                host: .sidebar,
+                leading: {
+                    DSModeRail(
+                        items: railItems,
+                        selection: mode,
+                        identifier: "inspector.modeRail"
+                    ) { picked in
+                        // Picking a mode is itself the way to stop the panel following the
+                        // selection — which is why there is no separate pin.
+                        manualMode = (picked == derivedMode) ? nil : picked
+                    }
+                }
             ) {
                 switch mode {
                 case .request:
@@ -185,6 +248,8 @@ struct InspectorPanelView: View {
                     EmptyView()
                 }
             }
+
+            DSProvenanceLine(provenance, identifier: "inspector.provenance")
 
             switch mode {
             case .request:

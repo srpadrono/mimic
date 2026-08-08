@@ -700,7 +700,13 @@ struct WorkspaceView: View {
         InspectorPanelView(
             endpoint: endpoint,
             requestDetail: detail,
-            overview: endpoint == nil && detail == nil ? inspectorOverview : nil,
+            // Always supplied, not only when nothing else is selected. That guard was right when
+            // the inspector's mode was a pure derivation — overview was the fallback, so computing
+            // it otherwise was waste. With a mode rail the user can *choose* it, and gating it on
+            // "nothing selected" made Overview permanently dim the moment you clicked an endpoint:
+            // the one mode you might want while working on something, unreachable while working on
+            // something. Precedence is unchanged; only availability is.
+            overview: inspectorOverview,
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],
