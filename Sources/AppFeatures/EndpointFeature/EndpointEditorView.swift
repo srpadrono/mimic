@@ -13,9 +13,14 @@ import DesignSystem
 /// and "Group tag" in another, but the eye reads them as a single form, and a seam that shifted
 /// between two cards 16pt apart would look like a mistake rather than a grouping.
 private enum EditorRowMetrics {
-    /// Width of the right-aligned label column. Sized for "Global delay", the longest label, which
-    /// measures 64.6pt at `DSTypography.label` (SF Pro 11pt regular). A longer label has to raise
-    /// this rather than wrap — a two-line label loses its alignment with the control beside it.
+    /// Width of the right-aligned label column. Sized for "Status code", now the longest label here
+    /// — "Global delay" was, and moved into the Response row as trailing read-only text when delay
+    /// joined the response's own shape. A longer label has to raise this rather than wrap: a two-line
+    /// label loses its alignment with the control beside it.
+    ///
+    /// Left at 68 rather than shrunk to fit the new longest string. The column is shared with the
+    /// second card, and a seam that moved because one label in one card got shorter would read as a
+    /// mistake rather than as a grouping.
     static let labelColumn: CGFloat = 68
 
     /// Width of a field holding a number: a status code, or a millisecond count. Both are at most
@@ -359,6 +364,55 @@ struct EndpointEditorView: View {
                 .fill(DSColors.httpStatusColor(for: Int(statusCodeString) ?? 0))
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
+
+            // The reason phrase, read-only, beside the code it belongs to.
+            //
+            // The redesign makes this whole thing a popup of codes-with-phrases. That would be a
+            // regression: this field deliberately accepts *any* integer, which is how you mock the
+            // 418 or the 599 a real service actually returns, and the debounce note a few lines down
+            // exists because "6" is a prefix of "600". So the phrase annotates the field rather than
+            // replacing it — and simply disappears for a code that has none.
+            if let phrase = Self.reasonPhrase(for: Int(statusCodeString) ?? 0) {
+                Text(phrase)
+                    .font(DSTypography.meta)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("endpointEditor.statusPhrase")
+            }
+
+            // Delay belongs with the response's shape, not two sections down under Settings. What a
+            // route returns is a status, a body, and how long it takes to say so.
+            Text("Delay")
+                .font(DSTypography.label)
+                .foregroundStyle(DSColors.labelSecondary)
+                .padding(.leading, DSSpacing.md)
+
+            TextField("0", text: $delayString)
+                .textFieldStyle(.plain)
+                .font(DSTypography.code)
+                .editorFieldWell(width: EditorRowMetrics.numericFieldWidth)
+                .accessibilityIdentifier("endpointEditor.delay")
+                .onChange(of: delayString) { delayError = nil }
+                .onChange(of: isDelayFocused) { _, focused in
+                    if !focused { commitDelay() }
+                }
+                .accessibilityLabel("Endpoint delay in milliseconds")
+                .focused($isDelayFocused)
+                .onSubmit { commitDelay() }
+
+            unitLabel("ms")
+
+            Spacer(minLength: DSSpacing.sm)
+
+            // Read-only, and trailing, because it is the project's number rather than this
+            // endpoint's — but it is added to the delay beside it before any response goes out, so
+            // showing it anywhere else means doing the arithmetic in your head.
+            Text("Project delay \(globalDelayMs) ms")
+                .font(DSTypography.metaSmall)
+                .foregroundStyle(DSColors.labelTertiary)
+                .lineLimit(1)
+                .accessibilityIdentifier("endpointEditor.globalDelay")
+                .accessibilityLabel("Project delay \(globalDelayMs) milliseconds, set with mimic server configure")
         }
 
         // A rejected status code used to be rejected in silence: the field went on showing 600 while
@@ -366,6 +420,38 @@ struct EndpointEditorView: View {
         // feedback, so it has to appear whenever the commit does not.
         if let statusCodeError {
             validationNote(statusCodeError, identifier: "endpointEditor.statusCode.error")
+        }
+
+        if let delayError {
+            validationNote(delayError, identifier: "endpointEditor.delay.error")
+        }
+    }
+
+    /// The phrase a client would see beside the code, for the codes this app actually mocks.
+    ///
+    /// Deliberately not exhaustive and deliberately not a picker: an unknown code returns `nil` and
+    /// the label simply does not draw, which is what keeps arbitrary codes enterable.
+    static func reasonPhrase(for code: Int) -> String? {
+        switch code {
+        case 200: "OK"
+        case 201: "Created"
+        case 202: "Accepted"
+        case 204: "No Content"
+        case 301: "Moved Permanently"
+        case 302: "Found"
+        case 304: "Not Modified"
+        case 400: "Bad Request"
+        case 401: "Unauthorized"
+        case 403: "Forbidden"
+        case 404: "Not Found"
+        case 409: "Conflict"
+        case 422: "Unprocessable Content"
+        case 429: "Too Many Requests"
+        case 500: "Internal Server Error"
+        case 502: "Bad Gateway"
+        case 503: "Service Unavailable"
+        case 504: "Gateway Timeout"
+        default: nil
         }
     }
 
@@ -553,47 +639,13 @@ struct EndpointEditorView: View {
                 .onSubmit { commitGroupTag() }
         }
 
-        formRow("Delay") {
-            TextField("0", text: $delayString)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .editorFieldWell(width: EditorRowMetrics.numericFieldWidth)
-                .accessibilityIdentifier("endpointEditor.delay")
-                .onChange(of: delayString) { delayError = nil }
-                .onChange(of: isDelayFocused) { _, focused in
-                    if !focused { commitDelay() }
-                }
-                .accessibilityLabel("Endpoint delay in milliseconds")
-                .focused($isDelayFocused)
-                .onSubmit { commitDelay() }
-
-            unitLabel("ms")
-
-            if let delayError {
-                validationNote(delayError, identifier: "endpointEditor.delay.error")
-            }
-        }
-
-        formRow("Global delay") {
-            // Not a disabled text field. A greyed-out well in a row of live ones reads as a control
-            // that failed rather than as a value belonging to something else, and there is nothing to
-            // type into: this number is the project's, shown here because it is added to the delay
-            // above before any response goes out. The padding puts its digits at the same x as the
-            // digits in the field above rather than 6pt to their left.
-            Text("\(globalDelayMs)")
-                .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelSecondary)
-                .padding(.horizontal, DSSpacing.sm)
-                .frame(width: EditorRowMetrics.numericFieldWidth, alignment: .leading)
-                .accessibilityIdentifier("endpointEditor.globalDelay")
-                .accessibilityLabel("Global delay in milliseconds")
-
-            unitLabel("ms")
-        }
+        // Delay and the project delay moved up into the Response row, where they belong: what a
+        // route returns is a status, a body, and how long it takes to say so. Settings keeps the
+        // things that are about the *endpoint* rather than its response.
 
         // Non-breaking spaces inside the command: wrapped at 420pt the sentence broke it across two
         // lines as "configure --" / "delay", which is not a thing anyone can copy.
-        note("Project-wide, and added on top of this endpoint's own delay. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.")
+        note("The project delay shown in the Response row is added on top of this endpoint's own. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.")
     }
 
     // MARK: - Row furniture
