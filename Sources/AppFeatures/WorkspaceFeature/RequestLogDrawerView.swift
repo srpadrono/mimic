@@ -249,6 +249,12 @@ struct RequestLogDrawerView: View {
             onClear: onClear,
             selectedLogIDs: selectedLogIDs,
             unmatchedOnly: unmatchedOnly,
+            // Forwarded, and it was not: this initialiser took `endpointScope` and dropped it on the
+            // floor, so the designated one always received its `.constant(nil)` default. Everything
+            // downstream was correct — the binding, the `onChange`, the filter — and the feature was
+            // still inert, because a parameter with a default silently disappears when you forget to
+            // pass it on. Nothing warns about that.
+            endpointScope: endpointScope,
             onCreateEndpoint: onCreateEndpoint,
             journeys: journeys,
             onAddToJourney: onAddToJourney,

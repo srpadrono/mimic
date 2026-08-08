@@ -37,6 +37,7 @@ struct InspectorPanelView: View {
     /// view that no longer exists. Carrying the id makes the sheet a function of what was clicked
     /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
+    @State private var isTrafficCountHovered = false
 
     /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
@@ -148,9 +149,23 @@ struct InspectorPanelView: View {
                                         .font(DSTypography.Figure.small)
                                 }
                                 .foregroundStyle(DSColors.accentText)
+                                // A real hit target and a real hover, because it had neither: a
+                                // 10pt glyph beside a numeral is about 20pt of clickable area and
+                                // gave no sign it was a control at all. AGENTS.md is explicit —
+                                // every interactive control answers the pointer, and a control you
+                                // find by trial is the defect that recurs most here. Same 22pt
+                                // target and `accentSubtle` well as `DSPanelHeaderButton` beside it.
+                                .padding(.horizontal, DSSpacing.xs)
+                                .frame(height: 22)
+                                .background(
+                                    RoundedRectangle(cornerRadius: DSCornerRadius.smPlus)
+                                        .fill(isTrafficCountHovered ? DSColors.accentSubtle : Color.clear)
+                                )
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .onHover { isTrafficCountHovered = $0 }
+                            .animation(.easeOut(duration: DSAnimation.micro), value: isTrafficCountHovered)
                             .help("Show this endpoint's requests in the log")
                             .accessibilityIdentifier("inspector.endpointTrafficCount")
                             .accessibilityLabel("\(endpointTraffic.count) requests answered by this endpoint")
