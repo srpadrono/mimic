@@ -20,6 +20,9 @@ struct JourneyNavigatorList: View {
     let journeys: [Journey]
     /// The journey currently overriding endpoint responses, if any.
     let activeJourneyID: UUID?
+    /// Live progress for the active journey, so its row can show what it has served rather than only
+    /// that it is running. `nil` when nothing is active.
+    var activeJourneyStatus: JourneyStatus?
     /// Progress for the active journey, e.g. "Step 2 of 5" or "Complete". Nil when none is running.
     let activeProgress: String?
     /// What the centre pane is editing. Selecting is *not* activating — see ``JourneyNavigatorRow``.
@@ -60,9 +63,13 @@ struct JourneyNavigatorList: View {
                 DSEmptyState(
                     systemImage: NavigatorTab.journeys.systemImage,
                     heading: "No journeys",
-                    message: "A journey scripts an ordered sequence of responses, so one endpoint can "
-                        + "fail and then succeed on the retry. Add one to script a flow endpoints "
-                        + "alone can't express.",
+                    // Points at the gallery rather than describing the feature at length, because
+                    // the centre pane is now showing nine worked examples of it. Two surfaces
+                    // explaining the same idea in different words is how they drift; this one names
+                    // where the answer already is.
+                    message: "A journey scripts an ordered sequence of responses, so one endpoint "
+                        + "can fail and then succeed on the retry. Pick a template from the gallery, "
+                        + "or start an empty one.",
                     actionTitle: "Add journey",
                     identifier: "journeys.empty",
                     action: onAdd
@@ -75,6 +82,7 @@ struct JourneyNavigatorList: View {
                         JourneyNavigatorRow(
                             journey: journey,
                             isActive: isActive,
+                            status: isActive ? activeJourneyStatus : nil,
                             onToggleActivation: { onActivate(isActive ? nil : journey.id) },
                             onDuplicate: { onDuplicate(journey.id) },
                             onDelete: { deleteTarget = journey }
@@ -233,11 +241,57 @@ struct JourneyNavigatorRunStrip: View {
 struct JourneyNavigatorRow: View {
     let journey: Journey
     let isActive: Bool
+    var status: JourneyStatus?
     let onToggleActivation: () -> Void
     let onDuplicate: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            identityRow
+
+            // Only while it is running, and only when there is something to report. A journey that
+            // is active but has served nothing does not need a bar of empty segments to say so.
+            if isActive, let status, status.totalSteps > 0 {
+                HStack(spacing: DSSpacing.sm) {
+                    DSProgressSegments(
+                        states: status.steps.map(\.isExhausted),
+                        identifier: "journeys.progress.\(journey.id.uuidString)"
+                    )
+
+                    Text(progressSummary(status))
+                        .font(DSTypography.metaSmall)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+        }
+        .padding(.horizontal, isActive ? DSSpacing.sm : 0)
+        .padding(.vertical, isActive ? DSSpacing.xs : 0)
+        .background {
+            // A card, but only for the one that is answering. An active journey rewrites what every
+            // endpoint returns, so it is the rare piece of state that has earned a fill — and it has
+            // to be findable in a list without reading every row.
+            if isActive {
+                RoundedRectangle(cornerRadius: DSCornerRadius.mdPlus)
+                    .fill(DSColors.accent.opacity(0.11))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: DSCornerRadius.mdPlus)
+                            .stroke(DSColors.accent.opacity(0.32), lineWidth: 0.5)
+                    }
+            }
+        }
+    }
+
+    /// Reads per-step `isExhausted`, never the cursor — see `DSProgressSegments` for why.
+    private func progressSummary(_ status: JourneyStatus) -> String {
+        let served = status.steps.filter(\.isExhausted).count
+        let step = min(served + 1, status.totalSteps)
+        return "Step \(step) of \(status.totalSteps) · \(status.totalServed) served"
+    }
+
+    private var identityRow: some View {
         HStack(spacing: DSSpacing.sm) {
             JourneyActivationToggle(
                 journey: journey,
@@ -264,7 +318,7 @@ struct JourneyNavigatorRow: View {
         }
         .padding(.vertical, DSSpacing.xs)
         .contentShape(Rectangle())
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+        .dsHoverHighlight(cornerRadius: DSCornerRadius.mdPlus)
         .contextMenu {
             Button(action: onToggleActivation) {
                 Label(
@@ -321,6 +375,7 @@ struct JourneyNavigatorRow: View {
 private struct JourneyActivationToggle: View {
     let journey: Journey
     let isActive: Bool
+    var status: JourneyStatus?
     let onToggleActivation: () -> Void
 
     @State private var isHovered = false

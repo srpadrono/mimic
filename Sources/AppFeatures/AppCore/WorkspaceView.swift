@@ -621,6 +621,7 @@ struct WorkspaceView: View {
                 JourneyNavigatorList(
                     journeys: appState.journeys,
                     activeJourneyID: appState.activeJourney?.id,
+                    activeJourneyStatus: appState.activeJourneyStatus,
                     activeProgress: activeJourneyProgress,
                     selectedJourneyID: $appState.selectedJourneyID,
                     onActivate: appState.activateJourney,
