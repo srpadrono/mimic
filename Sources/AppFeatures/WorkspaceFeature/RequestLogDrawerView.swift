@@ -49,11 +49,12 @@ private extension View {
         fill: Color,
         stroke: Color,
         minWidth: CGFloat? = nil,
-        idealWidth: CGFloat? = nil
+        idealWidth: CGFloat? = nil,
+        maxWidth: CGFloat? = nil
     ) -> some View {
         padding(.horizontal, DSSpacing.sm)
             .padding(.vertical, HeaderControl.verticalPadding)
-            .frame(minWidth: minWidth, idealWidth: idealWidth)
+            .frame(minWidth: minWidth, idealWidth: idealWidth, maxWidth: maxWidth)
             .frame(height: HeaderControl.height)
             .background {
                 RoundedRectangle(cornerRadius: HeaderControl.cornerRadius)
@@ -353,7 +354,10 @@ struct RequestLogDrawerView: View {
     /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
     /// that is always coloured has stopped saying anything.
     private func unmatchedFilterForeground(count: Int) -> Color {
-        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
+        // `warningDeep`, not the plain amber. Measured on this control's own `warning @ 13%` fill
+        // over the panel header, the plain hue is 3.92:1 in light — and the handoff lists this exact
+        // pairing under "measured and passing". It is the log's most-used filter; it has to be read.
+        if unmatchedOnly || count > 0 { return DSColors.warningDeep }
         return DSColors.labelSecondary
     }
 
@@ -362,7 +366,7 @@ struct RequestLogDrawerView: View {
     /// The count is on the control itself, so a missing mock is visible without opening the filter —
     /// which is the whole point: you notice it while debugging something else.
     @ViewBuilder
-    private var unmatchedFilterToggle: some View {
+    private func unmatchedFilterToggle(compact: Bool) -> some View {
         let count = RequestLogQuery.unmatchedCount(logs: requestLogs)
 
         // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
@@ -375,16 +379,26 @@ struct RequestLogDrawerView: View {
             HStack(spacing: DSSpacing.xs) {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 10))
-                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                    .font(DSTypography.caption)
+                // The word is the first thing to go when the row runs out of room. The glyph still
+                // says what this is and the count is the number you came for, so a compact toggle
+                // loses nothing a reader needs — and the spoken label below is identical either way.
+                if compact {
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(DSTypography.caption)
+                    }
+                } else {
+                    Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
+                        .font(DSTypography.caption)
+                }
             }
             .foregroundStyle(unmatchedFilterForeground(count: count))
             // The same well as the filter field beside it — one height, one radius, one hairline.
             // These two were written independently and drifted by a couple of points, which is
             // exactly the kind of difference nobody can name and everybody can see.
             .headerControlWell(
-                fill: unmatchedOnly ? DSColors.httpStatusColor(for: 404).opacity(0.12) : .clear,
-                stroke: unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
+                fill: unmatchedOnly ? DSColors.warning.opacity(0.13) : .clear,
+                stroke: unmatchedOnly ? DSColors.warning.opacity(0.30) : DSColors.border
             )
             .contentShape(Rectangle())
         }
@@ -450,7 +464,37 @@ struct RequestLogDrawerView: View {
     @ViewBuilder
     private var drawerToolbar: some View {
         DSPanelHeader("Request log", subtitle: countSubtitle, identifier: "requestLog") {
-            HStack(spacing: DSSpacing.sm) {
+            // `ViewThatFits`, because this row over-commits and an over-committed `HStack` in this
+            // window does not truncate — it pushes its *leading* edge out of view. Resized to the
+            // minimum window width the header rendered "g 16 requests" instead of "Request log", and
+            // took the Method column header off screen with it. `DSPanelHeader`'s title is
+            // `.fixedSize()`, so the row cannot yield there; it has to yield here.
+            //
+            // The collapse order is the one written down in docs/redesign/decisions.md §1.2:
+            // the Clear label first (it is already icon-only), then the unmatched toggle's *word*,
+            // then the filter field down to its 160pt floor. The method popup and the filter field
+            // never disappear, because they are the two controls that change what you are looking at.
+            ViewThatFits(in: .horizontal) {
+                toolbarControls(compactUnmatched: false, filterFloor: 160)
+                toolbarControls(compactUnmatched: true, filterFloor: 160)
+                toolbarControls(compactUnmatched: true, filterFloor: 110)
+                // The floor of the floor. 90pt still shows about ten characters, which is enough to
+                // type a route fragment into — and it is the last thing that yields before
+                // `DSPanelHeader`'s `.fixedSize()` title starts losing its leading characters, which
+                // is the failure this whole ladder exists to prevent.
+                toolbarControls(compactUnmatched: true, filterFloor: 90)
+            }
+        }
+    }
+
+    /// The header's trailing controls, in two widths.
+    ///
+    /// `compactUnmatched` drops the word "Unmatched" and keeps the glyph and the count. That is the
+    /// only text in the row that is safe to lose: the glyph still says what it is, the count is the
+    /// number you came for, and the accessibility label is unchanged either way.
+    @ViewBuilder
+    private func toolbarControls(compactUnmatched: Bool, filterFloor: CGFloat) -> some View {
+        HStack(spacing: DSSpacing.sm) {
                 // First, because it is the filter a user is least likely to have set deliberately —
                 // it arrives from the inspector, in another panel.
                 endpointScopeChip
@@ -473,7 +517,7 @@ struct RequestLogDrawerView: View {
                     .accessibilityIdentifier("drawer.methodFilter")
                     .accessibilityLabel("Filter by method")
 
-                    unmatchedFilterToggle
+                    unmatchedFilterToggle(compact: compactUnmatched)
 
                     HStack(spacing: DSSpacing.xs) {
                         Image(systemName: "magnifyingglass")
@@ -491,8 +535,15 @@ struct RequestLogDrawerView: View {
                     .headerControlWell(
                         fill: DSColors.surfaceWell,
                         stroke: DSColors.border,
-                        minWidth: 120,
-                        idealWidth: 160
+                        // The sole flexible control in this row, and the only one with a ceiling.
+                        // The handoff specifies a fixed 270, which is a direct reversal of a
+                        // documented fix: a fixed width was simultaneously too wide for a narrow
+                        // drawer and too narrow to read a path in a wide one. Min 160 is what the
+                        // width policy budgets at the 1140pt window; 320 stops it eating the row
+                        // on a large display, where the extra width buys nothing.
+                        minWidth: filterFloor,
+                        idealWidth: 270,
+                        maxWidth: 320
                     )
 
                     DSPanelHeaderButton(
@@ -503,7 +554,6 @@ struct RequestLogDrawerView: View {
                         selectedLogIDs = Self.performClear(onClear: onClear)
                         selectionAnchorID = nil
                     }
-                }
             }
         }
     }
