@@ -12,6 +12,23 @@ cd "$ROOT_DIR"
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
+# First, because it is the cheapest and because a drift here makes everything below it test a build
+# that does not ship. The two manifests declare the same dependency ranges and resolve them into two
+# separate lockfiles; 21 packages had already diverged, Vapor, NIO and GRDB among them.
+step "Lockfiles agree"
+python3 - <<'PY'
+import json, sys
+def pins(path):
+    return {p['identity']: p['state'].get('version') for p in json.load(open(path))['pins']}
+root, tuist = pins('Package.resolved'), pins('Tuist/Package.resolved')
+drifted = {k: (root[k], tuist[k]) for k in root.keys() & tuist.keys() if root[k] != tuist[k]}
+for name, (a, b) in sorted(drifted.items()):
+    print(f"{name}: Package.resolved={a} Tuist/Package.resolved={b}")
+if drifted:
+    sys.exit(f"{len(drifted)} package(s) drifted — re-resolve both lockfiles to one set")
+print(f"{len(root.keys() & tuist.keys())} shared packages agree")
+PY
+
 # The fast gate: everything that does not need Xcode. This is exactly what CI runs.
 step "Portable modules (swift test — same as CI)"
 swift test 2>&1 | grep -E "error:|✘|Test run with" || true
