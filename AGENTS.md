@@ -238,6 +238,16 @@ set of rules, because they used to follow none and the window read as three unre
   Nobody chose 31, or 33, or 46. A bar that genuinely fits no rung (the request detail's identity row
   wraps to two lines, so it measures 46–59) stays content-sized and says so in a comment, so the next
   audit does not re-flag it.
+- **A control's height comes from `DSControlHeight` and a line weight from `DSStroke`**, for the same
+  reason and after the same failure. The rule above about controls sharing a row was being kept by
+  hand: `DSButtonSize`, `DSTextField`, `DSFilterField`, `DSStatusBadge`, `RequestLogDrawerView`'s
+  `HeaderControl` and `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
+  the same 3pt inset privately — two of them across a module boundary, one with a comment promising
+  it matched `DSFilterField` "so a panel that later adopts that component does not change shape on
+  the way in". Six copies, and nothing checked that the promise held. The hairline was worse:
+  twenty-three bare `0.5`s, seven of them hand-drawing the closing rule `DSDivider` exists to draw.
+  `Tests/DesignSystemTests` pins all three ladders by value, because an ordering assertion cannot
+  catch `DSSpacing.md` going from 12 to 10.
 - **A bar inside a pane takes `DSColors.band`; a panel's own header takes `DSColors.secondary`.**
   Column-header strips, section headers and the jump bar are the first kind. `band` is a tint, not the
   separator — the 0.5pt `DSColors.separator` rule each of them closes with does the separating, at
