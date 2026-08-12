@@ -93,6 +93,14 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 - **Operations are data.** Modelling an operation as a `ControlCommand` value buys determinism (it is
   replayable and diffable), a single interpreter, and self-description — an agent can ask a running
   instance what it accepts instead of trusting documentation.
+- **Adding an operation is a compile error until it is routed.** A command carries associated values,
+  so `ControlCommand` can never be `CaseIterable` — and without a way to enumerate the surface, every
+  list claiming to mirror it is a copy maintained by hand. `CommandKind` is the join: no payloads, so
+  it *is* `CaseIterable`, and `ControlCommand.kind` maps onto it through a switch with no `default`.
+  The three switches that dispatch a command — the executor and both hosts — name every case for the
+  same reason, so a new one stops the build in all three until somebody decides which side of the
+  project-scoped line it falls on. The catalog is then checked against `allCases` rather than against
+  a fourth hand-written list, which is what it used to be compared with: a copy of itself.
 - **The journey cursor lives in an actor.** `MockRouteStore.resolve` reads the cursor, picks a step,
   and writes the advanced cursor back in one non-reentrant step. A read-then-write would let two
   concurrent requests consume the same step, which is exactly the bug a journey cannot afford.
