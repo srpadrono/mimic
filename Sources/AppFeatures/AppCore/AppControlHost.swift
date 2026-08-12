@@ -71,9 +71,31 @@ final class AppControlHost: ControlHost {
             return .success(.init(state: makeState(appState)))
 
         case let .reset(scope):
-            if scope == .logs || scope == .all { appState.requestLogs = [] }
-            if scope == .journey || scope == .all { appState.restartActiveJourney() }
-            return .success(.init(message: "Reset \(scope.rawValue).", state: makeState(appState)))
+            // The reply is built by `ControlMessages`, the same way the headless service builds it.
+            // This used to report `Reset \(scope.rawValue).` — true of the request, silent about the
+            // instance, and different from what the same command answers against a daemon. A script
+            // driving both got two answers to one question.
+            var clearedLogEntries: Int?
+            if scope == .logs || scope == .all {
+                clearedLogEntries = appState.requestLogs.count
+                appState.requestLogs = []
+            }
+
+            var restartedJourneyName: String?
+            if scope == .journey || scope == .all {
+                // Read before the restart is requested: it is dispatched to the engine and does not
+                // report back synchronously, and the journey being rewound is the one active now.
+                restartedJourneyName = appState.activeJourney?.name
+                appState.restartActiveJourney()
+            }
+
+            return .success(.init(
+                message: ControlMessages.reset(
+                    clearedLogEntries: clearedLogEntries,
+                    restartedJourneyName: restartedJourneyName
+                ),
+                state: makeState(appState)
+            ))
 
         // MARK: Server
 

@@ -640,6 +640,24 @@ struct ControlWireFormatTests {
         )
     }
 
+    /// Both hosts build this sentence, so it is a contract rather than a detail. It lived in each of
+    /// them separately: the service answered `Reset 12 log entries and journey "Checkout"` and the
+    /// window answered `Reset all.` — the same command, two answers, and a script driving both had no
+    /// way to tell which it was talking to.
+    @Test("A reset reports what it cleared, not what it was asked to clear")
+    func resetMessageNamesWhatWasCleared() {
+        #expect(ControlMessages.reset(clearedLogEntries: nil, restartedJourneyName: nil) == "Nothing to reset.")
+        // Scoped to the log, and the log was already empty: still nothing happened, and saying so is
+        // more useful than reporting the scope back.
+        #expect(ControlMessages.reset(clearedLogEntries: 0, restartedJourneyName: nil) == "Reset 0 log entries.")
+        #expect(ControlMessages.reset(clearedLogEntries: 1, restartedJourneyName: nil) == "Reset 1 log entry.")
+        #expect(ControlMessages.reset(clearedLogEntries: 12, restartedJourneyName: nil) == "Reset 12 log entries.")
+        #expect(ControlMessages.reset(clearedLogEntries: nil, restartedJourneyName: "Checkout")
+                == "Reset journey \"Checkout\".")
+        #expect(ControlMessages.reset(clearedLogEntries: 12, restartedJourneyName: "Checkout")
+                == "Reset 12 log entries and journey \"Checkout\".")
+    }
+
     @Test("Every command reports the kind it is")
     func kindMatchesTheCase() {
         #expect(ControlCommand.ping.kind == .ping)

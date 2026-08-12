@@ -876,6 +876,23 @@ struct AppStateAndViewTests {
         try await waitUntil { await engine.startConfigurations.last?.port == 9100 }
     }
 
+    /// The window's host and the headless service answer `reset` with the same sentence, because they
+    /// build it in the same place. This one used to report `Reset all.` — true of the request, silent
+    /// about the instance, and different from what a daemon says to the identical command.
+    @Test("Reset reports what was cleared, the same way the headless service does")
+    func controlHostResetNamesWhatWasCleared() async throws {
+        let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+
+        let response = await host.execute(.reset(scope: .all))
+
+        #expect(response.ok)
+        // Nothing served and no journey active, so there is genuinely nothing to report.
+        #expect(response.result?.message == "Reset 0 log entries.")
+    }
+
     @Test("An invalid port is refused and leaves the project alone")
     func controlHostRejectsAnInvalidStartPort() async throws {
         let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))

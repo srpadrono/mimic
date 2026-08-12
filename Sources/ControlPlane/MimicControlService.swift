@@ -399,20 +399,22 @@ public actor MimicControlService: ControlHost {
     }
 
     private func reset(scope: ResetScope) async throws -> ControlResult {
-        var cleared: [String] = []
-
+        var clearedLogEntries: Int?
         if scope == .logs || scope == .all {
-            cleared.append("\(requestLogs.count) log entries")
+            clearedLogEntries = requestLogs.count
             requestLogs = []
         }
-        if scope == .journey || scope == .all {
-            if let status = await engine.restartJourney() {
-                cleared.append("journey \"\(status.journeyName)\"")
-            }
+
+        var restartedJourneyName: String?
+        if scope == .journey || scope == .all, let status = await engine.restartJourney() {
+            restartedJourneyName = status.journeyName
         }
 
         return .init(
-            message: cleared.isEmpty ? "Nothing to reset." : "Reset \(cleared.joined(separator: " and ")).",
+            message: ControlMessages.reset(
+                clearedLogEntries: clearedLogEntries,
+                restartedJourneyName: restartedJourneyName
+            ),
             state: await makeState()
         )
     }
