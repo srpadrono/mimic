@@ -7,6 +7,24 @@ import Domain
 @Suite("Migrations")
 struct MigrationTests {
 
+    /// A record stamped with a document schema one ahead of what this build understands.
+    ///
+    /// It exists to hand the write closure an immutable value. `ProjectRecord.schemaVersion` is a
+    /// `var`, GRDB's `write` closure is `@Sendable`, and capturing a `var` in one is an error rather
+    /// than a warning under Swift 6 — so mutating a local and then closing over it does not compile.
+    /// Stamping through a function makes what the closure captures a `let`.
+    ///
+    /// `PersistenceError` is spelled `Persistence.PersistenceError` everywhere below for a
+    /// neighbouring reason: GRDB carries a deprecated `typealias PersistenceError = RecordError`,
+    /// and this file imports both modules, so the bare name is ambiguous. The compiler reported it
+    /// at the `catch` and not at the `#expect(throws:)`, which is a difference in how far
+    /// type-checking got rather than a difference in the two spellings — both are qualified.
+    private func stampedAhead(_ record: ProjectRecord) -> ProjectRecord {
+        var stamped = record
+        stamped.schemaVersion = MockProject.currentSchemaVersion + 1
+        return stamped
+    }
+
     // MARK: - Schema Tests
 
     @Test func v1MigrationCreatesAllTables() throws {
@@ -159,14 +177,13 @@ struct MigrationTests {
         let repository = GRDBProjectRepository(dbQueue: dbQueue)
 
         let project = MockProject(name: "From the future")
-        var record = ProjectRecord(from: project)
-        record.schemaVersion = MockProject.currentSchemaVersion + 1
-        try dbQueue.write { db in try record.insert(db) }
+        let record = stampedAhead(ProjectRecord(from: project))
+        try await dbQueue.write { db in try record.insert(db) }
 
         do {
             _ = try await repository.load(id: project.id)
             Issue.record("expected the load to be refused")
-        } catch let error as PersistenceError {
+        } catch let error as Persistence.PersistenceError {
             guard case let .unsupportedSchemaVersion(name, stored, supported) = error else {
                 Issue.record("expected unsupportedSchemaVersion, got \(error)")
                 return
@@ -195,9 +212,8 @@ struct MigrationTests {
         let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
         let repository = GRDBProjectRepository(dbQueue: dbQueue)
 
-        var record = ProjectRecord(from: MockProject(name: "From the future"))
-        record.schemaVersion = MockProject.currentSchemaVersion + 1
-        try dbQueue.write { db in try record.insert(db) }
+        let record = stampedAhead(ProjectRecord(from: MockProject(name: "From the future")))
+        try await dbQueue.write { db in try record.insert(db) }
 
         let listed = try await repository.allProjects()
         #expect(listed.map(\.name) == ["From the future"])
@@ -215,7 +231,7 @@ struct MigrationTests {
         }
 
         record.schemaVersion = MockProject.currentSchemaVersion + 1
-        #expect(throws: PersistenceError.self) { try record.requireSupportedSchemaVersion() }
+        #expect(throws: Persistence.PersistenceError.self) { try record.requireSupportedSchemaVersion() }
     }
 
     // MARK: - Erase-on-schema-change gating
