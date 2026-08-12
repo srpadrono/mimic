@@ -174,13 +174,11 @@ public actor MimicControlService: ControlHost {
 
         case let .projectDuplicate(ref):
             let source = try await resolveStoredProject(ref)
-            let copy = MockProject(
-                name: "\(source.name) (Copy)",
-                serverConfiguration: source.serverConfiguration,
-                endpoints: source.endpoints,
-                journeys: source.journeys,
-                activeJourneyID: source.activeJourneyID
-            )
+            // Every child id reminted. Carrying the source's meant the insert collided with rows the
+            // original still owns, and the whole write rolled back — `mimic project duplicate`
+            // reported a failure it could not explain, and against the window's host reported success
+            // while creating nothing.
+            let copy = source.duplicated(name: "\(source.name) (Copy)")
             try await repository.save(copy)
             return .init(message: "Duplicated project as \"\(copy.name)\".", project: copy)
 

@@ -138,7 +138,25 @@ struct ProjectWorkspaceTests {
             service.currentProject != nil && service.recentProjects.count == 1
         }
 
-        let sourceID = try #require(service.currentProject?.id)
+        // The source has content. This test used to duplicate an empty project, which is the only
+        // shape the old implementation could copy: it carried the source's endpoint and scenario ids
+        // into the copy, and those are primary keys across the whole database, so the insert collided
+        // and the write rolled back. With nothing to collide, the bug was invisible here.
+        _ = service.mutateCurrentProject { project in
+            let scenario = Scenario(name: "OK", statusCode: 200, body: "{}")
+            project.endpoints.append(
+                Endpoint(name: "Account", method: .get, path: "/account",
+                         scenarios: [scenario], activeScenarioID: scenario.id)
+            )
+        }
+
+        // Saved through the repository directly rather than by polling an autosave: `duplicateProject`
+        // reads the source back out of the store, so the store has to be current before it runs, and
+        // a deterministic await beats waiting on a debounce.
+        let source = try #require(service.currentProject)
+        try await context.repository.save(source)
+        let sourceID = source.id
+
         service.duplicateProject(id: sourceID)
         service.duplicateProject(id: UUID())
 
@@ -147,6 +165,15 @@ struct ProjectWorkspaceTests {
         }
 
         #expect(service.recentProjects.contains(where: { $0.name == "Source API (Copy)" }))
+
+        // The recents entry is a `UserDefaults` write and happens whether or not the store accepted
+        // anything — which is why it alone could not catch this. Load the copy back.
+        let copyID = try #require(service.recentProjects.first(where: { $0.name == "Source API (Copy)" })?.id)
+        let storedCopy = try await context.repository.load(id: copyID)
+        #expect(storedCopy.endpoints.count == 1, "the duplicate persisted no endpoints")
+        #expect(storedCopy.endpoints.first?.path == "/account")
+        let storedSource = try await context.repository.load(id: sourceID)
+        #expect(storedSource.endpoints.first?.id != storedCopy.endpoints.first?.id)
 
         service.deleteProject(id: sourceID)
         try await waitUntil {

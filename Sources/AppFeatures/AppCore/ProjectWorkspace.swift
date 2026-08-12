@@ -96,15 +96,18 @@ final class ProjectWorkspace {
             guard let self else { return }
             do {
                 let source = try await projectRepository.load(id: id)
-                let copy = MockProject(
-                    name: "\(source.name) (Copy)",
-                    serverConfiguration: source.serverConfiguration,
-                    endpoints: source.endpoints
-                )
+                // `duplicated(name:)`, not a `MockProject` built around `source.endpoints`. Child ids
+                // are primary keys across the whole database, so reusing them made every duplicate of
+                // a non-empty project collide on insert and roll the write back — and this `catch`
+                // is why nobody noticed. It also dropped the journeys entirely.
+                let copy = source.duplicated(name: "\(source.name) (Copy)")
                 try await projectRepository.save(copy)
                 recordRecentProject(id: copy.id, name: copy.name)
             } catch {
-                // Non-critical action; keep the current workspace state unchanged.
+                // A duplicate that fails has to say so. Swallowing it is what let a feature that
+                // could not work on any project with a single endpoint in it ship silently.
+                // `autosaveStatus` is the channel the window already renders for a store failure.
+                autosaveStatus = .failed("Could not duplicate the project.")
             }
         }
     }
