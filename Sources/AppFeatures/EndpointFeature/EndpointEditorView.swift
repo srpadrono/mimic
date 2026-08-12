@@ -234,7 +234,7 @@ struct EndpointEditorView: View {
                 // `separator`, the weight every horizontal bar in this window ends with.
                 // `panelSeparator` is heavier and reserved for the seam *between* panels.
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityElement(children: .contain)
     }
@@ -659,7 +659,7 @@ struct EndpointEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.lg)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         )
     }
 

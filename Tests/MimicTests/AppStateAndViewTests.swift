@@ -852,4 +852,62 @@ struct AppStateAndViewTests {
         #expect(UITestSupport.isRunningUITests == false)
         await UITestSupport.performForegroundActivation()
     }
+
+    // MARK: - Control host
+    //
+    // `AppControlHost` had no unit test anywhere in the repo, which is how the four divergences
+    // between it and `MimicControlService` shipped unnoticed. These cover the seam a script actually
+    // hits: the window's host answering the same commands the headless one does.
+
+    @Test("A port given to `server start` is written to the project, not just to the runtime")
+    func controlHostPersistsTheStartPort() async throws {
+        let engine = StubEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+
+        let response = await host.execute(.serverStart(port: 9100))
+
+        #expect(response.ok)
+        // The point of the change: a port supplied to the CLI is a change to the project, so it
+        // survives a reopen and cannot be overwritten by the next edit of anything else.
+        #expect(appState.currentProject?.serverConfiguration.port == 9100)
+        try await waitUntil { await engine.startConfigurations.last?.port == 9100 }
+    }
+
+    @Test("An invalid port is refused and leaves the project alone")
+    func controlHostRejectsAnInvalidStartPort() async throws {
+        let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+
+        let response = await host.execute(.serverStart(port: 70000))
+
+        #expect(response.ok == false)
+        #expect(appState.currentProject?.serverConfiguration.port == 8080)
+    }
+
+    /// The arm that replaced `default:`. Every project-scoped command is named there, so this is the
+    /// answer a caller gets rather than "unsupported" — and a command added later cannot land here by
+    /// accident, because the switch no longer compiles until it is routed.
+    @Test(
+        "Project-scoped commands report that no project is open",
+        arguments: [
+            ControlCommand.endpointList,
+            .journeyList,
+            .serverConfigure(port: 9000, globalDelayMs: nil),
+            .projectRename(name: "New name"),
+        ]
+    )
+    func controlHostReportsNoProjectOpen(command: ControlCommand) async throws {
+        let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        let response = await host.execute(command)
+
+        #expect(response.ok == false)
+        #expect(response.error?.code == "project.noneOpen")
+    }
 }

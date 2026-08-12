@@ -60,7 +60,7 @@ struct ServerStatusWell: View {
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
-                .strokeBorder(DSColors.border, lineWidth: 0.5)
+                .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
         }
         // A floor as well as a ceiling. Xcode's activity view keeps its width whether it is reporting
         // a build or sitting idle, so the toolbar does not re-flow every time the text changes

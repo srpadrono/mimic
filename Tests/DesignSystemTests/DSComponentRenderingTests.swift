@@ -263,6 +263,39 @@ struct DSComponentRenderingTests {
         #expect(await DSJSONEditor.validateAsync("{") == false)
     }
 
+    /// Values, not orderings.
+    ///
+    /// An ordering assertion cannot catch the change that actually matters: `DSSpacing.md` going from
+    /// 12 to 10 keeps every `<` true and moves every panel in the window. These numbers are measured
+    /// against Xcode rather than chosen freely, so changing one should mean editing a test and
+    /// re-reading why the number is what it is.
+    ///
+    /// The two ladders below had no coverage at all, having been six and twenty-three hand-written
+    /// literals until they were named — which is precisely when a test is worth adding, because the
+    /// literals are no longer there to compare against each other.
+    @Test("The bar, control and stroke ladders are the measured values")
+    func laddersArePinned() {
+        #expect(DSBarHeight.panelHeader == 30)
+        #expect(DSBarHeight.secondaryBar == 24)
+        #expect(DSBarHeight.controlRow == 32)
+        #expect(DSBarHeight.columnHeader == 22)
+
+        #expect(DSControlHeight.row == 20)
+        #expect(DSControlHeight.field == 22)
+        #expect(DSControlHeight.prominent == 28)
+        #expect(DSControlHeight.verticalPadding == 3)
+
+        #expect(DSStroke.hairline == 0.5)
+        #expect(DSStroke.seam == 1)
+        #expect(DSStroke.focusRing == 1)
+
+        // The relationships the comments claim, stated where they can fail: a control row is a row
+        // control with `sm` above and below, and a panel header stands on the ladder rather than
+        // owning its own number.
+        #expect(DSBarHeight.controlRow == DSControlHeight.row + DSSpacing.sm * 2)
+        #expect(DSPanelHeader<EmptyView>.height == DSBarHeight.panelHeader)
+    }
+
     @Test("Token values and color mappings stay consistent")
     func tokenValuesStayConsistent() {
         _ = DSAnimation.spring()

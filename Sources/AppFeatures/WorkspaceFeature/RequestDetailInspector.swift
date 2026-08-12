@@ -391,7 +391,7 @@ struct RequestDetailInspector: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         )
         .padding(.horizontal, DSSpacing.md)
         .padding(.bottom, DSSpacing.sm)

@@ -164,7 +164,7 @@ struct JourneyEditorView: View {
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityElement(children: .contain)
     }

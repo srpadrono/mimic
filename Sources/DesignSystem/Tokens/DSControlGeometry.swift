@@ -16,8 +16,8 @@ import CoreGraphics
 /// from a list rather than from whatever its neighbour happened to measure.
 public enum DSControlHeight {
     /// 20 — a control that sits in a row of other controls: panel-header controls, badges, filter
-    /// fields, small buttons. The rung `DSBarHeight.controlRow` is built from (20 + `sm` above and
-    /// below).
+    /// fields, small buttons. `DSBarHeight.controlRow` is this height plus `DSSpacing.sm` above and
+    /// below.
     public static let row: CGFloat = 20
 
     /// 22 — a control a user types into, or a single prominent action in a header. A 13pt line with
@@ -36,8 +36,8 @@ public enum DSControlHeight {
 ///
 /// A hairline and a seam. `DSDivider` already encodes which colour goes with which — `border` and
 /// `separator` at ``hairline``, `panelSeparator` at ``seam`` — and explains why two of the three used
-/// to be indistinguishable. The *weights* were still written as bare literals in twenty-one places:
-/// ten strokes, seven closing rules under a bar, three private constants, and
+/// to be indistinguishable. The *weights* were written as bare literals in twenty-three places:
+/// eleven strokes, eight closing rules under a bar, three private constants, and
 /// `DSDividerStyle.thickness`.
 ///
 /// A stroke weight is not a free parameter here. 0.5 is a device pixel on every display this app runs
