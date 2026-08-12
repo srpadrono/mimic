@@ -157,6 +157,26 @@ final class ImportWorkflow {
     var parseError: String?
     var isParsing: Bool
 
+    /// The parse the screen is currently waiting for.
+    ///
+    /// It used to be an unstructured `Task` owned by nothing, which is a last-writer-wins race:
+    /// choose a large HAR, realise it was the wrong file, choose a small one, and the first parse
+    /// finishes second and replaces the candidates for the file you actually asked for — under a
+    /// screen that had already stopped saying it was parsing, so nothing on it suggests the list is
+    /// from the abandoned file. Held here so a new parse can supersede the old one.
+    private(set) var parseTask: Task<Void, Never>?
+
+    /// Which parse the state on screen belongs to.
+    ///
+    /// Cancelling the task above cannot do this job on its own, twice over. Cancellation is
+    /// cooperative and nothing downstream observes it: `loadData` defaults to a synchronous
+    /// `Data(contentsOf:)`, and `HARParser.parse` and `OpenAPIParser.parse` each decode inside a
+    /// `Task.detached` of their own, which does not inherit cancellation from the task awaiting it.
+    /// And even where cancellation *is* observed, awaiting a cancelled task still hands back whatever
+    /// it computed, so a stale result would arrive and be committed regardless. The generation is
+    /// checked at the only point that settles it — after the await, immediately before the write.
+    private var parseGeneration = 0
+
     init(
         kind: ImportKind = .har,
         candidates: [ImportCandidate] = [],
@@ -238,8 +258,19 @@ final class ImportWorkflow {
     ) {
         beginParsing()
 
-        Task { [existingEndpoints, loadData, parse] in
+        parseGeneration &+= 1
+        let generation = parseGeneration
+        // Best effort, and honestly so — see `parseGeneration` for why nothing downstream stops. It
+        // costs one line, and it starts working the day a parser learns to check `Task.isCancelled`.
+        parseTask?.cancel()
+
+        parseTask = Task { @MainActor [weak self, existingEndpoints, loadData, parse] in
+            let outcome: Result<[ImportCandidate], any Error>
             do {
+                // The detached hop is kept from the code this replaced, deliberately: this type is
+                // `@MainActor`, and `ImportCandidateLoader.load` calls `loadData` — synchronous, and
+                // over a file the importer allows to be 256 MB. That read must not happen on the main
+                // actor, whatever else moves around it.
                 let parsed = try await Task.detached(priority: .userInitiated) {
                     try await ImportCandidateLoader.load(
                         url: url,
@@ -248,8 +279,20 @@ final class ImportWorkflow {
                         parse: parse
                     )
                 }.value
-                finishParsing(with: parsed)
+                outcome = .success(parsed)
             } catch {
+                outcome = .failure(error)
+            }
+
+            // One guard covering both outcomes, placed after the await and before anything is
+            // written: a superseded parse must not report a failure either. Its error belongs to a
+            // file the user has already moved on from, and showing it would replace the running
+            // spinner with "Parse error" for a parse that is still going.
+            guard let self, generation == parseGeneration else { return }
+            switch outcome {
+            case let .success(parsed):
+                finishParsing(with: parsed)
+            case let .failure(error):
                 failParsing(error)
             }
         }
@@ -395,8 +438,13 @@ struct ImportWorkflowScreen: View {
 }
 
 enum ImportPanelSelection {
+    /// The fallback is not defensive padding. This asks the system to describe a filename extension,
+    /// which is a question it is allowed to have no answer to — that is why the initialiser is
+    /// failable — and the `!` that used to be here turned "open the HAR importer" into a crash the
+    /// user could do nothing about, over a value that decides a picker filter and nothing else. A HAR
+    /// *is* JSON, so `.json` degrades to a panel that still filters rather than to no panel at all.
     static func configureHAR(panel: any ImportOpenPanel) {
-        panel.allowedContentTypes = [UTType(filenameExtension: "har")!]
+        panel.allowedContentTypes = [UTType(filenameExtension: "har") ?? .json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.panelMessage = "Choose a HAR file to import"

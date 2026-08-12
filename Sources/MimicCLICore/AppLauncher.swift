@@ -38,7 +38,7 @@ public enum AppLauncher {
         do {
             try process.run()
         } catch {
-            throw CLIFailure.badArgument(
+            throw CLIFailure.appUnavailable(
                 "Could not launch \(executable.path): \(error.localizedDescription)"
             )
         }
@@ -69,12 +69,116 @@ public enum AppLauncher {
         )
     }
 
+    /// Confirms that the pid in a discovery file belongs to the Mimic that wrote it, before anything
+    /// signals it.
+    ///
+    /// `mimic app stop` read a pid out of `control.json` and handed it straight to `kill(2)`. Two
+    /// facts make that unsafe together: the file outlives a crash, and the liveness check that is
+    /// meant to catch a stale one — ``ControlEndpointFileReader/isProcessAlive(_:)`` — returns `true`
+    /// on `EPERM`, which means "a process with that id exists and is *not* yours". So a file left by
+    /// an instance that died, naming a pid the kernel has since recycled, reads as live and collects
+    /// a `SIGTERM` meant for Mimic. Whoever owns that pid now finds out when their editor closes.
+    ///
+    /// The file cannot settle it — every field in it is the thing in doubt. The instance can: it is
+    /// asked for its own state, on the loopback port the file names, presenting the token the file
+    /// carries, and the pid it reports back must be the pid about to be signalled. A process that is
+    /// not Mimic cannot answer that at all; a *different* Mimic answers with a different pid; a dead
+    /// one does not answer. For a genuine instance the two numbers are the same by construction —
+    /// `ControlServer` writes `ProcessInfo.processInfo.processIdentifier` into the file and
+    /// `AppControlHost` reports that same value as `state.pid`.
+    ///
+    /// When it cannot be confirmed, nothing is signalled and the refusal names the pid so the caller
+    /// can decide for themselves. That is the safe direction to fail in: refusing costs one `kill`
+    /// typed by hand, and proceeding costs an unrelated process a signal it never asked for.
+    ///
+    /// A test replaces the instance the same way it replaces one anywhere else in this module, by
+    /// binding `ControlTransportOverride` — one seam rather than a second injection point that only
+    /// this function would understand.
+    ///
+    /// `timeout` is 5s and not `--timeout`: the instance is on loopback and answers in milliseconds
+    /// if it is there at all, a stale file refuses the connection immediately, and the only case that
+    /// waits out the clock is a wedged instance — which is the case this is about to refuse anyway.
+    public static func confirmRunningInstance(
+        _ endpoint: ControlEndpointFileReader.Endpoint,
+        timeout: TimeInterval = 5
+    ) async throws {
+        // The file's own port, and deliberately not `MIMIC_CONTROL_URL`: the pid about to be
+        // signalled is the one *this file* names, so the instance that has to confirm it is the one
+        // this file advertises. An environment pointing somewhere else describes a different Mimic,
+        // whose pid means nothing here.
+        guard let baseURL = ControlEndpointFileReader.resolveBaseURL(
+            explicit: nil,
+            environment: [:],
+            discovered: endpoint
+        ) else {
+            throw CLIFailure.appUnavailable(refusal(
+                endpoint,
+                because: "its discovery file names port \(endpoint.port), which is not a port."
+            ))
+        }
+
+        // Spelled out rather than coalesced, so each branch converts to the declared existential on
+        // its own line.
+        let client: any ControlTransport
+        if let override = ControlTransportOverride.current {
+            client = override
+        } else {
+            client = ControlClient(baseURL: baseURL, timeout: timeout, token: endpoint.token)
+        }
+
+        let response: ControlResponse
+        do {
+            response = try await client.send(.state)
+        } catch {
+            throw CLIFailure.appUnavailable(refusal(
+                endpoint,
+                // "did not confirm" rather than "did not answer": a refusal is an answer, and a
+                // `401` from an instance whose token this CLI does not have arrives here too.
+                because: "the control API did not confirm it — "
+                    + ((error as? any LocalizedError)?.errorDescription ?? error.localizedDescription)
+            ))
+        }
+
+        guard response.ok, let state = response.result?.state else {
+            throw CLIFailure.appUnavailable(refusal(
+                endpoint,
+                because: "\(baseURL.absoluteString) answered, but not with the state a Mimic reports."
+            ))
+        }
+        guard state.pid == endpoint.pid else {
+            throw CLIFailure.appUnavailable(refusal(
+                endpoint,
+                because: "the instance answering at \(baseURL.absoluteString) is pid \(state.pid), "
+                    + "not \(endpoint.pid)."
+            ))
+        }
+    }
+
+    /// One shape for every refusal, so the part that tells the caller what to do next cannot be the
+    /// part that gets left out of one of them.
+    private static func refusal(
+        _ endpoint: ControlEndpointFileReader.Endpoint,
+        because reason: String
+    ) -> String {
+        """
+        Refusing to signal pid \(endpoint.pid): \(reason)
+        That pid comes from Mimic's discovery file, and a file left behind by a crashed instance can \
+        name a pid the system has since given to something else.
+        If you are sure it is Mimic, stop it by hand: kill \(endpoint.pid)
+        """
+    }
+
     /// Asks the instance to quit. `SIGTERM` rather than `SIGKILL` so it can flush pending saves and
     /// remove its discovery file.
+    ///
+    /// This signals whatever it is told to. `confirmRunningInstance` is what establishes that the pid
+    /// is Mimic's, and `AppCommand.Stop` calls it first — do not add a caller here that skips it.
     public static func terminate(pid: Int) throws {
-        guard pid > 0 else { throw CLIFailure.badArgument("Invalid pid \(pid).") }
+        guard pid > 0 else { throw CLIFailure.appUnavailable("Invalid pid \(pid).") }
         guard kill(pid_t(pid), SIGTERM) == 0 else {
-            throw CLIFailure.badArgument("Could not stop pid \(pid): \(String(cString: strerror(errno))).")
+            throw CLIFailure.appUnavailable(
+                "Could not stop pid \(pid): \(String(cString: strerror(errno)))."
+            )
         }
     }
 
@@ -112,7 +216,7 @@ public enum AppLauncher {
                 return inner
             }
         }
-        throw CLIFailure.badArgument(
+        throw CLIFailure.appUnavailable(
             """
             Could not find Mimic.app. Looked in:
             \(searched.map { "  \($0.path)" }.joined(separator: "\n"))

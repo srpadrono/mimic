@@ -114,17 +114,108 @@ struct MigrationTests {
 
     // MARK: - Schema Version Tests
 
-    @Test func schemaVersionRoundTrips() throws {
+    /// Named for what it actually shows, which is less than it used to claim.
+    ///
+    /// `schemaVersion` was **write-only**: `ProjectRecord.init(from:)` stores `project.schemaVersion`,
+    /// but `toDomain` rebuilds through `MockProject`'s memberwise initialiser, which hard-codes
+    /// `MockProject.currentSchemaVersion`. So a test that writes a current project and reads back the
+    /// current version is round-tripping a *constant* — it passes for a store whose column holds any
+    /// value at all, including one from a build that understands more than this one.
+    ///
+    /// Carrying the stored integer through unchanged would need a `schemaVersion:` parameter on
+    /// `MockProject.init`, which is a Domain change. What the column *is* read for is the refusal
+    /// below, which is the only reading it has ever had.
+    @Test func toDomainReportsTheCurrentVersionWhateverTheColumnHolds() throws {
         let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
         let project = MockProject(name: "SchemaVersionTest")
         #expect(project.schemaVersion == MockProject.currentSchemaVersion)
 
-        let record = ProjectRecord(from: project)
+        var record = ProjectRecord(from: project)
+        // A v1 row — the real shape of a store written before journeys existed. Loading it as the
+        // current version is a genuine forward migration: v2 added journeys, and a v1 project has
+        // none, which is exactly what `toDomain` produces.
+        record.schemaVersion = 1
         try dbQueue.write { db in try record.insert(db) }
 
         let fetched = try dbQueue.read { db in try ProjectRecord.fetchOne(db, key: project.id.uuidString) }
-        let domain = try #require(fetched).toDomain()
-        #expect(domain.schemaVersion == MockProject.currentSchemaVersion)
+        let stored = try #require(fetched)
+        #expect(stored.schemaVersion == 1, "the column itself round-trips")
+        #expect(stored.toDomain().schemaVersion == MockProject.currentSchemaVersion)
+        #expect(stored.toDomain().journeys.isEmpty)
+    }
+
+    /// The reading the column exists for, and the one it never had.
+    ///
+    /// A project written by a build that understands a later document schema loaded as a current one,
+    /// having silently dropped whatever that version added — and the next autosave wrote the lower
+    /// number back over it. That is the exact failure the field exists to prevent.
+    ///
+    /// Refusing rather than repairing, because a document from ahead of us cannot be read down safely:
+    /// the fields we do not know about are precisely the ones that would be lost, and a load that
+    /// half-succeeds is how data actually goes missing.
+    @Test("A project written by a newer build is refused on load, naming both versions")
+    func aNewerSchemaVersionIsRefusedOnLoad() async throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+
+        let project = MockProject(name: "From the future")
+        var record = ProjectRecord(from: project)
+        record.schemaVersion = MockProject.currentSchemaVersion + 1
+        try dbQueue.write { db in try record.insert(db) }
+
+        do {
+            _ = try await repository.load(id: project.id)
+            Issue.record("expected the load to be refused")
+        } catch let error as PersistenceError {
+            guard case let .unsupportedSchemaVersion(name, stored, supported) = error else {
+                Issue.record("expected unsupportedSchemaVersion, got \(error)")
+                return
+            }
+            #expect(name == "From the future")
+            #expect(stored == MockProject.currentSchemaVersion + 1)
+            #expect(supported == MockProject.currentSchemaVersion)
+
+            // The message is what reaches the user — both hosts map `PersistenceError` onto
+            // `persistence.failure` with `localizedDescription` — so "update Mimic" has to be
+            // actionable, which means showing how far ahead the store is.
+            let message = try #require(error.errorDescription)
+            #expect(message.contains("From the future"))
+            #expect(message.contains(String(stored)))
+            #expect(message.contains(String(supported)))
+        }
+    }
+
+    /// Deliberately *not* filtered out of the listing.
+    ///
+    /// A project this build cannot open is still a project the user has, and hiding it would look
+    /// exactly like the symptom this repository has already lost a project to once — "the recents list
+    /// is empty". So it lists, and `load` refuses it by name if they try to open it.
+    @Test("A project this build cannot open still appears in the listing")
+    func aNewerSchemaVersionStillLists() async throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+
+        var record = ProjectRecord(from: MockProject(name: "From the future"))
+        record.schemaVersion = MockProject.currentSchemaVersion + 1
+        try dbQueue.write { db in try record.insert(db) }
+
+        let listed = try await repository.allProjects()
+        #expect(listed.map(\.name) == ["From the future"])
+    }
+
+    /// The guard on its own, at both boundaries: the current version and every older one are opened,
+    /// and only a version this build does not know is refused.
+    @Test("Only a version ahead of this build is refused")
+    func schemaVersionGuardBoundaries() throws {
+        var record = ProjectRecord(from: MockProject(name: "Boundaries"))
+
+        for version in 1...MockProject.currentSchemaVersion {
+            record.schemaVersion = version
+            try record.requireSupportedSchemaVersion()
+        }
+
+        record.schemaVersion = MockProject.currentSchemaVersion + 1
+        #expect(throws: PersistenceError.self) { try record.requireSupportedSchemaVersion() }
     }
 
     // MARK: - Erase-on-schema-change gating

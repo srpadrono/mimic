@@ -26,6 +26,15 @@ struct ServerStatusWell: View {
     @State private var showingCopied = false
     @State private var copyResetTask: Task<Void, Never>?
     @State private var isPulsing = false
+    /// Which of the well's two buttons the pointer is on.
+    ///
+    /// Neither had an answer: this file contained no hover handling at all, so the address — which
+    /// the type's own note calls the most-copied string in the app — and the badge that jumps you to
+    /// the traffic nothing answered both looked exactly the same whether or not you were about to
+    /// click them. That is the class of defect the house rules say recurs most, and a copy button is
+    /// the case they name.
+    @State private var isURLHovered = false
+    @State private var isUnmatchedHovered = false
 
     init(
         serverState: ServerState,
@@ -56,7 +65,11 @@ struct ServerStatusWell: View {
             }
         }
         .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, 3)
+        // `DSControlHeight.verticalPadding`, which is what this 3 always was: the inset above and
+        // below a control's own content, half of `DSSpacing.sm` and deliberately off the spacing
+        // scale because it is internal geometry rather than a gap between two things. The request
+        // log's header wells and the endpoint editor's fields take the same rung.
+        .padding(.vertical, DSControlHeight.verticalPadding)
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
@@ -103,6 +116,8 @@ struct ServerStatusWell: View {
                 primaryLabel
             }
             .buttonStyle(.plain)
+            .onHover { isURLHovered = $0 }
+            .animation(.easeOut(duration: DSAnimation.micro), value: isURLHovered)
             .help("Copy the base URL")
             .accessibilityIdentifier("serverStatusWell.url")
             .accessibilityLabel(spokenPrimaryLabel)
@@ -118,7 +133,7 @@ struct ServerStatusWell: View {
             // Monospaced only for the address: digits that change as the port changes should not
             // reflow the row, and a project name in SF Mono reads as a filename.
             .font(isRunning ? DSTypography.codeSmall : DSTypography.label)
-            .foregroundStyle(isRunning ? DSColors.labelPrimary : DSColors.labelSecondary)
+            .foregroundStyle(primaryColor)
             .lineLimit(1)
             .truncationMode(.middle)
             .contentTransition(.opacity)
@@ -153,6 +168,8 @@ struct ServerStatusWell: View {
                 unmatchedBadge
             }
             .buttonStyle(.plain)
+            .onHover { isUnmatchedHovered = $0 }
+            .animation(.easeOut(duration: DSAnimation.micro), value: isUnmatchedHovered)
             .help("Show the requests no endpoint or journey answered")
             .accessibilityIdentifier("serverStatusWell.unmatched")
             .accessibilityLabel(Self.unmatchedLabel(unmatchedCount, actionable: true))
@@ -167,14 +184,41 @@ struct ServerStatusWell: View {
     private var unmatchedBadge: some View {
         HStack(spacing: DSSpacing.xxs) {
             // The icon carries the warning as shape as well as colour, so the badge survives
-            // Differentiate Without Color.
+            // Differentiate Without Color — and it is what lets the colour move on hover below
+            // without the badge stopping saying "warning".
+            //
+            // `inlineSmall`, which `DSGlyph` names this glyph for by hand: a mark that qualifies the
+            // count beside it rather than being the control itself.
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
             Text(verbatim: "\(unmatchedCount)")
                 .font(DSTypography.codeSmall)
         }
-        .foregroundStyle(DSColors.httpStatusColor(for: 404))
+        .foregroundStyle(unmatchedColor)
         .contentShape(.rect)
+    }
+
+    /// The address, and whether the pointer is on it.
+    ///
+    /// A colour change rather than the `accentSubtle` well every icon button in the window lights up
+    /// with, for the reason `DSClearButton` states for its own hover: both of these controls sit
+    /// inside a capsule that already has a fill and a hairline, with `DSControlHeight.verticalPadding`
+    /// between them and its edge, so a second well would read as a control that had come loose from
+    /// the well it lives in. `accentText` and not a lift toward `labelPrimary`, because at rest this
+    /// is already `labelPrimary` — there is nowhere brighter to go, and blue is what the rest of the
+    /// window uses to say "this word is a control" (`DSButton`'s ghost variant, the editor's "Add"
+    /// and "Format").
+    private var primaryColor: Color {
+        guard isRunning else { return DSColors.labelSecondary }
+        return isURLHovered ? DSColors.accentText : DSColors.labelPrimary
+    }
+
+    /// The unmatched badge, and whether the pointer is on it. Same answer as the address above, so
+    /// the well's two buttons respond to the pointer the same way rather than inventing one idiom
+    /// each. The warning is not lost while the colour is borrowed: the filled triangle is the half of
+    /// this badge that survives Differentiate Without Color, and it is unchanged.
+    private var unmatchedColor: Color {
+        isUnmatchedHovered ? DSColors.accentText : DSColors.httpStatusColor(for: 404)
     }
 
     // MARK: - State-derived properties

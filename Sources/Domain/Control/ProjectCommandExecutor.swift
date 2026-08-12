@@ -484,49 +484,31 @@ public enum ProjectCommandExecutor {
 
     // MARK: - Duplication
 
+    /// A copy of `source` named "… (Copy)", reminted by ``Endpoint/copyingWithFreshIdentifiers()``.
+    ///
+    /// The reminting is not repeated here, and that is the whole point. This arm used to build its own
+    /// copy, and it and the shared helper disagreed about one field: it pointed the copy at
+    /// `scenarios.first`, while the helper follows whichever scenario the source has *active*. So
+    /// `mimic endpoint duplicate` and `mimic project duplicate` produced different copies of the same
+    /// endpoint whenever its active scenario was not its first — duplicating an endpoint serving
+    /// "Server error" handed back one serving "Default".
+    ///
+    /// Following the source is the correct half: a duplicate should answer the way the original
+    /// answers. The rename is the only thing left that is specific to duplicating *within* a project,
+    /// where the copy lands in the same list as its original and two identical names tell the reader
+    /// nothing about which is which.
     static func duplicate(_ source: Endpoint) -> Endpoint {
-        // Fresh scenario ids, so editing the copy never mutates the original's responses.
-        let scenarios = source.scenarios.map {
-            Scenario(
-                name: $0.name,
-                statusCode: $0.statusCode,
-                headers: $0.headers,
-                body: $0.body,
-                bodyContentType: $0.bodyContentType
-            )
-        }
-        return Endpoint(
-            name: "\(source.name) (Copy)",
-            method: source.method,
-            path: source.path,
-            scenarios: scenarios,
-            activeScenarioID: scenarios.first?.id,
-            delayMs: source.delayMs,
-            groupTag: source.groupTag,
-            graphqlOperation: source.graphqlOperation
-        )
+        var copy = source.copyingWithFreshIdentifiers()
+        copy.name = "\(source.name) (Copy)"
+        return copy
     }
 
+    /// A copy of `source` named "… (Copy)", reminted by ``Journey/copyingWithFreshIdentifiers()``.
+    /// Same division of labour as the endpoint arm above: the helper owns identity, this owns the name.
     static func duplicate(_ source: Journey) -> Journey {
-        Journey(
-            name: "\(source.name) (Copy)",
-            summary: source.summary,
-            steps: source.steps.map {
-                JourneyStep(
-                    name: $0.name,
-                    method: $0.method,
-                    path: $0.path,
-                    outcome: $0.outcome,
-                    delayMs: $0.delayMs,
-                    repeatCount: $0.repeatCount,
-                    graphqlOperation: $0.graphqlOperation
-                )
-            },
-            matchMode: source.matchMode,
-            completion: source.completion,
-            unmatchedBehavior: source.unmatchedBehavior,
-            autoAdvance: source.autoAdvance
-        )
+        var copy = source.copyingWithFreshIdentifiers()
+        copy.name = "\(source.name) (Copy)"
+        return copy
     }
 
     // MARK: - Helpers

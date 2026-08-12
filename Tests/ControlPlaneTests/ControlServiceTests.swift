@@ -17,7 +17,12 @@ import Testing
 
 /// Exercises the control surface the way the CLI does — one command at a time against a live
 /// service — without HTTP or a daemon in the way.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ControlServiceTests {
 
     static func makeService() throws -> MimicControlService {
@@ -274,6 +279,73 @@ struct ControlServiceTests {
 
         // Stopping twice is likewise benign.
         try await Self.ok(service, .serverStop)
+        await service.shutdown()
+    }
+
+    /// Being an actor makes a *statement* atomic, not a sequence of them.
+    ///
+    /// `if await engine.isRunning` is a question asked across a suspension, and the actor admits the
+    /// next command while the answer is in flight — so two `serverStart`s arriving together both
+    /// heard "no", both fell through, and the second reached `engine.start`. The engine's own guard
+    /// caught it, but as `MockServerError.alreadyRunning`, which the service reports as
+    /// `server.startFailed`: a script that ensured the server was up twice in parallel was told its
+    /// start had *failed*.
+    ///
+    /// What is asserted is the outcome set, because the interleaving cannot be forced from here: the
+    /// pair must be answered either "running" or `server.busy`, and never as a failed start. Both of
+    /// those are answers a caller can act on; `server.startFailed` is not.
+    @Test("Two starts at once are answered, never reported as a failed start")
+    func concurrentServerStartsAreSerialised() async throws {
+        let service = try Self.makeService()
+        let port = try FreePort.next()
+        try await Self.ok(service, .projectCreate(name: "Checkout", port: port))
+
+        async let first = service.execute(.serverStart(port: nil))
+        async let second = service.execute(.serverStart(port: nil))
+        let responses = [await first, await second]
+
+        for response in responses {
+            #expect(
+                response.error?.code != "server.startFailed",
+                "a concurrent start was reported as a failure: \(response.error?.message ?? "")"
+            )
+            #expect(response.error?.code != "server.portInUse")
+            if let code = response.error?.code {
+                #expect(code == "server.busy", "unexpected refusal: \(code)")
+            }
+        }
+        #expect(responses.contains { $0.ok }, "neither start ran")
+
+        try await Self.ok(service, .serverStop)
+        await service.shutdown()
+    }
+
+    /// The other half of the same flag, and the reason it has to be *one* flag rather than two: a stop
+    /// overlapping a start is the pair that leaves a listener nobody owns, because `engine.stop`
+    /// clears the engine's own `app` before it awaits the shutdown.
+    @Test("A stop overlapping a start leaves the service and the engine agreeing")
+    func concurrentStartAndStopAreSerialised() async throws {
+        let service = try Self.makeService()
+        let port = try FreePort.next()
+        try await Self.ok(service, .projectCreate(name: "Checkout", port: port))
+
+        async let starting = service.execute(.serverStart(port: nil))
+        async let stopping = service.execute(.serverStop)
+        let responses = [await starting, await stopping]
+
+        for response in responses where response.ok == false {
+            #expect(
+                response.error?.code == "server.busy",
+                "unexpected refusal: \(response.error?.code ?? "none") \(response.error?.message ?? "")"
+            )
+        }
+
+        // Whatever the ordering, the instance ends up in a state it agrees with: a stop succeeds and
+        // the status that follows reports stopped.
+        try await Self.ok(service, .serverStop)
+        let status = try await Self.ok(service, .serverStatus)
+        #expect(status.server?.state == "stopped")
+        #expect(status.server?.baseURL == nil)
         await service.shutdown()
     }
 

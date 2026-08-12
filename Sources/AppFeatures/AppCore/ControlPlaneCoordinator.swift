@@ -32,6 +32,35 @@ enum HeadlessMode {
     }
 }
 
+/// "Has the shutdown write finished?", asked across an isolation boundary.
+///
+/// One `Bool`, written once by the detached task that performs the save and read by a waiter on the
+/// main actor. It is a hand-rolled flag rather than a `DispatchSemaphore` because both waiters need
+/// to *poll* it — the signal path from an `async` loop that must not block, the Quit path from a
+/// `willTerminate` observer that has no `await` left to it — and one primitive answering both keeps
+/// the two paths honest about waiting for the same thing.
+///
+/// `@unchecked Sendable` is the lock's promise: every access to `isFinished` goes through it, and
+/// there is nothing else in here to get wrong. `nonisolated` — the same opt-out `NavigationHistory`
+/// takes — because this module's default isolation is `MainActor`, and a main-actor flag is precisely
+/// what a detached task cannot set and a blocked main thread cannot observe.
+private nonisolated final class PendingSaveSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isFinished = false
+
+    var hasFinished: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isFinished
+    }
+
+    func markFinished() {
+        lock.lock()
+        isFinished = true
+        lock.unlock()
+    }
+}
+
 /// Owns the control API for the app's lifetime.
 ///
 /// Starting it automatically is deliberate: a CLI that works only after the user remembers to enable
@@ -52,6 +81,29 @@ final class ControlPlaneCoordinator {
     private var host: AppControlHost?
     private var terminationSignalSources: [DispatchSourceSignal] = []
 
+    /// The session a shutdown has to flush, and the store it flushes into.
+    ///
+    /// Weak on the session because ownership runs the other way: `AppSession.shared` holds the
+    /// `AppState` for as long as the process exists, so a strong reference here would buy nothing and
+    /// would let this singleton outlive the session it describes.
+    private weak var appState: AppState?
+    private var repository: (any ProjectRepository)?
+
+    /// Set by the first termination signal, read by the second.
+    private var isTerminating = false
+
+    /// How long a shutdown will wait for the store before it gives up and exits anyway.
+    ///
+    /// A save is one `dbQueue.write` — a local SQLite transaction over a project the store is built
+    /// to hold under a hundred endpoints of — so two seconds is orders of magnitude more than it
+    /// needs. The ceiling is what picked the number. `DatabaseFactory.busyTimeoutSeconds` is 5, so a
+    /// database another process is holding will sit in GRDB for five seconds before it fails: waiting
+    /// that out would make ⌘Q feel broken, and it would put the process past the three seconds
+    /// `Scripts/run_cli_e2e.sh` gives it after `kill` (ten polls, 0.3s apart) before it stops waiting
+    /// and deletes the work directory underneath it. Two seconds clears the write and clears both
+    /// deadlines.
+    static let shutdownFlushTimeoutSeconds: TimeInterval = 2
+
     /// `nil` until the server has bound; useful for diagnostics and tests.
     private(set) var boundPort: Int?
     private(set) var startupError: String?
@@ -63,6 +115,10 @@ final class ControlPlaneCoordinator {
         let server = ControlServer(host: host, mode: HeadlessMode.isEnabled ? "headless" : "app")
         self.host = host
         self.server = server
+        // Held for the shutdown flush below, which needs to know what to write and where — and has to
+        // know it before the signal arrives, because there is no time to go looking afterwards.
+        self.appState = appState
+        self.repository = repository
 
         let port = Self.resolvePort()
         Task { @MainActor [weak self] in
@@ -90,13 +146,20 @@ final class ControlPlaneCoordinator {
     ///
     /// Both paths are needed. `willTerminate` covers Quit and a closed last window; it does *not* run
     /// for `SIGTERM`, which is exactly how `mimic app stop` asks a headless instance to exit.
+    ///
+    /// Both paths also have to write the open project before they go — see `flushPendingSave()`.
     private func installTerminationHandlers() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
-        ) { _ in
-            ControlEndpointFile.remove()
+        ) { [weak self] _ in
+            // The queue is `.main`, so this block runs on the main actor; the compiler cannot see
+            // that through Foundation's `@Sendable` observer block.
+            MainActor.assumeIsolated {
+                ControlEndpointFile.remove()
+                self?.flushPendingSaveBlocking()
+            }
         }
 
         for signalNumber in [SIGTERM, SIGINT] {
@@ -104,17 +167,113 @@ final class ControlPlaneCoordinator {
             // fires if that happens first.
             signal(signalNumber, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
-            source.setEventHandler {
-                ControlEndpointFile.remove()
-                // `exit`, not `NSApp.terminate`. Ignoring the signal above means this handler is now
-                // the *only* thing that can end the process, so it has to be something that cannot be
-                // deferred or cancelled — and AppKit termination is both. Routing through it left the
-                // app alive through a SIGTERM whenever something was mid-flight (an edit waiting on
-                // autosave, an open sheet), which is worse than the crude exit it replaced.
-                exit(0)
+            source.setEventHandler { [weak self] in
+                // Same reasoning as above: the source's queue is `.main`.
+                MainActor.assumeIsolated {
+                    guard let self else {
+                        ControlEndpointFile.remove()
+                        exit(0)
+                    }
+                    handleTerminationSignal()
+                }
             }
             source.resume()
             terminationSignalSources.append(source)
+        }
+    }
+
+    /// The whole of what `mimic app stop` gets: drop the credential, write the pending edit, exit.
+    ///
+    /// The handler used to be two statements — remove the file, `exit(0)` — while
+    /// `AppLauncher.terminate` documented `SIGTERM` as the signal that lets the app "flush pending
+    /// saves". It did not. `ProjectWorkspace.scheduleAutosave` waits 500 ms before it writes, so every
+    /// edit made in the last half-second before a stop went to an exit that had no idea it was there.
+    /// A `mimic` command is the worst of it: `AppControlHost.perform` mutates `currentProject`,
+    /// schedules the autosave and answers the CLI immediately, so `mimic endpoint create` followed by
+    /// `mimic app stop` — two commands back to back, well inside the debounce, and a script rather
+    /// than a mistake — lost the endpoint the first one had just reported creating. Silently: the
+    /// window that shows "Save failed" is gone by then, and the next launch simply reads an older
+    /// project.
+    ///
+    /// The file goes first, before the wait. It is credential material, this handler is the only
+    /// thing that can end the process now that the default disposition is ignored, and a flush that
+    /// times out must not be able to leave a live token on disk.
+    private func handleTerminationSignal() {
+        ControlEndpointFile.remove()
+
+        guard !isTerminating else {
+            // Asked twice. Someone who signals again is telling us they are done waiting, and the
+            // one promise this path has to keep is that it always ends.
+            exit(0)
+        }
+        isTerminating = true
+
+        // Suspends rather than blocks, so the main queue keeps draining while the store works — this
+        // path, unlike the `willTerminate` observer, still has somewhere to suspend to. `exit`, not
+        // `NSApp.terminate`: ignoring the signal above means this is now the *only* thing that can end
+        // the process, so it has to be something that cannot be deferred or cancelled, and AppKit
+        // termination is both. Routing through it left the app alive through a SIGTERM whenever
+        // something was mid-flight (an edit waiting on autosave, an open sheet), which is worse than
+        // the crude exit it replaced.
+        Task { @MainActor [weak self] in
+            await self?.flushPendingSave()
+            exit(0)
+        }
+    }
+
+    /// Starts the write and hands back the handle that says when it finished, or `nil` when there is
+    /// nothing to write.
+    ///
+    /// The project is read here rather than tracked: the coordinator has no business watching edits,
+    /// and the open project *is* what the pending autosave would have written — `scheduleAutosave`
+    /// re-reads `currentProject` when its debounce fires rather than capturing it at schedule time. It
+    /// writes unconditionally because a pending debounce is not visible from outside
+    /// `ProjectWorkspace`: `autosaveStatus` is still `.idle` or `.saved` during those 500 ms, so
+    /// "nothing to do" and "half a second of unwritten edits" look identical from here. The write is
+    /// idempotent, so doing it when it was not needed costs a few milliseconds and nothing else.
+    ///
+    /// `Task.detached` is load-bearing. Nothing in the chain then needs the main actor — the
+    /// repository is nonisolated and GRDB runs the transaction on its own queue — which is what lets
+    /// the blocking waiter below block the main thread without deadlocking against the work it is
+    /// waiting for.
+    private func startPendingSave() -> PendingSaveSignal? {
+        guard let repository, let project = appState?.currentProject else { return nil }
+        let didFinish = PendingSaveSignal()
+        Task.detached(priority: .userInitiated) {
+            // A store that refuses the write has nowhere to report it — there is no window left to
+            // show `autosaveStatus` in, and the next line ends the process.
+            try? await repository.save(project)
+            didFinish.markFinished()
+        }
+        return didFinish
+    }
+
+    /// Returns when the store is done or `shutdownFlushTimeoutSeconds` has passed, whichever is first.
+    ///
+    /// Polled rather than raced in a task group, for the reason the bound exists at all: a group does
+    /// not return until every one of its children has finished, so cancelling the timeout's sibling
+    /// would still leave a wedged write holding the quit open. `AppLauncher.waitForReadiness` polls a
+    /// deadline for the same kind of reason.
+    private func flushPendingSave() async {
+        guard let didFinish = startPendingSave() else { return }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
+        while !didFinish.hasFinished, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// The same flush for the path that has no `await` left in it.
+    ///
+    /// `willTerminate` is posted from inside `NSApplication.terminate`, and the process ends as soon
+    /// as its observers return — there is nowhere to suspend to, so this one blocks the main thread
+    /// for the same bound the signal path suspends for. A quit that takes a few extra milliseconds is
+    /// not a defect; a quit that drops the edit you just made is, and ⌘Q dropped it exactly as
+    /// `SIGTERM` did.
+    private func flushPendingSaveBlocking() {
+        guard let didFinish = startPendingSave() else { return }
+        let deadline = Date().addingTimeInterval(Self.shutdownFlushTimeoutSeconds)
+        while !didFinish.hasFinished, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.005)
         }
     }
 

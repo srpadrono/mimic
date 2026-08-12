@@ -37,7 +37,11 @@ struct RequestBodyView: View {
                 if !rendered.isFormatted {
                     Text("Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB.")
                         .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelTertiary)
+                        // `labelSecondary`. This is the sentence that explains why the payload below
+                        // is a wall of minified JSON rather than the indented view every other body
+                        // gets — without it the view looks broken. `DSContrastTests` asserts that
+                        // `labelTertiary` clears AA on no surface in this app, in either appearance.
+                        .foregroundStyle(DSColors.labelSecondary)
                 }
 
                 // The count lives here rather than next to the search field because only this view
@@ -46,7 +50,11 @@ struct RequestBodyView: View {
                 if !searchText.isEmpty {
                     Text(Self.matchSummary(rendered.matchCount))
                         .font(DSTypography.caption)
-                        .foregroundStyle(rendered.matchCount == 0 ? DSColors.labelTertiary : DSColors.warning)
+                        // "No matches in this body" is the answer to a search someone just typed, so
+                        // it is read rather than glanced past — the same reason the line above moved
+                        // off `labelTertiary`. Still quieter than the hit count, which keeps
+                        // `warning` because it is pointing at highlighted text further down.
+                        .foregroundStyle(rendered.matchCount == 0 ? DSColors.labelSecondary : DSColors.warning)
                         .accessibilityIdentifier("requestLog.body.\(identifier).matches")
                 }
 

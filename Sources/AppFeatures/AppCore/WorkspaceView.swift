@@ -35,7 +35,6 @@ struct WorkspaceView: View {
     /// The two journey sheets, both of which used to be reachable only from the journeys window.
     @State private var showJourneyTemplatePicker = false
     @State private var showNewJourneySheet = false
-    @State private var isAddJourneyHovered = false
     /// How tall the request log is. Two-way with `DSSplitPane`, which reports a *settled* size rather
     /// than every frame of a drag — so this can be persisted on change without writing `UserDefaults`
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
@@ -503,13 +502,22 @@ struct WorkspaceView: View {
 
     /// The navigator's "+" on the Journeys tab.
     ///
-    /// Shaped like `DSPanelHeaderButton` rather than using it, because that type is a `Button` and
-    /// this has to be a `Menu`. The geometry is copied deliberately — 22pt target, 13pt glyph, `sm`
-    /// well, `labelSecondary` → `labelPrimary` on hover — so it sits in the strip as one of the
-    /// buttons beside it rather than as a third kind of control. `EndpointEditorView.moreMenu` is
-    /// the same shape for the same reason.
+    /// `DSIconMenu` rather than `DSPanelHeaderButton`, because that type is a `Button` and this has
+    /// to be a `Menu`. The geometry used to be *copied* — 22pt target, 13pt glyph, `sm` well,
+    /// `labelSecondary` → `labelPrimary` on hover — and the note here said so, naming
+    /// `EndpointEditorView.moreMenu` as the other block with the same shape. That is a coupling
+    /// asserted in prose across two modules' worth of call sites and checked by nobody, which is the
+    /// thing `DSControlHeight` was extracted to stop. The component is where the agreement lives now.
     private var addJourneyMenu: some View {
-        Menu {
+        DSIconMenu(
+            systemImage: "plus",
+            help: "Add a journey",
+            // "Add journey", not the tooltip's "Add a journey": `JourneyUITests` separates this
+            // control from the empty state's identically-worded call to action by element type and
+            // by *this* label, because `DSTabStrip` flattens the identifier it is given.
+            label: "Add journey",
+            identifier: "journeys.addJourneyButton"
+        ) {
             // Opens a naming sheet rather than creating a "New journey" outright, which is what the
             // Endpoints tab's "+" does with `NewEndpointSheet` — and what the journeys window did
             // before it was removed. Creating it unnamed made this the one add action in the app that
@@ -529,23 +537,7 @@ struct WorkspaceView: View {
             }
             .accessibilityIdentifier("journeys.templateMenuItem")
             .accessibilityLabel("Add journey from template")
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isAddJourneyHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 22, height: 22)
-        .background {
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(isAddJourneyHovered ? DSColors.accentSubtle : Color.clear)
-        }
-        .onHover { isAddJourneyHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isAddJourneyHovered)
-        .help("Add a journey")
-        .accessibilityIdentifier("journeys.addJourneyButton")
-        .accessibilityLabel("Add journey")
     }
 
     /// One panel, two lists, an icon strip to switch them — Xcode's navigator, at Mimic's scale.

@@ -63,8 +63,18 @@ public enum GraphQLRequest {
     }
 
     /// `true` when the body carries more than one operation. Such a request expects an array of
-    /// results, which a single mocked response cannot represent — worth reporting rather than
-    /// silently matching one of them.
+    /// results, which a single mocked response cannot represent.
+    ///
+    /// Nothing in `Sources` calls this — its only reference is its own test. It used to promise that a
+    /// batch was "worth reporting rather than silently matching one of them", which described a report
+    /// no code makes; the silence is the real behaviour. ``operation(inBody:)`` answers `nil` for a
+    /// batch, `RequestMatcher.operationSpecificity` reads that as "the request is not asking for the
+    /// operation this endpoint declares", and if no catch-all mock covers the route the client gets
+    /// the same bare `404` a typo'd path gets. This is the predicate that would tell those two apart —
+    /// wiring it in means a distinct `ResolvedResponse` carrying the reason, the way
+    /// ``ResolvedResponse/journeyBlocked`` already does, which is a change in `RequestMatcher` rather
+    /// than here. Kept, with the promise corrected to what is true, rather than deleted: it is the
+    /// only place that knows how to ask the question.
     public static func isBatched(body: String?) -> Bool {
         operations(inBody: body).count > 1
     }
@@ -102,6 +112,21 @@ public enum GraphQLRequest {
     static func parseDocument(_ document: String) -> ParsedDocument? {
         var scanner = Scanner(stripping: document)
 
+        // Fragment definitions come first in most documents a real client emits, and nothing below
+        // consumes a keyword it does not recognise, so a leading `fragment` used to sit in the buffer
+        // and derail everything after it: `Kind(rawValue: "fragment")` is `nil`, so the branch below
+        // declined it *without* advancing; `advanceToSelectionSet` then stopped at the fragment's own
+        // opening brace; and `takeRootField` named the document after the fragment's first field. A
+        // document reading `fragment fields on User { name }` ahead of `query GetUser { … }` resolved
+        // to the operation "name", so an endpoint declared for "GetUser" did not match it and a
+        // perfectly well-formed request 404'd.
+        while scanner.peekIdentifier() == "fragment" {
+            // A fragment whose braces never close leaves nothing trustworthy behind it. `nil` is the
+            // tolerant answer this scanner gives anything it cannot read: the request falls back to
+            // plain path routing rather than matching on a name guessed out of a broken document.
+            guard scanner.skipFragmentDefinition() else { return nil }
+        }
+
         var kind = GraphQLOperation.Kind.query
         if let keyword = scanner.peekIdentifier(), let parsed = GraphQLOperation.Kind(rawValue: keyword) {
             kind = parsed
@@ -118,7 +143,7 @@ public enum GraphQLRequest {
         return ParsedDocument(name: scanner.takeRootField(), kind: kind)
     }
 
-    /// A cursor over a GraphQL document with comments and strings removed.
+    /// A cursor over a GraphQL document with `#` comments removed.
     struct Scanner {
         private let characters: [Character]
         private var index: Int = 0
@@ -178,6 +203,32 @@ public enum GraphQLRequest {
                     return true
                 }
                 index += 1
+            }
+            return false
+        }
+
+        /// Consumes one whole fragment definition — the `fragment` keyword, its name, its `on Type`
+        /// condition, any directives and its selection set — leaving the cursor on whatever follows.
+        mutating func skipFragmentDefinition() -> Bool {
+            guard takeIdentifier() != nil else { return false }
+            guard advanceToSelectionSet() else { return false }
+            return skipToEndOfSelectionSet()
+        }
+
+        /// Moves past the `}` that closes the selection set whose `{` has already been consumed.
+        ///
+        /// Brace-counted rather than run to the next `}`, because a fragment's selections nest:
+        /// `fragment f on User { profile { name } }` has to close twice before the operation begins.
+        mutating func skipToEndOfSelectionSet() -> Bool {
+            var depth = 1
+            while index < characters.count {
+                let character = characters[index]
+                index += 1
+                if character == "{" { depth += 1 }
+                if character == "}" {
+                    depth -= 1
+                    if depth == 0 { return true }
+                }
             }
             return false
         }

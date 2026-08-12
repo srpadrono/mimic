@@ -6,8 +6,10 @@ public enum ValidationError: Error, Sendable, LocalizedError {
     case invalidPort(Int)
     case invalidHeaderName(String)
     case invalidHeaderValue(name: String)
-    /// A field inside an imported document, with enough context to find it. The wrapped message is
-    /// another `ValidationError`'s description, so the reason is not restated here.
+    /// A field or a reference inside an imported document, with enough context to find it. The wrapped
+    /// message is usually another `ValidationError`'s description — the reason is then not restated
+    /// here — and otherwise a whole sentence written by ``ProjectValidator``, for the failures no
+    /// per-field validator can express.
     case invalidDocument(context: String, reason: String)
 
     public var errorDescription: String? {
@@ -110,11 +112,41 @@ public enum EndpointValidator {
 /// then trapped the process when it was served, taking the whole app with it.
 public enum ProjectValidator {
 
-    /// Checks every field an import can carry that the serving path later trusts.
+    /// Checks the fields an import can carry that the serving path later trusts, **and the references
+    /// between them**.
     ///
     /// Deliberately whole-document and fail-fast: a partially-imported project is harder to reason
     /// about than a rejected one, and the caller gets a message naming the offending endpoint.
+    ///
+    /// The reference checks are the half this did not use to do, and they are the half import actually
+    /// breaks on. Every editing command maintains those references as an invariant — `scenarioDelete`
+    /// repoints `activeScenarioID` at the first surviving scenario, `journeyDelete` clears
+    /// `activeJourneyID` — so a document that carries a dangling one did not come from this app, which
+    /// is exactly the case an import is. Both failures are silent at serving time: `RequestMatcher`
+    /// skips an endpoint whose `activeScenarioID` resolves to no scenario it owns — a `continue`
+    /// before that endpoint can win — so the route 404s as though it were never configured; and
+    /// ``MockProject/activeJourney`` reads a dangling `activeJourneyID` as `nil`, so the server runs
+    /// with no overlay while the document says a journey is active.
     public static func validate(_ project: MockProject) throws {
+        // A document from a *newer* build, checked first because nothing below can be trusted to mean
+        // what it says once the schema has moved. Decoding does not stop one: `MockProject.init(from:)`
+        // keeps whatever version the document declares, unknown keys are dropped in silence, and the
+        // synthesised encoder writes the higher number back out — so a v3 document imported here
+        // becomes a v2 project still claiming to be v3, having quietly lost whatever v3 added.
+        //
+        // The version is checked here and nowhere else in `Sources`, which covers the import path —
+        // where a *foreign* document arrives. It does not cover a store written by a newer build, and
+        // could not: `ProjectRecord.toDomain` rebuilds through `MockProject`'s memberwise initialiser,
+        // which stamps the current version over whatever the stored column holds, so the version never
+        // survives a load to be checked. Closing that is Persistence's to do, not this type's.
+        guard project.schemaVersion <= MockProject.currentSchemaVersion else {
+            throw ValidationError.invalidDocument(
+                context: "project \"\(project.name)\"",
+                reason: "schemaVersion \(project.schemaVersion) was written by a newer version of "
+                    + "Mimic. This build understands up to \(MockProject.currentSchemaVersion)."
+            )
+        }
+
         try EndpointValidator.validatePort(project.serverConfiguration.port)
 
         for endpoint in project.endpoints {
@@ -126,8 +158,20 @@ public enum ProjectValidator {
                 }
             } catch let error as ValidationError {
                 throw ValidationError.invalidDocument(
-                    context: "endpoint \"\(endpoint.name)\" (\(endpoint.method.rawValue) \(endpoint.path))",
+                    context: context(for: endpoint),
                     reason: error.errorDescription ?? "invalid"
+                )
+            }
+
+            // Thrown outside the `do` above on purpose: `invalidDocument` is itself a `ValidationError`,
+            // so raising it in there would be caught and wrapped in a second one, reporting the endpoint
+            // twice in one sentence.
+            if let activeScenarioID = endpoint.activeScenarioID,
+               endpoint.scenarios.contains(where: { $0.id == activeScenarioID }) == false {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "activeScenarioID names a scenario this endpoint does not have, so the "
+                        + "endpoint would answer nothing at all."
                 )
             }
         }
@@ -148,6 +192,26 @@ public enum ProjectValidator {
                 }
             }
         }
+
+        // A step is *not* checked against the endpoints, and should not be: a `JourneyStep` carries no
+        // endpoint id — it matches on method and path with the same wildcards an endpoint uses — and a
+        // journey deliberately scripts routes the project has no endpoint for. That is what
+        // `JourneyUnmatchedBehavior` is for. There is no reference here to dangle.
+
+        if let activeJourneyID = project.activeJourneyID,
+           project.journeys.contains(where: { $0.id == activeJourneyID }) == false {
+            throw ValidationError.invalidDocument(
+                context: "project \"\(project.name)\"",
+                reason: "activeJourneyID names a journey this project does not contain, so the "
+                    + "server would run with no journey at all."
+            )
+        }
+    }
+
+    /// Names an endpoint the way a reader would find it in the window: by name, then by the route.
+    /// Shared so a field failure and a reference failure report the same endpoint the same way.
+    private static func context(for endpoint: Endpoint) -> String {
+        "endpoint \"\(endpoint.name)\" (\(endpoint.method.rawValue) \(endpoint.path))"
     }
 }
 

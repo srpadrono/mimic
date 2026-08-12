@@ -1,9 +1,32 @@
 #!/bin/zsh
-# Runs exactly what CI runs, locally.
+# Runs the CI gates locally: the macOS job command for command, the Linux job only in spirit.
 #
 # Exists so the gate is reproducible on a laptop — useful before pushing, and essential while the
-# hosted runners are unavailable. Keep this in step with .github/workflows/ci.yml; if they drift, the
-# one that catches a bug first is the one that was actually run.
+# hosted runners are unavailable. It used to open by claiming it "runs exactly what CI runs", which
+# was false in a way that mattered, so here is the precise version. Three differences, none of them
+# fixable from inside this file:
+#
+#   - **`swift test` runs on this machine, not in the `swift:6.2` container.** Same sources, a
+#     different platform: `URLSession` lives in `FoundationNetworking` there, the BSD socket calls
+#     come from `Glibc` rather than `Darwin`, and some C types are wider — the differences
+#     `Tests/MockServerEngineTests/PlatformSockets.swift` exists to hold. A green run here is not
+#     evidence the Linux job will be green, and structurally cannot be. To check that, run what
+#     AGENTS.md prescribes:
+#
+#         docker run --rm -v "$PWD":/src -w /src swift:6.2 swift test
+#
+#   - **The UI suite runs without `-retry-tests-on-failure -test-iterations 2`.** CI passes those
+#     because a hosted runner under memory pressure will SIGKILL a random app launch, and a retry
+#     tells that apart from a real assertion failure. Locally a flake is worth seeing rather than
+#     retrying away, so this is a deliberate difference rather than a gap.
+#
+#   - **Runner setup is absent**, because it is not a gate: the SwiftPM and Tuist caches, and
+#     `automationmodetool enable-automationmode-without-authentication`, which is what lets XCUITest
+#     drive another app with nobody at the keyboard.
+#
+# Everything else is the same command with the same flags, ad-hoc signing included. The two manifest
+# checks are the same *program*, not a copy of it: `Scripts/check_lockfiles.py` and
+# `Scripts/check_compiler_settings.py` are invoked from here and from the workflow.
 
 set -euo pipefail
 
@@ -59,120 +82,29 @@ run_step() {
 
 # Before anything that compiles, because a drift here makes every step below it test a build that does
 # not ship. The two manifests declare the same dependency ranges and resolve them into two separate
-# lockfiles; 21 packages had already diverged, Vapor, NIO and GRDB among them.
-#
-# This compares the *union*, not the intersection. The first version iterated `root.keys() & tuist.keys()`,
-# so a package present in one lockfile and absent from the other was never looked at — which is exactly
-# the shape a dropped dependency takes. `codeeditorview` and `rearrange` are legitimately one-sided
-# (Tuist builds DesignSystem, which links CodeEditorView, which pulls Rearrange; Package.swift declares
-# no SwiftUI target for either to attach to), so they are allowlisted by name and the allowlist is
-# itself checked for staleness. The body below is character-for-character the one in
-# .github/workflows/ci.yml, so a diff between the two files shows drift at a glance.
+# lockfiles; 21 packages had already diverged, Vapor, NIO and GRDB among them. The program says why
+# it compares the union rather than the intersection, and which two packages are legitimately
+# one-sided.
 step "Lockfiles agree"
-python3 - <<'PY'
-import json, sys
-TUIST_ONLY, ROOT_ONLY = {'codeeditorview', 'rearrange'}, set()
-def pins(path):
-    return {p['identity']: p['state'].get('version') for p in json.load(open(path))['pins']}
-root, tuist = pins('Package.resolved'), pins('Tuist/Package.resolved')
-problems = [f"{k}: Package.resolved={root[k]} Tuist/Package.resolved={tuist[k]}"
-            for k in sorted(root.keys() & tuist.keys()) if root[k] != tuist[k]]
-problems += [f"{k}: in Package.resolved ({root[k]}) and missing from Tuist/Package.resolved"
-             for k in sorted(root.keys() - tuist.keys() - ROOT_ONLY)]
-problems += [f"{k}: in Tuist/Package.resolved ({tuist[k]}) and missing from Package.resolved"
-             for k in sorted(tuist.keys() - root.keys() - ROOT_ONLY - TUIST_ONLY)]
-problems += [f"{k}: allowlisted as one-sided but is no longer — drop it from the allowlist"
-             for k in sorted((TUIST_ONLY - (tuist.keys() - root.keys()))
-                             | (ROOT_ONLY - (root.keys() - tuist.keys())))]
-for line in problems:
-    print(line)
-if problems:
-    sys.exit(f"{len(problems)} lockfile problem(s) — re-resolve both lockfiles to one set, "
-             "or update the one-sided allowlist in this check")
-print(f"{len(root.keys() & tuist.keys())} shared packages agree; "
-      f"{len(TUIST_ONLY | ROOT_ONLY)} allowlisted as one-sided")
-PY
+python3 Scripts/check_lockfiles.py
 
-# The other half of the same drift, and the half that is still open. The lockfiles now agree on
-# versions; nothing makes the two manifests agree on how the compiler is configured. `Project.swift`
-# sets four Swift settings in its shared base and `Package.swift` sets none, so `swift test` above is
-# the looser gate — it accepts an implicit transitive import that Xcode rejects.
+# The other half of the same drift, and the half that is still half open. The deployment floors are
+# now a gate — `MACOSX_DEPLOYMENT_TARGET` against `platforms:`, two literals, no toolchain needed to
+# compare them, and they have already shipped eleven majors apart. The Swift settings stay a warning:
+# `Project.swift` sets four in its shared base and `Package.swift` sets none, so `swift test` above is
+# the looser gate — it accepts an implicit transitive import that Xcode rejects — and closing that
+# wants a Swift 6.2 compiler to hand rather than a red pipeline to iterate against.
 #
-# It prints and moves on rather than failing, on purpose, and for the same reason the style gate sits
-# at the bottom of this script: enabling the missing setting in `Package.swift` lights up every
-# portable module at once, and stopping a local run over a known, tracked gap that nobody can close
-# in passing is how a gate stops being read. The follow-up is to add
-# `swiftSettings: [.enableUpcomingFeature(...)]` to `Package.swift`'s targets and fix the imports it
-# surfaces in one change; this check goes quiet on its own when that lands.
+# Both halves live in one file that this script and the workflow both call. They used to be pasted
+# into each, under a comment here claiming the copies were character-for-character identical; they
+# were not, which is the whole argument for a file.
 step "Compiler settings"
-python3 - <<'PY'
-import os, pathlib, re
-def warn(path, message):
-    print(('::warning file=%s::%s' if os.environ.get('GITHUB_ACTIONS') else 'WARNING (%s): %s')
-          % (path, message))
-project = pathlib.Path('Project.swift').read_text()
-# Whole-line comments are dropped so a feature merely *named* in prose cannot satisfy the
-# check. Trailing comments are left alone on purpose: `//` also appears inside every
-# `.package(url:)`, and cutting there would mangle the manifest this is reading.
-package = "\n".join(l for l in pathlib.Path('Package.swift').read_text().splitlines()
-                    if not l.lstrip().startswith('//'))
-block = re.search(r'let sharedSettings.*?configurations:', project, re.S)
-if block is None:
-    warn('Project.swift', 'Could not find `sharedSettings`, so this check compared nothing. '
-                          'Point it at wherever the shared base settings moved to.')
-    raise SystemExit(0)
-xcode = dict(re.findall(r'"(SWIFT_[A-Z_0-9]+)"\s*:\s*"([^"]*)"', block.group(0)))
-# Spelled differently in the two manifests but meaning the same thing today. Printed every
-# run, because that is a fact about the current tree rather than a property of either file.
-EQUIVALENT_TODAY = {
-    'SWIFT_VERSION':
-        'swift-tools-version 6.0 already puts SwiftPM in language mode 6',
-    'SWIFT_DEFAULT_ACTOR_ISOLATION':
-        'every module Package.swift builds overrides this to "none" in Project.swift, and '
-        'nonisolated is what SwiftPM defaults to — so the two agree by coincidence, not by '
-        'construction',
-}
-# Deliberately NOT in the dict above. It is an Xcode umbrella that turns on a set of upcoming
-# concurrency features, and Package.swift enables none of them — so calling it "equivalent today"
-# would file a real divergence under the heading of things that are only spelled differently, which
-# is the failure this whole check exists to stop.
-UMBRELLA_WITHOUT_SWIFTPM_SPELLING = {
-    'SWIFT_APPROACHABLE_CONCURRENCY':
-        'an Xcode umbrella over several upcoming concurrency features; Package.swift enables none of '
-        'them, so the Linux gate is genuinely looser here',
-}
-looser, unmapped, notes = [], [], []
-for name, value in sorted(xcode.items()):
-    if name.startswith('SWIFT_UPCOMING_FEATURE_'):
-        # Xcode names an upcoming feature in UPPER_SNAKE, SwiftPM in UpperCamel. Deriving
-        # it means a feature added to Project.swift is picked up with no edit here.
-        feature = ''.join(w.capitalize()
-                          for w in name[len('SWIFT_UPCOMING_FEATURE_'):].split('_'))
-        token = 'enableUpcomingFeature("%s")' % feature
-        if token not in package:
-            looser.append('  %s = %s — Package.swift declares no .%s' % (name, value, token))
-    elif name in UMBRELLA_WITHOUT_SWIFTPM_SPELLING:
-        unmapped.append('  %s = %s — %s' % (name, value, UMBRELLA_WITHOUT_SWIFTPM_SPELLING[name]))
-    elif name in EQUIVALENT_TODAY:
-        notes.append('  %s = %s — %s' % (name, value, EQUIVALENT_TODAY[name]))
-    else:
-        unmapped.append('  %s = %s — this check has no SwiftPM mapping for it; add one'
-                        % (name, value))
-for line in looser + unmapped + notes:
-    print(line)
-if looser or unmapped:
-    warn('Package.swift',
-         '%d Swift setting(s) Project.swift applies that Package.swift does not, so this '
-         'gate is looser than the compiler that ships the app. Reported, not enforced: '
-         'turning them on here lights up every portable module at once, and closing those '
-         'errors wants a toolchain to hand rather than a red pipeline to iterate against.'
-         % (len(looser) + len(unmapped)))
-else:
-    print('Every Swift setting Project.swift applies is declared in Package.swift too.')
-PY
+python3 Scripts/check_compiler_settings.py
 
-# The fast gate: everything that does not need Xcode. This is exactly what CI runs.
-step "Portable modules (swift test — same as CI)"
+# The fast gate: everything that does not need Xcode. The same suites the Linux job runs, on this
+# machine's toolchain rather than in the `swift:6.2` container — see the header for what that cannot
+# catch.
+step "Portable modules (swift test — macOS toolchain, not the Linux container)"
 run_step portable-modules "error:|✘|Test run with" \
   swift test
 
@@ -184,15 +116,21 @@ tuist install
 step "Generate project"
 tuist generate --no-open
 
+# `CODE_SIGN_IDENTITY=-` on all four xcodebuild steps, matching the workflow. It was on the Release
+# gate here and nowhere else, which made the three steps above it the only commands in either runner
+# that could reach for the project's DEVELOPMENT_TEAM certificate — so a signing failure was a thing
+# only a laptop could produce, and only under the gate that is supposed to mirror CI exactly.
 step "Build (Debug)"
 run_step build-debug "error:|warning:|BUILD" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-  -configuration Debug -destination 'platform=macOS' build
+  -configuration Debug -destination 'platform=macOS' \
+  CODE_SIGN_IDENTITY=- build
 
 step "Test (all unit suites)"
 run_step test-units "error:|✘|Test run with|TEST (SUCCEEDED|FAILED)" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
-  test -destination 'platform=macOS' -skip-testing:MimicUITests
+  test -destination 'platform=macOS' -skip-testing:MimicUITests \
+  CODE_SIGN_IDENTITY=-
 
 step "Release build gate"
 run_step build-release "error:|BUILD" \
@@ -204,10 +142,13 @@ run_step build-release "error:|BUILD" \
 # make this local-only. Kept here because a local run is still the fastest way to see a failure — and
 # because this machine's automation service wedges periodically, at which point CI is the only place
 # the suite runs at all.
+# Without CI's `-retry-tests-on-failure -test-iterations 2`, deliberately: those are there for a
+# hosted runner SIGKILLing an app launch under memory pressure, and locally a flake is worth seeing.
 step "UI tests"
 run_step test-ui "error:|Test Case|TEST (SUCCEEDED|FAILED)" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-  test -destination 'platform=macOS' -only-testing:MimicUITests
+  test -destination 'platform=macOS' -only-testing:MimicUITests \
+  CODE_SIGN_IDENTITY=-
 
 # Last locally, first in CI — deliberately different, because the two runs answer different questions.
 #
@@ -218,26 +159,49 @@ run_step test-ui "error:|Test Case|TEST (SUCCEEDED|FAILED)" \
 # backwards while you are still writing it. It stays fatal here, so this script can still go red; it
 # simply does not stand in front of the compiler.
 step "House rules"
+# The scanner before the tree. `--self-test` plants each rule's own pattern in a throwaway file and
+# asserts it is reported — including behind a URL in a string literal, which is the case that made
+# the whole check evadable for as long as it stripped comments with `sed 's|//.*||'`. It costs a
+# fraction of a second and it is the only thing standing between "no violations" and "no scan".
+Scripts/check_house_rules.sh --self-test
 Scripts/check_house_rules.sh
+
+# The other thing a grep can settle, and the only one that is about a document rather than the code.
+# README.md's Tests badge and Testing table are hand-maintained — the README says so — and they have
+# twice claimed a figure the tree did not support. This recounts `@Test` and `func test`
+# declarations per folder and fails if any number README states has drifted, printing the true ones.
+#
+# Here and not in .github/workflows/ci.yml, deliberately. A contributor's pull request should go red
+# for a defect in the code, not for a hand count in a document they may not own; and the README's
+# other generated numbers already work this way — `Scripts/update_readme_coverage.py` rewrites the
+# coverage section from `Scripts/run_full_test_suite.sh`, which CI does not run either. This is the
+# gate you run before pushing, which is exactly where a stale count is cheap to fix.
+step "README test counts"
+python3 Scripts/check_doc_counts.py
 
 # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
 #
 # CONTRIBUTING.md lists it beside these gates, and it covers a seam nothing else does — process
-# launch, discovery, real sockets. It still cannot join an unattended run, because its cleanup trap is
-# not scoped to the instance it started. `mimic app stop` ignores MIMIC_CONTROL_URL and
-# MIMIC_CONTROL_PORT entirely: `AppCommand.Stop` calls `ControlEndpointFileReader.discover()`, which
-# reads the single `control.json` under Application Support and SIGTERMs whatever pid it names.
-# Nothing redirects that file — the script's MIMIC_DATABASE_PATH isolates the store, not the discovery
-# path — so on a machine with Mimic open, this script would quit the developer's own instance, and the
-# headless run would have overwritten their discovery file on the way in. That is the same shape as
-# the UI suite deleting `mimic.sqlite`, and the rule is the same: a convenience must never be able to
-# compute its own target.
+# launch, discovery, real sockets. What used to keep it out was that its cleanup trap called
+# `mimic app stop`, which reads the shared `control.json` and SIGTERMs whatever pid it names: on a
+# machine with Mimic open, running it quit the developer's own instance. That is fixed — it now kills
+# the pid `mimic app start` reported and writes its discovery file inside its own temporary directory
+# via MIMIC_CONTROL_FILE — so what is left is not a safety problem but a plumbing one, in two parts:
+#
+#   - **It cannot find a CLI this script built.** No xcodebuild step here passes `-derivedDataPath`,
+#     so the products land in the user's DerivedData, outside the checkout, while the script looks for
+#     `find "$ROOT_DIR" … -path '*Build/Products*'`. The only thing that writes that shape inside the
+#     tree is `Scripts/package_release.sh`, under `.artifacts/build/DerivedData`. Failing that, the
+#     script falls back to whatever `mimic` is on PATH — which is an *installed* build, not this one.
+#   - **The app is resolved separately from the CLI.** `AppLauncher.resolveExecutable` tries
+#     `MIMIC_APP_PATH`, `/Applications/Mimic.app`, then `~/Applications/Mimic.app`. Wiring this up
+#     means exporting two paths, not one, and both have to point at what this run just built rather
+#     than at whatever is installed — otherwise a green e2e says nothing about the working tree.
 #
 # So run it knowingly, when you have touched the CLI, the control plane or the launcher:
 #
 #   ./Scripts/run_cli_e2e.sh
 #
-# Making it stop the pid it launched, rather than whatever the shared discovery file names, is what
-# would let it join this script and CI both. The matching note is in .github/workflows/ci.yml.
+# The matching note is in .github/workflows/ci.yml, where the same two paths are the blocker.
 
 printf '\n\033[1mLocal CI finished — everything green.\033[0m\nFull output: %s\n' "$LOG_DIR"

@@ -1501,8 +1501,16 @@ final class MimicUITests: XCTestCase {
             "Status code field should update to 401"
         )
 
-        // Ensure the debounced status edit is autosaved before closing (closing drops a not-yet-saved
-        // edit). The reopened-editor check below is the authoritative persistence verification.
+        // Kept, but no longer for the reason it was written. Closing used to *drop* a not-yet-saved
+        // edit — `ProjectWorkspace.closeProject()` cleared `currentProject`, and the pending
+        // debounced write then woke, found the guard false, and returned having saved nothing. It now
+        // flushes the pending edit first, capturing the project by value, so this wait is no longer
+        // load-bearing.
+        //
+        // It stays because it costs nothing and because what this test is *for* is the round trip
+        // through the store, not the flush: waiting here means a failure below says "the store lost
+        // it" rather than "something about the timing". `Tests/MimicTests/ProjectWorkspaceTests.swift`
+        // covers the flush itself, without the debounce in the way.
         waitForAsyncSave()
 
         closeProjectViaMenu()

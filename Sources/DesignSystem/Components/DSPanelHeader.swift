@@ -166,7 +166,10 @@ public struct DSPanelHeaderButton: View {
                 // you have to hunt for is one most people never discover. Same correction
                 // `DSTabStrip` made for its unselected tabs.
                 .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: 22, height: 22)
+                // `field`, the rung a single prominent control in a header stands on. This was a bare
+                // `22` in the module that declares the ladder, which is the one place a literal has no
+                // excuse: `DSTabStrip` wrote the same number for the same target a file away.
+                .frame(width: DSControlHeight.field, height: DSControlHeight.field)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                         .fill(isHovered ? DSColors.accentSubtle : Color.clear)

@@ -39,8 +39,7 @@ matching, and [docs/ROADMAP.md](docs/ROADMAP.md) for what is deliberately not bu
 # Build (always use the workspace — Tuist resolves SPM deps into it)
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug build
 
-# Unit suites run through the aggregate Mimic-Workspace scheme. The per-module schemes
-# build the frameworks but do not bundle their test targets.
+# Every unit suite in one pass, through the aggregate Mimic-Workspace scheme.
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test \
   -destination 'platform=macOS' -skip-testing:MimicUITests
 
@@ -58,11 +57,40 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release COD
 # Full suite + coverage refresh:
 ./Scripts/run_full_test_suite.sh
 
-# CLI end-to-end (launches Mimic headless against a throwaway store):
+# CLI end-to-end (launches Mimic headless against a throwaway store — read the caveats below
+# before running it):
 ./Scripts/run_cli_e2e.sh
 ```
 
 After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && tuist generate`.
+
+### Which scheme runs what
+
+`Project.swift` declares **exactly one** scheme — confirm with `grep -c '\.scheme(' Project.swift`,
+which answers `1`, for the `Mimic` scheme at the bottom of the file. Every other name you will see
+passed to `-scheme` in this repository (`Mimic-Workspace`, `Domain`, `MockServerEngine`,
+`Persistence`, `ControlPlane`, `MimicCLICore`, `DesignSystem`, `SpecImport`) is **inferred by Tuist**
+at generation time, not written by anyone here.
+
+This section used to say the per-module schemes "build the frameworks but do not bundle their test
+targets", and that is why `Mimic-Workspace` was presented as the only way to run a unit suite. It
+cannot be right: [`Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) — the sole
+producer of the coverage numbers — runs `xcodebuild -scheme Domain test` and six more against exactly
+those schemes, and `Scripts/update_readme_coverage.py` then reads the `Domain.xcresult`,
+`ControlPlane.xcresult` … bundles they leave behind. A scheme with nothing testable in it fails
+immediately with *"Scheme X is not currently configured for the test action"* and produces no bundle,
+so seven of that script's steps would be dead on arrival and it could never produce the coverage
+section it is written to produce. Tuist's inferred schemes group a target with the suites whose names
+extend it, and every test target here is named `<Module>Tests` for exactly that reason.
+
+So: `Mimic-Workspace` is the scheme to reach for because it builds and tests **everything** in one
+pass, not because the per-module ones cannot test. Prefer the smallest scheme that contains the suite
+you are iterating on — it compiles less. Neither claim can be checked from inside this file; the
+generated workspace is the authority, and it answers in one command:
+
+```bash
+xcodebuild -workspace Mimic.xcworkspace -list      # every scheme Tuist actually generated
+```
 
 ### What CI actually covers
 
@@ -104,7 +132,48 @@ This was not always possible. While the repo was private, every run died in abou
 zero steps executed, on Linux and macOS alike, because of a billing block — which is why the triggers
 used to be commented out and the macOS job disabled. Making the repo public resolved it.
 
-`./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing.
+`./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing:
+lockfiles, compiler settings, `swift test`, `tuist install && generate`, the Debug build, every unit
+suite, the Release gate, the UI suite, `check_house_rules.sh --self-test` followed by the real house
+rules scan, and `check_doc_counts.py`. Its own header names the three things it cannot reproduce —
+`swift test` runs on this machine's toolchain rather than in the `swift:6.2` container, the UI suite
+runs without CI's `-retry-tests-on-failure`, and runner setup is absent — so read it rather than
+treating a green local run as a green CI run.
+
+### `run_cli_e2e.sh`: what it needs, and why no gate runs it
+
+It covers a seam nothing else does — process launch, discovery file, real sockets — and `ci.sh`
+still does not run it. That is deliberate and the reason is written into both `ci.sh` and
+`.github/workflows/ci.yml`: **it cannot find the CLI those gates just built.** No `xcodebuild` step
+in either passes `-derivedDataPath`, so the products land in DerivedData outside the checkout while
+the script looks for `*Build/Products*` *inside* it, then falls back to whatever `mimic` is on
+`PATH` — an installed build, not this one. `AppLauncher.resolveExecutable` picks the *app* the same
+way, independently (`MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`), so
+wiring it up means exporting two paths, both pointing at what the run just built. A green e2e against
+an installed build says nothing about the working tree.
+
+What it is no longer is dangerous, and that is a recent change worth knowing because the old
+behaviour is what kept it out of the docs' recommended path:
+
+- **It stops the instance it launched, by pid.** The cleanup trap used to call `mimic app stop`,
+  which reads the *shared* `control.json` and signals whatever pid it names — so on a machine with
+  Mimic open, running this script quit the developer's own instance, on every exit path including
+  the ones where it had launched nothing. The pid now comes out of what `mimic app start` printed
+  about the process it launched.
+- **It needs `MIMIC_CONTROL_FILE`, and it exports it** (`"$WORK/control.json"`). That variable is
+  read by `ControlEndpointFile.writeURL` and `searchURLs` in `ControlPlane`, and the override
+  *replaces* the search list instead of joining the front of it, so this run cannot fall through to
+  a developer's real instance. The script asserts the file exists after launch, because the app —
+  not the script — is what honours the variable, and if it is missing the instance advertised itself
+  at the shared path after all.
+- `set -euo pipefail` is now on, so a line added without a trailing `|| fail` cannot pass silently.
+
+**The CLI half of that variable is not implemented.** `MimicCLICore`'s own discovery reader — a
+second copy, because the CLI links no `ControlPlane` — still searches only the two Application
+Support paths (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing). The
+script is unaffected only because it also exports `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT`, which
+win in `resolveBaseURL` before discovery is consulted. Anything else that wants an isolated run must
+do the same, and mirroring the override into `MimicCLICore` is an open item.
 
 When touching anything the Linux build compiles, remember it is not macOS: `URLSession` lives in
 `FoundationNetworking`, the BSD socket calls live in `Glibc` rather than `Darwin`, and some C types
@@ -226,19 +295,30 @@ The `"headless"` in the discovery file and in `mimic ping`'s reply names a *mode
 different process. Confirm it in one command:
 
 ```bash
-grep -rn MimicDaemon --include=*.swift .    # one hit: its own declaration
+# Nothing outside the file names the type. Prints nothing; exits 1.
+grep -rn MimicDaemon --include=*.swift . | grep -v '^\./Sources/ControlPlane/MimicDaemon\.swift:'
 ```
 
-`MimicControlService` fares no better — outside its own file, every reference is a doc comment or a
-test. So `MimicDaemon.swift` (93 lines) and `MimicControlService.swift` (543 lines) are ~636 lines
-that no shipped path can reach, while `ControlServer.swift` and `ControlEndpointFile.swift` beside
-them are load-bearing.
+The unfiltered `grep -rn MimicDaemon --include=*.swift .` that this replaced was documented here and
+in README.md as returning "one hit, its own declaration". It returns **two**: the declaration, and a
+doc comment a few lines above it that quotes the grep. A check whose result its own documentation
+moves is not a check; filter the file out, as above, and what is left is the fact being claimed.
+
+`MimicControlService` fares no better — outside its own file, every reference is a doc comment, a
+test, or `MimicDaemon`, which is itself unreachable. Both files ship in the framework and never
+execute, while `ControlServer.swift` and `ControlEndpointFile.swift` beside them are load-bearing.
+(There used to be a line count here. It is gone on purpose: it changes whenever anybody edits a
+comment in either file, so it was guaranteed to drift, and `wc -l` answers it on demand.)
 
 **This is the mechanism behind every divergence between the two hosts, and it works in the worst
-direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` is 38 tests,
-and all 38 run against `MimicControlService` — 18 calling it directly, 20 standing `ControlServer` up
-on top of it. `AppControlHost`, the host every `mimic` invocation actually reaches, has 4 of its own plus the 13 in
-`Tests/MimicTests/HostParityTests.swift` that drive both hosts together, all added after the fact; the comment above them in `Tests/MimicTests/AppStateAndViewTests.swift` records that
+direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` holds two
+files, and **every** test in both runs against `MimicControlService`: `ControlServiceTests` builds one
+directly, `ControlServerTests` stands a `ControlServer` on top of one. `AppControlHost`, the host
+every `mimic` invocation actually reaches, has a handful of its own in
+`Tests/MimicTests/AppStateAndViewTests.swift` plus `Tests/MimicTests/HostParityTests.swift`, which
+drives both hosts together — all added after the fact. (Counts are left out deliberately; these
+suites are edited often and a number here would be wrong within the week. `grep -c '@Test'` answers
+it.) The comment above the `AppControlHost` cases in `AppStateAndViewTests.swift` records that
 it "had no unit test anywhere in the repo, which is how the four divergences between it and
 `MimicControlService` shipped unnoticed". A green ControlPlane suite is evidence about code the user
 never runs.
@@ -250,10 +330,12 @@ Two things follow for anyone working here:
   it turns on whether a headless Mimic should keep needing a GUI-capable app bundle. What is not
   defensible is documentation that hides the fact that the decision is pending, which is why this
   section exists.
-- **When you add a command, the tests that matter are the `AppControlHost` ones.** `CommandKind`'s
-  no-`default` switches still force you to handle it in `MimicControlService` too, and you should —
-  keeping the two in agreement is what makes wiring the daemon up later a small change rather than a
-  rewrite. Just do not mistake a passing `ControlPlaneTests` for proof that `mimic` works.
+- **When you add a command, the tests that matter are the `AppControlHost` ones.** The *compiler*
+  does not force you to implement it in either host — both dispatch switches end in a `default:` that
+  throws at runtime (see the CLI/control-plane Definition of Done below for exactly what is and is
+  not compile-checked). `HostParityTests` is what forces it: its two sweeps drive every host-scoped
+  kind through both hosts and fail if either answers from that arm. Implement both, and read a green
+  `ControlPlaneTests` for what it is — evidence about code the user never runs.
 
 ## Visual standard
 
@@ -299,8 +381,13 @@ problem.
 - **Nothing a user must read sits at `labelTertiary`.** It is 36% alpha — right for a timestamp or a
   separator, wrong for a control's own label. Unselected tab icons live at `labelSecondary` for this
   reason.
-- **No glyph below 8pt.** Separators and menu indicators are 8pt, inline glyphs 9–10pt, control
-  glyphs 11–13pt. A 7pt chevron is decoration that happens to be load-bearing.
+- **No glyph below 8pt, and the size comes from `DSGlyph`.** The ladder is `indicator` 8,
+  `inlineSmall` 9, `inline` 10, `control` 11, `controlLarge` 12, `controlProminent` 13, with
+  `minimum` 8 as the floor. A 7pt chevron is decoration that happens to be load-bearing.
+  `AppFeatures` used to name none of these — two dozen `.font(.system(size: N))` literals instead —
+  and now names all but two, both on the welcome window and both commented at the call site with why
+  they sit off the ladder. `grep -rn '\.font(\.system(size: [0-9]' Sources` prints exactly those two;
+  a third means somebody hand-wrote a rung.
 - **A fixed frame around a `@ViewBuilder` that can produce nothing does not reserve its space.** A
   stack drops an `EmptyView` *together with the `.frame(width:)` wrapped around it*, so the column
   silently collapses and every sibling after it shifts by that width. The import review's flag column
@@ -489,23 +576,72 @@ When adding or changing an operation:
    so this is not optional — the build fails until it is there. That is the point: `ControlCommand`
    carries associated values and can never be `CaseIterable`, so `CommandKind` is the thing that
    *can* be, and it is what every list claiming to mirror the surface is checked against.
-3. **Handle it in `ProjectCommandExecutor`** if it is project-scoped; otherwise in
+3. **Classify it in `CommandKind.scope`.** This one is also compile-enforced: `scope` is a
+   non-optional property whose switch has no `default` either, so the build stays broken until you
+   have said whether the command is `.project` (a pure function of the open document) or `.host`
+   (server lifecycle, project selection, the live journey cursor, the request log).
+4. **Handle it in `ProjectCommandExecutor`** if it is project-scoped; otherwise in
    `MimicControlService` *and* `AppControlHost`. Of that pair only `AppControlHost` is reachable in
    production — see "Two hosts, one of them shipped" — so it is the one to test and the one to check
    by hand against a running instance. Implement both anyway: they are meant to answer identically,
    and the cheapest way to keep that true is to write them together.
 
-   **None of those three switches ends in `default:`, and none of them may.** Every case is named,
-   including the ones each switch declines, so adding a command is a compile error in all three
-   until somebody decides which side of the project-scoped line it falls on. Under a `default` a new
-   command compiled everywhere untouched and surfaced at runtime as "no project is open" — with a
-   project open. A `default` is how a switch stops being a decision and starts being a guess.
-4. **Add a `CommandCatalog` descriptor.** `DomainTests` compares the catalog against
-   `CommandKind.allCases`, so a missing entry fails the tests rather than silently shipping an
-   undiscoverable command. It used to compare the catalog against a set of string literals written
-   in the test itself — which is a fourth hand-maintained copy of the case list, so forgetting the
-   catalog and forgetting the literals were the same omission and the test passed.
-5. **Add the CLI subcommand** and a parse test in `MimicCLICoreTests`.
+   **This step is not compile-enforced, and the documentation claimed for a long time that it was.**
+   All three dispatch switches end in a `default:` — `ProjectCommandExecutor.apply`,
+   `MimicControlService.run` and `AppControlHost.perform` (which has a second one in its
+   project-lifecycle switch). Check it yourself in one command:
+
+   ```bash
+   grep -n 'default:' Sources/Domain/Control/ProjectCommandExecutor.swift \
+                      Sources/ControlPlane/MimicControlService.swift \
+                      Sources/AppFeatures/AppCore/AppControlHost.swift
+   ```
+
+   The three tails are deliberate, and the reason is written above each of them: each switch is over
+   `ControlCommand` while its caller has already narrowed by `CommandKind`, so the compiler cannot
+   see the narrowing, and closing a switch would mean re-listing every case it declines — twenty-one
+   in the executor, twenty-six in each host, as `CommandKind.scope` partitions the surface today.
+   Those two lists written out three times are exactly what `scope` was introduced to collapse into
+   one, and neither number belongs in a document: `scope` is where it is decided and the only place
+   it should be read. What each `default:` does instead is **throw and name the command**
+   (`"<kind> is host-scoped but this service does not implement it."`), rather than falling through
+   to `noProjectOpen` and telling a caller to open a project they already have open.
+
+   So the compiler forces you to **classify** a command; tests force you to **implement** it, on
+   both sides of the line and in both hosts:
+
+   - `Tests/DomainTests/ControlCommandTests.swift` runs a sample of every kind through the executor
+     from both directions — `hostScopedCommandsReturnNil` requires every host-scoped kind to be
+     declined, `projectScopedCommandsAreApplied` requires every project-scoped kind to be answered —
+     failing specifically on the error code `internal.failure`, which is the executor's `default:`
+     saying in as many words that it has no arm for the command.
+   - `Tests/MimicTests/HostParityTests.swift` does the same for the pair that has no compile check
+     at all: `everyHostScopedCommandIsRoutedByBothHosts` walks `CommandKind.allCases` through
+     **both** hosts with nothing open, `everyHostScopedCommandIsRoutedWithAProjectOpen` repeats it
+     with a project seeded (skipping only `serverStart`, whose headless engine would bind a real
+     port), and each asserts neither host answered from its unimplemented arm. It also mirrors the
+     executor sweep, so one file covers the whole partition.
+   - `Tests/MimicCLICoreTests/ControlTransportTests.swift` drives a list of `mimic` invocations
+     through a recording transport and requires every `CommandKind` to have been emitted by one of
+     them — so a command with no CLI verb fails there.
+5. **Add a sample in the two places that hold one.** `HostParityTests.sample(for:)` is a switch over
+   `CommandKind` with **no `default`**, so a new kind stops `MimicTests` compiling until you supply a
+   payload — which is what keeps the sweeps above from quietly ceasing to cover the newest command.
+   `ControlCommandSamples.all` in `DomainTests` is the same list for the executor's sweeps, and being
+   an array it is checked rather than compiled: `everyCommandHasASample` compares it against
+   `CommandKind.allCases` and fails naming what is missing.
+
+   The duplication is real and deliberate — a test target is a module, and `MimicTests` cannot import
+   `DomainTests` — but both copies are held to `allCases`, which is the difference between two lists
+   that must agree and two lists that will drift. It is the failure those lists were built out of:
+   the previous hand-written ones named fifteen of the twenty-one host-scoped commands and read as
+   complete.
+6. **Add a `CommandCatalog` descriptor.** `catalogCoversTheSurface` in `DomainTests` compares the
+   catalog against `CommandKind.allCases`, so a missing entry fails the tests rather than silently
+   shipping an undiscoverable command. It used to compare the catalog against a set of string
+   literals written in the test itself — a fourth hand-maintained copy of the case list, so
+   forgetting the catalog and forgetting the literals were the same omission and the test passed.
+7. **Add the CLI subcommand** and a parse test in `MimicCLICoreTests`.
 
    The catalog indexes *control commands*, not CLI verbs, and the two are deliberately not one-to-one.
    Four verbs have no catalog entry and should not get one: `mimic app start`, `mimic app stop`,
@@ -514,17 +650,35 @@ When adding or changing an operation:
    so there is nobody to ask. Another three have no entry because they are compositions of entries
    that exist: `mimic journey export` is a `journeyGet` rendered as a spec, `mimic journey import` is
    a `journeyGet` then a `journeyCreate` or `journeyUpdate`, and `mimic journey deactivate` is
-   `journeyActivate` with no name. Everything else the CLI can do maps onto exactly one of the 47
-   `CommandKind` cases, and `DomainTests` holds that number.
-6. **Keep the exit-code contract**: `0` success, `2` bad usage, `3` no reachable instance, `4` the
+   `journeyActivate` with no name. Everything else the CLI can do maps onto exactly one `CommandKind`
+   case — 47 of them as this is written, which
+   `awk '/^public enum CommandKind/,/^}/' Sources/Domain/Control/CommandKind.swift | grep -c '^    case '`
+   will confirm and `CommandCatalog.descriptors` matches one for one.
+
+   **No test asserts that number any more, and none should.** `DomainTests` used to end on
+   `CommandKind.allCases.count == 47`; it was a hand-edited mirror of a fact the type system already
+   knows, so adding a command and bumping the literal was one edit and the assertion only ever caught
+   somebody who had not run the suite. What it was reaching for is asserted structurally instead —
+   every kind has a sample, a catalog entry, and an executor answer that agrees with its declared
+   scope.
+8. **Keep the exit-code contract**: `0` success, `2` bad usage, `3` no Mimic to talk to, `4` the
    command reached Mimic and did not come back with a result. Assert it at the process boundary —
    `MimicCommand.run(arguments:)` — and not only on `CLIFailure.exitCode`. Usage errors never become
    a `CLIFailure` at all; they come from ArgumentParser, whose own status is `EX_USAGE`, so `mimic
    nonsense` exited 64 against a documented 2 while every `CLIFailure` assertion stayed green.
-7. **Parse enum-valued options with `try`, never `try?`.** A swallowed conversion writes `nil` over
+
+   `3` is deliberately wider than "no reachable instance": `CLIFailure.appUnavailable` joins
+   `noInstance` and `unreachable` there, so *Mimic.app is not installed where the CLI looked*, *it
+   would not launch*, and *the pid in the discovery file could not be confirmed or signalled* all
+   exit `3` too. They used to be `badArgument` — exit `2` — which told a script the user had mistyped
+   something when what had actually happened was that there was no Mimic. Adding a fifth code was the
+   alternative and was rejected: `3` already means "there is no Mimic to talk to", and inside `mimic
+   app start` the not-installed failure and the never-answered failure are one condition that was
+   being reported under two codes. Keep the contract at four values.
+9. **Parse enum-valued options with `try`, never `try?`.** A swallowed conversion writes `nil` over
    the field and reports success, so `--match-mode sequential` told the caller it had changed a mode
    it had not touched.
-8. **Never widen the control plane's binding** beyond `127.0.0.1`. It must stay unreachable from
+10. **Never widen the control plane's binding** beyond `127.0.0.1`. It must stay unreachable from
    whatever the app under test can route to.
 
    The discovery file is the other half of that boundary, and it is a credential: it is written
@@ -533,6 +687,29 @@ When adding or changing an operation:
    sits at the final path at the umask default until the `chmod` lands, and stays there if it throws.
    Resolution reads `port` from that file and derives the host; it does not read `baseURL`, because a
    file that can name the host can send the token off-box.
+
+   **A discovered token goes to the instance that advertised it, and nowhere else.** Destination and
+   credential are now resolved together in `ControlClient.discover`: the token from `control.json` is
+   attached only when the URL's *host* is loopback (`127.0.0.1`, `::1`, `[::1]`, `localhost`) **and**
+   its port is the one that file advertised — `ControlEndpointFileReader.namesDiscoveredInstance`.
+   They used to be resolved independently, so `mimic state --url http://attacker.example` posted this
+   machine's live control-plane credential to that host in an `X-Mimic-Token` header. A caller
+   legitimately reaching Mimic through a forwarded port or a container supplies the credential
+   itself with `MIMIC_CONTROL_TOKEN`, which still wins — that is the caller naming a token rather
+   than the CLI guessing one.
+
+   **`mimic app stop` confirms before it signals.** It asks the instance the discovery file names for
+   `.state` on that file's own port and requires the reported pid to match, because a file left by a
+   crashed process can name a pid the system has since reused. It ignores `--url` for the same
+   reason — a pid only means something on the machine the file was read from. Two things this
+   forecloses, both deliberate: a *wedged* instance, and one whose file carries no token, can no
+   longer be stopped by `mimic app stop`; the refusal names the pid and prints `kill <pid>`.
+
+   **`MIMIC_CONTROL_FILE` relocates the discovery file** for a run that must not touch the shared
+   one. `ControlEndpointFile.writeURL` and `searchURLs` honour it, the override *replaces* the search
+   list rather than joining the front of it, and the parent directory is created `0700` on that path
+   too — an isolated run is not a less sensitive one. `MimicCLICore`'s copy of the reader does **not**
+   honour it yet; see the `run_cli_e2e.sh` section above.
 
 ## Skill Integration — Mandatory
 

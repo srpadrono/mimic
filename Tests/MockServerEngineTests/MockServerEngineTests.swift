@@ -8,7 +8,11 @@ import FoundationNetworking
 import Domain
 @testable import MockServerEngine
 
-@Suite("MockServerEngine", .serialized)
+/// Every case here binds a real socket, so the suite carries a time limit: a bind that never
+/// completes, or a wait on a stream that never yields, otherwise hangs the whole run with no
+/// indication of which test is stuck. One minute is the finest granularity `.timeLimit` offers and is
+/// far above what any of these needs — the point is a bound, not a deadline.
+@Suite("MockServerEngine", .serialized, .timeLimit(.minutes(1)))
 struct MockServerEngineTests {
 
     /// Every sibling suite in this target already asks the OS for a port; this file was the one
@@ -17,6 +21,31 @@ struct MockServerEngineTests {
     /// `TIME_WAIT` — both of which read as a broken engine rather than a broken test.
     static func freePort() throws -> Int {
         try #require(PlatformSocket.freePort())
+    }
+
+    /// The first entry `stream` yields, or `nil` if none arrives inside `limit`.
+    ///
+    /// The bound is what replaces `try await Task.sleep(for: .seconds(1))`: that cost every run a
+    /// second whether or not the entry had already landed, and said nothing at all if the stream had
+    /// simply stopped — the test failed on `receivedLog != nil` with no hint of why. This returns the
+    /// moment the entry arrives and gives up rather than hanging when it does not.
+    static func firstLogEntry(
+        from stream: AsyncStream<RequestLog>,
+        within limit: Duration
+    ) async -> RequestLog? {
+        await withTaskGroup(of: RequestLog?.self) { group in
+            group.addTask {
+                for await entry in stream { return entry }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     @Test func startAndStopSucceeds() async throws {
@@ -44,13 +73,48 @@ struct MockServerEngineTests {
         }
     }
 
-    @Test func updateConfigurationDoesNotThrow() async {
+    /// This called `updateConfiguration` twice and asserted nothing at all — its whole claim was that
+    /// a non-`throws`, non-returning function did not trap, which it cannot. The configuration goes
+    /// into a `MockRouteStore` the engine holds privately, so the observation has to come back out
+    /// through the engine: `journeyStatus()` is a straight read of that store and needs no socket.
+    ///
+    /// It also pins the difference between the two overloads, which is the part a caller can get
+    /// wrong: the three-argument form replaces the journey, the two-argument form leaves it alone.
+    /// `MockServerRuntime.updateMocks` calls the three-argument one on every project change, so a
+    /// two-argument call that quietly cleared the journey would stop a running flow mid-run.
+    @Test func updateConfigurationReachesTheRouteStore() async {
         let engine = MockServerEngine()
         let scenario = Scenario(name: "Success", statusCode: 200, body: "{}")
         let endpoint = Endpoint(name: "Test", method: .get, path: "/test",
                                 scenarios: [scenario], activeScenarioID: scenario.id)
-        await engine.updateConfiguration(endpoints: [endpoint])
+        let journey = Journey(
+            name: "Flow",
+            steps: [
+                JourneyStep(
+                    name: "one",
+                    method: .get,
+                    path: "/test",
+                    outcome: .respond(JourneyResponse(statusCode: 503))
+                ),
+            ]
+        )
+
+        #expect(await engine.journeyStatus() == nil, "a fresh engine has no journey")
+
+        await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 0, journey: journey)
+        let loaded = await engine.journeyStatus()
+        #expect(loaded?.journeyName == "Flow")
+        #expect(loaded?.totalSteps == 1)
+        #expect(loaded?.currentStepIndex == 0)
+
+        // An endpoints-only update must not disturb the run: the store keeps `journey` and `runState`
+        // out of the two-argument path entirely.
         await engine.updateConfiguration(endpoints: [])
+        #expect(await engine.journeyStatus()?.journeyName == "Flow")
+
+        // …and clearing it explicitly does.
+        await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: nil)
+        #expect(await engine.journeyStatus() == nil)
     }
 
     @Test func logStreamYieldsEntryAfterHTTPRequest() async throws {
@@ -61,23 +125,82 @@ struct MockServerEngineTests {
         defer { Task { try? await engine.stop() } }
 
         let stream = engine.logStream
-
-        let logTask: Task<RequestLog?, Never> = Task {
-            for await entry in stream {
-                return entry
-            }
-            return nil
-        }
-
         let url = try #require(URL(string: "http://127.0.0.1:\(port)/anything"))
-        _ = try? await URLSession.shared.data(from: url)
 
-        try await Task.sleep(for: .seconds(1))
-        logTask.cancel()
+        await confirmation("the served request is yielded to the log stream") { logged in
+            // Started before the request is issued, so the entry cannot be missed between the
+            // response landing and the consumer attaching.
+            async let entry = Self.firstLogEntry(from: stream, within: .seconds(5))
+            _ = try? await URLSession.shared.data(from: url)
 
-        let receivedLog = await logTask.value
-        #expect(receivedLog != nil)
-        #expect(receivedLog?.path == "/anything")
+            let received = await entry
+            #expect(received?.path == "/anything")
+            if received != nil { logged() }
+        }
+    }
+
+    // MARK: - Lifecycle reentrancy
+
+    /// `stop()` clears `app` and *then* awaits the shutdown, and an actor admits another call at that
+    /// suspension. A `start` arriving in that window used to see `app == nil`, pass the guard, and try
+    /// to bind a port the outgoing application had not released — so the caller was told the port was
+    /// in use by something else, when the something else was Mimic's own previous listener.
+    ///
+    /// The window is a real race, so the assertion is on the *outcome set* rather than on one
+    /// ordering: whichever way the two land, a start racing a stop must never come back as
+    /// `portInUse`. Before the guard that was the answer whenever the start landed inside the window;
+    /// after it the three possible answers are `alreadyRunning` (the start reached the actor first),
+    /// `invalidState(.stopping)` (it landed inside the window and was told to retry), and success (the
+    /// stop had already finished).
+    ///
+    /// The `Task.yield()` and the repeat count bias the timing toward the interesting ordering
+    /// without depending on it — nothing here can *make* the stop reach its suspension first, and a
+    /// test that only passes when it does would be a flake in the other direction. What is asserted
+    /// holds in every ordering, so this fails only for the reason it names.
+    @Test("A start racing a stop is never told the port is in use")
+    func startDuringStopIsRefusedRatherThanColliding() async throws {
+        let port = try Self.freePort()
+        let config = ServerConfiguration(port: port, globalDelayMs: 0)
+
+        for attempt in 1...5 {
+            let engine = MockServerEngine()
+            try await engine.start(configuration: config)
+
+            let stopping = Task { try await engine.stop() }
+            await Task.yield()
+
+            var raced: (any Error)?
+            do {
+                try await engine.start(configuration: config)
+            } catch {
+                raced = error
+            }
+            _ = try? await stopping.value
+
+            if let engineError = raced as? MockServerError, case let .portInUse(reported) = engineError {
+                Issue.record("attempt \(attempt): a start racing a stop reported port \(reported) in use")
+            }
+            // Whatever happened, the engine agrees with itself afterwards, and the port is released
+            // before the next attempt.
+            if raced == nil {
+                #expect(await engine.isRunning, "the racing start succeeded but the engine says it is not running")
+            }
+            try? await engine.stop()
+            #expect(await engine.isRunning == false)
+        }
+    }
+
+    /// The two refusals name different problems, and the difference is what a caller does next:
+    /// `alreadyRunning` means "you already have a server", `invalidState(.stopping)` means "ask again
+    /// in a moment". They were the same message until the stop window was distinguished from a second
+    /// start.
+    @Test("The two lifecycle refusals do not say the same thing")
+    func lifecycleRefusalsAreDistinguishable() {
+        #expect(
+            MockServerError.alreadyRunning.errorDescription
+                != MockServerError.invalidState(.stopping).errorDescription
+        )
+        #expect(MockServerError.invalidState(.stopping).errorDescription?.contains("stopping") == true)
     }
 
     @Test func appliesConfiguredDelayBeforeResponding() async throws {

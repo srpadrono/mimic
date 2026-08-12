@@ -13,7 +13,12 @@ import Testing
 ///
 /// Same motivation as the import audit: the bugs that reached users were not in the logic, they were
 /// in the assumptions about what arrives on the wire.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct RealTrafficTests {
 
     static func endpoint(

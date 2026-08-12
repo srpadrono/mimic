@@ -244,7 +244,12 @@ struct RequestDetailInspector: View {
             if log.outcome.isMissingConfiguration {
                 Text("Nothing was configured for this call, so Mimic answered with its fallback. Right-click the row in the request log to create an endpoint for it.")
                     .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelTertiary)
+                    // `labelSecondary`. This sentence is the only place the panel explains what an
+                    // unmatched request is and what to do about it — and `DSContrastTests` asserts
+                    // that `labelTertiary` clears AA on no surface in this app, in either appearance.
+                    // The summary rows just above already carry that correction; this paragraph, and
+                    // the truncation note further down, were the two that did not.
+                    .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.unmatchedHint")
@@ -359,7 +364,7 @@ struct RequestDetailInspector: View {
     private var bodySearchField: some View {
         HStack(spacing: DSSpacing.xs) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: DSGlyph.inline, weight: .medium))
                 .foregroundStyle(DSColors.labelTertiary)
             TextField("Find in body", text: $searchText)
                 .textFieldStyle(.plain)
@@ -381,10 +386,11 @@ struct RequestDetailInspector: View {
             }
         }
         .padding(.horizontal, DSSpacing.sm)
-        // Pinned to 20, the height `DSFilterField` and the request log's header controls settle at.
-        // This well inferred its height from padding alone, so the app's two search fields were a
-        // point apart for no reason anyone chose.
-        .frame(height: 20)
+        // `DSControlHeight.row` — the rung `DSFilterField` and the request log's header controls
+        // stand on. This well inferred its height from padding alone, so the app's two search fields
+        // were a point apart for no reason anyone chose; the note that fixed that then wrote the
+        // number out by hand next to the name of the token holding it.
+        .frame(height: DSControlHeight.row)
         .background(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                 .fill(DSColors.tertiary)
@@ -418,7 +424,9 @@ struct RequestDetailInspector: View {
                 if log.responseBodyTruncated {
                     Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
                         .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelTertiary)
+                        // The one thing telling you the payload above is not the whole payload. See
+                        // the unmatched note above for why this is not `labelTertiary`.
+                        .foregroundStyle(DSColors.labelSecondary)
                         .padding(.horizontal, DSSpacing.md)
                         .padding(.vertical, DSSpacing.xs)
                 }

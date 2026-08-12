@@ -50,8 +50,7 @@ docker run --rm -v "$PWD":/src -w /src swift:6.2 \
 # Everything, in one go — build, all suites, Release gate, UI tests
 ./Scripts/ci.sh
 
-# Unit suites through the aggregate scheme (per-module schemes build frameworks
-# but do not bundle their test targets)
+# Every unit suite in one pass, through the aggregate scheme
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test \
   -destination 'platform=macOS' -skip-testing:MimicUITests
 
@@ -66,21 +65,62 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic test \
 # Release gate — run after any SPM/Tuist change
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release \
   CODE_SIGN_IDENTITY=- build
-
-# CLI end-to-end: launches Mimic headless against a throwaway store
-./Scripts/run_cli_e2e.sh
 ```
+
+`Project.swift` declares exactly one scheme, `Mimic`. Everything else you can pass to `-scheme` —
+`Mimic-Workspace` and one per module — is inferred by Tuist, and the inferred per-module schemes do
+carry their `<Module>Tests` target: `Scripts/run_full_test_suite.sh` runs `xcodebuild -scheme Domain
+test` and six more, and README's coverage section is generated from the `.xcresult` bundles they
+produce. (This file used to claim the opposite, which is why `Mimic-Workspace` was presented as the
+only way to run a unit suite. Prefer it because it covers everything in one pass, not because the
+others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
+generated.
+
+**The CLI end-to-end check is not part of `./Scripts/ci.sh`, on purpose.**
+
+```bash
+./Scripts/run_cli_e2e.sh   # launches Mimic headless against a throwaway store
+```
+
+It covers a seam nothing else does — process launch, discovery, real sockets — and it exercises
+whatever `mimic` and `Mimic.app` it can *find*, which by default is the installed build rather than
+the one you just compiled: neither `./Scripts/ci.sh` nor the commands above pass `-derivedDataPath`,
+so the products land outside the checkout while the script looks for `*Build/Products*` inside it and
+then falls back to `PATH`. Point `MIMIC_APP_PATH` at your build and put the matching `mimic` on
+`PATH`, or the green result is about a release you are not working on.
+
+It is safe to run on a machine with Mimic open, which it did not use to be: it stops the instance it
+launched by the pid `mimic app start` reported, and it exports `MIMIC_CONTROL_FILE="$WORK/control.json"`
+so the launched instance advertises itself inside its own temporary directory instead of overwriting
+the shared `control.json`. The old cleanup trap called `mimic app stop`, which reads that shared file
+and signals whatever pid it names — it quit developers' own instances, on every exit path.
 
 ## Conventions
 
 **Keep the rules in one place.** Adding an operation means adding a `ControlCommand` case, a matching
-`CommandKind` case, and handling it in `ProjectCommandExecutor` if it is project-scoped. The window,
-the CLI and the HTTP API all call that, so they cannot disagree. Never implement the same rule twice.
+`CommandKind` case, a `scope` for it, and handling it in `ProjectCommandExecutor` if it is
+project-scoped. The window, the CLI and the HTTP API all call that, so they cannot disagree. Never
+implement the same rule twice. Three more steps are easy to miss: a `CommandCatalog` descriptor, and
+a sample in each of the two lists the sweeps run on — `HostParityTests.sample(for:)` (which fails the
+*build*, being a `default`-free switch over `CommandKind`) and `ControlCommandSamples.all` in
+`DomainTests` (which fails the suite).
+
+**What the compiler enforces is narrower than it looks.** `ControlCommand.kind` and
+`CommandKind.scope` have no `default:`, so a new command cannot compile until it is named and
+classified. The three switches that *dispatch* it — `ProjectCommandExecutor.apply`,
+`MimicControlService.run`, `AppControlHost.perform` — all end in a `default:` that throws at runtime
+naming the command; closing them would mean re-listing the twenty-one or twenty-six cases each one
+declines, which is the hand-maintained duplication `CommandKind.scope` exists to remove.
+
+Sweeps over `CommandKind.allCases` cover the gap instead, and a new command has to survive all of
+them: the executor from both sides (`DomainTests`), both hosts with and without a project open
+(`HostParityTests`), the catalog, and the CLI, where `ControlTransportTests` requires some `mimic`
+invocation to emit every kind.
 
 A host-scoped command — one about server lifecycle, project selection, the journey cursor or the log,
-which no pure function of the project can express — goes to both `ControlHost` conformances instead:
-`AppControlHost` and `MimicControlService`. The switches carry no `default`, so the compiler makes
-you handle it in both. **Test `AppControlHost`.** It is the only one a shipped build reaches:
+which no pure function of the project can express — goes to both `ControlHost` conformances:
+`AppControlHost` and `MimicControlService`. **Test `AppControlHost`.** It is the only one a shipped
+build reaches:
 `mimic daemon start` launches `Mimic.app` with `MIMIC_HEADLESS=1` rather than running
 `MimicControlService`, so a green `ControlPlaneTests` says nothing about what `mimic` does. The full
 account, and what is undecided about it, is in

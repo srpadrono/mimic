@@ -24,17 +24,19 @@ final class AppControlHost: ControlHost {
     }
 
     nonisolated func execute(_ command: ControlCommand) async -> ControlResponse {
-        await MainActor.run { [weak self] in
-            guard let self else {
-                return ControlResponse.failure(.internalFailure("The Mimic session is no longer available."))
-            }
-            return self.perform(command)
-        }
+        await perform(command)
     }
 
-    // MARK: - Synchronous execution on the main actor
+    // MARK: - Execution on the main actor
 
-    private func perform(_ command: ControlCommand) -> ControlResponse {
+    /// Answers a command against the live session.
+    ///
+    /// Asynchronous for one reason: four of the project-lifecycle commands have to reach the store —
+    /// three to check that the reference they were given names a real project, `projectExport` to read
+    /// a document this session does not have open — and the store is asynchronous. Everything else
+    /// here is a read of session state and never suspends, so it still runs to completion in one hop
+    /// with nothing able to interleave.
+    private func perform(_ command: ControlCommand) async -> ControlResponse {
         guard let appState else {
             return .failure(.internalFailure("The Mimic session is no longer available."))
         }
@@ -123,7 +125,7 @@ final class AppControlHost: ControlHost {
                 } catch {
                     return .failure(.validation(error))
                 }
-                let configured = perform(.serverConfigure(port: port, globalDelayMs: nil))
+                let configured = await perform(.serverConfigure(port: port, globalDelayMs: nil))
                 guard configured.ok else { return configured }
             }
             appState.startServer()
@@ -171,11 +173,20 @@ final class AppControlHost: ControlHost {
 
         case .journeyAdvance:
             guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
-            guard appState.activeJourney != nil else { return .failure(.noActiveJourney) }
-            appState.advanceActiveJourney()
+            guard let journey = appState.activeJourney else { return .failure(.noActiveJourney) }
+            // Awaited, and the *engine's* answer is what is reported. This used to dispatch the
+            // advance and then read `activeJourneyStatus` — the runtime's mirror of the cursor, which
+            // the advance it had just requested had not reached yet. So the reply carried the position
+            // from before the command at best, and no position at all on a script's first advance,
+            // which is when nothing has populated the mirror. `journeyRestart` above never had the
+            // problem because it builds its status from the journey rather than reading the mirror.
+            let advanced = await appState.advanceActiveJourneyReportingStatus()
             return .success(.init(
                 message: "Advanced the journey.",
-                journeyStatus: appState.activeJourneyStatus
+                // The fallback is the same one `journeyRestart` and `journeyStatus` use: with no
+                // journey loaded into the engine there is no cursor to report, and the journey as it
+                // stands — not yet started — is the honest answer rather than an omitted field.
+                journeyStatus: advanced ?? JourneyStatus.make(journey: journey, state: nil)
             ))
 
         case .journeyStatus:
@@ -208,7 +219,7 @@ final class AppControlHost: ControlHost {
 
         case .projectList, .projectCreate, .projectOpen, .projectClose, .projectDelete,
              .projectDuplicate, .projectExport, .projectImport:
-            return performProjectCommand(command, appState: appState)
+            return await performProjectCommand(command, appState: appState)
 
         // Declared host-scoped, not implemented above.
         //
@@ -226,10 +237,17 @@ final class AppControlHost: ControlHost {
 
     // MARK: - Project lifecycle
 
-    /// Project selection and store access are asynchronous in the app (autosave, recents, GRDB), but
-    /// a control call must answer synchronously. These commands are therefore *initiated* here and
-    /// confirmed by the caller with a follow-up `state` — the same contract as `serverStart`.
-    private func performProjectCommand(_ command: ControlCommand, appState: AppState) -> ControlResponse {
+    /// Project selection is asynchronous in the app (autosave, recents, GRDB), so these commands are
+    /// *initiated* here and confirmed by the caller with a follow-up `state` — the same contract as
+    /// `serverStart`.
+    ///
+    /// What is *not* optimistic is whether the reference names anything. Resolving it against the
+    /// store is the one part that can be answered before replying, and it is the part a script
+    /// branches on.
+    private func performProjectCommand(
+        _ command: ControlCommand,
+        appState: AppState
+    ) async -> ControlResponse {
         switch command {
         case .projectList:
             // Recents are the app's own listing and are already loaded, so this one can answer fully.
@@ -266,39 +284,57 @@ final class AppControlHost: ControlHost {
             return .success(.message("Creating and opening project \"\(trimmed)\"."))
 
         case let .projectOpen(ref):
-            guard let id = ref.id ?? appState.recentProjects.first(where: {
-                $0.name.caseInsensitiveCompare(ref.name ?? "") == .orderedSame
-            })?.id else {
-                return .failure(.projectNotFound(ref))
+            do {
+                let id = try await resolveStoredProjectID(ref, appState: appState)
+                appState.openProject(id: id)
+                return .success(.message("Opening project."))
+            } catch {
+                return failureResponse(for: error)
             }
-            appState.openProject(id: id)
-            return .success(.message("Opening project."))
 
         case .projectClose:
             appState.closeProject()
             return .success(.message("Closed the project."))
 
         case let .projectDelete(ref):
-            guard let id = ref.id ?? appState.recentProjects.first(where: {
-                $0.name.caseInsensitiveCompare(ref.name ?? "") == .orderedSame
-            })?.id else {
-                return .failure(.projectNotFound(ref))
+            do {
+                let id = try await resolveStoredProjectID(ref, appState: appState)
+                appState.deleteProject(id: id)
+                return .success(.message("Deleted the project."))
+            } catch {
+                return failureResponse(for: error)
             }
-            appState.deleteProject(id: id)
-            return .success(.message("Deleted the project."))
 
         case let .projectDuplicate(ref):
-            guard let id = ref.id ?? appState.recentProjects.first(where: {
-                $0.name.caseInsensitiveCompare(ref.name ?? "") == .orderedSame
-            })?.id else {
-                return .failure(.projectNotFound(ref))
+            do {
+                let id = try await resolveStoredProjectID(ref, appState: appState)
+                appState.duplicateProject(id: id)
+                return .success(.message("Duplicating the project."))
+            } catch {
+                return failureResponse(for: error)
             }
-            appState.duplicateProject(id: id)
-            return .success(.message("Duplicating the project."))
 
-        case .projectExport:
-            guard let project = appState.currentProject else { return .failure(.noProjectOpen) }
-            return .success(.init(project: project))
+        case let .projectExport(ref):
+            guard let ref else {
+                guard let project = appState.currentProject else { return .failure(.noProjectOpen) }
+                return .success(.init(project: project))
+            }
+            // The reference used to be dropped on the floor — the arm bound no associated value — so
+            // `mimic project export Other` returned whatever happened to be open and
+            // `mimic project export Nonexistent` returned a document instead of `project.notFound`.
+            //
+            // The open project is still answered from the session rather than re-read: an export
+            // taken straight after an edit has to contain it, and that edit is sitting in the
+            // autosave debounce. Anything else exists only in the store.
+            if let open = appState.currentProject, Self.matches(open, ref) {
+                return .success(.init(project: open))
+            }
+            do {
+                let stored = try await resolveStoredProject(ref)
+                return .success(.init(project: stored))
+            } catch {
+                return failureResponse(for: error)
+            }
 
         case let .projectImport(document, activate):
             // Same guard as the headless service: an import is the only way into a project that skips
@@ -308,13 +344,13 @@ final class AppControlHost: ControlHost {
             } catch {
                 return .failure(.validation(error))
             }
-            let repository = repository
-            Task {
-                try? await repository.save(document)
-                if activate {
-                    await MainActor.run { appState.openProject(id: document.id) }
-                }
-            }
+            // The write stays asynchronous, so the reply stays optimistic — but it is no longer
+            // *silent*. This used to be `Task { try? await repository.save(document) }` right here,
+            // which is the shape `ProjectDuplication` dissects: a store failure discarded and success
+            // reported before the store was touched, so `mimic project import` exited 0 on an import
+            // that never happened. `AppState.importProject` reports a refused write on the status the
+            // window renders, and only opens the document once it is actually stored.
+            appState.importProject(document, activate: activate)
             return .success(.init(
                 message: "Importing project \"\(document.name)\" "
                     + "(\(document.endpoints.count) endpoints, \(document.journeys.count) journeys).",
@@ -331,6 +367,95 @@ final class AppControlHost: ControlHost {
                 "\(command.kind.rawValue) is not a project-lifecycle command."
             ))
         }
+    }
+
+    // MARK: - Resolving a project reference
+
+    /// The id of the project a reference names, refused when nothing has it.
+    ///
+    /// The window used to take `ref.id` on trust and search only when it had a name instead, so no
+    /// step of `projectOpen`, `projectDelete` or `projectDuplicate` ever checked that the id existed:
+    /// `mimic project delete --id <any uuid>` answered "Deleted the project." having deleted nothing,
+    /// while the identical command against a daemon reported `project.notFound`. The store is the only
+    /// thing that can answer the question, and asking it is what the daemon does.
+    ///
+    /// Recents is deliberately not the source. It is a ten-entry `UserDefaults` cache reconciled
+    /// against the store by an asynchronous refresh, so between launch and that refresh it can be
+    /// missing projects the store holds — and a delete refused for a project that plainly exists is a
+    /// worse answer than the one being fixed.
+    ///
+    /// The open project counts whether or not the store has caught up with it: `projectCreate` answers
+    /// before its write lands, so a script that creates a project and immediately names it would
+    /// otherwise be told it does not exist.
+    private func resolveStoredProjectID(_ ref: ProjectRef, appState: AppState) async throws -> UUID {
+        if let open = appState.currentProject, Self.matches(open, ref) { return open.id }
+
+        let stored = try await repository.allProjects()
+        if let id = ref.id {
+            guard stored.contains(where: { $0.id == id }) else {
+                throw ControlError.projectNotFound(ref)
+            }
+            return id
+        }
+        return try Self.requireNamedProject(ref, in: stored).id
+    }
+
+    /// The whole document a reference names — endpoints and journeys included, which is what an export
+    /// has to carry. Mirrors `MimicControlService.resolveStoredProject`, including which failure each
+    /// dead end produces.
+    private func resolveStoredProject(_ ref: ProjectRef) async throws -> MockProject {
+        if let id = ref.id {
+            do {
+                return try await repository.load(id: id)
+            } catch PersistenceError.projectNotFound {
+                throw ControlError.projectNotFound(ref)
+            }
+            // Every other failure — a locked database, a row that will not decode — carries its own
+            // diagnosis and is mapped by `failureResponse(for:)`. Catching `any Error` here would
+            // report all of them as `project.notFound`, which is how "my projects vanished" ends up
+            // with no diagnosis.
+        }
+        // `allProjects` returns stubs, so the name is matched against those and the winner loaded.
+        let stored = try await repository.allProjects()
+        let match = try Self.requireNamedProject(ref, in: stored)
+        return try await repository.load(id: match.id)
+    }
+
+    private static func requireNamedProject(
+        _ ref: ProjectRef,
+        in stored: [MockProject]
+    ) throws -> MockProject {
+        guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            throw ControlError.invalid("Provide a project id or name.")
+        }
+        let key = name.lowercased()
+        guard let match = stored.first(where: { $0.name.lowercased() == key }) else {
+            throw ControlError.projectNotFound(ref)
+        }
+        return match
+    }
+
+    /// Whether `project` is the one `ref` names. An id decides on its own when there is one; names are
+    /// matched case-insensitively, which is what ``ProjectRef`` promises.
+    private static func matches(_ project: MockProject, _ ref: ProjectRef) -> Bool {
+        if let id = ref.id { return project.id == id }
+        guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return false
+        }
+        return project.name.caseInsensitiveCompare(name) == .orderedSame
+    }
+
+    /// Turns a thrown failure into the reply the headless service gives for the same one, so a script
+    /// branching on `error.code` gets the same string from either host.
+    private func failureResponse(for error: any Error) -> ControlResponse {
+        if let error = error as? ControlError { return .failure(error) }
+        if let error = error as? PersistenceError {
+            return .failure(ControlError(
+                code: "persistence.failure",
+                message: error.localizedDescription
+            ))
+        }
+        return .failure(.internalFailure(error.localizedDescription))
     }
 
     // MARK: - Reporting

@@ -94,11 +94,13 @@ struct JourneyStepRow: View {
         Group {
             if isCurrent {
                 Image(systemName: "play.fill")
-                    .font(.system(size: 10, weight: .semibold))
+                    // `inline`, the tier for a mark on a line of text — this one annotates the step
+                    // beside it rather than being something you press.
+                    .font(.system(size: DSGlyph.inline, weight: .semibold))
                     .foregroundStyle(DSColors.accentText)
             } else if isExhausted {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: DSGlyph.inline, weight: .semibold))
                     .foregroundStyle(DSColors.labelSecondary)
             } else {
                 Color.clear
@@ -138,7 +140,7 @@ struct JourneyStepRow: View {
         case let .networkFailure(failure):
             HStack(spacing: DSSpacing.xs) {
                 Image(systemName: failure == .connectionDrop ? "bolt.horizontal.circle" : "clock.badge.exclamationmark")
-                    .font(.system(size: 10))
+                    .font(.system(size: DSGlyph.inline))
                 Text(Self.failureText(failure))
                     .font(DSTypography.caption)
                     .lineLimit(1)

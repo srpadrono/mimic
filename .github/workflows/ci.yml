@@ -54,8 +54,17 @@ jobs:
       # It runs here rather than on macOS because it needs nothing a Mac has: it reads
       # `MimicUITests/` as text, so the one job that never builds the UI suite is still the right
       # place to check how it is written.
+      #
+      # `--self-test` first, and it is not ceremony. The scanner blanked comments with
+      # `sed 's|//.*||'`, which cut at the `//` in every URL, so any line carrying one defeated all
+      # six rules: a planted `Text("see https://example.com").textCase(.uppercase)` reported "no
+      # violations" and exited 0. That survived review of the script itself, so the scanner now
+      # plants each rule's pattern behind a URL in a string literal and asserts it is still caught,
+      # before it is trusted to say anything about the tree.
       - name: House rules
-        run: ./Scripts/check_house_rules.sh
+        run: |
+          ./Scripts/check_house_rules.sh --self-test
+          ./Scripts/check_house_rules.sh
 
       # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
       # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
@@ -81,127 +90,33 @@ jobs:
       # against versions the shipped .pkg does not contain. Nothing detected it, because the claim
       # that the manifests "cannot drift" was written in prose rather than checked.
       #
-      # This compares the *union*, not the intersection. The first version of it iterated
-      # `root.keys() & tuist.keys()`, which meant a package present in one lockfile and absent from
-      # the other was simply not looked at — precisely the shape a dropped or newly one-sided
-      # dependency takes, and the one case where "the versions agree" is the wrong question. The two
-      # legitimately one-sided packages are named below instead: Tuist builds DesignSystem, which
-      # links CodeEditorView, which pulls Rearrange, and Package.swift declares no SwiftUI target for
-      # either to attach to. Naming them keeps today green while a *new* one-sided package fails, and
-      # the allowlist is itself checked for staleness, because a list that has stopped describing the
-      # tree has stopped checking it.
+      # The program explains the rest: why it compares the union rather than the intersection, and
+      # which two packages are legitimately one-sided. It is a file, not a heredoc, because this step
+      # and the matching one in `Scripts/ci.sh` used to hold a pasted copy each under a comment
+      # claiming they were character-for-character identical. They were not — the compiler-settings
+      # pair below had drifted — and a claim of that kind is worth exactly as much as whatever
+      # enforces it.
       - name: Lockfiles agree
-        run: |
-          python3 - <<'PY'
-          import json, sys
-          TUIST_ONLY, ROOT_ONLY = {'codeeditorview', 'rearrange'}, set()
-          def pins(path):
-              return {p['identity']: p['state'].get('version') for p in json.load(open(path))['pins']}
-          root, tuist = pins('Package.resolved'), pins('Tuist/Package.resolved')
-          problems = [f"{k}: Package.resolved={root[k]} Tuist/Package.resolved={tuist[k]}"
-                      for k in sorted(root.keys() & tuist.keys()) if root[k] != tuist[k]]
-          problems += [f"{k}: in Package.resolved ({root[k]}) and missing from Tuist/Package.resolved"
-                       for k in sorted(root.keys() - tuist.keys() - ROOT_ONLY)]
-          problems += [f"{k}: in Tuist/Package.resolved ({tuist[k]}) and missing from Package.resolved"
-                       for k in sorted(tuist.keys() - root.keys() - ROOT_ONLY - TUIST_ONLY)]
-          problems += [f"{k}: allowlisted as one-sided but is no longer — drop it from the allowlist"
-                       for k in sorted((TUIST_ONLY - (tuist.keys() - root.keys()))
-                                       | (ROOT_ONLY - (root.keys() - tuist.keys())))]
-          for line in problems:
-              print(line)
-          if problems:
-              sys.exit(f"{len(problems)} lockfile problem(s) — re-resolve both lockfiles to one set, "
-                       "or update the one-sided allowlist in this check")
-          print(f"{len(root.keys() & tuist.keys())} shared packages agree; "
-                f"{len(TUIST_ONLY | ROOT_ONLY)} allowlisted as one-sided")
-          PY
+        run: python3 Scripts/check_lockfiles.py
 
-      # The other half of the same drift, and the half that is still open: the lockfiles now agree on
-      # *versions*, and nothing yet makes the two manifests agree on how the compiler is configured.
-      # `Project.swift` sets four Swift settings in its shared base; `Package.swift` sets none. So
-      # this job is the looser gate — it can go green on an implicit transitive import that Xcode
-      # rejects, because member-import visibility is enforced there and not here.
+      # The other half of the same drift, and it is now two checks with two different verdicts.
       #
-      # It warns rather than fails, deliberately. Enabling the missing setting in `Package.swift`
-      # would light up every portable module at once, and this workflow is the only place a Linux
-      # compiler runs on this code — so the errors could only be fixed by pushing at a red pipeline
-      # and reading what came back, which is not a way to do that work. Warning makes the gap visible
-      # on every run and in the job summary without blocking anyone.
+      # The **deployment floor fails**: `MACOSX_DEPLOYMENT_TARGET` in Project.swift against
+      # `platforms:` in Package.swift. They are the same fact written twice, they have already come
+      # apart — `platforms:` said `.v15`, eleven majors below everything else, and nothing caught it
+      # because no job builds that manifest on a Mac and Linux ignores `platforms:` entirely — and
+      # comparing two literals needs no toolchain, so there is no reason to be gentle about it.
       #
-      # The follow-up is to close it: add `swiftSettings: [.enableUpcomingFeature(...)]` to the
-      # targets in `Package.swift`, on a machine with a Swift 6.2 toolchain, fixing the imports it
-      # surfaces in the same change; then this step goes quiet on its own. `SWIFT_UPCOMING_FEATURE_*`
-      # is matched generically, so a feature added to `Project.swift` later is picked up here with no
-      # edit. A setting with no mapping recorded is reported too, so a new one cannot slip past by
-      # being unrecognised.
+      # The **Swift settings warn**: Project.swift sets four in its shared base, Package.swift sets
+      # none, and this job is therefore the looser gate — it accepts an implicit transitive import
+      # that Xcode rejects, because member-import visibility is enforced there and not here. Turning
+      # the setting on would light up every portable module at once, and this workflow is the only
+      # place a Linux compiler runs on this code, so those errors could only be fixed by pushing at a
+      # red pipeline and reading what came back. Warning keeps the gap on every run and in the job
+      # summary without blocking anyone; the step goes quiet on its own the day
+      # `swiftSettings: [.enableUpcomingFeature(...)]` lands.
       - name: Compiler settings
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, re
-          def warn(path, message):
-              print(('::warning file=%s::%s' if os.environ.get('GITHUB_ACTIONS') else 'WARNING (%s): %s')
-                    % (path, message))
-          project = pathlib.Path('Project.swift').read_text()
-          # Whole-line comments are dropped so a feature merely *named* in prose cannot satisfy the
-          # check. Trailing comments are left alone on purpose: `//` also appears inside every
-          # `.package(url:)`, and cutting there would mangle the manifest this is reading.
-          package = "\n".join(l for l in pathlib.Path('Package.swift').read_text().splitlines()
-                              if not l.lstrip().startswith('//'))
-          block = re.search(r'let sharedSettings.*?configurations:', project, re.S)
-          if block is None:
-              warn('Project.swift', 'Could not find `sharedSettings`, so this check compared nothing. '
-                                    'Point it at wherever the shared base settings moved to.')
-              raise SystemExit(0)
-          xcode = dict(re.findall(r'"(SWIFT_[A-Z_0-9]+)"\s*:\s*"([^"]*)"', block.group(0)))
-          # Spelled differently in the two manifests but meaning the same thing today. Printed every
-          # run, because that is a fact about the current tree rather than a property of either file.
-          EQUIVALENT_TODAY = {
-              'SWIFT_VERSION':
-                  'swift-tools-version 6.0 already puts SwiftPM in language mode 6',
-              'SWIFT_DEFAULT_ACTOR_ISOLATION':
-                  'every module Package.swift builds overrides this to "none" in Project.swift, and '
-                  'nonisolated is what SwiftPM defaults to — so the two agree by coincidence, not by '
-                  'construction',
-          }
-          # Deliberately NOT in the dict above. It is an Xcode umbrella that turns on a set of upcoming
-          # concurrency features, and Package.swift enables none of them — so calling it "equivalent
-          # today" would file a real divergence under the heading of things that are only spelled
-          # differently, which is the failure this whole check exists to stop. It has no one-to-one
-          # SwiftPM spelling, so it is reported as unmapped rather than as a missing feature flag.
-          UMBRELLA_WITHOUT_SWIFTPM_SPELLING = {
-              'SWIFT_APPROACHABLE_CONCURRENCY':
-                  'an Xcode umbrella over several upcoming concurrency features; Package.swift enables '
-                  'none of them, so the Linux gate is genuinely looser here',
-          }
-          looser, unmapped, notes = [], [], []
-          for name, value in sorted(xcode.items()):
-              if name.startswith('SWIFT_UPCOMING_FEATURE_'):
-                  # Xcode names an upcoming feature in UPPER_SNAKE, SwiftPM in UpperCamel. Deriving
-                  # it means a feature added to Project.swift is picked up with no edit here.
-                  feature = ''.join(w.capitalize()
-                                    for w in name[len('SWIFT_UPCOMING_FEATURE_'):].split('_'))
-                  token = 'enableUpcomingFeature("%s")' % feature
-                  if token not in package:
-                      looser.append('  %s = %s — Package.swift declares no .%s' % (name, value, token))
-              elif name in UMBRELLA_WITHOUT_SWIFTPM_SPELLING:
-                  unmapped.append('  %s = %s — %s' % (name, value, UMBRELLA_WITHOUT_SWIFTPM_SPELLING[name]))
-              elif name in EQUIVALENT_TODAY:
-                  notes.append('  %s = %s — %s' % (name, value, EQUIVALENT_TODAY[name]))
-              else:
-                  unmapped.append('  %s = %s — this check has no SwiftPM mapping for it; add one'
-                                  % (name, value))
-          for line in looser + unmapped + notes:
-              print(line)
-          if looser or unmapped:
-              warn('Package.swift',
-                   '%d Swift setting(s) Project.swift applies that Package.swift does not, so this '
-                   'gate is looser than the compiler that ships the app. Reported, not enforced: '
-                   'turning them on here lights up every portable module at once, and closing those '
-                   'errors wants a toolchain to hand rather than a red pipeline to iterate against.'
-                   % (len(looser) + len(unmapped)))
-          else:
-              print('Every Swift setting Project.swift applies is declared in Package.swift too.')
-          PY
+        run: python3 Scripts/check_compiler_settings.py
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -323,8 +238,8 @@ jobs:
       #
       # AGENTS.md and CONTRIBUTING.md both list it as a gate, and it is the only thing that covers
       # process launch, discovery-file resolution and real HTTP end to end — so its absence is a real
-      # hole, recorded here so it stays a decision rather than an oversight. Three things block it,
-      # and none of them can be fixed inside this file:
+      # hole, recorded here so it stays a decision rather than an oversight. Two things block it, and
+      # neither can be fixed inside this file:
       #
       #   - It cannot find what this job built. `MIMIC_BIN` comes from
       #     `find "$ROOT_DIR" … -path '*Build/Products*'`, which only matches when DerivedData sits
@@ -335,19 +250,17 @@ jobs:
       #   - The app is resolved separately from the CLI. `AppLauncher.resolveExecutable` tries
       #     `MIMIC_APP_PATH`, `/Applications/Mimic.app` and `~/Applications/Mimic.app`, none of which
       #     a hosted runner has, so a working step has to plumb in *two* paths, not one.
-      #   - Its cleanup is not scoped to the instance it started. `mimic app stop` ignores
-      #     `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT` entirely: `AppCommand.Stop` calls
-      #     `ControlEndpointFileReader.discover()`, which reads the single `control.json` under
-      #     Application Support and SIGTERMs whatever pid it names. Nothing redirects that file — the
-      #     script's `MIMIC_DATABASE_PATH` isolates the store and not the discovery path. On a runner
-      #     there is nothing else to hit; on a laptop the trap kills the developer's own Mimic, which
-      #     is why `Scripts/ci.sh` does not run it either.
       #
-      # The first two are fixable here — export `MIMIC_APP_PATH` and a products directory read out of
+      # There used to be a third, and it was the one that mattered on a laptop rather than here: the
+      # cleanup trap called `mimic app stop`, which reads the single shared `control.json` and
+      # SIGTERMs whatever pid it names, so the script quit the developer's own instance. That is
+      # fixed — it kills the pid `mimic app start` reported, and `MIMIC_CONTROL_FILE` keeps its
+      # discovery file inside its own temporary directory — which is why the remaining two are
+      # plumbing rather than a hazard.
+      #
+      # Both are fixable here — export `MIMIC_APP_PATH` and a products directory read out of
       # `xcodebuild -showBuildSettings` — but not verifiably without a Mac to run them on, and a step
       # that fails for its own reasons is worse than a missing one: it teaches people to ignore red.
-      # The third belongs in `Scripts/run_cli_e2e.sh`, which should stop the pid it launched rather
-      # than whatever the shared discovery file happens to name. Wire this up in that order.
 
       # Release compiles with whole-module optimisation and different warnings-as-errors, so it
       # catches things Debug does not. Run after the tests so a compile-only failure does not hide a

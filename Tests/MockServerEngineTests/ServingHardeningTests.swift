@@ -8,7 +8,12 @@ import Testing
 /// These are regression tests for a security review: each one reproduces something that used to
 /// happen, and each failure mode is reachable from a project file the user did not write by hand —
 /// an import, a shared fixture, a file edited outside the app.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ServingHardeningTests {
 
     // MARK: - Status codes

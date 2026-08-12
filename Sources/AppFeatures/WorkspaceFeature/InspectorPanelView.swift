@@ -329,7 +329,11 @@ struct ScenarioRow: View {
             // being a checkmark and becomes a smudge — and it re-drew a mark AppKit already ships
             // optically corrected at this size.
             Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                // `controlProminent`, which is `DSTypography.body`'s size — the font the scenario
+                // name beside it is set in, so the mark sits level with the line rather than a point
+                // proud of it. The 8pt floor the note above invokes is the bottom of this same
+                // ladder, named as `DSGlyph.minimum`.
+                .font(.system(size: DSGlyph.controlProminent, weight: isActive ? .semibold : .regular))
                 .foregroundStyle(isActive ? DSColors.accentText : DSColors.labelSecondary)
                 .accessibilityIdentifier("inspector.scenario.\(scenario.name).indicator")
 
@@ -373,6 +377,14 @@ struct ScenarioRow: View {
         .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
         .onTapGesture(perform: onTap)
         .accessibilityElement(children: .combine)
+        // After the element is formed, not before it — `EndpointTrafficRow` orders it the same way,
+        // because a trait added to the children is a trait the combine has already passed over.
+        //
+        // The row activates a scenario on tap, but a tap gesture carries no trait, so VoiceOver
+        // announced this as static text with no hint that it could be pressed. `RequestLogTableRow`
+        // and `EndpointTrafficRow` are the same shape and already restore it; this row and the
+        // journey editor's step row were the two that did not.
+        .accessibilityAddTraits(.isButton)
         .contextMenu {
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
             Divider()

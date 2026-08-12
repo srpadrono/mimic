@@ -339,58 +339,6 @@ struct RequestLogDrawerView: View {
         .onAppear { updateLogs() }
     }
 
-    // MARK: - Unmatched filter
-
-    /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
-    /// that is always coloured has stopped saying anything.
-    private func unmatchedFilterForeground(count: Int) -> Color {
-        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
-        return DSColors.labelSecondary
-    }
-
-    /// A one-click answer to "what is my app calling that I have not mocked?".
-    ///
-    /// The count is on the control itself, so a missing mock is visible without opening the filter —
-    /// which is the whole point: you notice it while debugging something else.
-    @ViewBuilder
-    private var unmatchedFilterToggle: some View {
-        let count = RequestLogQuery.unmatchedCount(logs: requestLogs)
-
-        // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
-        // to advertise the count made the control look pressed whenever there was anything to count —
-        // so a filter that was off read as on, every time it mattered. On and off have to look
-        // different from each other before either can carry a colour.
-        Button {
-            unmatchedOnly.toggle()
-        } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 10))
-                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                    .font(DSTypography.caption)
-            }
-            .foregroundStyle(unmatchedFilterForeground(count: count))
-            // The same well as the filter field beside it — one height, one radius, one hairline.
-            // These two were written independently and drifted by a couple of points, which is
-            // exactly the kind of difference nobody can name and everybody can see.
-            .headerControlWell(
-                fill: unmatchedOnly ? DSColors.httpStatusColor(for: 404).opacity(0.12) : .clear,
-                stroke: unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(count == 0 && !unmatchedOnly)
-        .animation(.easeOut(duration: DSAnimation.micro), value: unmatchedOnly)
-        .help("Show only requests that matched no endpoint — the ones you are missing a mock for.")
-        .accessibilityIdentifier("drawer.unmatchedFilter")
-        .accessibilityLabel(
-            count > 0
-                ? "Show only unmatched requests, \(count) so far"
-                : "Show only unmatched requests"
-        )
-    }
-
     // MARK: - Toolbar
 
     /// The drawer's single row of chrome.
@@ -421,11 +369,14 @@ struct RequestLogDrawerView: View {
                     .accessibilityIdentifier("drawer.methodFilter")
                     .accessibilityLabel("Filter by method")
 
-                    unmatchedFilterToggle
+                    UnmatchedFilterToggle(
+                        count: RequestLogQuery.unmatchedCount(logs: requestLogs),
+                        unmatchedOnly: $unmatchedOnly
+                    )
 
                     HStack(spacing: DSSpacing.xs) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: DSGlyph.inline, weight: .medium))
                             .foregroundStyle(DSColors.labelTertiary)
                         TextField("Filter", text: $filterText)
                             .textFieldStyle(.plain)
@@ -492,7 +443,10 @@ struct RequestLogDrawerView: View {
             title: title,
             isActive: sortField == field,
             isAscending: sortAscending,
-            width: width
+            width: width,
+            // Keyed on the sort field rather than the title, so the name a test holds does not move
+            // when a column is relabelled — the same reason the rows below are keyed on `log.id`.
+            identifier: "drawer.columnHeader.\(field.rawValue)"
         ) {
             (sortField, sortAscending) = Self.nextSortState(
                 currentField: sortField,
@@ -737,6 +691,88 @@ struct RequestLogDrawerView: View {
     }
 }
 
+// MARK: - Unmatched filter
+
+/// A one-click answer to "what is my app calling that I have not mocked?".
+///
+/// The count is on the control itself, so a missing mock is visible without opening the filter —
+/// which is the whole point: you notice it while debugging something else.
+///
+/// Its own view so the hover state stays local, which is the same reason `SortableColumnHeader`
+/// below is one: held on the drawer, a `@State` flag toggled by the pointer crossing this control
+/// would re-evaluate the panel's whole body — the table of up to a thousand rows included — twice per
+/// pass of the mouse.
+private struct UnmatchedFilterToggle: View {
+    let count: Int
+    @Binding var unmatchedOnly: Bool
+
+    @State private var isHovered = false
+
+    var body: some View {
+        // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
+        // to advertise the count made the control look pressed whenever there was anything to count —
+        // so a filter that was off read as on, every time it mattered. On and off have to look
+        // different from each other before either can carry a colour.
+        Button {
+            unmatchedOnly.toggle()
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: DSGlyph.inline))
+                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
+                    .font(DSTypography.caption)
+            }
+            .foregroundStyle(foreground)
+            // The same well as the filter field beside it — one height, one radius, one hairline.
+            // These two were written independently and drifted by a couple of points, which is
+            // exactly the kind of difference nobody can name and everybody can see.
+            .headerControlWell(fill: fill, stroke: stroke)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isInert)
+        // This control had no pointer response of any kind, which in a row where the clear button is
+        // a `DSPanelHeaderButton` and the method filter is a native popup made it the one thing in
+        // the drawer's chrome that looked the same whether or not you were about to click it.
+        //
+        // Gated on `isInert` for the reason `ServerToggleButton` states: a well that answers a
+        // pointer which cannot click is the same lie as a live-looking dead control.
+        .onHover { isHovered = $0 && !isInert }
+        .animation(.easeOut(duration: DSAnimation.micro), value: unmatchedOnly)
+        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .help("Show only requests that matched no endpoint — the ones you are missing a mock for.")
+        .accessibilityIdentifier("drawer.unmatchedFilter")
+        .accessibilityLabel(
+            count > 0
+                ? "Show only unmatched requests, \(count) so far"
+                : "Show only unmatched requests"
+        )
+    }
+
+    /// Nothing to filter to and not already filtering: the control is disabled, so it neither reacts
+    /// to the pointer nor carries a colour.
+    private var isInert: Bool { count == 0 && !unmatchedOnly }
+
+    /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
+    /// that is always coloured has stopped saying anything.
+    private var foreground: Color {
+        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
+        return DSColors.labelSecondary
+    }
+
+    /// On, the well stays amber under the pointer rather than being overpainted by a blue that means
+    /// nothing here — the rule `ServerToggleButton`'s running glow follows. Off, it takes
+    /// `accentSubtle`, which is the app's one hover fill.
+    private var fill: Color {
+        if unmatchedOnly { return DSColors.httpStatusColor(for: 404).opacity(0.12) }
+        return isHovered ? DSColors.accentSubtle : .clear
+    }
+
+    private var stroke: Color {
+        unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
+    }
+}
+
 // MARK: - Column Header
 
 /// One sortable column title.
@@ -748,19 +784,27 @@ struct RequestLogDrawerView: View {
 /// Its own view so the hover highlight stays local. Kept on the table as a `hoveredField`, one
 /// pointer crossing the row would re-evaluate all six columns — `DSTabStrip.TabButton` is the same
 /// shape for the same reason.
+///
+/// **It is a `Button`, so it is named like one.** All six of these shipped with no accessibility
+/// identifier and no label, on the type or at the call site — six interactive controls that VoiceOver
+/// could only announce by reading the word inside them, with nothing saying they sorted anything and
+/// nothing a UI test could address. The sort direction rides in the value rather than the label, so
+/// the label stays a stable string while the state underneath it moves, exactly as `DSTabStrip` does
+/// with its badge count.
 private struct SortableColumnHeader: View {
     let title: String
     let isActive: Bool
     let isAscending: Bool
     /// `nil` for the flexible column, which takes whatever the fixed ones leave.
     let width: CGFloat?
+    let identifier: String
     let sort: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
         Button(action: sort) {
-            HStack(spacing: 2) {
+            HStack(spacing: DSSpacing.xxs) {
                 Text(title)
                     .font(DSTypography.caption)
                     // The sorted column should be legible as sorted from across the row, without
@@ -770,7 +814,9 @@ private struct SortableColumnHeader: View {
 
                 if isActive {
                     Image(systemName: isAscending ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        // `inlineSmall`, the rung `DSGlyph` names a column header's sort chevron for:
+                        // it qualifies the title beside it rather than being the control itself.
+                        .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
                         .foregroundStyle(DSColors.accentText)
                 }
             }
@@ -786,6 +832,18 @@ private struct SortableColumnHeader: View {
         // change and no hover, so the columns looked exactly like a static legend.
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .help("Sort by \(title.lowercased())")
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel("Sort by \(title.lowercased())")
+        .accessibilityValue(sortStateAnnouncement)
+    }
+
+    /// Which way this column is currently sorting, or nothing when it is not the sorted one. A value
+    /// rather than part of the label, so "Sort by status" stays the same string whichever direction
+    /// the arrow is pointing.
+    private var sortStateAnnouncement: String {
+        guard isActive else { return "" }
+        return isAscending ? "sorted ascending" : "sorted descending"
     }
 
     private var titleColor: Color {

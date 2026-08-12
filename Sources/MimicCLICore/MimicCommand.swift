@@ -189,7 +189,15 @@ struct AppCommand: AsyncParsableCommand {
     }
 
     struct Stop: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Quit the running Mimic instance.")
+        static let configuration = CommandConfiguration(
+            abstract: "Quit the running Mimic instance.",
+            discussion: """
+            The instance is the one its discovery file names, so this ignores --url: a pid only means
+            something on the machine it was read from. Mimic is asked to confirm that pid is its own
+            before anything is signalled — if it cannot, nothing is, and the message says how to stop
+            it by hand.
+            """
+        )
 
         @OptionGroup var options: GlobalOptions
 
@@ -197,6 +205,9 @@ struct AppCommand: AsyncParsableCommand {
             guard let endpoint = ControlEndpointFileReader.discover() else {
                 throw CLIFailure.noInstance
             }
+            // A pid in a file is not evidence — see `AppLauncher.confirmRunningInstance`. Nothing is
+            // signalled until the instance itself has answered that it is the process named there.
+            try await AppLauncher.confirmRunningInstance(endpoint)
             try AppLauncher.terminate(pid: endpoint.pid)
             Output(options).emitMessage("Stopped Mimic (pid \(endpoint.pid)).")
         }

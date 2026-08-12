@@ -576,6 +576,17 @@ final class AppState {
     func restartActiveJourney() { server.restartJourney() }
     func advanceActiveJourney() { server.advanceJourney() }
 
+    /// Advances the active journey and reports the cursor the engine moved it to.
+    ///
+    /// ``advanceActiveJourney()`` dispatches and returns, which is right for a menu item and wrong for
+    /// a control call: `mimic journey advance` has to answer with the position it produced, and
+    /// reading ``activeJourneyStatus`` straight after dispatching reads the mirror from *before* the
+    /// advance. Named apart rather than overloaded on `async`, because the synchronous one is handed
+    /// to a `Button` and to `JourneyRunControls` as a `() -> Void` action.
+    func advanceActiveJourneyReportingStatus() async -> JourneyStatus? {
+        await server.advanceJourneyReportingStatus()
+    }
+
     /// The last error a journey edit produced, for surfacing in the UI. Cleared on the next success.
     var lastCommandError: String?
 
@@ -593,7 +604,23 @@ final class AppState {
 
     func openProject(id: UUID) {
         stopServerForProjectChange()
-        _ = projects.openProject(id: id)
+        projects.openProject(id: id)
+    }
+
+    /// Stores an imported document, and opens it when the caller asked for it.
+    ///
+    /// Activation waits for the write and goes through ``openProject(id:)`` rather than the
+    /// workspace's own: a document that the store refused is not a project to open — opening it would
+    /// only send `ProjectWorkspace.openProject` down its missing-project path and strike the entry
+    /// from recents — and switching projects has to stop the server the same way every other switch
+    /// does.
+    func importProject(_ document: MockProject, activate: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let stored = await projects.importProject(document)
+            guard stored, activate else { return }
+            openProject(id: document.id)
+        }
     }
 
     /// The server serves *the open project*, so it cannot outlive one.

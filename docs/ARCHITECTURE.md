@@ -76,7 +76,21 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   the delay or the transport failure, and yields one `RequestLog` per request to a single `logStream`.
 - **Persistence** — GRDB storage behind the `ProjectRepository` port; the app injects the port, not
   the concrete store. Journeys and steps are stored relationally, so a step can be reordered and
-  diffed like any other row.
+  diffed like any other row. `load` now **refuses a row written by a newer build**: the stored
+  `schemaVersion` is checked before a single field is read, and a document from ahead of this one
+  throws `PersistenceError.unsupportedSchemaVersion` naming both numbers, because the fields this
+  build does not know about are exactly the ones a partial read would drop. `allProjects` is
+  deliberately *not* filtered — a project you cannot open is still a project you have, and hiding it
+  would look exactly like "the recents list is empty". Both hosts map `PersistenceError` to
+  `persistence.failure` with that message, so `mimic project open` prints it.
+
+  Two things this does not do. It does not carry the stored number into the value: `toDomain()`
+  rebuilds through `MockProject`'s memberwise initialiser, which stamps `currentSchemaVersion`, and
+  changing that needs a `schemaVersion:` parameter in Domain. On the `load` path that is a real
+  forward migration rather than a relabelling — nothing from ahead of this build gets past the guard,
+  and a row from behind it genuinely is the current shape once loaded. And it does not fix the
+  window's reaction: `ProjectWorkspace.openProject(id:)` treats *any* load failure as "the store does
+  not have it", so a newer-schema project drops out of recents silently instead of explaining itself.
 - **ControlPlane** — `ControlServer` (a loopback-only Vapor app), `ControlEndpointFile` (the `0600`
   discovery file), and `MimicControlService` + `MimicDaemon` (a windowless Mimic: store + engine +
   log + rules). `ControlHost` is the protocol both `MimicControlService` and the app's
@@ -112,13 +126,19 @@ loop, which the embedded servers need) and `ControlPlaneCoordinator` starts
 and written into the discovery file names a *mode of the app*. There is no second binary.
 
 ```bash
-grep -rn MimicDaemon --include=*.swift .   # one hit: its own declaration
+# Nothing outside the file names the type. Prints nothing; exits 1.
+grep -rn MimicDaemon --include=*.swift . | grep -v '^\./Sources/ControlPlane/MimicDaemon\.swift:'
 ```
+
+The unfiltered grep — which this document and README.md both used to present as returning "one hit,
+its own declaration" — returns two, because a doc comment inside that file now quotes the grep. Its
+own documentation moves the number, so filter the file out and read what is left.
 
 `MimicControlService` is referenced only by `MimicDaemon`, by doc comments, and by two test suites —
 `Tests/ControlPlaneTests`, which exercises it as the product, and `Tests/MimicTests/HostParityTests`,
-which drives it *beside* `AppControlHost` precisely to catch them drifting. Together the two source
-files are about 636 lines that ship in the framework and never execute.
+which drives it *beside* `AppControlHost` precisely to catch them drifting. Both source files ship in
+the framework and never execute. (A line count stood here; it is gone because it changes whenever
+anybody edits a comment in either file, and `wc -l` answers it on demand.)
 
 Three consequences worth understanding before you touch this area:
 
@@ -127,20 +147,28 @@ Three consequences worth understanding before you touch this area:
   was never written to the project, and `reset` answered with a different sentence than the headless
   service does; both are pinned in `Tests/MimicTests/AppStateAndViewTests.swift`. In both, the tests
   were right about the code they ran and wrong about the product.
-  `Tests/MimicTests/HostParityTests` now drives commands through both hosts and pins four *live*
-  differences as declared exceptions, each with the reason it is legitimate — the window's host answers
-  project lifecycle optimistically because its store access is async, and the caller confirms with
-  `state`. A difference that is written down is a contract; one that is not is a bug waiting to be
-  found by a user.
-- **The test coverage points the wrong way.** All 38 tests in `ControlPlaneTests` run against
-  `MimicControlService`, directly or through `ControlServer` stood up on top of it.
-  `AppControlHost` has 4 of its own in `Tests/MimicTests/AppStateAndViewTests.swift`, added only after
-  those divergences shipped, plus the 13 in `HostParityTests` that drive it against its twin. A green
-  `ControlPlaneTests` is still not evidence that `mimic` works.
-- **The `CommandKind` discipline is still load-bearing.** Both hosts switch with no `default`, so a
-  new command cannot compile until both handle it. That is what keeps `MimicControlService` from
-  rotting into something that could no longer be wired up — the reason it is worth keeping in
-  agreement even while it is dormant.
+  `Tests/MimicTests/HostParityTests` now drives commands through both hosts and separates the two
+  kinds of difference: a `contractDifferences` table of answers that are *allowed* to differ, each
+  with the reason (the window's host answers project lifecycle optimistically because its store
+  access is async, and the caller confirms with `state`), and a set of `DIVERGENCE` tests pinning
+  differences nobody defends, so that closing one is a visible edit to this suite rather than a
+  silent change in behaviour. A difference that is written down is a contract; one that is not is a
+  bug waiting to be found by a user.
+- **The test coverage points the wrong way.** Every test in `ControlPlaneTests` runs against
+  `MimicControlService` — `ControlServiceTests` builds one directly, `ControlServerTests` stands a
+  `ControlServer` on top of one. `AppControlHost` has a handful of its own in
+  `Tests/MimicTests/AppStateAndViewTests.swift`, added only after those divergences shipped, plus
+  `HostParityTests`, which drives it against its twin. A green `ControlPlaneTests` is still not
+  evidence that `mimic` works.
+- **The compiler does not make the dormant host keep up; a test does.** Both hosts' dispatch switches
+  end in a `default:` that throws at runtime naming the command, so a new one compiles with neither
+  host implementing it. This document previously said the opposite — that the switches carried no
+  `default` and a new command could not compile until both handled it — and that claim was the reason
+  nobody worried about `MimicControlService` rotting. What actually holds the two together now is
+  `HostParityTests`: two sweeps drive every host-scoped `CommandKind` through both hosts and fail if
+  either answers from its unimplemented arm, and the sample list they run on is a `default`-free
+  switch, so the *build* breaks until a new command has a payload to sweep with. That is what keeps
+  wiring the daemon up later a small change rather than a rewrite.
 
 Whether to give `MimicDaemon` a real `mimic daemon` binary — which would let a headless Mimic run
 without a GUI-capable app bundle, useful on a bare CI box — or to delete it and fold `ControlPlane`
@@ -156,14 +184,28 @@ headless service as the thing CI runs and nothing said otherwise.
 - **Operations are data.** Modelling an operation as a `ControlCommand` value buys determinism (it is
   replayable and diffable), a single interpreter, and self-description — an agent can ask a running
   instance what it accepts instead of trusting documentation.
-- **Adding an operation is a compile error until it is routed.** A command carries associated values,
-  so `ControlCommand` can never be `CaseIterable` — and without a way to enumerate the surface, every
-  list claiming to mirror it is a copy maintained by hand. `CommandKind` is the join: no payloads, so
-  it *is* `CaseIterable`, and `ControlCommand.kind` maps onto it through a switch with no `default`.
-  The three switches that dispatch a command — the executor and both hosts — name every case for the
-  same reason, so a new one stops the build in all three until somebody decides which side of the
-  project-scoped line it falls on. The catalog is then checked against `allCases` rather than against
-  a fourth hand-written list, which is what it used to be compared with: a copy of itself.
+- **Adding an operation is a compile error until it is *classified*, and a test failure until it is
+  routed.** A command carries associated values, so `ControlCommand` can never be `CaseIterable` —
+  and without a way to enumerate the surface, every list claiming to mirror it is a copy maintained
+  by hand. `CommandKind` is the join: no payloads, so it *is* `CaseIterable`. Two switches over it
+  have no `default:` and are the compile-time half — `ControlCommand.kind`, which forces a new case
+  to be named, and `CommandKind.scope`, which forces it onto one side of the project/host line.
+
+  The three switches that *dispatch* a command — `ProjectCommandExecutor.apply` and both hosts —
+  each end in a `default:` instead, because each is a switch over `ControlCommand` while its caller
+  has already narrowed by `CommandKind`, and the compiler cannot see that narrowing; closing them
+  would restore the three hand-written case lists (twenty-one on one side, twenty-six on the other)
+  that `scope` was introduced to collapse into one. Each tail throws and names the command rather
+  than falling through to a plausible lie like "no project is open".
+
+  What replaces the compile check is a set of sweeps over `allCases`, one per surface. `DomainTests`
+  puts a sample of every kind through `apply` from both sides, so a project-scoped command reaching
+  the executor's tail — or a host-scoped one being swallowed there — fails. `HostParityTests` does
+  the same through **both hosts**, with and without a project open, asserting neither answered from
+  its unimplemented arm; its sample list is a `default`-free switch over `CommandKind`, so a new
+  command stops that target compiling until it is covered. `ControlTransportTests` requires some
+  `mimic` invocation to emit every kind. And the catalog is checked against `allCases` rather than
+  against a fourth hand-written list, which is what it used to be compared with: a copy of itself.
 - **The journey cursor lives in an actor.** `MockRouteStore.resolve` reads the cursor, picks a step,
   and writes the advanced cursor back in one non-reentrant step. A read-then-write would let two
   concurrent requests consume the same step, which is exactly the bug a journey cannot afford.

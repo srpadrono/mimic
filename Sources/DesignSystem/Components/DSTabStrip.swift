@@ -155,7 +155,12 @@ public struct DSTabStrip: View {
 
         /// The selection circle's diameter, and the icon's whole footprint. Fixed, whatever share of
         /// the row the cell gets.
-        private static let shapeSize: CGFloat = 22
+        ///
+        /// `DSControlHeight.field`, not a literal 22. `DSPanelHeaderButton` — which is what sits in
+        /// this strip's own accessory slot — takes the same rung, and the padding note above measures
+        /// the leading inset off this number, so the two agreeing has to be something the ladder
+        /// guarantees rather than something two files happen to say.
+        private static let shapeSize: CGFloat = DSControlHeight.field
 
         var body: some View {
             Button(action: select) {

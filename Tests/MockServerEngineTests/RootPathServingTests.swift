@@ -20,7 +20,12 @@ import Testing
 ///
 /// `/` is not an exotic path: it is what a browser sends for `http://localhost:8080`, what a health
 /// check hits, and what an API gateway mock roots itself at.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct RootPathServingTests {
 
     /// The root URL as a real client emits it — `appendingPathComponent("")` cannot express `/`, and

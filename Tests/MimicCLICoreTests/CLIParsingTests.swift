@@ -129,7 +129,12 @@ struct CLIParsingTests {
         #expect(try options.resolveBody() == payload)
     }
 
-    @Test("An unreadable body file is reported with its path")
+    /// The exit code here said `4` and `CLIFailure.fileUnreadable` has been `2` since the two codes
+    /// that sat on the wrong side of the line were swapped — a path the caller mistyped never leaves
+    /// the process, so it is bad usage rather than "Mimic refused it". The assertion was simply stale,
+    /// and stale in the direction that matters: it disagreed with `exitCodeContract` below, which
+    /// pins the same value for the same case, so the file contained both answers.
+    @Test("An unreadable body file is reported with its path, as bad usage")
     func missingBodyFile() throws {
         let options = try ResponseOptions.parse(["--body-file", "/nonexistent/mimic/body.json"])
         do {
@@ -137,7 +142,7 @@ struct CLIParsingTests {
             Issue.record("expected a failure")
         } catch let failure as CLIFailure {
             #expect(failure.errorDescription?.contains("/nonexistent/mimic/body.json") == true)
-            #expect(failure.exitCode == 4)
+            #expect(failure.exitCode == 2)
         }
     }
 
@@ -605,7 +610,14 @@ struct AppLauncherTests {
         #expect(candidates.first?.path.contains("~") == false)
     }
 
-    @Test("When no bundle exists the error lists everywhere that was tried")
+    /// Mimic not being installed where the CLI looked is `3`, not `2`.
+    ///
+    /// It used to be `badArgument`, so a script branching on the code was told the *user had mistyped
+    /// something* when what had happened was that the app was not there. `3` already means "there is
+    /// no Mimic to talk to", and inside `mimic app start` the not-installed failure and the
+    /// never-answered failure (`waitForReadiness`, already `3`) are one condition that was being
+    /// reported under two codes. The contract stays at four documented values.
+    @Test("When no bundle exists the error lists everywhere that was tried, and exits 3")
     func missingBundleIsDiagnosable() {
         do {
             // Candidates are injected so the outcome does not depend on whether Mimic happens to be
@@ -623,7 +635,7 @@ struct AppLauncherTests {
             #expect(message.contains("/nowhere/Mimic.app"))
             #expect(message.contains("/also-nowhere/Mimic.app"))
             #expect(message.contains("MIMIC_APP_PATH"))
-            #expect(failure.exitCode == 2)
+            #expect(failure.exitCode == 3)
         } catch {
             Issue.record("expected a CLIFailure, got \(error)")
         }
@@ -633,5 +645,26 @@ struct AppLauncherTests {
     func refusesInvalidPid() {
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: 0) }
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: -5) }
+        // And it is reported as "there is no Mimic to signal" rather than as a mistyped argument.
+        #expect(CLIFailure.appUnavailable("Invalid pid 0.").exitCode == 3)
+    }
+
+    /// The whole contract, in one place, including the case that joined it.
+    ///
+    /// `appUnavailable` deliberately shares `3` with `noInstance` and `unreachable` instead of
+    /// claiming a fifth code: all three are the same sentence about the world, and docs/CLI.md
+    /// publishes four values a caller may branch on.
+    @Test("The exit contract is four values, and appUnavailable did not add a fifth")
+    func exitCodesRemainFourValues() {
+        let codes: Set<Int32> = [
+            CLIFailure.badArgument("x").exitCode,
+            CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode,
+            CLIFailure.noInstance.exitCode,
+            CLIFailure.unreachable(baseURL: URL(string: "http://127.0.0.1:1")!, underlying: "x").exitCode,
+            CLIFailure.appUnavailable("Could not find Mimic.app.").exitCode,
+            CLIFailure.commandFailed(.noProjectOpen).exitCode,
+            CLIFailure.undecodable("x").exitCode,
+        ]
+        #expect(codes == [2, 3, 4])
     }
 }

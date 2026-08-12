@@ -11,9 +11,9 @@ import Persistence
 /// `AppControlHost` maps a command onto the live session behind the window; `MimicControlService`
 /// owns a repository and an engine of its own. They are meant to answer identically, and every
 /// divergence between them so far was found by *reading* the two files next to each other — never by
-/// a test, because until now no test drove both. `Tests/ControlPlaneTests` is thirty-eight tests
-/// against the service alone, and the `AppControlHost` cases in `AppStateAndViewTests` are four
-/// against the host alone; two green suites prove nothing about whether the two agree.
+/// a test, because until this suite existed no test drove both. `Tests/ControlPlaneTests` covers the
+/// service alone and the `AppControlHost` cases in `AppStateAndViewTests` cover the host alone; two
+/// green suites prove nothing about whether the two agree.
 ///
 /// What "agree" means here is deliberately narrow, because over-asserting would fail this suite for
 /// things that are not defects:
@@ -193,6 +193,186 @@ struct HostParityTests {
             return []
         }
         return Set(object.keys)
+    }
+
+    // MARK: - Routing: every kind reaches an implementation
+
+    /// One payload per ``CommandKind``, in a switch with **no `default`**.
+    ///
+    /// That is the whole point of writing it out rather than importing a list: adding a `CommandKind`
+    /// stops this file compiling until somebody supplies a sample, so the two sweeps below cannot
+    /// silently stop covering the command that was just added. A `default` here — or an array of
+    /// literals like the one `DomainTests` keeps — would turn "every command is routed" back into
+    /// "every command somebody remembered".
+    ///
+    /// The payloads are deliberately awkward: ids that match nothing, references to endpoints an
+    /// empty project does not have. What is under test is *routing*, not success.
+    ///
+    /// `DomainTests.ControlCommandSamples` is the same list for the executor's own sweeps. It cannot
+    /// be shared — a test target is a module, and `MimicTests` cannot import `DomainTests` — so the
+    /// duplication is real. It is compiler-checked on both sides, which is the difference between two
+    /// lists that must agree and two lists that will drift.
+    static func sample(for kind: CommandKind) -> ControlCommand {
+        switch kind {
+        case .ping: .ping
+        case .describeCommands: .describeCommands
+        case .state: .state
+        case .reset: .reset(scope: .all)
+        case .projectList: .projectList
+        case .projectCreate: .projectCreate(name: "Swept", port: 9098)
+        case .projectOpen: .projectOpen(project: .name("Swept"))
+        case .projectClose: .projectClose
+        case .projectDelete: .projectDelete(project: .name("Swept"))
+        case .projectRename: .projectRename(name: "Renamed")
+        case .projectDuplicate: .projectDuplicate(project: .name("Swept"))
+        case .projectExport: .projectExport(project: nil)
+        case .projectImport: .projectImport(project: MockProject(name: "Swept import"), activate: false)
+        case .serverStart: .serverStart(port: nil)
+        case .serverStop: .serverStop
+        case .serverStatus: .serverStatus
+        case .serverConfigure: .serverConfigure(port: 9097, globalDelayMs: 10)
+        case .endpointList: .endpointList
+        case .endpointGet: .endpointGet(endpoint: .route(.get, "/a"))
+        case .endpointCreate: .endpointCreate(name: "A", method: .get, path: "/a", spec: nil)
+        case .endpointUpdate: .endpointUpdate(endpoint: .route(.get, "/a"), spec: EndpointSpec(delayMs: 5))
+        case .endpointDelete: .endpointDelete(endpoint: .route(.get, "/a"))
+        case .endpointDuplicate: .endpointDuplicate(endpoint: .route(.get, "/a"))
+        case .scenarioList: .scenarioList(endpoint: .route(.get, "/a"))
+        case .scenarioCreate: .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: nil)
+        case .scenarioUpdate:
+            .scenarioUpdate(endpoint: .route(.get, "/a"), scenario: .name("S"), spec: ScenarioSpec(statusCode: 201))
+        case .scenarioDelete: .scenarioDelete(endpoint: .route(.get, "/a"), scenario: .name("S"))
+        case .scenarioActivate: .scenarioActivate(endpoint: .route(.get, "/a"), scenario: .name("S"))
+        case .journeyList: .journeyList
+        case .journeyGet: .journeyGet(journey: .name("Flow"))
+        case .journeyCreate: .journeyCreate(name: "Flow", spec: nil)
+        case .journeyTemplateList: .journeyTemplateList
+        case .journeyAddTemplate: .journeyAddTemplate(templateID: "payment-retry", name: "Flow")
+        case .journeyUpdate: .journeyUpdate(journey: .name("Flow"), spec: JourneySpec(completion: .restart))
+        case .journeyDelete: .journeyDelete(journey: .name("Flow"))
+        case .journeyDuplicate: .journeyDuplicate(journey: .name("Flow"))
+        case .journeyStepAdd:
+            .journeyStepAdd(
+                journey: .name("Flow"),
+                step: JourneyStepSpec(method: .get, path: "/a", statusCode: 200),
+                atIndex: nil
+            )
+        case .journeyStepsAdd:
+            .journeyStepsAdd(
+                journey: .name("Flow"),
+                steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)],
+                atIndex: nil
+            )
+        case .journeyStepUpdate:
+            .journeyStepUpdate(journey: .name("Flow"), step: .index(0), spec: JourneyStepSpec(statusCode: 500))
+        case .journeyStepRemove: .journeyStepRemove(journey: .name("Flow"), step: .index(0))
+        case .journeyStepMove: .journeyStepMove(journey: .name("Flow"), step: .index(0), toIndex: 1)
+        case .journeyActivate: .journeyActivate(journey: .name("Flow"))
+        case .journeyRestart: .journeyRestart
+        case .journeyAdvance: .journeyAdvance
+        case .journeyStatus: .journeyStatus
+        case .logList: .logList(limit: 5, unmatchedOnly: nil)
+        case .logClear: .logClear
+        }
+    }
+
+    /// The code both hosts answer with from the arm that means "nothing here handles this command".
+    ///
+    /// `AppControlHost.perform` and `MimicControlService.run` each end in a `default:` that reports
+    /// exactly that, and both build it with `ControlError.internalFailure` — so this is read from the
+    /// constructor rather than written out, and cannot drift from it.
+    ///
+    /// It is `internalFailure`'s *general* code, which each host also uses for an unexpected error it
+    /// could not classify. So a failure here could in principle be one of those instead. That is why
+    /// every assertion below prints the message: `"… is host-scoped but the app's control host does
+    /// not implement it."` is unmistakable, and anything else in that slot is a different bug worth
+    /// reading rather than a false alarm worth suppressing.
+    static let unimplementedCommandCode = ControlError.internalFailure("").code
+
+    /// The gap `HostParityTests` was one test short of closing.
+    ///
+    /// Every other case here compares two hosts on commands somebody chose to list. So a *new*
+    /// host-scoped command, implemented in neither host, compiled clean, passed the whole suite, and
+    /// surfaced at runtime as `internal.failure` — after `mimic commands` had already advertised it to
+    /// whatever was driving the instance. Nothing in three test targets looked at the two `default:`
+    /// arms that produce it.
+    ///
+    /// Driven with **no project open**, which is the state that makes the sweep safe as well as
+    /// complete: every host-scoped arm is reached, and the ones that need a document refuse with
+    /// `project.noneOpen` before they can touch a store, a socket or an engine. `serverStart` is the
+    /// case that makes this matter — the headless service holds a real `MockServerEngine`, and with a
+    /// project open it would bind a real port, which is why the seeded pass below skips it.
+    @Test("Every host-scoped command is answered by both hosts, not left to the unimplemented arm")
+    func everyHostScopedCommandIsRoutedByBothHosts() async throws {
+        for kind in CommandKind.allCases where kind.scope == .host {
+            let hosts = try makeHosts()
+            let responses = await run(Self.sample(for: kind), on: hosts)
+
+            #expect(
+                responses.window.error?.code != Self.unimplementedCommandCode,
+                "\(kind.rawValue): the window's host has no arm for it — \(responses.window.error?.message ?? "")"
+            )
+            #expect(
+                responses.headless.error?.code != Self.unimplementedCommandCode,
+                "\(kind.rawValue): the headless service has no arm for it — \(responses.headless.error?.message ?? "")"
+            )
+        }
+    }
+
+    /// The same sweep once a project is open, because "no project is open" is a legitimate answer and
+    /// a command that only ever produced it would pass the pass above without ever reaching its own
+    /// arm.
+    ///
+    /// `serverStart` is skipped and only `serverStart`: the headless service's engine is a real
+    /// `MockServerEngine`, so with a project open this would put a listener on port 9099 and a parity
+    /// suite has no business opening sockets. It is covered without a project by the sweep above,
+    /// where both hosts refuse it before the engine is touched, and its contract difference is
+    /// recorded in ``contractDifferences``.
+    @Test("Every host-scoped command reaches its own arm with a project open")
+    func everyHostScopedCommandIsRoutedWithAProjectOpen() async throws {
+        for kind in CommandKind.allCases where kind.scope == .host {
+            guard kind != .serverStart else { continue }
+
+            let hosts = try makeHosts()
+            try await seedProject(hosts)
+            let responses = await run(Self.sample(for: kind), on: hosts)
+
+            #expect(
+                responses.window.error?.code != Self.unimplementedCommandCode,
+                "\(kind.rawValue): the window's host has no arm for it — \(responses.window.error?.message ?? "")"
+            )
+            #expect(
+                responses.headless.error?.code != Self.unimplementedCommandCode,
+                "\(kind.rawValue): the headless service has no arm for it — \(responses.headless.error?.message ?? "")"
+            )
+        }
+    }
+
+    /// The mirror on the other side of the line, so one file covers the whole partition: a
+    /// project-scoped command must be applied by ``ProjectCommandExecutor`` rather than declined to a
+    /// host that would then report "no project is open" with one open.
+    ///
+    /// `DomainTests` runs this against its own sample list; running it here against *this* file's
+    /// list is what makes the two lists agree about something rather than merely both existing.
+    @Test("Every project-scoped command is applied by the executor")
+    func everyProjectScopedCommandIsAppliedByTheExecutor() {
+        for kind in CommandKind.allCases where kind.scope == .project {
+            var project = MockProject(name: "Swept")
+            do {
+                let outcome = try ProjectCommandExecutor.apply(Self.sample(for: kind), to: &project)
+                #expect(outcome != nil, "\(kind.rawValue) is project-scoped and was declined by the executor")
+            } catch let error as ControlError {
+                // Refusing is still answering: most of these name an endpoint, scenario or journey the
+                // empty fixture does not have. What must not appear is the executor's own "I have no
+                // arm for this" code.
+                #expect(
+                    error.code != Self.unimplementedCommandCode,
+                    "\(kind.rawValue) reached the executor's unimplemented tail: \(error.message)"
+                )
+            } catch {
+                Issue.record("\(kind.rawValue) failed with a non-ControlError: \(error)")
+            }
+        }
     }
 
     // MARK: - Agreement, with nothing open
@@ -438,8 +618,10 @@ struct HostParityTests {
             headless: #"ok, "Deleted project "X".""#,
             reason: """
             The window hands the delete to the session and answers; the service awaits the store and \
-            has the name it removed. See also the divergence below: because the window never waits, \
-            an id that names nothing is accepted rather than refused.
+            has the name it removed. Only the *tense* differs now: the sentence this row used to end \
+            with — that an id naming nothing is accepted rather than refused, because the window never \
+            waits — stopped being true when the window started resolving the reference against the \
+            store before answering. See `anUnknownProjectIDIsRefusedByBothHosts`.
             """
         ),
         ContractDifference(
@@ -564,110 +746,176 @@ struct HostParityTests {
 
     // MARK: - Divergences
 
-    /// DIVERGENCE: `projectExport` takes a project reference, and the window's host ignores it.
+    /// Was a DIVERGENCE, now parity: `projectExport` takes a project reference and both hosts honour
+    /// it.
     ///
-    /// The window answers with whatever is open — so exporting a *different* stored project returns
-    /// the wrong document, and exporting one that does not exist returns a document rather than an
-    /// error. The service resolves the reference against its store and reports `project.notFound`.
+    /// The window's arm used to bind no associated value at all — `case .projectExport:` — so the
+    /// reference was dropped on the floor: `mimic project export Other` returned whatever happened to
+    /// be open, and `mimic project export Nonexistent` returned a document instead of an error. It
+    /// now resolves the reference against the store, mirroring `MimicControlService`.
     ///
-    /// Pinned, not fixed: `AppControlHost` is not this suite's to change. The `case .projectExport:`
-    /// arm binds no associated value, which is why the reference goes missing silently.
-    @Test("DIVERGENCE: the window's host ignores the project reference on export")
-    func projectExportIgnoresItsReferenceOnTheWindowHost() async throws {
+    /// The one thing that is deliberately *not* symmetric is where the open project comes from: the
+    /// window answers it out of the session rather than re-reading the store, because an export taken
+    /// straight after an edit has to contain that edit, and the edit is sitting in the autosave
+    /// debounce. Anything else exists only in the store, for both hosts.
+    @Test("Both hosts resolve the project reference on export")
+    func projectExportHonoursItsReference() async throws {
         let hosts = try makeHosts()
         try await seedProject(hosts, name: "Checkout")
 
-        let responses = await run(.projectExport(project: .name("Nonexistent")), on: hosts)
+        let missing = try await expectParity(.projectExport(project: .name("Nonexistent")), on: hosts)
+        #expect(missing.window.ok == false)
+        #expect(missing.window.error?.code == "project.notFound")
+        #expect(missing.headless.error?.code == "project.notFound")
 
-        // Window: the reference is dropped and the open project comes back regardless.
-        #expect(responses.window.ok)
-        #expect(responses.window.result?.project?.name == "Checkout")
+        // Naming the open project is the case that has to keep working, and it is the one the window
+        // answers from the session.
+        let named = try await expectParity(.projectExport(project: .name("Checkout")), on: hosts)
+        #expect(named.window.result?.project?.name == "Checkout")
+        #expect(named.headless.result?.project?.name == "Checkout")
 
-        // Service: the reference is resolved, and nothing matches it.
-        #expect(responses.headless.ok == false)
-        #expect(responses.headless.error?.code == "project.notFound")
+        // …and so does asking for whatever is open.
+        let open = try await expectParity(.projectExport(project: nil), on: hosts)
+        #expect(open.window.result?.project?.name == "Checkout")
+        #expect(open.headless.result?.project?.name == "Checkout")
     }
 
-    /// DIVERGENCE: a project id that names nothing is refused by the service and accepted by the
-    /// window.
+    /// Was a DIVERGENCE, now parity: a project id that names nothing is refused by both hosts.
     ///
-    /// The window resolves a reference by taking `ref.id` if it has one and only otherwise searching
-    /// recents, then hands the id to the session and answers immediately — so there is no moment at
-    /// which anything checks that a project with that id exists. `projectOpen` and `projectDuplicate`
-    /// take the same shape; `projectDelete` stands in for all three here.
+    /// The window used to take `ref.id` on trust and search only when it had a name instead, so no
+    /// step of `projectOpen`, `projectDelete` or `projectDuplicate` ever checked that the id existed:
+    /// `mimic project delete --id <any uuid>` answered "Deleted the project." having deleted nothing,
+    /// while the identical command against a daemon reported `project.notFound`. All three now
+    /// resolve through the store, which is the only thing that can answer the question.
     ///
-    /// A script that deletes by id therefore gets `ok` from a window and `project.notFound` from a
-    /// daemon for the identical command.
-    @Test("DIVERGENCE: an unknown project id is accepted by the window and refused by the service")
-    func anUnknownProjectIDIsAcceptedByTheWindowHost() async throws {
+    /// All three are driven, rather than letting `projectDelete` stand in for them: they took the same
+    /// shape by having been written the same way, which is exactly the property that stops holding
+    /// when somebody edits one of them.
+    @Test(
+        "An unknown project id is refused by both hosts",
+        arguments: [
+            ControlCommand.projectDelete(project: .id(UUID())),
+            .projectOpen(project: .id(UUID())),
+            .projectDuplicate(project: .id(UUID())),
+        ]
+    )
+    func anUnknownProjectIDIsRefusedByBothHosts(command: ControlCommand) async throws {
         let hosts = try makeHosts()
         try await seedProject(hosts)
 
-        let responses = await run(.projectDelete(project: .id(UUID())), on: hosts)
-
-        #expect(responses.window.ok)
-        #expect(responses.window.result?.message == "Deleted the project.")
-
-        #expect(responses.headless.ok == false)
+        let responses = try await expectParity(command, on: hosts)
+        #expect(responses.window.ok == false)
+        #expect(responses.window.error?.code == "project.notFound")
         #expect(responses.headless.error?.code == "project.notFound")
+    }
 
-        // A name that matches nothing *is* refused by both, because the window has to search recents
-        // for it — so the gap is specifically the reference that skips the lookup.
-        let byName = await run(.projectDelete(project: .name("Nonexistent")), on: hosts)
+    /// The other half of that resolution, and the reason it is not simply "ask the store": the open
+    /// project counts whether or not the store has caught up with it.
+    ///
+    /// `projectCreate` answers before its write lands on the window's host — that is a declared
+    /// contract difference — so a script that creates a project and immediately names it would be told
+    /// it does not exist if resolution went only to the store.
+    @Test("A reference naming the open project resolves even before its write has landed")
+    func theOpenProjectResolvesWithoutWaitingForTheStore() async throws {
+        let hosts = try makeHosts()
+        let created = await run(.projectCreate(name: "Just created", port: 9098), on: hosts)
+        #expect(created.window.ok)
+
+        let responses = try await expectParity(.projectExport(project: .name("Just created")), on: hosts)
+        #expect(responses.window.result?.project?.name == "Just created")
+    }
+
+    /// A name that matches nothing is refused by both, and always was — the window had to search for
+    /// a name, so only the reference that skipped the lookup was ever accepted. Kept because it is the
+    /// control case for the parity above: if this ever starts disagreeing, the resolution changed
+    /// rather than the reference handling.
+    @Test("An unknown project name is refused by both hosts")
+    func anUnknownProjectNameIsRefusedByBothHosts() async throws {
+        let hosts = try makeHosts()
+        try await seedProject(hosts)
+
+        let byName = try await expectParity(.projectDelete(project: .name("Nonexistent")), on: hosts)
         #expect(byName.window.error?.code == "project.notFound")
         #expect(byName.headless.error?.code == "project.notFound")
     }
 
-    /// DIVERGENCE: `projectClose` names the project it closed from the service and not from the
-    /// window, and answers a close with nothing open differently.
+    /// The one divergence still standing, and the only test in this suite that is *supposed* to fail.
     ///
-    /// Unlike the rest of the project lifecycle this one is not an artefact of asynchrony —
-    /// `AppState.closeProject()` is synchronous and the name is right there in `currentProject`. The
-    /// two sentences simply drifted.
-    @Test("DIVERGENCE: closing a project is reported differently by each host")
+    /// `projectClose` names the project it closed from the service and not from the window, and the
+    /// two answer a close with nothing open differently. Unlike the rest of the project lifecycle this
+    /// is not an artefact of asynchrony — `AppState.closeProject()` is synchronous and the name is
+    /// right there in `currentProject`. The two sentences simply drifted.
+    ///
+    /// It is wrapped in `withKnownIssue` rather than asserted the way it stands, because a test that
+    /// pins current behaviour reports as a **pass** — and a green suite claiming "host parity" with a
+    /// known divergence inside it is exactly the report this file exists to stop anyone trusting. As
+    /// a known issue the run says so, and the day somebody fixes the wording this fails as an
+    /// *unexpected pass*, which is the notification that the exception can be deleted.
+    ///
+    /// Message parity is not a general contract here — `expectParity` never compares prose, and `ping`
+    /// and `logClear` are deliberately unpinned for that reason. This one is different because the
+    /// two hosts differ in whether the reply names the project at all, which is a difference in what a
+    /// caller can read out of it rather than in how it is worded.
+    @Test("KNOWN ISSUE: closing a project is reported differently by each host")
     func projectCloseIsReportedDifferently() async throws {
         let empty = try makeHosts()
         let withNothingOpen = await run(.projectClose, on: empty)
         #expect(withNothingOpen.window.ok)
         #expect(withNothingOpen.headless.ok)
-        #expect(withNothingOpen.window.result?.message == "Closed the project.")
-        #expect(withNothingOpen.headless.result?.message == "No project was open.")
 
         let seeded = try makeHosts()
         try await seedProject(seeded, name: "Checkout")
         let withAProjectOpen = await run(.projectClose, on: seeded)
+
+        withKnownIssue(
+            """
+            `projectClose` answers "Closed the project." from the window and "No project was open." / \
+            "Closed project \\"X\\"." from the service. Neither host was corrected when the other \
+            changed, and nothing needs to be asynchronous for them to agree.
+            """
+        ) {
+            #expect(withNothingOpen.window.result?.message == withNothingOpen.headless.result?.message)
+            #expect(withAProjectOpen.window.result?.message == withAProjectOpen.headless.result?.message)
+        }
+
+        // What each host says today, so the divergence is described and not merely flagged.
+        #expect(withNothingOpen.window.result?.message == "Closed the project.")
+        #expect(withNothingOpen.headless.result?.message == "No project was open.")
         #expect(withAProjectOpen.window.result?.message == "Closed the project.")
         #expect(withAProjectOpen.headless.result?.message == "Closed project \"Checkout\".")
     }
 
-    /// DIVERGENCE: `journeyAdvance` answers without a `journeyStatus` from the window's host.
+    /// Was a DIVERGENCE, now parity: `journeyAdvance` carries a `journeyStatus` from both hosts.
     ///
-    /// The service asks the engine to advance and reports what the engine hands back. The window asks
-    /// the session to advance — which dispatches to the engine and does not report back synchronously
-    /// — and then reports `MockServerRuntime`'s *mirror* of the cursor, which the advance it has just
-    /// requested has not updated. So the reply carries the cursor from before the command at best, and
-    /// no cursor at all when nothing has populated the mirror yet, which is the case a script meets on
-    /// its first advance.
+    /// The window used to dispatch the advance and then report `MockServerRuntime`'s *mirror* of the
+    /// cursor, which the advance it had just requested had not reached — so the reply carried the
+    /// position from before the command at best, and no position at all on a script's first advance,
+    /// which is when nothing has populated the mirror. It now awaits the engine and reports the
+    /// engine's own answer, falling back to the not-yet-started journey exactly as `journeyRestart`
+    /// and `journeyStatus` beside it already did.
     ///
-    /// `journeyRestart` beside it does not have this problem: it builds a status from the journey
-    /// rather than reading the mirror. Nor does `journeyAdvance` itself when no journey is active —
-    /// both hosts refuse it with `journey.noneActive`, which is why the command still appears in the
-    /// agreement table above. The gap opens only once there is a cursor to report.
-    @Test("DIVERGENCE: advancing a journey reports no status from the window's host")
-    func journeyAdvanceOmitsTheStatusOnTheWindowHost() async throws {
+    /// **What this suite can and cannot see.** Field presence is the whole of the parity claim here,
+    /// because the window's engine in this fixture is `ParityStubEngine`, which takes the protocol's
+    /// default `advanceJourney()` and reports no cursor at all — so the window's reply comes from the
+    /// fallback rather than from an engine that moved. That the *engine's* answer is what gets
+    /// reported is asserted where an engine can be made to answer:
+    /// `AppStateAndViewTests.controlHostAdvanceReportsTheEngineAnswer`.
+    @Test("Advancing a journey reports a status from both hosts")
+    func journeyAdvanceReportsAStatusFromBothHosts() async throws {
         let hosts = try makeHosts()
         try await seedProject(hosts)
         try await expectParity(.journeyAddTemplate(templateID: "payment-retry", name: "Flow"), on: hosts)
         try await expectParity(.journeyActivate(journey: .name("Flow")), on: hosts)
 
-        let responses = await run(.journeyAdvance, on: hosts)
+        let responses = try await expectParity(.journeyAdvance, on: hosts)
 
         #expect(responses.window.ok)
         #expect(responses.headless.ok)
-        #expect(responses.window.result?.journeyStatus == nil)
-        #expect(responses.headless.result?.journeyStatus != nil)
+        #expect(responses.window.result?.journeyStatus?.journeyName == "Flow")
+        #expect(responses.headless.result?.journeyStatus?.journeyName == "Flow")
 
-        // The query beside it agrees, which is what makes the gap specific to the mutation.
+        // The query beside it agrees too, which is what makes this a property of the command surface
+        // rather than of one arm.
         let queried = try await expectParity(.journeyStatus, on: hosts)
         #expect(queried.window.result?.journeyStatus != nil)
     }

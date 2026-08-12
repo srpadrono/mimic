@@ -38,6 +38,44 @@ struct ProjectWorkspaceTests {
         Issue.record("Timed out waiting for condition")
     }
 
+    /// The same poll for a predicate that has to ask the store, which is asynchronous. Named apart
+    /// from `waitUntil` rather than overloaded on the closure's effects: two overloads differing only
+    /// in `async` is exactly the shape that resolves to whichever one the compiler happens to prefer.
+    private func waitUntilAsync(
+        timeout: Duration = .seconds(2),
+        interval: Duration = .milliseconds(20),
+        _ predicate: @escaping () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await predicate() {
+                return
+            }
+            try await Task.sleep(for: interval)
+        }
+        Issue.record("Timed out waiting for condition")
+    }
+
+    /// A store that refuses every write and holds nothing.
+    ///
+    /// Stateless, so it needs no `@unchecked`: `ProjectRepository` is `Sendable` and a struct with no
+    /// stored properties satisfies that on its own.
+    ///
+    /// `nonisolated` because `MimicTests` compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
+    /// so an unannotated type here is `@MainActor` — and `ProjectRepository` is a nonisolated protocol
+    /// declared in `Domain`, whose conformances the app's real repositories satisfy off the main
+    /// actor. Same reason `NavigationHistory` carries it in `AppFeatures`.
+    private nonisolated struct RefusingRepository: ProjectRepository {
+        struct Refused: Error, LocalizedError {
+            var errorDescription: String? { "the store refused the write" }
+        }
+
+        func load(id: UUID) async throws -> MockProject { throw PersistenceError.projectNotFound(id) }
+        func save(_ project: MockProject) async throws { throw Refused() }
+        func allProjects() async throws -> [MockProject] { [] }
+        func delete(id: UUID) async throws { throw Refused() }
+    }
+
     @Test("Project creation persists recents and updates autosave state")
     func projectCreation() async throws {
         let context = try makeContext()
@@ -185,6 +223,122 @@ struct ProjectWorkspaceTests {
         service.closeProject()
         #expect(service.currentProject == nil)
         _ = context
+    }
+
+    // MARK: - The debounce and the project moving out from under it
+
+    /// The failure this app had no way of telling you about.
+    ///
+    /// `scheduleAutosave` waits 500 ms and then re-reads `currentProject`, guarding that it is still
+    /// the project the edit belonged to. Closing clears that property, so the pending task woke up,
+    /// found the guard false, and returned having written nothing — no error, no indicator, and an
+    /// edit that simply was not there when you reopened the project.
+    ///
+    /// The close deliberately happens *inside* the debounce window, because outside it there is
+    /// nothing to lose.
+    @Test("Closing a project writes the edit still sitting in the debounce")
+    func closingFlushesThePendingAutosave() async throws {
+        let context = try makeContext()
+        let service = context.service
+
+        _ = service.createProject(name: "Flushed", port: 8080)
+        try await waitUntil { service.recentProjects.count == 1 }
+        let id = try #require(service.currentProject?.id)
+
+        service.currentProject?.name = "Edited inside the debounce"
+        service.scheduleAutosave()
+        service.closeProject()
+
+        #expect(service.currentProject == nil)
+        try await waitUntilAsync {
+            (try? await context.repository.load(id: id))?.name == "Edited inside the debounce"
+        }
+    }
+
+    /// The same loss from the other direction: opening another project replaces `currentProject`, so
+    /// the pending write for the *outgoing* one found a different project under the guard and gave up.
+    ///
+    /// The flush captures the project by value before the property moves, which is what makes the
+    /// write independent of whatever is open by the time it lands.
+    @Test("Switching projects writes the outgoing project's pending edit")
+    func switchingProjectsFlushesThePendingAutosave() async throws {
+        let context = try makeContext()
+        let service = context.service
+
+        _ = service.createProject(name: "First", port: 8080)
+        try await waitUntil { service.recentProjects.count == 1 }
+        let firstID = try #require(service.currentProject?.id)
+
+        _ = service.createProject(name: "Second", port: 8081)
+        try await waitUntil { service.recentProjects.count == 2 }
+        let secondID = try #require(service.currentProject?.id)
+
+        service.openProject(id: firstID)
+        try await waitUntil { service.currentProject?.id == firstID }
+
+        service.currentProject?.name = "Edited before switching away"
+        service.scheduleAutosave()
+        service.openProject(id: secondID)
+
+        try await waitUntil { service.currentProject?.id == secondID }
+        try await waitUntilAsync {
+            (try? await context.repository.load(id: firstID))?.name == "Edited before switching away"
+        }
+    }
+
+    // The third member of this family — `deleteProject` cancelling the pending write so a debounced
+    // save cannot put the row back — is deliberately **not** tested here, because no test in this
+    // file could fail for that reason. The debounced task guards on `currentProject`, and the delete
+    // clears it, so the row is only resurrected when the save wakes in the narrow window between
+    // `deleteProject(id:)` being called and its own task nilling the property. A test that drove that
+    // would pass whether or not the cancellation exists, which is the shape this whole pass is here
+    // to remove. The cancellation is still right — it makes the outcome independent of the race
+    // rather than merely unlikely — it is just not something an assertion here can see.
+
+    // MARK: - Importing a document
+
+    /// `AppControlHost` used to store an imported document itself, as
+    /// `Task { try? await repository.save(document) }` beside a success envelope — so
+    /// `mimic project import` exited 0 on an import that never happened and the window said nothing.
+    @Test("A refused import reports the failure instead of reporting success")
+    func importReportsARefusedWrite() async throws {
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: RefusingRepository(),
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+
+        let stored = await service.importProject(MockProject(name: "Refused"))
+
+        #expect(stored == false)
+        #expect(service.autosaveStatus == .failed("Could not import project \"Refused\"."))
+        #expect(service.recentProjects.contains { $0.name == "Refused" } == false)
+    }
+
+    @Test("An accepted import is in the store and in the list")
+    func importStoresTheDocument() async throws {
+        let context = try makeContext()
+        let scenario = Scenario(name: "Default", statusCode: 200, body: "{}")
+        let document = MockProject(
+            name: "Imported",
+            endpoints: [
+                Endpoint(
+                    name: "Summary",
+                    method: .get,
+                    path: "/account-summary",
+                    scenarios: [scenario],
+                    activeScenarioID: scenario.id
+                ),
+            ]
+        )
+
+        let stored = await context.service.importProject(document)
+
+        #expect(stored)
+        let loaded = try await context.repository.load(id: document.id)
+        #expect(loaded.name == "Imported")
+        #expect(loaded.endpoints.first?.path == "/account-summary")
+        try await waitUntil { context.service.recentProjects.contains { $0.id == document.id } }
     }
 
     @Test("Load last opened project restores persisted state and clears stale IDs")

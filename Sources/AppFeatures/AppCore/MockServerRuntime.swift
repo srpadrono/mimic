@@ -137,25 +137,69 @@ final class MockServerRuntime {
 
     // MARK: - Journey runtime control
 
+    /// Ticket taken by each mirror update before it suspends, and checked again before it writes.
+    ///
+    /// Every update below reaches the engine across an `await`, and each one used to do so from an
+    /// unstructured `Task` of its own with no ordering between them — while the drain loop in `init`
+    /// starts one per *served request*. Under a burst the answers therefore landed in whatever order
+    /// the engine handed them back, so the last write could be the oldest read: the mirror settled on
+    /// a stale cursor and stayed there until the next request happened to arrive and refresh it.
+    ///
+    /// Comparing the ticket makes the most recently *requested* update the one that lands and drops
+    /// every answer a later request has already superseded. It orders the writes, which is the defect
+    /// here; it cannot order two engine calls against each other, so a restart and a refresh issued
+    /// together still race inside the engine — which owns the cursor either way.
+    private var journeyStatusTicket = 0
+
     func restartJourney() {
+        let ticket = nextJourneyStatusTicket()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            journeyStatus = await engine.restartJourney()
+            let status = await engine.restartJourney()
+            setJourneyStatus(status, ticket: ticket)
         }
     }
 
+    /// Advances the cursor and reports where the engine moved it to.
+    ///
+    /// This is the primitive, because the engine reports the new position only as the answer to the
+    /// advance itself. A caller that dispatches the advance and then reads ``journeyStatus`` is
+    /// reading the cursor from *before* the command — which is exactly what `mimic journey advance`
+    /// used to hand back.
+    func advanceJourneyReportingStatus() async -> JourneyStatus? {
+        let ticket = nextJourneyStatusTicket()
+        let status = await engine.advanceJourney()
+        setJourneyStatus(status, ticket: ticket)
+        return status
+    }
+
+    /// The fire-and-forget form, for the menu item and the run controls: they have nowhere to report
+    /// a status to and are passed straight to a `Button` as a `() -> Void` action.
     func advanceJourney() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            journeyStatus = await engine.advanceJourney()
+            _ = await advanceJourneyReportingStatus()
         }
     }
 
     func refreshJourneyStatus() {
+        let ticket = nextJourneyStatusTicket()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            journeyStatus = await engine.journeyStatus()
+            let status = await engine.journeyStatus()
+            setJourneyStatus(status, ticket: ticket)
         }
+    }
+
+    private func nextJourneyStatusTicket() -> Int {
+        journeyStatusTicket += 1
+        return journeyStatusTicket
+    }
+
+    /// Publishes a mirror update, unless something newer was asked for while it was in flight.
+    private func setJourneyStatus(_ status: JourneyStatus?, ticket: Int) {
+        guard ticket == journeyStatusTicket else { return }
+        journeyStatus = status
     }
 
     private func appendLog(_ entry: RequestLog) {

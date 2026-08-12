@@ -86,6 +86,57 @@ struct MockServerRuntimeTests {
         }
     }
 
+    /// An engine whose `journeyStatus()` does not answer until it is released.
+    ///
+    /// That is the whole fixture: it lets a mirror update that was *requested first* come back
+    /// *last*, which is the ordering `MockServerRuntime`'s ticket exists to survive and the ordering
+    /// no arrangement of `FakeEngine` can produce, because every one of its answers is immediate.
+    actor GatedEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+
+        private var isReleased = false
+        /// Incremented once a gated `journeyStatus()` has actually answered, so a test can wait for
+        /// the superseded write to have been *attempted* rather than sleeping and hoping.
+        private(set) var completedStatusCalls = 0
+        private var statusAnswer: JourneyStatus?
+        private var restartAnswer: JourneyStatus?
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func setAnswers(status: JourneyStatus?, restart: JourneyStatus?) {
+            statusAnswer = status
+            restartAnswer = restart
+        }
+
+        func release() {
+            isReleased = true
+        }
+
+        func journeyStatus() async -> JourneyStatus? {
+            // Sleeping rather than spinning: each suspension hands the actor back, so `restartJourney`
+            // below is admitted and answers while this call is still parked.
+            while !isReleased {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            completedStatusCalls += 1
+            return statusAnswer
+        }
+
+        func restartJourney() async -> JourneyStatus? { restartAnswer }
+        func advanceJourney() async -> JourneyStatus? { restartAnswer }
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(2),
         interval: Duration = .milliseconds(20),
@@ -94,6 +145,24 @@ struct MockServerRuntimeTests {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if predicate() {
+                return
+            }
+            try await Task.sleep(for: interval)
+        }
+        Issue.record("Timed out waiting for condition")
+    }
+
+    /// The same poll for a predicate that has to ask an actor. Named apart from `waitUntil` rather
+    /// than overloaded on the closure's effects, which is the shape that resolves to whichever
+    /// overload the compiler happens to prefer.
+    private func waitUntilAsync(
+        timeout: Duration = .seconds(2),
+        interval: Duration = .milliseconds(20),
+        _ predicate: @escaping () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await predicate() {
                 return
             }
             try await Task.sleep(for: interval)
@@ -206,10 +275,50 @@ struct MockServerRuntimeTests {
         let endpoints = [makeEndpoint(name: "Users"), makeEndpoint(name: "Posts")]
 
         manager.updateMocks(endpoints: endpoints)
-        try await Task.sleep(for: .milliseconds(50))
+        // Polled rather than slept: `updateMocks` dispatches, so a flat 50 ms was both a floor every
+        // run paid and a ceiling that would fail on a loaded machine.
+        try await waitUntilAsync { await engine.updatedEndpoints.isEmpty == false }
         let updatedEndpoints = await engine.updatedEndpoints
         #expect(updatedEndpoints.count == 1)
         #expect(updatedEndpoints.first?.map(\.name) == ["Users", "Posts"])
+    }
+
+    /// Every mirror update reaches the engine across an `await`, and each used to do so from an
+    /// unstructured `Task` with no ordering between them — while the drain loop starts one per served
+    /// request. So under a burst the answers landed in whatever order the engine handed them back,
+    /// and the *last* write could be the *oldest* read: the mirror settled on a stale cursor and
+    /// stayed there until the next request happened to refresh it.
+    ///
+    /// The gate makes that ordering happen on purpose rather than under load. Both tickets are taken
+    /// synchronously on the main actor, in call order, so the refresh is unambiguously the older
+    /// request; the gate then makes it the later *answer*.
+    @Test("A superseded mirror update cannot overwrite the newer one that already landed")
+    func aStaleJourneyStatusIsDropped() async throws {
+        let engine = GatedEngine()
+        let stale = JourneyStatus.make(journey: Journey(name: "Stale"), state: nil)
+        let fresh = JourneyStatus.make(journey: Journey(name: "Fresh"), state: nil)
+        await engine.setAnswers(status: stale, restart: fresh)
+
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.refreshJourneyStatus()   // ticket 1 — parked in the engine until released
+        manager.restartJourney()         // ticket 2 — answers immediately
+
+        try await waitUntil { manager.journeyStatus?.journeyName == "Fresh" }
+
+        await engine.release()
+        // Wait for the older read to have actually come back, so what follows is an assertion about
+        // a write that was *attempted and dropped* rather than one that had not arrived yet.
+        try await waitUntilAsync { await engine.completedStatusCalls == 1 }
+        // Then a short settle: the runtime hops back to the main actor to publish, so the engine
+        // having answered is one step short of the write having been offered. This is the one wait
+        // here that cannot be a poll — the condition being asserted is that nothing happens.
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(
+            manager.journeyStatus?.journeyName == "Fresh",
+            "the superseded refresh republished a cursor the restart had already replaced"
+        )
     }
 
     @Test("Request logs are appended and capped at the maximum")

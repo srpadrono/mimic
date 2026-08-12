@@ -10,6 +10,9 @@ import Domain
 public actor MockServerEngine {
     private var app: Application?
     private var isStarting = false
+    /// Set for the whole of `stop()`, because `stop()` clears `app` before it awaits the shutdown and
+    /// `app == nil` is otherwise indistinguishable from "nothing is listening". See `start`.
+    private var isStopping = false
     private let routeStore = MockRouteStore()
 
     /// Single-consumer stream of served request logs. Bounded buffer drops the oldest entries if the
@@ -23,6 +26,13 @@ public actor MockServerEngine {
 
     public func start(configuration: ServerConfiguration) async throws {
         guard app == nil, !isStarting else { throw MockServerError.alreadyRunning }
+        // A stop in flight is invisible to the guard above: `stop()` sets `app = nil` and only then
+        // suspends on `server.shutdown()`, and an actor admits another call at that suspension — so a
+        // start arriving in that window sees `nil`, passes, and binds a port the outgoing application
+        // has not released. Reported as `.invalidState(.stopping)` rather than `.alreadyRunning`
+        // because the two ask different things of the caller: one means "you already have a server",
+        // this one means "ask again in a moment".
+        guard !isStopping else { throw MockServerError.invalidState(.stopping) }
         isStarting = true
         defer { isStarting = false }
 
@@ -49,7 +59,11 @@ public actor MockServerEngine {
 
     public func stop() async throws {
         guard let running = app else { throw MockServerError.notRunning }
+        // Both assignments happen before the first suspension, so no other call can observe the
+        // half-stopped state: `app` already cleared, the socket still open.
+        isStopping = true
         app = nil
+        defer { isStopping = false }
         await running.server.shutdown()
         try await running.asyncShutdown()
         // Intentionally does NOT finish `logContinuation` — the engine may be started again and the

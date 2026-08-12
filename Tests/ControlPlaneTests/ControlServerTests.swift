@@ -10,7 +10,12 @@ import Testing
 @testable import Persistence
 
 /// The HTTP surface, exercised the way a `curl`-driven script or a non-Swift agent would.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ControlServerTests {
 
     /// The token the test server was started with.
@@ -161,6 +166,68 @@ struct ControlServerTests {
             #expect(invalid.status == 400)
             #expect(invalid.response.error?.code == "request.invalid")
         }
+    }
+
+    // MARK: - Lifecycle reentrancy
+
+    /// `stop()` clears `app` and *then* awaits the shutdown, and an actor admits another call at that
+    /// suspension. So the eight lines of reasoning above `start`'s first guard — written for two
+    /// overlapping *starts* — left the same window open from the other end: a start arriving mid-stop
+    /// saw `app == nil`, passed, and bound a port the outgoing application had not released.
+    ///
+    /// The window is a real race, so what is asserted is the outcome *set* rather than one ordering.
+    /// Whichever way the two land, the racing start must not come back as `portInUse`: the three
+    /// answers it may now give are `alreadyRunning` (it reached the actor first), `shuttingDown` (it
+    /// landed inside the window), and success (the stop had already finished). Nothing here can force
+    /// the interesting ordering — `Task.yield()` and the repeat count only make it likely — and a test
+    /// that only passed when it happened would be a flake in the other direction.
+    @Test("A start racing a stop on the control port is never told the port is in use")
+    func startDuringStopIsRefusedRatherThanColliding() async throws {
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let service = MimicControlService(
+            repository: GRDBProjectRepository(dbQueue: queue),
+            settings: SettingsStore(dbQueue: queue),
+            mode: "headless"
+        )
+
+        for attempt in 1...3 {
+            let server = ControlServer(host: service, mode: "headless", token: ControlToken.generate())
+            // `advertise: false` throughout: a discovery file here would overwrite a real instance's.
+            let port = try await server.start(port: 0, advertise: false)
+
+            let stopping = Task { try await server.stop() }
+            await Task.yield()
+
+            var raced: (any Error)?
+            do {
+                _ = try await server.start(port: port, advertise: false)
+            } catch {
+                raced = error
+            }
+            _ = try? await stopping.value
+
+            #expect(
+                raced as? ControlServerError != .portInUse(port: port),
+                "attempt \(attempt): a start racing a stop reported the control port in use"
+            )
+            try? await server.stop()
+        }
+
+        await service.shutdown()
+    }
+
+    /// The two refusals name different problems, and the difference is what the caller does next:
+    /// `alreadyRunning` means "you already have one", `shuttingDown` means "ask again in a moment".
+    /// Reporting the second as the first is what sent `ControlPlaneCoordinator` down the
+    /// give-up-entirely path for a condition that clears itself.
+    @Test("The two control-server refusals do not say the same thing")
+    func controlServerRefusalsAreDistinguishable() {
+        #expect(ControlServerError.alreadyRunning != ControlServerError.shuttingDown)
+        #expect(
+            ControlServerError.alreadyRunning.errorDescription
+                != ControlServerError.shuttingDown.errorDescription
+        )
+        #expect(ControlServerError.shuttingDown.errorDescription?.contains("shutting down") == true)
     }
 
     @Test("An undecodable body is a 400 that says what to read next")
@@ -433,13 +500,110 @@ struct ControlEndpointFileTests {
         #expect(ControlEndpointFile.resolveBaseURL(environment: [:], discovered: nil) == nil)
     }
 
+    /// `environment:` is passed explicitly, and every case below does the same. It defaults to the
+    /// real process environment, so a developer who happens to have `MIMIC_CONTROL_FILE` exported —
+    /// which `Scripts/run_cli_e2e.sh` sets, and a shell keeps — would otherwise get one path back here
+    /// and a red suite that has nothing to do with the code.
     @Test("The sandboxed container is searched before the plain Application Support path")
     func searchOrderPrefersTheAppContainer() {
-        let urls = ControlEndpointFile.searchURLs(homeDirectory: URL(fileURLWithPath: "/Users/test"))
+        let urls = ControlEndpointFile.searchURLs(
+            homeDirectory: URL(fileURLWithPath: "/Users/test"),
+            environment: [:]
+        )
         #expect(urls.count == 2)
         #expect(urls[0].path.contains("Library/Containers/devxa.Mimic"))
         #expect(urls[1].path.contains("Library/Application Support/devxa.Mimic"))
         #expect(urls.allSatisfy { $0.lastPathComponent == "control.json" })
+    }
+
+    // MARK: - MIMIC_CONTROL_FILE
+
+    /// The override exists because the default path is *computed*, so two launches of the app bundle
+    /// resolve to the same file: an end-to-end script's instance overwrites the developer's
+    /// advertisement and removes it on the way out, leaving a running Mimic no `mimic` command can
+    /// find. `Scripts/run_cli_e2e.sh` sets it for exactly that reason and asserts the file appears.
+    ///
+    /// It **replaces** the search list rather than joining the front of it, and that is the assertion
+    /// that matters most: prepending would let a run whose own instance has not advertised yet fall
+    /// through to the developer's real file and drive that instance instead — a failure that looks
+    /// exactly like a passing test.
+    @Test("The override replaces the search list rather than being tried first")
+    func overrideReplacesTheSearchList() {
+        let override = "/tmp/mimic-e2e/control.json"
+        let urls = ControlEndpointFile.searchURLs(
+            homeDirectory: URL(fileURLWithPath: "/Users/test"),
+            environment: [ControlEndpointFile.pathEnvironmentKey: override]
+        )
+
+        #expect(urls.map(\.path) == [override])
+        #expect(urls.contains { $0.path.contains("Library/Application Support/devxa.Mimic") } == false)
+    }
+
+    /// An exported-but-unassigned variable — `MIMIC_CONTROL_FILE="$WORK/control.json"` in a script
+    /// where `WORK` was never set — must read as "not overridden" rather than as a path nobody chose.
+    /// `DatabaseFactory.resolveDatabaseURL` treats an empty `MIMIC_DATABASE_PATH` the same way.
+    @Test("An empty override falls back to the real search list")
+    func emptyOverrideIsIgnored() {
+        let urls = ControlEndpointFile.searchURLs(
+            homeDirectory: URL(fileURLWithPath: "/Users/test"),
+            environment: [ControlEndpointFile.pathEnvironmentKey: ""]
+        )
+        #expect(urls.count == 2)
+    }
+
+    /// The reader and the writer have to mean the same file, which is the whole point of threading one
+    /// environment through both: a process that advertises at the override and then computes the
+    /// *default* path on the way out would delete the developer's advertisement and leave its own.
+    @Test("Writing, discovering and removing all follow the override together")
+    func overrideIsHonouredByWriteDiscoverAndRemove() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-override-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        // Deliberately *not* created first: the write has to make its own parent, because the script
+        // that names the override names a path inside a directory it has just `mktemp -d`-ed and then
+        // a subdirectory that does not exist yet.
+        let target = directory.appendingPathComponent("nested").appendingPathComponent("control.json")
+        let environment = [ControlEndpointFile.pathEnvironmentKey: target.path]
+
+        let resolved = try ControlEndpointFile.writeURL(environment: environment)
+        #expect(resolved.path == target.path)
+
+        let endpoint = ControlEndpoint(
+            port: 8787,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            mode: "headless",
+            token: ControlToken.generate()
+        )
+        try ControlEndpointFile.write(endpoint, environment: environment)
+        #expect(FileManager.default.fileExists(atPath: target.path))
+
+        // The token is in there, so the override gets the same 0600 the computed path does — an
+        // isolated run is not a less sensitive one.
+        let mode = try #require(
+            FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(mode.int16Value & 0o777 == 0o600, "mode was \(String(mode.int16Value, radix: 8))")
+
+        let discovered = try #require(ControlEndpointFile.discover(environment: environment))
+        #expect(discovered == endpoint)
+
+        ControlEndpointFile.remove(environment: environment)
+        #expect(FileManager.default.fileExists(atPath: target.path) == false)
+        #expect(ControlEndpointFile.discover(environment: environment) == nil)
+    }
+
+    /// A tilde is what a person types when they name a path in a shell profile, and `URL(fileURLWithPath:)`
+    /// does not expand it — a literal `~` directory would be created in the working directory instead.
+    @Test("A tilde in the override is expanded")
+    func overrideExpandsTilde() {
+        let urls = ControlEndpointFile.searchURLs(
+            environment: [ControlEndpointFile.pathEnvironmentKey: "~/mimic/control.json"]
+        )
+        #expect(urls.count == 1)
+        #expect(urls[0].path.hasPrefix("/"))
+        #expect(urls[0].path.contains("~") == false)
+        #expect(urls[0].lastPathComponent == "control.json")
     }
 
     @Test("A discovery file round-trips and carries a usable base URL")

@@ -256,6 +256,164 @@ struct ControlClientTests {
         #expect(ControlEndpointFileReader.resolveToken(environment: [:], discovered: nil) == nil)
     }
 
+    // MARK: - The destination and the credential, decided together
+
+    /// The defect the two resolvers had between them.
+    ///
+    /// `resolveBaseURL` returns an explicit `--url` verbatim, with no check on its host — deliberately,
+    /// because naming an instance is the caller's business. `resolveToken` fell back to whatever the
+    /// *local* instance's `control.json` carried, and knew nothing about where the request was going.
+    /// Neither is wrong on its own; combining them is. `mimic state --url http://attacker.example`
+    /// therefore put this machine's live control-plane credential into an `X-Mimic-Token` header
+    /// addressed to that host — in a client that already refuses, in `resolveBaseURL`, to route on the
+    /// `baseURL` a discovery file names, for exactly this reason.
+    ///
+    /// `ControlClient.discover` is where the two meet, so that is what is driven: a hostile `--url`
+    /// with a real local discovery file supplied alongside it.
+    @Test(
+        "A --url that is not the discovered instance carries no token",
+        arguments: [
+            "http://attacker.example",
+            "http://attacker.example:8787",
+            // Loopback-shaped and not loopback: reads as local at a glance, resolves to whatever its
+            // owner wants. Matched against `url.host`, so a loopback spelling anywhere else in the URL
+            // — userinfo, path, query — is not a loopback host either.
+            "http://127.0.0.1.evil.example:8787",
+            "http://127.0.0.1@evil.example:8787",
+            "http://evil.example/127.0.0.1:8787",
+            // This machine, but some other process: the token belongs to one instance, not to the
+            // loopback interface.
+            "http://127.0.0.1:9999",
+            "http://localhost:9999",
+        ]
+    )
+    func aForeignURLCarriesNoToken(explicitURL: String) throws {
+        let discovered = ControlEndpointFileReader.Endpoint(
+            apiVersion: ControlAPI.version,
+            port: 8787,
+            pid: 1,
+            mode: "app",
+            baseURL: "http://127.0.0.1:8787",
+            token: "not-a-real-token"
+        )
+
+        let client = try ControlClient.discover(
+            explicitURL: explicitURL,
+            environment: [:],
+            timeout: 1,
+            discovered: discovered
+        )
+        #expect(client.token == nil, "\(explicitURL) was handed the local instance's token")
+    }
+
+    /// The legitimate local case still works, and it is the one every `mimic` invocation takes:
+    /// `--url` naming the running instance is the same host and the same port the file advertises.
+    @Test(
+        "A --url naming the discovered instance still carries its token",
+        arguments: ["http://127.0.0.1:8787", "http://localhost:8787"]
+    )
+    func theDiscoveredInstanceCarriesItsToken(explicitURL: String) throws {
+        let discovered = ControlEndpointFileReader.Endpoint(
+            apiVersion: ControlAPI.version,
+            port: 8787,
+            pid: 1,
+            mode: "app",
+            baseURL: "http://127.0.0.1:8787",
+            token: "not-a-real-token"
+        )
+
+        let client = try ControlClient.discover(
+            explicitURL: explicitURL,
+            environment: [:],
+            timeout: 1,
+            discovered: discovered
+        )
+        #expect(client.token == "not-a-real-token")
+    }
+
+    /// …and with no `--url` at all, which is the ordinary path: the client is pointed at the
+    /// discovered instance, so it carries the discovered token.
+    @Test("Discovery with no explicit URL carries the discovered token")
+    func discoveryCarriesItsOwnToken() throws {
+        let discovered = ControlEndpointFileReader.Endpoint(
+            apiVersion: ControlAPI.version,
+            port: 8787,
+            pid: 1,
+            mode: "app",
+            baseURL: "http://127.0.0.1:8787",
+            token: "not-a-real-token"
+        )
+
+        let client = try ControlClient.discover(environment: [:], timeout: 1, discovered: discovered)
+        #expect(client.baseURL.absoluteString == "http://127.0.0.1:8787")
+        #expect(client.token == "not-a-real-token")
+    }
+
+    /// `MIMIC_CONTROL_TOKEN` is untouched by any of this, and has to be: a caller reaching Mimic
+    /// through a forwarded port or a container supplies the token the documented way, which is the
+    /// caller naming a credential rather than this CLI guessing one.
+    @Test("An explicitly supplied token goes wherever the caller points")
+    func anExplicitTokenIsNotSecondGuessed() throws {
+        let discovered = ControlEndpointFileReader.Endpoint(
+            apiVersion: ControlAPI.version,
+            port: 8787,
+            pid: 1,
+            mode: "app",
+            baseURL: "http://127.0.0.1:8787",
+            token: "from-the-file"
+        )
+
+        let client = try ControlClient.discover(
+            explicitURL: "http://forwarded.example:8787",
+            environment: [ControlAPI.tokenEnvironmentKey: "from-the-environment"],
+            timeout: 1,
+            discovered: discovered
+        )
+        #expect(client.token == "from-the-environment")
+    }
+
+    /// The predicate itself, since it is what both halves above turn on. Both conditions have to
+    /// hold — a loopback host *and* the port the file advertised — and a file that was never read
+    /// names no instance at all.
+    @Test("Naming the discovered instance means loopback host and advertised port, together")
+    func namesDiscoveredInstanceRequiresBoth() throws {
+        let discovered = ControlEndpointFileReader.Endpoint(
+            apiVersion: ControlAPI.version,
+            port: 8787,
+            pid: 1,
+            mode: "app",
+            baseURL: "http://127.0.0.1:8787",
+            token: "not-a-real-token"
+        )
+        func url(_ text: String) throws -> URL { try #require(URL(string: text)) }
+
+        #expect(ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8787"), discovered))
+        #expect(ControlEndpointFileReader.namesDiscoveredInstance(try url("http://LOCALHOST:8787"), discovered))
+        // Written with brackets, because that is the only legal spelling of an IPv6 literal in a URL.
+        // `URL.host` hands back `::1` on some platforms and `[::1]` on others, which is why the
+        // reader's set holds both and why this case is worth having rather than assuming.
+        let ipv6 = try #require(
+            URL(string: "http://[::1]:8787"),
+            "this platform's URL parser rejected an IPv6 literal"
+        )
+        #expect(ControlEndpointFileReader.namesDiscoveredInstance(ipv6, discovered))
+
+        // Right host, wrong port.
+        #expect(
+            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8788"), discovered)
+                == false
+        )
+        // Right port, wrong host.
+        #expect(
+            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://example.test:8787"), discovered)
+                == false
+        )
+        // Nothing was discovered, so nothing is named.
+        #expect(
+            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8787"), nil) == false
+        )
+    }
+
     // MARK: - What a refusal costs
 
     /// `send` now reads the HTTP status instead of discarding it, and these pin the two things that

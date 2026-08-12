@@ -26,6 +26,16 @@ public actor MimicControlService: ControlHost {
     private var serverState: ServerState = .stopped
     private var logDrain: Task<Void, Never>?
 
+    /// Set for the whole of a `serverStart` or `serverStop`, and read before either suspends.
+    ///
+    /// Being an actor makes a *statement* atomic, not a sequence of them: `if await engine.isRunning`
+    /// is a question asked across a suspension, and the actor admits the next command while the
+    /// answer is in flight. Two `serverStart`s arriving together therefore both hear "no", both fall
+    /// through, and the second binds — or fails to bind — a port the first has already taken. This
+    /// flag is the part of the decision that is a plain read of this actor's own state, so it is
+    /// settled before anything can interleave.
+    private var isChangingServerState = false
+
     public init(
         repository: any ProjectRepository,
         settings: SettingsStore,
@@ -292,14 +302,40 @@ public actor MimicControlService: ControlHost {
     private func startServer(port: Int?) async throws -> ControlResult {
         var project = try requireOpenProject()
 
+        // Everything from here to the `defer` runs without a suspension, so a second `serverStart`
+        // cannot reach the engine while this one is still deciding.
+        guard !isChangingServerState else { throw Self.serverBusy }
+        if case let .running(runningPort) = serverState, port == nil || port == runningPort {
+            // Answered from this actor's own state rather than from `await engine.isRunning`, which
+            // is the check that could not be trusted. Starting twice stays benign — a script that
+            // ensures the server is up should not have to ask first.
+            return .init(
+                message: "Server already running on port \(runningPort).",
+                server: makeServerStatus()
+            )
+        }
+        isChangingServerState = true
+        defer { isChangingServerState = false }
+
         if let port {
             try validatePort(port)
             project.serverConfiguration.port = port
             project.modifiedAt = Date()
-            openProject = project
+            // Persist first, commit to memory second.
+            //
+            // The other order published a port the store does not have: `save` throws — a locked
+            // database, a full disk — and `openProject` was already carrying the new number, so
+            // `mimic server status` reported it, the next `pushConfigurationToEngine` served on it,
+            // and reopening the project produced the old one. A failed write should leave nothing
+            // behind, which means the in-memory copy waits for it.
             try await repository.save(project)
+            openProject = project
         }
 
+        // `engine.isRunning` is still worth asking, but only as a backstop now: the flag above is
+        // what serialises two callers, and this catches a state the service and the engine could
+        // only reach by disagreeing. `serverState` is deliberately not written here — it holds the
+        // port that is actually bound, and this branch knows only that *something* is.
         if await engine.isRunning {
             return .init(
                 message: "Server already running on port \(project.serverConfiguration.port).",
@@ -333,6 +369,13 @@ public actor MimicControlService: ControlHost {
     }
 
     private func stopServer() async throws -> ControlResult {
+        // The same flag as `startServer`, and it has to be the same one: a stop overlapping a start
+        // is the pair that leaves a listener nobody owns, because `engine.stop` clears the engine's
+        // own `app` before it awaits the shutdown.
+        guard !isChangingServerState else { throw Self.serverBusy }
+        isChangingServerState = true
+        defer { isChangingServerState = false }
+
         guard await engine.isRunning else {
             serverState = .stopped
             return .init(message: "Server is not running.", server: makeServerStatus())
@@ -341,6 +384,15 @@ public actor MimicControlService: ControlHost {
         serverState = .stopped
         return .init(message: "Server stopped.", server: makeServerStatus())
     }
+
+    /// Refused rather than queued: two callers asking for a lifecycle change at once is a script
+    /// racing itself, and a reply saying so is more useful than one that waits and then reports on
+    /// somebody else's start. `server.busy` maps to `409` in `ControlServer.httpStatus`, alongside
+    /// the other "well-formed, but not right now" codes.
+    private static let serverBusy = ControlError(
+        code: "server.busy",
+        message: "The server is already starting or stopping. Try again in a moment."
+    )
 
     // MARK: - Journeys
 

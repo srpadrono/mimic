@@ -20,6 +20,11 @@ final class ProjectWorkspace {
     private let recentProjectsStore: RecentProjectsStore
     private var autosaveTask: Task<Void, Never>?
     private var savedStatusClearTask: Task<Void, Never>?
+    /// Whether a debounced edit is still waiting to be written. Read by ``flushPendingAutosave()``,
+    /// which has to know the difference between "a save is owed" and "the last one already landed".
+    private var hasPendingAutosave = false
+    /// Ticket for the newest ``openProject(id:)``, so a load that has been superseded cannot publish.
+    private var openGeneration = 0
 
     init(
         projectRepository: any ProjectRepository,
@@ -35,6 +40,10 @@ final class ProjectWorkspace {
 
     @discardableResult
     func createProject(name: String, port: Int = 8080) -> ServerConfiguration {
+        // The project on screen is about to be replaced, and a debounced write may still be holding
+        // the one that is leaving — see `flushPendingAutosave()`.
+        flushPendingAutosave()
+
         let project = MockProject(
             name: name,
             serverConfiguration: ServerConfiguration(port: port, globalDelayMs: 0)
@@ -50,7 +59,12 @@ final class ProjectWorkspace {
                 autosaveStatus = .saved
                 scheduleSavedStatusClear()
             } catch {
-                recordRecentProject(id: project.id, name: project.name)
+                // Deliberately *not* recorded in recents. A project the store refused does not
+                // exist, and the welcome window's list is reconciled against the store — by
+                // `refreshProjectList`, which `recordRecentProject` kicks off itself — so the entry
+                // this catch used to write vanished again almost as soon as it was made, with
+                // nothing said. The failure belongs on the status the window renders, and nowhere
+                // else.
                 autosaveStatus = .failed(error.localizedDescription)
             }
         }
@@ -58,22 +72,32 @@ final class ProjectWorkspace {
         return project.serverConfiguration
     }
 
-    @discardableResult
-    func openProject(id: UUID) -> ServerConfiguration? {
-        Task { @MainActor [weak self] in
+    /// Opens a stored project, replacing whatever is open.
+    ///
+    /// Generation-guarded, because two opens in quick succession are two independent loads with no
+    /// order between them: the *slower* one used to win, so clicking one project, changing your mind
+    /// and clicking another could leave the window on the first. Only the load that is still the one
+    /// asked for is allowed to publish.
+    func openProject(id: UUID) {
+        flushPendingAutosave()
+
+        openGeneration += 1
+        let generation = openGeneration
+        Task { @MainActor [weak self, generation] in
             guard let self else { return }
             do {
                 let project = try await projectRepository.load(id: id)
+                guard generation == openGeneration else { return }
                 setCurrentProject(project, isRestoring: true)
                 recordRecentProject(id: project.id, name: project.name)
             } catch {
+                // Not generation-guarded: this entry names a project the store does not have, and
+                // that is true whichever open won the race.
                 recentProjectsStore.remove(id: id)
                 recentProjects = recentProjectsStore.load()
                 refreshProjectList()
             }
         }
-
-        return nil
     }
 
     func saveCurrentProject() {
@@ -112,10 +136,46 @@ final class ProjectWorkspace {
         }
     }
 
+    /// Stores a document that came from outside the app, reporting whether the store took it.
+    ///
+    /// `AppControlHost` used to do this itself, as `Task { try? await repository.save(document) }`
+    /// beside a success envelope — the same shape ``duplicateProject(id:)`` was fixed to stop using,
+    /// and with the same consequence: `mimic project import` exited 0 on a save that never happened
+    /// and the window said nothing. The write is still asynchronous, so the reply stays optimistic,
+    /// but a failure now reaches `autosaveStatus`, which is the channel the window already renders
+    /// for a store failure.
+    func importProject(_ document: MockProject) async -> Bool {
+        autosaveStatus = .saving
+        do {
+            try await projectRepository.save(document)
+            autosaveStatus = .saved
+            scheduleSavedStatusClear()
+            recordRecentProject(id: document.id, name: document.name)
+            return true
+        } catch {
+            autosaveStatus = .failed("Could not import project \"\(document.name)\".")
+            return false
+        }
+    }
+
     func deleteProject(id: UUID) {
+        // A debounced write for the project being removed has to go with it. It fires 500ms after the
+        // last edit and re-reads `currentProject`, so a delete landing inside that window would be
+        // followed by a save that puts the row straight back.
+        if currentProject?.id == id { cancelPendingAutosave() }
+
         Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await projectRepository.delete(id: id)
+            do {
+                try await projectRepository.delete(id: id)
+            } catch {
+                // `try?` here removed the recents entry and closed the project regardless, so a
+                // delete the store refused looked exactly like one it accepted — and left a project
+                // in the database with no row in the list to reach it by, which is the stranding
+                // `refreshProjectList` exists to prevent.
+                autosaveStatus = .failed("Could not delete the project.")
+                return
+            }
             recentProjectsStore.remove(id: id)
             recentProjects = recentProjectsStore.load()
             refreshProjectList()
@@ -126,6 +186,7 @@ final class ProjectWorkspace {
     }
 
     func closeProject() {
+        flushPendingAutosave()
         currentProject = nil
     }
 
@@ -135,10 +196,14 @@ final class ProjectWorkspace {
         let projectID = project.id
 
         autosaveTask?.cancel()
+        hasPendingAutosave = true
         autosaveTask = Task { @MainActor [weak self, projectID] in
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(500))
+                // Claimed before the guard below: from here the write belongs to this task, and a
+                // flush that ran now would only duplicate it.
+                hasPendingAutosave = false
                 guard let project = currentProject, project.id == projectID else { return }
 
                 autosaveStatus = .saving
@@ -154,10 +219,54 @@ final class ProjectWorkspace {
         }
     }
 
+    /// Writes the debounced edit now, instead of losing it.
+    ///
+    /// ``scheduleAutosave()`` waits 500ms and then re-reads `currentProject`, guarding that it is
+    /// still the project the edit belonged to. Closing clears that property and opening another
+    /// replaces it, so in both cases the pending task woke up, found the guard false and returned
+    /// having saved nothing: every edit made inside the debounce window was gone, with no error and
+    /// no indicator — the one failure mode this app has no way of telling you about.
+    ///
+    /// The project is captured *by value* here, before the property moves, so the write no longer
+    /// depends on what happens to be open by the time it lands. It cannot be awaited: the callers are
+    /// synchronous because a menu item and a `Button` action are.
+    ///
+    /// Unlike the debounced path this one does **not** touch recents. `record` makes its project the
+    /// most-recently-opened one and writes `lastOpenedProjectID`, and this runs a moment before the
+    /// *next* project is opened — so recording here would race the incoming open over which project
+    /// the app restores on next launch. Losing the edit is the bug being fixed; the list order is not
+    /// part of it, and `refreshProjectList` reads names back from the store regardless.
+    private func flushPendingAutosave() {
+        guard hasPendingAutosave, let project = currentProject else { return }
+        cancelPendingAutosave()
+
+        autosaveStatus = .saving
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await projectRepository.save(project)
+                autosaveStatus = .saved
+                scheduleSavedStatusClear()
+            } catch {
+                autosaveStatus = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Forgets the debounced edit — the timer and the flag together.
+    ///
+    /// Called by ``flushPendingAutosave()`` once it has taken the write over, and by
+    /// ``deleteProject(id:)``, which is the one case where performing the write would be wrong.
+    private func cancelPendingAutosave() {
+        hasPendingAutosave = false
+        autosaveTask?.cancel()
+        autosaveTask = nil
+    }
+
     @discardableResult
     func loadLastOpenedProject() -> ServerConfiguration? {
         guard let id = recentProjectsStore.lastOpenedProjectID() else { return nil }
-        _ = openProject(id: id)
+        openProject(id: id)
         return nil
     }
 

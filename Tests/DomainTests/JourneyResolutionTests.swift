@@ -527,4 +527,80 @@ struct JourneyResolutionTests {
         // The endpoint answers, because the journey has nothing left to say.
         #expect(plan.response.statusCode == 200)
     }
+
+    /// The lower bound, and the door the initializer can close.
+    ///
+    /// A negative cursor names no step in any journey, so it needs no journey to judge — which is why
+    /// `JourneyRunState`'s full initializer corrects it and leaves the *upper* bound to the resolver,
+    /// which is the only place that can see how many steps there are.
+    @Test("The full initializer refuses a negative cursor rather than storing one")
+    func negativeCursorIsClampedAtConstruction() {
+        let state = JourneyRunState(
+            journeyID: UUID(),
+            cursor: -1,
+            servedCountsByStepID: [:],
+            forceAdvancedStepIDs: [],
+            isComplete: false,
+            totalServed: 0
+        )
+        #expect(state.cursor == 0)
+
+        let veryNegative = JourneyRunState(
+            journeyID: UUID(),
+            cursor: Int.min,
+            servedCountsByStepID: [:],
+            forceAdvancedStepIDs: [],
+            isComplete: false,
+            totalServed: 0
+        )
+        #expect(veryNegative.cursor == 0)
+    }
+
+    /// The other door, and the reason the resolver keeps its own guard.
+    ///
+    /// `JourneyRunState` declares no `init(from:)`, so the synthesized `Codable` initializer assigns
+    /// the stored properties directly and never runs the clamp above. A persisted or hand-written
+    /// `{"cursor":-1}` therefore reaches `JourneyResolver.matchingStep` exactly as it was written,
+    /// where `strictSequence` builds `-1..<0` and `orderedPerEndpoint` builds `-1..<count` — and both
+    /// then read `journey.steps[-1]`, which traps. The engine runs in-process, so that trap takes the
+    /// whole app down rather than failing one request.
+    ///
+    /// Decoded rather than constructed on purpose: constructing it would go through the clamp and
+    /// test the layer that is already covered above, leaving this one unexercised.
+    @Test(
+        "A decoded negative cursor falls through instead of trapping",
+        arguments: [JourneyMatchMode.orderedPerEndpoint, .strictSequence]
+    )
+    func decodedNegativeCursorFallsThrough(mode: JourneyMatchMode) throws {
+        var journey = Journey(
+            name: "Rehydrated",
+            steps: [Self.step(.get, "/one", 201), Self.step(.get, "/two", 202)]
+        )
+        journey.matchMode = mode
+
+        let json = """
+        {
+          "journeyID": "\(journey.id.uuidString)",
+          "cursor": -1,
+          "servedCountsByStepID": {},
+          "forceAdvancedStepIDs": [],
+          "isComplete": false,
+          "totalServed": 0
+        }
+        """
+        let decoded = try JSONDecoder().decode(JourneyRunState.self, from: Data(json.utf8))
+        #expect(decoded.cursor == -1, "the synthesized decoder must not be running the clamp")
+
+        let plan = MockResolver.plan(
+            request: IncomingRequest(method: .get, path: "/one"),
+            endpoints: [Self.endpoint(.get, "/one", 200)],
+            globalDelayMs: 0,
+            journey: journey,
+            journeyState: decoded
+        )
+
+        // The endpoint answers: the journey declined to match rather than subscripting with -1.
+        #expect(plan.response.statusCode == 200)
+        #expect(plan.response.matchedJourneyID == nil)
+    }
 }

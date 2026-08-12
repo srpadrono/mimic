@@ -53,6 +53,17 @@ public enum JourneyResolver {
         journey: Journey,
         state: JourneyRunState
     ) -> Int? {
+        // A negative cursor names no step, and both branches below would subscript with it:
+        // `strictSequence` builds `-1..<0`, `orderedPerEndpoint` builds `-1..<count`, and each then
+        // reads `journey.steps[-1]`. `JourneyRunState`'s full initializer now clamps this at zero,
+        // and that is not a reason to drop the guard here — the initializer is only *one* of the two
+        // ways a value of that type comes into being. The other is `Codable`: the type declares no
+        // `init(from:)`, so the synthesized one assigns the stored properties directly and never
+        // runs the clamp. A persisted or hand-written `{"cursor":-1}` therefore arrives here exactly
+        // as it was written. Clamp where the value is constructed, guard where it is used as an
+        // index; neither alone covers both doors.
+        guard state.cursor >= 0 else { return nil }
+
         let searchRange: Range<Int>
         switch journey.matchMode {
         case .strictSequence:

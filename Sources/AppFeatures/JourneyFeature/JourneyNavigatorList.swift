@@ -326,7 +326,9 @@ private struct JourneyActivationToggle: View {
     @State private var isHovered = false
 
     private static let ringSize: CGFloat = 14
-    private static let targetSize: CGFloat = 20
+    /// The hit target around the ring. `DSControlHeight.row` — the rung a small control in a row of
+    /// other controls stands on, which is what this is.
+    private static let targetSize: CGFloat = DSControlHeight.row
 
     var body: some View {
         Button(action: onToggleActivation) {
@@ -336,10 +338,13 @@ private struct JourneyActivationToggle: View {
                 .frame(width: Self.ringSize, height: Self.ringSize)
                 .overlay {
                     if isActive {
-                        // 8pt, not 7. Below 8 an SF Symbol stops resolving into a shape you can read
-                        // and turns into a mark inside the ring that you take for a rendering fault.
+                        // `DSGlyph.indicator`, which sits on `DSGlyph.minimum` — the floor the house
+                        // rule states, and the reason this is 8 and not 7: below it an SF Symbol
+                        // stops resolving into a shape you can read and turns into a mark inside the
+                        // ring that you take for a rendering fault. The rule was quoted here in prose
+                        // on the line above the literal it was about.
                         Image(systemName: "play.fill")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: DSGlyph.indicator, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }

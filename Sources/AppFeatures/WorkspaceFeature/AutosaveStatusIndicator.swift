@@ -19,17 +19,25 @@ struct AutosaveStatusIndicator: View {
                 accessibleStatusView(identifier: "autosaveStatus.saving", label: "Saving") {
                     Text("Saving\u{2026}")
                         .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelTertiary)
+                        // `labelSecondary`, like "Saved" below. These two words are the whole of the
+                        // app's answer to "did my edit land?", and `DSContrastTests` asserts that
+                        // `labelTertiary` clears AA on no surface here, in either appearance. The
+                        // failure case beside them was already legible; the two that report success
+                        // were not.
+                        .foregroundStyle(DSColors.labelSecondary)
                 }
             case .saved:
                 accessibleStatusView(identifier: "autosaveStatus.saved", label: "All changes saved") {
                     HStack(spacing: DSSpacing.xxs) {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .medium))
+                            // `indicator`, the bottom of `DSGlyph`'s ladder and the rung it names
+                            // this mark for: it annotates the word beside it and never speaks alone.
+                            .font(.system(size: DSGlyph.indicator, weight: .medium))
                             .foregroundStyle(DSColors.success)
                         Text("Saved")
                             .font(DSTypography.caption)
-                            .foregroundStyle(DSColors.labelTertiary)
+                            // See "Saving…" above.
+                            .foregroundStyle(DSColors.labelSecondary)
                     }
                 }
             case .failed(let message):

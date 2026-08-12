@@ -29,13 +29,19 @@ import CoreGraphics
 /// the panel they fill; folding them in would turn a ladder with a defensible top rung into an
 /// open-ended scale, so they stay named constants on the views that own them. A *chrome* glyph above
 /// ``controlProminent`` is a different matter and is off the ladder rather than exempt from it — the
-/// welcome window's 14pt action glyphs are the one such site, and they are the AppFeatures pass's
-/// first question rather than a seventh rung here.
+/// welcome window's 14pt action glyphs are the one such site. They are still 14: the adoption pass
+/// left them alone and said why at the call site, because moving a glyph on the first screen a new
+/// user sees is a visual decision rather than a mechanical substitution.
 ///
 /// Naming the rungs changes no pixel — every value below is one already in the window. What it
 /// changes is that the next glyph starts from a list of six rather than from whatever its neighbour
-/// happened to measure. `AppFeatures` has not adopted this yet: two dozen sites there are still
-/// literals, and they are a separate pass.
+/// happened to measure.
+///
+/// **Both modules now draw from it.** `AppFeatures` had two dozen `.font(.system(size:))` literals
+/// and not one reference to this type. Exactly two of those literals are left — the welcome window's
+/// 14pt action glyph named above, and its 26pt first-run clock, which is an illustration — and each
+/// says at its call site which of the two it is. Anything else is a regression, and
+/// `grep -rn '\.font(\.system(size: [0-9]' Sources` is the whole check.
 public enum DSGlyph {
     /// 8 — a mark that annotates something else and never speaks on its own: a menu's disclosure
     /// indicator, a separator between two crumbs, a state dot.
@@ -80,7 +86,8 @@ public enum DSGlyph {
     public static let controlLarge: CGFloat = 12
 
     /// 13 — the largest a chrome glyph goes, at `DSTypography.body`'s size. `DSTabStrip`'s navigator
-    /// tabs, where the icon replaces a word rather than accompanying one, and the editor's more menu.
+    /// tabs, where the icon replaces a word rather than accompanying one, and `DSIconMenu`, which is
+    /// what the editor's more menu and the journeys navigator's "+" are.
     ///
     /// The ceiling is as load-bearing as the floor. A strip of icon-only tabs is only affordable
     /// because the icons stay legible where two or three text segments would truncate on the first

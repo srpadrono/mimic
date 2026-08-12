@@ -17,6 +17,9 @@ public actor ControlServer {
     private let mode: String
     private var app: Application?
     private var isStarting = false
+    /// The other half of the `isStarting` guard. `stop()` clears `app` before it awaits the
+    /// shutdown, so `app == nil` does not distinguish "never started" from "still closing".
+    private var isStopping = false
     private var endpointFileURL: URL?
 
     /// This instance's token. Fresh per process; see ``ControlToken``.
@@ -51,6 +54,11 @@ public actor ControlServer {
         // stray one held the other port for the life of the process. `MockServerEngine.start`
         // carries this guard for the same reason and in the same shape.
         guard app == nil, !isStarting else { throw ControlServerError.alreadyRunning }
+        // And `stop()` opens the same window from the other end: it clears `app` and *then* suspends
+        // on the shutdown, so a start arriving mid-stop sees `nil` and binds a port the outgoing
+        // application still holds — the eight lines above, reasoned through only for two starts. A
+        // separate case rather than `.alreadyRunning`: this one is worth retrying in a moment.
+        guard !isStopping else { throw ControlServerError.shuttingDown }
         isStarting = true
         defer { isStarting = false }
 
@@ -83,11 +91,35 @@ public actor ControlServer {
                 mode: mode,
                 token: token
             )
-            // A discovery file that cannot be written is not fatal — an explicit
-            // MIMIC_CONTROL_URL still reaches this instance.
-            if let url = try? ControlEndpointFile.writeURL() {
+            // Reported, not swallowed, and not fatal either.
+            //
+            // Not fatal because an instance that cannot advertise itself is still perfectly usable:
+            // `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT` reach it without the file, and the one
+            // caller that throws — `ControlPlaneCoordinator` — drops the server *and* the host when
+            // `start` throws, so failing here would turn "the CLI cannot discover me" into "the CLI
+            // cannot reach me at all".
+            //
+            // Reported because the two `try?` this replaces made every failure invisible, and
+            // `ControlEndpointFile.write` exists to be strict about exactly this file: it refuses to
+            // publish a token at anything but `0600`, and it is the caller's silence that turned
+            // "could not create a private file" into a CLI that simply finds no instance running and
+            // says so. It goes to this application's own logger — the one whose level is set to
+            // `.warning` where the application is built above, which `.error` clears.
+            do {
+                let url = try ControlEndpointFile.writeURL()
+                try ControlEndpointFile.write(endpoint, to: url)
+                // Recorded only after the write lands. `stop()` removes whatever this names, and a
+                // path we failed to write is a path something else may own.
                 endpointFileURL = url
-                try? ControlEndpointFile.write(endpoint, to: url)
+            } catch {
+                application.logger.error(
+                    """
+                    Mimic control plane is listening on 127.0.0.1:\(boundPort) but could not write \
+                    its discovery file: \(error.localizedDescription) \
+                    The CLI will not find this instance on its own — set \
+                    \(ControlAPI.urlEnvironmentKey)=http://127.0.0.1:\(boundPort) to reach it.
+                    """
+                )
             }
         }
 
@@ -96,7 +128,11 @@ public actor ControlServer {
 
     public func stop() async throws {
         guard let running = app else { return }
+        // Set before anything below can suspend, so an overlapping `start` cannot pass its guard
+        // while this application is still holding the port.
+        isStopping = true
         app = nil
+        defer { isStopping = false }
         // Remove the advertisement first: a CLI must never be pointed at a port that is closing.
         if let endpointFileURL {
             ControlEndpointFile.remove(at: endpointFileURL)
@@ -255,7 +291,7 @@ public actor ControlServer {
             return .forbidden
         case "request.invalid", "request.undecodable":
             return .badRequest
-        case "project.noneOpen", "journey.noneActive", "server.portInUse":
+        case "project.noneOpen", "journey.noneActive", "server.portInUse", "server.busy":
             // The request was well formed but the instance is not in a state to satisfy it.
             return .conflict
         default:
@@ -266,11 +302,14 @@ public actor ControlServer {
 
 public enum ControlServerError: Error, Sendable, LocalizedError, Equatable {
     case alreadyRunning
+    /// A `start` that arrived while `stop` was still closing the previous application.
+    case shuttingDown
     case portInUse(port: Int)
 
     public var errorDescription: String? {
         switch self {
         case .alreadyRunning: "The control server is already running."
+        case .shuttingDown: "The control server is shutting down; try again in a moment."
         case let .portInUse(port): "Control port \(port) is already in use."
         }
     }

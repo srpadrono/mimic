@@ -79,6 +79,10 @@ public struct GRDBProjectRepository: ProjectRepository {
             guard let projectRecord = try ProjectRecord.fetchOne(db, key: id.uuidString) else {
                 throw PersistenceError.projectNotFound(id)
             }
+            // Checked before a single field is read out of the row, and before any of the child
+            // tables are touched: a store written by a newer Mimic is refused rather than opened as
+            // though it were current. See `ProjectRecord.requireSupportedSchemaVersion`.
+            try projectRecord.requireSupportedSchemaVersion()
 
             // Fetch all endpoints for this project, ordered by sortOrder
             let endpointRecords = try EndpointRecord
@@ -128,7 +132,13 @@ public struct GRDBProjectRepository: ProjectRepository {
             let records = try ProjectRecord
                 .order(Column("modifiedAt").desc)
                 .fetchAll(db)
-            // Return lightweight stubs — no endpoints loaded
+            // Return lightweight stubs — no endpoints loaded.
+            //
+            // Deliberately *not* filtered by schema version, unlike `load`. A project this build
+            // cannot open is still a project the user has, and hiding it from the listing would look
+            // exactly like the symptom this repository has already lost a project to once — "the
+            // recents list is empty". So it lists, and `load` refuses it by name with both version
+            // numbers if they try to open it.
             return records.map { $0.toDomain() }
         }
     }

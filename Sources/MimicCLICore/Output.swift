@@ -27,8 +27,19 @@ public struct GlobalOptions: ParsableArguments, Sendable {
 
     public init() {}
 
-    public func client() throws -> ControlClient {
-        try ControlClient.discover(explicitURL: url, timeout: timeout)
+    /// The transport this invocation talks to — one funnel, so every subcommand resolves `--url` and
+    /// `--timeout` the same way.
+    ///
+    /// It returns `any ControlTransport` rather than `ControlClient` so a test can bind a recording
+    /// stub in `ControlTransportOverride` and drive the real subcommand tree. Without that there is
+    /// no way in at all: ArgumentParser builds each command from argv, so there is no call site to
+    /// hand a client to, and the emitted `ControlCommand` of every runnable verb — 55 of them, the
+    /// 65 `AsyncParsableCommand` types in this module less the 10 that only group others — was
+    /// unassertable in consequence. The production path is unchanged: with nothing bound, this is the
+    /// same `ControlClient.discover` call it always made.
+    public func client() throws -> any ControlTransport {
+        if let override = ControlTransportOverride.current { return override }
+        return try ControlClient.discover(explicitURL: url, timeout: timeout)
     }
 }
 

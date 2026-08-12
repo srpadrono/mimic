@@ -81,6 +81,32 @@ struct AppStateAndViewTests {
         return AppState(server: server, projectRepository: repository, recentProjectsStore: store)
     }
 
+    private func makeAppState(repository: any ProjectRepository) throws -> AppState {
+        let defaults = UserDefaults(suiteName: "AppStateAndViewTests.\(UUID().uuidString)")!
+        return AppState(
+            server: MockServerRuntime(engine: StubEngine()),
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+    }
+
+    /// A store that refuses every write and holds nothing. Stateless, so no `@unchecked` is needed:
+    /// `ProjectRepository` is `Sendable` and a struct with no stored properties satisfies that.
+    ///
+    /// `nonisolated` because `MimicTests` compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
+    /// so an unannotated type here is `@MainActor` — and `ProjectRepository` is a nonisolated protocol
+    /// declared in `Domain`. Same reason `NavigationHistory` carries it in `AppFeatures`.
+    private nonisolated struct RefusingRepository: ProjectRepository {
+        struct Refused: Error, LocalizedError {
+            var errorDescription: String? { "the store refused the write" }
+        }
+
+        func load(id: UUID) async throws -> MockProject { throw Refused() }
+        func save(_ project: MockProject) async throws { throw Refused() }
+        func allProjects() async throws -> [MockProject] { [] }
+        func delete(id: UUID) async throws { throw Refused() }
+    }
+
     /// Polls `predicate` until it holds or the timeout elapses — deterministic alternative to a
     /// fixed `Task.sleep` when waiting on work dispatched to background tasks/actors.
     private func waitUntil(
@@ -175,9 +201,11 @@ struct AppStateAndViewTests {
         appState.deleteEndpoint(id: copiedEndpoint.id)
         #expect(appState.currentProject?.endpoints.contains(where: { $0.id == copiedEndpoint.id }) == false)
 
-        try await Task.sleep(for: .milliseconds(350))
+        // `waitUntil`, not a flat 350 ms. The recents write is dispatched, so the sleep was a floor
+        // every run paid and a ceiling a loaded machine could miss — and the helper that polls for it
+        // was already declared thirty lines up.
+        try await waitUntil { appState.recentProjects.first?.name == "Users API" }
         #expect(appState.recentProjects.count == 1)
-        #expect(appState.recentProjects.first?.name == "Users API")
     }
 
     @Test("AppState imports candidates and manages project lifecycle")
@@ -194,24 +222,28 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.endpoints.first?.name == "Imported POST")
         #expect(appState.currentProject?.endpoints.first?.scenarios.first?.name == "Imported")
 
-        appState.saveCurrentProject()
-        try await Task.sleep(for: .milliseconds(700))
-
         let originalProjectID = try #require(appState.currentProject?.id)
+        appState.saveCurrentProject()
+        // Each of the four waits below names the condition the next step actually depends on, rather
+        // than sleeping for a round number that happens to be longer than the work usually takes.
+        // `duplicateProject` reads the source back out of the store, so the store has to be current
+        // before it runs — which is what the first `700` was really for, and what it did not check.
+        try await waitUntil {
+            (try? await appState.repository.load(id: originalProjectID))?.endpoints.isEmpty == false
+        }
+
         appState.duplicateProject(id: originalProjectID)
-        try await Task.sleep(for: .milliseconds(700))
+        try await waitUntil { appState.recentProjects.contains { $0.name == "Imported API (Copy)" } }
         #expect(appState.recentProjects.contains(where: { $0.id == originalProjectID }))
 
         appState.closeProject()
         #expect(appState.currentProject == nil)
 
         appState.openProject(id: originalProjectID)
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(appState.currentProject?.id == originalProjectID)
+        try await waitUntil { appState.currentProject?.id == originalProjectID }
 
         appState.deleteProject(id: originalProjectID)
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(appState.recentProjects.contains(where: { $0.id == originalProjectID }) == false)
+        try await waitUntil { appState.recentProjects.contains { $0.id == originalProjectID } == false }
     }
 
     @Test("AppState forwards mutable properties and autosave scheduling")
@@ -230,7 +262,12 @@ struct AppStateAndViewTests {
         appState.updateEndpoint(updatedEndpoint)
         appState.scheduleAutosave()
 
-        try await Task.sleep(for: .milliseconds(700))
+        // The debounce is 500 ms and the write follows it, so the condition to wait for is the write
+        // having landed — not a number chosen to be comfortably larger than it.
+        let projectID = try #require(appState.currentProject?.id)
+        try await waitUntil {
+            (try? await appState.repository.load(id: projectID))?.endpoints.first?.name == "Users v2"
+        }
 
         #expect(appState.serverConfiguration == ServerConfiguration(port: 9091, globalDelayMs: 25))
         // And it survived an unrelated mutation of the same project, because it was written *to* the
@@ -901,6 +938,120 @@ struct AppStateAndViewTests {
 
         #expect(response.ok == false)
         #expect(appState.currentProject?.serverConfiguration.port == 8080)
+    }
+
+    /// The half `HostParityTests` cannot see, because its stub engine reports no cursor at all.
+    ///
+    /// `mimic journey advance` has to answer with the position the advance *produced*. The window's
+    /// host used to dispatch the advance and then read `MockServerRuntime`'s mirror of the cursor —
+    /// which the advance it had just requested had not reached — so the reply carried the position
+    /// from before the command at best, and nothing at all on a script's first advance. It now awaits
+    /// the engine and reports what the engine hands back, which is what this pins: an engine whose
+    /// `advanceJourney()` answers with a recognisable status, and a reply carrying *that* status
+    /// rather than the mirror or the not-yet-started fallback.
+    @Test("`journey advance` reports the engine's answer, not the mirror")
+    func controlHostAdvanceReportsTheEngineAnswer() async throws {
+        let engine = AdvancingEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+        let added = await host.execute(.journeyAddTemplate(templateID: "payment-retry", name: "Flow"))
+        #expect(added.ok)
+        let activated = await host.execute(.journeyActivate(journey: .name("Flow")))
+        #expect(activated.ok)
+
+        // The mirror is deliberately left holding something else, so a reply built from it is
+        // distinguishable from one built from the engine's answer.
+        appState.server.journeyStatus = JourneyStatus.make(journey: Journey(name: "Stale mirror"), state: nil)
+
+        let response = await host.execute(.journeyAdvance)
+
+        #expect(response.ok)
+        #expect(response.result?.journeyStatus?.journeyName == AdvancingEngine.answerName)
+        #expect(await engine.advanceCallCount == 1)
+    }
+
+    /// An engine that answers `advanceJourney()` with a status nothing else in the test could have
+    /// produced, so "the engine's answer was reported" is a claim an assertion can make.
+    actor AdvancingEngine: MockServerEngineProtocol {
+        static let answerName = "Advanced by the engine"
+
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private(set) var advanceCallCount = 0
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func advanceJourney() async -> JourneyStatus? {
+            advanceCallCount += 1
+            return JourneyStatus.make(journey: Journey(name: Self.answerName), state: nil)
+        }
+    }
+
+    /// The window's host used to store an imported document itself, as
+    /// `Task { try? await repository.save(document) }` sitting beside a success envelope. The reply
+    /// stays optimistic — that is a declared contract difference, pinned in `HostParityTests` — but
+    /// the `try?` meant a refused write reached nobody at all: `mimic project import` exited 0 on an
+    /// import that never happened, and the window said nothing either.
+    ///
+    /// The optimistic reply is therefore *not* what this asserts. It asserts that the failure arrives
+    /// on `autosaveStatus`, which is the channel the window already renders for a store failure, and
+    /// that a document the store refused is not opened as though it had been stored.
+    @Test("An import the store refuses reports the failure and does not open the document")
+    func controlHostImportSurfacesAStoreFailure() async throws {
+        let appState = try makeAppState(repository: RefusingRepository())
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+        let document = MockProject(name: "Refused")
+
+        let response = await host.execute(.projectImport(project: document, activate: true))
+
+        // Optimistic by contract: the write is asynchronous and the call has to answer now.
+        #expect(response.ok)
+        #expect(response.result?.project?.id == document.id)
+
+        try await waitUntil { appState.autosaveStatus == .failed("Could not import project \"Refused\".") }
+        #expect(appState.currentProject == nil, "a document the store refused must not be opened")
+    }
+
+    /// The other half: when the store takes it, the document really is stored, and `activate: true`
+    /// opens it — through `AppState.openProject`, so the switch stops the server the way every other
+    /// project switch does.
+    @Test("An accepted import is stored and opened")
+    func controlHostImportStoresAndOpens() async throws {
+        let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        let scenario = Scenario(name: "Default", statusCode: 200, body: "{}")
+        let document = MockProject(
+            name: "Fixture",
+            endpoints: [
+                Endpoint(
+                    name: "Summary",
+                    method: .get,
+                    path: "/account-summary",
+                    scenarios: [scenario],
+                    activeScenarioID: scenario.id
+                ),
+            ]
+        )
+
+        let response = await host.execute(.projectImport(project: document, activate: true))
+        #expect(response.ok)
+
+        try await waitUntil { appState.currentProject?.id == document.id }
+        let stored = try await appState.repository.load(id: document.id)
+        #expect(stored.endpoints.first?.path == "/account-summary")
     }
 
     /// The arm that replaced `default:`. Every project-scoped command is named there, so this is the

@@ -11,7 +11,12 @@ import Testing
 /// These drive the *real* embedded server over *real* HTTP. Unit tests already prove journey
 /// resolution is correct; what these prove is that the correct answer actually reaches a client —
 /// including the two cases a status code cannot express.
-@Suite(.serialized)
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct JourneyServingTests {
 
     // MARK: - Harness

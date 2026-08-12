@@ -5,18 +5,26 @@ import Persistence
 
 /// Composition root for a windowless Mimic.
 ///
-/// **Nothing in a shipped path reaches this.** `mimic daemon start` sounds like the caller, and is
-/// not: `DaemonCommand.Start` sets `headless = true` on `AppCommand.Start`, which launches the app
-/// bundle with `MIMIC_HEADLESS=1` and serves the control API through `AppControlHost`. There is no
-/// `mimic-daemon` binary and no SwiftPM executable product that constructs this, and no test
-/// references it either — `grep -rn MimicDaemon --include=*.swift .` finds only this file.
+/// **Nothing in a shipped path reaches this.** `mimic daemon start` sounds like the caller and is
+/// not: `DaemonCommand.Start` sets `headless = true` on an `AppCommand.Start` and runs it, that
+/// reaches `AppLauncher.launch(headless:)`, and `launch` puts `MIMIC_HEADLESS=1` in the child
+/// environment and executes `Mimic.app/Contents/MacOS/Mimic`. So a headless instance is the app
+/// bundle, and `ControlPlaneCoordinator` gives it the same `AppControlHost` a windowed one gets.
 ///
-/// What it composes is reachable: `MimicControlService` is the one `ControlHost` `Package.swift`
-/// builds, so it is what the Linux job type-checks and what `Tests/ControlPlaneTests` exercises;
-/// `AppControlHost` is the one the window ships and lives in a target SwiftPM does not declare.
-/// Keeping the two in agreement is what makes wiring this to a real binary a small change rather
-/// than a rewrite, and `Tests/MimicTests/HostParityTests.swift` — a macOS-only suite — is what
-/// checks that agreement. See the "two hosts" section of AGENTS.md before changing either.
+/// Nothing else names this type either. `grep -rn MimicDaemon --include=*.swift .` returns two
+/// lines, both in this file: the one you are reading and the declaration below. No production code,
+/// no test, and no executable — `Package.swift` declares exactly one, `mimic`, whose only dependency
+/// is `MimicCLICore`.
+///
+/// It is still compiled by both manifests, and it is the only place the headless composition is
+/// written down, which is why it stays. What it composes splits along the same line everything else
+/// in this repository does: `MimicControlService` lives in this target, so `Package.swift` builds it
+/// and the six references in `Tests/ControlPlaneTests` drive it, while `AppControlHost` lives in
+/// `Sources/AppFeatures`, which no `Package.swift` target declares. `Tests/MimicTests` — where
+/// `HostParityTests.swift` asks both hosts the same questions side by side — is undeclared there
+/// too, so that suite runs under Xcode only and never on the Linux job. Neither suite touches this
+/// type; keeping the two hosts in agreement is what would make wiring this up a small change, and
+/// nothing here proves they are. See the "two hosts" section of AGENTS.md before changing either.
 public struct MimicDaemon: Sendable {
 
     public struct Configuration: Sendable {

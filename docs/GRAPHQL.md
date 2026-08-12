@@ -31,6 +31,14 @@ pair — the alias is whatever the caller felt like typing.
 Comments are ignored, so a `# query Decoy { }` cannot masquerade as an operation, and variable
 definitions (`query GetUser($id: ID!)`) do not swallow the name.
 
+**Leading fragment definitions are skipped**, braces counted so nested selections close correctly.
+Most real clients emit their fragments ahead of the operation, and the scanner used to stop at the
+first `{` it found — the fragment's — and name the document after *its* first field. A body reading
+`fragment fields on User { name }` before `query GetUser { … }` therefore resolved to the operation
+`name`, so a mock declared for `GetUser` did not match and a well-formed request 404'd. A fragment
+whose braces never close still yields "not GraphQL", which falls back to path routing rather than
+matching on a name guessed out of a broken document.
+
 This is a tolerant scanner, not a GraphQL parser: it identifies operations in real traffic rather
 than validating a schema. A body it cannot read is simply "not GraphQL", and routing falls back to
 method and path as before.

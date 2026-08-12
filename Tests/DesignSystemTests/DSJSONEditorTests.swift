@@ -225,23 +225,29 @@ struct DSServerStateTests {
     }
 }
 
-@Suite("Panel chrome")
-struct DSPanelHeaderTests {
-
-    @Test("Every panel header is the same height, so panels line up across the window")
-    func headerHeightIsShared() {
-        // The number matters less than the fact that there is exactly one of it. Before this, the
-        // sidebar had no header, the request log had a tall one, and the inspector a third size.
-        #expect(DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height)
-        #expect(DSPanelHeader<EmptyView>.height > 0)
-    }
-
-    @Test("A header renders with and without a trailing accessory")
-    func headerRenders() {
-        _ = DSPanelHeader("Request Log", subtitle: "9 requests", identifier: "test")
-        _ = DSPanelHeader("Endpoints", identifier: "test") {
-            DSPanelHeaderButton(systemImage: "plus", help: "Add", identifier: "test.add") { }
-        }
-    }
-
-}
+// MARK: - Removed: `DSPanelHeaderTests`
+//
+// Two cases lived here and neither could fail.
+//
+// `headerHeightIsShared` asserted `DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height`
+// and `> 0`. `height` is a `static var` returning `DSBarHeight.panelHeader`, so the two generic
+// specialisations read the same stored constant: the comparison is `x == x`, true for every possible
+// value of the token, including a value that would break every panel in the window. The `> 0`
+// companion excluded zero and negatives and nothing else.
+//
+// `headerRenders` constructed two `DSPanelHeader` values into `_` and asserted nothing at all. A
+// `View` initialiser stores its arguments; it does not lay anything out, so the only way that case
+// could have failed is by trapping inside a memberwise assignment.
+//
+// The claims they were reaching for are made properly in `DSComponentRenderingTests`, which is where
+// the hosting harness that can actually measure a view lives:
+//
+// - `laddersArePinned` pins `DSBarHeight.panelHeader == 30` — the assertion an equality between two
+//   reads of one constant cannot make — and `DSPanelHeader<EmptyView>.height ==
+//   DSBarHeight.panelHeader`, so the view keeps taking its number from the ladder.
+// - `panelChromeSharesOneHeight` renders a bare header, a header *with* a subtitle and a trailing
+//   `DSPanelHeaderButton`, and a `DSTabStrip`, and measures all three against a `Color` fixed to the
+//   token. That is `headerRenders`'s intent — both shapes survive layout — plus the cross-panel
+//   alignment neither case here checked.
+//
+// Nothing is left to move, which is why this file now ends at `DSServerStateTests`.

@@ -167,7 +167,7 @@ struct SidebarView: View {
                     } header: {
                         HStack(spacing: DSSpacing.xs) {
                             Image(systemName: "folder.fill")
-                                .font(.system(size: 10))
+                                .font(.system(size: DSGlyph.inline))
                                 .foregroundStyle(DSColors.labelTertiary)
                             Text(section.name)
                                 .font(DSTypography.label)

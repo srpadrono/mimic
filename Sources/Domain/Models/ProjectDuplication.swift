@@ -20,11 +20,33 @@ import Foundation
 /// what both tests of it construct.
 ///
 /// The rule this needed already existed twenty lines from where it was needed: the duplication
-/// helpers in ``ProjectCommandExecutor`` remint scenario and step ids, under a comment explaining
-/// that sharing them lets an edit to the copy mutate the original. Those apply to duplicating one
-/// endpoint or one journey *inside* a project. This is the same rule at the level above, and it lives
-/// in Domain for the same reason everything else does: it was written twice outside the executor, and
-/// both copies were wrong.
+/// helpers in ``ProjectCommandExecutor`` reminted scenario and step ids, because sharing them lets an
+/// edit to the copy mutate the original — the reason now recorded on
+/// ``Scenario/copyingWithFreshIdentifiers()``, which is where that reminting moved. Those apply to
+/// duplicating one endpoint or one journey *inside* a project. This is the same rule at the level
+/// above, and it lives in Domain for the same reason everything else does: it was written twice
+/// outside the executor, and both copies were wrong.
+///
+/// ## These helpers are the only implementation
+///
+/// `ProjectCommandExecutor.duplicate` calls into them rather than building its own copy. It used to
+/// build one, and the two disagreed: the executor pointed every copy at `scenarios.first`, while the
+/// helper below follows the source's *active* scenario by position. So `mimic endpoint duplicate` and
+/// `mimic project duplicate` produced different copies of the same endpoint whenever its active
+/// scenario was not its first — the duplicate answered with a response the original does not serve.
+///
+/// ## Each helper enumerates its model's stored properties by hand
+///
+/// Nothing checks that the lists are complete. The structurally complete form —
+/// `var copy = self; copy.id = UUID()`, which cannot drop a field because it never names one — is
+/// unavailable: `id` is a `let` on ``MockProject``, ``Endpoint``, ``Scenario``, ``Journey`` and
+/// ``JourneyStep``, so no copy can remint one in place. Widening those five to `var` would buy the
+/// safer copy, and it is a trade for a human to make rather than a cleanup: it gives up an identity
+/// that cannot change under a holder in exchange for a duplication that cannot silently drop a field.
+///
+/// Until then each helper below states the field list it must track, and adding a property to one of
+/// those models means coming back here. Miss it and duplication drops the new field in silence — no
+/// error, just a copy that is quietly not one.
 extension MockProject {
 
     /// A copy of this project under `name`, sharing no identifier with it.
@@ -33,6 +55,11 @@ extension MockProject {
     /// Only identity is new, and the two references that point *into* the tree (an endpoint's active
     /// scenario, the project's active journey) are repointed at their counterparts in the copy rather
     /// than left dangling at the original's.
+    ///
+    /// Field list to track: of ``MockProject``'s nine stored properties, `serverConfiguration`,
+    /// `endpoints`, `journeys` and `activeJourneyID` are copied and `name` is the parameter. The other
+    /// four are deliberately *not* carried — `id` is new, `schemaVersion` is always the current one,
+    /// and `createdAt`/`modifiedAt` take the initialiser's defaults because the copy was made now.
     public func duplicated(name: String) -> MockProject {
         var journeyIdentifiers: [UUID: UUID] = [:]
         let copiedJourneys = journeys.map { source -> Journey in
@@ -61,19 +88,20 @@ extension Endpoint {
     /// The active scenario is followed by *position* rather than by id, because the ids are precisely
     /// what is changing. Falling back to the first scenario matches what endpoint creation does: an
     /// endpoint with responses and no active one silently 404s, which is never what a copy should be.
+    ///
+    /// Following the source's active scenario is also the semantics `mimic endpoint duplicate` gets,
+    /// because a duplicate should answer the way the original does. Pointing the copy at
+    /// `scenarios.first` instead means an endpoint serving "Server error" duplicates into one serving
+    /// "Default" — a difference nothing on screen explains.
+    ///
+    /// Field list to track: of ``Endpoint``'s nine stored properties, `id` and `scenarios` are
+    /// reminted and `activeScenarioID` is repointed; `name`, `method`, `path`, `delayMs`, `groupTag`
+    /// and `graphqlOperation` are carried across unchanged.
     public func copyingWithFreshIdentifiers() -> Endpoint {
         let activeIndex = activeScenarioID.flatMap { active in
             scenarios.firstIndex { $0.id == active }
         }
-        let copiedScenarios = scenarios.map { source in
-            Scenario(
-                name: source.name,
-                statusCode: source.statusCode,
-                headers: source.headers,
-                body: source.body,
-                bodyContentType: source.bodyContentType
-            )
-        }
+        let copiedScenarios = scenarios.map { $0.copyingWithFreshIdentifiers() }
 
         return Endpoint(
             name: name,
@@ -88,28 +116,59 @@ extension Endpoint {
     }
 }
 
+extension Scenario {
+
+    /// This scenario with a new id, so editing the copy never rewrites the original's response.
+    ///
+    /// Field list to track: of ``Scenario``'s six stored properties, `id` is reminted; `name`,
+    /// `statusCode`, `headers`, `body` and `bodyContentType` are carried across unchanged.
+    public func copyingWithFreshIdentifiers() -> Scenario {
+        Scenario(
+            name: name,
+            statusCode: statusCode,
+            headers: headers,
+            body: body,
+            bodyContentType: bodyContentType
+        )
+    }
+}
+
 extension Journey {
 
     /// This journey with a new id and new step ids, in the same order.
+    ///
+    /// Field list to track: of ``Journey``'s eight stored properties, `id` and `steps` are reminted;
+    /// `name`, `summary`, `matchMode`, `completion`, `unmatchedBehavior` and `autoAdvance` are carried
+    /// across unchanged.
     public func copyingWithFreshIdentifiers() -> Journey {
         Journey(
             name: name,
             summary: summary,
-            steps: steps.map { source in
-                JourneyStep(
-                    name: source.name,
-                    method: source.method,
-                    path: source.path,
-                    outcome: source.outcome,
-                    delayMs: source.delayMs,
-                    repeatCount: source.repeatCount,
-                    graphqlOperation: source.graphqlOperation
-                )
-            },
+            steps: steps.map { $0.copyingWithFreshIdentifiers() },
             matchMode: matchMode,
             completion: completion,
             unmatchedBehavior: unmatchedBehavior,
             autoAdvance: autoAdvance
+        )
+    }
+}
+
+extension JourneyStep {
+
+    /// This step with a new id, keeping its place in the script.
+    ///
+    /// Field list to track: of ``JourneyStep``'s eight stored properties, `id` is reminted; `name`,
+    /// `method`, `path`, `outcome`, `delayMs`, `repeatCount` and `graphqlOperation` are carried across
+    /// unchanged.
+    public func copyingWithFreshIdentifiers() -> JourneyStep {
+        JourneyStep(
+            name: name,
+            method: method,
+            path: path,
+            outcome: outcome,
+            delayMs: delayMs,
+            repeatCount: repeatCount,
+            graphqlOperation: graphqlOperation
         )
     }
 }

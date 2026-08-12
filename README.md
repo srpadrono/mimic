@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-762%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-842%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -144,6 +144,8 @@ bodies, formatted and searchable — so checking what a mock returned doesn't me
 
 ```bash
 export MIMIC_DATABASE_PATH="$PWD/.mimic-ci/store.sqlite"   # isolated store
+export MIMIC_CONTROL_FILE="$PWD/.mimic-ci/control.json"    # isolated discovery file
+export MIMIC_CONTROL_PORT=18787                            # …and the port to reach it on
 
 mimic daemon start                          # headless: the app, windowless
 mimic project import fixtures/checkout.json # a `mimic project export` document, not an OpenAPI spec
@@ -155,8 +157,16 @@ mimic reset --scope all                     # rewind the journey, clear the log
 mimic journey status | jq -e '.journeyStatus.isComplete'
 ```
 
+`MIMIC_CONTROL_FILE` keeps a CI run out of a developer's `control.json` — the app writes and searches
+there instead of in Application Support. The port is exported alongside it because the CLI does not
+read that variable yet (it carries its own copy of the discovery reader), and `MIMIC_CONTROL_PORT`
+wins before discovery is consulted. → [docs/CLI.md](docs/CLI.md#environment).
+
 The CLI is a thin client over a loopback HTTP API, so a non-Swift agent can skip it entirely. Every
-request carries the instance's token, which it mints at startup and writes to its discovery file:
+request carries the instance's token, which it mints at startup and writes to its discovery file.
+That token is scoped to the instance that minted it: the CLI attaches a discovered token only to a
+loopback host on the port that file advertised, so pointing `--url` somewhere else does not take the
+credential with it.
 
 ```bash
 # The installed app is sandboxed, so its Application Support is inside its container.
@@ -218,14 +228,22 @@ once.
 engine and command handling included. Nothing reaches them. `mimic daemon start` sets `--headless` on
 `mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app hides itself from the
 Dock and serves the control API through `AppControlHost`, exactly as it does with a window open.
-`grep -rn MimicDaemon --include=*.swift .` returns one hit, its own declaration.
+Nothing outside `MimicDaemon.swift` names the type:
+
+```bash
+grep -rn MimicDaemon --include=*.swift . | grep -v '^\./Sources/ControlPlane/MimicDaemon\.swift:'
+```
+
+prints nothing. (The unfiltered grep used to be quoted here as returning "one hit, its own
+declaration". It returns two — a doc comment in that file now quotes the grep, so the check moved its
+own result.)
 
 Nothing is broken by this — headless works, and it works through the same code path a developer
 watches all day, which is a real argument in its favour. What it costs is honesty about the tests:
-all 38 `ControlPlaneTests` exercise the host that does not ship, while the host that does had no unit
-test at all until four behavioural divergences between the two had already been released and four
-tests were written to close them. Whether to wire the daemon up or delete it is an open question;
-leaving the documentation implying that CI runs a separate daemon is not. See
+every test in `ControlPlaneTests` exercises the host that does not ship, while the host that does had
+no unit test at all until four behavioural divergences between the two had already been released.
+Whether to wire the daemon up or delete it is an open question; leaving the documentation implying
+that CI runs a separate daemon is not. See
 [AGENTS.md](AGENTS.md#two-hosts-one-of-them-shipped--a-known-issue) and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#two-hosts-one-shipped).
 
@@ -233,22 +251,27 @@ leaving the documentation implying that CI runs a separate daemon is not. See
 
 ## Testing
 
-762 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+842 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 487 | Linux or macOS — `swift test` |
-| Design system | 49 | macOS — needs SwiftUI |
-| App and coordination | 186 | macOS — hosted by the app |
+| Domain, persistence, engine, control plane, import, CLI | 542 | Linux or macOS — `swift test` |
+| Design system | 47 | macOS — needs SwiftUI |
+| App and coordination | 213 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
-The portable 487 break down as Domain 166, SpecImport 105, MockServerEngine 63, Persistence 59,
-MimicCLICore 56, ControlPlane 38. The app's 186 are the five folders `MimicTests` builds —
-`WorkspaceFeatureTests` 88, `MimicTests` 75, `ImportFeatureTests` 13, `ProjectFeatureTests` 6,
-`EndpointFeatureTests` 4 — and `Sources/AppFeatures/JourneyFeature` deliberately has no folder of its
-own, because what covers the journey UI lives in `MimicTests`.
+The portable 542 break down as Domain 178, SpecImport 105, MimicCLICore 85, MockServerEngine 65,
+Persistence 63, ControlPlane 46. The app's 213 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 88, `MimicTests` 88, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+`ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
+
+`JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
+`Sources/AppFeatures/JourneyFeature` was described here as deliberately having no suite of its own
+because `MimicTests` covered the journey UI. It was the one feature folder with no tests at all.
+`Project.swift` now lists `Tests/JourneyFeatureTests` among the folders the `MimicTests` target
+builds, and the directory exists behind it.
 
 Only the SwiftUI layer needs a Mac. The domain rules, mock engine, persistence, control plane, spec
 import and CLI are plain Swift, so [`Package.swift`](Package.swift) builds them anywhere while
@@ -258,7 +281,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 487, no Xcode needed
+swift test                    # the portable 542, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
 ```
 
@@ -267,19 +290,37 @@ The **Tests** badge at the top is hand-maintained, unlike the two coverage badge
 lost them. That asymmetry is why the counts above keep drifting: the table has twice claimed a
 figure the tree did not support — 469 / 34 / 181 against an actual 487 / 49 / 173, then 173 for the
 app row while a new parity suite was landing 13 more in the same afternoon. A hand count is only ever
-true of the commit that wrote it. Recount before you change them:
+true of the commit that wrote it. It no longer has to be recounted by eye —
+[`Scripts/check_doc_counts.py`](Scripts/check_doc_counts.py) recounts every folder and fails naming
+each number here that has drifted:
 
 ```bash
-for d in Tests/*/; do echo "$(basename "$d") $(grep -rho '@Test' "$d" --include=*.swift | wc -l)"; done
-grep -rhoE 'func test[A-Za-z0-9_]*\(' MimicUITests --include=*.swift | wc -l
+python3 Scripts/check_doc_counts.py    # also run by ./Scripts/ci.sh, not by GitHub Actions
 ```
+
+**That checker is one edit behind this table.** It carries its own copy of the three groups, and
+`JourneyFeatureTests` is in none of them, so it counts the app row as 213 − 14 = 199 and reports the
+difference against the number above. Adding `"JourneyFeatureTests"` to its `APP` list — and widening
+the app-breakdown pattern from `five folders` to `six` — is what reconciles them; until somebody who
+owns `Scripts/` does that, the table above is the one that matches the tree.
 
 ### Coverage
 
 <!-- coverage:generated:start -->
-Coverage numbers are generated by [`./Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh),
-which runs every suite with coverage enabled and rewrites this section from the resulting `.xcresult`
-bundles. Run it to populate the table.
+**Coverage has not been measured for this commit, and the two badges above say so rather than
+carrying a stale number.** They read `not measured` because nothing has run
+[`./Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) here — that script needs macOS
+and Xcode (it drives `xcodebuild` and reads the resulting `.xcresult` bundles with `xcrun xccov`),
+and the environments most of this tree's recent editing happened in have neither.
+
+This is a placeholder in the sense that the numbers are absent, but not in the sense that somebody
+forgot: running the script on a Mac rewrites this block and both badges from the measured bundles.
+Until then, an absent number is the honest one — the alternative is a figure quoted from a run
+nobody can point at, which is precisely how the test counts above drifted twice.
+
+```bash
+./Scripts/run_full_test_suite.sh    # macOS + Xcode; rewrites this section and the two badges
+```
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to

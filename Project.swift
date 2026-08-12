@@ -333,12 +333,11 @@ let project = Project(
                 "Tests/EndpointFeatureTests",
                 "Tests/ProjectFeatureTests",
                 "Tests/ImportFeatureTests",
-                // No "Tests/JourneyFeatureTests". The line was here from the first commit and the
-                // directory has never existed in this repository's history — Tuist tolerated it, so
-                // the manifest read as if the journey UI had a suite of its own. It does not:
-                // `Sources/AppFeatures/JourneyFeature` is the only feature folder with no matching
-                // test folder, and what covers it lives in `Tests/MimicTests`. Listing a folder that
-                // is not there is worse than the gap, because it hides it.
+                // This line was here from the first commit with no directory behind it — Tuist
+                // tolerated the absence, so the manifest read as if the journey UI had a suite of
+                // its own when `Sources/AppFeatures/JourneyFeature` was the one feature folder with
+                // no tests at all. The directory exists now, so the line finally means what it said.
+                "Tests/JourneyFeatureTests",
             ],
             dependencies: [
                 .target(name: "Mimic"),
