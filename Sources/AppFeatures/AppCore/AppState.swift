@@ -54,9 +54,20 @@ final class AppState {
     /// copy is how the editor's "Global delay" row and `mimic server status` came to report a number
     /// the project no longer held. With no project open there is nothing to read, so the runtime's
     /// value stands in — that is the welcome screen, where it is `.default`.
+    /// Symmetric on purpose: what the getter reads is what the setter writes.
+    ///
+    /// A getter sourced from the project and a setter that wrote only the runtime would compile, read
+    /// naturally, and silently discard every write while a project was open — and the next mutation
+    /// of anything else would overwrite the runtime's copy too, erasing it twice over. Writing the
+    /// project first is also what pushes the change to the engine, because `currentProject`'s `didSet`
+    /// applies the project; the second line is the fallback for the welcome screen, where there is no
+    /// project to hold the value.
     var serverConfiguration: ServerConfiguration {
         get { currentProject?.serverConfiguration ?? server.serverConfiguration }
-        set { server.serverConfiguration = newValue }
+        set {
+            currentProject?.serverConfiguration = newValue
+            server.serverConfiguration = newValue
+        }
     }
     var requestLogs: [RequestLog] {
         get { server.requestLogs }
@@ -219,7 +230,12 @@ final class AppState {
     /// runtime is applied from — it would be overwritten by the next edit of anything else. One
     /// command puts it where it belongs; the runtime call then clears the alert and starts.
     func retryStartOnNextPort(from port: Int) {
-        _ = run(.serverConfigure(port: port + 1, globalDelayMs: nil))
+        // Only start once the port is stored. A conflict on 65535 makes the next port 65536, which
+        // the validator rejects — and starting anyway would leave the runtime bound to a port the
+        // project does not have, which is the divergence this whole path exists to close. `run` has
+        // already put the reason in `lastCommandError`, so the user is told rather than left with a
+        // server that quietly did not start.
+        guard run(.serverConfigure(port: port + 1, globalDelayMs: nil)) != nil else { return }
         server.retryStartOnNextPort(from: port)
     }
 

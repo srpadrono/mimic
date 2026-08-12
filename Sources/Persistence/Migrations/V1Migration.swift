@@ -146,5 +146,20 @@ enum AppMigrations {
                 t.add(column: "graphqlOperation", .text)
             }
         }
+
+        migrator.registerMigration("v4_foreign_key_indexes") { db in
+            // `journey` and `journeyStep` were given these in v2; `endpoint` and `scenario` never
+            // got theirs, which makes the omission an oversight rather than a policy. Both columns
+            // are the ones every read and every write joins on, so without an index each is a full
+            // table scan: `load` runs one per endpoint to fetch its scenarios, and `save` — which
+            // autosave fires on a debounce as you type — deletes and reinserts through the same
+            // columns. Additive DDL, no data movement.
+            //
+            // Safe to add only because `eraseDatabaseOnSchemaChange` no longer fires on a real store.
+            // Under the old `#if DEBUG` flag this migration would have been indistinguishable from
+            // "delete every project on the next launch".
+            try db.create(index: "endpoint_projectID", on: "endpoint", columns: ["projectID"])
+            try db.create(index: "scenario_endpointID", on: "scenario", columns: ["endpointID"])
+        }
     }
 }

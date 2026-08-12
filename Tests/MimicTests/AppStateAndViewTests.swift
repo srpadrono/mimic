@@ -233,6 +233,10 @@ struct AppStateAndViewTests {
         try await Task.sleep(for: .milliseconds(700))
 
         #expect(appState.serverConfiguration == ServerConfiguration(port: 9091, globalDelayMs: 25))
+        // And it survived an unrelated mutation of the same project, because it was written *to* the
+        // project. A setter that only reached the runtime's copy would have had it erased by the
+        // endpoint edit above, while the getter read the project's untouched original.
+        #expect(appState.currentProject?.serverConfiguration == ServerConfiguration(port: 9091, globalDelayMs: 25))
         #expect(appState.portConflictAlert?.conflictingPort == 9091)
         #expect(appState.genericStartError == "Server failed")
         #expect(appState.currentProject?.endpoints.first?.name == "Users v2")
@@ -606,8 +610,11 @@ struct AppStateAndViewTests {
         let server = MockServerRuntime(engine: engine)
         let appState = try makeAppState(server: server)
 
+        // Two pushes, not one: `bindProjectWorkspace` applies the (empty) project during `init`, so
+        // waiting for the array to be non-empty would have been satisfied before `createProject` did
+        // anything at all.
         appState.createProject(name: "Checkout", port: 8080)
-        try await waitUntil { await engine.pushedGlobalDelays.isEmpty == false }
+        try await waitUntil { await engine.pushedGlobalDelays.count >= 2 }
 
         appState.updateGlobalDelay(delayMs: 500)
 

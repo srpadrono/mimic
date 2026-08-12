@@ -313,8 +313,11 @@ struct HARParserTests {
         #expect(HARParser.extractPath(from: "https://api.example.com") == "/")
         #expect(HARParser.extractPath(from: "") == "/")
         // One dotted segment with nothing behind it is a filename, not a host — re-parsing it as one
-        // would leave an empty path and lose the segment.
+        // would leave an empty path and lose the segment. A bare hostname is indistinguishable from a
+        // filename here, so it is kept rather than dropped: showing the user `/api.example.com` in the
+        // import review is recoverable, silently importing `/` is not.
         #expect(HARParser.extractPath(from: "logo.png") == "/logo.png")
+        #expect(HARParser.extractPath(from: "api.example.com") == "/api.example.com")
 
         for capture in ["https://api.example.com/v1/users", "/already/path", "api.example.com/users",
                         "users/123", "https://api.example.com", "", "?query=only", "#fragment"] {
