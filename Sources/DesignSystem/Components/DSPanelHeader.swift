@@ -62,6 +62,10 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // title the *last* thing to yield without ever making the row demand width the panel
                 // does not have. A negative priority on the subtitle was the version that failed.
                 .lineLimit(1)
+                // Tail, where the subtitle truncates in the middle: a subtitle is usually a path or a
+                // count whose two ends both carry information, and a panel title is a word you can
+                // still recognise from its start.
+                .truncationMode(.tail)
                 .layoutPriority(1)
                 .accessibilityIdentifier("ds.panelheader.title.\(identifier)")
 

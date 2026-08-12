@@ -151,7 +151,11 @@ public enum HARParser {
            let firstSegment = urlString.split(separator: "/", maxSplits: 1).first,
            firstSegment.contains("."),
            let withScheme = URLComponents(string: "http://\(urlString)"),
-           withScheme.host != nil {
+           withScheme.host != nil,
+           // Only when there is a path left after the authority. `logo.png` is one dotted segment
+           // with nothing behind it, and re-parsing it as a host would leave the path empty and lose
+           // the segment entirely — a relative filename is a path, not a bare host.
+           !withScheme.path.isEmpty {
             components = withScheme
         }
 

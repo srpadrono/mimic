@@ -46,12 +46,16 @@ final class AppState {
     var navigatorRequest: NavigatorTab?
     /// The journey being edited in the navigator.
     var selectedJourneyID: UUID?
-
-    private var syncConfigurationOnNextProjectChange = false
-
     var serverState: ServerState { server.serverState }
+    /// The open project's configuration — read from the project, not from the runtime's copy.
+    ///
+    /// The runtime keeps one because the engine needs a value to bind and a delay to apply, but the
+    /// project is what a user edits and what `mimic server configure` writes. Reading the runtime's
+    /// copy is how the editor's "Global delay" row and `mimic server status` came to report a number
+    /// the project no longer held. With no project open there is nothing to read, so the runtime's
+    /// value stands in — that is the welcome screen, where it is `.default`.
     var serverConfiguration: ServerConfiguration {
-        get { server.serverConfiguration }
+        get { currentProject?.serverConfiguration ?? server.serverConfiguration }
         set { server.serverConfiguration = newValue }
     }
     var requestLogs: [RequestLog] {
@@ -117,7 +121,6 @@ final class AppState {
             recentProjectsStore: recentProjectsStore
         )
         bindProjectWorkspace()
-        syncConfigurationOnNextProjectChange = true
         _ = projects.loadLastOpenedProject()
     }
 
@@ -209,7 +212,16 @@ final class AppState {
 
     func startServer() { server.startServer() }
     func stopServer() { server.stopServer() }
-    func retryStartOnNextPort(from port: Int) { server.retryStartOnNextPort(from: port) }
+    /// Accepts the next port after a conflict, and writes it to the project on the way.
+    ///
+    /// The port a user accepts here is a setting, not a runtime detail: it only lived on the runtime,
+    /// so it was lost the next time the project was opened, and — now that the project is what the
+    /// runtime is applied from — it would be overwritten by the next edit of anything else. One
+    /// command puts it where it belongs; the runtime call then clears the alert and starts.
+    func retryStartOnNextPort(from port: Int) {
+        _ = run(.serverConfigure(port: port + 1, globalDelayMs: nil))
+        server.retryStartOnNextPort(from: port)
+    }
 
     // MARK: - Endpoints
 
@@ -260,8 +272,10 @@ final class AppState {
         _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(groupTag: groupTag ?? "")))
     }
 
+    /// One writer. The command mutates the project, and applying the project is what reaches the
+    /// engine — the direct write to the runtime's copy that used to lead this method was the reason
+    /// the window appeared to work while `mimic server configure --delay` did not.
     func updateGlobalDelay(delayMs: Int) {
-        server.serverConfiguration.globalDelayMs = delayMs
         _ = run(.serverConfigure(port: nil, globalDelayMs: delayMs))
     }
 
@@ -471,13 +485,11 @@ final class AppState {
 
     func createProject(name: String, port: Int = 8080) {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
         _ = projects.createProject(name: name, port: port)
     }
 
     func openProject(id: UUID) {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
         _ = projects.openProject(id: id)
     }
 
@@ -501,13 +513,11 @@ final class AppState {
     func deleteProject(id: UUID) {
         if currentProject?.id == id {
             stopServerForProjectChange()
-            syncConfigurationOnNextProjectChange = true
         }
         projects.deleteProject(id: id)
     }
     func closeProject() {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
         projects.closeProject()
     }
     func scheduleAutosave() { projects.scheduleAutosave() }
@@ -540,22 +550,21 @@ final class AppState {
     }
 
     private func bindProjectWorkspace() {
+        // Every change applies the whole project, configuration included.
+        //
+        // This used to take the configuration only when the *identity* of the open project changed,
+        // behind a `syncConfigurationOnNextProjectChange` flag, and push endpoints alone otherwise.
+        // But the configuration is edited in place on the open project — `mimic server configure
+        // --delay 500` is a `.serverConfigure` command like any other — so that edit reached the
+        // project and stopped there. The engine kept the old delay, `mimic server status` reported
+        // the old port, the editor's "Global delay" row showed a number nothing had changed, and
+        // `startServer` bound whichever port the runtime happened to be holding. The window and the
+        // script disagreed about the same project, which is the one thing this seam exists to
+        // prevent — and the headless host, which keeps no second copy, behaved correctly all along.
         projects.onCurrentProjectChanged = { [weak self] project in
-            guard let self else { return }
-            if syncConfigurationOnNextProjectChange {
-                server.applyProject(project)
-                syncConfigurationOnNextProjectChange = false
-            } else {
-                server.updateMocks(
-                    endpoints: project?.endpoints ?? [],
-                    journey: project?.activeJourney
-                )
-            }
+            self?.server.applyProject(project)
         }
-        server.updateMocks(
-            endpoints: projects.currentProject?.endpoints ?? [],
-            journey: projects.currentProject?.activeJourney
-        )
+        server.applyProject(projects.currentProject)
     }
 
     @discardableResult

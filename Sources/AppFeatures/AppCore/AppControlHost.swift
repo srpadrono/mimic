@@ -80,12 +80,18 @@ final class AppControlHost: ControlHost {
         case let .serverStart(port):
             guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
             if let port {
+                // Through `.serverConfigure`, not by writing the runtime's copy: a port supplied to
+                // `mimic server start --port` is a change to the project, and validating it here and
+                // then applying it somewhere the project cannot see is how the two came apart. The
+                // executor validates too, but keeping the check here means the caller gets
+                // `port.invalid` rather than a start that quietly used the old port.
                 do {
                     try EndpointValidator.validatePort(port)
                 } catch {
                     return .failure(.validation(error))
                 }
-                appState.serverConfiguration.port = port
+                let configured = perform(.serverConfigure(port: port, globalDelayMs: nil))
+                guard configured.ok else { return configured }
             }
             appState.startServer()
             // The runtime starts asynchronously, so report the intent rather than claiming a state

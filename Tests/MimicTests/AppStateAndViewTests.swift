@@ -15,6 +15,9 @@ struct AppStateAndViewTests {
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
         private(set) var startConfigurations: [ServerConfiguration] = []
         private(set) var stopCallCount = 0
+        /// What the runtime actually pushed. Nothing recorded this, which is why a global delay that
+        /// reached the project and stopped there had no test that could see it.
+        private(set) var pushedGlobalDelays: [Int] = []
 
         init() {
             (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
@@ -32,7 +35,9 @@ struct AppStateAndViewTests {
             stopCallCount += 1
         }
 
-        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {
+            pushedGlobalDelays.append(globalDelayMs)
+        }
     }
 
     @discardableResult
@@ -583,6 +588,33 @@ struct AppStateAndViewTests {
 
         #expect(appState.serverConfiguration.port == 9844)
         #expect(await engine.startConfigurations.last?.port == 9844)
+        // The accepted port belongs to the project, so it survives everything else the project does.
+        #expect(appState.currentProject?.serverConfiguration.port == 9844)
+    }
+
+    /// The window and `mimic` have to agree about the project they are both looking at.
+    ///
+    /// `serverConfigure` is an ordinary project-scoped command: the executor writes it to the open
+    /// project, exactly as it does for an endpoint edit. But the runtime took the configuration only
+    /// when the *identity* of the open project changed, and pushed endpoints alone otherwise — so
+    /// this edit reached the project and stopped there. The engine kept the old delay, the editor's
+    /// "Global delay" row showed a value nothing had changed, and `mimic server status` reported the
+    /// old port, while the headless service — which keeps no second copy — got it right.
+    @Test("A configuration change reaches the engine, not just the project")
+    func serverConfigureReachesTheEngine() async throws {
+        let engine = StubEngine()
+        let server = MockServerRuntime(engine: engine)
+        let appState = try makeAppState(server: server)
+
+        appState.createProject(name: "Checkout", port: 8080)
+        try await waitUntil { await engine.pushedGlobalDelays.isEmpty == false }
+
+        appState.updateGlobalDelay(delayMs: 500)
+
+        try await waitUntil { await engine.pushedGlobalDelays.last == 500 }
+        #expect(appState.currentProject?.serverConfiguration.globalDelayMs == 500)
+        // What the editor's row and `mimic server status` both read.
+        #expect(appState.serverConfiguration.globalDelayMs == 500)
     }
 
     @Test("The welcome list is the store, ordered by the recents cache")

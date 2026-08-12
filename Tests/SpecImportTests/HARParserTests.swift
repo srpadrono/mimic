@@ -312,6 +312,9 @@ struct HARParserTests {
         // A URL with no path at all still has to name one.
         #expect(HARParser.extractPath(from: "https://api.example.com") == "/")
         #expect(HARParser.extractPath(from: "") == "/")
+        // One dotted segment with nothing behind it is a filename, not a host — re-parsing it as one
+        // would leave an empty path and lose the segment.
+        #expect(HARParser.extractPath(from: "logo.png") == "/logo.png")
 
         for capture in ["https://api.example.com/v1/users", "/already/path", "api.example.com/users",
                         "users/123", "https://api.example.com", "", "?query=only", "#fragment"] {
