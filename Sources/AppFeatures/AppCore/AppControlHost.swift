@@ -390,6 +390,12 @@ final class AppControlHost: ControlHost {
     private func resolveStoredProjectID(_ ref: ProjectRef, appState: AppState) async throws -> UUID {
         if let open = appState.currentProject, Self.matches(open, ref) { return open.id }
 
+        // A script's previous command may still be writing. `mimic project create Foo` answers before
+        // its insert lands, so `mimic project duplicate Foo` a moment later read a store that did not
+        // have Foo yet and reported `project.notFound` for a project it had just been told about.
+        // Waiting here costs nothing when nothing is in flight — see `ProjectWorkspace.storeWrites`.
+        await appState.projects.awaitPendingStoreWrites()
+
         let stored = try await repository.allProjects()
         if let id = ref.id {
             guard stored.contains(where: { $0.id == id }) else {
@@ -404,6 +410,11 @@ final class AppControlHost: ControlHost {
     /// has to carry. Mirrors `MimicControlService.resolveStoredProject`, including which failure each
     /// dead end produces.
     private func resolveStoredProject(_ ref: ProjectRef) async throws -> MockProject {
+        // Same wait, same reason as `resolveStoredProjectID` above: this is the read behind
+        // `mimic project export`, and exporting a project created by the previous command has to
+        // find it.
+        await appState?.projects.awaitPendingStoreWrites()
+
         if let id = ref.id {
             do {
                 return try await repository.load(id: id)

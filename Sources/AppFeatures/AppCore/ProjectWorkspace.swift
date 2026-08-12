@@ -25,6 +25,20 @@ final class ProjectWorkspace {
     private var hasPendingAutosave = false
     /// Ticket for the newest ``openProject(id:)``, so a load that has been superseded cannot publish.
     private var openGeneration = 0
+    /// The most recent project-lifecycle write, so the next one can wait for it.
+    ///
+    /// Create, duplicate and delete each answer before their write lands — the window needs the
+    /// project on screen now, not a spinner — and each used to be an independent unstructured `Task`
+    /// with no order between them. A script drives these back to back: `mimic project create Foo`
+    /// followed immediately by `mimic project delete Foo` is two commands well inside one database
+    /// round trip, and the delete could reach the store first, remove nothing, and then have the
+    /// create's insert land *after* it and put the project back. `mimic project duplicate Foo` in the
+    /// same position reported "not found" for a project the caller had just been told was created.
+    ///
+    /// `MimicControlService` never had this because it saves before it answers. Chaining the tasks
+    /// gives the window the same guarantee without making it wait: the writes reach the store in the
+    /// order they were asked for, whatever order the callers' replies arrive in.
+    private var storeWrites: Task<Void, Never>?
 
     init(
         projectRepository: any ProjectRepository,
@@ -51,7 +65,9 @@ final class ProjectWorkspace {
         setCurrentProject(project, isRestoring: true)
 
         autosaveStatus = .saving
-        Task { @MainActor [weak self] in
+        let previousWrites = storeWrites
+        storeWrites = Task { @MainActor [weak self] in
+            await previousWrites?.value
             guard let self else { return }
             do {
                 try await projectRepository.save(project)
@@ -116,7 +132,9 @@ final class ProjectWorkspace {
     }
 
     func duplicateProject(id: UUID) {
-        Task { @MainActor [weak self] in
+        let previousWrites = storeWrites
+        storeWrites = Task { @MainActor [weak self] in
+            await previousWrites?.value
             guard let self else { return }
             do {
                 let source = try await projectRepository.load(id: id)
@@ -145,6 +163,11 @@ final class ProjectWorkspace {
     /// but a failure now reaches `autosaveStatus`, which is the channel the window already renders
     /// for a store failure.
     func importProject(_ document: MockProject) async -> Bool {
+        // Ordered behind the lifecycle writes for the same reason they are ordered behind each other.
+        // It does not join the chain itself: this one is `async` and its caller awaits it, so anything
+        // issued after the reply is already behind it.
+        await storeWrites?.value
+
         autosaveStatus = .saving
         do {
             try await projectRepository.save(document)
@@ -164,7 +187,9 @@ final class ProjectWorkspace {
         // followed by a save that puts the row straight back.
         if currentProject?.id == id { cancelPendingAutosave() }
 
-        Task { @MainActor [weak self] in
+        let previousWrites = storeWrites
+        storeWrites = Task { @MainActor [weak self] in
+            await previousWrites?.value
             guard let self else { return }
             do {
                 try await projectRepository.delete(id: id)
@@ -188,6 +213,15 @@ final class ProjectWorkspace {
     func closeProject() {
         flushPendingAutosave()
         currentProject = nil
+    }
+
+    /// Waits for every project-lifecycle write already asked for.
+    ///
+    /// `AppControlHost` calls this before it resolves a project reference against the store, so a
+    /// reference to something a previous command created resolves to the row rather than to nothing.
+    /// See ``storeWrites`` for the sequence that makes this necessary.
+    func awaitPendingStoreWrites() async {
+        await storeWrites?.value
     }
 
     func scheduleAutosave() {
