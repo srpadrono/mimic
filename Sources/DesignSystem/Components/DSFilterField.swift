@@ -39,11 +39,16 @@ public struct DSFilterField: View {
     /// Keyboard focus, so the well answers the Tab key the way it already answers the pointer.
     ///
     /// `.textFieldStyle(.plain)` discards AppKit's own focus ring, and nothing replaced it — so this
-    /// field, the request log's and the request detail's were the three places in the workspace where
+    /// field, the request log's and the request detail's were three places in the workspace where
     /// tabbing in changed nothing on screen. That is the same defect as a control with no hover
     /// state, applied to the keyboard, and for Full Keyboard Access it is not a polish item.
     /// `DSTextField` already draws exactly this ring; it was simply the only thing in the module that
     /// did.
+    ///
+    /// This fixes one of the three. The request log's field (`RequestLogDrawerView`) and the request
+    /// detail's (`RequestDetailInspector`) are still hand-rolled `TextField`s with no ring — they are
+    /// two of the three call sites that should be adopting this component rather than redrawing it,
+    /// and they get the ring for free when they do.
     @FocusState private var isFocused: Bool
 
     public init(

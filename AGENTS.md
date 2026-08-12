@@ -97,12 +97,12 @@ place — verify with `docker run --rm -v "$PWD":/src -w /src swift:6.2 …` rat
 
 ### Testing against real inputs
 
-Three shipped bugs came from fixtures that were tidier than reality: a replayed `Content-Encoding:
-gzip` broke every real HAR import, an appended `Content-Type` was emitted twice, and every Swagger
-fixture in the suite declared `produces` inside the operation while real specs overwhelmingly declare
-it once at the document level — which the parser did not read, so those specs imported as plain text
-and, because `.plainText` short-circuits the JSON body fallback, with no body either. Two bugs behind
-one convention every fixture happened to share.
+Three shipped bugs came from fixtures that were tidier than reality: a replayed
+`Content-Encoding: gzip` broke every real HAR import, an appended `Content-Type` was emitted twice,
+and every Swagger fixture in the suite declared `produces` inside the operation while real specs
+overwhelmingly declare it once at the document level — which the parser did not read, so those specs
+imported as plain text and, because `.plainText` short-circuits the JSON body fallback, with no body
+either. Two bugs behind one convention every fixture happened to share.
 
 When adding a feature that consumes external input, add a case built from something a real server,
 browser or spec generator produces. `Tests/SpecImportTests/RealCaptureTests.swift` and
@@ -253,8 +253,9 @@ set of rules, because they used to follow none and the window read as three unre
   `HeaderControl` and `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
   the same 3pt inset privately — two of them across a module boundary, one with a comment promising
   it matched `DSFilterField` "so a panel that later adopts that component does not change shape on
-  the way in". Six copies, and nothing checked that the promise held. The hairline was worse:
-  twenty-three bare `0.5`s, seven of them hand-drawing the closing rule `DSDivider` exists to draw.
+  the way in". Six copies, and nothing checked that the promise held. The line weights were worse:
+  twenty-three bare literals — eleven strokes, eight of them hand-drawing the closing rule
+  `DSDivider` exists to draw, three private constants, and `DSDividerStyle` itself.
   `Tests/DesignSystemTests` pins all three ladders by value, because an ordering assertion cannot
   catch `DSSpacing.md` going from 12 to 10.
 - **A bar inside a pane takes `DSColors.band`; a panel's own header takes `DSColors.secondary`.**
