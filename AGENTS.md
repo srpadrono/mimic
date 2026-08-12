@@ -170,10 +170,19 @@ behaviour is what kept it out of the docs' recommended path:
 
 **The CLI half of that variable is not implemented.** `MimicCLICore`'s own discovery reader — a
 second copy, because the CLI links no `ControlPlane` — still searches only the two Application
-Support paths (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing). The
-script is unaffected only because it also exports `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT`, which
-win in `resolveBaseURL` before discovery is consulted. Anything else that wants an isolated run must
-do the same, and mirroring the override into `MimicCLICore` is an open item.
+Support paths (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing).
+
+**So an isolated run has to supply the token, not only the destination.** This paragraph used to say
+the script was "unaffected only because it also exports `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT`,
+which win in `resolveBaseURL` before discovery is consulted", and that is half an answer: those two
+resolve *where* to send a command and carry no credential — `resolveToken` never consults either.
+Move the file and `mimic` finds no `control.json` at all, so it sends no `X-Mimic-Token`, and
+`ControlServer.denial` guards every route including `/health`; every command comes back 401 while
+`mimic app start` still looks fine, because `isReachable` accepts a 401 as proof something answered.
+`Scripts/run_cli_e2e.sh` therefore exports `MIMIC_CONTROL_TOKEN` as well, which `ControlServer.init`
+takes for the token it demands and `ControlEndpointFileReader.resolveToken` takes first for the one
+it sends. Anything else wanting an isolated run needs all four, and mirroring `MIMIC_CONTROL_FILE`
+into `MimicCLICore` — which would reduce that to two — is an open item.
 
 When touching anything the Linux build compiles, remember it is not macOS: `URLSession` lives in
 `FoundationNetworking`, the BSD socket calls live in `Glibc` rather than `Darwin`, and some C types
@@ -312,8 +321,11 @@ comment in either file, so it was guaranteed to drift, and `wc -l` answers it on
 
 **This is the mechanism behind every divergence between the two hosts, and it works in the worst
 direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` holds two
-files, and **every** test in both runs against `MimicControlService`: `ControlServiceTests` builds one
-directly, `ControlServerTests` stands a `ControlServer` on top of one. `AppControlHost`, the host
+files, and every test in them that exercises a *host* runs against `MimicControlService`:
+`ControlServiceTests` builds one directly, and `ControlServerTests` stands a `ControlServer` on top of
+one. (`ControlServerTests` also carries an `Endpoint discovery` suite and a Host-header unit test
+that stand up no host at all, several of them added by the same work that widened
+`ControlEndpointFile` — so "every test in both" was true when it was written and is not now.) `AppControlHost`, the host
 every `mimic` invocation actually reaches, has a handful of its own in
 `Tests/MimicTests/AppStateAndViewTests.swift` plus `Tests/MimicTests/HostParityTests.swift`, which
 drives both hosts together — all added after the fact. (Counts are left out deliberately; these
@@ -429,7 +441,7 @@ set of rules, because they used to follow none and the window read as three unre
   the same 3pt inset privately — two of them across a module boundary, one with a comment promising
   it matched `DSFilterField` "so a panel that later adopts that component does not change shape on
   the way in". Six copies, and nothing checked that the promise held. The line weights were worse:
-  twenty-three bare literals — eleven strokes, eight of them hand-drawing the closing rule
+  twenty-three bare literals — eleven strokes, eight more hand-drawing the closing rule
   `DSDivider` exists to draw, three private constants, and `DSDividerStyle` itself.
   `Tests/DesignSystemTests` pins all three ladders by value, because an ordering assertion cannot
   catch `DSSpacing.md` going from 12 to 10.

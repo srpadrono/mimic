@@ -30,8 +30,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Adding a `ControlCommand` case is now a compile error until it is routed, in the executor and in
-  both hosts. The command catalog is checked against the enum rather than against a copy of itself.
+- Adding a `ControlCommand` case is now a compile error until it is *named and classified* —
+  `ControlCommand.kind` and `CommandKind.scope` are switches with no `default` — and a test failure
+  until it is *routed*, in the executor and in both hosts. Routing is not compile-enforced: all three
+  dispatch switches end in a `default:` that throws at runtime, and sweeps over `CommandKind.allCases`
+  are what catch a command nobody implemented. The command catalog is checked against the enum rather
+  than against a copy of itself, and every catalog example is parsed by the CLI.
 - Endpoint, scenario and step names and paths are trimmed on the way in, as journey names already
   were.
 - `Package.resolved` and `Tuist/Package.resolved` are pinned to one set of dependency versions, and

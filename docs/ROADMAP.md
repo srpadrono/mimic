@@ -35,7 +35,7 @@ Real limitations, not planned work:
 - **`mimic daemon start` runs the app, not a daemon.** It sets `--headless` on `mimic app start`,
   which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app hides its Dock icon and serves the
   control API through `AppControlHost`. `MimicDaemon` and `MimicControlService` in `ControlPlane` —
-  a complete windowless composition root, and the target of every test in `ControlPlaneTests` — are
+  a complete windowless composition root, and the target of every host-level test in `ControlPlaneTests` — are
   unreachable from any shipped path. Headless works, and works through the same code path the window
   uses, which is an argument for the current arrangement rather than against it; the cost is that
   the better-tested host is the one nobody runs, and four divergences between the two shipped before

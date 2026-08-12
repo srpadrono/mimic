@@ -132,9 +132,13 @@ honours it on both sides — it writes its `control.json` there and searches onl
 override *replaces* the default search list rather than joining the front of it, so an isolated run
 cannot fall through to a developer's real instance. The **CLI** does not: `mimic` links no
 `ControlPlane` and carries its own copy of the discovery reader, which still looks only in the two
-Application Support paths. So an isolated run must also set `MIMIC_CONTROL_URL` or
-`MIMIC_CONTROL_PORT`, which win before discovery is consulted — which is exactly what
-`Scripts/run_cli_e2e.sh` does. Mirroring the override into the CLI's reader is an open item.
+Application Support paths. So an isolated run must set `MIMIC_CONTROL_URL` or `MIMIC_CONTROL_PORT`
+for the destination **and `MIMIC_CONTROL_TOKEN` for the credential**. The second half is easy to
+miss: those two variables win before discovery is consulted, but discovery is also where the token
+comes from, and `resolveToken` does not read either of them — so a run that sets only the destination
+reaches the right port with no `X-Mimic-Token` and is refused by every route. `mimic app start` still
+succeeds in that state, because `isReachable` accepts a 401 as proof something answered.
+`Scripts/run_cli_e2e.sh` sets all four. Mirroring the override into the CLI's reader is an open item.
 
 The parent directory is created `0700` and the file itself is written `0600` wherever it lands: it
 carries the instance's token, and an isolated run is not a less sensitive one.

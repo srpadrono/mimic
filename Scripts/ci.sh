@@ -171,11 +171,13 @@ Scripts/check_house_rules.sh
 # twice claimed a figure the tree did not support. This recounts `@Test` and `func test`
 # declarations per folder and fails if any number README states has drifted, printing the true ones.
 #
-# Here and not in .github/workflows/ci.yml, deliberately. A contributor's pull request should go red
-# for a defect in the code, not for a hand count in a document they may not own; and the README's
-# other generated numbers already work this way — `Scripts/update_readme_coverage.py` rewrites the
-# coverage section from `Scripts/run_full_test_suite.sh`, which CI does not run either. This is the
-# gate you run before pushing, which is exactly where a stale count is cheap to fix.
+# Also in .github/workflows/ci.yml, and this comment used to argue at length that it should not be —
+# that a contributor's pull request should go red for a defect in the code, not for a hand count in a
+# document they may not own. That reasoning was wrong about which failure is cheaper. A count that is
+# only checked before pushing is a count nobody checks, and this table has already drifted twice; the
+# fix is one command whose output names the numbers to paste, and it takes seconds on a runner with
+# no Swift involved. The README's coverage section still works the other way because populating it
+# needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
 step "README test counts"
 python3 Scripts/check_doc_counts.py
 

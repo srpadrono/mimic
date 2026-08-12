@@ -40,6 +40,22 @@ export MIMIC_DATABASE_PATH="$WORK/mimic.sqlite"
 export MIMIC_CONTROL_PORT="$CONTROL_PORT"
 export MIMIC_CONTROL_URL="http://127.0.0.1:$CONTROL_PORT"
 export MIMIC_CONTROL_FILE="$WORK/control.json"
+# The credential has to be supplied, not discovered, and moving the file is what makes that true.
+#
+# `MIMIC_CONTROL_FILE` is honoured by the *app* — `ControlEndpointFile` in ControlPlane — and not by
+# the CLI, which carries its own reader searching only the two Application Support paths
+# (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing; mirroring it is an open
+# item in AGENTS.md). So the instance advertises itself in $WORK and `mimic` cannot see that file.
+# `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT` do not close the gap: they resolve the *destination*,
+# and `resolveToken` never consults them. Every command would reach the right port with no token and
+# come back 401 — `ControlServer.denial` guards every route — while `mimic app start` still looked
+# fine, because `isReachable` accepts a 401 as proof something answered.
+#
+# Both sides read `MIMIC_CONTROL_TOKEN` first: `ControlServer.init` for the token it demands,
+# `ControlEndpointFileReader.resolveToken` for the one it sends. Setting it here is what makes an
+# isolated run work at all, and it is a fresh value per run rather than a fixed string so a leftover
+# file from a previous run cannot authenticate against this one.
+export MIMIC_CONTROL_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
 # Prefer a freshly built CLI; fall back to one on PATH.
 #

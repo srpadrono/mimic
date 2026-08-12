@@ -146,6 +146,7 @@ bodies, formatted and searchable — so checking what a mock returned doesn't me
 export MIMIC_DATABASE_PATH="$PWD/.mimic-ci/store.sqlite"   # isolated store
 export MIMIC_CONTROL_FILE="$PWD/.mimic-ci/control.json"    # isolated discovery file
 export MIMIC_CONTROL_PORT=18787                            # …and the port to reach it on
+export MIMIC_CONTROL_TOKEN="$(uuidgen)"                    # …and the credential, since the file moved
 
 mimic daemon start                          # headless: the app, windowless
 mimic project import fixtures/checkout.json # a `mimic project export` document, not an OpenAPI spec
@@ -160,7 +161,9 @@ mimic journey status | jq -e '.journeyStatus.isComplete'
 `MIMIC_CONTROL_FILE` keeps a CI run out of a developer's `control.json` — the app writes and searches
 there instead of in Application Support. The port is exported alongside it because the CLI does not
 read that variable yet (it carries its own copy of the discovery reader), and `MIMIC_CONTROL_PORT`
-wins before discovery is consulted. → [docs/CLI.md](docs/CLI.md#environment).
+wins before discovery is consulted. `MIMIC_CONTROL_TOKEN` has to be set too: moving the file means
+`mimic` cannot read the token out of it, and the port variables carry a destination rather than a
+credential. → [docs/CLI.md](docs/CLI.md#environment).
 
 The CLI is a thin client over a loopback HTTP API, so a non-Swift agent can skip it entirely. Every
 request carries the instance's token, which it mints at startup and writes to its discovery file.
@@ -240,7 +243,7 @@ own result.)
 
 Nothing is broken by this — headless works, and it works through the same code path a developer
 watches all day, which is a real argument in its favour. What it costs is honesty about the tests:
-every test in `ControlPlaneTests` exercises the host that does not ship, while the host that does had
+every host-level test in `ControlPlaneTests` exercises the host that does not ship, while the host that does had
 no unit test at all until four behavioural divergences between the two had already been released.
 Whether to wire the daemon up or delete it is an open question; leaving the documentation implying
 that CI runs a separate daemon is not. See
@@ -295,14 +298,12 @@ true of the commit that wrote it. It no longer has to be recounted by eye —
 each number here that has drifted:
 
 ```bash
-python3 Scripts/check_doc_counts.py    # also run by ./Scripts/ci.sh, not by GitHub Actions
+python3 Scripts/check_doc_counts.py    # also run by ./Scripts/ci.sh and by the Linux CI job
 ```
 
-**That checker is one edit behind this table.** It carries its own copy of the three groups, and
-`JourneyFeatureTests` is in none of them, so it counts the app row as 213 − 14 = 199 and reports the
-difference against the number above. Adding `"JourneyFeatureTests"` to its `APP` list — and widening
-the app-breakdown pattern from `five folders` to `six` — is what reconciles them; until somebody who
-owns `Scripts/` does that, the table above is the one that matches the tree.
+It exits 0 against this table today. It also fails on a suite folder that exists and appears in none
+of its groups, which is what a newly added suite looks like before anybody writes it in — and is how
+`JourneyFeatureTests` was caught, hours after being created.
 
 ### Coverage
 

@@ -154,9 +154,10 @@ Three consequences worth understanding before you touch this area:
   differences nobody defends, so that closing one is a visible edit to this suite rather than a
   silent change in behaviour. A difference that is written down is a contract; one that is not is a
   bug waiting to be found by a user.
-- **The test coverage points the wrong way.** Every test in `ControlPlaneTests` runs against
-  `MimicControlService` — `ControlServiceTests` builds one directly, `ControlServerTests` stands a
-  `ControlServer` on top of one. `AppControlHost` has a handful of its own in
+- **The test coverage points the wrong way.** Every test in `ControlPlaneTests` that exercises a
+  host runs against `MimicControlService` — `ControlServiceTests` builds one directly,
+  `ControlServerTests` stands a `ControlServer` on top of one. The rest of `ControlServerTests` is an
+  `Endpoint discovery` suite and a Host-header check that need no host. `AppControlHost` has a handful of its own in
   `Tests/MimicTests/AppStateAndViewTests.swift`, added only after those divergences shipped, plus
   `HostParityTests`, which drives it against its twin. A green `ControlPlaneTests` is still not
   evidence that `mimic` works.

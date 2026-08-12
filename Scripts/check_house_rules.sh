@@ -43,7 +43,7 @@ esac
 # the one file that owns the menu bar outside the check that governs casing.
 PRODUCTION_SOURCES=(Sources App/Sources)
 
-# The twelve suite folders under `Tests/`, and until this line they were in scope for *none* of the
+# Every suite folder under `Tests/`, and until this line they were in scope for *none* of the
 # six rules — including the sleep rule, which exists because of tests. Nothing about `.textCase(`,
 # `@AppStorage` or `asyncAfter` stops being a defect in a fixture: a test is where each of them is
 # most likely to be reached for, because "it is only a test" is the argument that makes all three feel
