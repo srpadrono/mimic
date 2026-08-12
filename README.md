@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-708%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-722%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -208,15 +208,15 @@ once.
 
 ## Testing
 
-708 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+722 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 459 | Linux or macOS — `swift test` |
-| Design system | 33 | macOS — needs SwiftUI |
-| App and coordination | 176 | macOS — hosted by the app |
+| Domain, persistence, engine, control plane, import, CLI | 468 | Linux or macOS — `swift test` |
+| Design system | 34 | macOS — needs SwiftUI |
+| App and coordination | 180 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
 Only the SwiftUI layer needs a Mac. The domain rules, mock engine, persistence, control plane, spec
@@ -227,7 +227,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 459, no Xcode needed
+swift test                    # the portable 468, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
 ```
 
