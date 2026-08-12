@@ -28,7 +28,8 @@ let packageSettings = PackageSettings(
 
 let package = Package(
     name: "MimicDependencies",
-    platforms: [.macOS(.v15)],
+    // Matches `Project.swift`'s MACOSX_DEPLOYMENT_TARGET and `Package.swift`'s floor.
+    platforms: [.macOS("26.0")],
     dependencies: [
         // Vapor declared via SPM URL (not Tuist external) — workaround for vapor/vapor #3369
         // SPM's linker handles ManagedAtomic correctly; Tuist's does not

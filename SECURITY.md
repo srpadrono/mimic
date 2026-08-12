@@ -133,7 +133,8 @@ serving path does not trust what it is given:
 
 ## Sandbox and entitlements
 
-The app runs under App Sandbox and Hardened Runtime with four entitlements:
+The app runs under App Sandbox and Hardened Runtime with three entitlements beyond the sandbox
+itself:
 
 | Entitlement | Why |
 |---|---|

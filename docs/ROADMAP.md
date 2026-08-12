@@ -32,8 +32,6 @@ Real limitations, not planned work:
   to mock one service and leave the rest live.
 - **Beta, and versioned below 1.0.** The interface and the stored project format may still change
   between releases.
-- **CI can't run.** The workflow is correct and passes locally in the container it targets, but
-  GitHub Actions won't start a job on this account — see [the note in the README](../README.md#testing).
 - **One active journey per project.** Enough for a test case; not enough to model two independent
   clients against one server.
 
@@ -43,9 +41,8 @@ Roughly ordered by how often the gap gets hit:
 
 1. **Header and body matching** — the largest gap, and the matcher already has the inputs.
 2. **Passthrough for unmatched requests** — mock one endpoint, let the rest reach a real backend.
-3. **Signed and notarized releases** — removes the first-launch friction.
-4. **Response templating** — echo path params and request fields into the body.
-5. **Journey assertions** — let a journey declare the calls it *expects*, so a test can fail on a
+3. **Response templating** — echo path params and request fields into the body.
+4. **Journey assertions** — let a journey declare the calls it *expects*, so a test can fail on a
    missing call and not only on a wrong response.
 
 ## History

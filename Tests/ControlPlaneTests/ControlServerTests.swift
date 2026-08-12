@@ -465,6 +465,69 @@ struct ControlEndpointFileTests {
         #expect(ControlEndpointFile.discover(searchURLs: [url]) == nil)
     }
 
+    /// The file carries the instance's token, so its mode *is* the access control — and until this
+    /// test existed nothing anywhere asserted it. The write used to be `.atomic` followed by a
+    /// `chmod`, which publishes the token at the final path for as long as the second call takes,
+    /// and leaves it published forever if that call throws.
+    @Test("The discovery file is 0600, and is never briefly wider")
+    func discoveryFileIsPrivate() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-perms-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("control.json")
+        let endpoint = ControlEndpoint(
+            port: 8787,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            mode: "headless",
+            token: ControlToken.generate()
+        )
+
+        try ControlEndpointFile.write(endpoint, to: url)
+        let mode = try #require(
+            FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(mode.int16Value & 0o777 == 0o600, "mode was \(String(mode.int16Value, radix: 8))")
+
+        // Overwriting an existing advertisement — a restart on a new port — must land at 0600 too,
+        // and must not inherit a wider mode from whatever was already there.
+        try ControlEndpointFile.write(endpoint, to: url)
+        let rewritten = try #require(
+            FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(rewritten.int16Value & 0o777 == 0o600)
+
+        // And no temporary file is left beside it.
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(siblings == ["control.json"], "leftover files: \(siblings)")
+    }
+
+    /// A discovery file is a file on disk, and `baseURL` is a field in it. Trusting that field sends
+    /// the caller's `X-Mimic-Token` wherever the file says — so the host is derived, not read.
+    @Test("A tampered baseURL cannot redirect the CLI off the loopback")
+    func baseURLIsDerivedFromThePort() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-tamper-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("control.json")
+        var endpoint = ControlEndpoint(
+            port: 8787,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            mode: "headless"
+        )
+        endpoint.baseURL = "http://evil.example:80"
+        try ControlEndpointFile.write(endpoint, to: url)
+
+        let discovered = try #require(ControlEndpointFile.discover(searchURLs: [url]))
+        let resolved = try #require(
+            ControlEndpointFile.resolveBaseURL(explicit: nil, environment: [:], discovered: discovered)
+        )
+        #expect(resolved.absoluteString == "http://127.0.0.1:8787")
+    }
+
     @Test("A file left by a crashed instance is skipped instead of hanging the CLI")
     func staleFileIsIgnored() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())

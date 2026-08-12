@@ -16,6 +16,12 @@ MODULE_TARGETS = [
     ("Persistence.framework", "Persistence.framework", "Persistence.xcresult"),
     ("DesignSystem.framework", "DesignSystem.framework", "DesignSystem.xcresult"),
     ("SpecImport.framework", "SpecImport.framework", "SpecImport.xcresult"),
+    # ControlPlane and MimicCLICore are the automation surface the README leads with, and both were
+    # missing here while `run_full_test_suite.sh` produced their bundles anyway — so the generated
+    # "modules at or above 95%: n/6" counted six of the eight modules actually measured, and the two
+    # left out were invisible.
+    ("ControlPlane.framework", "ControlPlane.framework", "ControlPlane.xcresult"),
+    ("MimicCLICore.framework", "MimicCLICore.framework", "MimicCLICore.xcresult"),
     # AppFeatures has no standalone test scheme; its coverage is captured in the app test run.
     ("AppFeatures.framework", "AppFeatures.framework", "MimicApp.xcresult"),
 ]
@@ -124,8 +130,16 @@ def replace_badges(readme: str, app_percent: float, modules_at_or_above_95: int,
         f"{modules_at_or_above_95}%2F{module_count}-{badge_color(100.0 * modules_at_or_above_95 / module_count)})](#coverage)"
     )
 
-    readme = re.sub(r"\[!\[App Coverage\]\([^)]+\)\]\(#coverage\)", app_badge, readme, count=1)
-    readme = re.sub(r"\[!\[Module Coverage\]\([^)]+\)\]\(#coverage\)", modules_badge, readme, count=1)
+    # `re.sub` with no match returns the string unchanged and raises nothing, so when the README
+    # carried no coverage badges at all this function was a guaranteed silent no-op: the full suite
+    # ran, the script exited 0, `run_full_test_suite.sh` printed "README coverage section updated."
+    # and neither badge had ever existed. `replace_coverage_block` above defends itself; this did not.
+    readme, replaced = re.subn(r"\[!\[App Coverage\]\([^)]+\)\]\(#coverage\)", app_badge, readme, count=1)
+    if replaced != 1:
+        raise RuntimeError("README.md is missing the App Coverage badge.")
+    readme, replaced = re.subn(r"\[!\[Module Coverage\]\([^)]+\)\]\(#coverage\)", modules_badge, readme, count=1)
+    if replaced != 1:
+        raise RuntimeError("README.md is missing the Module Coverage badge.")
     return readme
 
 

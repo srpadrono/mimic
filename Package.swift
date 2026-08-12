@@ -9,11 +9,18 @@ import PackageDescription
 // Vapor's native home is Linux. Building them here means the bulk of the logic is testable on a free
 // Linux runner instead of an expensive macOS one.
 //
-// Both manifests point at the *same* directories, so they cannot drift in what they compile — only
-// in how targets are declared.
+// Both manifests declare these modules from the *same* directories, so they cannot drift in what
+// they compile — only in how targets are declared. Their two lockfiles can and did drift, which is
+// why CI compares them before building.
 let package = Package(
     name: "Mimic",
-    platforms: [.macOS(.v15)],
+    // The same floor `Project.swift` sets as MACOSX_DEPLOYMENT_TARGET, and the same one
+    // CONTRIBUTING.md, the README badge and the installer's `<os-version min>` all state. This said
+    // `.v15` — eleven majors below every other artefact — and nothing caught it because no CI job
+    // builds this manifest on a Mac, and Linux ignores `platforms:` entirely. A contributor running
+    // `swift build` locally compiled the portable modules against a macOS 15 availability floor while
+    // Xcode used 26, so an API introduced in between built in one and errored in the other.
+    platforms: [.macOS("26.0")],
     products: [
         .executable(name: "mimic", targets: ["mimic"]),
         .library(name: "MimicDomain", targets: ["Domain"]),

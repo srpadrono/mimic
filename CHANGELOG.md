@@ -3,6 +3,52 @@
 Notable changes per release. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A schema change no longer erases your projects.** `AppMigrations.migrator` set GRDB's
+  `eraseDatabaseOnSchemaChange` under `#if DEBUG`, and the app applied that migrator to the real
+  store in Application Support. Debug is the configuration every developer runs, so the next
+  migration added to the project would have dropped and rebuilt everyone's database empty. Erasing is
+  now opt-in and honoured only alongside an explicit `MIMIC_DATABASE_PATH`.
+- **A journey rehydrated against removed steps no longer takes the app down.** With the default
+  `orderedPerEndpoint` match mode, a cursor past the end of the step list built an invalid `Range`,
+  which is a trap rather than an error — inside the embedded server, so it ended the process.
+- **`mimic` exits 2 for bad usage, as documented.** An unknown subcommand or a missing argument
+  exited 64. `--match-mode`, `--completion` and `--unmatched` also silently ignored an unrecognised
+  value and reported success; they now fail.
+- **The control plane's discovery file is never world-readable.** It was written at the default
+  umask and chmodded afterwards, leaving the instance token readable by any local account for the
+  length of that window. The CLI also no longer trusts the `baseURL` string inside that file.
+- **Refused edits are reported.** Every validation failure raised by a window action was written to
+  a field nothing read, so a header containing a newline silently kept the old value.
+- **Restarting the control service logs again.** `shutdown()` cancelled the log drain, which finishes
+  the shared stream, so a later `start()` served traffic and recorded none of it.
+- A locked or unreadable database is no longer reported as "project not found".
+- The request log's method badges no longer share one accessibility identifier per HTTP method.
+
+### Changed
+
+- Adding a `ControlCommand` case is now a compile error until it is routed, in the executor and in
+  both hosts. The command catalog is checked against the enum rather than against a copy of itself.
+- Endpoint, scenario and step names and paths are trimmed on the way in, as journey names already
+  were.
+- `Package.resolved` and `Tuist/Package.resolved` are pinned to one set of dependency versions, and
+  CI fails if they drift — Linux was testing a Vapor, NIO and GRDB build the installer never shipped.
+- Both manifests declare macOS 26, the floor every other artefact already stated.
+
+## [0.9.3] — 2026-08-06
+
+### Fixed
+
+- **The request log drawer resizes like the other two panels.** It was the last one still driven by a
+  `DragGesture` writing into a frame, which could crash inside AppKit's constraint update with the
+  mouse still down; it is an `NSSplitViewItem` now, so hover, double-click and size restoration match
+  the navigator and the inspector.
+- **The journey editor's header stays reachable** when a journey has more steps than fit.
+- A release now fails rather than shipping a version that disagrees with the tag.
+
 ## [0.9.2] — 2026-08-04
 
 ### Fixed
@@ -100,5 +146,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.9.3]: https://github.com/srpadrono/mimic/releases/tag/v0.9.3
+[0.9.2]: https://github.com/srpadrono/mimic/releases/tag/v0.9.2
 [0.9.1]: https://github.com/srpadrono/mimic/releases/tag/v0.9.1
 [0.9.0]: https://github.com/srpadrono/mimic/releases/tag/v0.9.0

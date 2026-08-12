@@ -9,8 +9,10 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-716%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-708%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
+[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -206,22 +208,26 @@ once.
 
 ## Testing
 
-716 tests: Swift Testing for units and integration, XCTest with page objects for UI.
+708 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
+for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 455 | Linux or macOS — `swift test` |
-| Design system | 41 | macOS — needs SwiftUI |
-| App and coordination | 179 | macOS — hosted by the app |
-| macOS UI (XCUITest) | 41 | macOS, interactive session |
+| Domain, persistence, engine, control plane, import, CLI | 459 | Linux or macOS — `swift test` |
+| Design system | 33 | macOS — needs SwiftUI |
+| App and coordination | 176 | macOS — hosted by the app |
+| macOS UI (XCUITest) | 40 | macOS, interactive session |
 
 Only the SwiftUI layer needs a Mac. The domain rules, mock engine, persistence, control plane, spec
 import and CLI are plain Swift, so [`Package.swift`](Package.swift) builds them anywhere while
-[`Project.swift`](Project.swift) (Tuist) builds the app. Both manifests point at the *same*
-directories, so they cannot drift in what they compile.
+[`Project.swift`](Project.swift) (Tuist) builds the app. Both manifests declare those modules from
+the *same* directories, so they cannot drift in what they compile — but they resolve their
+dependencies into two separate lockfiles, and that pair *can* drift, so CI checks the two agree
+before it builds anything.
 
 ```bash
-swift test                    # the portable 455, no Xcode needed
+swift test                    # the portable 459, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
 ```
 
@@ -233,10 +239,12 @@ which runs every suite with coverage enabled and rewrites this section from the 
 bundles. Run it to populate the table.
 <!-- coverage:generated:end -->
 
-> **CI is currently manual-only.** GitHub Actions cannot start a job on this account — runs die in
-> ~2s with zero steps executed because of a billing block, not a workflow error. The workflow is kept
-> in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) with its automatic triggers commented
-> out, so commits aren't marked with a red X that says nothing about the code.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
+`main`, in two jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
+minutes, macOS runs `tuist generate`, the Debug build, the app-level suites, XCUITest and the Release
+gate. Both runners are free on a public repository. (This section used to say Actions could not start
+a job here at all — true while the repository was private and a billing block killed every run in
+about two seconds; making it public resolved it.)
 
 ## Documentation
 

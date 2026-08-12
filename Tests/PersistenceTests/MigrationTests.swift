@@ -126,4 +126,34 @@ struct MigrationTests {
         let domain = try #require(fetched).toDomain()
         #expect(domain.schemaVersion == MockProject.currentSchemaVersion)
     }
+
+    // MARK: - Erase-on-schema-change gating
+
+    /// GRDB's `eraseDatabaseOnSchemaChange` drops the file and rebuilds it empty on any schema
+    /// difference. It used to be on for every DEBUG build — the configuration every developer runs —
+    /// against the real store in Application Support, so the next migration anybody added would have
+    /// deleted everyone's projects. These four cases are the gate that replaced it: the flag needs an
+    /// explicit opt-in *and* an explicitly chosen store, so it can never reach a path nobody named.
+    @Test(
+        "Erase-on-schema-change needs both the opt-in and an explicit store",
+        arguments: [
+            ([:], false),
+            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1"], false),
+            (["MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], false),
+            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": ""], false),
+            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "0", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], false),
+            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], true),
+        ] as [([String: String], Bool)]
+    )
+    func eraseIsGated(environment: [String: String], expected: Bool) {
+        #expect(AppMigrations.erasesOnSchemaChange(environment: environment) == expected)
+    }
+
+    /// The default migrator is the one the app opens a real store with, and it must never erase.
+    @Test("The default migrator migrates forward rather than erasing")
+    func defaultMigratorDoesNotErase() throws {
+        #expect(AppMigrations.migrator.eraseDatabaseOnSchemaChange == false)
+        #expect(AppMigrations.migrator(erasingOnSchemaChange: false).eraseDatabaseOnSchemaChange == false)
+        #expect(AppMigrations.migrator(erasingOnSchemaChange: true).eraseDatabaseOnSchemaChange)
+    }
 }

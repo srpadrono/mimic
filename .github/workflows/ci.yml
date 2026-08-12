@@ -27,9 +27,13 @@ permissions:
 # trailing comment is the human-readable version; the SHA is what actually runs.
 
 concurrency:
-  # A newer push makes an in-flight run irrelevant; cancel rather than queue behind it.
+  # A newer push makes an in-flight run irrelevant *on a pull request*, where only the tip matters.
+  # On `main` it does not: every commit there is an artefact someone may bisect to, and `github.ref`
+  # is `refs/heads/main` for pushes and manual runs alike, so they all shared one group. That has
+  # already happened — a `workflow_dispatch` on main was cancelled by the next push, leaving the
+  # commit before it with no completed run and no red X to say so. Both runners are free here.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
@@ -48,15 +52,43 @@ jobs:
           apt-get update
           apt-get install -y libsqlite3-dev
 
+      # Recorded, and then used in the cache key below. `container: swift:6.2` is a tag its owner
+      # repoints at each patch release, so `runner.os` alone keys a `.build` full of .swiftmodules at
+      # whatever compiler produced them — and restoring those into a newer one fails with "module
+      # compiled with Swift X cannot be imported by Swift Y", which reads as a source problem and
+      # reproduces nowhere locally.
       - name: Swift version
-        run: swift --version
+        id: swift
+        run: |
+          swift --version
+          echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-')" >> "$GITHUB_OUTPUT"
+
+      # The two manifests declare the same dependency ranges from the same directories, and then
+      # resolve them into two separate lockfiles. That is a drift generator: 21 packages had already
+      # diverged, including Vapor, NIO and GRDB — so this job's socket-binding suites were passing
+      # against versions the shipped .pkg does not contain. Nothing detected it, because the claim
+      # that the manifests "cannot drift" was written in prose rather than checked.
+      - name: Lockfiles agree
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          def pins(path):
+              return {p['identity']: p['state'].get('version') for p in json.load(open(path))['pins']}
+          root, tuist = pins('Package.resolved'), pins('Tuist/Package.resolved')
+          drifted = {k: (root[k], tuist[k]) for k in root.keys() & tuist.keys() if root[k] != tuist[k]}
+          for name, (a, b) in sorted(drifted.items()):
+              print(f"{name}: Package.resolved={a} Tuist/Package.resolved={b}")
+          if drifted:
+              sys.exit(f"{len(drifted)} package(s) drifted — re-resolve both lockfiles to one set")
+          print(f"{len(root.keys() & tuist.keys())} shared packages agree")
+          PY
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
-          restore-keys: ${{ runner.os }}-spm-
+          key: ${{ runner.os }}-${{ steps.swift.outputs.key }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: ${{ runner.os }}-${{ steps.swift.outputs.key }}-spm-
 
       - name: Build
         run: swift build --build-tests

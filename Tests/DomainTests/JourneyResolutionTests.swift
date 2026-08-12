@@ -489,4 +489,42 @@ struct JourneyResolutionTests {
         let decoded = try JSONDecoder().decode(JourneyRunState.self, from: data)
         #expect(decoded == state)
     }
+
+    /// A cursor past the end of the step list is what a run looks like after the journey it belongs
+    /// to loses steps — the full initializer above exists to rehydrate exactly that, and
+    /// `JourneyRunState` promises the run "degrades gracefully instead of silently replaying the
+    /// wrong step". It did not: `orderedPerEndpoint` — the default mode — built `cursor..<count`
+    /// unguarded, and `3..<2` is a precondition failure, not an empty range. The engine runs
+    /// in-process, so that trap took the whole app down.
+    @Test(
+        "A cursor past the last step falls through instead of trapping",
+        arguments: [JourneyMatchMode.orderedPerEndpoint, .strictSequence]
+    )
+    func cursorBeyondTheStepsFallsThrough(mode: JourneyMatchMode) {
+        var journey = Journey(
+            name: "Shortened",
+            steps: [Self.step(.get, "/one", 201), Self.step(.get, "/two", 202)]
+        )
+        journey.matchMode = mode
+
+        let stale = JourneyRunState(
+            journeyID: journey.id,
+            cursor: 5,
+            servedCountsByStepID: [:],
+            forceAdvancedStepIDs: [],
+            isComplete: false,
+            totalServed: 0
+        )
+
+        let plan = MockResolver.plan(
+            request: IncomingRequest(method: .get, path: "/one"),
+            endpoints: [Self.endpoint(.get, "/one", 200)],
+            globalDelayMs: 0,
+            journey: journey,
+            journeyState: stale
+        )
+
+        // The endpoint answers, because the journey has nothing left to say.
+        #expect(plan.response.statusCode == 200)
+    }
 }

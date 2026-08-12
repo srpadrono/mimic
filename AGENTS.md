@@ -59,8 +59,14 @@ included.
 
 **Linux** builds through [`Package.swift`](Package.swift) rather than Tuist — the domain rules, mock
 engine, persistence, control plane, spec import and CLI are plain Swift, so most of the suite reports
-back in a couple of minutes. Both manifests point at the same directories, so they cannot drift in
-what they compile, only in how targets are declared.
+back in a couple of minutes. Both manifests declare those modules from the same directories, so they
+cannot drift in what they compile, only in how targets are declared. What they *can* drift in is
+dependency resolution: they resolve the same ranges into two separate lockfiles, and 21 packages —
+Vapor, NIO and GRDB among them — had already diverged, so this job was passing against versions the
+shipped `.pkg` does not contain. The Linux job now checks `Package.resolved` against
+`Tuist/Package.resolved` before it builds. Compiler settings are the other half and are not yet
+checked: `Project.swift` sets `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY`, `Package.swift`
+sets nothing, so Linux still accepts an implicit transitive import that Xcode rejects.
 
 **macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
 app-level suites, **the XCUITest suite**, and the Release gate. The image label is load-bearing —
