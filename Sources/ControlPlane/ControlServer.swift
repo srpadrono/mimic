@@ -16,6 +16,7 @@ public actor ControlServer {
     private let host: any ControlHost
     private let mode: String
     private var app: Application?
+    private var isStarting = false
     private var endpointFileURL: URL?
 
     /// This instance's token. Fresh per process; see ``ControlToken``.
@@ -41,7 +42,17 @@ public actor ControlServer {
     /// - Returns: the port actually bound.
     @discardableResult
     public func start(port: Int, advertise: Bool = true) async throws -> Int {
-        guard app == nil else { throw ControlServerError.alreadyRunning }
+        // `app == nil` alone does not close the window an actor leaves open. This method suspends
+        // twice before it assigns `app` — building the application and binding the socket — and an
+        // actor admits another call at every suspension, so two overlapping starts both saw `nil`,
+        // both bound, and the second overwrote `app` with its own application. The first was then
+        // unreachable: still listening on its port, never shut down by `stop()`, and with its
+        // discovery file replaced by the second's — a CLI would be pointed at one instance while a
+        // stray one held the other port for the life of the process. `MockServerEngine.start`
+        // carries this guard for the same reason and in the same shape.
+        guard app == nil, !isStarting else { throw ControlServerError.alreadyRunning }
+        isStarting = true
+        defer { isStarting = false }
 
         let env = Environment(name: "production", arguments: ["vapor"])
         let application = try await Application.make(env)

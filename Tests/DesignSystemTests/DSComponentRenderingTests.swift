@@ -296,6 +296,54 @@ struct DSComponentRenderingTests {
         #expect(DSPanelHeader<EmptyView>.height == DSBarHeight.panelHeader)
     }
 
+    /// The third ladder, and the only one that arrived with a floor.
+    ///
+    /// `DSBarHeight` and `DSControlHeight` name points. `DSGlyph` names tiers, because the house rule
+    /// it encodes states ranges — "Separators and menu indicators are 8pt, inline glyphs 9–10pt,
+    /// control glyphs 11–13pt" — and it spent far longer than either as prose with nothing behind it:
+    /// thirty-odd bare `.font(.system(size:))` literals across two modules, which is exactly the state
+    /// the other two ladders were pinned on leaving.
+    ///
+    /// **The floor is asserted separately, and it is not redundant with the values above it.** A tier
+    /// stated as a range invites a seventh rung, and a seventh rung would pass every value line here
+    /// while sitting at 7pt — which is the failure the rule is actually about, since a menu indicator
+    /// that small stops reading as a mark and the control it annotates stops being discovered.
+    ///
+    /// Not asserted, for want of a way to: three rungs are deliberately the sizes of
+    /// `DSTypography.caption`, `.label` and `.body`, so a glyph beside a line of type matches the
+    /// line. `Font` does not expose its point size, so that relationship stays a claim in the token's
+    /// documentation rather than a check — unlike the `controlRow == row + sm * 2` line above, which
+    /// is why that one is stated there and this one is not stated here.
+    @Test("The glyph ladder is the measured values, and nothing sits below the floor")
+    func glyphLadderIsPinned() {
+        #expect(DSGlyph.indicator == 8)
+        #expect(DSGlyph.inlineSmall == 9)
+        #expect(DSGlyph.inline == 10)
+        #expect(DSGlyph.control == 11)
+        #expect(DSGlyph.controlLarge == 12)
+        #expect(DSGlyph.controlProminent == 13)
+
+        #expect(DSGlyph.minimum == 8)
+
+        let ladder = [
+            DSGlyph.indicator,
+            DSGlyph.inlineSmall,
+            DSGlyph.inline,
+            DSGlyph.control,
+            DSGlyph.controlLarge,
+            DSGlyph.controlProminent
+        ]
+
+        // "No glyph below 8pt" — the rule, stated where it can fail rather than remembered.
+        for rung in ladder {
+            #expect(rung >= DSGlyph.minimum)
+        }
+
+        // And the floor is reached, not merely respected: a `minimum` that drifted above every rung
+        // would satisfy the loop above while no longer describing the ladder it bounds.
+        #expect(ladder.min() == DSGlyph.minimum)
+    }
+
     @Test("Token values and color mappings stay consistent")
     func tokenValuesStayConsistent() {
         _ = DSAnimation.spring()

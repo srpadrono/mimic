@@ -114,6 +114,18 @@ public actor MimicControlService: ControlHost {
             return outcome.result
         }
 
+        // Project-scoped, and nothing is open.
+        //
+        // `ProjectCommandExecutor` would have handled every one of these; it declined only because
+        // there is no project to apply them to, and saying so is far more useful than "unsupported".
+        // This used to be a twenty-six-case list at the bottom of the switch below, mirrored case for
+        // case by `AppControlHost` and complemented by the executor's own twenty-one — one fact
+        // written three times and kept in agreement by hand. `CommandKind.scope` is that fact now,
+        // and its switch carries no `default`, so a command added later still cannot compile until
+        // somebody decides which side of the line it falls on. That was the whole point of naming
+        // twenty-six cases here, and it survives the collapse.
+        guard command.kind.scope == .host else { throw ControlError.noProjectOpen }
+
         switch command {
 
         // MARK: Discovery
@@ -261,41 +273,17 @@ public actor MimicControlService: ControlHost {
             requestLogs = []
             return .message("Cleared \(count) request log \(count == 1 ? "entry" : "entries").")
 
-        // MARK: Project-scoped, but no project is open
+        // MARK: Declared host-scoped, not implemented above
         //
-        // Named one by one rather than caught by `default:`. `ProjectCommandExecutor` would have
-        // handled every one of these — it only declined because nothing is open, and saying so is far
-        // more useful than "unsupported". The reason to spell them out is what happens to a command
-        // added later: under a `default` it landed here and told the caller to open a project they
-        // already had open. Listed, the compiler stops the build until the new command is routed on
-        // purpose, in the same edit that adds it to the executor.
-        case .projectRename,
-             .serverConfigure,
-             .endpointList,
-             .endpointGet,
-             .endpointCreate,
-             .endpointUpdate,
-             .endpointDelete,
-             .endpointDuplicate,
-             .scenarioList,
-             .scenarioCreate,
-             .scenarioUpdate,
-             .scenarioDelete,
-             .scenarioActivate,
-             .journeyList,
-             .journeyGet,
-             .journeyCreate,
-             .journeyTemplateList,
-             .journeyAddTemplate,
-             .journeyUpdate,
-             .journeyDelete,
-             .journeyDuplicate,
-             .journeyStepAdd,
-             .journeyStepsAdd,
-             .journeyStepUpdate,
-             .journeyStepRemove,
-             .journeyStepMove:
-            throw ControlError.noProjectOpen
+        // Unreachable while `CommandKind.scope` and this switch agree, and the compiler cannot
+        // check that they do: the guard above narrows by `CommandKind` while the switch is over
+        // `ControlCommand`. Naming the real problem beats falling through to `noProjectOpen`, which
+        // would tell the caller to open a project they already have open — the misdirection the old
+        // twenty-six-case list existed to prevent.
+        default:
+            throw ControlError.internalFailure(
+                "\(command.kind.rawValue) is host-scoped but this service does not implement it."
+            )
         }
     }
 

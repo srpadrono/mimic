@@ -59,7 +59,10 @@ public struct DSJSONEditor: View {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(DSColors.destructive)
-                        .font(.system(size: 10))
+                        // The same `inline` rung `DSTextField`'s validation row takes, beside the same
+                        // `DSTypography.label`. The two error rows are one idiom and used to be two
+                        // literals that happened to agree.
+                        .font(.system(size: DSGlyph.inline))
                     Text(error)
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.destructive)

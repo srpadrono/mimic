@@ -111,12 +111,21 @@ private extension DSButtonSize {
         }
     }
 
-    /// Never below 8pt, and never smaller than the text it sits beside.
+    /// Never below 8pt, and a step *under* the line it sits beside rather than level with it.
+    ///
+    /// The rungs are `DSGlyph`'s: `.small` sets `DSTypography.label` (11) and takes the inline rung at
+    /// 10, while `.medium` and `.large` both set 13pt lines and take control rungs at 11 and 12.
+    ///
+    /// This used to promise the glyph was "never smaller than the text it sits beside", which no
+    /// size here has ever satisfied — and should not. An SF Symbol drawn at a line's own point size
+    /// reads *larger* than the line, because the glyph fills the em box where a letter leaves room
+    /// above and below it. Matching the numbers is what makes the warning triangle look oversized,
+    /// not what makes it match.
     var glyphSize: CGFloat {
         switch self {
-        case .small: 10
-        case .medium: 11
-        case .large: 12
+        case .small: DSGlyph.inline
+        case .medium: DSGlyph.control
+        case .large: DSGlyph.controlLarge
         }
     }
 

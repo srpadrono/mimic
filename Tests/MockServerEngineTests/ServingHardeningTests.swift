@@ -44,7 +44,12 @@ struct ServingHardeningTests {
             activeScenarioID: scenario.id
         )
 
-        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { _, baseURL in
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { engine, baseURL in
+            let collector = LogCollector()
+            let stream = engine.logStream
+            let drain = Task { for await entry in stream { await collector.append(entry) } }
+            defer { drain.cancel() }
+
             let port = try #require(baseURL.port)
             // Raw socket rather than URLSession: the point is that the *process is still alive* and
             // wrote one well-formed response, which a client that retries could disguise.
@@ -52,7 +57,30 @@ struct ServingHardeningTests {
             #expect(reply.isEmpty == false, "the server died instead of answering")
             #expect(reply.statusLine.hasPrefix("HTTP/1.1 "))
             #expect(reply.isTruncated == false)
+
+            // Read the served status off the wire rather than restating the clamp, because asserting
+            // the log against the *configured* value is exactly what let the two drift: the clamp
+            // used to be applied only on the way out, so this scenario served 200 and the traffic
+            // list said 0.
+            try await collector.waitForCount(1)
+            let logged = try #require(await collector.entries.first)
+            #expect(logged.responseStatusCode == Self.servedStatusCode(reply.statusLine))
         }
+    }
+
+    @Test("The log records the status that was served, not the one that was configured")
+    func logRecordsServedStatusCode() {
+        // One clamp, two call sites: `response(for:)` and `makeLog`. The log is the half of a request
+        // that is still readable once the request is over, so a log that reports a code no client ever
+        // saw is worse than the bad code itself.
+        #expect(Self.logEntry(statusCode: -1).responseStatusCode == 200)
+        #expect(Self.logEntry(statusCode: 0).responseStatusCode == 200)
+        #expect(Self.logEntry(statusCode: 100).responseStatusCode == 200)
+        #expect(Self.logEntry(statusCode: 700).responseStatusCode == 599)
+
+        // A serveable code is recorded exactly as configured.
+        #expect(Self.logEntry(statusCode: 201).responseStatusCode == 201)
+        #expect(Self.logEntry(statusCode: 503).responseStatusCode == 503)
     }
 
     // MARK: - Header injection
@@ -76,7 +104,12 @@ struct ServingHardeningTests {
             activeScenarioID: scenario.id
         )
 
-        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { _, baseURL in
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { engine, baseURL in
+            let collector = LogCollector()
+            let stream = engine.logStream
+            let drain = Task { for await entry in stream { await collector.append(entry) } }
+            defer { drain.cancel() }
+
             let port = try #require(baseURL.port)
             let reply = try RawHTTPClient.send(method: "GET", path: "/inject", port: port)
 
@@ -85,7 +118,33 @@ struct ServingHardeningTests {
             #expect(reply.raw.contains("X-Test") == false, "the malformed header should be dropped whole")
             // Dropping the bad one must not cost the good ones.
             #expect(reply.raw.contains("X-Safe: kept"))
+
+            // And the log has to say the same thing the wire did. It used to list `X-Test` among the
+            // headers the client received, which is the one reading a developer cannot check for
+            // themselves — the response is gone by the time they open the panel.
+            try await collector.waitForCount(1)
+            let logged = try #require(await collector.entries.first)
+            #expect(logged.responseHeaders["X-Test"] == nil, "a header that never went out was logged as sent")
+            #expect(logged.responseHeaders["X-Safe"] == "kept")
         }
+    }
+
+    @Test("The log records the headers that were written, not the ones that were dropped")
+    func logOmitsDroppedHeaders() {
+        let headers = Self.logEntry(statusCode: 200, headers: [
+            "X-Test": "a\r\nX-Injected: yes",
+            "X Space": "v",
+            "X-Safe": "kept",
+        ]).responseHeaders
+
+        // Both halves of the grammar, because `response(for:)` drops on both: a value that can end
+        // the header line early, and a name that is not a token.
+        #expect(headers["X-Test"] == nil)
+        #expect(headers["X Space"] == nil)
+        #expect(headers["X-Safe"] == "kept")
+
+        // The content type the server chose is part of what the client received, so it stays.
+        #expect(headers["Content-Type"] == Scenario.ContentType.json.rawValue)
     }
 
     @Test("Header names and values are held to the RFC 9110 grammar")
@@ -170,5 +229,31 @@ struct ServingHardeningTests {
         #expect(redacted.requestHeaders["Accept"] == "application/json")
         #expect(redacted.responseHeaders["Content-Type"] == "application/json")
         #expect(redacted.path == log.path)
+    }
+
+    // MARK: - Helpers
+
+    /// The log entry the engine would write for a response resolved this way, without standing a
+    /// server up — these assertions are about what `makeLog` records, not about routing.
+    private static func logEntry(statusCode: Int, headers: [String: String] = [:]) -> RequestLog {
+        VaporConfigurator.makeLog(
+            incoming: IncomingRequest(method: .get, path: "/thing"),
+            resolved: ResolvedResponse(
+                statusCode: statusCode,
+                headers: headers,
+                contentType: .json,
+                body: "{}",
+                delayMs: 0,
+                matchedEndpointID: nil,
+                matchedScenarioID: nil
+            )
+        )
+    }
+
+    /// The status a client actually read, taken from `HTTP/1.1 200 OK` rather than from the scenario.
+    private static func servedStatusCode(_ statusLine: String) -> Int? {
+        let fields = statusLine.split(separator: " ")
+        guard fields.count >= 2 else { return nil }
+        return Int(fields[1])
     }
 }

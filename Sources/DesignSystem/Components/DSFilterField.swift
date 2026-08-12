@@ -150,8 +150,12 @@ public struct DSFilterField: View {
                     // filter searches". The magnifier belongs to the request detail's "Find in body",
                     // which really is a search. See the type's note for why one would not fit here
                     // anyway: it would land immediately beside this pill, two glyphs in one corner.
+                    //
+                    // `inlineSmall`, the quiet end of the inline tier: this glyph qualifies the pill
+                    // rather than being the pill's affordance — the chevron below is that — so it
+                    // sits a step under the title it may appear beside.
                     Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: DSGlyph.inlineSmall, weight: .medium))
 
                     if isScoped {
                         Text(title)
@@ -165,14 +169,16 @@ public struct DSFilterField: View {
                     //
                     // `chevron.up.chevron.down`, not a lone `chevron.down`: this picks one of N values
                     // and shows the one in force, which is a pop-up, and it is the same mark
-                    // `BreadcrumbJumpBar` puts on a crumb that has siblings. 8pt is the window's
-                    // menu-indicator size and the floor below which the mark becomes a smudge.
+                    // `BreadcrumbJumpBar` puts on a crumb that has siblings. `DSGlyph.indicator` is
+                    // the window's menu-indicator size, and it sits on `DSGlyph.minimum` — the floor
+                    // below which a mark stops reading as a mark. This pill is the case that floor
+                    // was written for.
                     //
                     // It takes the pill's own colour rather than dropping to `labelTertiary` the way
                     // the breadcrumb's does. There a title carries the message and the chevron only
                     // annotates it; here there is no title to annotate.
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
                 }
                 .foregroundStyle(foreground)
                 .padding(.horizontal, DSSpacing.xs)

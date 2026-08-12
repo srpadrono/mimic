@@ -158,7 +158,9 @@ public struct DSPanelHeaderButton: View {
     public var body: some View {
         Button(role: role, action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
+                // `control`, the rung for a glyph that *is* the control. There is no title beside it
+                // to carry the meaning, which is the whole reason this tier sits above the inline one.
+                .font(.system(size: DSGlyph.control, weight: .medium))
                 // `labelSecondary` at rest, not `labelTertiary`. At 36% alpha the "add endpoint" and
                 // "clear log" buttons were nearly invisible until the pointer found them — a control
                 // you have to hunt for is one most people never discover. Same correction

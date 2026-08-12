@@ -57,6 +57,17 @@ final class AppControlHost: ControlHost {
             }
         }
 
+        // Project-scoped, and nothing is open. `ProjectCommandExecutor` would have handled every one
+        // of these; it declined only because there is no project to apply them to.
+        //
+        // This used to be a twenty-six-case list at the bottom of the switch below, mirrored case for
+        // case by `MimicControlService` and complemented by the executor's own twenty-one — one fact
+        // written three times and kept in agreement by hand. `CommandKind.scope` is that fact now,
+        // and its switch carries no `default`, so a command added later still cannot compile until
+        // somebody decides which side of the line it falls on, which is the only thing naming
+        // twenty-six cases here was buying.
+        guard command.kind.scope == .host else { return .failure(.noProjectOpen) }
+
         switch command {
         case .ping:
             // Mode comes from the same source the discovery file uses, so the two cannot disagree.
@@ -199,37 +210,17 @@ final class AppControlHost: ControlHost {
              .projectDuplicate, .projectExport, .projectImport:
             return performProjectCommand(command, appState: appState)
 
-        // Project-scoped: `ProjectCommandExecutor` would have handled every one of these, and only
-        // declined because nothing is open. Named individually rather than caught by `default:` so a
-        // command added later cannot land here by accident and tell the caller to open a project they
-        // already have open — the compiler stops the build until it is routed deliberately.
-        case .projectRename,
-             .serverConfigure,
-             .endpointList,
-             .endpointGet,
-             .endpointCreate,
-             .endpointUpdate,
-             .endpointDelete,
-             .endpointDuplicate,
-             .scenarioList,
-             .scenarioCreate,
-             .scenarioUpdate,
-             .scenarioDelete,
-             .scenarioActivate,
-             .journeyList,
-             .journeyGet,
-             .journeyCreate,
-             .journeyTemplateList,
-             .journeyAddTemplate,
-             .journeyUpdate,
-             .journeyDelete,
-             .journeyDuplicate,
-             .journeyStepAdd,
-             .journeyStepsAdd,
-             .journeyStepUpdate,
-             .journeyStepRemove,
-             .journeyStepMove:
-            return .failure(.noProjectOpen)
+        // Declared host-scoped, not implemented above.
+        //
+        // Unreachable while `CommandKind.scope` and this switch agree, and the compiler cannot check
+        // that they do: the guard above narrows by `CommandKind` while the switch is over
+        // `ControlCommand`. Naming the real problem beats falling through to `noProjectOpen`, which
+        // would tell the caller to open a project they already have open — the misdirection the old
+        // twenty-six-case list existed to prevent.
+        default:
+            return .failure(.internalFailure(
+                "\(command.kind.rawValue) is host-scoped but the app's control host does not implement it."
+            ))
         }
     }
 
@@ -330,8 +321,15 @@ final class AppControlHost: ControlHost {
                 project: document
             ))
 
+        // The caller has already narrowed to the eight project-lifecycle commands above, and nothing
+        // in the type system says so — this takes a whole `ControlCommand`. Closing the switch would
+        // mean naming the other thirty-nine cases, which is a fourth hand-written partition of the
+        // surface and precisely what `CommandKind.scope` exists to remove. So it stays a `default`,
+        // and names the command rather than reporting a bare "unhandled".
         default:
-            return .failure(.internalFailure("Unhandled project command."))
+            return .failure(.internalFailure(
+                "\(command.kind.rawValue) is not a project-lifecycle command."
+            ))
         }
     }
 

@@ -88,7 +88,10 @@ public struct DSTextField: View {
     private func validationRow(_ message: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 10, weight: .semibold))
+                // `inline`, at `DSTypography.caption`'s size, beside the 11pt `label` this row sets.
+                // A mark carrying the whole message for a greyscale reader has to be readable, which
+                // is what keeps it a tier above an indicator.
+                .font(.system(size: DSGlyph.inline, weight: .semibold))
 
             // Wraps rather than truncates. The path field shares its row with a method picker, so
             // the message can be given well under its ideal width — and a validation message that

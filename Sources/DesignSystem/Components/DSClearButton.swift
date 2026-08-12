@@ -48,10 +48,11 @@ public struct DSClearButton: View {
     public var body: some View {
         Button { text = "" } label: {
             // The target is on the label, not the glyph: a bare `Image` in a `.plain` button gives a
-            // ~10pt hit area, the shape the panel-chrome rules name as too small to aim at. 11pt is
-            // the control-glyph floor — 10 put this below the inline glyphs it sits beside.
+            // ~10pt hit area, the shape the panel-chrome rules name as too small to aim at.
+            // `DSGlyph.control` is the bottom of the control tier — at `inline` this sat level with
+            // the annotations around it rather than above them, and this glyph is a control.
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11))
+                .font(.system(size: DSGlyph.control))
                 .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                 .frame(width: 18, height: 18)
                 .contentShape(Rectangle())

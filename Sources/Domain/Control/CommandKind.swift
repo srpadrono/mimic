@@ -79,6 +79,89 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
     case logClear
 }
 
+/// Which of the two implementations of the command surface owns a command.
+///
+/// The line is not arbitrary: it is drawn at what a `(ControlCommand, inout MockProject)`
+/// transformation can see. Everything that is a function of the open document sits on one side and is
+/// implemented once; everything that needs state the document does not hold sits on the other and is
+/// implemented by each host, because a windowless daemon and a live window genuinely do those
+/// differently.
+public enum CommandScope: String, Sendable {
+    /// A function of the open project. Applied by ``ProjectCommandExecutor``, once, for every host.
+    case project
+    /// Needs host state — which project is open, whether the server is running, where the live
+    /// journey cursor sits, what has been logged. Implemented by `MimicControlService` and
+    /// `AppControlHost` separately.
+    case host
+}
+
+extension CommandKind {
+
+    /// Which side of the project/host line this command falls on.
+    ///
+    /// This used to be three hand-written case lists: the twenty-one host-scoped cases at the bottom
+    /// of ``ProjectCommandExecutor/apply(_:to:)``, and the complementary twenty-six at the bottom of
+    /// `MimicControlService.run` and again at the bottom of `AppControlHost.perform`. All three were
+    /// exhaustive on purpose — under a `default` a command added later compiled everywhere untouched
+    /// and surfaced at runtime as "no project is open", with a project open — but exhaustive or not,
+    /// they were one fact written three times, and a fact written three times is one that drifts.
+    ///
+    /// What those lists were really buying survives here: this switch has no `default` either, so a
+    /// new command still cannot compile until somebody has decided which side of the line it belongs
+    /// on. The difference is that the decision is now recorded once and read three times, instead of
+    /// being restated three times and reconciled by hand.
+    public var scope: CommandScope {
+        switch self {
+
+        // Discovery and whole-instance state. `reset` clears the request log and rewinds the live
+        // cursor — neither of which the document holds.
+        case .ping, .describeCommands, .state, .reset:
+            .host
+
+        // Choosing, creating, copying and moving documents around. Which one is open is the host's
+        // to know; the store is the host's to reach.
+        case .projectList, .projectCreate, .projectOpen, .projectClose, .projectDelete,
+             .projectDuplicate, .projectExport, .projectImport:
+            .host
+
+        // Renaming is the odd one out, and deliberately so: it edits the open document rather than
+        // selecting among documents.
+        case .projectRename:
+            .project
+
+        // Starting and stopping is the running process; the configuration it starts *from* is a
+        // field of the document, which is why `serverConfigure` sits on the other side.
+        case .serverStart, .serverStop, .serverStatus:
+            .host
+
+        case .serverConfigure:
+            .project
+
+        case .endpointList, .endpointGet, .endpointCreate, .endpointUpdate, .endpointDelete,
+             .endpointDuplicate:
+            .project
+
+        case .scenarioList, .scenarioCreate, .scenarioUpdate, .scenarioDelete, .scenarioActivate:
+            .project
+
+        // Authoring a journey is editing the document…
+        case .journeyList, .journeyGet, .journeyCreate, .journeyTemplateList, .journeyAddTemplate,
+             .journeyUpdate, .journeyDelete, .journeyDuplicate, .journeyStepAdd, .journeyStepsAdd,
+             .journeyStepUpdate, .journeyStepRemove, .journeyStepMove:
+            .project
+
+        // …running one is not. Activation resets the engine's cursor, and the cursor is live state
+        // the engine owns; the document only records which journey was chosen.
+        case .journeyActivate, .journeyRestart, .journeyAdvance, .journeyStatus:
+            .host
+
+        // The request log is per-instance and never persisted.
+        case .logList, .logClear:
+            .host
+        }
+    }
+}
+
 extension ControlCommand {
 
     /// Which command this is, ignoring what it was called with.

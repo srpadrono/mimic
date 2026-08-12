@@ -160,7 +160,11 @@ public struct DSTabStrip: View {
         var body: some View {
             Button(action: select) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(size: 13, weight: .medium))
+                    // The top of `DSGlyph`'s ladder, which is what an icon-only strip costs: the icon
+                    // stands in for a word here rather than accompanying one, so it has to stay
+                    // legible at every width the panel can be dragged to. The padding note above
+                    // measures the leading inset off this exact number.
+                    .font(.system(size: DSGlyph.controlProminent, weight: .medium))
                     .foregroundStyle(iconColor)
                     .frame(width: Self.shapeSize, height: Self.shapeSize)
                     .background(Circle().fill(selectionFill))

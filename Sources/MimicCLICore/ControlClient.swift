@@ -62,17 +62,46 @@ public struct ControlClient: Sendable {
         request.httpBody = try ControlCoding.encoder().encode(command)
 
         let data: Data
+        let response: URLResponse
         do {
-            (data, _) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw CLIFailure.unreachable(baseURL: baseURL, underlying: error.localizedDescription)
         }
 
-        do {
-            return try ControlCoding.decode(ControlResponse.self, from: data)
-        } catch {
-            throw CLIFailure.undecodable(String(decoding: data, as: UTF8.self))
+        // The envelope first, whatever the status. Mimic answers a refusal with the same
+        // `ControlResponse` it answers a success with — a `401` carries `request.unauthorized`, a
+        // `409` carries `project.noneOpen` — and that error names the problem far better than a bare
+        // status number does. `Output.emit` turns `ok: false` into `.commandFailed`, which exits 4,
+        // the code docs/CLI.md pins for "Mimic refused it".
+        if let decoded = try? ControlCoding.decode(ControlResponse.self, from: data) {
+            return decoded
         }
+
+        // Nothing usable came back — and until now the status was thrown away on the way in, as
+        // `(data, _)`. So *everything* that answered on this port without speaking Mimic's envelope
+        // arrived as "Unexpected response from Mimic: …": a proxy's `401`, an nginx `502` page, a
+        // captive portal's login HTML. That message reads as a decoding bug in this CLI and sends
+        // whoever hit it hunting through the wrong module, when the reply had already said exactly
+        // what was wrong. The status is the one thing that separates "we were refused" from "the
+        // answer was gibberish", so it gets read rather than discarded.
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if status == 401 {
+            // Mimic's own wording, because the advice does not depend on who sent the 401: the token
+            // is missing or wrong, and the CLI normally reads it out of the instance's control.json.
+            // That message names the file and never the value — a token echoed into an error ends up
+            // in terminal scrollback, CI logs and bug reports.
+            throw CLIFailure.commandFailed(.unauthorized)
+        }
+        if let status, status < 200 || status >= 300 {
+            throw CLIFailure.commandFailed(.invalid(
+                "\(baseURL.absoluteString) answered HTTP \(status) with a body this CLI could not "
+                    + "read: \(String(decoding: data, as: UTF8.self))",
+                code: "http.\(status)"
+            ))
+        }
+        // A 2xx this CLI cannot read really is a decoding problem, and stays one.
+        throw CLIFailure.undecodable(String(decoding: data, as: UTF8.self))
     }
 
     /// True when an instance answers. Used by `mimic app start` to wait for readiness rather than
@@ -111,6 +140,9 @@ public enum ControlEndpointFileReader {
         public var port: Int
         public var pid: Int
         public var mode: String
+        /// What the instance *said* its base URL was. Decoded so the record round-trips, and never
+        /// routed on — `resolveBaseURL` derives the host from `port` instead, because a file that
+        /// gets to name the host is a file that can send the token off-box. Do not restore it here.
         public var baseURL: String
         /// Optional so a file written by a pre-token instance still decodes, and the CLI can say
         /// "that Mimic is too old" instead of "unexpected response".
@@ -130,7 +162,16 @@ public enum ControlEndpointFileReader {
         ]
     }
 
-    public static func discover(searchURLs: [URL]? = nil) -> Endpoint? {
+    /// Reads the first readable discovery file, skipping any whose process is gone.
+    ///
+    /// The liveness check is a parameter, exactly as it is on the control plane's own reader, because
+    /// a test cannot name a pid it can guarantee is dead: pick a plausible-looking one and the kernel
+    /// is free to hand it to somebody between the fixture being written and the file being read, so
+    /// the assertion passes or fails depending on what else the machine is doing.
+    public static func discover(
+        searchURLs: [URL]? = nil,
+        isProcessAlive: (Int) -> Bool = ControlEndpointFileReader.isProcessAlive
+    ) -> Endpoint? {
         for url in searchURLs ?? Self.searchURLs() {
             guard let data = try? Data(contentsOf: url),
                   let endpoint = try? ControlCoding.decode(Endpoint.self, from: data)
@@ -160,7 +201,16 @@ public enum ControlEndpointFileReader {
         if let port = environment[ControlAPI.portEnvironmentKey], let value = Int(port) {
             return URL(string: "http://127.0.0.1:\(value)")
         }
-        if let discovered { return URL(string: discovered.baseURL) }
+        // Derived from `port`, never read from `baseURL`.
+        //
+        // This line used to be `URL(string: discovered.baseURL)`, and `baseURL` is a decoded field of
+        // a file on disk. So a discovery file saying `http://evil.example` decided where the next
+        // command went, and `authorize` then put this instance's `X-Mimic-Token` — the credential the
+        // whole scheme exists to protect — in a header addressed to it, while `port` and `pid` sat
+        // alongside still looking reassuringly local. The host is not something the file gets to
+        // supply: the control plane binds `127.0.0.1` and nothing else, so the only thing worth
+        // reading out of that file is which port it landed on.
+        if let discovered { return URL(string: "http://127.0.0.1:\(discovered.port)") }
         return nil
     }
 

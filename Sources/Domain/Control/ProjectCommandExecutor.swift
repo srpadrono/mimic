@@ -30,6 +30,19 @@ public enum ProjectCommandExecutor {
         _ command: ControlCommand,
         to project: inout MockProject
     ) throws -> ProjectCommandOutcome? {
+        // Host-scoped commands — server lifecycle, project selection, journey runtime, logs,
+        // discovery — reach state a pure `inout MockProject` transformation cannot see, so they are
+        // the host's to answer. `nil` is the signal to keep looking, not a failure.
+        //
+        // This check used to be twenty-one cases named one by one at the bottom of the switch below,
+        // with the complementary twenty-six named at the bottom of `MimicControlService.run` and
+        // again at the bottom of `AppControlHost.perform`: one fact — which side of the line a
+        // command falls on — written out three times and kept in agreement by hand. It is written
+        // once now, as `CommandKind.scope`, whose own switch has no `default`, so a command added
+        // later still cannot compile until somebody has decided which side it belongs on. That
+        // decision is the only thing the three lists were really buying.
+        guard command.kind.scope == .project else { return nil }
+
         switch command {
 
         // MARK: Project metadata
@@ -259,39 +272,22 @@ public enum ProjectCommandExecutor {
                 journey: project.journeys[journeyIndex]
             ))
 
-        // MARK: Host-scoped
+        // MARK: Declared project-scoped, not applied above
         //
-        // Listed one by one rather than caught by `default:`, and that is the point. Under a
-        // `default` a newly added command compiles here untouched, silently reports itself as
-        // host-scoped, and surfaces as "unknown command" at runtime — from the CLI, from the HTTP
-        // control API and from the window alike, because all three ask this function first. Spelled
-        // out, the compiler stops the build until somebody decides which side of the line the new
-        // command belongs on. That decision is the one thing about adding a command that must not be
-        // possible to skip.
-        case .ping,
-             .describeCommands,
-             .state,
-             .reset,
-             .projectList,
-             .projectCreate,
-             .projectOpen,
-             .projectClose,
-             .projectDelete,
-             .projectDuplicate,
-             .projectExport,
-             .projectImport,
-             .serverStart,
-             .serverStop,
-             .serverStatus,
-             .journeyActivate,
-             .journeyRestart,
-             .journeyAdvance,
-             .journeyStatus,
-             .logList,
-             .logClear:
-            // Server lifecycle, project selection, journey runtime, logs, discovery: state a pure
-            // `inout MockProject` transformation cannot reach.
-            return nil
+        // Unreachable while `CommandKind.scope` and this switch agree, and the compiler cannot
+        // check that they do: the guard narrows by `CommandKind` while the switch is over
+        // `ControlCommand`. It throws rather than returning `nil` because `nil` sends the command on
+        // to the host, which would answer "no project is open" — with a project open, which is
+        // exactly the misdirection the old hand-written lists existed to prevent. Saying what is
+        // actually wrong is worth more than a plausible lie.
+        //
+        // `ControlCommandTests` runs one sample of every kind through here and fails when a
+        // project-scoped command is declined, so this arm costs a red suite rather than a broken
+        // script.
+        default:
+            throw ControlError.internalFailure(
+                "\(command.kind.rawValue) is project-scoped but ProjectCommandExecutor does not apply it."
+            )
         }
     }
 

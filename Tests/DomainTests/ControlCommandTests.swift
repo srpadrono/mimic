@@ -2,6 +2,59 @@ import Foundation
 import Testing
 @testable import Domain
 
+/// One sample of every command, complete by assertion rather than by good intentions.
+///
+/// Three tests need a list of commands: the wire-format round trip, and the two that check the
+/// executor routes each command to the side ``CommandKind/scope`` declares it belongs on. They used
+/// to carry a list each, and both lists were quietly partial — the host-scoped one named fifteen of
+/// twenty-one, and nothing in the file said so, because a list of examples reads exactly like a list
+/// of all of them.
+///
+/// `everyCommandHasASample` compares this one against `CommandKind.allCases`, so a command added
+/// without a sample fails the suite rather than being covered by none of the three. The payloads are
+/// deliberately awkward — ids that match nothing, references to endpoints an empty project does not
+/// have — because what is being checked here is routing and encoding, not success.
+enum ControlCommandSamples {
+    static let all: [ControlCommand] = [
+        .ping, .describeCommands, .state, .reset(scope: .journey),
+        .projectList, .projectCreate(name: "Checkout", port: 9090),
+        .projectOpen(project: .name("Checkout")), .projectClose,
+        .projectDelete(project: .id(UUID())), .projectRename(name: "Renamed"),
+        .projectDuplicate(project: .name("Checkout")), .projectExport(project: nil),
+        .projectImport(project: MockProject(name: "Imported"), activate: true),
+        .serverStart(port: 8081), .serverStop, .serverStatus,
+        .serverConfigure(port: 8080, globalDelayMs: 250),
+        .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
+        .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
+        .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
+        .endpointDelete(endpoint: .name("A")), .endpointDuplicate(endpoint: .route(.get, "/a")),
+        .scenarioList(endpoint: .route(.get, "/a")),
+        .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: ScenarioSpec(statusCode: 201)),
+        .scenarioUpdate(endpoint: .route(.get, "/a"), scenario: .name("S"), spec: ScenarioSpec(body: "{}")),
+        .scenarioDelete(endpoint: .route(.get, "/a"), scenario: .id(UUID())),
+        .scenarioActivate(endpoint: .route(.get, "/a"), scenario: .name("S")),
+        .journeyList, .journeyGet(journey: .name("J")),
+        .journeyCreate(name: "J", spec: JourneySpec(steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)])),
+        .journeyTemplateList, .journeyAddTemplate(templateID: "session-expiry", name: nil),
+        .journeyUpdate(journey: .name("J"), spec: JourneySpec(matchMode: .strictSequence)),
+        .journeyDelete(journey: .name("J")), .journeyDuplicate(journey: .name("J")),
+        .journeyStepAdd(journey: .name("J"), step: JourneyStepSpec(method: .get, path: "/a", failure: .connectionDrop), atIndex: 2),
+        .journeyStepsAdd(
+            journey: .name("J"),
+            steps: [
+                JourneyStepSpec(method: .get, path: "/a", statusCode: 500),
+                JourneyStepSpec(method: .get, path: "/a", statusCode: 200, repeatCount: 3),
+            ],
+            atIndex: nil
+        ),
+        .journeyStepUpdate(journey: .name("J"), step: .index(0), spec: JourneyStepSpec(statusCode: 500)),
+        .journeyStepRemove(journey: .name("J"), step: .index(1)),
+        .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
+        .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
+        .logList(limit: 50, unmatchedOnly: true), .logClear,
+    ]
+}
+
 @Suite("Control command execution")
 struct ControlCommandExecutionTests {
 
@@ -486,18 +539,46 @@ struct ControlCommandExecutionTests {
         }
     }
 
-    // MARK: - Host-scoped commands
+    // MARK: - Scope routing
 
+    /// Driven from ``ControlCommandSamples`` rather than from a list written here, which named
+    /// fifteen of the twenty-one host-scoped commands and looked complete. Six of them — `projectOpen`,
+    /// `projectCreate`, `projectDelete`, `projectDuplicate`, `projectExport`, `projectImport` — were
+    /// never checked at all.
     @Test("Host-scoped commands are passed through, not silently swallowed")
     func hostScopedCommandsReturnNil() throws {
         var project = Self.project
-        for command: ControlCommand in [
-            .ping, .state, .serverStart(port: nil), .serverStop, .serverStatus,
-            .projectList, .projectClose, .journeyActivate(journey: nil), .journeyRestart,
-            .journeyAdvance, .journeyStatus, .logList(limit: nil, unmatchedOnly: nil), .logClear,
-            .reset(scope: .all), .describeCommands,
-        ] {
-            #expect(try ProjectCommandExecutor.apply(command, to: &project) == nil, "\(command) should be host-scoped")
+        for command in ControlCommandSamples.all where command.kind.scope == .host {
+            #expect(
+                try ProjectCommandExecutor.apply(command, to: &project) == nil,
+                "\(command.kind.rawValue) is host-scoped and must be declined here"
+            )
+        }
+    }
+
+    /// The other half, and the one the collapse of the three case lists made necessary.
+    ///
+    /// The executor's host-scoped tail is now a `default`, so the compiler no longer catches a
+    /// command that ``CommandKind/scope`` declares project-scoped and that nothing above the tail
+    /// applies. This does: every project-scoped kind is put through `apply`, and only `nil` — "not
+    /// mine" — fails it.
+    @Test("Project-scoped commands are applied here, not handed back to the host")
+    func projectScopedCommandsAreApplied() {
+        for command in ControlCommandSamples.all where command.kind.scope == .project {
+            var project = Self.project
+            do {
+                let outcome = try ProjectCommandExecutor.apply(command, to: &project)
+                #expect(
+                    outcome != nil,
+                    "\(command.kind.rawValue) is project-scoped and must be applied here"
+                )
+            } catch {
+                // Failing is still handling it. Most of these name an endpoint, scenario or journey
+                // the empty fixture does not have, and a `ControlError` saying what was missing is
+                // the right answer; `nil` would send the command on to a host that would report "no
+                // project is open", with one open.
+                #expect(error is ControlError, "\(command.kind.rawValue) failed with \(error)")
+            }
         }
     }
 
@@ -544,48 +625,23 @@ struct ControlWireFormatTests {
         )
     }
 
+    /// "Every" in the test below, and in the two routing tests, is only as true as this. The list was
+    /// written inline in `commandsRoundTrip` and compared to nothing, so it was complete exactly as
+    /// long as everyone adding a command remembered it — the same failure `CommandKind` was
+    /// introduced to end for the catalog.
+    @Test("Every command has a sample, so the round-trip and routing checks cannot be partial")
+    func everyCommandHasASample() {
+        let kinds = ControlCommandSamples.all.map(\.kind)
+        #expect(
+            Set(kinds) == Set(CommandKind.allCases),
+            "no sample for: \(Set(CommandKind.allCases).subtracting(kinds).map(\.rawValue).sorted())"
+        )
+        #expect(kinds.count == CommandKind.allCases.count, "one sample per kind, no duplicates")
+    }
+
     @Test("Every command round-trips through JSON unchanged")
     func commandsRoundTrip() throws {
-        let commands: [ControlCommand] = [
-            .ping, .describeCommands, .state, .reset(scope: .journey),
-            .projectList, .projectCreate(name: "Checkout", port: 9090),
-            .projectOpen(project: .name("Checkout")), .projectClose,
-            .projectDelete(project: .id(UUID())), .projectRename(name: "Renamed"),
-            .projectDuplicate(project: .name("Checkout")), .projectExport(project: nil),
-            .projectImport(project: MockProject(name: "Imported"), activate: true),
-            .serverStart(port: 8081), .serverStop, .serverStatus,
-            .serverConfigure(port: 8080, globalDelayMs: 250),
-            .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
-            .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
-            .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
-            .endpointDelete(endpoint: .name("A")), .endpointDuplicate(endpoint: .route(.get, "/a")),
-            .scenarioList(endpoint: .route(.get, "/a")),
-            .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: ScenarioSpec(statusCode: 201)),
-            .scenarioUpdate(endpoint: .route(.get, "/a"), scenario: .name("S"), spec: ScenarioSpec(body: "{}")),
-            .scenarioDelete(endpoint: .route(.get, "/a"), scenario: .id(UUID())),
-            .scenarioActivate(endpoint: .route(.get, "/a"), scenario: .name("S")),
-            .journeyList, .journeyGet(journey: .name("J")),
-            .journeyCreate(name: "J", spec: JourneySpec(steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)])),
-            .journeyTemplateList, .journeyAddTemplate(templateID: "session-expiry", name: nil),
-            .journeyUpdate(journey: .name("J"), spec: JourneySpec(matchMode: .strictSequence)),
-            .journeyDelete(journey: .name("J")), .journeyDuplicate(journey: .name("J")),
-            .journeyStepAdd(journey: .name("J"), step: JourneyStepSpec(method: .get, path: "/a", failure: .connectionDrop), atIndex: 2),
-            .journeyStepsAdd(
-                journey: .name("J"),
-                steps: [
-                    JourneyStepSpec(method: .get, path: "/a", statusCode: 500),
-                    JourneyStepSpec(method: .get, path: "/a", statusCode: 200, repeatCount: 3),
-                ],
-                atIndex: nil
-            ),
-            .journeyStepUpdate(journey: .name("J"), step: .index(0), spec: JourneyStepSpec(statusCode: 500)),
-            .journeyStepRemove(journey: .name("J"), step: .index(1)),
-            .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
-            .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
-            .logList(limit: 50, unmatchedOnly: true), .logClear,
-        ]
-
-        for command in commands {
+        for command in ControlCommandSamples.all {
             let data = try JSONEncoder().encode(command)
             let decoded = try JSONDecoder().decode(ControlCommand.self, from: data)
             #expect(decoded == command, "round-trip changed \(command)")
@@ -668,6 +724,31 @@ struct ControlWireFormatTests {
         // Every kind is reachable, so `allCases` is a faithful index of the surface rather than a
         // list that has grown entries the enum no longer has.
         #expect(CommandKind.allCases.count == 47)
+    }
+
+    /// Every kind has a scope by construction — `CommandKind.scope` is a non-optional property whose
+    /// switch has no `default`, so the compiler will not let a new command past without one. What is
+    /// left to check is the *shape* of the partition, because a command changing sides is the one way
+    /// this consolidation can go wrong while still compiling everywhere: 26 and 21 were the lengths
+    /// of the two hand-written lists it replaced.
+    @Test("Every command kind falls on exactly one side of the project/host line")
+    func everyKindDeclaresAScope() {
+        let projectScoped = CommandKind.allCases.filter { $0.scope == .project }
+        let hostScoped = CommandKind.allCases.filter { $0.scope == .host }
+
+        #expect(projectScoped.count + hostScoped.count == CommandKind.allCases.count)
+        #expect(projectScoped.count == 26, "project-scoped: \(projectScoped.map(\.rawValue).sorted())")
+        #expect(hostScoped.count == 21, "host-scoped: \(hostScoped.map(\.rawValue).sorted())")
+
+        // Anchors on both sides, so a wholesale flip cannot slip through by keeping the totals right.
+        // The two `server*` ones are the pair that is easiest to get wrong: configuring writes the
+        // document, starting runs a process.
+        #expect(CommandKind.serverConfigure.scope == .project)
+        #expect(CommandKind.serverStart.scope == .host)
+        #expect(CommandKind.projectRename.scope == .project)
+        #expect(CommandKind.projectOpen.scope == .host)
+        #expect(CommandKind.journeyStepMove.scope == .project)
+        #expect(CommandKind.journeyActivate.scope == .host)
     }
 
     @Test("Every catalog entry names a CLI invocation")

@@ -181,7 +181,13 @@ enum VaporConfigurator {
             matchedScenarioID: resolved.matchedScenarioID,
             // A failed request never produced a status; recording one would be a lie the request log
             // then repeats to every reader.
-            responseStatusCode: resolved.failure == nil ? resolved.statusCode : nil,
+            //
+            // The same reasoning is why the status is the *clamped* one. `response(for:)` clamps on
+            // the way to the wire and this line used to log the configured value, so a scenario
+            // carrying 0 or 999 served 200 or 599 while the traffic list reported 0 or 999 — the two
+            // halves of one request disagreeing, with the log being the half that is still readable
+            // after the request is over.
+            responseStatusCode: resolved.failure == nil ? clampedStatusCode(resolved.statusCode) : nil,
             // Mirrors what `response(for:)` writes: the content type first, then any header the
             // scenario or step set — so the log shows the headers the client actually received.
             responseHeaders: resolved.failure == nil ? loggedResponseHeaders(resolved) : [:],
@@ -194,10 +200,18 @@ enum VaporConfigurator {
         )
     }
 
-    /// The headers a client received, in the same precedence the response builder applies.
+    /// The headers a client received, in the same precedence the response builder applies — and
+    /// subject to the same validity check, which this used to skip.
+    ///
+    /// `response(for:)` drops a header that fails `EndpointValidator.isValidHeader` rather than
+    /// writing it, so a scenario carrying `"X-Test": "a\r\nSet-Cookie: evil=1"` put nothing on the
+    /// wire while the log listed it among the headers the client received. That is the worst kind of
+    /// wrong for this panel: a developer reads the log precisely because they cannot see the wire,
+    /// and here it invented a header and hid the fact that Mimic had refused to send one.
     static func loggedResponseHeaders(_ resolved: ResolvedResponse) -> [String: String] {
         var headers = ["Content-Type": resolved.contentType.rawValue]
         for (key, value) in resolved.headers {
+            guard EndpointValidator.isValidHeader(name: key, value: value) else { continue }
             headers[key] = value
         }
         return headers
