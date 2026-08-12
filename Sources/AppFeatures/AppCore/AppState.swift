@@ -65,7 +65,14 @@ final class AppState {
     var serverConfiguration: ServerConfiguration {
         get { currentProject?.serverConfiguration ?? server.serverConfiguration }
         set {
-            currentProject?.serverConfiguration = newValue
+            if currentProject != nil {
+                currentProject?.serverConfiguration = newValue
+                // Every other project mutation reaches the disk through `run`, which schedules this.
+                // Writing the project directly and not scheduling it would store the change in memory
+                // and lose it on reopen — the same half-applied state this property was made
+                // symmetric to avoid, one layer down.
+                projects.scheduleAutosave()
+            }
             server.serverConfiguration = newValue
         }
     }
