@@ -132,7 +132,7 @@ struct MigrationTests {
     /// GRDB's `eraseDatabaseOnSchemaChange` drops the file and rebuilds it empty on any schema
     /// difference. It used to be on for every DEBUG build — the configuration every developer runs —
     /// against the real store in Application Support, so the next migration anybody added would have
-    /// deleted everyone's projects. These four cases are the gate that replaced it: the flag needs an
+    /// deleted everyone's projects. These six cases are the gate that replaced it: the flag needs an
     /// explicit opt-in *and* an explicitly chosen store, so it can never reach a path nobody named.
     @Test(
         "Erase-on-schema-change needs both the opt-in and an explicit store",

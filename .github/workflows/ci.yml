@@ -61,7 +61,7 @@ jobs:
         id: swift
         run: |
           swift --version
-          echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-')" >> "$GITHUB_OUTPUT"
+          echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-' | tr -s '-')" >> "$GITHUB_OUTPUT"
 
       # The two manifests declare the same dependency ranges from the same directories, and then
       # resolve them into two separate lockfiles. That is a drift generator: 21 packages had already

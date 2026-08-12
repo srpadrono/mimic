@@ -299,10 +299,14 @@ struct CLIParsingTests {
         #expect(await MimicCommand.run(arguments: arguments) == 2)
     }
 
+    /// The other half of the exit contract: mapping every non-success to 2 must not catch the two
+    /// requests that are not failures. `--version` matters most — it is the first thing the README
+    /// tells someone to run after installing, so an installer smoke test branches on it.
     @Test("--help and --version are successes, not usage errors")
-    func helpExitsZero() async {
+    func helpAndVersionExitZero() async {
         #expect(await MimicCommand.run(arguments: ["--help"]) == 0)
         #expect(await MimicCommand.run(arguments: ["journey", "--help"]) == 0)
+        #expect(await MimicCommand.run(arguments: ["--version"]) == 0)
     }
 
     @Test("\"No instance\" says how to start one")
