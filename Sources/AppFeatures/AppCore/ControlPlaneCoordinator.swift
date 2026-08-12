@@ -120,12 +120,25 @@ final class ControlPlaneCoordinator {
         self.appState = appState
         self.repository = repository
 
+        // Before the port is bound, and deliberately outside the `Task` below.
+        //
+        // These handlers are what write the open project on the way out. That has nothing to do with
+        // the control plane: it is the user's data, and it is owed whether or not a socket is
+        // available. Installing them inside the `do` block — which is where they were — meant that on
+        // any machine where the port could not be bound (a second instance, an occupied
+        // `MIMIC_CONTROL_PORT`, the `alreadyRunning` and `shuttingDown` paths beside this one) Cmd-Q
+        // silently dropped the debounced edit exactly as it did before the flush existed, and the
+        // failure showed up as the one symptom nobody attributes to the control plane: an edit that
+        // was not there next launch.
+        //
+        // They need `appState` and `repository`, both assigned above, and nothing else.
+        installTerminationHandlers()
+
         let port = Self.resolvePort()
         Task { @MainActor [weak self] in
             do {
                 let bound = try await server.start(port: port, advertise: true)
                 self?.boundPort = bound
-                self?.installTerminationHandlers()
             } catch {
                 // A control plane that cannot bind must not stop the app from working — the window is
                 // still fully usable, so the failure is recorded rather than raised.
@@ -241,12 +254,28 @@ final class ControlPlaneCoordinator {
     /// the blocking waiter below block the main thread without deadlocking against the work it is
     /// waiting for.
     private func startPendingSave() -> PendingSaveSignal? {
-        guard let repository, let project = appState?.currentProject else { return nil }
+        guard let workspace = appState?.projects else { return nil }
+        let repository = self.repository
+        let project = appState?.currentProject
         let didFinish = PendingSaveSignal()
         Task.detached(priority: .userInitiated) {
-            // A store that refuses the write has nowhere to report it — there is no window left to
-            // show `autosaveStatus` in, and the next line ends the process.
-            try? await repository.save(project)
+            // The in-flight lifecycle writes first, and this is not belt and braces. `createProject`,
+            // `duplicateProject`, `deleteProject` and `importProject` all answer their caller before
+            // the store has the change — that is what makes the window feel immediate — so
+            // `mimic project delete Foo` followed by `mimic app stop`, two commands inside one
+            // database round trip, used to reach here with the delete still queued. Re-saving
+            // `currentProject` and calling `exit(0)` does not wait for it, so the CLI reported a
+            // delete that then did not happen. `awaitPendingStoreWrites` is the drain this branch
+            // built for exactly that ordering problem, and the quit path is the other place that
+            // needs it.
+            await workspace.awaitPendingStoreWrites()
+
+            // Then the debounced edit to whatever is open. A store that refuses this has nowhere to
+            // report it — there is no window left to show `autosaveStatus` in, and the caller ends
+            // the process as soon as this returns.
+            if let repository, let project {
+                try? await repository.save(project)
+            }
             didFinish.markFinished()
         }
         return didFinish

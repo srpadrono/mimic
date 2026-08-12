@@ -324,7 +324,24 @@ final class AppState {
     /// reasons go to `lastCommandError` — the channel `ContentView` already presents.
     func commitImportedCandidates(_ candidates: [ImportCandidate]) {
         let selected = candidates.filter(\.isSelected)
+        guard !selected.isEmpty else { return }
+
+        // One copy, mutated through the executor, published once at the end.
+        //
+        // Routing this through `run(_:)` per command was correct about the rules and wrong about the
+        // cost: every mutating `run` assigns `currentProject`, and that `didSet` applies the whole
+        // project to the engine and reschedules the autosave debounce. A candidate takes two
+        // commands, so a 300-entry HAR — an ordinary size for a real capture — meant six hundred
+        // whole-project pushes to the engine actor and six hundred debounce restarts on the main
+        // actor, for one confirmation of one sheet. The rules still have exactly one implementation:
+        // this calls the same `ProjectCommandExecutor.apply` that `run(_:)` does.
+        guard var project = currentProject else {
+            lastCommandError = "Skipped all \(selected.count) imported endpoints: no project is open."
+            return
+        }
+
         var rejections: [String] = []
+        var didMutate = false
 
         for candidate in selected {
             let route = "\(candidate.method.rawValue) \(candidate.path)"
@@ -340,46 +357,71 @@ final class AppState {
                 continue
             }
 
-            guard let created = run(.endpointCreate(
-                name: candidate.suggestedName,
-                method: candidate.method,
-                path: candidate.path,
-                // The executor reads an empty string as "clear", which is what a candidate with no
-                // group and no GraphQL operation means.
-                spec: EndpointSpec(
-                    groupTag: candidate.suggestedGroupTag ?? "",
-                    graphqlOperation: candidate.graphqlOperation ?? ""
-                )
-            ))?.endpoint,
-                let scenarioID = created.activeScenarioID
-            else {
-                rejections.append("\(route) — \(lastCommandError ?? "no project is open")")
-                continue
-            }
+            // Taken before the pair and restored if either half fails. Rolling back by value is what
+            // the old `endpointDelete` command was reaching for, and it cannot half-succeed: an
+            // endpoint created by the first command but left without its captured response is a mock
+            // nobody asked for, standing in for the one they did.
+            let beforeCandidate = project
 
-            guard run(.scenarioUpdate(
-                endpoint: .id(created.id),
-                scenario: .id(scenarioID),
-                spec: ScenarioSpec(
-                    name: "Imported",
-                    statusCode: candidate.statusCode,
-                    headers: candidate.responseHeaders,
-                    body: candidate.responseBody,
-                    contentType: candidate.responseContentType
+            do {
+                guard let created = try ProjectCommandExecutor.apply(
+                    .endpointCreate(
+                        name: candidate.suggestedName,
+                        method: candidate.method,
+                        path: candidate.path,
+                        // The executor reads an empty string as "clear", which is what a candidate
+                        // with no group and no GraphQL operation means.
+                        spec: EndpointSpec(
+                            groupTag: candidate.suggestedGroupTag ?? "",
+                            graphqlOperation: candidate.graphqlOperation ?? ""
+                        )
+                    ),
+                    to: &project
+                )?.result.endpoint,
+                    let scenarioID = created.activeScenarioID
+                else {
+                    project = beforeCandidate
+                    rejections.append("\(route) — the endpoint could not be created")
+                    continue
+                }
+
+                _ = try ProjectCommandExecutor.apply(
+                    .scenarioUpdate(
+                        endpoint: .id(created.id),
+                        scenario: .id(scenarioID),
+                        spec: ScenarioSpec(
+                            name: "Imported",
+                            statusCode: candidate.statusCode,
+                            headers: candidate.responseHeaders,
+                            body: candidate.responseBody,
+                            contentType: candidate.responseContentType
+                        )
+                    ),
+                    to: &project
                 )
-            )) != nil else {
-                // Read before the rollback, because a command that succeeds clears
-                // `lastCommandError` — and deleting the endpoint is a command that succeeds.
-                let reason = lastCommandError ?? "its response could not be applied"
-                // Only reachable if the check above and the executor ever stop agreeing. Taking the
-                // endpoint back out is what stops that disagreement shipping a fabricated mock.
-                _ = run(.endpointDelete(endpoint: .id(created.id)))
-                rejections.append("\(route) — \(reason)")
-                continue
+                didMutate = true
+            } catch let error as ControlError {
+                project = beforeCandidate
+                rejections.append("\(route) — \(error.message)")
+            } catch {
+                project = beforeCandidate
+                rejections.append("\(route) — \(error.localizedDescription)")
             }
         }
 
-        guard !rejections.isEmpty else { return }
+        // Published once, and only if something survived: assigning `currentProject` is what pushes
+        // the project to the engine and restarts the autosave debounce, so an import in which every
+        // candidate was refused should cost neither.
+        if didMutate {
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+        }
+
+        guard !rejections.isEmpty else {
+            lastCommandError = nil
+            return
+        }
         // Assigned after the loop rather than inside it: every command that succeeds clears
         // `lastCommandError`, so a reason recorded mid-import would be erased by the next candidate
         // that lands — which is the silent drop this whole method exists to stop.

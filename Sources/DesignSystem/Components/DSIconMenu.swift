@@ -73,7 +73,20 @@ public struct DSIconMenu<Content: View>: View {
                 // same correction for the buttons this sits beside.
                 .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
         }
-        .menuStyle(.button)
+        // `.borderlessButton` even though it is deprecated, and this is not an oversight.
+        //
+        // A `Menu` with this style is realized by AppKit as an `NSPopUpButton`, which XCUITest sees
+        // as a `MenuButton`; `.button` is a push button that presents a menu, and is seen as a
+        // `Button`. `MimicUITests/JourneyUITests.swift` separates the navigator's "Add journey" menu
+        // from the empty state's identically-labelled "Add journey" *button* by element type alone —
+        // its page object says so at length, because the identifier is no help (`DSTabStrip` flattens
+        // its children's) and the label is shared. Modernising the style here silently rewrites what
+        // that query resolves to, in a suite this component's own commit did not touch.
+        //
+        // The deeper fragility is the test's, not this component's: two controls that differ only by
+        // AppKit realization are one framework change away from swapping. Giving the menu its own
+        // accessibility label is the fix, and it belongs in a change that can run the UI suite.
+        .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         // The label above draws the whole control; the system indicator would be a second glyph in a
         // 22pt box that already holds one.

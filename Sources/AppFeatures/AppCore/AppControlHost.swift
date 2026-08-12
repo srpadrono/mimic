@@ -16,6 +16,10 @@ import Persistence
 final class AppControlHost: ControlHost {
 
     private weak var appState: AppState?
+    /// Held across the suspension in `serverStart`, so two lifecycle requests cannot interleave.
+    /// `MimicControlService` carries the same flag for the same reason; the two hosts are meant to
+    /// answer identically and this is one of the places that has to be written twice to stay true.
+    private var isChangingServerState = false
     private let repository: any ProjectRepository
 
     init(appState: AppState, repository: any ProjectRepository) {
@@ -31,11 +35,18 @@ final class AppControlHost: ControlHost {
 
     /// Answers a command against the live session.
     ///
-    /// Asynchronous for one reason: four of the project-lifecycle commands have to reach the store —
-    /// three to check that the reference they were given names a real project, `projectExport` to read
-    /// a document this session does not have open — and the store is asynchronous. Everything else
-    /// here is a read of session state and never suspends, so it still runs to completion in one hop
-    /// with nothing able to interleave.
+    /// Asynchronous because several arms have to leave the main actor: four of the project-lifecycle
+    /// commands reach the store — three to check that the reference they were given names a real
+    /// project, `projectExport` to read a document this session does not have open — and `serverStart`
+    /// awaits a recursive `serverConfigure` when it is given a port.
+    ///
+    /// **Which arms suspend is the interesting part**, and this comment used to say none of them did:
+    /// "a read of session state … runs to completion in one hop with nothing able to interleave". It
+    /// was true before the store lookups landed and it is not now, and it was asserting exactly the
+    /// atomicity the control server's concurrency safety rested on. Two concurrent `serverStart`s can
+    /// interleave across that `await`, which is why the arm carries its own guard below — the same one
+    /// `MimicControlService` grew in the same change, refusing with `server.busy` rather than queueing.
+    /// Everything else here is still a single-hop read.
     private func perform(_ command: ControlCommand) async -> ControlResponse {
         guard let appState else {
             return .failure(.internalFailure("The Mimic session is no longer available."))
@@ -114,6 +125,15 @@ final class AppControlHost: ControlHost {
 
         case let .serverStart(port):
             guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
+            // Set before the first suspension below, cleared however this arm leaves. Two scripts —
+            // or one script racing itself — asking to start at once would otherwise both cross the
+            // `await` on `serverConfigure` and both call `startServer()`. Refused rather than queued,
+            // and with the same code the headless service uses, so a caller gets one answer to this
+            // whatever it is talking to.
+            guard !isChangingServerState else { return .failure(Self.serverBusy) }
+            isChangingServerState = true
+            defer { isChangingServerState = false }
+
             if let port {
                 // Through `.serverConfigure`, not by writing the runtime's copy: a port supplied to
                 // `mimic server start --port` is a change to the project, and validating it here and
@@ -138,6 +158,10 @@ final class AppControlHost: ControlHost {
             ))
 
         case .serverStop:
+            // No suspension in this arm today, so the guard is about the *other* one: a stop arriving
+            // while a start is mid-`await` would otherwise tell the engine to stop a server the start
+            // has not asked for yet.
+            guard !isChangingServerState else { return .failure(Self.serverBusy) }
             appState.stopServer()
             return .success(.init(message: "Stopping the server.", server: makeServerStatus(appState)))
 
@@ -368,6 +392,14 @@ final class AppControlHost: ControlHost {
             ))
         }
     }
+
+    /// Word for word what `MimicControlService.serverBusy` says, because the two hosts are meant to be
+    /// indistinguishable to a caller and a lifecycle collision is the kind of thing a script branches
+    /// on. `server.busy` maps to `409` in `ControlServer.httpStatus`.
+    private static let serverBusy = ControlError(
+        code: "server.busy",
+        message: "The server is already starting or stopping. Try again in a moment."
+    )
 
     // MARK: - Resolving a project reference
 

@@ -117,7 +117,11 @@ start_output="$("$MIMIC_BIN" app start --headless --wait-seconds 60)" || fail "c
 # stdout, stderr and stdin at `FileHandle.nullDevice`. A command substitution waits for the write end
 # of its pipe to close everywhere, not for the command to exit, so a launcher that let the app
 # inherit those descriptors would hang this line for as long as Mimic stayed up.
-MIMIC_PID="$(printf '%s\n' "$start_output" | sed -n 's/.*(pid \([0-9][0-9]*\).*/\1/p' | head -1)"
+# No `head -1`: `sed -n …p` over this output emits at most one line already, and adding one would
+# reintroduce under `set -e` exactly the SIGPIPE hazard the `find` above carries `|| true` for — the
+# pipeline would report 141 and abort the script *before* the diagnosis below could run, leaving the
+# trap to fire with no pid and the launched instance never signalled.
+MIMIC_PID="$(printf '%s\n' "$start_output" | sed -n 's/.*(pid \([0-9][0-9]*\).*/\1/p')"
 if [ -z "$MIMIC_PID" ]; then
   # The other thing `app start` prints is "Mimic is already running at …", with no pid, when the
   # control URL already answers. That is a leftover from an earlier run of this script, and adopting
