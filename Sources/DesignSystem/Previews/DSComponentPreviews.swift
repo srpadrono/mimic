@@ -1,5 +1,12 @@
 import SwiftUI
 
+// Guarded so previews do not ship.
+//
+// `#Preview` expands to a `PreviewRegistry` conformance, which is compiled into whatever
+// configuration builds the file — and nothing here was gated, so 386 lines of preview scaffolding
+// went into the Release binary. Every `#Preview` elsewhere in this project is already inside
+// `#if DEBUG`; the design system's were the exception.
+#if DEBUG
 // MARK: - DSButton
 
 #Preview("DSButton — Variants") {
@@ -243,3 +250,4 @@ import SwiftUI
     DSLoadingPlaceholder(identifier: "preview")
         .frame(width: 400, height: 200)
 }
+#endif
