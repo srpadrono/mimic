@@ -174,7 +174,11 @@ final class ControlPlaneCoordinator {
                         ControlEndpointFile.remove()
                         exit(0)
                     }
-                    handleTerminationSignal()
+                    // `self.` spelled out, not decoration: the `guard let self` above sits inside
+                    // `assumeIsolated`'s closure while the weak capture belongs to the event
+                    // handler outside it, so the compiler does not carry the unwrap across the two
+                    // and rejects implicit `self` here.
+                    self.handleTerminationSignal()
                 }
             }
             source.resume()
