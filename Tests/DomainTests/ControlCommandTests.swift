@@ -646,9 +646,10 @@ struct ControlWireFormatTests {
     /// way to tell which it was talking to.
     @Test("A reset reports what it cleared, not what it was asked to clear")
     func resetMessageNamesWhatWasCleared() {
+        // Nothing was in scope at all — a journey reset with no journey active.
         #expect(ControlMessages.reset(clearedLogEntries: nil, restartedJourneyName: nil) == "Nothing to reset.")
-        // Scoped to the log, and the log was already empty: still nothing happened, and saying so is
-        // more useful than reporting the scope back.
+        // In scope but already empty. A count of zero is an answer: the log was cleared and held
+        // nothing, which is a different fact from the log never having been looked at.
         #expect(ControlMessages.reset(clearedLogEntries: 0, restartedJourneyName: nil) == "Reset 0 log entries.")
         #expect(ControlMessages.reset(clearedLogEntries: 1, restartedJourneyName: nil) == "Reset 1 log entry.")
         #expect(ControlMessages.reset(clearedLogEntries: 12, restartedJourneyName: nil) == "Reset 12 log entries.")

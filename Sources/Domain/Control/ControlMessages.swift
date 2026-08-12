@@ -29,9 +29,15 @@ public enum ControlMessages {
         if let restartedJourneyName {
             cleared.append("journey \"\(restartedJourneyName)\"")
         }
-        // Naming what was cleared rather than the scope that was asked for: "Reset all." is true of a
-        // request and says nothing about the instance, and `reset --scope all` against an instance
-        // with an empty log and no active journey did nothing at all while reporting success.
+        // Naming what was cleared rather than the scope that was asked for. "Reset all." is true of
+        // the request and says nothing about the instance — a caller learns that its own command
+        // parsed, which it already knew.
+        //
+        // A count of zero is still an answer, so `--scope all` on an idle instance reports
+        // "Reset 0 log entries." rather than "Nothing to reset.": the log was in scope and is now
+        // empty, and that is a different fact from the log never having been looked at. Only a scope
+        // whose every target reported nothing back — `--scope journey` with no journey active —
+        // leaves `cleared` empty.
         return cleared.isEmpty ? "Nothing to reset." : "Reset \(cleared.joined(separator: " and "))."
     }
 }
