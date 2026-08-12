@@ -104,19 +104,43 @@ struct EndpointFeatureRenderingTests {
         #expect(groupTag == "Auth")
     }
 
-    @Test("New endpoint sheet renders creation form")
-    func rendersNewEndpointSheet() {
-        let size = render(
-            NewEndpointSheet { _, _, _ in }
-        )
+    /// Both sheets open at one width, which is the part of "the shared sheet convention" that is a
+    /// number.
+    ///
+    /// The convention each of these two views claims to follow in its own documentation — a
+    /// sentence-case heading, `DSSpacing.lg` between the blocks, a trailing button row — ends in
+    /// `.frame(minWidth: 420, idealWidth: 420)`, written out separately in both files. A convention
+    /// spelled out at each call site is one that drifts, and nothing checked that these two still
+    /// agreed.
+    ///
+    /// Compared with each other rather than against 420, so it is the agreement being asserted and
+    /// either sheet leaving it fails here.
+    @Test("The two creation sheets open at one width")
+    func creationSheetsShareOneWidth() {
+        let endpointSheet = render(NewEndpointSheet { _, _, _ in })
+        let projectSheet = render(NewProjectSheet { _, _ in })
 
-        #expect(size.width >= 0)
+        #expect(endpointSheet.width == projectSheet.width)
+        // And it is the stated floor, not whatever the fields happened to measure.
+        #expect(endpointSheet.width >= 420)
     }
 
-    @Test("Endpoint editor renders populated scenario")
-    func rendersEndpointEditorWithActiveScenario() {
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// The editor carries more `@State` than anything else in the window — five fields, three
+    /// debounced commit tasks and a JSON editor — and none of it is built until the view is hosted.
+    /// Both branches are worth making: with an active scenario it builds the whole form, without one
+    /// it builds a `DSEmptyState`, and the two share no layout.
+    ///
+    /// It replaces two `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, which
+    /// cannot be negative. The editor's own geometry is a stack of flexible cards inside a
+    /// `ScrollView`, so its fitting size measures the scroll content rather than anything the layout
+    /// promises — there is no honest number to assert here, and the helpers below are where this
+    /// view's behaviour is actually pinned.
+    @Test("Hosting the endpoint editor does not trap during layout")
+    func hostingEndpointEditorDoesNotTrap() {
         let endpoint = makeEndpoint()
-        let size = render(
+        render(
             EndpointEditorView(
                 endpoint: endpoint,
                 activeScenario: endpoint.scenarios.first,
@@ -125,12 +149,7 @@ struct EndpointFeatureRenderingTests {
             )
         )
 
-        #expect(size.height >= 0)
-    }
-
-    @Test("Endpoint editor renders without active scenario")
-    func rendersEndpointEditorWithoutActiveScenario() {
-        let endpoint = Endpoint(
+        let withoutScenario = Endpoint(
             name: "Health",
             method: .get,
             path: "/health",
@@ -139,17 +158,14 @@ struct EndpointFeatureRenderingTests {
             delayMs: 0,
             groupTag: nil
         )
-
-        let size = render(
+        render(
             EndpointEditorView(
-                endpoint: endpoint,
+                endpoint: withoutScenario,
                 activeScenario: nil,
                 globalDelayMs: 0,
                 actions: makeActions()
             )
         )
-
-        #expect(size.width >= 0)
     }
 
     @Test("Endpoint editor helper functions normalize synced state and updates")

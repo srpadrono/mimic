@@ -190,6 +190,39 @@ struct RealCaptureTests {
         #expect(candidate.responseBody == nil, "a half-body would be worse than none")
     }
 
+    // MARK: - Statuses real captures contain
+
+    @Test("A request the browser never completed carries status 0, which no mock can serve")
+    func cancelledRequestHasUnservableStatus() async throws {
+        // Chrome, Safari and Firefox all write `"status": 0` for a request that was cancelled,
+        // blocked by an extension or content blocker, or failed in transport — and a capture of a
+        // real session normally holds several of them. Every fixture in this suite until now carried
+        // a status the app could have served, so nothing here could see what happens when one does
+        // not.
+        //
+        // The parser reports what it read, and the candidate arrives pre-selected. What keeps that 0
+        // out of the store is `AppState.commitImportedCandidates`, which now runs the same
+        // `EndpointValidator` an edit runs. Before it did, the 0 was stored verbatim and
+        // `clampedStatusCode` served 200 for it — the editor showing a status the wire never used.
+        let entries = """
+        \(Self.entry(url: "https://api.test/v1/cancelled", status: 0, headers: "", text: "")),
+        \(Self.entry(headers: #"{ "name": "content-type", "value": "application/json" }"#))
+        """
+        let candidates = try await HARParser.parse(data: Self.har(entries: entries), existingEndpoints: [])
+        let cancelled = try #require(candidates.first(where: { $0.path == "/v1/cancelled" }))
+
+        #expect(cancelled.statusCode == 0)
+        #expect(cancelled.isSelected, "nothing but the commit path stands between this and the store")
+        #expect(
+            EndpointValidator.serveableStatusCodes.contains(cancelled.statusCode) == false,
+            "0 is not a status a response can be completed with, so the commit path must refuse it"
+        )
+
+        // And the entry beside it is untouched: one dead request must not cost the twenty around it.
+        #expect(candidates.count == 2)
+        #expect(candidates.contains(where: { $0.path == "/v1/things" && $0.statusCode == 200 }))
+    }
+
     // MARK: - URLs real captures contain
 
     @Test("Query strings and fragments do not become part of the route")

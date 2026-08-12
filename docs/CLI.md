@@ -1,7 +1,15 @@
 # The `mimic` CLI
 
-Everything Mimic's window can do, from a script. Built for programs first: JSON on stdout,
-diagnostics on stderr, and exit codes that mean something.
+Mimic's projects, endpoints, scenarios, journeys, server and request log, from a script. Built for
+programs first: JSON on stdout, diagnostics on stderr, and exit codes that mean something.
+
+**One thing the window does is not here: importing a spec.** `SpecImport` — the HAR and
+OpenAPI/Swagger parsers — is linked by the app alone, so there is no `mimic import` and no `import`
+command on the HTTP API. A script that wants a spec's routes reads the file itself and issues
+`mimic endpoint create` and `mimic scenario update` per route — the same pair of operations the
+window's review sheet runs when you confirm it, held to the same validation. Do not confuse this with
+`mimic project import`, below: that reads a Mimic project document — the JSON `mimic project export`
+writes — and refuses anything else.
 
 ## Contract
 
@@ -38,6 +46,20 @@ mimic app stop                 # SIGTERM, so pending saves flush
 
 `app start` **waits for readiness** rather than sleeping a guessed interval, so the next command in a
 script cannot race startup.
+
+`daemon start` is `app start --headless` — not a euphemism for it, the same code: `DaemonCommand.Start`
+sets `headless` on an `AppCommand.Start` and runs it. Both launch `Mimic.app`, and `--headless` only
+adds `MIMIC_HEADLESS=1` to its environment, which makes the app drop its Dock icon and open no
+window. **There is no separate daemon binary**, and nothing about a headless run is a different
+implementation: the commands below are answered by the same host that answers them with a window
+open. Practically, that means a headless run still requires the app bundle to be present — installed,
+or pointed at with `MIMIC_APP_PATH` — and still runs a full `NSApplication` event loop, which is why
+the activation policy is `.accessory` rather than `.prohibited`. The upside is the one that matters
+in a bug report: headless behaviour and on-screen behaviour cannot fork, because they are one binary
+running one host.
+
+`mimic app stop` and `mimic daemon stop` are likewise one thing: `SIGTERM` to the pid in the
+discovery file.
 
 Set `MIMIC_APP_PATH` to run a build that is not installed in `/Applications` — an Xcode products
 directory, for instance.
@@ -113,6 +135,10 @@ mimic project import project.json [--no-activate]
 
 Re-importing the same document updates the project in place rather than creating a copy, so a CI step
 can import its fixtures on every run.
+
+`project import` takes a **Mimic project document** — what `project export` writes — and nothing else;
+handed an OpenAPI or HAR file it fails with "is not a Mimic project document". Spec import has no
+command at all, as the top of this page explains.
 
 ### Endpoints
 
@@ -250,8 +276,11 @@ needs the instance's token in an `X-Mimic-Token` header — read it from the dis
 instance writes:
 
 ```bash
-TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' \
-  < ~/Library/Application\ Support/devxa.Mimic/control.json)
+# The installed app is sandboxed, so its Application Support is inside its container. An unsandboxed
+# build writes to ~/Library/Application Support/devxa.Mimic/control.json instead; the CLI looks in
+# both, in that order, which is why it needs no configuration.
+CONTROL=~/Library/Containers/devxa.Mimic/Data/Library/Application\ Support/devxa.Mimic/control.json
+TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' < "$CONTROL")
 
 curl -s -H "X-Mimic-Token: $TOKEN" http://127.0.0.1:8787/v1/state
 curl -s -H "X-Mimic-Token: $TOKEN" http://127.0.0.1:8787/v1/commands

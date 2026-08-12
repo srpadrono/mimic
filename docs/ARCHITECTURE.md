@@ -14,8 +14,14 @@ responses, switch scenarios, script journeys, simulate latency and network failu
 request traffic — so frontend work can start before the backend exists. An embedded Vapor server runs
 **in-process** (direct Swift calls, never HTTP-to-self).
 
-It is also a testing platform: everything the window does is available as a command, so UI tests,
-integration tests, and AI agents can reproduce a whole application scenario without driving the UI.
+It is also a testing platform: 47 operations — every project, server, endpoint, scenario, journey and
+request-log operation the window performs — are available as commands, so UI tests, integration
+tests, and AI agents can reproduce a whole application scenario without driving the UI. The one
+workflow that is not a command is **spec import**: `SpecImport` is linked by `AppFeatures` alone, so
+turning a HAR or an OpenAPI document into endpoints happens in the window and nowhere else. A script
+parses the file itself and issues `endpointCreate` + `scenarioUpdate` per route — which is precisely
+what `AppState.commitImportedCandidates` does after the review sheet is confirmed, so the rules
+applied are the same either way.
 
 ## Domain language
 
@@ -71,10 +77,16 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 - **Persistence** — GRDB storage behind the `ProjectRepository` port; the app injects the port, not
   the concrete store. Journeys and steps are stored relationally, so a step can be reordered and
   diffed like any other row.
-- **ControlPlane** — `MimicControlService` (a windowless Mimic: store + engine + log + rules) and
-  `ControlServer` (a loopback-only Vapor app exposing it). `ControlHost` is the protocol both it and
-  the app's `AppControlHost` satisfy, so the HTTP layer does not know which it is serving.
-- **SpecImport** — HAR/OpenAPI/Swagger parsing → `ImportCandidate`s.
+- **ControlPlane** — `ControlServer` (a loopback-only Vapor app), `ControlEndpointFile` (the `0600`
+  discovery file), and `MimicControlService` + `MimicDaemon` (a windowless Mimic: store + engine +
+  log + rules). `ControlHost` is the protocol both `MimicControlService` and the app's
+  `AppControlHost` satisfy, so the HTTP layer does not know which it is serving — but in a shipped
+  build it is always serving `AppControlHost`. See **[Two hosts, one shipped](#two-hosts-one-shipped)**
+  before changing anything in this module.
+- **SpecImport** — HAR/OpenAPI/Swagger parsing → `ImportCandidate`s. Linked by `AppFeatures` and by
+  the `Mimic` app target (`Project.swift` declares it on both); neither `ControlPlane` nor
+  `MimicCLICore` links it, in `Package.swift` or in `Project.swift`. That missing edge is the whole
+  reason import has no command.
 - **DesignSystem** — `DS*` tokens and components; SwiftUI only, no Domain coupling.
 - **AppFeatures** — the only module that understands full user workflows. Coordination lives in:
   - `AppState` — the root `@Observable` for a session; coordinates endpoint/scenario/journey edits and
@@ -84,6 +96,57 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
     mirrors the journey cursor for views.
   - `AppControlHost` — maps control commands onto the live session, so `mimic` drives the window.
 - **MimicCLICore** — the `mimic` command surface as a library, so it is unit-testable. A client only.
+
+## Two hosts, one shipped
+
+The module map above is honest about what exists and misleading about what runs, so this needs saying
+plainly: **`MimicDaemon` and `MimicControlService` are not reachable from any shipped path.**
+
+`mimic daemon start` reads like the entry point to a separate headless process. It is not.
+`DaemonCommand.Start` constructs an `AppCommand.Start`, sets `headless = true`, and calls its
+`run()`. `AppLauncher.launch(headless:)` then puts `MIMIC_HEADLESS=1` into the child environment and
+executes `Mimic.app/Contents/MacOS/Mimic` — the GUI bundle. Inside it, `HeadlessMode` sets the
+activation policy to `.accessory` (no Dock icon, no window, but `NSApplication` still runs its event
+loop, which the embedded servers need) and `ControlPlaneCoordinator` starts
+`ControlServer(host: AppControlHost(…), mode: "headless")`. The `"headless"` reported by `mimic ping`
+and written into the discovery file names a *mode of the app*. There is no second binary.
+
+```bash
+grep -rn MimicDaemon --include=*.swift .   # one hit: its own declaration
+```
+
+`MimicControlService` is referenced only by `MimicDaemon`, by doc comments, and by two test suites —
+`Tests/ControlPlaneTests`, which exercises it as the product, and `Tests/MimicTests/HostParityTests`,
+which drives it *beside* `AppControlHost` precisely to catch them drifting. Together the two source
+files are about 636 lines that ship in the framework and never execute.
+
+Three consequences worth understanding before you touch this area:
+
+- **The two hosts are meant to answer identically, and only one is ever exercised by a user.** Two
+  divergences were found by reading and fixed — a port passed to `server start` reached the runtime but
+  was never written to the project, and `reset` answered with a different sentence than the headless
+  service does; both are pinned in `Tests/MimicTests/AppStateAndViewTests.swift`. In both, the tests
+  were right about the code they ran and wrong about the product.
+  `Tests/MimicTests/HostParityTests` now drives commands through both hosts and pins four *live*
+  differences as declared exceptions, each with the reason it is legitimate — the window's host answers
+  project lifecycle optimistically because its store access is async, and the caller confirms with
+  `state`. A difference that is written down is a contract; one that is not is a bug waiting to be
+  found by a user.
+- **The test coverage points the wrong way.** All 38 tests in `ControlPlaneTests` run against
+  `MimicControlService`, directly or through `ControlServer` stood up on top of it.
+  `AppControlHost` has 4 of its own in `Tests/MimicTests/AppStateAndViewTests.swift`, added only after
+  those divergences shipped, plus the 13 in `HostParityTests` that drive it against its twin. A green
+  `ControlPlaneTests` is still not evidence that `mimic` works.
+- **The `CommandKind` discipline is still load-bearing.** Both hosts switch with no `default`, so a
+  new command cannot compile until both handle it. That is what keeps `MimicControlService` from
+  rotting into something that could no longer be wired up — the reason it is worth keeping in
+  agreement even while it is dormant.
+
+Whether to give `MimicDaemon` a real `mimic daemon` binary — which would let a headless Mimic run
+without a GUI-capable app bundle, useful on a bare CI box — or to delete it and fold `ControlPlane`
+down to the server and the discovery file, is an open architectural question. It is deliberately not
+decided here. What this section exists to prevent is the previous state, where the docs described a
+headless service as the thing CI runs and nothing said otherwise.
 
 ## Key decisions (the "why")
 

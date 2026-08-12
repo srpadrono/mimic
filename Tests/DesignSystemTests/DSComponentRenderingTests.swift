@@ -136,9 +136,21 @@ struct DSComponentRenderingTests {
         }
     }
 
-    @Test("Core components render without crashing")
-    func rendersCoreComponents() {
-        let size = render(
+    /// The one test in this file that claims only "nothing trapped", and says so in its name.
+    ///
+    /// Hosting a view is not a formality: it runs layout, makes and updates every representable, and
+    /// runs every `@State` initialiser — which is where these components crash if they are going to.
+    /// `DSSplitPane` is the reason it is worth keeping at all. It installs a custom `NSSplitView` from
+    /// `loadView`, and the unguarded `splitView(_:shouldHideDividerAt:)` underneath that threw out of
+    /// `_updateStackConstraints` before a single frame was drawn — a launch crash no value assertion
+    /// can reach, because nothing is wrong with any value.
+    ///
+    /// What it replaced was nine `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`,
+    /// a quantity that cannot be negative. They read as coverage of the whole component set and
+    /// asserted nothing at all; the geometry tests below carry the claims that can fail.
+    @Test("Hosting every component does not trap during layout")
+    func hostingComponentsDoesNotTrap() {
+        render(
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     DSButton("Primary", variant: .primary, size: .small, identifier: "primary") {}
@@ -181,33 +193,156 @@ struct DSComponentRenderingTests {
             }
         )
 
-        #expect(size.width >= 0)
-    }
-
-    @Test("Drawer variants render")
-    func rendersDrawers() {
-        let size = render(DrawerHarness())
-        #expect(size.height >= 0)
-    }
-
-    @Test("Split panes render on both axes, collapsed and revealed")
-    func rendersSplitPanes() {
-        let vertical = render(SplitPaneHarness(axis: .vertical))
-        let horizontal = render(SplitPaneHarness(axis: .horizontal))
+        render(DrawerHarness())
+        render(EdgeDrawerHarness())
+        render(SplitPaneHarness(axis: .vertical))
+        render(SplitPaneHarness(axis: .horizontal))
         // A pane that starts collapsed must not load its content into a zero-height frame and trap;
         // `NSSplitViewItem` defers the view load until it is uncollapsed, and this is the only place
         // that path is exercised.
-        let collapsed = render(SplitPaneHarness(axis: .vertical, startsCollapsed: true))
+        render(SplitPaneHarness(axis: .vertical, startsCollapsed: true))
 
-        #expect(vertical.height >= 0)
-        #expect(horizontal.width >= 0)
-        #expect(collapsed.height >= 0)
+        // 0.4s, because validation is debounced by 300ms — see `DSJSONEditor.resolvedValidationResult`.
+        // A shorter wait finishes the render before the invalid-JSON path is ever taken, which is the
+        // one of the three that has anything to go wrong in it.
+        render(JSONEditorHarness(text: "{invalid}", onValidationChanged: { _ in }), wait: 0.4)
+        render(
+            JSONEditorHarness(text: #"{"ok":true}"#, onValidationChanged: { _ in })
+                .environment(\.colorScheme, .light),
+            wait: 0.4
+        )
+        render(
+            JSONEditorHarness(text: #"[1,2,3]"#, onValidationChanged: { _ in })
+                .environment(\.colorScheme, .dark),
+            wait: 0.4
+        )
+    }
+
+    /// The claim the component exists to make, stated where it can fail.
+    ///
+    /// A badge sized to its content came out around 32pt for `GET` and 52pt for `DELETE`, so a column
+    /// of them left the paths beside them starting at a different x on every row — and compact
+    /// `OPTIONS` wanted 58.2pt inside the 58pt frame `SidebarView` and `ImportReviewList` both give
+    /// it, which a `Text` resolves by wrapping onto a second line and taking the row's height with it.
+    /// Every measurement here is a comparison between two renders rather than a literal, so it stays
+    /// true across a font substitution and still fails the moment the fixed width comes off.
+    @Test("A method badge is one width whatever method it holds")
+    func methodBadgeWidthIsStableAcrossMethods() {
+        let measure = CGSize(width: 200, height: 60)
+        let compactGet = render(DSMethodBadge(method: "GET", size: .compact, identifier: "get"), size: measure)
+        let compactOptions = render(DSMethodBadge(method: "OPTIONS", size: .compact, identifier: "options"), size: measure)
+        let standardGet = render(DSMethodBadge(method: "GET", size: .standard, identifier: "get"), size: measure)
+        let standardOptions = render(DSMethodBadge(method: "OPTIONS", size: .standard, identifier: "options"), size: measure)
+
+        #expect(compactGet.width == compactOptions.width)
+        #expect(standardGet.width == standardOptions.width)
+
+        // And the widest method still fits the 58pt column its two callers reserve —
+        // `SidebarView.EndpointSidebarRow` and `ImportColumns.method`. The badge is 56pt wide
+        // (`DSMethodBadgeSize.badgeWidth`), so this passes with two points of slack rather than the
+        // 0.2pt of overflow that caused the wrap.
+        #expect(compactOptions.width <= 58)
+
+        // The two sizes are genuinely two sizes: a dense list gets the smaller badge.
+        #expect(standardGet.width > compactGet.width)
+        #expect(standardGet.height > compactGet.height)
+    }
+
+    /// "Every panel wears one bar of chrome, `DSBarHeight.panelHeader` tall."
+    ///
+    /// The navigator wears a `DSTabStrip` where the other two panels wear a `DSPanelHeader`, and the
+    /// only reason that is allowed is that the two stand the same height — otherwise the three panels'
+    /// headers stop aligning horizontally, which is the state the window was in before either
+    /// component existed. `DSTabStrip` states the parity in its own documentation; nothing checked it.
+    ///
+    /// Measured against a bare `Color` fixed to the token rather than against the literal 30, so the
+    /// comparison cannot drift from the ladder and cannot be broken by anything the hosting layer adds
+    /// to both sides equally.
+    @Test("Panel chrome stands one height, whether a panel opens with a header or a tab strip")
+    func panelChromeSharesOneHeight() {
+        let measure = CGSize(width: 320, height: 120)
+        let ruler = render(Color.clear.frame(height: DSBarHeight.panelHeader), size: measure)
+        let header = render(DSPanelHeader("Endpoints", identifier: "sidebar"), size: measure)
+        let loadedHeader = render(
+            DSPanelHeader("Scenarios", subtitle: "12 requests", identifier: "inspector") {
+                DSPanelHeaderButton(systemImage: "plus", help: "Add scenario", identifier: "add") {}
+            },
+            size: measure
+        )
+        let strip = render(
+            DSTabStrip(
+                tabs: [
+                    DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints"),
+                    DSTabStrip.Tab(id: "journeys", systemImage: "arrow.triangle.branch", help: "Show journeys"),
+                ],
+                selection: .constant("endpoints"),
+                identifier: "navigator"
+            ),
+            size: measure
+        )
+
+        #expect(header.height == ruler.height)
+        #expect(loadedHeader.height == header.height)
+        #expect(strip.height == header.height)
+    }
+
+    /// A badge rides the corner of the selection shape as an overlay, so it takes no part in layout.
+    ///
+    /// Inline, it widened the cell by its own width: the icon drifted off centre the moment a count
+    /// appeared and drifted back when it cleared, so the strip visibly shuffled while you watched it.
+    @Test("A badged tab is the same shape as a bare one")
+    func tabBadgeDoesNotChangeTheStripsGeometry() {
+        let measure = CGSize(width: 320, height: 120)
+        let bare = render(
+            DSTabStrip(
+                tabs: [DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints")],
+                selection: .constant("endpoints"),
+                identifier: "navigator"
+            ),
+            size: measure
+        )
+        let badged = render(
+            DSTabStrip(
+                tabs: [
+                    DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints", badge: 128),
+                ],
+                selection: .constant("endpoints"),
+                identifier: "navigator"
+            ),
+            size: measure
+        )
+
+        #expect(badged == bare)
+    }
+
+    /// The validation message is a row under the field, not an overlay on it.
+    ///
+    /// It sits as a sibling in `DSTextField`'s stack precisely so the form makes room for it — a
+    /// message drawn over the control it is complaining about would cover the value you are being
+    /// asked to correct. The height difference is the whole point, and it is what a caller sizing a
+    /// sheet around this field is relying on.
+    @Test("A field with something to complain about is taller than one without")
+    func validationMessageTakesItsOwnRow() {
+        let measure = CGSize(width: 320, height: 160)
+        let quiet = render(
+            DSTextField("Port", text: .constant("8080"), identifier: "port"),
+            size: measure
+        )
+        let complaining = render(
+            DSTextField(
+                "Port",
+                text: .constant("70000"),
+                validation: "Port must be between 1 and 65535",
+                identifier: "port"
+            ),
+            size: measure
+        )
+
+        #expect(complaining.height > quiet.height)
     }
 
     @Test("Drawer edges stay consistent")
     func drawerHelpersAndAdditionalEdges() {
-        let edgeSize = render(EdgeDrawerHarness())
-
         #expect(DSDrawerEdge.leading.swiftUIEdge == .leading)
         #expect(DSDrawerEdge.trailing.swiftUIEdge == .trailing)
         #expect(DSDrawerEdge.top.swiftUIEdge == .top)
@@ -220,29 +355,6 @@ struct DSComponentRenderingTests {
         #expect(DSDrawerEdge.trailing.dividerLeads)
         #expect(DSDrawerEdge.top.dividerLeads == false)
         #expect(DSDrawerEdge.bottom.dividerLeads)
-        #expect(edgeSize.height >= 0)
-    }
-
-    @Test("JSON editor renders valid and invalid content in both themes")
-    func rendersJSONEditorWithThemeAndValidationStates() {
-        let invalidSize = render(
-            JSONEditorHarness(text: "{invalid}", onValidationChanged: { _ in }),
-            wait: 0.4
-        )
-        let validSize = render(
-            JSONEditorHarness(text: #"{"ok":true}"#, onValidationChanged: { _ in })
-                .environment(\.colorScheme, .light),
-            wait: 0.4
-        )
-        let darkSize = render(
-            JSONEditorHarness(text: #"[1,2,3]"#, onValidationChanged: { _ in })
-                .environment(\.colorScheme, .dark),
-            wait: 0.4
-        )
-
-        #expect(invalidSize.height >= 0)
-        #expect(validSize.width >= 0)
-        #expect(darkSize.width >= 0)
     }
 
     @Test("JSON editor helpers validate and pretty print")

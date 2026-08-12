@@ -290,32 +290,38 @@ struct AppStateAndViewTests {
                 || PanelLayoutStore(defaults: isolated).load().requestLogHeight == 300)
     }
 
-    @Test("Content view renders welcome and workspace states")
-    func contentViewRendersBothStates() throws {
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// Hosting the window is the only way to run what these views do on the way to a first frame:
+    /// `ContentView` chooses between the welcome window and the workspace, `WorkspaceView` builds
+    /// three split-view panes around the centre pane, and each sheet and alert below is attached to a
+    /// view that has to survive being made with it already presented. None of that is reachable from
+    /// a value assertion, because nothing is wrong with any value when it fails.
+    ///
+    /// It replaces eleven `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, which
+    /// cannot be negative. Nothing here has an honest number to assert: every one of these views is
+    /// sized by the window rather than by itself, so its fitting size measures the harness. The
+    /// geometry claims that can fail live beside the components that make them —
+    /// `DSComponentRenderingTests` for the panel chrome, `ProjectFeatureRenderingTests` for the sheet.
+    @Test("Hosting every window state does not trap during layout")
+    func hostingEveryWindowStateDoesNotTrap() throws {
         let welcomeState = try makeAppState()
-        let welcomeSize = render(
+        render(
             ContentView()
                 .environment(welcomeState)
         )
 
-        let workspaceState = try makeAppState()
-        workspaceState.createProject(name: "Workspace API", port: 8080)
-        _ = workspaceState.addEndpoint(name: "Health", method: .get, path: "/health")
-        let workspaceSize = render(
+        let contentState = try makeAppState()
+        contentState.createProject(name: "Workspace API", port: 8080)
+        _ = contentState.addEndpoint(name: "Health", method: .get, path: "/health")
+        render(
             ContentView()
-                .environment(workspaceState)
+                .environment(contentState)
         )
 
-        #expect(welcomeSize.width >= 0)
-        #expect(workspaceSize.height >= 0)
-    }
-
-    @Test("Center pane and workspace render populated app state")
-    func workspaceViewsRender() throws {
+        let endpoint = makeEndpoint()
         let appState = try makeAppState()
         appState.createProject(name: "Workspace API", port: 8080)
-
-        let endpoint = makeEndpoint()
         appState.currentProject?.endpoints = [endpoint]
         appState.requestLogs = [
             RequestLog(
@@ -330,22 +336,72 @@ struct AppStateAndViewTests {
         ]
         appState.server.serverState = .running(port: 8080)
 
-        let centerEmptySize = render(
+        render(
             CenterPaneView(content: .endpoint(nil))
                 .environment(appState)
         )
-        let centerSelectedSize = render(
+        render(
             CenterPaneView(content: .endpoint(endpoint.id))
                 .environment(appState)
         )
-        let workspaceSize = render(
+        render(
             WorkspaceView()
                 .environment(appState)
         )
 
-        #expect(centerEmptySize.width >= 0)
-        #expect(centerSelectedSize.height >= 0)
-        #expect(workspaceSize.width >= 0)
+        try renderWorkspaceTransientStates(endpoint: endpoint)
+    }
+
+    /// Split out only to keep the smoke test above readable. Each of these opens the workspace with
+    /// something already presented over it — a sheet, an alert, or a panel the user had hidden — which
+    /// is a different code path from presenting it after the window exists.
+    private func renderWorkspaceTransientStates(endpoint: Endpoint) throws {
+        let newEndpointState = try makeAppState()
+        newEndpointState.createProject(name: "Workspace API", port: 8080)
+        newEndpointState.currentProject?.endpoints = [endpoint]
+        newEndpointState.showNewEndpointSheet = true
+        render(
+            WorkspaceView(initialSelectedEndpointID: endpoint.id)
+                .environment(newEndpointState)
+        )
+
+        let genericErrorState = try makeAppState()
+        genericErrorState.createProject(name: "Workspace API", port: 8080)
+        genericErrorState.currentProject?.endpoints = [endpoint]
+        genericErrorState.genericStartError = "Server failed"
+        render(
+            WorkspaceView(initialSelectedEndpointID: endpoint.id)
+                .environment(genericErrorState)
+        )
+
+        let portConflictState = try makeAppState()
+        portConflictState.createProject(name: "Workspace API", port: 8080)
+        portConflictState.currentProject?.endpoints = [endpoint]
+        portConflictState.portConflictAlert = PortConflictAlertData(conflictingPort: 8080)
+        render(
+            WorkspaceView(initialSelectedEndpointID: endpoint.id)
+                .environment(portConflictState)
+        )
+
+        let importState = try makeAppState()
+        importState.createProject(name: "Workspace API", port: 8080)
+        importState.currentProject?.endpoints = [endpoint]
+        render(
+            WorkspaceView(initialSelectedEndpointID: endpoint.id, initialShowHARImport: true)
+                .environment(importState)
+        )
+        render(
+            WorkspaceView(initialSelectedEndpointID: endpoint.id, initialShowOpenAPIImport: true)
+                .environment(importState)
+        )
+        render(
+            WorkspaceView(
+                initialShowInspector: false,
+                initialShowDrawer: false,
+                initialSelectedEndpointID: endpoint.id
+            )
+            .environment(importState)
+        )
     }
 
     @Test("AppState presentation bindings reflect and dismiss alert state")
@@ -363,65 +419,6 @@ struct AppStateAndViewTests {
         #expect(appState.isShowingGenericStartError)
         appState.isShowingGenericStartError = false
         #expect(appState.genericStartError == nil)
-    }
-
-    @Test("Workspace view renders sheet alert and hidden panel states")
-    func workspaceTransientStatesRender() throws {
-        let endpoint = makeEndpoint()
-
-        let newEndpointState = try makeAppState()
-        newEndpointState.createProject(name: "Workspace API", port: 8080)
-        newEndpointState.currentProject?.endpoints = [endpoint]
-        newEndpointState.showNewEndpointSheet = true
-        let newEndpointSize = render(
-            WorkspaceView(initialSelectedEndpointID: endpoint.id)
-                .environment(newEndpointState)
-        )
-
-        let genericErrorState = try makeAppState()
-        genericErrorState.createProject(name: "Workspace API", port: 8080)
-        genericErrorState.currentProject?.endpoints = [endpoint]
-        genericErrorState.genericStartError = "Server failed"
-        let genericErrorSize = render(
-            WorkspaceView(initialSelectedEndpointID: endpoint.id)
-                .environment(genericErrorState)
-        )
-
-        let portConflictState = try makeAppState()
-        portConflictState.createProject(name: "Workspace API", port: 8080)
-        portConflictState.currentProject?.endpoints = [endpoint]
-        portConflictState.portConflictAlert = PortConflictAlertData(conflictingPort: 8080)
-        let portConflictSize = render(
-            WorkspaceView(initialSelectedEndpointID: endpoint.id)
-                .environment(portConflictState)
-        )
-
-        let importState = try makeAppState()
-        importState.createProject(name: "Workspace API", port: 8080)
-        importState.currentProject?.endpoints = [endpoint]
-        let harImportSize = render(
-            WorkspaceView(initialSelectedEndpointID: endpoint.id, initialShowHARImport: true)
-                .environment(importState)
-        )
-        let openAPIImportSize = render(
-            WorkspaceView(initialSelectedEndpointID: endpoint.id, initialShowOpenAPIImport: true)
-                .environment(importState)
-        )
-        let hiddenPanelSize = render(
-            WorkspaceView(
-                initialShowInspector: false,
-                initialShowDrawer: false,
-                initialSelectedEndpointID: endpoint.id
-            )
-            .environment(importState)
-        )
-
-        #expect(newEndpointSize.width >= 0)
-        #expect(genericErrorSize.height >= 0)
-        #expect(portConflictSize.height >= 0)
-        #expect(harImportSize.width >= 0)
-        #expect(openAPIImportSize.width >= 0)
-        #expect(hiddenPanelSize.height >= 0)
     }
 
     @Test("Mimic app scene builds")

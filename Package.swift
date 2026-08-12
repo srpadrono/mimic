@@ -12,6 +12,20 @@ import PackageDescription
 // Both manifests declare these modules from the *same* directories, so they cannot drift in what
 // they compile — only in how targets are declared. Their two lockfiles can and did drift, which is
 // why CI compares them before building.
+//
+// They drift in a second way, and this one is not fixed: how the compiler is configured.
+// `Project.swift` sets four Swift settings in its shared base, and no target below sets
+// `swiftSettings:` at all — so this manifest is the *looser* of the two, and a Linux run can go
+// green on code Xcode rejects. The case that bites is an implicit transitive import, because
+// member-import visibility is enforced there and not here.
+//
+// Tightening it is not an edit to make blind. Turning that diagnostic on lights up every portable
+// module at once, and CI is the only place a Linux compiler runs, so the resulting errors would have
+// to be fixed against a red pipeline. Until somebody does that with a toolchain to hand, CI
+// *reports* the gap rather than closing it: the "Compiler settings" step in
+// `.github/workflows/ci.yml` prints every Swift setting one manifest asks for and the other does
+// not, as a warning. That step reads this file and drops whole-line comments before it looks, so
+// naming a feature in a note here cannot make it believe one is declared.
 let package = Package(
     name: "Mimic",
     // The same floor `Project.swift` sets as MACOSX_DEPLOYMENT_TARGET, and the same one

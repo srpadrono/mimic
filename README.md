@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-724%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-762%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -31,8 +31,10 @@ the one that actually breaks clients: **what does it return the second time, aft
 - **Live by default.** Edit an endpoint or switch a scenario and the running server reflects it
   immediately. No restart.
 - **Built to be driven.** A deterministic CLI (JSON out, meaningful exit codes) and a
-  token-authenticated loopback HTTP control API expose every operation the window has — for test
-  suites and AI agents.
+  token-authenticated loopback HTTP control API expose 47 operations — every project, server,
+  endpoint, scenario, journey and request-log operation the window has — for test suites and AI
+  agents. (Spec import is the exception, and stays in the window; see
+  [Import](#more).)
 - **Honest failures.** Dropped connections and timeouts, not just 5xx status codes.
 - **Small on purpose.** A sharp feature set, done well.
 
@@ -127,6 +129,11 @@ bodies, formatted and searchable — so checking what a mock returned doesn't me
 
 - **Scenarios** — multiple responses per endpoint, one active, switchable live.
 - **Import** — HAR captures and OpenAPI/Swagger specs (JSON) become reviewable, normalized endpoints.
+  **This one is window-only.** There is no `mimic import`: parsing a spec lives in the `SpecImport`
+  module, which only the app links, so a script that wants a spec's routes reads the file itself and
+  issues `mimic endpoint create` and `mimic scenario update` per route — the same two commands the
+  review sheet runs when you confirm it, so the result is identical. (`mimic project import` is a
+  different operation: it reads a Mimic project export.)
 - **GraphQL** — every operation hits one path, so Mimic matches on the operation instead, with a
   fallback chain that works even when the client sends no `operationName`.
   → [docs/GRAPHQL.md](docs/GRAPHQL.md)
@@ -138,8 +145,8 @@ bodies, formatted and searchable — so checking what a mock returned doesn't me
 ```bash
 export MIMIC_DATABASE_PATH="$PWD/.mimic-ci/store.sqlite"   # isolated store
 
-mimic daemon start                          # headless
-mimic project import fixtures/api.json
+mimic daemon start                          # headless: the app, windowless
+mimic project import fixtures/checkout.json # a `mimic project export` document, not an OpenAPI spec
 mimic journey activate "Session expiry"
 mimic reset --scope all                     # rewind the journey, clear the log
 
@@ -152,8 +159,9 @@ The CLI is a thin client over a loopback HTTP API, so a non-Swift agent can skip
 request carries the instance's token, which it mints at startup and writes to its discovery file:
 
 ```bash
-TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' \
-  < ~/Library/Application\ Support/devxa.Mimic/control.json)
+# The installed app is sandboxed, so its Application Support is inside its container.
+CONTROL=~/Library/Containers/devxa.Mimic/Data/Library/Application\ Support/devxa.Mimic/control.json
+TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' < "$CONTROL")
 
 curl -s -H "X-Mimic-Token: $TOKEN" \
   http://127.0.0.1:8787/v1/commands                # ask what this instance accepts
@@ -195,7 +203,7 @@ flowchart TB
 | `MockServerEngine` | The embedded Vapor runtime: start/stop, serving, the request-log stream. |
 | `Persistence` | GRDB storage behind a `ProjectRepository` port. |
 | `SpecImport` | HAR / OpenAPI / Swagger → normalized import candidates. |
-| `ControlPlane` | The automation surface: a loopback-only HTTP API over the same engine and store the window uses. |
+| `ControlPlane` | The automation surface: a loopback-only HTTP API over the same engine and store the window uses. Also holds a windowless composition root that nothing currently reaches — see below. |
 | `MimicCLICore` | The whole `mimic` command surface, as a testable library. Links neither Vapor nor GRDB. |
 | `DesignSystem` | SwiftUI tokens and components. No Domain coupling. |
 | `AppFeatures` | Screens, navigation, and the `AppState` coordinator — the only module that knows full workflows. |
@@ -204,20 +212,43 @@ The rule that keeps the window and the CLI honest: **every project-scoped operat
 `ProjectCommandExecutor` in `Domain`**, which all three surfaces call. A rule can only be written
 once.
 
+### Known issue: `mimic daemon start` runs the app, not the daemon
+
+`ControlPlane` contains `MimicDaemon` and `MimicControlService` — a full windowless Mimic, store and
+engine and command handling included. Nothing reaches them. `mimic daemon start` sets `--headless` on
+`mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app hides itself from the
+Dock and serves the control API through `AppControlHost`, exactly as it does with a window open.
+`grep -rn MimicDaemon --include=*.swift .` returns one hit, its own declaration.
+
+Nothing is broken by this — headless works, and it works through the same code path a developer
+watches all day, which is a real argument in its favour. What it costs is honesty about the tests:
+all 38 `ControlPlaneTests` exercise the host that does not ship, while the host that does had no unit
+test at all until four behavioural divergences between the two had already been released and four
+tests were written to close them. Whether to wire the daemon up or delete it is an open question;
+leaving the documentation implying that CI runs a separate daemon is not. See
+[AGENTS.md](AGENTS.md#two-hosts-one-of-them-shipped--a-known-issue) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#two-hosts-one-shipped).
+
 → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain language and the reasoning.
 
 ## Testing
 
-724 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+762 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 469 | Linux or macOS — `swift test` |
-| Design system | 34 | macOS — needs SwiftUI |
-| App and coordination | 181 | macOS — hosted by the app |
+| Domain, persistence, engine, control plane, import, CLI | 487 | Linux or macOS — `swift test` |
+| Design system | 49 | macOS — needs SwiftUI |
+| App and coordination | 186 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
+
+The portable 487 break down as Domain 166, SpecImport 105, MockServerEngine 63, Persistence 59,
+MimicCLICore 56, ControlPlane 38. The app's 186 are the five folders `MimicTests` builds —
+`WorkspaceFeatureTests` 88, `MimicTests` 75, `ImportFeatureTests` 13, `ProjectFeatureTests` 6,
+`EndpointFeatureTests` 4 — and `Sources/AppFeatures/JourneyFeature` deliberately has no folder of its
+own, because what covers the journey UI lives in `MimicTests`.
 
 Only the SwiftUI layer needs a Mac. The domain rules, mock engine, persistence, control plane, spec
 import and CLI are plain Swift, so [`Package.swift`](Package.swift) builds them anywhere while
@@ -227,8 +258,20 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 469, no Xcode needed
+swift test                    # the portable 487, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
+```
+
+The **Tests** badge at the top is hand-maintained, unlike the two coverage badges beside it, which
+`Scripts/update_readme_coverage.py` rewrites and which make the script fail loudly if the README has
+lost them. That asymmetry is why the counts above keep drifting: the table has twice claimed a
+figure the tree did not support — 469 / 34 / 181 against an actual 487 / 49 / 173, then 173 for the
+app row while a new parity suite was landing 13 more in the same afternoon. A hand count is only ever
+true of the commit that wrote it. Recount before you change them:
+
+```bash
+for d in Tests/*/; do echo "$(basename "$d") $(grep -rho '@Test' "$d" --include=*.swift | wc -l)"; done
+grep -rhoE 'func test[A-Za-z0-9_]*\(' MimicUITests --include=*.swift | wc -l
 ```
 
 ### Coverage

@@ -73,9 +73,23 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release \
 
 ## Conventions
 
-**Keep the rules in one place.** Adding an operation means adding a `ControlCommand` case and
-handling it in `ProjectCommandExecutor`. The window, the CLI and the HTTP API all call that, so they
-cannot disagree. Never implement the same rule twice.
+**Keep the rules in one place.** Adding an operation means adding a `ControlCommand` case, a matching
+`CommandKind` case, and handling it in `ProjectCommandExecutor` if it is project-scoped. The window,
+the CLI and the HTTP API all call that, so they cannot disagree. Never implement the same rule twice.
+
+A host-scoped command — one about server lifecycle, project selection, the journey cursor or the log,
+which no pure function of the project can express — goes to both `ControlHost` conformances instead:
+`AppControlHost` and `MimicControlService`. The switches carry no `default`, so the compiler makes
+you handle it in both. **Test `AppControlHost`.** It is the only one a shipped build reaches:
+`mimic daemon start` launches `Mimic.app` with `MIMIC_HEADLESS=1` rather than running
+`MimicControlService`, so a green `ControlPlaneTests` says nothing about what `mimic` does. The full
+account, and what is undecided about it, is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#two-hosts-one-shipped).
+
+**Spec import is the deliberate hole in that surface.** `SpecImport` is linked by the app — by
+`AppFeatures` and by the app target — and by neither `ControlPlane` nor `MimicCLICore`, so HAR and
+OpenAPI parsing has no command and no CLI verb. If you add one, you are adding a
+dependency edge `ControlPlane` has never had — treat it as an architecture change, not a feature.
 
 **Keep logic out of views.** Business rules belong in `Domain`; views stay declarative. If something
 is worth a test, it belongs behind a testable boundary (`resolve`, `plan`, `ProjectCommandExecutor`).
@@ -95,12 +109,20 @@ to a command or response shape.
 
 ## Testing against real inputs
 
-Two shipped bugs came from fixtures tidier than reality: a replayed `Content-Encoding: gzip` broke
-every real HAR import, and an appended `Content-Type` was emitted twice. When a feature consumes
-external input, add a case built from what a real server or browser actually produces —
+Three shipped bugs came from fixtures tidier than reality: a replayed `Content-Encoding: gzip` broke
+every real HAR import; an appended `Content-Type` was emitted twice; and every Swagger fixture in the
+suite declared `produces` inside the operation, while real specs overwhelmingly declare it once at the
+document level — which the parser did not read, so those specs imported as plain text and, because
+`.plainText` short-circuits the JSON body fallback, with no body either.
+
+The tell is a fixture whose every instance agrees on something the format does not require: if all of
+them put a field in the same place, the parser has only ever been asked to read it there. When a
+feature consumes external input, add a case built from what a real server, browser or spec generator
+actually produces —
 [`Tests/SpecImportTests/RealCaptureTests.swift`](Tests/SpecImportTests/RealCaptureTests.swift) and
 [`Tests/MockServerEngineTests/RealTrafficTests.swift`](Tests/MockServerEngineTests/RealTrafficTests.swift)
-are the homes for those.
+are the homes for HAR and traffic, and the OpenAPI/Swagger shape cases sit beside their parser in
+[`Tests/SpecImportTests/OpenAPIParserTests.swift`](Tests/SpecImportTests/OpenAPIParserTests.swift).
 
 ## UI changes
 

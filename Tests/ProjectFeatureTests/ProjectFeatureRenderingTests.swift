@@ -120,9 +120,20 @@ struct ProjectFeatureRenderingTests {
         #expect(invalidConfirmed == false)
     }
 
-    @Test("Welcome window renders empty state")
-    func rendersEmptyWelcomeWindow() {
-        let size = render(
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// The welcome window is the first thing the app draws, so a trap in its layout is a launch
+    /// failure rather than a wrong number — and its three states differ in ways a value test cannot
+    /// reach: an empty recents list takes a different branch from a populated one, and the delete
+    /// confirmation attaches an alert to the whole window.
+    ///
+    /// It replaces four `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, a
+    /// quantity with no negative values to find. The welcome window's own geometry is a `minWidth`
+    /// floor with a flexible `List` under it, so there is nothing here worth pinning to a number; the
+    /// sheet below has something that can genuinely fail, and asserts it.
+    @Test("Hosting every welcome window state does not trap during layout")
+    func hostingWelcomeWindowStatesDoesNotTrap() {
+        render(
             WelcomeWindow(
                 recentProjects: [],
                 onOpenProject: { _ in },
@@ -132,11 +143,6 @@ struct ProjectFeatureRenderingTests {
             )
         )
 
-        #expect(size.width >= 0)
-    }
-
-    @Test("Welcome window renders recent projects list")
-    func rendersWelcomeWindowWithRecentProjects() {
         let entries = [
             RecentProjectEntry(
                 id: UUID(),
@@ -149,8 +155,7 @@ struct ProjectFeatureRenderingTests {
                 lastOpenedAt: Date(timeIntervalSinceNow: -3600)
             ),
         ]
-
-        let size = render(
+        render(
             WelcomeWindow(
                 recentProjects: entries,
                 onOpenProject: { _ in },
@@ -160,29 +165,19 @@ struct ProjectFeatureRenderingTests {
             )
         )
 
-        #expect(size.height >= 0)
-    }
-
-    @Test("Welcome window renders sheet and delete confirmation states")
-    func rendersWelcomeWindowModalStates() {
-        let entry = RecentProjectEntry(
-            id: UUID(),
-            name: "Payments API",
-            lastOpenedAt: Date(timeIntervalSinceNow: -600)
-        )
-
-        let size = render(
+        let target = try! #require(entries.first)
+        render(
             WelcomeWindow(
-                recentProjects: [entry],
+                recentProjects: entries,
                 onOpenProject: { _ in },
                 onDuplicateProject: { _ in },
                 onDeleteProject: { _ in },
                 onRequestNewProject: {},
-                initialDeleteTarget: WelcomeWindow.DeleteTarget(id: entry.id, name: entry.name)
+                initialDeleteTarget: WelcomeWindow.DeleteTarget(id: target.id, name: target.name)
             )
         )
 
-        #expect(size.width >= 0)
+        render(NewProjectSheet { _, _ in })
     }
 
     @Test("Welcome window exposes initial modal view state")
@@ -206,31 +201,34 @@ struct ProjectFeatureRenderingTests {
         #expect(window.currentViewState.deleteTarget?.name == entry.name)
     }
 
-    @Test("New project sheet renders form fields")
-    func rendersNewProjectSheet() {
-        let size = render(
-            NewProjectSheet { _, _ in }
-        )
-
-        #expect(size.width >= 0)
-    }
-
-    @Test("New project sheet renders invalid and valid prefilled states")
-    func rendersPrefilledNewProjectSheetStates() {
-        let invalidSize = render(
+    /// A bad port is explained under the field, so the sheet has to grow to hold the explanation.
+    ///
+    /// `DSTextField` puts its validation row in the same stack as the control rather than over it —
+    /// a message drawn on top of the value you are being asked to correct would cover the one thing
+    /// you need to read. That only holds if the sheet around it makes room, which is exactly what
+    /// this measures: same sheet, same fields, one of them complaining.
+    ///
+    /// A relative comparison rather than a literal height, because the number is a sum of two fonts'
+    /// line heights and the sheet's own spacing — quantities that may legitimately change. That the
+    /// message costs height cannot.
+    @Test("A port the sheet refuses makes the sheet taller")
+    func invalidPortAddsAValidationRow() {
+        let invalid = render(
             NewProjectSheet(
-                initialProjectName: "   ",
+                initialProjectName: "Users API",
                 initialPortString: "70000"
             ) { _, _ in }
         )
-        let validSize = render(
+        let valid = render(
             NewProjectSheet(
                 initialProjectName: "Users API",
                 initialPortString: "8082"
             ) { _, _ in }
         )
 
-        #expect(invalidSize.height >= 0)
-        #expect(validSize.width >= 0)
+        #expect(invalid.height > valid.height)
+        // And the field is the only thing that moved: the sheet's width is fixed by its own frame, so
+        // a validation message can never widen the dialog it appears in.
+        #expect(invalid.width == valid.width)
     }
 }

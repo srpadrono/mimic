@@ -302,27 +302,107 @@ final class AppState {
         _ = run(.serverConfigure(port: nil, globalDelayMs: delayMs))
     }
 
+    /// Adds the selected candidates to the open project — through the executor, so an import is held
+    /// to exactly the rules an edit is.
+    ///
+    /// This used to build `Scenario` and `Endpoint` inline and append them, which made importing the
+    /// one way into a project that validated nothing. `ProjectCommandExecutor` guards every edit and
+    /// `ProjectValidator` guards `projectImport`; this went around both, and `SpecImport` does not
+    /// validate either — it reports what it read.
+    ///
+    /// Real captures make that reachable rather than theoretical. A browser writes `"status": 0` into
+    /// a HAR for every cancelled, blocked or transport-failed request, and a session's worth of
+    /// traffic normally contains several. Stored verbatim, that 0 reached the serving path, where
+    /// `VaporConfigurator.clampedStatusCode` answered 200 while the editor showed 0 and flagged the
+    /// user's own field as invalid — the request and the window disagreeing about the same mock. A
+    /// response header carrying CR or LF went the same way: accepted here, silently dropped when the
+    /// response was written, under a comment in `VaporConfigurator` promising that "the validators on
+    /// the editing and import paths are where a bad header gets a real error message".
+    ///
+    /// Refused candidates are reported, never dropped. The signature stays `Void` because this method
+    /// is handed straight to `ImportView` as its `([ImportCandidate]) -> Void` commit action, so the
+    /// reasons go to `lastCommandError` — the channel `ContentView` already presents.
     func commitImportedCandidates(_ candidates: [ImportCandidate]) {
-        _ = mutateCurrentProject {
-            for candidate in candidates.filter(\.isSelected) {
-                let scenario = Scenario(
+        let selected = candidates.filter(\.isSelected)
+        var rejections: [String] = []
+
+        for candidate in selected {
+            let route = "\(candidate.method.rawValue) \(candidate.path)"
+
+            // Checked before anything is created, because a candidate takes two commands — the
+            // endpoint, then its response — and a bad response caught only by the second would leave
+            // an endpoint behind still answering the placeholder 200 `makeEndpoint` gives it: a mock
+            // nobody captured, standing in for the one they did. These are the same validators the
+            // executor calls, so the rule still has a single implementation; only the moment it runs
+            // is different.
+            if let reason = Self.importRejection(for: candidate) {
+                rejections.append("\(route) — \(reason)")
+                continue
+            }
+
+            guard let created = run(.endpointCreate(
+                name: candidate.suggestedName,
+                method: candidate.method,
+                path: candidate.path,
+                // The executor reads an empty string as "clear", which is what a candidate with no
+                // group and no GraphQL operation means.
+                spec: EndpointSpec(
+                    groupTag: candidate.suggestedGroupTag ?? "",
+                    graphqlOperation: candidate.graphqlOperation ?? ""
+                )
+            ))?.endpoint,
+                let scenarioID = created.activeScenarioID
+            else {
+                rejections.append("\(route) — \(lastCommandError ?? "no project is open")")
+                continue
+            }
+
+            guard run(.scenarioUpdate(
+                endpoint: .id(created.id),
+                scenario: .id(scenarioID),
+                spec: ScenarioSpec(
                     name: "Imported",
                     statusCode: candidate.statusCode,
                     headers: candidate.responseHeaders,
                     body: candidate.responseBody,
-                    bodyContentType: candidate.responseContentType
+                    contentType: candidate.responseContentType
                 )
-                var endpoint = Endpoint(
-                    name: candidate.suggestedName,
-                    method: candidate.method,
-                    path: candidate.path,
-                    scenarios: [scenario],
-                    activeScenarioID: scenario.id
-                )
-                endpoint.groupTag = candidate.suggestedGroupTag
-                endpoint.graphqlOperation = candidate.graphqlOperation
-                $0.endpoints.append(endpoint)
+            )) != nil else {
+                // Read before the rollback, because a command that succeeds clears
+                // `lastCommandError` — and deleting the endpoint is a command that succeeds.
+                let reason = lastCommandError ?? "its response could not be applied"
+                // Only reachable if the check above and the executor ever stop agreeing. Taking the
+                // endpoint back out is what stops that disagreement shipping a fabricated mock.
+                _ = run(.endpointDelete(endpoint: .id(created.id)))
+                rejections.append("\(route) — \(reason)")
+                continue
             }
+        }
+
+        guard !rejections.isEmpty else { return }
+        // Assigned after the loop rather than inside it: every command that succeeds clears
+        // `lastCommandError`, so a reason recorded mid-import would be erased by the next candidate
+        // that lands — which is the silent drop this whole method exists to stop.
+        lastCommandError = """
+        Skipped \(rejections.count) of \(selected.count) imported endpoints:
+
+        \(rejections.joined(separator: "\n"))
+        """
+    }
+
+    /// Why an imported candidate cannot become an endpoint, or `nil` when it can.
+    ///
+    /// Exactly the three checks `ProjectCommandExecutor` would apply to the two commands
+    /// ``commitImportedCandidates(_:)`` runs — path on the create, status and headers on the
+    /// response — run early enough that a refusal costs no half-made endpoint.
+    private static func importRejection(for candidate: ImportCandidate) -> String? {
+        do {
+            try EndpointValidator.validatePath(candidate.path)
+            try EndpointValidator.validateStatusCode(candidate.statusCode)
+            try EndpointValidator.validateHeaders(candidate.responseHeaders)
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 

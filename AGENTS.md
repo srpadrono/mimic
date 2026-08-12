@@ -10,9 +10,22 @@ configure responses, switch scenarios, script **journeys**, simulate latency and
 and inspect live request traffic — so client work can start before the backend is ready. The embedded
 Vapor server runs **in-process** (direct Swift calls, never HTTP-to-self).
 
-Mimic is also drivable entirely from a script. The `mimic` CLI and a loopback HTTP control API expose
-every operation the window offers, so a UI test or an AI agent can create configurations, script
-flows, and drive a run without touching the interface.
+Mimic is also drivable from a script. The `mimic` CLI and a loopback HTTP control API expose the
+forty-seven operations in `CommandCatalog` — every project, server, endpoint, scenario, journey and
+request-log operation — so a UI test or an AI agent can create configurations, script flows, and drive
+a run without touching the interface.
+
+**One workflow is window-only: spec import.** Turning a HAR capture or an OpenAPI/Swagger document
+into endpoints has no `ControlCommand`, and neither `ControlPlane` nor `MimicCLICore` depends on
+`SpecImport` — in `Package.swift` or in `Project.swift`. A script that wants a spec's routes parses
+the file itself and issues `endpointCreate` + `scenarioUpdate` per route, which is what
+`AppState.commitImportedCandidates` does once the review sheet is confirmed; only the *parse* and the
+*review* are missing from the command surface. `mimic project import` is a different operation
+entirely — it decodes a `MockProject`, the document `mimic project export` writes, and refuses
+anything else with "is not a Mimic project document".
+
+So: "every operation the window offers" is true of everything a project is made of, and false of
+getting a spec into one. Do not restore the shorter, absolute claim.
 
 Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain language and the reasoning
 behind the module boundaries. Then [docs/JOURNEYS.md](docs/JOURNEYS.md) for the journey model,
@@ -64,9 +77,12 @@ cannot drift in what they compile, only in how targets are declared. What they *
 dependency resolution: they resolve the same ranges into two separate lockfiles, and 21 packages —
 Vapor, NIO and GRDB among them — had already diverged, so this job was passing against versions the
 shipped `.pkg` does not contain. The Linux job now checks `Package.resolved` against
-`Tuist/Package.resolved` before it builds. Compiler settings are the other half and are not yet
-checked: `Project.swift` sets `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY`, `Package.swift`
-sets nothing, so Linux still accepts an implicit transitive import that Xcode rejects.
+`Tuist/Package.resolved` before it builds. Compiler settings are the other half, and the job now
+reports on them too — as a *warning*, not a failure: `Project.swift` sets
+`SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` and `Package.swift` sets nothing, so Linux still
+accepts an implicit transitive import that Xcode rejects. Enabling the flag on the SwiftPM side is the
+fix; it warns rather than fails because turning it on will surface real errors, and going red before
+anyone can iterate on them helps nobody. The gap is visible and tracked instead of silent.
 
 **macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
 app-level suites, **the XCUITest suite**, and the Release gate. The image label is load-bearing —
@@ -115,7 +131,29 @@ them put a field in the same place, the parser has only ever been asked to read 
 ## Project Configuration
 
 - **Platform:** macOS 26.0+
-- **Swift:** 6.2 with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and `SWIFT_APPROACHABLE_CONCURRENCY = YES`
+- **Swift:** 6.2 with `SWIFT_APPROACHABLE_CONCURRENCY = YES` everywhere, and
+  `SWIFT_DEFAULT_ACTOR_ISOLATION` set **per target, not project-wide**. The shared base in
+  `Project.swift` sets it to `MainActor`, and fourteen targets then override it to `"none"`:
+  `Domain`, `MockServerEngine`, `Persistence`, `ControlPlane`, `MimicCLICore`, `SpecImport`, the
+  `MimicCLI` tool, each of their six test targets, and `MimicUITests`. Only five targets actually
+  compile under `MainActor` — `DesignSystem`, `DesignSystemTests`, `AppFeatures`, the `Mimic` app,
+  and `MimicTests` — which is to say: **the SwiftUI half is MainActor-by-default and the portable
+  half is not.**
+
+  The overrides are not incidental. Each one is a place where main-actor inference would be wrong
+  rather than merely unnecessary, and `Project.swift` says which above each target: MainActor on
+  `Domain`'s struct inits would stop nonisolated modules constructing Domain values at all; the
+  engine lives on NIO threads; GRDB's closures run off the main queue and deadlock against
+  `DatabaseQueue`; `SpecImport` is called from `Task.detached`; and `XCTestCase`'s lifecycle methods
+  are nonisolated, so `MimicUITests` cannot compile with it. Read the default as "MainActor when
+  there is a window involved".
+
+  `Package.swift` sets no `defaultIsolation` at all, so on Linux the portable modules take the
+  language default — nonisolated — which happens to be what the fourteen `"none"` overrides ask for.
+  The two agree today by coincidence, not by construction, and nothing checks that they still will:
+  the same unchecked-compiler-settings gap the CI section notes for
+  `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY`. Changing the base setting in `Project.swift`
+  would not move Linux with it.
 - **Bundle ID:** `devxa.Mimic`
 - **Sandbox:** App Sandbox and Hardened Runtime enabled (relaxed only where a test target requires it,
   and for the `mimic` command line tool, which launches and signals the app)
@@ -140,9 +178,13 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 - **MockServerEngine** — the embedded Vapor runtime; serves requests by asking Domain to resolve, and
   owns the live journey cursor.
 - **Persistence** — GRDB storage behind the `ProjectRepository` port.
-- **ControlPlane** — the automation surface: a loopback HTTP control API over the same engine and
-  store the window uses, plus a headless service for CI.
-- **SpecImport** — HAR/OpenAPI/Swagger parsing into `ImportCandidate`s.
+- **ControlPlane** — the automation surface. `ControlServer` (the loopback Vapor app) and
+  `ControlEndpointFile` (the `0600` discovery file) are what ships; `MimicControlService` and
+  `MimicDaemon`, the windowless composition root beside them, are **not reachable in production** —
+  see "Two hosts, one of them shipped" below before touching either.
+- **SpecImport** — HAR/OpenAPI/Swagger parsing into `ImportCandidate`s. Linked by `AppFeatures` and
+  by the app bundle itself, and by nothing else: neither `ControlPlane` nor `MimicCLICore` depends on
+  it, in either manifest, which is why spec import has no CLI or HTTP surface.
 - **DesignSystem** — `DS*` SwiftUI tokens and components; no Domain coupling.
 - **AppFeatures** — the only module that understands full user workflows (`AppState`,
   `ProjectWorkspace`, `MockServerRuntime`, `AppControlHost`, the journeys UI).
@@ -166,6 +208,52 @@ will drift, and the window and the script would stop agreeing.
 
 Only genuinely stateful operations belong outside the executor: server lifecycle, project selection,
 the live journey cursor, and the request log.
+
+### Two hosts, one of them shipped — a known issue
+
+`ControlHost` has two conformances: `AppControlHost` in `AppFeatures`, which maps commands onto the
+live session, and `MimicControlService` in `ControlPlane`, which owns a repository and an engine of
+its own. Read from the outside, the second looks like the one CI uses. **It is not. Nothing in
+production constructs it.**
+
+Follow `mimic daemon start` and it ends up in the same place `mimic app start` does.
+`DaemonCommand.Start` builds an `AppCommand.Start`, sets `headless = true` on it, and calls its
+`run()`. That reaches `AppLauncher.launch(headless: true)`, which sets `MIMIC_HEADLESS=1` in the
+child environment and executes `Mimic.app/Contents/MacOS/Mimic` — the app bundle, not a separate
+daemon binary. Inside it, `HeadlessMode` drops the activation policy to `.accessory` and
+`ControlPlaneCoordinator.start` stands up `ControlServer(host: AppControlHost(…), mode: "headless")`.
+The `"headless"` in the discovery file and in `mimic ping`'s reply names a *mode of the app*, not a
+different process. Confirm it in one command:
+
+```bash
+grep -rn MimicDaemon --include=*.swift .    # one hit: its own declaration
+```
+
+`MimicControlService` fares no better — outside its own file, every reference is a doc comment or a
+test. So `MimicDaemon.swift` (93 lines) and `MimicControlService.swift` (543 lines) are ~636 lines
+that no shipped path can reach, while `ControlServer.swift` and `ControlEndpointFile.swift` beside
+them are load-bearing.
+
+**This is the mechanism behind every divergence between the two hosts, and it works in the worst
+direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` is 38 tests,
+and all 38 run against `MimicControlService` — 18 calling it directly, 20 standing `ControlServer` up
+on top of it. `AppControlHost`, the host every `mimic` invocation actually reaches, has 4 of its own plus the 13 in
+`Tests/MimicTests/HostParityTests.swift` that drive both hosts together, all added after the fact; the comment above them in `Tests/MimicTests/AppStateAndViewTests.swift` records that
+it "had no unit test anywhere in the repo, which is how the four divergences between it and
+`MimicControlService` shipped unnoticed". A green ControlPlane suite is evidence about code the user
+never runs.
+
+Two things follow for anyone working here:
+
+- **Do not delete either file.** Wiring `MimicDaemon` up to a real `mimic daemon` binary and deleting
+  it are both defensible, and choosing between them is an architectural decision for a human —
+  it turns on whether a headless Mimic should keep needing a GUI-capable app bundle. What is not
+  defensible is documentation that hides the fact that the decision is pending, which is why this
+  section exists.
+- **When you add a command, the tests that matter are the `AppControlHost` ones.** `CommandKind`'s
+  no-`default` switches still force you to handle it in `MimicControlService` too, and you should —
+  keeping the two in agreement is what makes wiring the daemon up later a small change rather than a
+  rewrite. Just do not mistake a passing `ControlPlaneTests` for proof that `mimic` works.
 
 ## Visual standard
 
@@ -402,7 +490,10 @@ When adding or changing an operation:
    carries associated values and can never be `CaseIterable`, so `CommandKind` is the thing that
    *can* be, and it is what every list claiming to mirror the surface is checked against.
 3. **Handle it in `ProjectCommandExecutor`** if it is project-scoped; otherwise in
-   `MimicControlService` *and* `AppControlHost`.
+   `MimicControlService` *and* `AppControlHost`. Of that pair only `AppControlHost` is reachable in
+   production — see "Two hosts, one of them shipped" — so it is the one to test and the one to check
+   by hand against a running instance. Implement both anyway: they are meant to answer identically,
+   and the cheapest way to keep that true is to write them together.
 
    **None of those three switches ends in `default:`, and none of them may.** Every case is named,
    including the ones each switch declines, so adding a command is a compile error in all three
@@ -415,6 +506,16 @@ When adding or changing an operation:
    in the test itself — which is a fourth hand-maintained copy of the case list, so forgetting the
    catalog and forgetting the literals were the same omission and the test passed.
 5. **Add the CLI subcommand** and a parse test in `MimicCLICoreTests`.
+
+   The catalog indexes *control commands*, not CLI verbs, and the two are deliberately not one-to-one.
+   Four verbs have no catalog entry and should not get one: `mimic app start`, `mimic app stop`,
+   `mimic daemon start` and `mimic daemon stop` act on the OS process — launching the bundle,
+   `SIGTERM`-ing a pid — and a command is by definition something a *running* instance is asked to do,
+   so there is nobody to ask. Another three have no entry because they are compositions of entries
+   that exist: `mimic journey export` is a `journeyGet` rendered as a spec, `mimic journey import` is
+   a `journeyGet` then a `journeyCreate` or `journeyUpdate`, and `mimic journey deactivate` is
+   `journeyActivate` with no name. Everything else the CLI can do maps onto exactly one of the 47
+   `CommandKind` cases, and `DomainTests` holds that number.
 6. **Keep the exit-code contract**: `0` success, `2` bad usage, `3` no reachable instance, `4` the
    command reached Mimic and did not come back with a result. Assert it at the process boundary —
    `MimicCommand.run(arguments:)` — and not only on `CLIFailure.exitCode`. Usage errors never become
@@ -435,19 +536,34 @@ When adding or changing an operation:
 
 ## Skill Integration — Mandatory
 
-Specialized skills are installed in `.agents/skills/` and `.claude/skills/`. Load and follow the
+**Five** skills are vendored into this repository, in `.agents/skills/`; `.claude/skills/` holds
+symlinks to the same five, so Claude Code and other agents read one copy. Load and follow the
 relevant skill when working in its domain.
 
-| Skill | Trigger | Governs |
-|-------|---------|---------|
-| **swiftui-pro** | Any SwiftUI view code | Modern APIs, no deprecated modifiers, data flow, accessibility, HIG, performance |
-| **xcuitest-pro** | Any XCUITest code | Page object pattern, accessibility-first targeting, deterministic launch contracts, no `sleep()` |
-| **swift-testing-pro** | Any unit/integration test | `@Test`, `#expect`, async patterns |
-| **swift-concurrency-pro** | Any async/await, actor, Task, Sendable code | Actor isolation, structured concurrency, cancellation, MainActor |
-| **using-tuist-generated-projects** | Any Tuist/`xcodebuild`/config work | Buildable folders, target tagging, build configs, workspace workflows |
+| Skill | Vendored? | Trigger | Governs |
+|-------|-----------|---------|---------|
+| **swiftui-pro** | yes | Any SwiftUI view code | Modern APIs, no deprecated modifiers, data flow, accessibility, HIG, performance |
+| **swift-testing-pro** | yes | Any unit/integration test | `@Test`, `#expect`, async patterns |
+| **swift-concurrency-pro** | yes | Any async/await, actor, Task, Sendable code | Actor isolation, structured concurrency, cancellation, MainActor |
+| **using-tuist-generated-projects** | yes | Any Tuist/`xcodebuild`/config work | Buildable folders, target tagging, build configs, workspace workflows |
+| **improve-codebase-architecture** | yes | Deepening a module, moving a boundary | Testability, module depth, consolidating shallow glue |
+| **xcuitest-pro** | **no** | Any XCUITest code | Page object pattern, accessibility-first targeting, deterministic launch contracts, no `sleep()` |
 
-How to load: read the skill's `SKILL.md` (lightweight index), then pull specific `references/*.md`
-as needed. Multiple skills can apply at once.
+`xcuitest-pro` is **not in this repository** — `find . -iname '*xcuitest*'` returns nothing, and the
+row is kept only so that nobody re-adds the reference believing it was an oversight. It is listed
+because agents run with their own skill sets and some do carry one; if yours does, use it. If yours
+does not, the XCUITest rules that matter here are written out in full in "UI Changes — Definition of
+Done" above, which is where the repo's actual, hard-won contract lives — the accessibility-identifier
+flattening, the launch/activation retry, and the `waitForAny` rule are all things a generic skill
+would not tell you.
+
+`improve-codebase-architecture` is vendored from `mattpocock/skills` and pinned in
+[`skills-lock.json`](skills-lock.json); the other four are local.
+
+How to load: read the skill's `SKILL.md` (lightweight index), then pull what it points at — the three
+`*-pro` skills carry a `references/` directory, `improve-codebase-architecture` a single
+`REFERENCE.md`, and `using-tuist-generated-projects` nothing but its `SKILL.md`. Multiple skills can
+apply at once.
 
 ### Non-negotiable patterns
 
