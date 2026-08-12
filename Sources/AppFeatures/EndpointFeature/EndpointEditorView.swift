@@ -40,16 +40,16 @@ private enum EditorRowMetrics {
 /// One height, one radius, one hairline — the rule the request log states for its own control row,
 /// applied here for the same reason: fields that differ by a couple of points read as unrelated
 /// controls that happen to be near each other.
+///
+/// Read from the design system rather than restated, so this row and the request log's cannot drift
+/// apart by a point the way four independently written literals eventually do. `field` is the rung a
+/// control a user types into stands on; it is also the minimum height of a row, so a row whose value
+/// is plain text keeps the rhythm of one holding a field.
 private enum EditorField {
-    /// 3pt above and below a 12pt monospaced line.
-    static let verticalPadding: CGFloat = 3
-    /// 22pt — the line plus `verticalPadding` top and bottom. Also the minimum height of a row, so a
-    /// row whose value is plain text keeps the rhythm of one holding a field.
-    static let height: CGFloat = 22
-    /// 4pt, from `DSCornerRadius.sm`.
-    static let cornerRadius: CGFloat = DSCornerRadius.sm
-    /// A hairline, not a border. At 1pt a column of these reads as a grid.
-    static let borderWidth: CGFloat = 0.5
+    static let verticalPadding = DSControlHeight.verticalPadding
+    static let height = DSControlHeight.field
+    static let cornerRadius = DSCornerRadius.sm
+    static let borderWidth = DSStroke.hairline
 }
 
 private extension View {

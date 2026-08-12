@@ -26,16 +26,16 @@ enum SortField: String {
 /// its own: a system popup, a bordered pill, a filled well and a bare icon. Xcode's equivalent bars
 /// run a single control idiom end to end, and the only way to keep that true here past the next edit
 /// is to have the numbers live in one place rather than be matched by hand.
+///
+/// The numbers are read from the design system rather than restated here. This enum used to hold
+/// four literals and a comment promising they matched `DSFilterField` — a coupling across a module
+/// boundary, asserted in prose and verified by nobody. `DSControlHeight` and `DSStroke` are where
+/// that promise now lives, so adopting the component later cannot change this row's shape.
 private enum HeaderControl {
-    /// 3pt above and below the content.
-    static let verticalPadding: CGFloat = 3
-    /// 20pt — content plus `verticalPadding` top and bottom, which is also where `DSFilterField`
-    /// settles, so a panel that later adopts that component does not change shape on the way in.
-    static let height: CGFloat = 20
-    /// 4pt, from `DSCornerRadius.sm`.
-    static let cornerRadius: CGFloat = DSCornerRadius.sm
-    /// A hairline, not a border. At 1pt the row reads as a form.
-    static let borderWidth: CGFloat = 0.5
+    static let verticalPadding = DSControlHeight.verticalPadding
+    static let height = DSControlHeight.row
+    static let cornerRadius = DSCornerRadius.sm
+    static let borderWidth = DSStroke.hairline
 }
 
 private extension View {
