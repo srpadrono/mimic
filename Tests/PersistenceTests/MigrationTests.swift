@@ -152,6 +152,33 @@ struct MigrationTests {
         #expect(AppMigrations.erasesOnSchemaChange(environment: environment) == expected)
     }
 
+    /// Every column another table joins on carries an index.
+    ///
+    /// `journey` and `journeyStep` got theirs in v2 and `endpoint` and `scenario` did not, which made
+    /// it an oversight rather than a policy — and these are the columns `load` and `save` walk, the
+    /// latter on an autosave debounce as the user types. Asserted by name so a future migration that
+    /// rebuilds a table cannot quietly drop one.
+    @Test(
+        "Foreign-key columns are indexed",
+        arguments: [
+            ("endpoint", "endpoint_projectID"),
+            ("scenario", "scenario_endpointID"),
+            ("journey", "journey_projectID"),
+            ("journeyStep", "journeyStep_journeyID"),
+        ]
+    )
+    func foreignKeyColumnsAreIndexed(table: String, index: String) throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let count = try dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ? AND tbl_name = ?",
+                arguments: [index, table]
+            ) ?? 0
+        }
+        #expect(count == 1, "\(table) has no \(index)")
+    }
+
     /// The default migrator is the one the app opens a real store with, and it must never erase.
     @Test("The default migrator migrates forward rather than erasing")
     func defaultMigratorDoesNotErase() throws {
