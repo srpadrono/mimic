@@ -126,10 +126,19 @@ struct EmittedCommandTests {
         var kinds: [CommandKind] { commands.map(\.kind) }
 
         func send(_ command: ControlCommand) async throws -> ControlResponse {
-            lock.lock()
-            recorded.append(command)
-            lock.unlock()
+            record(command)
             return answer(command)
+        }
+
+        /// The append lives in a synchronous method because `NSLock.lock()` is `noasync`: taking a
+        /// lock in an async function is a hold that can span a suspension, so the compiler refuses
+        /// it outright rather than warning. `CapturedHeaders` below is shaped the same way for the
+        /// same reason, and the computed `commands` above is fine because a getter is synchronous
+        /// however it is reached.
+        private func record(_ command: ControlCommand) {
+            lock.lock()
+            defer { lock.unlock() }
+            recorded.append(command)
         }
 
         func isReachable() async -> Bool { true }
@@ -617,7 +626,7 @@ struct ControlClientTransportTests {
     /// Nothing answered at all — the port is closed, the host is gone. The failure names where it was
     /// pointed, because "no instance" is the single most common reason a command cannot proceed.
     @Test("A transport error is reported as unreachable, naming the base URL")
-    func transportFailureIsUnreachable() async {
+    func transportFailureIsUnreachable() async throws {
         // `CustomStringConvertible` as well as `LocalizedError`: `send` reports
         // `error.localizedDescription`, and on Linux that falls back to `String(describing:)` rather
         // than to `errorDescription`. Spelling both means the assertion below is about the CLI's
