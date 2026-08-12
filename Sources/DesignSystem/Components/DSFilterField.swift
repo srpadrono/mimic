@@ -36,6 +36,16 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
 
+    /// Keyboard focus, so the well answers the Tab key the way it already answers the pointer.
+    ///
+    /// `.textFieldStyle(.plain)` discards AppKit's own focus ring, and nothing replaced it — so this
+    /// field, the request log's and the request detail's were the three places in the workspace where
+    /// tabbing in changed nothing on screen. That is the same defect as a control with no hover
+    /// state, applied to the keyboard, and for Full Keyboard Access it is not a polish item.
+    /// `DSTextField` already draws exactly this ring; it was simply the only thing in the module that
+    /// did.
+    @FocusState private var isFocused: Bool
+
     public init(
         text: Binding<String>,
         scopeID: Binding<String>,
@@ -64,6 +74,7 @@ public struct DSFilterField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(DSTypography.codeSmall)
+                .focused($isFocused)
                 .accessibilityIdentifier("\(identifier).field")
                 .accessibilityLabel(placeholder)
 
@@ -90,8 +101,14 @@ public struct DSFilterField: View {
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
-                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
+                // Focused, the well differs from its neighbours by *state* and by nothing else —
+                // same colour and same weight `DSTextField` uses, so the two read as one idiom.
+                .stroke(
+                    isFocused ? DSColors.borderFocused : DSColors.border,
+                    lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline
+                )
         }
+        .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
         // Paired deliberately: an identifier alone on a container overrides its descendants', and
         // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
         .accessibilityIdentifier("ds.filterfield.\(identifier)")
