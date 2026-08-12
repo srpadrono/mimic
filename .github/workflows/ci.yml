@@ -68,10 +68,18 @@ jobs:
 
       # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
       # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
-      - name: Install SQLite headers
+      #
+      # `python3` is here for the same reason and was found the same way: `swift:6.2` is a slim
+      # Ubuntu with no interpreter, so the two manifest checks below — plain stdlib Python — exited
+      # 127 with "python3: not found" on this workflow's first ever run. They had never executed
+      # before: the automatic triggers were disabled while the repository was private, and until this
+      # branch the checks did not exist. `python3-minimal` is the smallest thing that runs them;
+      # neither script imports anything outside the standard library, which is a constraint their own
+      # headers state so that this stays true.
+      - name: Install SQLite headers and Python
         run: |
           apt-get update
-          apt-get install -y libsqlite3-dev
+          apt-get install -y libsqlite3-dev python3-minimal
 
       # Recorded, and then used in the cache key below. `container: swift:6.2` is a tag its owner
       # repoints at each patch release, so `runner.os` alone keys a `.build` full of .swiftmodules at
@@ -117,6 +125,14 @@ jobs:
       # `swiftSettings: [.enableUpcomingFeature(...)]` lands.
       - name: Compiler settings
         run: python3 Scripts/check_compiler_settings.py
+
+      # README states a test total, a four-row table and two per-suite breakdowns, and all of them
+      # are hand-written. The repo's own README records that they have drifted twice. This recounts
+      # from the tree and fails on any disagreement, including a suite folder that exists and appears
+      # in none of the groups — which is what a newly added suite looks like before anybody writes it
+      # into the table, and is exactly how the newest one was found.
+      - name: Documented counts
+        run: python3 Scripts/check_doc_counts.py
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
