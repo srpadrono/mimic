@@ -5,9 +5,18 @@ import Persistence
 
 /// Composition root for a windowless Mimic.
 ///
-/// `mimic daemon start` is the whole reason this exists: a CI job or an agent needs the full engine,
-/// the project store, and the control API without a window or a logged-in GUI session. It wires the
-/// same pieces the app does, in the same order, so behaviour does not fork between the two.
+/// **Nothing in a shipped path reaches this.** `mimic daemon start` sounds like the caller, and is
+/// not: `DaemonCommand.Start` sets `headless = true` on `AppCommand.Start`, which launches the app
+/// bundle with `MIMIC_HEADLESS=1` and serves the control API through `AppControlHost`. There is no
+/// `mimic-daemon` binary and no SwiftPM executable product that constructs this, and no test
+/// references it either — `grep -rn MimicDaemon --include=*.swift .` finds only this file.
+///
+/// What it composes is reachable: `MimicControlService` is the one `ControlHost` `Package.swift`
+/// builds, so it is what the Linux job type-checks and what `Tests/ControlPlaneTests` exercises;
+/// `AppControlHost` is the one the window ships and lives in a target SwiftPM does not declare.
+/// Keeping the two in agreement is what makes wiring this to a real binary a small change rather
+/// than a rewrite, and `Tests/MimicTests/HostParityTests.swift` — a macOS-only suite — is what
+/// checks that agreement. See the "two hosts" section of AGENTS.md before changing either.
 public struct MimicDaemon: Sendable {
 
     public struct Configuration: Sendable {
