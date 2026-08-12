@@ -106,25 +106,58 @@ public enum ControlEndpointFile {
             create: true
         )
         let directory = appSupport.appendingPathComponent("devxa.Mimic", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+        )
         return directory.appendingPathComponent(fileName)
     }
 
-    /// Writes the discovery file `0600`.
+    /// Writes the discovery file `0600`, and never at any wider mode, even briefly.
     ///
     /// The file carries the instance's token, so its permissions are the access control. A plain
     /// `write(to:options:.atomic)` lands at `0644` under the default umask, which publishes the token
-    /// to every account on the machine — on a shared box or a CI host, that is the whole authentication
-    /// story undone. `.atomic` writes via a temporary file and renames, so the mode has to be applied
-    /// after the rename, not before.
+    /// to every account on the machine — on a shared box or a CI host, that is the whole
+    /// authentication story undone.
+    ///
+    /// Chmod-after-write does not fix it, which is what this used to do: `.atomic` writes a temporary
+    /// file and renames it into place, so between that rename and the `setAttributes` call the token
+    /// is sitting at the final path, readable by anyone who is looking. A loop watching the path wins
+    /// that race trivially. Worse, if `setAttributes` threw, the throw left the world-readable file
+    /// behind — and `ControlServer` writes this with `try?`, so nothing would have been reported.
+    ///
+    /// So the mode is applied to the temporary file *before* it becomes visible under the real name,
+    /// and `rename(2)` — which replaces atomically and carries the source's mode with it — publishes
+    /// it. A reader therefore sees either the old file or a complete `0600` one, and never a partial
+    /// or a wide one.
     public static func write(_ endpoint: ControlEndpoint, to url: URL? = nil) throws {
         let target = try url ?? writeURL()
         let data = try ControlCoding.encoder(pretty: true).encode(endpoint)
-        try data.write(to: target, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: Int16(0o600))],
-            ofItemAtPath: target.path
-        )
+
+        // Same directory, so the rename stays within one filesystem and is therefore atomic.
+        let temporary = target.deletingLastPathComponent()
+            .appendingPathComponent(".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier)")
+
+        let manager = FileManager.default
+        try? manager.removeItem(at: temporary)
+        guard manager.createFile(
+            atPath: temporary.path,
+            contents: nil,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o600))]
+        ) else {
+            throw ControlEndpointFileError.couldNotWrite(path: temporary.path)
+        }
+
+        do {
+            try data.write(to: temporary)
+            guard rename(temporary.path, target.path) == 0 else {
+                throw ControlEndpointFileError.couldNotWrite(path: target.path)
+            }
+        } catch {
+            try? manager.removeItem(at: temporary)
+            throw error
+        }
     }
 
     /// Removes the file so a stale endpoint never outlives the process that advertised it.
@@ -170,7 +203,30 @@ public enum ControlEndpointFile {
         if let port = environment[ControlAPI.portEnvironmentKey], let value = Int(port) {
             return URL(string: "http://127.0.0.1:\(value)")
         }
-        if let discovered { return URL(string: discovered.baseURL) }
+        // Derived from `port`, not read from `baseURL`.
+        //
+        // `baseURL` is a decoded field, so a discovery file saying `http://evil.example` would send
+        // the caller's `X-Mimic-Token` — the credential this whole file exists to protect — to
+        // whatever host it named, while `port` and `pid` still looked reassuringly local. The host
+        // is not information the file gets to supply: the control plane binds `127.0.0.1` and
+        // nothing else, so the only thing worth reading out of the file is which port.
+        if let discovered { return URL(string: "http://127.0.0.1:\(discovered.port)") }
         return nil
+    }
+}
+
+/// Why a discovery file could not be written.
+///
+/// Typed rather than a bare `NSError` because the caller — `ControlServer` — has to decide whether an
+/// instance that cannot advertise itself should still serve, and "the write failed" and "the rename
+/// failed" are the same decision.
+public enum ControlEndpointFileError: Error, LocalizedError, Equatable {
+    case couldNotWrite(path: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .couldNotWrite(path):
+            "Could not write the control discovery file at \(path)."
+        }
     }
 }

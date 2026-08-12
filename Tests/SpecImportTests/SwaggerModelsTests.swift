@@ -83,13 +83,11 @@ struct SwaggerModelsTests {
         let decoded = try JSONDecoder().decode([String: AnyCodableValue].self, from: Data(json.utf8))
 
         if case .null = decoded["nullValue"] {
-            #expect(true)
         } else {
             Issue.record("Expected null value to decode as .null")
         }
 
         if case .bool(true) = decoded["boolValue"] {
-            #expect(true)
         } else {
             Issue.record("Expected bool value to decode as .bool(true)")
         }

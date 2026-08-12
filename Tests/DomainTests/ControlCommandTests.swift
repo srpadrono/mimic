@@ -617,28 +617,38 @@ struct ControlWireFormatTests {
         #expect(decoded.result == nil)
     }
 
-    @Test("The catalog describes every command case exactly once")
+    /// This used to compare the catalog against a set of string literals written out below it, and
+    /// the comment claimed "a new command that skips the catalog fails here". It could not: adding a
+    /// case to `ControlCommand` and forgetting the catalog left the literals unchanged too, so the
+    /// test compared the catalog against a copy of itself and passed. `CommandKind` is the join that
+    /// makes the assertion real — `ControlCommand.kind` switches over it exhaustively, so a new case
+    /// cannot compile until it is named there, and `allCases` then has nowhere to hide.
+    @Test("The catalog describes every command exactly once, with no invented names")
     func catalogCoversTheSurface() {
         let names = CommandCatalog.descriptors.map(\.name)
         #expect(Set(names).count == names.count, "duplicate descriptors: \(names)")
 
-        // Mirrors the case list; a new command that skips the catalog fails here.
-        let expected: Set<String> = [
-            "ping", "describeCommands", "state", "reset",
-            "projectList", "projectCreate", "projectOpen", "projectClose", "projectDelete",
-            "projectRename", "projectDuplicate", "projectExport", "projectImport",
-            "serverStart", "serverStop", "serverStatus", "serverConfigure",
-            "endpointList", "endpointGet", "endpointCreate", "endpointUpdate", "endpointDelete",
-            "endpointDuplicate",
-            "scenarioList", "scenarioCreate", "scenarioUpdate", "scenarioDelete", "scenarioActivate",
-            "journeyList", "journeyGet", "journeyCreate", "journeyTemplateList", "journeyAddTemplate",
-            "journeyUpdate", "journeyDelete", "journeyDuplicate", "journeyStepAdd",
-            "journeyStepsAdd",
-            "journeyStepUpdate", "journeyStepRemove", "journeyStepMove", "journeyActivate",
-            "journeyRestart", "journeyAdvance", "journeyStatus",
-            "logList", "logClear",
-        ]
-        #expect(Set(names) == expected)
+        let described = CommandCatalog.describedKinds
+        let missing = Set(CommandKind.allCases).subtracting(described)
+        #expect(missing.isEmpty, "commands with no catalog entry: \(missing.map(\.rawValue).sorted())")
+
+        // A descriptor whose name is not a real command is dropped by `describedKinds`, so the count
+        // comparison is what catches a typo'd or stale entry.
+        #expect(
+            described.count == names.count,
+            "descriptors naming no known command: \(names.filter { CommandKind(rawValue: $0) == nil })"
+        )
+    }
+
+    @Test("Every command reports the kind it is")
+    func kindMatchesTheCase() {
+        #expect(ControlCommand.ping.kind == .ping)
+        #expect(ControlCommand.endpointList.kind == .endpointList)
+        #expect(ControlCommand.journeyStepMove(journey: .name("j"), step: .index(0), toIndex: 1).kind == .journeyStepMove)
+        #expect(ControlCommand.reset(scope: .all).kind == .reset)
+        // Every kind is reachable, so `allCases` is a faithful index of the surface rather than a
+        // list that has grown entries the enum no longer has.
+        #expect(CommandKind.allCases.count == 47)
     }
 
     @Test("Every catalog entry names a CLI invocation")

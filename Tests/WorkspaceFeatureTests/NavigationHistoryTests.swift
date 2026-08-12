@@ -11,8 +11,8 @@ struct NavigationHistoryTests {
         var history = NavigationHistory<String>()
 
         #expect(history.current == nil)
-        #expect(!history.canGoBack)
-        #expect(!history.canGoForward)
+        #expect(history.canGoBack == false)
+        #expect(history.canGoForward == false)
 
         let back = history.goBack()
         let forward = history.goForward()
@@ -28,8 +28,8 @@ struct NavigationHistoryTests {
 
         #expect(history.current == "endpoints")
         // One entry is a position, not a trail: there is nothing behind it and nothing ahead.
-        #expect(!history.canGoBack)
-        #expect(!history.canGoForward)
+        #expect(history.canGoBack == false)
+        #expect(history.canGoForward == false)
     }
 
     // MARK: - Back and forward
@@ -46,7 +46,7 @@ struct NavigationHistoryTests {
 
         #expect(previous == "endpoints")
         #expect(history.current == "endpoints")
-        #expect(!history.canGoBack)
+        #expect(history.canGoBack == false)
     }
 
     @Test("Forward retraces the step back")
@@ -62,7 +62,7 @@ struct NavigationHistoryTests {
 
         #expect(next == "journeys")
         #expect(history.current == "journeys")
-        #expect(!history.canGoForward)
+        #expect(history.canGoForward == false)
 
         // Past the end of the trail there is nothing to retrace, and the cursor must not drift.
         let past = history.goForward()
@@ -87,7 +87,7 @@ struct NavigationHistoryTests {
 
         // "c" is gone: you left the trail at "b", so forward now means "d" or nothing.
         #expect(history.current == "d")
-        #expect(!history.canGoForward)
+        #expect(history.canGoForward == false)
 
         let previous = history.goBack()
 
@@ -106,7 +106,7 @@ struct NavigationHistoryTests {
         history.visit("a")
 
         #expect(history.current == "a")
-        #expect(!history.canGoBack)
+        #expect(history.canGoBack == false)
         #expect(history.canGoForward)
 
         let next = history.goForward()
@@ -122,7 +122,7 @@ struct NavigationHistoryTests {
         history.visit("a")
 
         #expect(history.current == "a")
-        #expect(!history.canGoBack)
+        #expect(history.canGoBack == false)
     }
 
     // MARK: - Capacity
@@ -146,7 +146,7 @@ struct NavigationHistoryTests {
 
         #expect(steps == NavigationHistory<Int>.capacity - 1)
         #expect(history.current == 2)
-        #expect(!history.canGoBack)
+        #expect(history.canGoBack == false)
     }
 
     @Test("Dropping the oldest entry leaves the cursor where it was")
@@ -160,7 +160,7 @@ struct NavigationHistoryTests {
         // bar would show an item you visited 30 moves ago.
         #expect(history.current == 80)
         #expect(history.canGoBack)
-        #expect(!history.canGoForward)
+        #expect(history.canGoForward == false)
 
         let previous = history.goBack()
 

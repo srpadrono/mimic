@@ -59,7 +59,14 @@ public enum JourneyResolver {
             guard state.cursor < journey.steps.count else { return nil }
             searchRange = state.cursor..<(state.cursor + 1)
         case .orderedPerEndpoint:
-            searchRange = state.cursor..<journey.steps.count
+            // Clamped, because `a..<b` with `a > b` is not an empty range — it is a precondition
+            // failure, and this runs inside the embedded server, so the trap takes the whole app
+            // down with it. `strictSequence` guards the same condition one line up; this branch did
+            // not, and it is the default mode. A cursor past the end is reachable whenever a journey
+            // is rehydrated against steps that have since been removed — `JourneyRunState`'s public
+            // initializer exists for exactly that, and promises the run "degrades gracefully instead
+            // of silently replaying the wrong step". Nothing here was keeping that promise.
+            searchRange = min(state.cursor, journey.steps.count)..<journey.steps.count
         }
 
         for index in searchRange {

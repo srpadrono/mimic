@@ -51,22 +51,22 @@ import SwiftUI
 
 #Preview("DSMethodBadge — Standard") {
     HStack(spacing: DSSpacing.sm) {
-        DSMethodBadge(method: "GET")
-        DSMethodBadge(method: "POST")
-        DSMethodBadge(method: "PUT")
-        DSMethodBadge(method: "PATCH")
-        DSMethodBadge(method: "DELETE")
+        DSMethodBadge(method: "GET", identifier: "preview.get")
+        DSMethodBadge(method: "POST", identifier: "preview.post")
+        DSMethodBadge(method: "PUT", identifier: "preview.put")
+        DSMethodBadge(method: "PATCH", identifier: "preview.patch")
+        DSMethodBadge(method: "DELETE", identifier: "preview.delete")
     }
     .padding()
 }
 
 #Preview("DSMethodBadge — Compact") {
     HStack(spacing: DSSpacing.sm) {
-        DSMethodBadge(method: "GET", size: .compact)
-        DSMethodBadge(method: "POST", size: .compact)
-        DSMethodBadge(method: "PUT", size: .compact)
-        DSMethodBadge(method: "PATCH", size: .compact)
-        DSMethodBadge(method: "DELETE", size: .compact)
+        DSMethodBadge(method: "GET", size: .compact, identifier: "preview.compact.get")
+        DSMethodBadge(method: "POST", size: .compact, identifier: "preview.compact.post")
+        DSMethodBadge(method: "PUT", size: .compact, identifier: "preview.compact.put")
+        DSMethodBadge(method: "PATCH", size: .compact, identifier: "preview.compact.patch")
+        DSMethodBadge(method: "DELETE", size: .compact, identifier: "preview.compact.delete")
     }
     .padding()
 }

@@ -312,7 +312,7 @@ struct HARParserTests {
         let body = try await importedResponseBody(payload: payload, path: "/api/articles")
 
         #expect(body == payload)
-        #expect(!body.contains("REDACTED"))
+        #expect(body.contains("REDACTED") == false)
     }
 
     @Test("A captured credential is imported as captured, not rewritten")

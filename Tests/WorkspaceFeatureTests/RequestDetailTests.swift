@@ -122,7 +122,7 @@ struct RequestDetailTests {
         let tokens = JSONFormatter.tokenize(#"["alpha","beta"]"#)
 
         #expect(tokens.contains { $0.text == #""alpha""# && $0.kind == .string })
-        #expect(!tokens.contains { $0.kind == .key })
+        #expect(tokens.contains(where: { $0.kind == .key }) == false)
     }
 
     @Test("Non-JSON tokenises as a single plain run")
@@ -163,7 +163,7 @@ struct RequestDetailTests {
         let huge = "{\"a\":\"" + String(repeating: "x", count: JSONFormatter.formattingLimit) + "\"}"
         let rendered = RequestBodyView.render(payload: huge, searchText: "")
 
-        #expect(!rendered.isFormatted)
+        #expect(rendered.isFormatted == false)
         #expect(String(rendered.text.characters) == huge)
     }
 
@@ -231,7 +231,7 @@ struct RequestDetailTests {
     func omitsEmptyBody() {
         let log = RequestLog(method: .get, path: "/health", requestBody: "")
 
-        #expect(!RequestLogExport.curl(for: log, port: 3000).contains("--data-raw"))
+        #expect(RequestLogExport.curl(for: log, port: 3000).contains("--data-raw") == false)
     }
 
     @Test("Copying a response body formats it the same way the view shows it")

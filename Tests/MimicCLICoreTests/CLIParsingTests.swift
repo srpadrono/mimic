@@ -273,19 +273,62 @@ struct CLIParsingTests {
     @Test("Exit codes distinguish usage errors, missing instances, and failed commands")
     func exitCodeContract() {
         #expect(CLIFailure.badArgument("x").exitCode == 2)
-        #expect(CLIFailure.undecodable("x").exitCode == 2)
+        // A path the caller mistyped is bad usage; nothing was ever sent to Mimic.
+        #expect(CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode == 2)
         #expect(CLIFailure.noInstance.exitCode == 3)
         #expect(CLIFailure.unreachable(baseURL: URL(string: "http://127.0.0.1:1")!, underlying: "x").exitCode == 3)
         #expect(CLIFailure.commandFailed(.noProjectOpen).exitCode == 4)
-        #expect(CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode == 4)
+        // The arguments were fine and Mimic answered — just not with anything decodable.
+        #expect(CLIFailure.undecodable("x").exitCode == 4)
+    }
+
+    /// The contract is only real at the process boundary, and that is where it was broken: everything
+    /// above asserts `CLIFailure`, which `MimicCommand.run` never sees for a usage error. Those come
+    /// from ArgumentParser, whose usage exit status is `EX_USAGE` — so these invocations exited 64
+    /// while docs/CLI.md promised 2, and no test looked.
+    @Test(
+        "Usage errors exit 2 from the process, not just from CLIFailure",
+        arguments: [
+            ["nonsense"],
+            ["journey", "teleport"],
+            ["endpoint", "create"],
+            ["server", "configure", "--port", "not-a-number"],
+        ]
+    )
+    func usageErrorsExitTwo(arguments: [String]) async {
+        #expect(await MimicCommand.run(arguments: arguments) == 2)
+    }
+
+    @Test("--help and --version are successes, not usage errors")
+    func helpExitsZero() async {
+        #expect(await MimicCommand.run(arguments: ["--help"]) == 0)
+        #expect(await MimicCommand.run(arguments: ["journey", "--help"]) == 0)
     }
 
     @Test("\"No instance\" says how to start one")
-    func noInstanceIsActionable() {
-        let message = try! #require(CLIFailure.noInstance.errorDescription)
+    func noInstanceIsActionable() throws {
+        let message = try #require(CLIFailure.noInstance.errorDescription)
         #expect(message.contains("mimic app start"))
         #expect(message.contains("mimic daemon start"))
         #expect(message.contains("MIMIC_CONTROL_URL"))
+    }
+
+    /// `JourneyBehaviorOptions.apply` used `try?`, so a misremembered value parsed to `nil`, was
+    /// written over the field, and the command exited 0 reporting a change it had not made. These are
+    /// the spellings someone actually reaches for.
+    @Test("A misspelled enum option is rejected rather than silently dropped")
+    func behaviorOptionsRejectUnknownValues() throws {
+        for bad in ["sequential", "", "STRICT_SEQUENCE", "ordered per endpoint"] {
+            #expect(throws: (any Error).self, "expected \"\(bad)\" to be rejected") {
+                _ = try ArgumentParsing.matchMode(bad)
+            }
+        }
+        #expect(throws: (any Error).self) { _ = try ArgumentParsing.completion("loop") }
+        #expect(throws: (any Error).self) { _ = try ArgumentParsing.unmatchedBehavior("ignore") }
+
+        var spec = JourneySpec()
+        spec.matchMode = try ArgumentParsing.matchMode("strict-sequence")
+        #expect(spec.matchMode == .strictSequence)
     }
 }
 

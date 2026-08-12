@@ -91,7 +91,7 @@ struct JourneyCommand: AsyncParsableCommand {
         func run() async throws {
             var spec = try file.map(JourneyFile.readSpec) ?? JourneySpec()
             if let summary { spec.summary = summary }
-            behavior.apply(to: &spec)
+            try behavior.apply(to: &spec)
             // The name argument is authoritative; a file's own name must not silently win.
             spec.name = nil
 
@@ -131,7 +131,7 @@ struct JourneyCommand: AsyncParsableCommand {
             var spec = try file.map(JourneyFile.readSpec) ?? JourneySpec()
             if let newName { spec.name = newName }
             if let summary { spec.summary = summary }
-            behavior.apply(to: &spec)
+            try behavior.apply(to: &spec)
 
             guard spec != JourneySpec() else {
                 throw CLIFailure.badArgument(
@@ -587,10 +587,15 @@ struct JourneyBehaviorOptions: ParsableArguments, Sendable {
 
     /// Only writes fields the caller actually passed. `autoAdvance` has no natural "absent" value as a
     /// flag, so it is only applied when one of the two spellings appears in the arguments.
-    func apply(to spec: inout JourneySpec) {
-        if let matchMode { spec.matchMode = try? ArgumentParsing.matchMode(matchMode) }
-        if let completion { spec.completion = try? ArgumentParsing.completion(completion) }
-        if let unmatched { spec.unmatchedBehavior = try? ArgumentParsing.unmatchedBehavior(unmatched) }
+    ///
+    /// Throws rather than swallowing: these were `try?`, so `--match-mode sequential` — a plausible
+    /// misremembering of `strict-sequence` — parsed to `nil`, wrote `nil` over the field, and exited
+    /// 0 reporting success. The journey kept whatever mode it already had and the caller was told the
+    /// change had been applied. A typo in an enum-valued option is bad usage, and bad usage exits 2.
+    func apply(to spec: inout JourneySpec) throws {
+        if let matchMode { spec.matchMode = try ArgumentParsing.matchMode(matchMode) }
+        if let completion { spec.completion = try ArgumentParsing.completion(completion) }
+        if let unmatched { spec.unmatchedBehavior = try ArgumentParsing.unmatchedBehavior(unmatched) }
         if Self.autoAdvanceWasSpecified() { spec.autoAdvance = autoAdvance }
     }
 

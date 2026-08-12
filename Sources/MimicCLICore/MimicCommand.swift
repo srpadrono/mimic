@@ -48,8 +48,9 @@ public struct MimicCommand: AsyncParsableCommand {
 
     /// Runs the CLI, mapping thrown failures onto the documented exit codes.
     ///
-    /// ArgumentParser's own `main()` would report every failure as exit 1; the whole point of the exit
-    /// contract is that a script can tell "no instance" from "command failed" without parsing text.
+    /// ArgumentParser's own `main()` would not report what the contract promises; the whole point of
+    /// the exit contract is that a script can tell "no instance" from "command failed" without
+    /// parsing text.
     public static func run(arguments: [String]? = nil) async -> Int32 {
         do {
             var command = try parseAsRoot(arguments)
@@ -73,7 +74,14 @@ public struct MimicCommand: AsyncParsableCommand {
                     FileHandle.standardError.write(Data("\(message)\n".utf8))
                 }
             }
-            return code == .success ? 0 : (code.rawValue == 1 ? 2 : code.rawValue)
+            // Anything still thrown here came from ArgumentParser itself — an unknown subcommand, a
+            // missing argument, a value it could not convert — and every one of those is "bad usage",
+            // which the contract fixes at 2. Passing `code.rawValue` through instead was wrong: for a
+            // usage error ArgumentParser returns `EX_USAGE`, so `mimic nonsense` and `mimic endpoint
+            // create` exited **64** while docs/CLI.md promised 2 for exactly that case. The old code
+            // rewrote only 1 → 2, and 1 is a value this path does not produce. `--help` and
+            // `--version` arrive here too, but as `.success`, and still exit 0.
+            return code == .success ? 0 : 2
         }
     }
 }

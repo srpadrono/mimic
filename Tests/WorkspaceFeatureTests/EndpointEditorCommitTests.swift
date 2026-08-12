@@ -117,9 +117,9 @@ struct EndpointEditorCommitTests {
             EndpointEditorView.syncedValues(endpoint: endpoint, activeScenario: scenario)
         )
 
-        #expect(!EndpointEditorView.statusCodeIsDirty(synced.statusCodeString, against: scenario))
-        #expect(!EndpointEditorView.bodyIsDirty(synced.responseBody, against: scenario))
-        #expect(!EndpointEditorView.headersAreDirty(synced.headers, against: scenario))
+        #expect(EndpointEditorView.statusCodeIsDirty(synced.statusCodeString, against: scenario) == false)
+        #expect(EndpointEditorView.bodyIsDirty(synced.responseBody, against: scenario) == false)
+        #expect(EndpointEditorView.headersAreDirty(synced.headers, against: scenario) == false)
     }
 
     @Test("A header list rebuilt with fresh identities still says the same thing")
@@ -128,9 +128,9 @@ struct EndpointEditorCommitTests {
         // `id`s, so the array is never equal to the one it replaced even when the headers are.
         let scenario = makeScenario(headers: ["A": "1", "B": "2"])
 
-        #expect(!EndpointEditorView.headersAreDirty([("A", "1"), ("B", "2")], against: scenario))
+        #expect(EndpointEditorView.headersAreDirty([("A", "1"), ("B", "2")], against: scenario) == false)
         // Order is a property of the rows, not of the headers.
-        #expect(!EndpointEditorView.headersAreDirty([("B", "2"), ("A", "1")], against: scenario))
+        #expect(EndpointEditorView.headersAreDirty([("B", "2"), ("A", "1")], against: scenario) == false)
     }
 
     @Test("A row added but not yet typed into is not a header")
@@ -139,8 +139,8 @@ struct EndpointEditorCommitTests {
         // not wake the debounce at all.
         let scenario = makeScenario(headers: ["A": "1"])
 
-        #expect(!EndpointEditorView.headersAreDirty([("A", "1"), ("", "")], against: scenario))
-        #expect(!EndpointEditorView.headersAreDirty([("A", "1"), ("   ", "value")], against: scenario))
+        #expect(EndpointEditorView.headersAreDirty([("A", "1"), ("", "")], against: scenario) == false)
+        #expect(EndpointEditorView.headersAreDirty([("A", "1"), ("   ", "value")], against: scenario) == false)
     }
 
     @Test("A real edit is still an edit")
@@ -173,7 +173,7 @@ struct EndpointEditorCommitTests {
         // endpoint with no body must not look permanently edited.
         let scenario = makeScenario(body: nil)
 
-        #expect(!EndpointEditorView.bodyIsDirty("", against: scenario))
+        #expect(EndpointEditorView.bodyIsDirty("", against: scenario) == false)
         #expect(EndpointEditorView.bodyIsDirty(" ", against: scenario))
         #expect(EndpointEditorView.bodyIsDirty("{}", against: scenario))
     }
@@ -182,8 +182,8 @@ struct EndpointEditorCommitTests {
     func nothingCommitsWithoutAScenario() {
         // The editor shows its empty state instead of the fields here, so this is a guard rather
         // than a behaviour: a commit would have nowhere to land.
-        #expect(!EndpointEditorView.statusCodeIsDirty("404", against: nil))
-        #expect(!EndpointEditorView.bodyIsDirty("{}", against: nil))
-        #expect(!EndpointEditorView.headersAreDirty([("A", "1")], against: nil))
+        #expect(EndpointEditorView.statusCodeIsDirty("404", against: nil) == false)
+        #expect(EndpointEditorView.bodyIsDirty("{}", against: nil) == false)
+        #expect(EndpointEditorView.headersAreDirty([("A", "1")], against: nil) == false)
     }
 }

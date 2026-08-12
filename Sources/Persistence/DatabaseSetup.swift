@@ -35,7 +35,10 @@ public enum DatabaseFactory {
             withIntermediateDirectories: true
         )
         let dbQueue = try DatabaseQueue(path: dbURL.path, configuration: appConfiguration)
-        try AppMigrations.migrator.migrate(dbQueue)
+        let migrator = AppMigrations.migrator(
+            erasingOnSchemaChange: AppMigrations.erasesOnSchemaChange(environment: environment)
+        )
+        try migrator.migrate(dbQueue)
         return dbQueue
     }
 

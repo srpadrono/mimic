@@ -171,8 +171,36 @@ final class AppControlHost: ControlHost {
              .projectDuplicate, .projectExport, .projectImport:
             return performProjectCommand(command, appState: appState)
 
-        default:
-            // Reaching here means the command is project-scoped but nothing is open.
+        // Project-scoped: `ProjectCommandExecutor` would have handled every one of these, and only
+        // declined because nothing is open. Named individually rather than caught by `default:` so a
+        // command added later cannot land here by accident and tell the caller to open a project they
+        // already have open — the compiler stops the build until it is routed deliberately.
+        case .projectRename,
+             .serverConfigure,
+             .endpointList,
+             .endpointGet,
+             .endpointCreate,
+             .endpointUpdate,
+             .endpointDelete,
+             .endpointDuplicate,
+             .scenarioList,
+             .scenarioCreate,
+             .scenarioUpdate,
+             .scenarioDelete,
+             .scenarioActivate,
+             .journeyList,
+             .journeyGet,
+             .journeyCreate,
+             .journeyTemplateList,
+             .journeyAddTemplate,
+             .journeyUpdate,
+             .journeyDelete,
+             .journeyDuplicate,
+             .journeyStepAdd,
+             .journeyStepsAdd,
+             .journeyStepUpdate,
+             .journeyStepRemove,
+             .journeyStepMove:
             return .failure(.noProjectOpen)
         }
     }

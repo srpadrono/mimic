@@ -153,7 +153,7 @@ struct RequestDetailInspector: View {
     private var requestLine: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             HStack(spacing: DSSpacing.sm) {
-                DSMethodBadge(method: log.method.rawValue, size: .compact)
+                DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: "requestDetail.method")
                 statusPill
                 Spacer(minLength: 0)
                 Text(log.timestamp, style: .time)

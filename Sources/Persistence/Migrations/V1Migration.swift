@@ -5,17 +5,38 @@ import GRDB
 /// `v1` is the original project/endpoint/scenario schema. `v2` adds journeys — stored relationally
 /// rather than as a JSON blob so a step can be queried, reordered, and diffed like any other row.
 enum AppMigrations {
+
+    /// Opts a throwaway store into GRDB's erase-on-schema-change, for iterating on a migration.
+    ///
+    /// Honoured **only** alongside `MIMIC_DATABASE_PATH`. Erasing is not a debugging convenience that
+    /// can be aimed at whatever database happens to be open: GRDB compares the live schema against a
+    /// freshly migrated one and, on any difference, drops the file and rebuilds it empty. This used
+    /// to be `#if DEBUG` — unconditional, and applied by `makeAppDatabaseQueue` to the real
+    /// `mimic.sqlite` in Application Support. Debug is the configuration every developer runs, so the
+    /// next migration anybody added would have deleted every project of everyone who pulled it, and
+    /// the damage would have looked exactly like "the recents list is empty" — the same symptom, from
+    /// the same cause, as the UI-test reset this repository has already lost a project to.
+    ///
+    /// Requiring an explicit path is what makes it safe: the flag can only ever reach a store someone
+    /// deliberately pointed at. Nothing here computes a production path for itself.
+    static let eraseOnSchemaChangeEnvironmentKey = "MIMIC_ERASE_DB_ON_SCHEMA_CHANGE"
+
+    /// The migrator for a real store: it migrates forward, and never erases.
     static var migrator: DatabaseMigrator {
+        migrator(erasingOnSchemaChange: false)
+    }
+
+    static func migrator(erasingOnSchemaChange: Bool) -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
-
-        #if DEBUG
-        // In DEBUG builds, erase the database on schema changes so developers
-        // get a clean slate when iterating on the schema.
-        migrator.eraseDatabaseOnSchemaChange = true
-        #endif
-
+        migrator.eraseDatabaseOnSchemaChange = erasingOnSchemaChange
         registerAll(on: &migrator)
         return migrator
+    }
+
+    /// Whether `environment` asks for — and is allowed — the erasing migrator.
+    static func erasesOnSchemaChange(environment: [String: String]) -> Bool {
+        environment[eraseOnSchemaChangeEnvironmentKey] == "1"
+            && environment[DatabaseFactory.databasePathEnvironmentKey]?.isEmpty == false
     }
 
     /// The migrations themselves, without the DEBUG erase-on-schema-change behaviour.

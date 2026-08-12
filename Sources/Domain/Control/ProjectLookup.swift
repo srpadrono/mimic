@@ -82,6 +82,47 @@ extension MockProject {
     }
 }
 
+/// Resolution that fails loudly.
+///
+/// Every project-scoped command starts by turning a handle into a member, and the failure is always
+/// the same sentence: throw the `ControlError` that names what could not be found. Spelled out at
+/// each call site that was `guard let index = … else { throw … }` twenty-four times over — twenty-four
+/// chances to throw the wrong error, or to report a missing scenario as a missing endpoint. Naming
+/// the lookup and its failure together means a caller cannot pair them up incorrectly.
+extension MockProject {
+
+    public func requireEndpointIndex(_ ref: EndpointRef) throws -> Int {
+        guard let index = endpointIndex(matching: ref) else {
+            throw ControlError.endpointNotFound(ref)
+        }
+        return index
+    }
+
+    public func requireEndpoint(_ ref: EndpointRef) throws -> Endpoint {
+        let index = try requireEndpointIndex(ref)
+        return endpoints[index]
+    }
+
+    public func requireScenarioIndex(in endpoint: Endpoint, matching ref: ScenarioRef) throws -> Int {
+        guard let index = scenarioIndex(in: endpoint, matching: ref) else {
+            throw ControlError.scenarioNotFound(ref)
+        }
+        return index
+    }
+
+    public func requireJourneyIndex(_ ref: JourneyRef) throws -> Int {
+        guard let index = journeyIndex(matching: ref) else {
+            throw ControlError.journeyNotFound(ref)
+        }
+        return index
+    }
+
+    public func requireJourney(_ ref: JourneyRef) throws -> Journey {
+        let index = try requireJourneyIndex(ref)
+        return journeys[index]
+    }
+}
+
 extension Journey {
     public func stepIndex(matching ref: JourneyStepRef) -> Int? {
         if let id = ref.id {
@@ -95,5 +136,12 @@ extension Journey {
             return steps.firstIndex { MockProject.foldName($0.name) == key }
         }
         return nil
+    }
+
+    public func requireStepIndex(_ ref: JourneyStepRef) throws -> Int {
+        guard let index = stepIndex(matching: ref) else {
+            throw ControlError.journeyStepNotFound(ref)
+        }
+        return index
     }
 }

@@ -63,8 +63,18 @@ public actor MimicControlService: ControlHost {
     }
 
     public func shutdown() async {
-        logDrain?.cancel()
-        logDrain = nil
+        // The drain task is deliberately left running.
+        //
+        // Cancelling it would not just end the loop: `AsyncStream`'s iterator finishes the *stream*
+        // when the awaiting task is cancelled, and `engine.logStream` is one stream shared for the
+        // engine's whole lifetime — the engine says so twice, and does not finish it on `stop` so a
+        // stop/start cycle keeps reaching the same consumer. Cancelling here finished it anyway, so a
+        // `shutdown()` followed by `start()` produced a service that served traffic and recorded none
+        // of it, with nothing to see in `mimic log list`.
+        //
+        // `logDrain` also stays set, so a later `start()` does not attach a second consumer to a
+        // single-consumer stream and split the log between them. The task holds `self` weakly and
+        // ends on its own when the engine deallocates and its continuation finishes.
         if await engine.isRunning {
             try? await engine.stop()
         }
@@ -254,10 +264,39 @@ public actor MimicControlService: ControlHost {
             return .message("Cleared \(count) request log \(count == 1 ? "entry" : "entries").")
 
         // MARK: Project-scoped, but no project is open
-
-        default:
-            // Reaching here means `ProjectCommandExecutor` would have handled the command — it only
-            // declined because nothing is open. Saying so is far more useful than "unsupported".
+        //
+        // Named one by one rather than caught by `default:`. `ProjectCommandExecutor` would have
+        // handled every one of these — it only declined because nothing is open, and saying so is far
+        // more useful than "unsupported". The reason to spell them out is what happens to a command
+        // added later: under a `default` it landed here and told the caller to open a project they
+        // already had open. Listed, the compiler stops the build until the new command is routed on
+        // purpose, in the same edit that adds it to the executor.
+        case .projectRename,
+             .serverConfigure,
+             .endpointList,
+             .endpointGet,
+             .endpointCreate,
+             .endpointUpdate,
+             .endpointDelete,
+             .endpointDuplicate,
+             .scenarioList,
+             .scenarioCreate,
+             .scenarioUpdate,
+             .scenarioDelete,
+             .scenarioActivate,
+             .journeyList,
+             .journeyGet,
+             .journeyCreate,
+             .journeyTemplateList,
+             .journeyAddTemplate,
+             .journeyUpdate,
+             .journeyDelete,
+             .journeyDuplicate,
+             .journeyStepAdd,
+             .journeyStepsAdd,
+             .journeyStepUpdate,
+             .journeyStepRemove,
+             .journeyStepMove:
             throw ControlError.noProjectOpen
         }
     }
@@ -381,15 +420,24 @@ public actor MimicControlService: ControlHost {
     // MARK: - State
 
     private func makeState() async -> ControlState {
-        ControlState(
+        // The awaited value is resolved first, and everything else read from locals afterwards.
+        //
+        // Written inline among the other arguments, this suspended the actor half way through
+        // building one snapshot: arguments evaluate left to right, so `project` and the two counts
+        // came from before the hop and `requestLogCount` from after it. A `.logClear` or a
+        // `.projectClose` arriving in that window produced a single `state` reply describing two
+        // different instants — the hardest kind of wrong answer to reproduce.
+        let journey = await journeyStatus()
+        let project = openProject
+        return ControlState(
             appVersion: appVersion,
             mode: mode,
             pid: currentPID,
             server: makeServerStatus(),
-            project: openProject.map(ProjectSummary.init),
-            endpointCount: openProject?.endpoints.count ?? 0,
-            journeyCount: openProject?.journeys.count ?? 0,
-            activeJourney: await journeyStatus(),
+            project: project.map(ProjectSummary.init),
+            endpointCount: project?.endpoints.count ?? 0,
+            journeyCount: project?.journeys.count ?? 0,
+            activeJourney: journey,
             requestLogCount: requestLogs.count
         )
     }
@@ -451,9 +499,14 @@ public actor MimicControlService: ControlHost {
         if let id = ref.id {
             do {
                 return try await repository.load(id: id)
-            } catch {
+            } catch PersistenceError.projectNotFound {
                 throw ControlError.projectNotFound(ref)
             }
+            // Everything else — a locked database, an I/O error, a row that will not decode — reaches
+            // `execute`, which has a `PersistenceError` branch and an internal-failure fallback that
+            // name the real problem. Catching `any Error` here reported all of them as
+            // `project.notFound`, so a database Mimic could not open was indistinguishable from a
+            // project that had genuinely been deleted, and "my projects vanished" had no diagnosis.
         }
         guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
             throw ControlError.invalid("Provide a project id or name.")

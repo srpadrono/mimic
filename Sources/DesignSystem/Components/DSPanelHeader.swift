@@ -47,7 +47,22 @@ public struct DSPanelHeader<Accessory: View>: View {
             Text(title)
                 .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
-                .fixedSize()
+                // `.lineLimit(1)` with priority, not `.fixedSize()`.
+                //
+                // The subtitle below explains how `.fixedSize()` produced "narios" instead of
+                // "Scenarios" — and then the fix was applied to the subtitle while the modifier stayed
+                // on the title, which is the string the original defect was about. The mechanism never
+                // went away: a rigid child in an `HStack` that runs out of width is resolved by
+                // pushing the row's leading edge out of view, and the request log's header hands its
+                // accessory a picker, a toggle, a 120pt filter well and a button before this title
+                // gets a say. The subtitle merely absorbs the slack first, so it takes a narrow
+                // window rather than a long word to reach it.
+                //
+                // Positive priority is the half of the subtitle's lesson that works: it makes the
+                // title the *last* thing to yield without ever making the row demand width the panel
+                // does not have. A negative priority on the subtitle was the version that failed.
+                .lineLimit(1)
+                .layoutPriority(1)
                 .accessibilityIdentifier("ds.panelheader.title.\(identifier)")
 
             if let subtitle {

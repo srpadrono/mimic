@@ -11,16 +11,24 @@ import Domain
 @Suite("MockServerEngine", .serialized)
 struct MockServerEngineTests {
 
+    /// Every sibling suite in this target already asks the OS for a port; this file was the one
+    /// holding 18080–18084 by hand. A fixed port fails on the machine that happens to have something
+    /// on it, and fails again on the run that starts while the previous socket is still in
+    /// `TIME_WAIT` — both of which read as a broken engine rather than a broken test.
+    static func freePort() throws -> Int {
+        try #require(PlatformSocket.freePort())
+    }
+
     @Test func startAndStopSucceeds() async throws {
         let engine = MockServerEngine()
-        let config = ServerConfiguration(port: 18080, globalDelayMs: 0)
+        let config = ServerConfiguration(port: try Self.freePort(), globalDelayMs: 0)
         try await engine.start(configuration: config)
         try await engine.stop()
     }
 
     @Test func doubleStartThrowsAlreadyRunning() async throws {
         let engine = MockServerEngine()
-        let config = ServerConfiguration(port: 18081, globalDelayMs: 0)
+        let config = ServerConfiguration(port: try Self.freePort(), globalDelayMs: 0)
         try await engine.start(configuration: config)
         defer { Task { try? await engine.stop() } }
 
@@ -47,7 +55,8 @@ struct MockServerEngineTests {
 
     @Test func logStreamYieldsEntryAfterHTTPRequest() async throws {
         let engine = MockServerEngine()
-        let config = ServerConfiguration(port: 18082, globalDelayMs: 0)
+        let port = try Self.freePort()
+        let config = ServerConfiguration(port: port, globalDelayMs: 0)
         try await engine.start(configuration: config)
         defer { Task { try? await engine.stop() } }
 
@@ -60,7 +69,7 @@ struct MockServerEngineTests {
             return nil
         }
 
-        let url = URL(string: "http://127.0.0.1:18082/anything")!
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/anything"))
         _ = try? await URLSession.shared.data(from: url)
 
         try await Task.sleep(for: .seconds(1))
@@ -79,10 +88,11 @@ struct MockServerEngineTests {
         // global (120) + per-endpoint (150) = 270ms minimum
         await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 120)
 
-        try await engine.start(configuration: ServerConfiguration(port: 18084, globalDelayMs: 120))
+        let port = try Self.freePort()
+        try await engine.start(configuration: ServerConfiguration(port: port, globalDelayMs: 120))
         defer { Task { try? await engine.stop() } }
 
-        let url = URL(string: "http://127.0.0.1:18084/slow")!
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/slow"))
         let started = ContinuousClock.now
         let (_, response) = try await URLSession.shared.data(from: url)
         let elapsed = ContinuousClock.now - started
@@ -112,7 +122,8 @@ struct MockServerEngineTests {
 
     @Test func updateConfigurationAffectsRouteMatching() async throws {
         let engine = MockServerEngine()
-        let config = ServerConfiguration(port: 18083, globalDelayMs: 0)
+        let port = try Self.freePort()
+        let config = ServerConfiguration(port: port, globalDelayMs: 0)
 
         let scenario = Scenario(name: "OK", statusCode: 200, body: "{\"status\":\"ok\"}")
         let endpoint = Endpoint(name: "Health", method: .get, path: "/health",
@@ -122,9 +133,10 @@ struct MockServerEngineTests {
         try await engine.start(configuration: config)
         defer { Task { try? await engine.stop() } }
 
-        let url = URL(string: "http://127.0.0.1:18083/health")!
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/health"))
         let (data, response) = try await URLSession.shared.data(from: url)
-        let httpResponse = response as! HTTPURLResponse
+        // `as!` aborts the whole runner on a surprise; `#require` fails this one test and says why.
+        let httpResponse = try #require(response as? HTTPURLResponse)
 
         #expect(httpResponse.statusCode == 200)
         let body = String(data: data, encoding: .utf8)

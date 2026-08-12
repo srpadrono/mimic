@@ -57,6 +57,24 @@ struct ContentView: View {
         } message: { reason in
             Text(reason)
         }
+        // Every rule the window breaks is refused by `ProjectCommandExecutor`, and until this alert
+        // existed the refusal went nowhere: `AppState.run` set `lastCommandError` and nothing in the
+        // app, the tests, or the UI suite ever read it. Type a header value containing a newline and
+        // the editor kept showing it, the endpoint kept the old one, and switching endpoints put the
+        // old value back — a change silently not made, which is the worst way for a validator to
+        // fail. Presented here for the same reason the store-failure alert is: one presenter, so both
+        // branches of the window report a refusal the same way.
+        .alert(
+            "Couldn't apply that change",
+            isPresented: $appState.isShowingCommandError,
+            presenting: appState.lastCommandError
+        ) { _ in
+            Button("OK") { appState.lastCommandError = nil }
+                .accessibilityIdentifier("commandError.okButton")
+                .accessibilityLabel("OK")
+        } message: { message in
+            Text(message)
+        }
     }
 }
 

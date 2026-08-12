@@ -212,11 +212,17 @@ public enum CLIFailure: Error, LocalizedError, Equatable {
 
     /// Exit codes are part of the contract: a script branches on them without parsing output.
     /// `2` means "the command was wrong", `3` means "no instance", `4` means "the command failed".
+    ///
+    /// Two of these used to sit on the wrong side of that line, in opposite directions. A path the
+    /// caller mistyped never leaves the process, so `fileUnreadable` cannot be "Mimic refused it" —
+    /// it is the same kind of mistake as a missing selector, and exits 2. A reply this CLI could not
+    /// decode is the reverse: the arguments were fine and Mimic answered, just not with anything
+    /// usable, so reporting it as bad usage sent a script looking at its own command line.
     public var exitCode: Int32 {
         switch self {
-        case .badArgument, .undecodable: 2
+        case .badArgument, .fileUnreadable: 2
         case .noInstance, .unreachable: 3
-        case .commandFailed, .fileUnreadable: 4
+        case .commandFailed, .undecodable: 4
         }
     }
 }

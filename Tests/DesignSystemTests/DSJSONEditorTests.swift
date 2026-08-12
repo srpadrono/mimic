@@ -37,17 +37,17 @@ struct DSJSONEditorTests {
 
     @Test("Invalid JSON returns false")
     func invalidJSON() {
-        #expect(!DSJSONEditor.validateJSON("{invalid}"))
+        #expect(DSJSONEditor.validateJSON("{invalid}") == false)
     }
 
     @Test("Incomplete JSON returns false")
     func incompleteJSON() {
-        #expect(!DSJSONEditor.validateJSON(#"{"key":"#))
+        #expect(DSJSONEditor.validateJSON(#"{"key":"#) == false)
     }
 
     @Test("Plain string is invalid JSON")
     func plainStringIsInvalid() {
-        #expect(!DSJSONEditor.validateJSON("hello"))
+        #expect(DSJSONEditor.validateJSON("hello") == false)
     }
 
     // MARK: - prettyPrint

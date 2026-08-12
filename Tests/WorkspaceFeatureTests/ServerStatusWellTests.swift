@@ -142,7 +142,7 @@ struct ServerStatusWellTests {
         )
 
         #expect(help == "Payments API — server stopped. No requests logged.")
-        #expect(!help.contains("unmatched"))
+        #expect(help.contains("unmatched") == false)
     }
 
     @Test("The tooltip still names the state when there is no project and no traffic")

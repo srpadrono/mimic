@@ -828,7 +828,9 @@ struct RequestLogTableRow: View {
     var body: some View {
         HStack(spacing: 0) {
             // Method
-            DSMethodBadge(method: log.method.rawValue, size: .compact)
+            // Keyed by the log entry, not by the method: every GET row shared one identifier when the
+            // badge defaulted to the method name, so a query for it resolved to an arbitrary row.
+            DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: log.id.uuidString)
                 .frame(width: LogColumns.method, alignment: .leading)
 
             // Path

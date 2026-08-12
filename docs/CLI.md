@@ -10,7 +10,7 @@ diagnostics on stderr, and exit codes that mean something.
 | `0` | Success. |
 | `2` | Bad usage — a malformed argument, a missing selector, or an unknown subcommand. |
 | `3` | No reachable Mimic instance. |
-| `4` | The command reached Mimic and Mimic refused it. |
+| `4` | The command reached Mimic and did not come back with a result — Mimic refused it, or answered with something this CLI could not read. |
 
 Every response uses one envelope, so a caller branches on a single boolean and never has to guess
 whether the payload is an error:
