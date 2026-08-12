@@ -219,8 +219,17 @@ struct RealCaptureTests {
         )
 
         // And the entry beside it is untouched: one dead request must not cost the twenty around it.
+        //
+        // Found and asserted in two steps rather than as one `contains(where:)` over `path == …
+        // && statusCode == 200`. That spelling made the type checker give up — "unable to type-check
+        // this expression in reasonable time", inside the `#expect` expansion, failing the whole
+        // SpecImportTests batch on macOS while Linux compiled it. `&&` across a `String` comparison
+        // and an integer literal is enough to do it once a macro re-types the expression. This form
+        // also says which half is wrong when it fails.
         #expect(candidates.count == 2)
-        #expect(candidates.contains(where: { $0.path == "/v1/things" && $0.statusCode == 200 }))
+        let things = candidates.first { $0.path == "/v1/things" }
+        #expect(things != nil)
+        #expect(things?.statusCode == 200)
     }
 
     // MARK: - URLs real captures contain
