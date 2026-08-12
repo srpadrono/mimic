@@ -801,4 +801,105 @@ struct OpenAPIParserTests {
 
         #expect(candidates[0].responseBody?.contains("csv,data") == true)
     }
+
+    // MARK: - Content types as real specs declare them
+
+    /// Every Swagger fixture above puts `produces` inside the operation. Real specs overwhelmingly
+    /// declare it once at the document level, which this parser did not decode at all — so those
+    /// specs imported as plain text, which then short-circuited the JSON body fallback and left every
+    /// endpoint with no body either. Two bugs, one missing field, and fixtures tidier than reality.
+    @Test("A document-level `produces` applies to operations that do not override it")
+    func swagger2HonoursDocumentLevelProduces() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "produces": ["application/json"],
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "operationId": "listUsers",
+                        "summary": "List all users",
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                },
+                "/api/report": {
+                    "get": {
+                        "produces": ["text/csv"],
+                        "responses": { "200": { "description": "A CSV report" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let users = try #require(candidates.first { $0.path == "/api/users" })
+        let report = try #require(candidates.first { $0.path == "/api/report" })
+
+        #expect(users.responseContentType == .json)
+        #expect(users.responseBody != nil, "a JSON endpoint with no schema still gets a fallback body")
+        // An operation's own `produces` still wins over the document's.
+        #expect(report.responseContentType == .plainText)
+    }
+
+    /// `application/json` is not the only spelling of JSON, and both of these appear in specs that
+    /// ship. The exact-match test this replaced imported them as plain text.
+    @Test(
+        "JSON is recognised by more than an exact `application/json`",
+        arguments: ["application/json", "application/hal+json", "application/json; charset=utf-8", "application/vnd.api+json"]
+    )
+    func swagger2RecognisesJSONVariants(mimeType: String) async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "produces": ["\(mimeType)"],
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseContentType == .json)
+    }
+
+    /// Swagger 2 candidates used to be constructed by hand instead of going through
+    /// `ImportCandidateBuilder`, so they carried their own duplicate rule — one that compared route
+    /// only, while the shared rule also compares the GraphQL operation. The header policy was skipped
+    /// on that path too. `ImportHeaderPolicyTests` claimed to cover "every importer" and could not:
+    /// it called the builder directly.
+    @Test("Swagger 2 candidates are built by the same chokepoint as every other importer")
+    func swagger2UsesTheSharedBuilder() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "produces": ["application/json"],
+            "paths": {
+                "/api/users": {
+                    "get": { "responses": { "200": { "description": "OK" } } }
+                }
+            }
+        }
+        """
+        let existing = Endpoint(
+            name: "Users",
+            method: .get,
+            path: "/api/users",
+            scenarios: [],
+            activeScenarioID: nil
+        )
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8), existingEndpoints: [existing])
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.isDuplicate)
+        #expect(candidate.isSelected == false, "a duplicate arrives unselected")
+        // The builder names and groups a candidate when the parser does not.
+        #expect(candidate.suggestedGroupTag != nil)
+    }
 }

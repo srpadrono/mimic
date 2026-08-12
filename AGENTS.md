@@ -307,6 +307,16 @@ When adding or modifying views or navigation:
    **not** arm it — `Scripts/run_cli_e2e.sh` exports exactly that to share a throwaway store with the
    CLI, and arming there would delete the store the script just set up.
 
+   **The same rule binds anything that can destroy a store, not just a test reset.** GRDB's
+   `eraseDatabaseOnSchemaChange` was set under `#if DEBUG` in `AppMigrations.migrator` — the migrator
+   the app runs against the real `mimic.sqlite`. It drops the file and rebuilds it empty on any
+   schema difference, and Debug is the configuration every developer runs, so the next migration
+   anybody added would have deleted every project of everyone who pulled it, with the damage again
+   looking exactly like "the recents list is empty". It is now opt-in via
+   `MIMIC_ERASE_DB_ON_SCHEMA_CHANGE` **and** honoured only alongside an explicit
+   `MIMIC_DATABASE_PATH`, so it can only ever reach a store somebody deliberately named. A
+   convenience that erases must never be able to compute its own target.
+
    If you add another kind of persisted state, isolate it the same way: give the test run its own,
    and never let a reset compute a production path for itself.
 5. **Use XCTest for UI tests** (Swift Testing does not support XCUITest).
@@ -367,15 +377,41 @@ When adding or modifying views or navigation:
 When adding or changing an operation:
 
 1. **Add a `ControlCommand` case** with labelled associated values (unlabelled ones encode as `_0`).
-2. **Handle it in `ProjectCommandExecutor`** if it is project-scoped; otherwise in
+2. **Add the matching `CommandKind` case.** `ControlCommand.kind` switches onto it with no `default`,
+   so this is not optional — the build fails until it is there. That is the point: `ControlCommand`
+   carries associated values and can never be `CaseIterable`, so `CommandKind` is the thing that
+   *can* be, and it is what every list claiming to mirror the surface is checked against.
+3. **Handle it in `ProjectCommandExecutor`** if it is project-scoped; otherwise in
    `MimicControlService` *and* `AppControlHost`.
-3. **Add a `CommandCatalog` descriptor** — `DomainTests` asserts the catalog covers every case, so a
-   missing entry fails the build's tests rather than silently shipping an undiscoverable command.
-4. **Add the CLI subcommand** and a parse test in `MimicCLICoreTests`.
-5. **Keep the exit-code contract**: `0` success, `2` bad usage, `3` no reachable instance, `4` command
-   failed.
-6. **Never widen the control plane's binding** beyond `127.0.0.1`. It must stay unreachable from
+
+   **None of those three switches ends in `default:`, and none of them may.** Every case is named,
+   including the ones each switch declines, so adding a command is a compile error in all three
+   until somebody decides which side of the project-scoped line it falls on. Under a `default` a new
+   command compiled everywhere untouched and surfaced at runtime as "no project is open" — with a
+   project open. A `default` is how a switch stops being a decision and starts being a guess.
+4. **Add a `CommandCatalog` descriptor.** `DomainTests` compares the catalog against
+   `CommandKind.allCases`, so a missing entry fails the tests rather than silently shipping an
+   undiscoverable command. It used to compare the catalog against a set of string literals written
+   in the test itself — which is a fourth hand-maintained copy of the case list, so forgetting the
+   catalog and forgetting the literals were the same omission and the test passed.
+5. **Add the CLI subcommand** and a parse test in `MimicCLICoreTests`.
+6. **Keep the exit-code contract**: `0` success, `2` bad usage, `3` no reachable instance, `4` the
+   command reached Mimic and did not come back with a result. Assert it at the process boundary —
+   `MimicCommand.run(arguments:)` — and not only on `CLIFailure.exitCode`. Usage errors never become
+   a `CLIFailure` at all; they come from ArgumentParser, whose own status is `EX_USAGE`, so `mimic
+   nonsense` exited 64 against a documented 2 while every `CLIFailure` assertion stayed green.
+7. **Parse enum-valued options with `try`, never `try?`.** A swallowed conversion writes `nil` over
+   the field and reports success, so `--match-mode sequential` told the caller it had changed a mode
+   it had not touched.
+8. **Never widen the control plane's binding** beyond `127.0.0.1`. It must stay unreachable from
    whatever the app under test can route to.
+
+   The discovery file is the other half of that boundary, and it is a credential: it is written
+   `0600` by setting the mode on a temporary file and then `rename(2)`-ing it into place. Do not
+   reach for `Data.write(options: .atomic)` and a following `chmod` — `.atomic` renames, so the token
+   sits at the final path at the umask default until the `chmod` lands, and stays there if it throws.
+   Resolution reads `port` from that file and derives the host; it does not read `baseURL`, because a
+   file that can name the host can send the token off-box.
 
 ## Skill Integration — Mandatory
 

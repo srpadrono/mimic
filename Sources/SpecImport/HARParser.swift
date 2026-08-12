@@ -133,12 +133,31 @@ public enum HARParser {
     }
 
     /// Extract the path component from a full URL.
+    ///
+    /// The result always begins with `/`, because an endpoint whose path does not cannot match any
+    /// request the server will ever receive — it imports, it appears in the list, and it is dead.
+    ///
+    /// That was reachable, and the `guard` below looks like it covers it but does not.
+    /// `URLComponents(string:)` does not fail on a schemeless string: it parses `api.example.com/users`
+    /// as a *relative reference*, succeeds, and hands back the whole thing as `.path` with no host —
+    /// so the fallback never ran and the host arrived as the start of the route. Re-parsing with a
+    /// scheme is what separates the authority from the path, and it is only safe to do when the first
+    /// segment actually looks like a hostname: `users/123` is a relative path, not a host called
+    /// `users`.
     static func extractPath(from urlString: String) -> String {
-        guard let components = URLComponents(string: urlString) else {
-            return urlString.hasPrefix("/") ? urlString : "/\(urlString)"
+        var components = URLComponents(string: urlString)
+
+        if components?.scheme == nil,
+           let firstSegment = urlString.split(separator: "/", maxSplits: 1).first,
+           firstSegment.contains("."),
+           let withScheme = URLComponents(string: "http://\(urlString)"),
+           withScheme.host != nil {
+            components = withScheme
         }
-        let path = components.path
-        return path.isEmpty ? "/" : path
+
+        let path = components?.path ?? urlString
+        guard !path.isEmpty else { return "/" }
+        return path.hasPrefix("/") ? path : "/\(path)"
     }
 
     /// Suggest a group tag from the first meaningful path segment.

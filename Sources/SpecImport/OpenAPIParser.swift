@@ -50,7 +50,7 @@ public enum OpenAPIParser {
                 guard let method = HTTPMethod(rawValue: methodString) else { continue }
 
                 var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(from: operation, doc: doc)
-                let contentType: Scenario.ContentType = (operation.produces?.contains("application/json") ?? false) ? .json : .plainText
+                let contentType = swagger2ContentType(operation: operation, doc: doc)
 
                 // Fallback: auto-generate body from operation metadata when no schema/examples
                 if exampleBody == nil && contentType == .json {
@@ -59,35 +59,38 @@ public enum OpenAPIParser {
                         parameters: operation.parameters
                     )
                 }
-                let name = suggestSwagger2Name(operation: operation, method: method, path: pathString)
-                let groupTag = HARParser.suggestGroupTag(path: pathString)
-                let bodySize = exampleBody?.utf8.count ?? 0
 
-                let isDuplicate = existingEndpoints.contains { ep in
-                    ep.method == method && ep.path == pathString
-                }
-
-                candidates.append(ImportCandidate(
-                    id: UUID(),
-                    isSelected: !isDuplicate,
+                // Through the builder, like every other importer. Built by hand, this path skipped
+                // `ImportHeaderPolicy` and carried its own duplicate rule — one that ignored the
+                // GraphQL operation the shared rule compares — so "one chokepoint means a future
+                // importer cannot forget" was true of the chokepoint and not of this caller.
+                candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
-                    suggestedName: name,
-                    suggestedGroupTag: groupTag,
+                    suggestedName: suggestSwagger2Name(operation: operation, method: method, path: pathString),
                     statusCode: statusCode,
                     responseHeaders: [:],
-                    responseBody: bodySize > HARParser.bodySizeLimit ? nil : exampleBody,
+                    responseBody: exampleBody,
                     responseContentType: contentType,
                     // An OpenAPI document describes REST routes; GraphQL operations do not appear in one.
                     graphqlOperation: nil,
-                    bodySizeBytes: bodySize,
-                    bodySizeExceedsLimit: bodySize > HARParser.bodySizeLimit,
-                    isDuplicate: isDuplicate
+                    existingEndpoints: existingEndpoints
                 ))
             }
         }
 
         return candidates
+    }
+
+    /// The content type an operation actually produces: its own `produces`, then the document's.
+    ///
+    /// Matched with the same rule the other importers use — a substring test, via
+    /// `ImportCandidateBuilder.detectContentType`. The exact `contains("application/json")` this
+    /// replaced missed `application/hal+json` and `application/json; charset=utf-8`, both of which
+    /// are ordinary things for a real spec to declare.
+    static func swagger2ContentType(operation: SwaggerOperation, doc: SwaggerDocument) -> Scenario.ContentType {
+        let declared = operation.produces ?? doc.produces ?? []
+        return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json } ? .json : .plainText
     }
 
     private static func extractSwagger2Response(

@@ -295,10 +295,31 @@ struct HARParserTests {
         #expect(megabytes.bodySizeLabel == "1.5 MB")
     }
 
-    @Test("Falls back to raw strings for invalid URL paths")
-    func extractsInvalidURLPaths() {
-        #expect(HARParser.extractPath(from: "api.example.com/users") == "api.example.com/users")
+    /// This used to assert `"api.example.com/users"` came back unchanged, and passed — codifying the
+    /// bug rather than the behaviour. A path with no leading slash matches no request the server can
+    /// receive, so that endpoint imported, appeared in the list, and answered nothing.
+    @Test("Every extracted path is routable, whatever the capture looked like")
+    func extractedPathsAreAlwaysRoutable() {
+        // A full URL: scheme and host stripped.
+        #expect(HARParser.extractPath(from: "https://api.example.com/v1/users") == "/v1/users")
+        // Already a path: unchanged.
         #expect(HARParser.extractPath(from: "/already/path") == "/already/path")
+        // Schemeless but host-shaped — `URLComponents` parses this as a relative reference and
+        // succeeds, which is why the old fallback never ran.
+        #expect(HARParser.extractPath(from: "api.example.com/users") == "/users")
+        // Genuinely relative, with no host to strip: a leading slash is added and nothing is lost.
+        #expect(HARParser.extractPath(from: "users/123") == "/users/123")
+        // A URL with no path at all still has to name one.
+        #expect(HARParser.extractPath(from: "https://api.example.com") == "/")
+        #expect(HARParser.extractPath(from: "") == "/")
+
+        for capture in ["https://api.example.com/v1/users", "/already/path", "api.example.com/users",
+                        "users/123", "https://api.example.com", "", "?query=only", "#fragment"] {
+            #expect(
+                HARParser.extractPath(from: capture).hasPrefix("/"),
+                "\"\(capture)\" produced an unroutable path"
+            )
+        }
     }
 
     @Test("Decodes base64 response content and reproduces the body verbatim")

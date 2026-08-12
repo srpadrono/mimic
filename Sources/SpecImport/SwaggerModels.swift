@@ -7,6 +7,13 @@ struct SwaggerDocument: Codable, Sendable {
     let swagger: String?
     let info: SwaggerInfo?
     let basePath: String?
+    /// Document-level content types, which an operation may override with its own `produces`.
+    ///
+    /// Swagger 2 permits both, and real specs overwhelmingly declare it once at the top rather than
+    /// on every operation — this was not decoded at all, so those specs imported every endpoint as
+    /// plain text, which then short-circuited the JSON body fallback and left them with no body
+    /// either. Every fixture in the test suite happened to put `produces` inside the operation.
+    let produces: [String]?
     let paths: [String: SwaggerPathItem]?
     let definitions: [String: SwaggerSchemaObject]?
 }
