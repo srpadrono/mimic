@@ -10,7 +10,7 @@ import SwiftUI
 /// fill — so the row around the badge does not shift on the frame the server fails.
 public struct DSStatusBadge: View {
     /// Same 20pt as the workspace's other row controls, so a badge dropped into a header lines up.
-    private static let height: CGFloat = 20
+    private static let height = DSControlHeight.row
     /// The dot. Small, but the smallest thing here is still 8pt.
     private static let dotSize: CGFloat = 8
 
@@ -36,13 +36,13 @@ public struct DSStatusBadge: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, DSSpacing.sm)
-        .padding(.vertical, 3)
+        .padding(.vertical, DSControlHeight.verticalPadding)
         .frame(height: Self.height)
         .background {
             Capsule().fill(fill)
         }
         .overlay {
-            Capsule().stroke(stroke, lineWidth: 0.5)
+            Capsule().stroke(stroke, lineWidth: DSStroke.hairline)
         }
         .onAppear { isPulsing = shouldPulse }
         .onChange(of: state) { isPulsing = shouldPulse }

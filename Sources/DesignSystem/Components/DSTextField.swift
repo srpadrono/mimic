@@ -19,8 +19,8 @@ import SwiftUI
 /// *state* — accent when focused, destructive when invalid — and by nothing else.
 public struct DSTextField: View {
     /// One 13pt line plus `verticalPadding` above and below.
-    private static let controlHeight: CGFloat = 22
-    private static let verticalPadding: CGFloat = 3
+    private static let controlHeight = DSControlHeight.field
+    private static let verticalPadding = DSControlHeight.verticalPadding
 
     private let label: String
     @Binding private var text: String
@@ -68,7 +68,7 @@ public struct DSTextField: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .stroke(borderColor, lineWidth: isFocused ? 1 : 0.5)
+                        .stroke(borderColor, lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
                 }
                 .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
                 .accessibilityIdentifier("ds.textfield.\(identifier)")

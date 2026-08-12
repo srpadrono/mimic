@@ -62,7 +62,7 @@ public struct DSMethodBadge: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(color.opacity(0.30), lineWidth: 0.5)
+                    .stroke(color.opacity(0.30), lineWidth: DSStroke.hairline)
             }
             .accessibilityIdentifier("ds.method.\(identifier)")
             .accessibilityLabel("\(method) method")

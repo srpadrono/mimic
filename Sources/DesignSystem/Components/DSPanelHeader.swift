@@ -109,7 +109,7 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // for an overlay or for `DSDivider`, and the split tracked nothing — the request
                 // detail's identity row closed lighter than a section header inside it.
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityIdentifier("ds.panelheader.\(identifier)")
         .accessibilityElement(children: .contain)

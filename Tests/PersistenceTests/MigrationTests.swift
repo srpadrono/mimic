@@ -136,14 +136,17 @@ struct MigrationTests {
     /// explicit opt-in *and* an explicitly chosen store, so it can never reach a path nobody named.
     @Test(
         "Erase-on-schema-change needs both the opt-in and an explicit store",
-        arguments: [
-            ([:], false),
-            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1"], false),
-            (["MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], false),
-            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": ""], false),
-            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "0", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], false),
-            (["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"], true),
-        ] as [([String: String], Bool)]
+        arguments: zip(
+            [
+                [:],
+                ["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1"],
+                ["MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"],
+                ["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": ""],
+                ["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "0", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"],
+                ["MIMIC_ERASE_DB_ON_SCHEMA_CHANGE": "1", "MIMIC_DATABASE_PATH": "/tmp/throwaway.sqlite"],
+            ] as [[String: String]],
+            [false, false, false, false, false, true]
+        )
     )
     func eraseIsGated(environment: [String: String], expected: Bool) {
         #expect(AppMigrations.erasesOnSchemaChange(environment: environment) == expected)

@@ -51,7 +51,7 @@ public struct DSJSONEditor: View {
             .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.sm))
             .overlay(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(DSColors.border, lineWidth: 0.5)
+                    .stroke(DSColors.border, lineWidth: DSStroke.hairline)
             )
             .accessibilityIdentifier("ds.jsoneditor.\(identifier)")
 

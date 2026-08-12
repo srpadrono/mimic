@@ -86,11 +86,11 @@ public struct DSFilterField: View {
         // control states its own height — but this one never did, so its height was whatever the
         // scope `Menu` inside it happened to measure. The one control that promised to match its
         // neighbours was the only one not measuring itself.
-        .frame(height: 20)
+        .frame(height: DSControlHeight.row)
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         }
         // Paired deliberately: an identifier alone on a container overrides its descendants', and
         // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
@@ -165,7 +165,7 @@ public struct DSFilterField: View {
                     // visible on any surface only when it does not borrow that surface's colour.
                     Capsule()
                         .fill(DSColors.secondary)
-                        .stroke(DSColors.border, lineWidth: 0.5)
+                        .stroke(DSColors.border, lineWidth: DSStroke.hairline)
                 }
             }
             .onHover { isHovered = $0 }

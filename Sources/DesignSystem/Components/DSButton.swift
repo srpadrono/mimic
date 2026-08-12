@@ -86,9 +86,8 @@ public struct DSButton: View {
 
 // MARK: - Geometry
 
-/// A hairline, not a border — the same weight `DSFilterField` and the request log's header controls
-/// use. At 1pt a row of buttons reads as a form.
-private let dsButtonBorderWidth: CGFloat = 0.5
+/// A hairline, not a border. At 1pt a row of buttons reads as a form.
+private let dsButtonBorderWidth = DSStroke.hairline
 
 private extension DSButtonSize {
     /// Fixed, so two buttons of the same size are the same height whatever their titles.
@@ -98,9 +97,9 @@ private extension DSButtonSize {
     /// button — so a `.medium` button standing next to a system `Picker` in a sheet lines up.
     var height: CGFloat {
         switch self {
-        case .small: 20
-        case .medium: 22
-        case .large: 28
+        case .small: DSControlHeight.row
+        case .medium: DSControlHeight.field
+        case .large: DSControlHeight.prominent
         }
     }
 
@@ -129,10 +128,9 @@ private extension DSButtonSize {
         }
     }
 
-    /// 3pt for the row sizes, which is what `DSFilterField` and the request log's controls use.
     var verticalPadding: CGFloat {
         switch self {
-        case .small, .medium: 3
+        case .small, .medium: DSControlHeight.verticalPadding
         case .large: DSSpacing.sm
         }
     }

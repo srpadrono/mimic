@@ -90,7 +90,7 @@ private func colorRow(_ name: String, _ color: Color) -> some View {
             .frame(width: 24, height: 24)
             .overlay(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(DSColors.border, lineWidth: 0.5)
+                    .stroke(DSColors.border, lineWidth: DSStroke.hairline)
             )
         Text(name).font(DSTypography.body)
     }

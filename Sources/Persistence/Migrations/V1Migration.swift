@@ -39,7 +39,7 @@ enum AppMigrations {
             && environment[DatabaseFactory.databasePathEnvironmentKey]?.isEmpty == false
     }
 
-    /// The migrations themselves, without the DEBUG erase-on-schema-change behaviour.
+    /// The migrations themselves, independent of the erase-on-schema-change flag.
     ///
     /// Separated so a test can verify that a real database *migrates forward* — with the erase flag
     /// set, an older database would simply be wiped and the test would prove nothing. It also means

@@ -133,7 +133,7 @@ public struct DSTabStrip: View {
             if drawsChrome {
                 Rectangle()
                     .fill(DSColors.separator)
-                    .frame(height: 0.5)
+                    .frame(height: DSStroke.hairline)
             }
         }
         // Paired deliberately. A bare identifier on a container makes every descendant report the

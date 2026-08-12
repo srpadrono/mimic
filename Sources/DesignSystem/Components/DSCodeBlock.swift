@@ -42,7 +42,7 @@ public struct DSCodeBlock: View {
             // where it either overlaps whatever is next to the block or gets clipped away by an
             // ancestor. Inset, the whole hairline is drawn and it is drawn where the fill ends.
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .strokeBorder(DSColors.border, lineWidth: 0.5)
+                .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
         }
         .accessibilityIdentifier("ds.code.\(identifier)")
         .accessibilityLabel(content)
