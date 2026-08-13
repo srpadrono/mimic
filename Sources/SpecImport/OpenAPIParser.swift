@@ -19,8 +19,36 @@ public enum OpenAPIParser {
             }
             // Default: try OpenAPI 3.x
             let document = try JSONDecoder().decode(OpenAPI.Document.self, from: data)
-            return candidatesFromDocument(document, existingEndpoints: existingEndpoints)
+            return candidatesFromDocument(
+                document,
+                documentBasePath: openAPI3BasePath(in: data),
+                existingEndpoints: existingEndpoints
+            )
         }.value
+    }
+
+    /// The prefix an OpenAPI 3 document's first `servers` entry declares, or `nil` when it declares
+    /// none. ``ImportPath`` reduces it; this only has to hand over the string the document wrote.
+    ///
+    /// Decoded straight from the JSON rather than read off `OpenAPI.Document.servers`, for two
+    /// reasons. The prefix then arrives as the same kind of thing in both formats — a raw string
+    /// beside Swagger 2's `basePath` — so one function reduces both and they cannot diverge. And
+    /// nothing here has to reach into `URLTemplate`, which is declared in `OpenAPIKitCore`; this
+    /// module imports `OpenAPIKit30` and not that.
+    ///
+    /// Server variables are substituted with their declared defaults first, because that is what
+    /// the spec says an unbound variable means: `https://{region}.example.com/{tier}` with
+    /// `tier: { default: "v2" }` serves `/v2`.
+    static func openAPI3BasePath(in data: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(OpenAPIServersEnvelope.self, from: data),
+              let first = envelope.servers?.first,
+              var url = first.url
+        else { return nil }
+        for (name, variable) in first.variables ?? [:] {
+            guard let value = variable.default else { continue }
+            url = url.replacingOccurrences(of: "{\(name)}", with: value)
+        }
+        return url
     }
 
     // MARK: - Swagger 2.0
@@ -67,7 +95,11 @@ public enum OpenAPIParser {
                 candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
-                    suggestedName: suggestSwagger2Name(operation: operation, method: method, path: pathString),
+                    // Declared once at the top of the document and, until now, decoded and then read
+                    // by nothing: a spec saying `basePath: /v2` imported `/pet/{petId}` for a server
+                    // that answers `/v2/pet/42`.
+                    documentBasePath: doc.basePath,
+                    suggestedName: suggestedSwagger2Name(operation: operation),
                     statusCode: statusCode,
                     responseHeaders: [:],
                     responseBody: exampleBody,
@@ -146,18 +178,15 @@ public enum OpenAPIParser {
         return (statusCode, nil, response.description)
     }
 
-    private static func suggestSwagger2Name(
-        operation: SwaggerOperation,
-        method: HTTPMethod,
-        path: String
-    ) -> String {
-        suggestName(operationId: operation.operationId, summary: operation.summary, method: method, path: path)
+    private static func suggestedSwagger2Name(operation: SwaggerOperation) -> String? {
+        suggestedName(operationId: operation.operationId, summary: operation.summary)
     }
 
     // MARK: - Private
 
     private static func candidatesFromDocument(
         _ document: OpenAPI.Document,
+        documentBasePath: String?,
         existingEndpoints: [Endpoint]
     ) -> [ImportCandidate] {
         var candidates: [ImportCandidate] = []
@@ -198,12 +227,18 @@ public enum OpenAPIParser {
                     from: operation,
                     document: document
                 )
-                let name = suggestName(operation: operation, method: method, path: pathString)
+                let name = suggestedName(operation: operation)
                 candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
+                    documentBasePath: documentBasePath,
                     suggestedName: name,
-                    suggestedGroupTag: HARParser.suggestGroupTag(path: pathString),
+                    // The group tag used to be passed in from here as
+                    // `HARParser.suggestGroupTag(path: pathString)`, which forwards to the very
+                    // function the builder falls back to — so it was a no-op for a literal route and
+                    // a divergence for a parameterised one, where only the builder's copy now knows
+                    // that a wildcard segment does not name a resource. One caller fewer, and the
+                    // two importers group identically by construction.
                     statusCode: statusCode,
                     responseHeaders: headers,
                     responseBody: exampleBody,
@@ -383,11 +418,11 @@ public enum OpenAPIParser {
         }
     }
 
-    private static func suggestName(operation: OpenAPI.Operation, method: HTTPMethod, path: String) -> String {
-        suggestName(operationId: operation.operationId, summary: operation.summary, method: method, path: path)
+    private static func suggestedName(operation: OpenAPI.Operation) -> String? {
+        suggestedName(operationId: operation.operationId, summary: operation.summary)
     }
 
-    /// Shared name suggestion: summary → operationId → path-based fallback.
+    /// Shared name suggestion: summary → operationId → **nothing**, meaning the builder decides.
     ///
     /// **Summary first**, which is the reverse of what this used to do. `operationId` is a machine
     /// identifier and `summary` is the sentence the spec's author wrote for a human to read — and the
@@ -396,16 +431,22 @@ public enum OpenAPIParser {
     /// "GetAccountSummary": one run-together word, harder to read than the words beside it, and not
     /// the shape the HAR importer produces for the same endpoint ("Get Account-Summary").
     ///
-    /// The `operationId` fallback now splits camelCase as well as `_` and `-`, since camelCase is how
+    /// The `operationId` fallback splits camelCase as well as `_` and `-`, since camelCase is how
     /// operation ids are overwhelmingly written and splitting on separators alone left them joined.
-    private static func suggestName(operationId: String?, summary: String?, method: HTTPMethod, path: String) -> String {
+    ///
+    /// The last step returns `nil` rather than calling `ImportCandidateBuilder.suggestName` itself,
+    /// which is what it used to do. That call reached the right function with the wrong argument —
+    /// the path as the *document* spelled it — so a spec offering neither a summary nor an
+    /// `operationId` for `/pet/{petId}` was labelled "Get {Petid}" in the sidebar. Declining to name
+    /// it hands the decision back to the one place that holds the rewritten route.
+    private static func suggestedName(operationId: String?, summary: String?) -> String? {
         if let summary, !summary.isEmpty {
             return summary
         }
         if let operationId, !operationId.isEmpty {
             return humanized(operationId)
         }
-        return ImportCandidateBuilder.suggestName(method: method, path: path)
+        return nil
     }
 
     /// Turns `getAccountSummary`, `get_account_summary` or `get-account-summary` into
@@ -436,4 +477,28 @@ public enum OpenAPIParser {
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
     }
+}
+
+/// Just enough of an OpenAPI 3 document to read its `servers` array, decoded alongside the full
+/// parse rather than through it — see ``OpenAPIParser/openAPI3BasePath(in:)``.
+///
+/// Every field is optional, and the decode above is `try?`ed, so this can never be what fails an
+/// import: a document with no `servers`, or one whose entries carry keys this does not model,
+/// simply imports with no prefix — exactly as every document did before there was one.
+///
+/// It is not a validator, and must not be read as one. `OpenAPI.Document` has already decoded the
+/// same bytes by the time this runs, and it is the thing that rejects a genuinely malformed
+/// `servers` — `OpenAPI.Server` requires `url`, so an entry without one throws out of the full
+/// decode before this is ever reached.
+private struct OpenAPIServersEnvelope: Decodable {
+    struct Server: Decodable {
+        struct Variable: Decodable {
+            let `default`: String?
+        }
+
+        let url: String?
+        let variables: [String: Variable]?
+    }
+
+    let servers: [Server]?
 }

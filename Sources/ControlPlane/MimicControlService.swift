@@ -117,8 +117,35 @@ public actor MimicControlService: ControlHost {
            let outcome = try ProjectCommandExecutor.apply(command, to: &project) {
             if outcome.didMutate {
                 project.modifiedAt = Date()
-                openProject = project
+                // Persist first, commit to memory second — the rule `startServer` states below, on
+                // the path every project-scoped command takes.
+                //
+                // The other order published a change the store does not have: `save` throws — a
+                // locked database, a full disk — the command reports the failure, and `openProject`
+                // is already carrying the edit. `state` and `project export` then answer from it,
+                // the next mutation saves it as though it had landed, and `projectSummaries`' "this
+                // service saves before it answers, so the stored row is never behind the session" is
+                // false in exactly the case that matters.
+                //
+                // What it costs, stated plainly because it is a real regression on the success path:
+                // the read at the top of this method and the commit here are no longer one
+                // uninterrupted actor region. A second mutating command admitted during this save
+                // reads the project as it was rather than as this command left it, applies its own
+                // edit and saves that — so the first command's edit is lost from the store, and
+                // whichever task resumes last decides memory.
+                //
+                // `startServer` is **not** the precedent for this, and an earlier draft of this
+                // comment claimed it was. That method guards its own window with
+                // `isChangingServerState` and refuses a concurrent server command outright; this
+                // path is every project-scoped mutation and has no such guard. The trade is
+                // deliberate anyway: the old order was wrong on *every* failed write, while this is
+                // wrong only when two mutating commands overlap. Closing it properly means either
+                // serialising this region the way `startServer` serialises its own, or re-reading
+                // `openProject` after the save and re-applying the command — neither of which is
+                // free, and neither of which is worth doing before this host is reachable at all
+                // (see "Two hosts, one of them shipped" in AGENTS.md).
                 try await repository.save(project)
+                openProject = project
                 await pushConfigurationToEngine()
             }
             return outcome.result
@@ -404,8 +431,11 @@ public actor MimicControlService: ControlHost {
         guard let ref else {
             project.activeJourneyID = nil
             project.modifiedAt = Date()
-            openProject = project
+            // Persist first, commit to memory second — same rule as the executor path above and as
+            // `startServer`. A refused write here left the session reporting no active journey while
+            // the store still held one, so reopening the project brought it back.
             try await repository.save(project)
+            openProject = project
             await pushConfigurationToEngine()
             return .message(ControlMessages.journeyCleared)
         }
@@ -415,8 +445,11 @@ public actor MimicControlService: ControlHost {
         }
         project.activeJourneyID = journey.id
         project.modifiedAt = Date()
-        openProject = project
+        // Persist first, commit to memory second, as above: a refused write used to leave the
+        // journey active in this session and inactive in the store, so `journey status` reported a
+        // run the next `project open` knew nothing about.
         try await repository.save(project)
+        openProject = project
         // Pushing the configuration is what resets the cursor: the engine sees a different journey
         // and starts a fresh run, so activating is always a clean start.
         await pushConfigurationToEngine()

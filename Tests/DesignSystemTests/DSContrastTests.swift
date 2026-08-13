@@ -121,6 +121,22 @@ private nonisolated func grey(_ delta: Double, below surface: RGBA) -> RGBA {
 /// comment rather than in a constant, and each is called out where it lives — numbered, so a reader
 /// can follow one back to the token it is about.
 ///
+/// **This suite measured tokens while the window drew composites, and that gap shipped an AA
+/// failure.** Every reading above the "The composite the window actually draws" mark takes a palette
+/// token against a palette *surface*. Four of the colours it cleared are never drawn that way: a
+/// status pill fills itself with a 12% wash of its own label colour and a method badge with a 16%
+/// one, both written as a literal opacity at the call site, so the background the user sees is a
+/// function of the foreground and the ratio measured here was not the ratio rendered. Under that
+/// composite `success`, `warning`, `destructive` and `accent` read 3.94, 3.96, 4.07 and 2.80 on a
+/// light panel against the 4.60–4.95 this file was checking, and every one of them was under the
+/// floor the palette states.
+///
+/// The tests under that mark close it, and they are driven from the token functions —
+/// `httpStatusColor(for:)` and `methodColor(for:)` — rather than from the call sites that compose
+/// them, because a list of call sites copied into a test is the same blind spot moved up one level.
+/// The surfaces are enumerated the same way: `pillSurfaces(in:)` includes the `band` and the
+/// `rowStripe`, which is where a token-only reading is most optimistic.
+///
 /// **No count of them is stated here, and one used to be.** It read "there are five" while eight
 /// findings were labelled below, across six numbers — a hand-maintained mirror of a list the tests
 /// beneath it already write out in full, and one that can go stale in either direction: upwards the
@@ -311,6 +327,14 @@ struct DSContrastTests {
     /// ceiling is arithmetic: a stronger stripe spends the margin `warning` and `success` have left on
     /// a panel. Every step of that argument checks out except two of its figures.
     ///
+    /// **The ceiling moved, and both halves are asserted below.** A status code on a striped row is
+    /// `warningText` or `successText` now, not `warning` or `success` — those clear AA on a stripe at
+    /// 5.47 and 5.53 where the old pair cleared by a hundredth, so the plain word stopped being what
+    /// the stripe was rationed for. What replaces it is the *filled* pill, which pays the stripe's
+    /// depth twice: at this depth the three read 4.65, 4.68 and 4.64, and at AppKit's ΔL\* 3.5 they
+    /// fall to 4.34, 4.36 and 4.33 while the plain words are still above 5. The old readings are kept
+    /// alongside because the old tokens did not move; only what draws a status code did.
+    ///
     /// **Finding 1 — "ΔL\* 0.70 in light mode and 1.40 in dark".** Light is 0.70. Dark is **1.83**.
     /// 1.40 is what the *light* stripe measures against `dominant` (1.39), so it reads like the wrong
     /// row of a measurement table rather than a bad reading. Nothing depends on it: the paragraph's
@@ -347,8 +371,8 @@ struct DSContrastTests {
         #expect(isClose(amberOnPanel, 4.60, within: ratioTolerance))
         #expect(isClose(greenOnPanel, 4.62, within: ratioTolerance))
 
-        // What the ceiling exists to protect, stated where it can fail: status text still clears AA
-        // when it lands on a striped row rather than a plain one. It clears by 0.02 and 0.04.
+        // The old ceiling, kept because `warning` and `success` did not move — only what draws a
+        // status code did. Read on a striped row they clear AA by 0.02 and 0.04.
         let amberOnStripe = try contrast(DSColors.warning, on: lightStripe, in: .light)
         let greenOnStripe = try contrast(DSColors.success, on: lightStripe, in: .light)
         #expect(isClose(amberOnStripe, 4.52, within: ratioTolerance))
@@ -356,7 +380,8 @@ struct DSContrastTests {
         #expect(amberOnStripe >= 4.5)
         #expect(greenOnStripe >= 4.5)
 
-        // And why it cannot simply be deepened: at the depth AppKit's own zebra runs, both fail.
+        // At the depth AppKit's own zebra runs, both fail — which is what made 0.7 a ceiling while
+        // these were the tokens a status code was drawn in.
         let deepRow = grey(3.5, below: lightPanel)
         let amberOnDeepRow = try contrast(DSColors.warning, on: deepRow, in: .light)
         let greenOnDeepRow = try contrast(DSColors.success, on: deepRow, in: .light)
@@ -364,6 +389,40 @@ struct DSContrastTests {
         #expect(isClose(greenOnDeepRow, 4.22, within: ratioTolerance))
         #expect(amberOnDeepRow < 4.5)
         #expect(greenOnDeepRow < 4.5)
+
+        // What the ceiling protects *now*. A status code on a striped row is a text variant, and
+        // those have room: plain, they clear AA on a stripe by a point.
+        let statusText: [(Color, Double, Double)] = [
+            (DSColors.warningText, 5.47, 4.65),
+            (DSColors.successText, 5.53, 4.68),
+            (DSColors.destructiveText, 5.67, 4.64)
+        ]
+        for (token, plain, filled) in statusText {
+            let bare = try contrast(token, on: lightStripe, in: .light)
+            let pill = try selfTintedReading(token, on: lightStripe, in: .light)
+            #expect(isClose(bare, plain, within: ratioTolerance))
+            #expect(isClose(pill, filled, within: ratioTolerance))
+            #expect(bare >= 4.5)
+            #expect(pill >= 4.5)
+        }
+
+        // So the binding constraint moved from the plain word to the *filled* pill, which pays the
+        // stripe's depth twice — once in the surface and once in the 12% wash of its own label
+        // colour. At AppKit's depth the words are still fine and the pills are not, which is why the
+        // zebra has headroom now but still cannot go that deep.
+        let atAppKitDepth: [(Color, Double, Double)] = [
+            (DSColors.warningText, 5.08, 4.34),
+            (DSColors.successText, 5.14, 4.36),
+            (DSColors.destructiveText, 5.27, 4.33)
+        ]
+        for (token, plain, filled) in atAppKitDepth {
+            let bare = try contrast(token, on: deepRow, in: .light)
+            let pill = try selfTintedReading(token, on: deepRow, in: .light)
+            #expect(isClose(bare, plain, within: ratioTolerance))
+            #expect(isClose(pill, filled, within: ratioTolerance))
+            #expect(bare >= 4.5)
+            #expect(pill < 4.5)
+        }
     }
 
     // MARK: - The accent as a word
@@ -586,6 +645,261 @@ struct DSContrastTests {
         }
     }
 
+    // MARK: - The composite the window actually draws
+
+    /// Every surface a status pill lands on, resolved and flattened.
+    ///
+    /// Five, because that is what the window has: a panel, the editor canvas, a sheet, a
+    /// ``DSColors/band`` and a ``DSColors/rowStripe``. The last two are the ones a token-only suite
+    /// forgets — and they are not hypothetical. The request detail's identity row takes `band` and
+    /// carries a status pill on it, and three of the four lists that alternate rows draw a pill on
+    /// those rows (the request log, the endpoint traffic list and the import review; the fourth is
+    /// the request detail's header tables, which have no pill). Both are composited onto
+    /// ``DSColors/secondary``, which is the surface each is drawn over everywhere a pill appears.
+    private func pillSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
+        let panel = try resolve(DSColors.secondary, in: appearance)
+        let canvas = try resolve(DSColors.dominant, in: appearance)
+        let sheet = try resolve(DSColors.surfaceElevated, in: appearance)
+        let band = try resolve(DSColors.band, over: DSColors.secondary, in: appearance)
+        let stripe = try resolve(DSColors.rowStripe, over: DSColors.secondary, in: appearance)
+        return [
+            ("panel", panel),
+            ("canvas", canvas),
+            ("sheet", sheet),
+            ("band on a panel", band),
+            ("striped row on a panel", stripe)
+        ]
+    }
+
+    /// A label read against a fill that is *a wash of the label's own colour* — the whole defect in
+    /// one function.
+    ///
+    /// Every status pill in the window is written `foregroundStyle(colour)` over
+    /// `fill(colour.opacity(0.12))`, so the background is a function of the foreground and the ratio
+    /// is not the one the token was chosen for. Nothing above this line could see that: the surfaces
+    /// are palette tokens, the wash is a literal at the call site, and the two never met in a
+    /// measurement. `DSMethodBadge` does the same at 16%, which is what `alpha` is for.
+    private func selfTintedReading(
+        _ token: Color,
+        on surface: RGBA,
+        alpha: Double = 0.12,
+        in appearance: Appearance
+    ) throws -> Double {
+        let fill = try resolve(token.opacity(alpha), in: appearance).composited(over: surface)
+        return try contrast(token, on: fill, in: appearance)
+    }
+
+    /// **The failure this suite shipped, and the assertion that would have caught it.**
+    ///
+    /// `httpStatusColor(for:)`'s result is used twice at every call site that draws a status pill:
+    /// once as the label and once, at 12%, as the fill behind it. So the thing to measure is the
+    /// colour on a tint of itself, and until this test nothing did — the palette held `success`,
+    /// `warning` and `destructive` to 4.5:1 against the *panel*, where they read 4.62, 4.60 and 4.95,
+    /// while the window drew them at 3.94, 3.96 and 4.07.
+    ///
+    /// Driven from `httpStatusColor(for:)` rather than from the nine places in `AppFeatures` that
+    /// draw a colour on a 12% wash of itself, because a hand-copied list of call sites is the same
+    /// blind spot one level up: it goes stale the moment somebody adds a tenth. The codes are the
+    /// classes HTTP has, and the function is the only thing between them and a colour.
+    ///
+    /// 3xx is absent on purpose and has its own test below — it is the one class whose colour does
+    /// not clear this bar when it is filled, and the reason is a rule about call sites rather than a
+    /// missing token.
+    @Test("A status pill's text clears AA on the tint of itself the pill fills with")
+    func statusPillTextClearsAAOnItsOwnFill() throws {
+        for appearance in Appearance.allCases {
+            for surface in try pillSurfaces(in: appearance) {
+                for code in [200, 204, 400, 404, 429, 500, 503] {
+                    let reading = try selfTintedReading(
+                        DSColors.httpStatusColor(for: code),
+                        on: surface.colour,
+                        in: appearance
+                    )
+                    #expect(
+                        reading >= 4.5,
+                        "\(code) on its own 12% fill, \(surface.name), \(appearance): \(reading)"
+                    )
+                }
+            }
+        }
+    }
+
+    /// Why ``DSColors/successText``, ``DSColors/warningText`` and ``DSColors/destructiveText`` exist,
+    /// stated as the readings that forced them.
+    ///
+    /// These four are what `httpStatusColor(for:)` used to return, and all four fail the test above
+    /// on the easiest of its five surfaces. Asserted as measured values rather than only as "under
+    /// 4.5" so that the day one of the base tokens moves, this fails and somebody re-derives it —
+    /// which is the only way a number in this file has ever been re-derived.
+    ///
+    /// The second half is the reading the suite *used* to take, on the bare panel, where three of the
+    /// four pass. That contrast is the finding: not one of these tokens is wrong, and the palette's
+    /// 4.5:1 commitment was being kept against a background the user never sees.
+    @Test("The tokens the status pills used to draw fail on a tint of themselves")
+    func baseSemanticTokensFailOnATintOfThemselves() throws {
+        let panel = try resolve(DSColors.secondary, in: .light)
+
+        let onATintOfThemselves: [(Color, Double)] = [
+            (DSColors.success, 3.94),
+            (DSColors.warning, 3.96),
+            (DSColors.destructive, 4.07),
+            (DSColors.accent, 2.80)
+        ]
+        for (token, expected) in onATintOfThemselves {
+            let reading = try selfTintedReading(token, on: panel, in: .light)
+            #expect(isClose(reading, expected, within: ratioTolerance))
+            #expect(reading < 4.5)
+        }
+
+        // Measured the way this suite used to measure them — against the bare panel — three of the
+        // four clear the floor. The accent never did, which is what `accentText` was for.
+        for token in [DSColors.success, DSColors.warning, DSColors.destructive] {
+            let reading = try contrast(token, on: panel, in: .light)
+            #expect(reading >= 4.5)
+        }
+        let accentAsBareText = try contrast(DSColors.accent, on: panel, in: .light)
+        #expect(accentAsBareText < 4.5)
+    }
+
+    /// The 3xx arm, which is the one `httpStatusColor(for:)` cannot lift over the floor by choosing a
+    /// colour — and the reason that is acceptable.
+    ///
+    /// AGENTS.md already says a redirect gets no fill: "**A filled colour swatch is for something
+    /// that needs attention.** Status codes in the traffic list are coloured text; only 4xx and 5xx
+    /// get a fill." Read as text, which is what a 3xx is, `accentText` clears AA on all five surfaces
+    /// in both appearances — where ``DSColors/accent``, the fill blue this function used to return,
+    /// never did at all: **3.20:1** on a light panel.
+    ///
+    /// Filled, it reads **4.48** on a panel and **4.35** on a band, up from 2.80 and 2.72 but still
+    /// short. That is recorded here rather than fixed with a fourth blue, because nothing draws the
+    /// composite: the two call sites that used to fill every code — `EndpointTrafficList.statusChip`
+    /// and `RequestDetailInspector.statusPill` — are gated on `code >= 400`, so a filled 3xx is
+    /// unreachable in the window. The style rule turns out to be a contrast rule, and this is the
+    /// measurement that says so.
+    ///
+    /// So this test guards a composite the window does not currently render, deliberately. It is the
+    /// thing that would make re-filling a 3xx a visible mistake rather than a silent one — the two
+    /// call sites were, between them, the only reason it was ever drawn, and both were written
+    /// without anyone noticing they disagreed with a `pill(…isFilled: code >= 400)` in the same file.
+    @Test("A redirect is readable as text, and the rule against filling one is a contrast rule")
+    func redirectTextIsReadableButItsFillIsNot() throws {
+        for appearance in Appearance.allCases {
+            for surface in try pillSurfaces(in: appearance) {
+                let reading = try contrast(
+                    DSColors.httpStatusColor(for: 302),
+                    on: surface.colour,
+                    in: appearance
+                )
+                #expect(reading >= 4.5, "302 as text, \(surface.name), \(appearance): \(reading)")
+            }
+        }
+
+        let panel = try resolve(DSColors.secondary, in: .light)
+        let band = try resolve(DSColors.band, over: DSColors.secondary, in: .light)
+
+        // Before and after, as bare text on a panel.
+        let accentAsRedirect = try contrast(DSColors.accent, on: panel, in: .light)
+        let textAsRedirect = try contrast(DSColors.httpStatusColor(for: 302), on: panel, in: .light)
+        #expect(isClose(accentAsRedirect, 3.20, within: ratioTolerance))
+        #expect(isClose(textAsRedirect, 5.35, within: ratioTolerance))
+
+        // Filled — the readings that keep the house rule honest. Both improved by more than half a
+        // point and both are still under; a 3xx must not be given a fill.
+        let filledOnPanel = try selfTintedReading(
+            DSColors.httpStatusColor(for: 302),
+            on: panel,
+            in: .light
+        )
+        let filledOnBand = try selfTintedReading(
+            DSColors.httpStatusColor(for: 302),
+            on: band,
+            in: .light
+        )
+        #expect(isClose(filledOnPanel, 4.48, within: ratioTolerance))
+        #expect(isClose(filledOnBand, 4.35, within: ratioTolerance))
+        #expect(filledOnPanel < 4.5)
+        #expect(filledOnBand < 4.5)
+    }
+
+    /// `DSMethodBadge` has the same shape as a status pill — `methodColor(for:)` as the label over a
+    /// **16%** wash of itself — and the same shape of blind spot, so it is measured here rather than
+    /// left for the next reviewer to find.
+    ///
+    /// It is not fixed. `methodColor(for:)` is a different palette from the semantic four and moving
+    /// six hues is a decision to take against the window rather than against a spreadsheet; what this
+    /// records is where they stand, driven from the function's own arms rather than from a list.
+    ///
+    /// **Light: every method sits on the floor rather than above it** — the seven readings run
+    /// 4.50 to 4.54, so the badge has no margin at all and the tightest, `PATCH`, is the boundary
+    /// itself. That band is asserted rather than the individual values, because a hundredth either
+    /// way is not a fact about the palette.
+    ///
+    /// **Dark: four of the seven miss**, and not marginally — `PATCH` reads **3.78**, `DELETE` 3.84,
+    /// and `HEAD`/`OPTIONS` 4.04 on the hue they share, against `GET`/`POST`/`PUT` at 4.98 and above.
+    /// The set is asserted, so fixing one of them fails this test and gets the record updated.
+    ///
+    /// The panel is the easiest bed a badge lands on — the sidebar and the request log also draw them
+    /// on stripes and on selection fills — so these are upper bounds.
+    @Test("The method badge's 16% self-tint is measured, and four of its dark readings miss AA")
+    func methodBadgeSelfTintIsMeasured() throws {
+        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+        let lightPanel = try resolve(DSColors.secondary, in: .light)
+        let darkPanel = try resolve(DSColors.secondary, in: .dark)
+
+        var lightReadings: [(method: String, reading: Double)] = []
+        var darkReadings: [(method: String, reading: Double)] = []
+        for method in methods {
+            let lightReading = try selfTintedReading(
+                DSColors.methodColor(for: method),
+                on: lightPanel,
+                alpha: 0.16,
+                in: .light
+            )
+            let darkReading = try selfTintedReading(
+                DSColors.methodColor(for: method),
+                on: darkPanel,
+                alpha: 0.16,
+                in: .dark
+            )
+            lightReadings.append((method, lightReading))
+            darkReadings.append((method, darkReading))
+        }
+
+        for (method, reading) in lightReadings {
+            #expect(reading >= 4.45, "\(method) light: \(reading)")
+            #expect(reading <= 4.60, "\(method) light: \(reading)")
+        }
+
+        let missingInDark = Set(darkReadings.filter { $0.reading < 4.5 }.map { $0.method })
+        #expect(missingInDark == Set(["PATCH", "DELETE", "HEAD", "OPTIONS"]))
+        let worstInDark = try #require(darkReadings.map { $0.reading }.min())
+        #expect(isClose(worstInDark, 3.78, within: ratioTolerance))
+    }
+
+    /// The third composite the window draws, and the one that is fine: `DSStatusBadge`'s error
+    /// capsule.
+    ///
+    /// It fills with `state.color.opacity(0.16)` exactly as the method badge does, and it is safe for
+    /// the reason the other two were not — the word on it is `labelPrimary`, not the fill's own hue,
+    /// so the tint moves the background *away* from the ink instead of toward it. That is the whole
+    /// difference between this and a status pill, stated where it can fail: worst reading 11.50 in
+    /// light and 7.97 in dark, against 3.78 for the badge.
+    ///
+    /// Only `.error` fills — the quiet states draw on the bare surface — so `destructive` is the only
+    /// hue this composite ever takes.
+    @Test("The error capsule is safe because its label is not its fill's own colour")
+    func errorCapsuleLabelClearsAA() throws {
+        for appearance in Appearance.allCases {
+            for surface in try pillSurfaces(in: appearance) {
+                let capsule = try resolve(DSColors.destructive.opacity(0.16), in: appearance)
+                    .composited(over: surface.colour)
+                let reading = try contrast(DSColors.labelPrimary, on: capsule, in: appearance)
+                #expect(reading >= 7.0, "error capsule, \(surface.name), \(appearance): \(reading)")
+            }
+        }
+    }
+
     // MARK: - Syntax
 
     /// The syntax palette states four ratios against the well it is drawn in, and is explicit that the
@@ -774,16 +1088,22 @@ struct DSContrastTests {
     /// so an equality test would pass or fail for reasons unrelated to the palette. The one case that
     /// *is* written as equality is the fallback, because `.secondary` is a single shared system token
     /// on both sides and `DSComponentRenderingTests` already compares it that way.
-    @Test("Status codes map onto the semantic tokens, and the unknown range onto neither")
+    ///
+    /// **Every arm is a text variant**, and that is load-bearing rather than cosmetic: the result is
+    /// both the pill's label and, at 12%, the pill's fill, so the base tokens fail on it. See
+    /// `statusPillTextClearsAAOnItsOwnFill`. This test is what stops the mapping being quietly put
+    /// back — `success` and `successText` resolve to different constants in light, so a revert here
+    /// fails on the component comparison as well as on the ratio.
+    @Test("Status codes map onto the semantic text tokens, and the unknown range onto neither")
     func statusColoursMapToSemanticTokens() throws {
         let mapping: [(Int, Color)] = [
-            (200, DSColors.success),
-            (204, DSColors.success),
-            (301, DSColors.accent),
-            (404, DSColors.warning),
-            (429, DSColors.warning),
-            (500, DSColors.destructive),
-            (503, DSColors.destructive)
+            (200, DSColors.successText),
+            (204, DSColors.successText),
+            (301, DSColors.accentText),
+            (404, DSColors.warningText),
+            (429, DSColors.warningText),
+            (500, DSColors.destructiveText),
+            (503, DSColors.destructiveText)
         ]
 
         for appearance in Appearance.allCases {

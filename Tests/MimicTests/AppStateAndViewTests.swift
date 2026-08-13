@@ -1081,6 +1081,146 @@ struct AppStateAndViewTests {
         #expect(response.ok == false)
         #expect(response.error?.code == "project.noneOpen")
     }
+
+    // MARK: - The order writes reach the store
+
+    /// A store that holds its first write open until a second command overtakes it, and records the
+    /// order writes actually arrive in.
+    ///
+    /// The gate is what makes the assertion below a claim rather than a coincidence. A `save` that
+    /// simply returned would let a delete issued while the import was "in flight" land after it by
+    /// luck on a quick machine, and the test would pass against the very inversion it exists to
+    /// catch. This one cannot return until the delete has had its chance — with a deadline, because
+    /// in a correctly ordered run the delete never arrives at all until the save is done.
+    private actor GatedRepository: ProjectRepository {
+        /// Every write in the order it happened, with `save` split in two so an overlap is visible
+        /// rather than inferred from what survived.
+        private(set) var operations: [String] = []
+        private var projects: [UUID: MockProject] = [:]
+        private var hasGatedASave = false
+
+        var didBeginSaving: Bool { operations.contains("save.begin") }
+        func stored(_ id: UUID) -> MockProject? { projects[id] }
+
+        func save(_ project: MockProject) async throws {
+            operations.append("save.begin")
+            if !hasGatedASave {
+                hasGatedASave = true
+                let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+                while ContinuousClock.now < deadline, !operations.contains("delete") {
+                    // Every hop here releases the actor, which is what lets a delete that is not
+                    // waiting its turn reach `delete(id:)` while this write is still open.
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            projects[project.id] = project
+            operations.append("save.end")
+        }
+
+        func load(id: UUID) async throws -> MockProject {
+            guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
+            return project
+        }
+
+        func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+        func delete(id: UUID) async throws {
+            operations.append("delete")
+            projects[id] = nil
+        }
+    }
+
+    /// `ProjectWorkspace.storeWrites` exists so a command a script issues *after* another cannot
+    /// reach the store first, and an import — the one command that writes a whole document — was
+    /// outside it: it awaited the chain without joining it, on the argument that its caller awaits
+    /// the result. `AppState.importProject` does not; it dispatches into an untracked `Task`.
+    ///
+    /// So this is the sequence from `storeWrites`' own documentation, with an import in the place of
+    /// the create: the delete took the chain as it was before the import, found nothing to wait for,
+    /// removed a project the store did not have yet, and the import's insert landed behind it and
+    /// put the project back.
+    @Test("A delete issued while an import is in flight still reaches the store after it")
+    func aDeleteCannotOvertakeAnImportInFlight() async throws {
+        let repository = GatedRepository()
+        let appState = try makeAppState(repository: repository)
+        let document = MockProject(name: "Imported")
+
+        appState.importProject(document, activate: false)
+        // The delete has to arrive while the import's write is genuinely in flight — that is the
+        // whole scenario — so it waits for the store to have taken the save in.
+        try await waitUntil { await repository.didBeginSaving }
+        appState.deleteProject(id: document.id)
+
+        try await waitUntil(timeout: .seconds(5)) { await repository.operations.count == 3 }
+
+        #expect(await repository.operations == ["save.begin", "save.end", "delete"])
+        #expect(
+            await repository.stored(document.id) == nil,
+            "the delete removed nothing and the import put the project back behind it"
+        )
+    }
+
+    // MARK: - An open the store refuses
+
+    /// A store that has the project and cannot open it: the shape of a locked store, or of the one
+    /// this stands in for — a document written by a build whose document schema is ahead of this
+    /// one's.
+    ///
+    /// `allProjects` lists it, which is not an oversight but what `GRDBProjectRepository.allProjects`
+    /// deliberately does: a project this build cannot open is still a project the user has, so the
+    /// row is listed, clicked, and refused by `load`.
+    private nonisolated struct UnreadableRepository: ProjectRepository {
+        let stub: MockProject
+
+        func load(id: UUID) async throws -> MockProject {
+            throw PersistenceError.unsupportedSchemaVersion(
+                name: stub.name,
+                stored: MockProject.currentSchemaVersion + 1,
+                supported: MockProject.currentSchemaVersion
+            )
+        }
+
+        func save(_ project: MockProject) async throws {}
+        func allProjects() async throws -> [MockProject] { [stub] }
+        func delete(id: UUID) async throws {}
+    }
+
+    /// `openProject`'s `catch` removed the recents entry and refreshed the list, which is right for
+    /// "the project is gone" and wrong for everything else. A store that is locked, or a document
+    /// written by a newer build, was treated as a missing project: struck from the recents cache —
+    /// which takes `lastOpenedProjectID` with it, so the app stops reopening the project on launch —
+    /// with no error, no indicator, and the window still showing whatever was open before.
+    @Test("An open that fails for any reason but a missing project reports it, and keeps the entry")
+    func openReportsAFailureThatIsNotAMissingProject() async throws {
+        let stub = MockProject(name: "Written by a newer Mimic")
+        let defaults = try #require(UserDefaults(suiteName: "AppStateAndViewTests.\(UUID().uuidString)"))
+        let recents = RecentProjectsStore(defaults: defaults)
+        recents.record(id: stub.id, name: stub.name)
+        let workspace = ProjectWorkspace(
+            projectRepository: UnreadableRepository(stub: stub),
+            recentProjectsStore: recents
+        )
+
+        workspace.openProject(id: stub.id)
+
+        try await waitUntil { workspace.autosaveStatus != .idle }
+        guard case let .failed(message) = workspace.autosaveStatus else {
+            Issue.record("the failure was swallowed: \(workspace.autosaveStatus)")
+            return
+        }
+        // The store's own description, verbatim: "update Mimic" is only actionable when the user can
+        // see how far ahead the document is.
+        #expect(message.contains("was written by a newer version of Mimic"))
+        #expect(workspace.currentProject == nil)
+        #expect(
+            recents.load().contains { $0.id == stub.id },
+            "a project the store has and cannot open is not a project the store does not have"
+        )
+        // The durable half of striking the entry, and the reason it is worth asserting separately:
+        // `RecentProjectsStore.remove` clears this too, so the app would stop reopening the project
+        // on launch — long after the failed click that caused it.
+        #expect(recents.lastOpenedProjectID() == stub.id)
+    }
 }
 
 /// A candidate shaped like one `SpecImport` produces, with every field the committer reads settable.

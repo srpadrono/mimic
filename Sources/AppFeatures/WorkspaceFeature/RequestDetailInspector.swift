@@ -196,26 +196,37 @@ struct RequestDetailInspector: View {
         if let failureLabel = log.failureLabel {
             Text(failureLabel)
                 .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.destructive)
+                // `destructiveText`, not `destructive`: this label is drawn on a 12% tint of its own
+                // colour, and the base token does not survive that composite — 4.07:1 on a panel and
+                // 3.95 on the `band` this row actually is, against a stated 4.5 floor. Same rule the
+                // status pill below gets for free from `httpStatusColor(for:)`.
+                .foregroundStyle(DSColors.destructiveText)
                 .padding(.horizontal, DSSpacing.xs)
                 .padding(.vertical, 1)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(DSColors.destructive.opacity(0.12))
+                        .fill(DSColors.destructiveText.opacity(0.12))
                 )
                 .accessibilityIdentifier("requestDetail.failure")
         } else {
             let code = log.responseStatusCode ?? 0
             let color = DSColors.httpStatusColor(for: code)
+            // Only a 4xx or 5xx is filled — the house rule, and the reading. A fill is a 12% tint of
+            // the label's own colour, and `accentText` (the 3xx) is the one arm that does not
+            // survive it: 4.35:1 on the `band` this identity row is, under the palette's 4.5 floor.
+            // See `EndpointTrafficList.statusChip`, which this now matches.
+            let isFilled = code >= 400
             Text("\(code)")
                 .font(DSTypography.codeSmall)
                 .foregroundStyle(color)
-                .padding(.horizontal, DSSpacing.xs)
+                .padding(.horizontal, isFilled ? DSSpacing.xs : 0)
                 .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                )
+                .background {
+                    if isFilled {
+                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
+                            .fill(color.opacity(0.12))
+                    }
+                }
                 .accessibilityIdentifier("requestDetail.status")
         }
     }

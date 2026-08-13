@@ -77,17 +77,27 @@ public nonisolated enum DSColors {
     /// alternate between, measures ΔL\* **3.54** light and 5.33 dark, five times as much — and the
     /// obvious reading is that Mimic's zebra is too weak to do its job on a panel.
     ///
-    /// It cannot be strengthened on its own. ``warning`` and ``success`` are read as *text* on these
-    /// rows — a 401 in the request log, a 2xx in the traffic list — and on ``secondary`` they clear
-    /// AA with almost nothing to spare, at 4.59:1 and 4.62:1. Darkening the row underneath spends
-    /// exactly that margin: at AppKit's ΔL\* 3.5 the amber falls to **4.28:1** and the green to 4.30,
-    /// both under the 4.5 this palette holds itself to. The arithmetic is tight enough to state
-    /// exactly — for amber to stay at 4.5 on a striped row, the stripe may take no more than 0.9% off
-    /// the surface, which is ΔL\* 0.7. This value *is* that ceiling.
+    /// **There is a ceiling, and this value is no longer sitting on it.** The argument here used to
+    /// be that ``warning`` and ``success`` are read as text on these rows, clear AA on ``secondary``
+    /// by a hundredth, and lose that margin the moment the row darkens — so ΔL\* 0.7 was the most a
+    /// stripe could take. It was right about the mechanism and is out of date about the tokens: a
+    /// status code on a striped row is ``warningText`` or ``successText`` now, and those clear AA on
+    /// a stripe at **5.47:1** and 5.53 rather than 4.52 and 4.54. Plain status text would survive a
+    /// stripe down to ΔL\* 8.
     ///
-    /// So a more visible zebra is not a change to this token. It is a change to ``warning`` and
-    /// ``success`` first, to buy the headroom, and this token second. Both are already pushed a long
-    /// way down for light mode; moving them again is a palette decision, not a layout one.
+    /// What sets the ceiling instead is the *filled* pill — a 4xx or 5xx, which draws its label on a
+    /// 12% tint of that same label colour, so the stripe's depth is paid twice. Measured on
+    /// ``secondary`` in light: at this depth the three filled pills read **4.65:1**, 4.68 and 4.64,
+    /// and at AppKit's ΔL\* 3.5 they fall to 4.34, 4.36 and **4.33**, all under the 4.5 this palette
+    /// holds itself to. The crossing is at **ΔL\* 1.8**, set by ``destructiveText`` as the tightest of
+    /// the three.
+    ///
+    /// So the zebra has about one and a half ΔL\* of headroom it did not have before, and taking it
+    /// is a change to this token alone — no longer a palette decision first. It still cannot reach
+    /// AppKit's depth: at ΔL\* 3.5 a filled 500 misses AA, and *that* is the wall.
+    ///
+    /// The old ceiling is still asserted next to the new one in `DSContrastTests.rowStripeIsACeiling`,
+    /// because ``warning`` and ``success`` did not move — only what draws a status code did.
     public static let rowStripe = tertiary.opacity(0.25)
 
     /// Primary accent — electric blue
@@ -116,6 +126,12 @@ public nonisolated enum DSColors {
     /// `accentSubtle` and `accentMuted` still derive from ``accent``: they are fills, and tinting them
     /// with the text blue would darken every hover well in the window to fix a contrast problem that
     /// belongs to the glyphs on top of it.
+    ///
+    /// **This is also the blue a 3xx is drawn in** — `httpStatusColor(for:)` returned ``accent``
+    /// there, which is the same defect one more place: 3.20:1 on a panel, and 2.80 once the pill
+    /// tinted itself. It is the model the three semantic ``warningText``-style tokens were built
+    /// from, and the one arm of that function still short of the floor when a caller fills it; the
+    /// note on `httpStatusColor(for:)` says why that is a call-site rule rather than another colour.
     public static let accentText = Color(light: .init(red: 0.0, green: 0.36, blue: 0.82),
                                          dark: .init(red: 0.316, green: 0.657, blue: 1.0))
 
@@ -144,7 +160,9 @@ public nonisolated enum DSColors {
     /// Muted accent for secondary indicators
     public static let accentMuted = accent.opacity(0.25)
     /// Destructive actions only. Light variant darkened from 3.6:1 to 5.6:1 for the same reason as
-    /// ``success`` and ``warning`` — a 500 in the request log is text before it is a signal.
+    /// ``success`` and ``warning`` — a failure is text before it is a signal. A **500** is
+    /// ``destructiveText``, not this one: it arrives on a 12% tint of itself and this constant reads
+    /// 4.07 there.
     public static let destructive = Color(light: .init(red: 0.80, green: 0.10, blue: 0.08),
                                           dark: .init(red: 1.0, green: 0.484, blue: 0.453))
 
@@ -153,9 +171,12 @@ public nonisolated enum DSColors {
     /// Success — green.
     ///
     /// The light variant is much darker than the dark one, and deliberately so. These are read as
-    /// *text* — a 200 in the request log, "Running" in the overview — and the vibrant green that
+    /// *text* — "Running" in the overview, the server dot beside it — and the vibrant green that
     /// works on a near-black panel measured **2.2:1** against a light one, well under the 4.5:1 AA
     /// needs for 10–11pt. The dark variant is unchanged; only the light side moved, to 4.8:1.
+    ///
+    /// A **200** is ``successText``: two of the lists that draw one fill the pill behind it with a
+    /// 12% tint of the label's own colour, where this constant reads 3.94.
     public static let success = Color(light: .init(red: 0.047, green: 0.491, blue: 0.189),
                                       dark: .init(red: 0.188, green: 0.820, blue: 0.345))
 
@@ -166,8 +187,18 @@ public nonisolated enum DSColors {
     /// `dominant`.
     ///
     /// Both surfaces are named because the panel is the one that decides. It is the harder of the
-    /// two, it is where a 404 in the request log is actually read, and the amber clears AA there by a
-    /// tenth. The green channel is what moves to buy that, and it stops at 0.373 because the margin
+    /// two, it is where this amber is read as a *word* — the import review's "Body dropped" flag, a
+    /// blocked-by-journey outcome, a search-hit count — and it clears AA there by a tenth.
+    ///
+    /// Every one of those three is a plain word on a plain surface, which is the only thing this
+    /// constant is measured for. The list named a fourth, the import review's "Duplicate" flag, and
+    /// that one was wrong when it was written: `ImportReviewList` draws it on a 12% tint of itself,
+    /// where this amber reads 3.96 rather than 4.60 — a failure, cited as the example of a pass. It
+    /// is ``warningText`` now, so it is no longer a call site of this token at all. Check what a
+    /// candidate example is drawn *on* before adding it here; that is the whole distinction between
+    /// these two tokens.
+    ///
+    /// The green channel is what moves to buy that, and it stops at 0.373 because the margin
     /// is genuinely that thin: 0.384 already reads **4.48** on a panel and misses, 0.39 reads 4.44,
     /// 0.40 reads 4.32. A hundredth of this one channel is the whole difference.
     ///
@@ -176,8 +207,71 @@ public nonisolated enum DSColors {
     /// panel — and to argue for "0.39 rather than 0.40", neither of which is the constant below and
     /// neither of which clears a panel. `DSContrastTests.semanticColoursClearAAAsText` pins all three
     /// channels and both readings, so the constant and the argument about it cannot drift apart again.
+    ///
+    /// **A 404 in the request log is ``warningText``, not this**, and the same goes for every other
+    /// status code the window draws: `httpStatusColor(for:)` returns the text variants, because a
+    /// status pill fills itself with a 12% tint of its own label colour and this constant does not
+    /// survive that. See ``warningText``.
     public static let warning = Color(light: .init(red: 0.602, green: 0.373, blue: 0.0),
                                       dark: .init(red: 1.0, green: 0.624, blue: 0.039))
+
+    // MARK: - Semantic colours as words on a tint of themselves
+
+    /// Success — green, on a tint of itself.
+    ///
+    /// See ``warningText`` for why these three exist; this is the 2xx of the set. Light moves from
+    /// `(0.047, 0.491, 0.189)` to `(0.041, 0.433, 0.166)` — **5.63:1** on a panel where ``success``
+    /// reads 4.62, **4.72** on its own 12% tint there, and **4.59** on the worst bed a pill lands on
+    /// (a ``band``). Dark is ``success``'s own constant, unchanged, because it needed no move: the
+    /// vibrant green already reads 5.49 on its own tint on a panel and 5.00 on a band.
+    public static let successText = Color(light: .init(red: 0.041, green: 0.433, blue: 0.166),
+                                          dark: .init(red: 0.188, green: 0.820, blue: 0.345))
+
+    /// Warning — amber, on a tint of itself. **This is the token the other two are documented from.**
+    ///
+    /// ``success``, ``warning`` and ``destructive`` each carry a light variant pushed down until it
+    /// cleared 4.5:1 *on a panel*, and each is measured that way below and in `DSContrastTests`. The
+    /// window does not draw them that way. A status pill labels itself in `httpStatusColor(for:)` and
+    /// fills itself with **that same colour at 12%**, so the surface moves toward the ink and the
+    /// margin those constants were chosen for is spent before anybody reads them. Rendered in sRGB
+    /// and read back on ``secondary`` in light, the composite measures **3.94:1** for ``success``,
+    /// **3.96** for ``warning``, **4.07** for ``destructive`` and **2.80** for ``accent`` — four
+    /// failures under a floor all four clear as bare text (4.62, 4.60, 4.95, and the accent's own
+    /// 3.20, which never cleared it at all).
+    ///
+    /// This is exactly the split ``accentText`` already makes, arriving one place later: there the
+    /// fill and the word are two tokens, and here they had been one. A self-tint costs between 13%
+    /// and 18% of the ratio in light mode — 13.9 for the amber, 14.7 for the green, 17.8 for the red
+    /// — and no amount of tinting buys it back, so the word moves instead, far enough to survive its
+    /// own 12% fill on every surface a pill actually lands on: the panel, the canvas, a sheet, a
+    /// ``band`` and a ``rowStripe``. The `band` case is the binding one, and it is a real one — the
+    /// request detail's identity row is a `band` and its status pill sits on it.
+    ///
+    /// The amber is the tightest of the three, for the reason ``warning`` gives: its luminance is
+    /// almost all green. `(0.602, 0.373, 0.0)` becomes `(0.534, 0.331, 0.0)` — **5.57:1** plain on a
+    /// panel, **4.71** on its own tint there, **4.56** on a `band`. Dark is ``warning``'s constant
+    /// untouched; the vibrant amber reads 5.40 on its own tint on a panel and 4.92 on a band, so
+    /// only the light side had anywhere to go. That asymmetry is the same one every other correction
+    /// in this file makes.
+    ///
+    /// ``warning`` itself is unchanged and still correct for what it is — a word on a plain surface,
+    /// and the hue ``Syntax/searchHit`` is a wash of. Reach for this one when the same colour is also
+    /// the fill.
+    public static let warningText = Color(light: .init(red: 0.534, green: 0.331, blue: 0.0),
+                                          dark: .init(red: 1.0, green: 0.624, blue: 0.039))
+
+    /// Destructive — red, on a tint of itself. The 5xx of the set; see ``warningText``.
+    ///
+    /// The only one of the three whose **dark** side had to move as well. ``destructive``'s dark
+    /// salmon clears its own tint on a panel at 4.55 and then misses on the two surfaces that are
+    /// one step off it, reading **4.15** on a ``band`` and 4.14 on a sheet — so a 500 in the request
+    /// detail's identity row was the failing case in dark mode too, not only in light.
+    ///
+    /// Light `(0.80, 0.10, 0.08)` → `(0.725, 0.090, 0.072)`: **5.78:1** plain on a panel, **4.72** on
+    /// its own tint, **4.55** on a `band`. Dark `(1.0, 0.484, 0.453)` → `(1.0, 0.552, 0.525)`:
+    /// **5.01** on its own tint on a panel and **4.57** on a `band`.
+    public static let destructiveText = Color(light: .init(red: 0.725, green: 0.090, blue: 0.072),
+                                              dark: .init(red: 1.0, green: 0.552, blue: 0.525))
 
     // MARK: - Server state colors
 
@@ -302,12 +396,38 @@ public nonisolated enum DSColors {
     // MARK: - HTTP status code color
 
     /// Maps an HTTP status code to a semantic color.
+    ///
+    /// **Every arm is a text variant, and that is the whole point of them.** This function's result
+    /// is used twice at every call site that draws a status pill — once as the label's
+    /// `foregroundStyle` and once, at 12%, as the fill behind it — so whatever it returns is measured
+    /// against a tint of itself rather than against the panel. On that composite ``success``,
+    /// ``warning``, ``destructive`` and ``accent`` read 3.94, 3.96, 4.07 and 2.80 on a light panel;
+    /// ``successText``, ``warningText`` and ``destructiveText`` read 4.72, 4.71 and 4.72, and clear
+    /// the 4.5:1 floor on every surface a pill lands on in both appearances. That composite is what
+    /// `DSContrastTests.statusPillTextClearsAAOnItsOwnFill` measures — driven from this function, so
+    /// putting a base token back in any arm fails the suite rather than shipping.
+    ///
+    /// **3xx is ``accentText``, which is the one arm still short of the floor when it is filled.**
+    /// The redirect blue was ``accent`` — the fill blue, the exact colour `accentText` was introduced
+    /// to replace as a word, and the only arm that failed AA even *unfilled*, at 3.20 on a light
+    /// panel. `accentText` takes that to 5.35, which is the reading that matters, because AGENTS.md's
+    /// rule is that "only 4xx and 5xx get a fill" — a redirect is not something to stop on. Under a
+    /// 12% tint of itself it reads 4.48 on a panel and 4.35 on a ``band``, so that style rule is also
+    /// a contrast rule.
+    ///
+    /// Two call sites used to fill every code — `EndpointTrafficList.statusChip` and
+    /// `RequestDetailInspector.statusPill` — and were the only reason a filled 3xx existed anywhere
+    /// in the window. Both are gated on `code >= 400` now, so this arm's weakest composite is not
+    /// drawn. It is left as ``accentText`` rather than pushed further down because every reading that
+    /// *is* drawn clears the floor comfortably, and darkening it would move the Cancel-button blue
+    /// throughout the window to fix a composite nothing renders. If a new call site ever fills a
+    /// 3xx, this is the paragraph that says why it must not.
     public static func httpStatusColor(for statusCode: Int) -> Color {
         switch statusCode {
-        case 200..<300: success
-        case 300..<400: accent
-        case 400..<500: warning
-        case 500..<600: destructive
+        case 200..<300: successText
+        case 300..<400: accentText
+        case 400..<500: warningText
+        case 500..<600: destructiveText
         default: .secondary
         }
     }

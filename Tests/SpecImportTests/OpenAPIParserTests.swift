@@ -363,11 +363,15 @@ struct OpenAPIParserTests {
 
     @Test("Parses a Swagger 2.0 spec")
     func parseSwagger2() async throws {
+        // `basePath: "/v1"` rather than the `"/"` this carried, and every other `basePath` fixture
+        // in the suite carried with it. `/` is the one value for which prepending the prefix and
+        // dropping it produce the same string, so a suite that only ever wrote `/` could not see
+        // that `basePath` was decoded and then read by nothing. See `ImportedRouteMatchingTests`.
         let spec = """
         {
             "swagger": "2.0",
             "info": { "title": "Test", "version": "1.0" },
-            "basePath": "/",
+            "basePath": "/v1",
             "paths": {
                 "/api/users": {
                     "get": {
@@ -395,7 +399,7 @@ struct OpenAPIParserTests {
 
         #expect(candidates.count == 2)
         let get = candidates.first { $0.method == .get }!
-        #expect(get.path == "/api/users")
+        #expect(get.path == "/v1/api/users", "the document's basePath is part of the route it serves")
         #expect(get.statusCode == 200)
         // The spec offers both `operationId: ListUsers` and `summary: "List all users"`, and the
         // summary wins: it is the sentence the spec's author wrote for a human, and this name becomes
@@ -410,6 +414,9 @@ struct OpenAPIParserTests {
 
     @Test("Swagger 2.0 generates fallback body with description when no schema")
     func swagger2FallbackWithDescription() async throws {
+        // This one keeps `"/"` on purpose. "A basePath of `/` adds nothing to the route" is a real
+        // case and has to stay covered; it just cannot be the *only* case covered, which is what it
+        // was — see `parseSwagger2` above and `ImportedRouteMatchingTests`.
         let spec = """
         {
             "swagger": "2.0",
@@ -474,6 +481,12 @@ struct OpenAPIParserTests {
         #expect(body.contains("Sucessful authentication."))
         #expect(body.contains("\"user\""))
         #expect(body.contains("\"passwd\""))
+
+        // This fixture carries two `{}` parameters and asserted only what ended up in the body. The
+        // route it produced — three literal segments, one of them the string `{user}` — could not
+        // answer the request the route describes, which is the thing an import exists to do.
+        #expect(candidates[0].path == "/basic-auth/:user/:passwd")
+        #expect(PathPattern.matches(requestPath: "/basic-auth/me/hunter2", pattern: candidates[0].path))
     }
 
     // MARK: - Status Code Selection

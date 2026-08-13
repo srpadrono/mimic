@@ -26,7 +26,7 @@ struct SwaggerModelsTests {
                 "title": "Inventory",
                 "version": "1.0"
             },
-            "basePath": "/",
+            "basePath": "/inventory/v1",
             "paths": {
                 "/items": {
                     "get": {
@@ -63,6 +63,10 @@ struct SwaggerModelsTests {
 
         #expect(document.swagger == "2.0")
         #expect(document.info?.title == "Inventory")
+        // Decoded since this model was written, and asserted by nothing until now — which is how it
+        // went on being read by nothing for as long as it did. A non-`/` value, so the assertion
+        // says something: `/` is the value every `basePath` fixture in this suite used to carry.
+        #expect(document.basePath == "/inventory/v1")
         #expect(document.paths?["/items"]?.get?.responses?["200"]?.description == "OK")
         #expect(document.paths?["/items"]?.get?.responses?["200"]?.schema?.properties?["items"]?.items?.type == "string")
         #expect(document.paths?["/items"]?.get?.responses?["200"]?.examples?["application/json"]?.toJSONString()?.contains("\"items\"") == true)

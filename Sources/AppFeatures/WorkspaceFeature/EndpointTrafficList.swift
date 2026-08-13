@@ -190,18 +190,34 @@ struct EndpointTrafficList: View {
         }
     }
 
+    /// Only a 4xx or 5xx is filled, which is the house rule (`AGENTS.md`: "a filled colour swatch is
+    /// for something that needs attention … a column of filled pills is a wall of colour that says
+    /// nothing, because everything in it is shouting equally") and matches `pill(text:color:isFilled:)`
+    /// twenty lines below — the two spellings sat in this one file disagreeing.
+    ///
+    /// It is also the reading. A fill is a 12% tint of the label's own colour, so it moves the
+    /// surface toward the ink and costs the label 13–18% of its contrast ratio. The three text
+    /// tokens `httpStatusColor(for:)` returns absorb that; ``DSColors/accentText`` — the 3xx — does
+    /// not, reading 4.48:1 on a panel and 4.35 on the `band` this header is, against a 4.5 floor. No
+    /// blue fixes it, because the fill is derived from the label. Not filling a redirect is what
+    /// fixes it, and a redirect is not something to stop on.
     private func statusChip(code: Int, count: Int) -> some View {
         let color = DSColors.httpStatusColor(for: code)
+        let isFilled = code >= 400
 
         return Text(verbatim: "\(code) \u{00D7}\(count)")
             .font(DSTypography.caption)
             .foregroundStyle(color)
-            .padding(.horizontal, DSSpacing.xs)
+            // Horizontal inset belongs to the fill, as in `pill` below; the `HStack` carries
+            // `DSSpacing.xs` of its own, so an unfilled chip still clears its neighbour.
+            .padding(.horizontal, isFilled ? DSSpacing.xs : 0)
             .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                    .fill(color.opacity(0.12))
-            )
+            .background {
+                if isFilled {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
+                        .fill(color.opacity(0.12))
+                }
+            }
             .accessibilityIdentifier("endpointTraffic.status.\(code)")
             .accessibilityLabel("\(count) \(count == 1 ? "response" : "responses") with status \(code)")
     }
@@ -297,8 +313,11 @@ private struct EndpointTrafficRow: View {
         if let code = log.responseStatusCode {
             pill(text: "\(code)", color: DSColors.httpStatusColor(for: code), isFilled: code >= 400)
         } else {
-            // No code at all is a failure by definition, so it keeps the fill.
-            pill(text: "\u{2014}", color: DSColors.destructive, isFilled: true)
+            // No code at all is a failure by definition, so it keeps the fill — and because `pill`
+            // draws that fill as a 12% tint of this very colour, it takes `destructiveText` for the
+            // same reason `httpStatusColor(for:)` returns the text variants. The base red reads
+            // 4.07:1 on a panel here, under the 4.5 the palette holds itself to.
+            pill(text: "\u{2014}", color: DSColors.destructiveText, isFilled: true)
         }
     }
 

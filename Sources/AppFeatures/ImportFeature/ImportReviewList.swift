@@ -312,12 +312,16 @@ private struct ImportCandidateRow: View {
         if candidate.isDuplicate {
             Label("Duplicate", systemImage: "doc.on.doc")
                 .font(DSTypography.caption)
-                .foregroundStyle(DSColors.warning)
+                // `warningText`, not `warning`: this flag fills itself with a 12% tint of its own
+                // colour, where the base amber reads 3.96:1 on a panel and 4.11 on the elevated
+                // surface this sheet is. The "Body dropped" flag below stays `warning` — it is a
+                // plain word on a plain surface, which is what that token is measured for.
+                .foregroundStyle(DSColors.warningText)
                 .padding(.horizontal, DSSpacing.xs)
                 .padding(.vertical, 1)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(DSColors.warning.opacity(0.12))
+                        .fill(DSColors.warningText.opacity(0.12))
                 )
                 .help("An endpoint with this method and path already exists")
                 .accessibilityLabel("Duplicate of an existing endpoint")

@@ -38,6 +38,12 @@ final class ProjectWorkspace {
     /// `MimicControlService` never had this because it saves before it answers. Chaining the tasks
     /// gives the window the same guarantee without making it wait: the writes reach the store in the
     /// order they were asked for, whatever order the callers' replies arrive in.
+    ///
+    /// ``importProject(_:)`` is in the chain too, and is the only member that does *not* answer
+    /// early — it awaits its own write to report whether the store took the document. Being `async`
+    /// is not what puts a write in order with the others, which is the mistake it used to embody:
+    /// its caller dispatches it into an untracked `Task`, so awaiting the chain without joining it
+    /// ordered the import behind everything before it and nothing behind the import.
     private var storeWrites: Task<Void, Never>?
 
     init(
@@ -106,12 +112,41 @@ final class ProjectWorkspace {
                 guard generation == openGeneration else { return }
                 setCurrentProject(project, isRestoring: true)
                 recordRecentProject(id: project.id, name: project.name)
-            } catch {
+            } catch PersistenceError.projectNotFound {
                 // Not generation-guarded: this entry names a project the store does not have, and
                 // that is true whichever open won the race.
+                //
+                // Only this arm may strike the entry. It used to be the whole `catch`, so *every*
+                // failure was treated as a missing project — see below.
                 recentProjectsStore.remove(id: id)
                 recentProjects = recentProjectsStore.load()
                 refreshProjectList()
+            } catch {
+                // Everything else is a project that exists and could not be read: a locked or
+                // unreadable store, or a document written by a newer build
+                // (`PersistenceError.unsupportedSchemaVersion`, which `allProjects` deliberately
+                // does not filter out — so the row is listed, clicked, and refused only here).
+                //
+                // Striking those from recents said something about the store that is not true. The
+                // *list* recovers on its own — `refreshProjectList` reconciles the cache against the
+                // store, so the project comes back in the tail — but its place in the order does
+                // not, and `RecentProjectsStore.remove` clears `lastOpenedProjectID` along with it,
+                // so the app stops reopening it on launch. Nor did anything else happen: no error
+                // and no indicator, with the window still showing whatever was open before.
+                //
+                // The store's own description is what carries the diagnosis — for a newer document,
+                // the sentence naming both schema numbers — so it goes verbatim onto
+                // `autosaveStatus`, the channel `createProject`, `saveCurrentProject` and
+                // `scheduleAutosave` already report a store failure on.
+                //
+                // What this does *not* change is the reply to `mimic project open`: that is
+                // optimistic by contract — `AppControlHost` answers "Opening project." as soon as the
+                // reference resolves — so a script still confirms with a follow-up `state`, where the
+                // open project is simply the one it already was.
+                //
+                // Reported whichever open won the race, for the same reason the arm above is: a
+                // load the user asked for failed, and a later one succeeding does not unfail it.
+                autosaveStatus = .failed(error.localizedDescription)
             }
         }
     }
@@ -162,23 +197,43 @@ final class ProjectWorkspace {
     /// and the window said nothing. The write is still asynchronous, so the reply stays optimistic,
     /// but a failure now reaches `autosaveStatus`, which is the channel the window already renders
     /// for a store failure.
+    ///
+    /// It joins ``storeWrites`` the way ``createProject(name:port:)`` and ``deleteProject(id:)`` do,
+    /// and answers with that write's own result.
+    ///
+    /// It used to only *await* the chain without joining it, on the argument that it is `async` and
+    /// its caller awaits it — so anything issued afterwards was already behind it. Its caller is
+    /// `AppState.importProject`, which dispatches into an untracked `Task` and returns immediately,
+    /// so nothing was behind it at all: a `mimic project delete` arriving after `mimic project
+    /// import` took `storeWrites` as it was *before* the import, found nothing to wait for, and was
+    /// free to reach the store first — deleting nothing, and leaving the import's insert to land
+    /// afterwards and put the project back. That is the inversion the chain exists to prevent, and
+    /// it was open on the one command that writes a whole document.
     func importProject(_ document: MockProject) async -> Bool {
-        // Ordered behind the lifecycle writes for the same reason they are ordered behind each other.
-        // It does not join the chain itself: this one is `async` and its caller awaits it, so anything
-        // issued after the reply is already behind it.
-        await storeWrites?.value
+        let previousWrites = storeWrites
+        let write: Task<Bool, Never> = Task { @MainActor [weak self] in
+            await previousWrites?.value
+            guard let self else { return false }
 
-        autosaveStatus = .saving
-        do {
-            try await projectRepository.save(document)
-            autosaveStatus = .saved
-            scheduleSavedStatusClear()
-            recordRecentProject(id: document.id, name: document.name)
-            return true
-        } catch {
-            autosaveStatus = .failed("Could not import project \"\(document.name)\".")
-            return false
+            autosaveStatus = .saving
+            do {
+                try await projectRepository.save(document)
+                autosaveStatus = .saved
+                scheduleSavedStatusClear()
+                recordRecentProject(id: document.id, name: document.name)
+                return true
+            } catch {
+                autosaveStatus = .failed("Could not import project \"\(document.name)\".")
+                return false
+            }
         }
+        // The chain is a `Task<Void, Never>` because nothing awaiting it wants an answer, so what
+        // goes into it is a wrapper around the write rather than the write itself. The wrapper
+        // cannot finish before the write it awaits, which is the whole of what
+        // `awaitPendingStoreWrites()` and the next lifecycle write need from it; the answer below
+        // is the write's own.
+        storeWrites = Task { @MainActor in _ = await write.value }
+        return await write.value
     }
 
     func deleteProject(id: UUID) {

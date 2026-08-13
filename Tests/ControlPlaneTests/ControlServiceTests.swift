@@ -410,6 +410,98 @@ struct ControlServiceTests {
         await service.shutdown()
     }
 
+    // MARK: - A store that refuses the write
+
+    /// The persist-first rule, from the side that shows why it is a rule.
+    ///
+    /// `run` committed the mutated project to `openProject` and *then* saved it, so a store that
+    /// refused the write left the session carrying an edit the store does not have. The command
+    /// reported the failure and every read afterwards answered from the edit anyway — which is also
+    /// what makes `projectSummaries`' "this service saves before it answers, so the stored row is
+    /// never behind the session" false in the one case where it matters.
+    @Test("A save the store refuses leaves the in-memory project as the store has it")
+    func aRefusedSaveDoesNotCommitInMemory() async throws {
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = RefusingWritesRepository()
+        let service = MimicControlService(
+            repository: repository,
+            settings: SettingsStore(dbQueue: queue),
+            engine: MockServerEngine(),
+            mode: "headless"
+        )
+
+        let created = try await Self.ok(service, .projectCreate(name: "Checkout", port: 9310))
+        let id = try #require(created.project?.id)
+        await repository.refuseFurtherWrites()
+
+        let refused = await service.execute(.projectRename(name: "Renamed"))
+        #expect(refused.ok == false)
+
+        // Every read the session answers from `openProject` reports what the store kept, not what
+        // it refused.
+        let state = try await Self.ok(service, .state)
+        #expect(
+            state.state?.project?.name == "Checkout",
+            "the session is reporting a rename the store refused"
+        )
+        #expect(await repository.stored(id)?.name == "Checkout")
+        let exported = try await Self.ok(service, .projectExport(project: nil))
+        #expect(exported.project?.name == "Checkout")
+    }
+
+    /// `activateJourney` had the same shape in both of its branches. This is the first: a refused
+    /// write used to leave the journey running in this session and inactive in the store, so
+    /// `mimic journey status` reported a run that reopening the project knew nothing about.
+    @Test("A journey activation the store refuses does not activate it in the session")
+    func aRefusedJourneyActivationDoesNotCommitInMemory() async throws {
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = RefusingWritesRepository()
+        let service = MimicControlService(
+            repository: repository,
+            settings: SettingsStore(dbQueue: queue),
+            engine: MockServerEngine(),
+            mode: "headless"
+        )
+
+        try await Self.ok(service, .projectCreate(name: "Checkout", port: 9311))
+        try await Self.ok(service, .journeyAddTemplate(templateID: "payment-retry", name: "Flow"))
+        await repository.refuseFurtherWrites()
+
+        let refused = await service.execute(.journeyActivate(journey: .name("Flow")))
+        #expect(refused.ok == false)
+
+        #expect(await Self.failure(service, .journeyStatus)?.code == "journey.noneActive")
+        let state = try await Self.ok(service, .state)
+        #expect(state.state?.activeJourney == nil)
+    }
+
+    /// The other branch of the same method: clearing. A refused write committed "no active journey"
+    /// to the session while the store still held one, so the instance reported nothing running and
+    /// the next `project open` brought the journey straight back.
+    @Test("Clearing the active journey against a store that refuses leaves it active")
+    func aRefusedJourneyClearDoesNotCommitInMemory() async throws {
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = RefusingWritesRepository()
+        let service = MimicControlService(
+            repository: repository,
+            settings: SettingsStore(dbQueue: queue),
+            engine: MockServerEngine(),
+            mode: "headless"
+        )
+
+        try await Self.ok(service, .projectCreate(name: "Checkout", port: 9312))
+        try await Self.ok(service, .journeyAddTemplate(templateID: "payment-retry", name: "Flow"))
+        try await Self.ok(service, .journeyActivate(journey: .name("Flow")))
+        await repository.refuseFurtherWrites()
+
+        let refused = await service.execute(.journeyActivate(journey: nil))
+        #expect(refused.ok == false)
+
+        // Still running, because the store still says so.
+        let status = try await Self.ok(service, .journeyStatus)
+        #expect(status.journeyStatus?.journeyName == "Flow")
+    }
+
     @Test("Reset scopes are independent")
     func resetScopes() async throws {
         let service = try Self.makeService()
@@ -422,6 +514,44 @@ struct ControlServiceTests {
 
         let journeyOnly = try await Self.ok(service, .reset(scope: .journey))
         #expect(journeyOnly.state?.activeJourney?.currentStepIndex == 0)
+    }
+}
+
+/// A store that takes writes until it is told to stop, and refuses every one after that.
+///
+/// The shape it stands in for is a database that locks, or a disk that fills, *after* the project
+/// being worked on already exists — which is the only way to reach the persist-first rule from a
+/// test: the command has to be one the service accepts and applies, and the store has to be one that
+/// then refuses to keep it.
+private actor RefusingWritesRepository: ProjectRepository {
+    struct Refused: Error, LocalizedError {
+        var errorDescription: String? { "the store refused the write" }
+    }
+
+    private var projects: [UUID: MockProject] = [:]
+    private var isRefusing = false
+
+    func refuseFurtherWrites() { isRefusing = true }
+
+    /// What the store actually holds, so a test can assert against it rather than against the
+    /// session's report of it.
+    func stored(_ id: UUID) -> MockProject? { projects[id] }
+
+    func save(_ project: MockProject) async throws {
+        if isRefusing { throw Refused() }
+        projects[project.id] = project
+    }
+
+    func load(id: UUID) async throws -> MockProject {
+        guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
+        return project
+    }
+
+    func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+    func delete(id: UUID) async throws {
+        if isRefusing { throw Refused() }
+        projects[id] = nil
     }
 }
 

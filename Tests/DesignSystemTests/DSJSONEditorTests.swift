@@ -145,33 +145,38 @@ struct DSJSONEditorTests {
 @Suite("DSColors")
 struct DSColorsTests {
 
-    @Test("httpStatusColor returns success color for 2xx")
+    // Each arm returns the *text* variant, not the base semantic token. A pill draws this colour as
+    // its label and, at 12%, as its own fill, and the base tokens do not survive that composite —
+    // `DSContrastTests.statusPillTextClearsAAOnItsOwnFill` is where that is measured. These four
+    // tests pin the boundaries of each range; the palette question is settled next door.
+
+    @Test("httpStatusColor returns the success text color for 2xx")
     func httpStatus2xx() {
-        let expected = DSColors.success
+        let expected = DSColors.successText
         #expect(DSColors.httpStatusColor(for: 200) == expected)
         #expect(DSColors.httpStatusColor(for: 201) == expected)
         #expect(DSColors.httpStatusColor(for: 299) == expected)
     }
 
-    @Test("httpStatusColor returns accent color for 3xx")
+    @Test("httpStatusColor returns the accent text color for 3xx")
     func httpStatus3xx() {
-        let expected = DSColors.accent
+        let expected = DSColors.accentText
         #expect(DSColors.httpStatusColor(for: 301) == expected)
         #expect(DSColors.httpStatusColor(for: 302) == expected)
         #expect(DSColors.httpStatusColor(for: 399) == expected)
     }
 
-    @Test("httpStatusColor returns warning color for 4xx")
+    @Test("httpStatusColor returns the warning text color for 4xx")
     func httpStatus4xx() {
-        let expected = DSColors.warning
+        let expected = DSColors.warningText
         #expect(DSColors.httpStatusColor(for: 400) == expected)
         #expect(DSColors.httpStatusColor(for: 404) == expected)
         #expect(DSColors.httpStatusColor(for: 499) == expected)
     }
 
-    @Test("httpStatusColor returns destructive color for 5xx")
+    @Test("httpStatusColor returns the destructive text color for 5xx")
     func httpStatus5xx() {
-        let expected = DSColors.destructive
+        let expected = DSColors.destructiveText
         #expect(DSColors.httpStatusColor(for: 500) == expected)
         #expect(DSColors.httpStatusColor(for: 503) == expected)
         #expect(DSColors.httpStatusColor(for: 599) == expected)

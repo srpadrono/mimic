@@ -258,8 +258,11 @@ final class ControlPlaneCoordinator {
     ///
     /// That parameter exists because passing `true` unconditionally deadlocked every quit, and the
     /// mechanism is worth writing down because nothing about it is visible at the call site.
-    /// `createProject`, `duplicateProject`, `deleteProject` and `importProject` answer before the
-    /// store has the change — that is what makes the window feel immediate — and
+    /// `ProjectWorkspace`'s `createProject`, `duplicateProject` and `deleteProject` answer before the
+    /// store has the change — that is what makes the window feel immediate — as does an import,
+    /// though one step further out: `ProjectWorkspace.importProject` awaits its own write and
+    /// reports whether the store took the document, and it is `AppState.importProject` that
+    /// dispatches it into an untracked `Task` and returns. All four are in the same write chain, and
     /// `ProjectWorkspace.awaitPendingStoreWrites()` is the drain built so a
     /// `mimic project delete Foo` still in flight is not lost to the `mimic app stop` behind it.
     /// But `ProjectWorkspace` is `@MainActor`, so awaiting that method from this detached task is a
