@@ -253,22 +253,40 @@ final class ControlPlaneCoordinator {
     /// repository is nonisolated and GRDB runs the transaction on its own queue — which is what lets
     /// the blocking waiter below block the main thread without deadlocking against the work it is
     /// waiting for.
-    private func startPendingSave() -> PendingSaveSignal? {
-        guard let workspace = appState?.projects else { return nil }
+    /// - Parameter drainingStoreWrites: whether the caller can afford to wait for the in-flight
+    ///   project-lifecycle writes. **Only a caller that leaves the main actor free may pass `true`.**
+    ///
+    /// That parameter exists because passing `true` unconditionally deadlocked every quit, and the
+    /// mechanism is worth writing down because nothing about it is visible at the call site.
+    /// `createProject`, `duplicateProject`, `deleteProject` and `importProject` answer before the
+    /// store has the change — that is what makes the window feel immediate — and
+    /// `ProjectWorkspace.awaitPendingStoreWrites()` is the drain built so a
+    /// `mimic project delete Foo` still in flight is not lost to the `mimic app stop` behind it.
+    /// But `ProjectWorkspace` is `@MainActor`, so awaiting that method from this detached task is a
+    /// hop *onto* the main actor — and `flushPendingSaveBlocking` is holding the main **thread** in
+    /// `Thread.sleep` at the same time. The hop cannot be serviced, the save below it never runs,
+    /// and the signal never finishes: ⌘Q spent the full two-second deadline and then dropped the
+    /// edit it was there to save. Worse than the defect it was written to fix, green in CI, and
+    /// invisible to every test because nothing exercises either quit path.
+    ///
+    /// The signal path is `async` and suspends on `Task.sleep`, which leaves the main actor free, so
+    /// it drains. ⌘Q cannot, and the honest fix is `applicationShouldTerminate` returning
+    /// `.terminateLater` — that keeps the runloop alive so main-actor work can finish, instead of
+    /// blocking the thread that has to run it. That is a change to the app's termination contract
+    /// and wants a machine that can actually quit the app to verify it; until then this path saves
+    /// the open project, which is what it did before the drain was added, and says what it cannot do.
+    private func startPendingSave(drainingStoreWrites: Bool) -> PendingSaveSignal? {
         let repository = self.repository
         let project = appState?.currentProject
+        // Read here, on the main actor, where this method already runs — not inside the task below.
+        let workspace = drainingStoreWrites ? appState?.projects : nil
+
+        // Nothing owed and nothing in flight: do not make the caller wait on an empty deadline.
+        guard repository != nil, project != nil || workspace != nil else { return nil }
+
         let didFinish = PendingSaveSignal()
         Task.detached(priority: .userInitiated) {
-            // The in-flight lifecycle writes first, and this is not belt and braces. `createProject`,
-            // `duplicateProject`, `deleteProject` and `importProject` all answer their caller before
-            // the store has the change — that is what makes the window feel immediate — so
-            // `mimic project delete Foo` followed by `mimic app stop`, two commands inside one
-            // database round trip, used to reach here with the delete still queued. Re-saving
-            // `currentProject` and calling `exit(0)` does not wait for it, so the CLI reported a
-            // delete that then did not happen. `awaitPendingStoreWrites` is the drain this branch
-            // built for exactly that ordering problem, and the quit path is the other place that
-            // needs it.
-            await workspace.awaitPendingStoreWrites()
+            await workspace?.awaitPendingStoreWrites()
 
             // Then the debounced edit to whatever is open. A store that refuses this has nowhere to
             // report it — there is no window left to show `autosaveStatus` in, and the caller ends
@@ -288,7 +306,9 @@ final class ControlPlaneCoordinator {
     /// would still leave a wedged write holding the quit open. `AppLauncher.waitForReadiness` polls a
     /// deadline for the same kind of reason.
     private func flushPendingSave() async {
-        guard let didFinish = startPendingSave() else { return }
+        // `true`: this path suspends on `Task.sleep` below rather than blocking, so the main actor
+        // stays free to run the lifecycle writes being drained.
+        guard let didFinish = startPendingSave(drainingStoreWrites: true) else { return }
         let deadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
         while !didFinish.hasFinished, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(10))
@@ -303,7 +323,9 @@ final class ControlPlaneCoordinator {
     /// not a defect; a quit that drops the edit you just made is, and ⌘Q dropped it exactly as
     /// `SIGTERM` did.
     private func flushPendingSaveBlocking() {
-        guard let didFinish = startPendingSave() else { return }
+        // `false`, and not negotiable: the loop below holds the main thread, so a drain that needs
+        // the main actor could never complete. See `startPendingSave(drainingStoreWrites:)`.
+        guard let didFinish = startPendingSave(drainingStoreWrites: false) else { return }
         let deadline = Date().addingTimeInterval(Self.shutdownFlushTimeoutSeconds)
         while !didFinish.hasFinished, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.005)
