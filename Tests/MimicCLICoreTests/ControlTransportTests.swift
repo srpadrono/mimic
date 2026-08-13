@@ -424,6 +424,101 @@ struct EmittedCommandTests {
         #expect(quietActivate == false)
     }
 
+    /// `project import` has to refuse a file that is not a project, and a decode is not how it can
+    /// tell.
+    ///
+    /// `MockProject.init(from:)` requires exactly `id` and `name` — everything else is
+    /// `decodeIfPresent`, which is what lets older exports load. A serialized `Journey` carries both
+    /// of those, so it decoded cleanly into a project with no endpoints and no journeys wearing the
+    /// journey's own name and id, and the CLI sent that on as a `projectImport` — a project the
+    /// caller never wrote, reported as a successful import. The fixture is exactly such a document:
+    /// an element of an exported project's `journeys` array, which is also the value under `journey`
+    /// in a `mimic journey get` reply.
+    ///
+    /// The refusal is now decided by a key only a project document has, before the decode. Both
+    /// halves are asserted: nothing is sent, and the exit code is `2` — the caller named the wrong
+    /// file, which is bad usage, not a refusal by Mimic.
+    @Test("`project import` refuses a journey document instead of decoding it into an empty project")
+    func projectImportRefusesANonProjectDocument() async throws {
+        var project = MockProject(name: "Checkout")
+        _ = try ProjectCommandExecutor.apply(
+            .journeyAddTemplate(templateID: "session-expiry", name: "Session"),
+            to: &project
+        )
+        let journeyDocument = try Self.temporaryFile(
+            try ControlCoding.string(project.journeys[0], pretty: true)
+        )
+        // A journey *spec* — what `mimic journey export` writes — was already refused, because it
+        // has no `id` for the decoder to require. It is here so the new key check is pinned as
+        // *widening* the refusal rather than replacing it: this file must still be turned away, with
+        // the same code and still without sending anything.
+        let specDocument = try Self.temporaryFile(Self.journeyFileJSON)
+        defer {
+            try? FileManager.default.removeItem(atPath: journeyDocument)
+            try? FileManager.default.removeItem(atPath: specDocument)
+        }
+
+        let fromJourney = await Self.emitted(["project", "import", journeyDocument], exitCode: 2)
+        #expect(fromJourney.isEmpty, "nothing may be sent for a file that is not a project document")
+
+        let fromSpec = await Self.emitted(["project", "import", specDocument], exitCode: 2)
+        #expect(fromSpec.isEmpty)
+    }
+
+    /// `endpoint create` is two commands, and a response option the second one cannot survive must
+    /// not leave the first one's endpoint behind.
+    ///
+    /// It did. The spec was resolved *after* the create, so `--content-type xml` and a missing
+    /// `--body-file` threw once the endpoint already existed, and a `--status` the instance refuses
+    /// failed the `scenarioUpdate` with nothing undoing the create. Either way the run exited
+    /// non-zero having left an endpoint answering the placeholder 200 `makeEndpoint` gives it — a
+    /// mock nobody asked for, standing in for the one they did.
+    ///
+    /// Two mechanisms, one invariant, and both are asserted here: everything resolvable locally is
+    /// resolved before anything is sent, and a refusal from the instance is rolled back with an
+    /// `endpointDelete` addressed by the id the create handed back.
+    @Test("`endpoint create` leaves nothing behind when the response half fails")
+    func endpointCreateIsAtomic() async {
+        // Locally resolvable failures: nothing is sent at all.
+        let badContentType = await Self.emitted(
+            ["endpoint", "create", "POST", "/login", "--content-type", "xml"],
+            exitCode: 2
+        )
+        #expect(badContentType.isEmpty, "an unreadable --content-type must be caught before the create")
+
+        let missingBodyFile = await Self.emitted(
+            ["endpoint", "create", "POST", "/login", "--body-file", "/nonexistent/body.json"],
+            exitCode: 2
+        )
+        #expect(missingBodyFile.isEmpty, "an unreadable --body-file must be caught before the create")
+
+        let badHeader = await Self.emitted(
+            ["endpoint", "create", "POST", "/login", "--header", "no-colon"],
+            exitCode: 2
+        )
+        #expect(badHeader.isEmpty)
+
+        // A refusal only the instance can make — `applyScenarioSpec` rejects a status outside
+        // 200...599 — is undone instead.
+        let refusing = RecordingTransport { command in
+            switch command.kind {
+            case .scenarioUpdate: .failure(.invalid("Invalid status code: 700."))
+            default: RecordingTransport.plausibleAnswer(command)
+            }
+        }
+        let rolledBack = await Self.emitted(
+            ["endpoint", "create", "POST", "/login", "--status", "700"],
+            transport: refusing,
+            exitCode: 4
+        )
+        #expect(rolledBack.map(\.kind) == [.endpointCreate, .scenarioUpdate, .endpointDelete])
+        let expectedRollback: ControlCommand = .endpointDelete(endpoint: .id(RecordingTransport.endpoint.id))
+        #expect(
+            rolledBack.last == expectedRollback,
+            "the rollback deletes the endpoint the create handed back, by id"
+        )
+    }
+
     // MARK: - The surface, from the CLI's side
 
     /// The meta-assertion: every command the catalog advertises is reachable from the CLI.

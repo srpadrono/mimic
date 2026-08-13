@@ -147,7 +147,24 @@ cutting mid-emoji no longer produces a replacement character.
 Written `0644` under the default umask, publishing port and pid to every account on the machine.
 Now that it carries the token, its permissions *are* the access control.
 
-**Fixed.** Written `0600`, applied after the atomic rename.
+**Fixed.** Written `0600`, and never at any wider mode, even briefly. `ControlEndpointFile.write`
+creates a temporary file in the target's own directory with `0600` already on it
+(`FileManager.createFile(atPath:contents:attributes:)`), writes the bytes into that, and then
+`rename(2)`s it over the real name — a rename carries the source's mode with it, so a reader sees
+either the old file or a complete `0600` one.
+
+**This section used to read "written `0600`, applied after the atomic rename", and that sentence was
+an instruction to reintroduce the finding.** Chmod-after-write is the broken shape, not the fix:
+`Data.write(options: .atomic)` renames a temporary file into place, so between that rename and the
+`setAttributes` call the token sits at the final path at whatever the umask allows, and a loop
+watching the path wins that race trivially. If `setAttributes` then throws, the world-readable file
+is what stays behind. `Sources/ControlPlane/ControlEndpointFile.swift` documents the ordering above
+`write`, and `discoveryFileIsPrivate` in `Tests/ControlPlaneTests/ControlServerTests.swift` pins the
+mode on both a first write and an overwrite, and asserts no temporary file is left beside it.
+
+The call site is the other half and is easy to undo by accident: `ControlServer` used to call this
+through `try?`, so a failed write was silent. It catches and logs now. A hardened write whose caller
+discards the error only moves the silence one frame up.
 
 ### 7. HAR redaction was narrower than its name — low
 

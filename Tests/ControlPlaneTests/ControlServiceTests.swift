@@ -132,6 +132,67 @@ struct ControlServiceTests {
         #expect(error?.code == "project.notFound")
     }
 
+    /// A store that lists a project and then cannot open it.
+    ///
+    /// The distinction this pins is the one `resolveStoredProject` documents at length and that
+    /// `ControlError.persistenceFailure` exists for: a store Mimic cannot read must not be reported
+    /// as a project that is not there. It used to be — every failure from the store was caught as
+    /// `project.notFound` — and "my projects vanished" then had no diagnosis, which is the failure
+    /// this repository has already lost a project to once.
+    ///
+    /// `persistence.failure` is documented in `docs/CLI.md` and `docs/ARCHITECTURE.md` as the code a
+    /// caller sees for exactly this, and no test in any target asserted it before this one. The
+    /// refusal is delivered by a stub repository rather than by corrupting a real row, because what
+    /// is under test is the mapping from `PersistenceError` to the code — not GRDB.
+    @Test("A store that cannot be read reports persistence.failure, not a missing project")
+    func unreadableStoreIsNotReportedAsAMissingProject() async throws {
+        let refusal = Persistence.PersistenceError.unsupportedSchemaVersion(
+            name: "From the future",
+            stored: MockProject.currentSchemaVersion + 1,
+            supported: MockProject.currentSchemaVersion
+        )
+        let stub = MockProject(name: "From the future")
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let service = MimicControlService(
+            repository: RefusingRepository(stub: stub, refusal: refusal),
+            settings: SettingsStore(dbQueue: queue),
+            engine: MockServerEngine(),
+            mode: "headless"
+        )
+
+        // Both routes into the store: by id, which loads directly, and by name, which lists first and
+        // then loads what it matched. Only the second ever reaches `allProjects`, and only the first
+        // has a `PersistenceError.projectNotFound` catch in front of it, so they are two different
+        // paths to the same answer.
+        for ref in [ProjectRef.id(stub.id), ProjectRef.name("From the future")] {
+            let error = try #require(await Self.failure(service, .projectOpen(project: ref)))
+            #expect(
+                error.code == "persistence.failure",
+                """
+                Opening by \(ref.id == nil ? "name" : "id") reported \(error.code). A store this \
+                build cannot read is not a missing project, and reporting it as one is how a \
+                recoverable "update Mimic" turns into "my projects are gone".
+                """
+            )
+            #expect(
+                error.message == refusal.localizedDescription,
+                "the store's own sentence has to reach the caller, not a substitute for it"
+            )
+        }
+    }
+
+    /// Lists one project and refuses to load it — the shape of a store written by a newer build, or
+    /// one that is locked, or a row that will not decode.
+    private struct RefusingRepository: ProjectRepository {
+        let stub: MockProject
+        let refusal: Persistence.PersistenceError
+
+        func load(id: UUID) async throws -> MockProject { throw refusal }
+        func save(_ project: MockProject) async throws {}
+        func allProjects() async throws -> [MockProject] { [stub] }
+        func delete(id: UUID) async throws {}
+    }
+
     @Test("Closing then reopening restores endpoints and journeys from the store")
     func stateSurvivesCloseAndReopen() async throws {
         let service = try Self.makeService()

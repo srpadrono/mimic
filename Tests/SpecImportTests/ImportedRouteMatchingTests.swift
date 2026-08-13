@@ -345,6 +345,85 @@ struct ImportedRouteMatchingTests {
         #expect(candidates.first?.path == "/api/v1/users/123")
     }
 
+    // MARK: - The encoding a capture is written in
+
+    @Test("A capture whose path is percent-encoded answers the request that produced it")
+    func percentEncodedCaptureAnswersItsOwnRequest() async throws {
+        // Every segment here is a literal, and that is the point. The test named
+        // `percentEncodedPath` in `Tests/MockServerEngineTests/RealTrafficTests.swift` claims this
+        // property and cannot fail on it: its fixture route is `/things/:id`, and `PathPattern`
+        // skips a `:` segment before it compares anything, so that request matches whichever
+        // encoding either side happens to use.
+        //
+        // A browser writes the URL encoded, and encoded is the only form the server can hand the
+        // matcher: `VaporConfigurator` builds its `IncomingRequest` from `req.url.path`, which Vapor
+        // answers with `percentEncodedPath` (4.121.3, `Sources/Vapor/Utilities/URI.swift:179`).
+        let candidates = try await HARParser.parse(data: Self.har(url: "https://api.test/v1/caf%C3%A9/my%20items"))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.path == "/v1/caf%C3%A9/my%20items")
+
+        let endpoints = [Self.endpoint(from: candidate)]
+        let matched = try #require(Self.matchedEndpoint(RequestMatcher.match(
+            request: IncomingRequest(method: .get, path: "/v1/caf%C3%A9/my%20items"),
+            against: endpoints
+        )))
+        #expect(matched.path == "/v1/caf%C3%A9/my%20items")
+
+        // And the decoded spelling — what the importer used to produce — matches nothing the server
+        // can receive. This is the whole defect: the endpoint imports, appears in the sidebar, and
+        // 404s forever.
+        let decoded = Self.matchedEndpoint(RequestMatcher.match(
+            request: IncomingRequest(method: .get, path: "/v1/café/my items"),
+            against: endpoints
+        ))
+        #expect(decoded == nil)
+    }
+
+    // MARK: - A capture repeats itself
+
+    @Test("A capture that hits one route twice imports it once, and flags the repeat")
+    func repeatedRouteIsFlaggedWithinTheBatch() async throws {
+        let candidates = try await HARParser.parse(data: Data(Self.repeatedCartCapture.utf8))
+
+        // Every entry is still listed — flagged, not dropped, exactly as a duplicate of a
+        // pre-existing endpoint is. The review sheet reports what was captured.
+        #expect(candidates.count == 3)
+        #expect(candidates.map(\.path) == ["/v1/cart", "/v1/cart/items", "/v1/cart"])
+        #expect(candidates.map(\.isDuplicate) == [false, false, true])
+        #expect(candidates.map(\.isSelected) == [true, true, false])
+
+        // What the sheet's defaults commit: one endpoint per route, and the response that answers is
+        // the one whose row was checked. `ImportCommitter` issues one `.endpointCreate` per selected
+        // candidate, so before this the same two routes produced three endpoints.
+        let selected = candidates.filter(\.isSelected).map(Self.endpoint(from:))
+        #expect(selected.count == 2)
+        let served = RequestMatcher.resolve(
+            request: IncomingRequest(method: .get, path: "/v1/cart"),
+            against: selected,
+            globalDelayMs: 0
+        )
+        #expect(served.body == #"{"items":[]}"#)
+    }
+
+    @Test("Selecting the repeats anyway does not change which one answers")
+    func committingEveryRepeatStillServesTheFirst() async throws {
+        // This is why the *first* claim is the one left selected rather than the last.
+        // `RequestMatcher.match` replaces its best only on strictly-greater specificity, so among
+        // endpoints of equal specificity the first declared answers. A user who overrides the
+        // defaults and imports all three therefore gets the same response the defaults would have
+        // given — and the two later rows are dead weight, which is what deselecting them says.
+        let candidates = try await HARParser.parse(data: Data(Self.repeatedCartCapture.utf8))
+        let all = candidates.map(Self.endpoint(from:))
+        #expect(all.count == 3)
+
+        let served = RequestMatcher.resolve(
+            request: IncomingRequest(method: .get, path: "/v1/cart"),
+            against: all,
+            globalDelayMs: 0
+        )
+        #expect(served.body == #"{"items":[]}"#, "the later repeats are unreachable, whoever selected them")
+    }
+
     @Test("A wildcard segment does not end up naming or grouping the endpoint")
     func wildcardSegmentsDoNotNameTheEndpoint() async throws {
         // No `summary` and no `operationId`, so the shared fallback in `ImportCandidateBuilder` is
@@ -429,6 +508,27 @@ struct ImportedRouteMatchingTests {
     static func openAPI3ImportedPath(serversJSON: String?) async throws -> String? {
         try await OpenAPIParser.parse(data: openAPI3(serversJSON: serversJSON)).first?.path
     }
+
+    /// The cart before an add, the add, and the cart after it: one route captured twice with two
+    /// different bodies, with an unrelated entry in between so the ledger has to survive it.
+    ///
+    /// This is what a capture of real traffic *is* — a browser hits `/v1/cart` every time the page
+    /// re-renders. `HARParser.parse` compared each entry against the endpoints the project already
+    /// held and accumulated nothing, so all three arrived unflagged and pre-selected, and all three
+    /// were committed onto two routes.
+    static let repeatedCartCapture = """
+    { "log": { "version": "1.2", "creator": { "name": "browser", "version": "1" }, "entries": [
+      { "request": { "method": "GET", "url": "https://api.test/v1/cart" },
+        "response": { "status": 200, "headers": [],
+          "content": { "mimeType": "application/json", "text": "{\\"items\\":[]}" } } },
+      { "request": { "method": "POST", "url": "https://api.test/v1/cart/items" },
+        "response": { "status": 201, "headers": [],
+          "content": { "mimeType": "application/json", "text": "{\\"id\\":\\"sku-1\\"}" } } },
+      { "request": { "method": "GET", "url": "https://api.test/v1/cart" },
+        "response": { "status": 200, "headers": [],
+          "content": { "mimeType": "application/json", "text": "{\\"items\\":[{\\"id\\":\\"sku-1\\"}]}" } } }
+    ] } }
+    """
 
     static func har(url: String) -> Data {
         Data("""

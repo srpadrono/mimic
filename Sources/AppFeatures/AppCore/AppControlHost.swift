@@ -45,8 +45,9 @@ final class AppControlHost: ControlHost {
     ///
     /// Asynchronous because several arms have to leave the main actor: four of the project-lifecycle
     /// commands reach the store — three to check that the reference they were given names a real
-    /// project, `projectExport` to read a document this session does not have open — and `serverStart`
-    /// awaits a recursive `serverConfigure` when it is given a port.
+    /// project, `projectExport` to read a document this session does not have open — `serverStart`
+    /// awaits a recursive `serverConfigure` when it is given a port, and `journeyAdvance` and
+    /// `journeyActivate` both await the engine for the cursor they report.
     ///
     /// **Which arms suspend is the interesting part**, and this comment used to say none of them did:
     /// "a read of session state … runs to completion in one hop with nothing able to interleave". It
@@ -54,7 +55,17 @@ final class AppControlHost: ControlHost {
     /// atomicity the control server's concurrency safety rested on. Two concurrent `serverStart`s can
     /// interleave across that `await`, which is why the arm carries its own guard below — the same one
     /// `MimicControlService` grew in the same change, refusing with `server.busy` rather than queueing.
-    /// Everything else here is still a single-hop read.
+    ///
+    /// It then said "everything else here is still a single-hop read", and that had already stopped
+    /// being true: the `journeyAdvance` arm awaits the engine, and does so precisely because reading
+    /// the runtime's mirror in one hop answered with the cursor from before the command.
+    ///
+    /// Four places in the switch below reach an `await`, and they are the four named above:
+    /// `serverStart` (only when it was given a port), `journeyActivate`, `journeyAdvance`, and the
+    /// single arm that hands the eight project-lifecycle commands to `performProjectCommand`. Every
+    /// other arm is a single-hop read of session state. Do not restate that as a count anywhere else —
+    /// this is the one place it is written down, and the arms are named so a reader can check it
+    /// against the switch rather than against another comment.
     private func perform(_ command: ControlCommand) async -> ControlResponse {
         guard let appState else {
             return .failure(.internalFailure("The Mimic session is no longer available."))
@@ -243,13 +254,31 @@ final class AppControlHost: ControlHost {
                 return .failure(.journeyNotFound(ref))
             }
             appState.activateJourney(id: journey.id)
+            // The engine's own cursor, awaited — not a fabricated one.
+            //
+            // This used to answer `JourneyStatus.make(journey:state:nil)`, which reports a run that
+            // has not started, whatever the engine was actually doing. `MockRouteStore.update` keeps
+            // the run state when the same journey with the same steps is pushed again, so a harness
+            // re-activating between test cases was told step 1 was next while the engine was mid-run
+            // — and the reply was built from the document, so nothing about the engine could ever
+            // have changed it.
+            //
+            // Routed through the runtime rather than asking the engine directly because activation
+            // reaches the engine from a task: `activateJourney` writes `currentProject`, whose `didSet`
+            // pushes the project, and a status read issued straight afterwards gets to the engine actor
+            // first and reports the journey that was there before. See
+            // `AppState.journeyStatusAfterPendingMockUpdates()`.
+            let engineStatus = await appState.journeyStatusAfterPendingMockUpdates()
             return .success(.init(
                 message: ControlMessages.journeyActivated(
                     name: journey.name,
                     stepCount: journey.steps.count
                 ),
                 journey: journey,
-                journeyStatus: JourneyStatus.make(journey: journey, state: nil)
+                // The same fallback `journeyStatus` and `journeyRestart` beside it use: with no journey
+                // loaded into the engine there is no cursor to report, and the journey as it stands is
+                // the honest answer rather than an omitted field.
+                journeyStatus: engineStatus ?? JourneyStatus.make(journey: journey, state: nil)
             ))
 
         case .journeyRestart:
@@ -258,6 +287,13 @@ final class AppControlHost: ControlHost {
             appState.restartActiveJourney()
             return .success(.init(
                 message: ControlMessages.journeyRestarted(name: journey.name),
+                // Built from the document, and that is a *remaining* gap rather than a decision.
+                // `MockServerRuntime.restartJourney()` dispatches, and the engine hands back the cursor
+                // the restart produced — which nothing here reads. So this reports a fresh run because
+                // a restart is *supposed* to produce one, not because the engine said it did, and the
+                // reply happens to be right today for exactly the reason `journeyActivate`'s was
+                // wrong: nobody asked. `advanceJourneyReportingStatus()` is the shape a fix takes, and
+                // the arm above now uses the equivalent for activation.
                 journeyStatus: JourneyStatus.make(journey: journey, state: nil)
             ))
 
@@ -380,6 +416,18 @@ final class AppControlHost: ControlHost {
 
         case let .projectCreate(name, port):
             guard let trimmed = name.nilIfEmpty else { return .failure(.emptyProjectName) }
+            // Validated where `MimicControlService.run` validates it, and where the `serverStart` arm
+            // above already validated the same value. This arm did not, and nothing downstream does:
+            // `AppState.createProject` hands the number straight to `ProjectWorkspace.createProject`,
+            // which builds a `ServerConfiguration` from it and saves it. So `mimic project create X
+            // --port 70000` was accepted here, stored, and refused by a daemon for the same command.
+            if let port {
+                do {
+                    try EndpointValidator.validatePort(port)
+                } catch {
+                    return .failure(.validation(error))
+                }
+            }
             appState.createProject(name: trimmed, port: port ?? ServerConfiguration.default.port)
             return .success(.message("Creating and opening project \"\(trimmed)\"."))
 
@@ -589,14 +637,23 @@ final class AppControlHost: ControlHost {
 
     /// The session's server state, in the shape the wire uses.
     ///
-    /// Only the three values are this host's to read; the switch that turns them into a report — the
-    /// state string, whether a `baseURL` is present and what it says — is shared with the service,
-    /// where the identical switch used to sit.
+    /// Only the values are this host's to read; the switch that turns them into a report — the state
+    /// string, whether a `baseURL` is present and what it says — is shared with the service, where the
+    /// identical switch used to sit.
+    ///
+    /// `errorCode` is the one field `HostReport` cannot derive: `ServerState.error` carries a sentence
+    /// and nothing else, so the code comes from the runtime, which is what saw the engine's error. It
+    /// is what makes a failed bind reportable at all from this host — `serverStart` answers before the
+    /// bind completes, so `mimic server status` is the only place the failure can surface, and it used
+    /// to surface as `stopped` with no `baseURL`, which is exactly what a server nobody started looks
+    /// like.
     private func makeServerStatus(_ appState: AppState) -> ServerStatusReport {
-        HostReport.serverStatus(
+        var report = HostReport.serverStatus(
             state: appState.serverState,
             configuredPort: appState.serverConfiguration.port,
             globalDelayMs: appState.serverConfiguration.globalDelayMs
         )
+        report.errorCode = appState.serverStartFailure?.code
+        return report
     }
 }

@@ -137,6 +137,26 @@ private nonisolated func grey(_ delta: Double, below surface: RGBA) -> RGBA {
 /// The surfaces are enumerated the same way: `pillSurfaces(in:)` includes the `band` and the
 /// `rowStripe`, which is where a token-only reading is most optimistic.
 ///
+/// **Measuring a composite is not the same as measuring the *easiest* bed of it, and this suite spent
+/// a wave doing the second while claiming the first.** Three of the readings under that mark were
+/// taken on the kindest surface the thing in question ever lands on, and all three hid a live AA
+/// failure:
+///
+/// - The method badge was measured on a bare panel, where it read 4.50–4.54 in light. The window also
+///   draws badges on a zebra stripe, on a hover wash and on a selected row — 3.97 on the last of
+///   those — and the four dark hues that already failed on the *panel* were recorded and left. They
+///   are fixed now, and `badgeSurfaces(in:)` is the list, not `pillSurfaces(in:)`.
+/// - The syntax palette was measured on `tertiary`, on the strength of a comment saying `DSJSONEditor`
+///   and `DSCodeBlock` fill with it. Neither draws `DSColors.Syntax` on `tertiary` — see
+///   `syntaxColoursOnTheWellTheyAreDrawnIn` — and the surface `RequestBodyView` really paints,
+///   `DSColors.codeWell`, was never measured at all. Nor was the search highlight drawn on top of it,
+///   which was the worst composite in the window at 2.29.
+/// - `DSButton` was not measured in any state. Its white label on the primary slab reads 4.65 at rest
+///   and read **3.06** while pressed, because the shade thinned the fill into the surface behind it.
+///
+/// The rule those three share: **enumerate the beds from the code that draws them, and assert on the
+/// worst.** A single-surface reading is a claim about one screen, not about the window.
+///
 /// **No count of them is stated here, and one used to be.** It read "there are five" while eight
 /// findings were labelled below, across six numbers — a hand-maintained mirror of a list the tests
 /// beneath it already write out in full, and one that can go stale in either direction: upwards the
@@ -821,70 +841,132 @@ struct DSContrastTests {
         #expect(filledOnBand < 4.5)
     }
 
-    /// `DSMethodBadge` has the same shape as a status pill — `methodColor(for:)` as the label over a
-    /// **16%** wash of itself — and the same shape of blind spot, so it is measured here rather than
-    /// left for the next reviewer to find.
+    /// Every bed a `DSMethodBadge` lands on, resolved and flattened.
     ///
-    /// It is not fixed. `methodColor(for:)` is a different palette from the semantic four and moving
-    /// six hues is a decision to take against the window rather than against a spreadsheet; what this
-    /// records is where they stand, driven from the function's own arms rather than from a list.
+    /// `grep -rn 'DSMethodBadge(' Sources` finds six call sites: the sidebar, the request log row, the
+    /// journey step row, the import review row, the endpoint editor and the request detail. The four
+    /// that are *rows* all wash themselves under the pointer, and none of them does it on a bare panel.
+    /// `pillSurfaces` and its five are the start of the list; the two added below are those washes.
     ///
-    /// **Light: every method sits on the floor rather than above it** — the seven readings run
-    /// 4.50 to 4.54, so the badge has no margin at all and the tightest, `PATCH`, is the boundary
-    /// itself. That band is asserted rather than the individual values, because a hundredth either
-    /// way is not a fact about the palette.
+    /// **`accentSubtle` at full strength is reached four ways, not one.** It is the request log's
+    /// selected row (`RequestLogDrawerView.rowBackground`), the import review's hover
+    /// (`ImportReviewList`), and the `dsHoverHighlight` the sidebar and the journey step row both take.
+    /// `accentSubtle.opacity(0.6)` is the request log's own hover. They are the worst beds in the
+    /// window in *both* appearances, because an accent wash carries a light surface down and a dark one
+    /// up, so a hue tuned against either mode's bare panel loses on it.
     ///
-    /// **Dark: four of the seven miss**, and not marginally — `PATCH` reads **3.78**, `DELETE` 3.84,
-    /// and `HEAD`/`OPTIONS` 4.04 on the hue they share, against `GET`/`POST`/`PUT` at 4.98 and above.
-    /// The set is asserted, so fixing one of them fails this test and gets the record updated.
-    ///
-    /// The panel is the easiest bed a badge lands on — the sidebar and the request log also draw them
-    /// on stripes and on selection fills — so these are upper bounds.
-    @Test("The method badge's 16% self-tint is measured, and four of its dark readings miss AA")
-    func methodBadgeSelfTintIsMeasured() throws {
-        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-
-        let lightPanel = try resolve(DSColors.secondary, in: .light)
-        let darkPanel = try resolve(DSColors.secondary, in: .dark)
-
-        var lightReadings: [(method: String, reading: Double)] = []
-        var darkReadings: [(method: String, reading: Double)] = []
-        for method in methods {
-            let lightReading = try selfTintedReading(
-                DSColors.methodColor(for: method),
-                on: lightPanel,
-                alpha: 0.16,
-                in: .light
-            )
-            let darkReading = try selfTintedReading(
-                DSColors.methodColor(for: method),
-                on: darkPanel,
-                alpha: 0.16,
-                in: .dark
-            )
-            lightReadings.append((method, lightReading))
-            darkReadings.append((method, darkReading))
-        }
-
-        for (method, reading) in lightReadings {
-            #expect(reading >= 4.45, "\(method) light: \(reading)")
-            #expect(reading <= 4.60, "\(method) light: \(reading)")
-        }
-
-        let missingInDark = Set(darkReadings.filter { $0.reading < 4.5 }.map { $0.method })
-        #expect(missingInDark == Set(["PATCH", "DELETE", "HEAD", "OPTIONS"]))
-        let worstInDark = try #require(darkReadings.map { $0.reading }.min())
-        #expect(isClose(worstInDark, 3.78, within: ratioTolerance))
+    /// One bed is missing on purpose and is named in `methodColor(for:)`: the sidebar is a
+    /// `List(selection:)` at `.listStyle(.sidebar)`, so AppKit paints its selected row with
+    /// `NSColor.selectedContentBackgroundColor` — a colour that follows the user's accent preference,
+    /// and therefore a number about the machine running the test rather than about this palette.
+    private func badgeSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
+        let panel = try resolve(DSColors.secondary, in: appearance)
+        let hovered = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)
+            .composited(over: panel)
+        let selected = try resolve(DSColors.accentSubtle, in: appearance).composited(over: panel)
+        var surfaces = try pillSurfaces(in: appearance)
+        surfaces.append((name: "hovered row on a panel", colour: hovered))
+        surfaces.append((name: "selected row on a panel", colour: selected))
+        return surfaces
     }
 
-    /// The third composite the window draws, and the one that is fine: `DSStatusBadge`'s error
-    /// capsule.
+    /// `DSMethodBadge` has the same shape as a status pill — `methodColor(for:)` as the label over a
+    /// **16%** wash of itself — and this suite used to measure it on one surface and pin what it found.
+    ///
+    /// **What that pinning said, verbatim: "It is not fixed."** Four dark hues — `PATCH` at 3.78,
+    /// `DELETE` at 3.84 and `HEAD`/`OPTIONS` at 4.04 — were asserted *as failures*, with the
+    /// justification that moving six hues was a decision to take against the window. Meanwhile the
+    /// seven light readings were held between 4.45 and 4.60, which reads like a pass and is a palette
+    /// with no margin at all sitting on a surface it is rarely drawn on. On the bed a selected row
+    /// gives it, the same hues read 3.97–4.04 in light and 3.41–4.93 in dark: twelve distinct hues,
+    /// and eleven of them under the floor.
+    ///
+    /// The hues moved. What is asserted now is the property rather than the record — every method, on
+    /// every bed in `badgeSurfaces(in:)`, in both appearances, clears 4.5 — plus the worst of those 98
+    /// readings, so that a future hue change that spends the margin fails here instead of shipping.
+    /// (98 is seven method names over seven beds in two appearances; `HEAD` and `OPTIONS` share a hue,
+    /// so 84 of them are distinct, which is the count `methodColor(for:)`'s own comment quotes.)
+    @Test("A method badge clears AA on every bed the window puts one on")
+    func methodBadgeClearsAAOnEveryBedItLandsOn() throws {
+        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        var worst = Double.greatestFiniteMagnitude
+
+        for appearance in Appearance.allCases {
+            for surface in try badgeSurfaces(in: appearance) {
+                for method in methods {
+                    let reading = try selfTintedReading(
+                        DSColors.methodColor(for: method),
+                        on: surface.colour,
+                        alpha: 0.16,
+                        in: appearance
+                    )
+                    #expect(reading >= 4.5, "\(method), \(surface.name), \(appearance): \(reading)")
+                    worst = min(worst, reading)
+                }
+            }
+        }
+        // Dark `POST` on a selected row.
+        #expect(isClose(worst, 4.57, within: ratioTolerance))
+
+        // **The palette this replaced, put back and measured on the bed that broke it.** Written out
+        // rather than described, so the bar above is shown rejecting the thing it was written to
+        // reject — an assertion that cannot fail is this repository's most expensive recurring defect,
+        // and "every reading clears 4.5" is exactly the shape that passes vacuously if the surface
+        // list is wrong.
+        let replaced: [(method: String, appearance: Appearance, hue: NSColor, reading: Double)] = [
+            ("GET", .light, NSColor(srgbRed: 0.0, green: 0.413, blue: 0.393, alpha: 1.0), 4.04),
+            ("PUT", .light, NSColor(srgbRed: 0.520, green: 0.328, blue: 0.055, alpha: 1.0), 3.97),
+            ("PATCH", .light, NSColor(srgbRed: 0.505, green: 0.239, blue: 0.697, alpha: 1.0), 3.97),
+            ("GET", .dark, NSColor(srgbRed: 0.259, green: 0.784, blue: 0.757, alpha: 1.0), 4.37),
+            ("PATCH", .dark, NSColor(srgbRed: 0.749, green: 0.478, blue: 0.969, alpha: 1.0), 3.41),
+            ("DELETE", .dark, NSColor(srgbRed: 1.0, green: 0.392, blue: 0.392, alpha: 1.0), 3.48),
+            ("HEAD", .dark, NSColor(srgbRed: 0.627, green: 0.627, blue: 0.647, alpha: 1.0), 3.59)
+        ]
+        for entry in replaced {
+            let panel = try resolve(DSColors.secondary, in: entry.appearance)
+            let selected = try resolve(DSColors.accentSubtle, in: entry.appearance)
+                .composited(over: panel)
+            let reading = try selfTintedReading(
+                Color(nsColor: entry.hue),
+                on: selected,
+                alpha: 0.16,
+                in: entry.appearance
+            )
+            #expect(isClose(reading, entry.reading, within: ratioTolerance))
+            #expect(reading < 4.5, "\(entry.method) \(entry.appearance) selected: \(reading)")
+        }
+
+        // No fill alpha rescues that palette, which is why the hues had to move rather than the badge
+        // getting a fainter wash: on a dark selected row the worst old reading is `PATCH` at 3.41 with
+        // the badge's 16% wash, and stripping the wash entirely still leaves the worst — the old
+        // `DELETE` red — at 4.20.
+        let darkPanel = try resolve(DSColors.secondary, in: .dark)
+        let darkSelected = try resolve(DSColors.accentSubtle, in: .dark).composited(over: darkPanel)
+        let unfilledDelete = try contrast(
+            Color(nsColor: NSColor(srgbRed: 1.0, green: 0.392, blue: 0.392, alpha: 1.0)),
+            on: darkSelected,
+            in: .dark
+        )
+        #expect(isClose(unfilledDelete, 4.20, within: ratioTolerance))
+        #expect(unfilledDelete < 4.5)
+
+        // `PUT`'s dark amber and `Syntax.number`'s are the one pair the two palettes still share —
+        // stated in `Syntax`'s own comment, and the cheapest kind of claim to check.
+        let put = try resolve(DSColors.methodColor(for: "PUT"), in: .dark)
+        let number = try resolve(DSColors.Syntax.number, in: .dark)
+        #expect(isClose(put.red, number.red, within: componentTolerance))
+        #expect(isClose(put.green, number.green, within: componentTolerance))
+        #expect(isClose(put.blue, number.blue, within: componentTolerance))
+    }
+
+    /// A self-tinted composite the window draws, and the one that was fine all along:
+    /// `DSStatusBadge`'s error capsule.
     ///
     /// It fills with `state.color.opacity(0.16)` exactly as the method badge does, and it is safe for
-    /// the reason the other two were not — the word on it is `labelPrimary`, not the fill's own hue,
-    /// so the tint moves the background *away* from the ink instead of toward it. That is the whole
-    /// difference between this and a status pill, stated where it can fail: worst reading 11.50 in
-    /// light and 7.97 in dark, against 3.78 for the badge.
+    /// the reason the badge and the status pill were not — the word on it is `labelPrimary`, not the
+    /// fill's own hue, so the tint moves the background *away* from the ink instead of toward it. That
+    /// is the whole difference, stated where it can fail: worst reading 11.50 in light and 7.97 in
+    /// dark, against the 3.41 the badge's worst hue measured before it was corrected.
     ///
     /// Only `.error` fills — the quiet states draw on the bare surface — so `destructive` is the only
     /// hue this composite ever takes.
@@ -900,52 +982,224 @@ struct DSContrastTests {
         }
     }
 
+    // MARK: - DSButton
+
+    /// **A composite the window paints in every sheet, and the one this suite had never looked at.**
+    ///
+    /// `DSButton`'s filled variants draw a white label on a coloured slab, and `accentFill` exists
+    /// precisely because white on the system blue reads 3.65. What nobody measured is the slab in the
+    /// two states a pointer puts it in. `shade(_:)` returned `base.opacity(0.72)` when pressed and
+    /// `0.88` when hovered — an alpha on the fill, which does not darken it, it *dissolves* it into
+    /// whatever is behind the button. On a light surface that carries the slab toward the white label
+    /// on top of it: the primary button, the commit action of every sheet in the app, measured
+    /// **3.06:1** on the canvas while held and 3.88 while hovered, against 4.65 at rest. The comment
+    /// above it said the variants "darken on press and lift very slightly on hover" — half wrong in
+    /// each appearance, since thinning a fill toward a light surface lightens both states and toward a
+    /// dark one darkens both.
+    ///
+    /// `DSButtonShade` replaces that with a wash of black *over* the slab, which is what makes this
+    /// assertable at all: black over an opaque fill can only reduce luminance, so a white label's
+    /// ratio can only rise, and it rises by the same amount whatever the button sits on. Three things
+    /// are asserted from that — every reading clears AA, each state is at least as readable as the one
+    /// before it, and the slab under the wash is opaque, which is the property the whole argument
+    /// stands on.
+    ///
+    /// The sweep is over `DSButtonVariant.allCases` rather than a list, so a variant added without a
+    /// reading fails here. That is also why `DSColors.destructiveFill` exists: white on the dark
+    /// salmon `destructive` reads 2.52, and excluding the destructive variant to keep this green would
+    /// be the same move as pinning the four dark method badges.
+    @Test("A filled button keeps its white label above AA at rest, on hover and while pressed")
+    func filledButtonsKeepTheirLabelAboveAAInEveryState() throws {
+        let states: [(name: String, wash: Color)] = [
+            ("at rest", DSButtonShade.wash(isPressed: false, isHovered: false)),
+            ("hovered", DSButtonShade.wash(isPressed: false, isHovered: true)),
+            ("pressed", DSButtonShade.wash(isPressed: true, isHovered: true))
+        ]
+
+        // The resting wash draws nothing, and says so as an alpha rather than as `.clear` — see
+        // `DSButtonShade.wash`. Asserted because the three readings below are only comparable while
+        // the only thing separating the states is that number.
+        let atRest = try resolve(DSButtonShade.wash(isPressed: false, isHovered: false), in: .light)
+        #expect(isClose(atRest.alpha, 0, within: componentTolerance))
+
+        var filled = 0
+        for appearance in Appearance.allCases {
+            for variant in DSButtonVariant.allCases {
+                guard let fill = variant.fill else { continue }
+                filled += 1
+
+                // The wash only stays surface-independent while the thing under it is opaque.
+                let slab = try resolve(fill, in: appearance)
+                #expect(isClose(slab.alpha, 1.0, within: componentTolerance), "\(variant) fill alpha")
+
+                var previous = 0.0
+                for state in states {
+                    let shaded = try resolve(state.wash, in: appearance).composited(over: slab)
+                    let reading = try contrast(variant.ink, on: shaded, in: appearance)
+                    #expect(reading >= 4.5, "\(variant) \(state.name), \(appearance): \(reading)")
+                    #expect(reading >= previous, "\(variant) \(state.name), \(appearance): \(reading)")
+                    previous = reading
+                }
+            }
+        }
+        // Two filled variants, both appearances. A third arriving unmeasured is what this counts.
+        #expect(filled == 4)
+
+        // The other two carry their feedback in the fill itself — `accentSubtle` on hover,
+        // `accentMuted` on press — so the black wash must not reach them, and `DSButtonStyle` gates it
+        // on exactly this `nil`. The count is the assertion: a new variant is either filled, and
+        // therefore swept above, or it is one of these.
+        #expect(DSButtonVariant.allCases.filter { $0.fill == nil }.count == 2)
+
+        // The six readings, stated so that spending the margin fails rather than ships.
+        let expected: [(DSButtonVariant, [Double])] = [
+            (.primary, [4.65, 5.17, 5.96]),
+            (.destructive, [5.64, 6.21, 7.13])
+        ]
+        for (variant, values) in expected {
+            let fill = try #require(variant.fill)
+            let slab = try resolve(fill, in: .light)
+            for (state, value) in zip(states, values) {
+                let shaded = try resolve(state.wash, in: .light).composited(over: slab)
+                let reading = try contrast(variant.ink, on: shaded, in: .light)
+                #expect(
+                    isClose(reading, value, within: ratioTolerance),
+                    "\(variant) \(state.name): \(reading)"
+                )
+            }
+        }
+
+        // **The shade this replaced, reconstructed on the surface that broke it.** An alpha on the
+        // fill is a function of the background, so the same button reads differently on every surface
+        // in the window — and on the canvas, where the app's empty states put their call to action,
+        // it fell to 3.06 under the finger.
+        let canvas = try resolve(DSColors.dominant, in: .light)
+        let previousShade: [(name: String, alpha: Double, reading: Double)] = [
+            ("hovered", 0.88, 3.88),
+            ("pressed", 0.72, 3.06)
+        ]
+        for entry in previousShade {
+            let thinned = try resolve(DSColors.accentFill.opacity(entry.alpha), in: .light)
+                .composited(over: canvas)
+            let reading = try contrast(Color.white, on: thinned, in: .light)
+            #expect(isClose(reading, entry.reading, within: ratioTolerance), "\(entry.name): \(reading)")
+            #expect(reading < 4.5)
+        }
+
+        // White on the dark salmon, which is what `destructive` would have put on the slab. The worst
+        // reading this palette has anywhere.
+        let onTheSalmon = try contrast(Color.white, on: DSColors.destructive, in: .dark)
+        #expect(isClose(onTheSalmon, 2.52, within: ratioTolerance))
+        #expect(onTheSalmon < 4.5)
+    }
+
     // MARK: - Syntax
 
-    /// The syntax palette states four ratios against the well it is drawn in, and is explicit that the
-    /// well is the surface to measure on: `DSJSONEditor` and `DSCodeBlock` fill with `tertiary`, a
-    /// step darker than the canvas, so it is the harder background. All four light figures reproduce.
-    ///
-    /// **Finding 6 — "The dark variants were already fine and are untouched" is not true of `key`.**
-    /// Dark `Syntax.key` measures **3.97:1** on the dark `tertiary` well: under the 4.5 the same
-    /// paragraph sets, and the only reading in the syntax palette that misses it in either appearance
-    /// (dark `literal` is next nearest at 4.54). The light side of that token was moved to 6.48 while
-    /// the dark side, never measured against the well, stayed where it was. Keys carry the most
-    /// saturated hue *because* scanning a response means scanning its keys, which makes this the worst
-    /// of the four for it to be.
-    ///
-    /// The assertion states the measured 3.97 rather than the bar, so the day somebody lightens the
-    /// dark key this fails and gets updated deliberately — which is the only way a number in this file
-    /// ever gets re-derived.
-    @Test("Syntax colours are measured against the well they are drawn in")
-    func syntaxColoursOnTheCodeWell() throws {
-        let light: [(Color, Double)] = [
-            (DSColors.Syntax.key, 6.48),
-            (DSColors.Syntax.string, 4.87),
-            (DSColors.Syntax.number, 4.66),
-            (DSColors.Syntax.literal, 4.63)
+    /// The four syntax hues, in the order their tokens are declared.
+    private var syntaxValueTokens: [(name: String, colour: Color)] {
+        [
+            ("key", DSColors.Syntax.key),
+            ("string", DSColors.Syntax.string),
+            ("number", DSColors.Syntax.number),
+            ("literal", DSColors.Syntax.literal)
         ]
-        for (token, expected) in light {
-            let reading = try contrast(token, on: DSColors.tertiary, in: .light)
-            #expect(isClose(reading, expected, within: ratioTolerance))
-            #expect(reading >= 4.5)
+    }
+
+    /// **This test used to measure a surface no call site paints, on the strength of a comment.**
+    ///
+    /// `DSColors.Syntax` said its hues were "drawn inside `DSJSONEditor` and `DSCodeBlock`, whose fill
+    /// is `tertiary`", and both this suite and the palette's own numbers were taken there. Two greps
+    /// settle it and neither half survives them:
+    ///
+    /// - `grep -n 'background' Sources/DesignSystem/Components/DSJSONEditor.swift` — the editor sets
+    ///   none. Its surface is its `CodeEditorView` `Theme`'s `backgroundColour`, and it colours from
+    ///   that theme's own fields rather than from these tokens at all.
+    /// - `grep -rn DSCodeBlock Sources Tests` — that component fills with `tertiary` and does draw
+    ///   text on it, but the text is `labelPrimary`; and every hit outside its own file is a preview,
+    ///   a doc comment, or a rendering test. It is placed in no feature module.
+    ///
+    /// The one view in the app that draws `DSColors.Syntax` is `RequestBodyView`, on
+    /// `DSColors.codeWell` — a 30% wash of `tertiary`, which was a literal opacity at that call site
+    /// until this wave and so could not be named by a test. That is the surface measured here, over
+    /// both hosts a body view can sit on, because the view holds no opinion about its host.
+    ///
+    /// **What that re-pointing does to "finding 6".** The suite recorded dark `Syntax.key` at 3.97 as
+    /// the palette's one AA failure and pinned it. On the well it is actually drawn in, the same token
+    /// reads 5.35 over the canvas and 4.60 over a panel. The token was never the defect; the surface
+    /// in the comment was.
+    ///
+    /// The editor's canvas is checked against the token it claims rather than assumed, which is the
+    /// assertion whose absence made all of the above possible: `DSJSONEditor.lightCanvas` and
+    /// `darkCanvas` are the values the component passes to its themes, and each must *be*
+    /// `DSColors.dominant` for its appearance.
+    @Test("Syntax colours are measured on the well they are drawn in")
+    func syntaxColoursOnTheWellTheyAreDrawnIn() throws {
+        let hosts: [(name: String, colour: Color)] = [
+            ("canvas", DSColors.dominant),
+            ("panel", DSColors.secondary)
+        ]
+
+        var worst = Double.greatestFiniteMagnitude
+        for appearance in Appearance.allCases {
+            for host in hosts {
+                let well = try resolve(DSColors.codeWell, over: host.colour, in: appearance)
+                for token in syntaxValueTokens {
+                    let reading = try contrast(token.colour, on: well, in: appearance)
+                    #expect(
+                        reading >= 4.5,
+                        "\(token.name) on the well over the \(host.name), \(appearance): \(reading)"
+                    )
+                    worst = min(worst, reading)
+                }
+            }
+        }
+        // Dark `key` over a panel — the token this suite used to record as a 3.97 failure on
+        // `tertiary`, and the only one of the eight that comes anywhere near the floor here.
+        #expect(isClose(worst, 4.60, within: ratioTolerance))
+
+        // The eight readings `codeWell`'s own comment quotes, in declaration order, on the harder host.
+        let overAPanel: [(Appearance, [Double])] = [
+            (.light, [6.83, 5.13, 4.91, 4.88]),
+            (.dark, [4.60, 6.44, 7.31, 5.26])
+        ]
+        for (appearance, expected) in overAPanel {
+            let well = try resolve(DSColors.codeWell, over: DSColors.secondary, in: appearance)
+            for (token, value) in zip(syntaxValueTokens, expected) {
+                let reading = try contrast(token.colour, on: well, in: appearance)
+                #expect(
+                    isClose(reading, value, within: ratioTolerance),
+                    "\(token.name) \(appearance): \(reading)"
+                )
+            }
         }
 
-        let dark: [(Color, Double)] = [
-            (DSColors.Syntax.string, 5.55),
-            (DSColors.Syntax.number, 6.30),
-            (DSColors.Syntax.literal, 4.54)
+        // The surface the editor sets, read off the component. Without this the paragraph above is
+        // exactly the kind of claim that put the old readings on `tertiary`: a comment about a
+        // component, checked by nobody.
+        let editorCanvases: [(Appearance, NSColor)] = [
+            (.light, DSJSONEditor.lightCanvas),
+            (.dark, DSJSONEditor.darkCanvas)
         ]
-        for (token, expected) in dark {
-            let reading = try contrast(token, on: DSColors.tertiary, in: .dark)
-            #expect(isClose(reading, expected, within: ratioTolerance))
-            #expect(reading >= 4.5)
+        for (appearance, canvas) in editorCanvases {
+            let set = try resolve(Color(nsColor: canvas), in: appearance)
+            let token = try resolve(DSColors.dominant, in: appearance)
+            #expect(isClose(set.red, token.red, within: componentTolerance))
+            #expect(isClose(set.green, token.green, within: componentTolerance))
+            #expect(isClose(set.blue, token.blue, within: componentTolerance))
         }
 
-        // The exception, asserted as what it is rather than as what the comment claims.
-        let darkKey = try contrast(DSColors.Syntax.key, on: DSColors.tertiary, in: .dark)
-        #expect(isClose(darkKey, 3.97, within: ratioTolerance))
-        #expect(darkKey < 4.5)
+        // …and the hues on that canvas, which is where `DSJSONEditor` now draws three of these four:
+        // its theme's `stringColour`, `numberColour` and `keywordColour` are `string`, `number` and
+        // `literal`. `key` goes with them because the editor's tokenizer cannot tell a JSON key from a
+        // JSON string and gives keys the string colour — so this is the reading `key` would have if it
+        // ever could, and the reading `RequestBodyView`'s keys would have on a well-less canvas.
+        for appearance in Appearance.allCases {
+            let canvas = try resolve(DSColors.dominant, in: appearance)
+            for token in syntaxValueTokens {
+                let reading = try contrast(token.colour, on: canvas, in: appearance)
+                #expect(reading >= 4.5, "\(token.name) on the editor canvas, \(appearance): \(reading)")
+            }
+        }
 
         // "This is the same reasoning ``DSColors/accentText`` carries, and the same dark value." A
         // claim of identity is the cheapest kind to check and the easiest kind to break, because the
@@ -955,6 +1209,75 @@ struct DSContrastTests {
         #expect(isClose(literal.red, accentText.red, within: componentTolerance))
         #expect(isClose(literal.green, accentText.green, within: componentTolerance))
         #expect(isClose(literal.blue, accentText.blue, within: componentTolerance))
+    }
+
+    /// **The worst composite in the window, and the one nothing was measuring: a search hit.**
+    ///
+    /// `RequestBodyView.highlight` set `backgroundColor` to `Syntax.searchHit` — a 35% wash of
+    /// `warning` — and left each run in whatever syntax colour it already had. Every reading on that
+    /// bed failed, and the worst of them, dark `key` at **2.29:1**, is the lowest number anywhere in
+    /// this suite. It is also the least forgivable place for one: a highlighted run is the text
+    /// somebody typed a search to find, so it is the one run in the payload they are certainly trying
+    /// to read.
+    ///
+    /// The fix is a foreground, not a paler wash. `Syntax.searchHitText` is `labelPrimary`, which is
+    /// what a find highlight does in every editor — the token colour steps aside, because a found run
+    /// is an answer rather than a kind of value.
+    ///
+    /// Both halves are asserted: the ink clears AA on the hit, and each of the four syntax hues
+    /// *fails* on it. The second is the part that cannot be satisfied by accident — it is the broken
+    /// version, kept, so that a change putting the syntax colour back has a test measuring exactly
+    /// what that costs.
+    @Test("A search hit is readable, and is only readable because it takes its own ink")
+    func searchHighlightKeepsItsRunReadable() throws {
+        let hosts: [(name: String, colour: Color)] = [
+            ("canvas", DSColors.dominant),
+            ("panel", DSColors.secondary)
+        ]
+
+        var worstInk = Double.greatestFiniteMagnitude
+        var bestSyntax = 0.0
+        for appearance in Appearance.allCases {
+            for host in hosts {
+                let well = try resolve(DSColors.codeWell, over: host.colour, in: appearance)
+                let hit = try resolve(DSColors.Syntax.searchHit, in: appearance).composited(over: well)
+
+                let ink = try contrast(DSColors.Syntax.searchHitText, on: hit, in: appearance)
+                #expect(ink >= 4.5, "a hit over the \(host.name), \(appearance): \(ink)")
+                worstInk = min(worstInk, ink)
+
+                for token in syntaxValueTokens {
+                    let reading = try contrast(token.colour, on: hit, in: appearance)
+                    #expect(
+                        reading < 4.5,
+                        "\(token.name) on a hit over the \(host.name), \(appearance): \(reading)"
+                    )
+                    bestSyntax = max(bestSyntax, reading)
+                }
+            }
+        }
+
+        // `labelPrimary` on a hit over a panel, in dark.
+        #expect(isClose(worstInk, 5.52, within: ratioTolerance))
+        // The best any syntax hue manages on that bed — light `key` over the canvas — still misses.
+        #expect(isClose(bestSyntax, 4.43, within: ratioTolerance))
+
+        // The four readings quoted in `searchHitText`'s own comment, on the harder host.
+        let onAPanel: [(Appearance, [Double])] = [
+            (.light, [4.28, 3.22, 3.08, 3.06]),
+            (.dark, [2.29, 3.21, 3.64, 2.62])
+        ]
+        for (appearance, expected) in onAPanel {
+            let well = try resolve(DSColors.codeWell, over: DSColors.secondary, in: appearance)
+            let hit = try resolve(DSColors.Syntax.searchHit, in: appearance).composited(over: well)
+            for (token, value) in zip(syntaxValueTokens, expected) {
+                let reading = try contrast(token.colour, on: hit, in: appearance)
+                #expect(
+                    isClose(reading, value, within: ratioTolerance),
+                    "\(token.name) \(appearance): \(reading)"
+                )
+            }
+        }
     }
 
     // MARK: - The structural rules AGENTS.md states
@@ -1063,6 +1386,9 @@ struct DSContrastTests {
         for appearance in Appearance.allCases {
             try expectSameHue(DSColors.band, DSColors.tertiary, alpha: 0.5, in: appearance)
             try expectSameHue(DSColors.rowStripe, DSColors.tertiary, alpha: 0.25, in: appearance)
+            // The recipe `RequestBodyView` used to write out by hand. Pinning it here is what makes
+            // `syntaxColoursOnTheWellTheyAreDrawnIn`'s bed a fact rather than a re-derivation.
+            try expectSameHue(DSColors.codeWell, DSColors.tertiary, alpha: 0.3, in: appearance)
             try expectSameHue(DSColors.accentSubtle, DSColors.accent, alpha: 0.12, in: appearance)
             try expectSameHue(DSColors.accentMuted, DSColors.accent, alpha: 0.25, in: appearance)
             try expectSameHue(DSColors.Syntax.searchHit, DSColors.warning, alpha: 0.35, in: appearance)
@@ -1075,6 +1401,12 @@ struct DSContrastTests {
                 DSColors.Syntax.punctuation,
                 DSColors.labelTertiary,
                 alpha: 0.36,
+                in: appearance
+            )
+            try expectSameHue(
+                DSColors.Syntax.searchHitText,
+                DSColors.labelPrimary,
+                alpha: 0.88,
                 in: appearance
             )
         }

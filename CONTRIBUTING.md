@@ -29,6 +29,28 @@ directories. SwiftPM builds the portable modules; Tuist builds the app, which ne
 bundle, entitlements and XCUITests. They cannot drift in *what* they compile — only in how targets
 are declared. Add a source file and both pick it up; add a *target* and both manifests need it.
 
+Three checks hold that together, and all three run in `./Scripts/ci.sh` and in the Linux CI job, as
+the same program rather than a copy of one:
+
+| Check | What it settles |
+|-------|-----------------|
+| [`Scripts/check_lockfiles.py`](Scripts/check_lockfiles.py) | `Package.resolved` and `Tuist/Package.resolved` pin the same versions. |
+| [`Scripts/check_compiler_settings.py`](Scripts/check_compiler_settings.py) | The deployment floors match (fails); the Swift settings one manifest sets and the other does not (warns). |
+| [`Scripts/check_module_edges.py`](Scripts/check_module_edges.py) | The module boundaries the documentation states — read from both manifests. |
+
+The third is the newest and the one worth knowing about before you edit a `dependencies:` array.
+Six documents state that `SpecImport` is unreachable from `ControlPlane` and from the CLI —
+AGENTS.md, README.md, [ARCHITECTURE.md](docs/ARCHITECTURE.md), [CLI.md](docs/CLI.md),
+[GRAPHQL.md](docs/GRAPHQL.md) and [ROADMAP.md](docs/ROADMAP.md) — and four places say the CLI links
+neither Vapor nor GRDB: three of those documents and a comment above the target in `Project.swift`
+itself. Every one of those sentences is a fact about two files, one line of either falsifies all of
+them, and nothing used to notice. It walks the **transitive** closure, because adding `SpecImport`
+to `Domain` would put the parsers in the CLI with every direct edge still absent, and it also
+asserts the edges that must exist — so it cannot pass by having stopped seeing the graph.
+
+If you deliberately change one of those boundaries, the check is the first thing to update; its
+header lists the documents that have to move with it.
+
 Anything SwiftPM compiles must also build on Linux, which is not macOS:
 
 - `URLSession` lives in `FoundationNetworking`, not `Foundation`

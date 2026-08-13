@@ -184,6 +184,36 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         message: "The server is already starting or stopping. Try again in a moment."
     )
 
+    /// The port a start asked for is already bound by something else.
+    ///
+    /// `server.portInUse` is documented in `docs/CLI.md` as a stable code and mapped to `409` by
+    /// `ControlServer.httpStatus`, and until now it could only ever be produced by the host nothing in
+    /// production constructs. Declared here so the host that *is* reachable can report the same code
+    /// for the same failure rather than inventing a second spelling of it.
+    ///
+    /// **Both hosts call this**, which is what makes "they answer the same" a fact about the code
+    /// rather than about two literals that happen to match: `AppControlHost` through
+    /// `MockServerRuntime.startFailure`, and `MimicControlService.startServer` from the
+    /// `catch let error as MockServerError` arm that used to spell the message out. `ControlServer`
+    /// maps the code to `409` and `mimic server status` reads it from whichever host answered.
+    public static func serverPortInUse(port: Int) -> ControlError {
+        ControlError(
+            code: "server.portInUse",
+            message: "Port \(port) is already in use. Choose another with `--port`.",
+            details: ["port": String(port)]
+        )
+    }
+
+    /// A start that failed for any other reason, carrying the engine's own sentence.
+    ///
+    /// Same provenance as ``serverPortInUse(port:)`` and reached from the same four places: the two
+    /// `catch` arms around `MimicControlService`'s `engine.start`, and the two around
+    /// `MockServerRuntime`'s. The message is the engine's own `localizedDescription` at every one of
+    /// them, so the two hosts cannot describe the same failure differently.
+    public static func serverStartFailed(_ message: String) -> ControlError {
+        ControlError(code: "server.startFailed", message: message)
+    }
+
     /// A project name that is empty, or is nothing but whitespace.
     ///
     /// Shared by ``ProjectCommandExecutor`` (rename) and both hosts (create), which is three places
@@ -307,13 +337,36 @@ public struct ServerStatusReport: Codable, Sendable, Equatable {
     public var baseURL: String?
     public var globalDelayMs: Int
     public var message: String?
+    /// The stable, dotted code for the failure ``message`` describes — `server.portInUse`,
+    /// `server.startFailed` — and `nil` whenever the server is not in an error state.
+    ///
+    /// A host that binds inside the call it was asked from can simply *throw* one of these codes, and
+    /// `MimicControlService` does: it awaits `engine.start` and answers `serverStart` with the
+    /// failure. `AppControlHost` cannot. `MockServerRuntime` binds from a task of its own, so
+    /// `serverStart` has already answered "starting, poll `mimic server status`" by the time the bind
+    /// fails — and for a port conflict the only channel left was `MockServerRuntime.portConflictAlert`,
+    /// which nothing but `WorkspaceView` reads and which a headless run never renders at all. The code
+    /// therefore has to survive until the poll arrives, which is what this field is for.
+    ///
+    /// It is a code and not a second sentence, because ``message`` already carries the sentence: both
+    /// hosts put the engine error's own `localizedDescription` into the `ServerState.error` this report
+    /// is built from.
+    public var errorCode: String?
 
-    public init(state: String, port: Int, baseURL: String?, globalDelayMs: Int, message: String? = nil) {
+    public init(
+        state: String,
+        port: Int,
+        baseURL: String?,
+        globalDelayMs: Int,
+        message: String? = nil,
+        errorCode: String? = nil
+    ) {
         self.state = state
         self.port = port
         self.baseURL = baseURL
         self.globalDelayMs = globalDelayMs
         self.message = message
+        self.errorCode = errorCode
     }
 }
 

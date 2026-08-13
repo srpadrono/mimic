@@ -378,7 +378,10 @@ reach a loopback port, so the token and the `Origin`/`Host` checks are what actu
 
 - **The CLI hosts nothing.** No server, no database. Every invocation reads and writes the one live
   instance, so two commands a second apart cannot disagree about the world — and `mimic` stays a
-  small static binary that links neither Vapor nor GRDB.
+  small static binary that links neither Vapor nor GRDB. That last clause is checked rather than
+  asserted: [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py) walks both manifests
+  on every CI run and fails if `MimicCLICore` or the `mimic` executable can reach Vapor, GRDB or
+  `SpecImport` by any path — including through a target that acquires one of them later.
 - **One implementation of the rules.** Project-scoped commands are applied by `ProjectCommandExecutor`
   in the `Domain` module, which the CLI, the HTTP API, and the app window all call. A rule can only be
   written once, so the window and the script cannot drift.

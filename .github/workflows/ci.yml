@@ -126,6 +126,22 @@ jobs:
       - name: Compiler settings
         run: python3 Scripts/check_compiler_settings.py
 
+      # The third manifest check, and the first one in this workflow that reads a *claim* rather than
+      # a count or a literal. Six documents state that `SpecImport` is unreachable from `ControlPlane`
+      # and from the CLI, and four that the CLI links neither Vapor nor GRDB — AGENTS.md, README.md,
+      # docs/ARCHITECTURE.md, docs/CLI.md, docs/GRAPHQL.md, docs/ROADMAP.md and a comment in
+      # Project.swift itself. Every one of them is a fact about two files, one line of either
+      # falsifies all of them, and until this step every gate here stayed green while it happened.
+      # docs/GRAPHQL.md used to print the grep a reader was meant to run by hand — an admission that
+      # nothing ran it for them — and now points at this program instead.
+      #
+      # Reachability rather than adjacency, because the cheap version is the one that fails to fire:
+      # `SpecImport` added to `Domain` would put the parsers in the CLI with every direct edge still
+      # absent. The program also asserts the edges that *are* supposed to exist, so a parser that
+      # stopped recognising `.external(name:)` cannot report a clean tree by seeing nothing.
+      - name: Module edges
+        run: python3 Scripts/check_module_edges.py
+
       # README states a test total, a four-row table and two per-suite breakdowns, and all of them
       # are hand-written. The repo's own README records that they have drifted twice. This recounts
       # from the tree and fails on any disagreement, including a suite folder that exists and appears
@@ -371,13 +387,65 @@ jobs:
       # `xcodebuild -showBuildSettings` — but not verifiably without a Mac to run them on, and a step
       # that fails for its own reasons is worse than a missing one: it teaches people to ignore red.
 
-      # Release compiles with whole-module optimisation and different warnings-as-errors, so it
-      # catches things Debug does not. Run after the tests so a compile-only failure does not hide a
-      # test result.
+      # Run after the tests so a compile-only failure does not hide a test result.
+      #
+      # This step's comment used to claim Release compiles with "different warnings-as-errors, so it
+      # catches things Debug does not". No build setting in this repository turns a warning into an
+      # error: neither manifest names a `*_TREAT_WARNINGS_AS_ERRORS` setting anywhere (the only two
+      # occurrences of that string in the tree are in this comment), and `Project.swift` declares its
+      # two configurations as bare `.debug(name: "Debug")` / `.release(name: "Release")` with no
+      # settings attached to either. Whatever differs between them comes from the defaults Tuist
+      # writes into the generated project, not from a choice made here — and a warning is a warning
+      # in both.
+      #
+      # Turning it on is worth doing and is deliberately *not* done from this file. An
+      # `xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` on the command line applies to every target
+      # in the workspace, Vapor, GRDB, NIO, OpenAPIKit, ArgumentParser and CodeEditorView included,
+      # and this repository does not get to decide whether those compile clean. The setting belongs
+      # per-target in `Project.swift` — on the eight `.staticFramework` targets plus the app and the
+      # `mimic` tool — and it cannot land until somebody has seen the warning inventory, which is
+      # what the step below now publishes on every run. Same order the coverage steps above follow:
+      # measure first, gate second.
       - name: Build (Release)
         run: |
+          set -o pipefail
+          mkdir -p .artifacts
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            -configuration Release CODE_SIGN_IDENTITY=- build
+            -configuration Release CODE_SIGN_IDENTITY=- build \
+            | tee .artifacts/release-build.log
+
+      # The baseline the paragraph above needs, and nothing more: it reports, it does not gate.
+      #
+      # `continue-on-error` is the whole point rather than caution. A warning count is not a verdict
+      # on a commit, and a step that reddens a run over one teaches people to ignore red — the same
+      # argument the coverage step makes for itself. Compiler output is also the one thing here whose
+      # exact shape could not be checked before this landed, so a diagnostic line spelled differently
+      # by a future Xcode must show up as an empty table, never as a failure on a commit whose tests
+      # passed.
+      #
+      # Dependency warnings are filtered out because they are not actionable here: SwiftPM checkouts
+      # live under `SourcePackages/`, and Tuist's own resolve under `Tuist/.build`. What is left is
+      # this repository's code, which is exactly the set a per-target setting in `Project.swift`
+      # would have to make clean first.
+      - name: Release warnings (reported, never a gate)
+        continue-on-error: true
+        run: |
+          warnings="$(grep -E ': warning: ' .artifacts/release-build.log \
+            | grep -vE 'SourcePackages/|Tuist/\.build/' | sort -u)"
+          count="$(printf '%s\n' "$warnings" | grep -c . || true)"
+          {
+            echo "### Release warnings in first-party sources"
+            echo
+            echo "**$count** distinct warning line(s). This step never fails the run — see the"
+            echo "comment above \`Build (Release)\` in \`.github/workflows/ci.yml\` for why"
+            echo "warnings-as-errors is not switched on from the command line."
+            if [ -n "$warnings" ]; then
+              echo
+              echo '```'
+              printf '%s\n' "$warnings" | head -50
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The result bundle is the only way to read a UI failure after the fact — it holds the failure
       # screenshots and the automatic UI hierarchy captures.

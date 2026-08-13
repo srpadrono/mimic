@@ -521,7 +521,25 @@ struct JourneyFileTests {
         #expect(spec.steps?[1].failure == .timeout(holdMs: 5_000))
     }
 
-    @Test("A file produced by `journey get` is also accepted")
+    /// Importing a whole `Journey` has to come back with the journey that went in.
+    ///
+    /// The fixture is one: the value a `mimic journey get` reply carries under `journey`, which is
+    /// also what each element of an exported project's `journeys` array looks like, and what lands in
+    /// a file after `mimic journey get "X" | jq .journey > flow.json`.
+    ///
+    /// It did not come back, and this test is why that went unnoticed for so long: it asserted `name`
+    /// and `steps?.count`, which are the two things a `Journey` keeps when it is misread as a
+    /// `JourneySpec`. `readSpec` tried `JourneySpec` first and accepted it whenever `steps` was
+    /// non-nil — and since every property of `JourneySpec`/`JourneyStepSpec` is Optional, a `Journey`
+    /// decodes as one with `statusCode`, `headers`, `body`, `contentType` and `failure` all nil,
+    /// because in a `Journey` those live under `outcome`. `ProjectCommandExecutor.makeStep` then
+    /// reads a nil `statusCode` as `?? 200` and a nil `failure` as "respond", so every step came back
+    /// a bare 200 with an empty body, and the run exited 0.
+    ///
+    /// So the assertions are the fields that were being destroyed: the 401, the header that makes it
+    /// a real challenge, and the bodies — taken from the template rather than retyped, so editing the
+    /// template cannot leave a stale expectation passing here.
+    @Test("A whole journey read from a file keeps every response it described")
     func readsAFullJourney() throws {
         var project = MockProject(name: "Checkout")
         _ = try ProjectCommandExecutor.apply(
@@ -533,7 +551,87 @@ struct JourneyFileTests {
 
         let spec = try JourneyFile.readSpec(path)
         #expect(spec.name == "Session")
-        #expect(spec.steps?.count == 5)
+
+        let steps = try #require(spec.steps)
+        let templateSteps = try #require(JourneyTemplates.sessionExpiry.spec.steps)
+        #expect(steps.count == 5)
+        #expect(steps.map(\.method) == templateSteps.map(\.method))
+        #expect(steps.map(\.path) == templateSteps.map(\.path))
+        #expect(steps.map(\.body) == templateSteps.map(\.body))
+        #expect(steps.compactMap(\.body).count == 5, "no step may come back with an empty body")
+
+        let statuses: [Int?] = [200, 200, 401, 200, 200]
+        #expect(steps.map(\.statusCode) == statuses)
+
+        // The step the whole template exists for: a 401 carrying the challenge header. Both halves
+        // are read out of the template so a change there fails here rather than passing quietly.
+        #expect(steps[2].statusCode == 401)
+        #expect(steps[2].headers == templateSteps[2].headers)
+        let challenge = try #require(steps[2].headers)
+        #expect(challenge["WWW-Authenticate"]?.contains("invalid_token") == true)
+    }
+
+    /// The other half of what the old reader flattened: a transport failure is not a status code, and
+    /// `makeStep` turns a step with no `failure` into a 200 response. Every `connectionDrop` and
+    /// `timeout` in a whole journey therefore came back as a success.
+    @Test("Transport failures survive a whole-journey file too")
+    func readsFailuresFromAFullJourney() throws {
+        var project = MockProject(name: "Checkout")
+        _ = try ProjectCommandExecutor.apply(
+            .journeyAddTemplate(templateID: "offline-to-online", name: "Offline"),
+            to: &project
+        )
+        let path = try Self.write(try ControlCoding.string(project.journeys[0], pretty: true))
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let spec = try JourneyFile.readSpec(path)
+        let steps = try #require(spec.steps)
+        let expected: [NetworkFailure?] = [.connectionDrop, .timeout(holdMs: 15_000), nil]
+        #expect(steps.map(\.failure) == expected)
+        #expect(steps[2].statusCode == 200, "only the last step is a response")
+    }
+
+    /// A document that is *part way* between the two shapes is refused, not guessed at.
+    ///
+    /// This is the failure mode the positive discriminator buys: `outcome` on a step — or a top-level
+    /// `id` — says "this is a `Journey`", and from there it must decode as one. Strip the outcomes
+    /// out of one and the old reader would have accepted the remains as a spec and silently produced
+    /// 200s; now it says which key it could not read.
+    ///
+    /// It also pins the discriminator against the non-fix: swapping the two decoders' order would
+    /// make this file fall through to the spec branch and be quietly accepted again.
+    @Test("A half-converted journey document is refused rather than read as a spec")
+    func refusesAnAmbiguousJourneyDocument() throws {
+        // Built by mangling a real serialized `Journey` rather than by hand: a `JourneyStepOutcome`
+        // encodes as `{"respond":{"_0":{…}}}` — the `_0` is Swift's synthesis for an unlabelled
+        // associated value — and a hand-typed approximation of that would fail to decode for a reason
+        // this test does not name.
+        var project = MockProject(name: "Checkout")
+        _ = try ProjectCommandExecutor.apply(
+            .journeyAddTemplate(templateID: "session-expiry", name: "Session"),
+            to: &project
+        )
+        let encoded = try ControlCoding.encoder().encode(project.journeys[0])
+        let decoded = try JSONSerialization.jsonObject(with: encoded)
+        var object = try #require(decoded as? [String: Any])
+        var steps = try #require(object["steps"] as? [[String: Any]])
+        #expect(steps[1].keys.contains("outcome"), "the document really did carry an outcome to strip")
+        _ = steps[1].removeValue(forKey: "outcome")
+        object["steps"] = steps
+
+        let mangled = try JSONSerialization.data(withJSONObject: object)
+        let path = try Self.write(String(decoding: mangled, as: UTF8.self))
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        do {
+            let spec = try JourneyFile.readSpec(path)
+            Issue.record("expected a refusal, got \(String(describing: spec.steps?.count)) steps")
+        } catch let failure as CLIFailure {
+            #expect(failure.exitCode == 2)
+            let message = failure.errorDescription ?? ""
+            #expect(message.contains(path))
+            #expect(message.contains("outcome"))
+        }
     }
 
     @Test("A journey round-trips through a file without ids leaking in")

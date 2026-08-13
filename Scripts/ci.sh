@@ -24,9 +24,10 @@
 #     `automationmodetool enable-automationmode-without-authentication`, which is what lets XCUITest
 #     drive another app with nobody at the keyboard.
 #
-# Everything else is the same command with the same flags, ad-hoc signing included. The two manifest
-# checks are the same *program*, not a copy of it: `Scripts/check_lockfiles.py` and
-# `Scripts/check_compiler_settings.py` are invoked from here and from the workflow.
+# Everything else is the same command with the same flags, ad-hoc signing included. The three
+# manifest checks are the same *program*, not a copy of it: `Scripts/check_lockfiles.py`,
+# `Scripts/check_compiler_settings.py` and `Scripts/check_module_edges.py` are invoked from here and
+# from the workflow.
 
 set -euo pipefail
 
@@ -100,6 +101,15 @@ python3 Scripts/check_lockfiles.py
 # were not, which is the whole argument for a file.
 step "Compiler settings"
 python3 Scripts/check_compiler_settings.py
+
+# The third manifest check, and the only gate in this repository that reads a *claim* rather than a
+# count, a literal or a forbidden string. Six documents state that `SpecImport` is unreachable from
+# `ControlPlane` and from the CLI, and four that the CLI links neither Vapor nor GRDB; all of that is
+# a fact about two files, and one line of either falsifies the lot while every other gate stays
+# green. Transitive, because a direct-edge check would miss `SpecImport` arriving via `Domain` — and
+# it asserts the edges that must exist too, so it cannot pass by having gone blind.
+step "Module edges"
+python3 Scripts/check_module_edges.py
 
 # The fast gate: everything that does not need Xcode. The same suites the Linux job runs, on this
 # machine's toolchain rather than in the `swift:6.2` container — see the header for what that cannot

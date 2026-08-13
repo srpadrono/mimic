@@ -59,6 +59,7 @@ public enum OpenAPIParser {
     ) throws -> [ImportCandidate] {
         let doc = try JSONDecoder().decode(SwaggerDocument.self, from: data)
         var candidates: [ImportCandidate] = []
+        var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
         guard let paths = doc.paths else { return [] }
 
@@ -106,7 +107,7 @@ public enum OpenAPIParser {
                     responseContentType: contentType,
                     // An OpenAPI document describes REST routes; GraphQL operations do not appear in one.
                     graphqlOperation: nil,
-                    existingEndpoints: existingEndpoints
+                    ledger: &ledger
                 ))
             }
         }
@@ -114,14 +115,25 @@ public enum OpenAPIParser {
         return candidates
     }
 
-    /// The content type an operation actually produces: its own `produces`, then the document's.
+    /// The content type an operation actually produces: its own `produces`, then the document's,
+    /// then — when the spec declares neither — JSON.
     ///
     /// Matched with the same rule the other importers use — a substring test, via
     /// `ImportCandidateBuilder.detectContentType`. The exact `contains("application/json")` this
     /// replaced missed `application/hal+json` and `application/json; charset=utf-8`, both of which
     /// are ordinary things for a real spec to declare.
+    ///
+    /// **The default was `.plainText`**, reached through `?? []` and an empty `contains`, and it cost
+    /// the same pair of bugs the document-level `produces` cost: a spec that declares no `produces`
+    /// anywhere — which is legal, and which Swagger 2 gives no default for — imported as plain text,
+    /// and `parseSwagger2` only reaches for the fallback body when the content type is `.json`, so
+    /// those endpoints arrived with no body either. JSON is the answer a mock of an HTTP API is
+    /// almost always right to give, and it is the one that keeps the body.
     static func swagger2ContentType(operation: SwaggerOperation, doc: SwaggerDocument) -> Scenario.ContentType {
-        let declared = operation.produces ?? doc.produces ?? []
+        // An operation's own list wins over the document's; an empty list declares nothing, so it
+        // falls through to the document rather than deciding for it.
+        let declared = operation.produces?.isEmpty == false ? operation.produces : doc.produces
+        guard let declared, !declared.isEmpty else { return .json }
         return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json } ? .json : .plainText
     }
 
@@ -190,6 +202,7 @@ public enum OpenAPIParser {
         existingEndpoints: [Endpoint]
     ) -> [ImportCandidate] {
         var candidates: [ImportCandidate] = []
+        var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
         // Sorted, like the Swagger 2 path below. `document.paths` is a dictionary, so iterating it
         // raw put the review list in whatever order the hash gave — the same file could list its
@@ -243,7 +256,7 @@ public enum OpenAPIParser {
                     responseHeaders: headers,
                     responseBody: exampleBody,
                     responseContentType: contentType,
-                    existingEndpoints: existingEndpoints
+                    ledger: &ledger
                 ))
             }
         }

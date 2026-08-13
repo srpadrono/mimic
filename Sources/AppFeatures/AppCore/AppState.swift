@@ -99,6 +99,13 @@ final class AppState {
         set { server.genericStartError = newValue }
     }
 
+    /// Why the last start attempt failed, or `nil` when it did not fail.
+    ///
+    /// Read-only, and deliberately not one of the two alert channels above: those are cleared by the
+    /// window when the user dismisses them, and a headless instance renders neither. This is what
+    /// `AppControlHost` reports on `mimic server status`. See ``MockServerRuntime/startFailure``.
+    var serverStartFailure: ControlError? { server.startFailure }
+
     /// Presentation binding for the port-conflict alert — setting `false` dismisses it.
     /// Lets views bind directly (`$appState.isShowingPortConflict`) instead of building ad-hoc `Binding(get:set:)`.
     var isShowingPortConflict: Bool {
@@ -509,6 +516,17 @@ final class AppState {
     /// to a `Button` and to `JourneyRunControls` as a `() -> Void` action.
     func advanceActiveJourneyReportingStatus() async -> JourneyStatus? {
         await server.advanceJourneyReportingStatus()
+    }
+
+    /// The engine's journey cursor, read once the configuration push this session most recently
+    /// dispatched has reached it.
+    ///
+    /// The one caller is `AppControlHost.journeyActivate`, which has to answer with where the run
+    /// actually stands. ``activateJourney(id:)`` reaches the engine through `currentProject`'s `didSet`
+    /// and therefore from a task, so anything asking the engine straight afterwards is asking before
+    /// the push arrived. See ``MockServerRuntime/journeyStatusAfterPendingUpdates()``.
+    func journeyStatusAfterPendingMockUpdates() async -> JourneyStatus? {
+        await server.journeyStatusAfterPendingUpdates()
     }
 
     /// The last error a journey edit produced, for surfacing in the UI. Cleared on the next success.

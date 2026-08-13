@@ -734,7 +734,22 @@ struct ControlEndpointFileTests {
     /// test existed nothing anywhere asserted it. The write used to be `.atomic` followed by a
     /// `chmod`, which publishes the token at the final path for as long as the second call takes,
     /// and leaves it published forever if that call throws.
-    @Test("The discovery file is 0600, and is never briefly wider")
+    ///
+    /// **The mode assertions below cannot fail on their own, and the test's name used to promise
+    /// what they could not deliver.** `rename(2)` carries the source file's mode across with it, so
+    /// the published file reads `0600` whether the mode was put on the temporary *before* it was
+    /// published — the safe order — or chmod'd onto the target *after*, which is the shape the
+    /// finding is about. Both orders end at the same observable file, and the difference between
+    /// them is a window a few microseconds wide that no reading of the result can see. They are kept
+    /// because a write that lands at `0644` and stays there is still the failure worth catching
+    /// first; what they are not is a guard on the ordering.
+    ///
+    /// Two checks that *can* fail cover the rest: `publicationReplacesTheFileRatherThanRewritingIt`
+    /// below pins that the advertisement is published by replacing the directory entry rather than
+    /// by opening the real name and writing into it, and `writePathAppliesTheModeBeforePublishing`
+    /// reads the write path itself, because the ordering is a property of the code and not of its
+    /// output.
+    @Test("The discovery file is 0600 on a first write and on an overwrite")
     func discoveryFileIsPrivate() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("mimic-perms-\(UUID().uuidString)", isDirectory: true)
@@ -766,6 +781,142 @@ struct ControlEndpointFileTests {
         // And no temporary file is left beside it.
         let siblings = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         #expect(siblings == ["control.json"], "leftover files: \(siblings)")
+    }
+
+    /// A hard link taken before an overwrite is the one thing that can see *how* the new
+    /// advertisement arrived.
+    ///
+    /// `rename(2)` swings the directory entry to a different inode, so a second link to the original
+    /// inode still holds the original bytes afterwards. A write that instead opened `control.json`
+    /// itself and truncated it — no temporary, no rename — would reach the same final content
+    /// through the same link, and would have published an empty file at the real name on the way
+    /// there, at whatever mode the umask allowed on a first write. That is the same class of failure
+    /// as chmod-after-rename, and unlike the mode of the finished file it is observable.
+    @Test("Publishing an advertisement replaces the file rather than rewriting it in place")
+    func publicationReplacesTheFileRatherThanRewritingIt() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-publish-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("control.json")
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+        try ControlEndpointFile.write(
+            ControlEndpoint(port: 8787, pid: pid, mode: "headless", token: ControlToken.generate()),
+            to: url
+        )
+
+        let witness = directory.appendingPathComponent("witness.json")
+        try FileManager.default.linkItem(at: url, to: witness)
+        let firstAdvertisement = try Data(contentsOf: url)
+
+        // A restart on a different port, so the two advertisements cannot be confused for each other.
+        try ControlEndpointFile.write(
+            ControlEndpoint(port: 8788, pid: pid, mode: "headless", token: ControlToken.generate()),
+            to: url
+        )
+
+        let published = try Data(contentsOf: url)
+        let throughTheOldLink = try Data(contentsOf: witness)
+
+        #expect(published != firstAdvertisement, "the overwrite did not take")
+        #expect(
+            throughTheOldLink == firstAdvertisement,
+            """
+            The second write reached the inode the first one published, so `control.json` was \
+            rewritten in place rather than replaced. A reader holding that path sees a truncated \
+            file mid-write, and a first write done this way lands at the umask default with the \
+            token already in it.
+            """
+        )
+    }
+
+    /// The ordering the finding is actually about, read off the write path itself.
+    ///
+    /// Nothing observable about the finished file distinguishes "mode applied to the temporary, then
+    /// renamed" from "renamed, then chmod'd" — see the note on `discoveryFileIsPrivate`. So this
+    /// asserts the property where it lives: `ControlEndpointFile` never chmods a path at all, never
+    /// asks `Data.write` to publish atomically on its behalf, and puts `0o600` on the file at the
+    /// moment it is created, which is before the `rename` that gives it its real name.
+    ///
+    /// Whole-line comments are dropped before any of that is looked for, for the reason
+    /// `Scripts/check_compiler_settings.py` drops them from the two manifests it compares:
+    /// `ControlEndpointFile.write`'s own documentation spells out both `setAttributes` and `.atomic`
+    /// while explaining why neither belongs in the write path, and a check that read them would be
+    /// answering from the explanation instead of from the code.
+    @Test("The write path applies the mode before it publishes, not after")
+    func writePathAppliesTheModeBeforePublishing() throws {
+        let source = try Self.controlPlaneSource("ControlEndpointFile.swift")
+
+        #expect(
+            !source.contains("setAttributes"),
+            """
+            ControlEndpointFile now chmods a path. If that is the discovery file, it is the finding \
+            coming back: between the rename that publishes the token and the chmod that narrows it, \
+            the file sits at the final path at whatever the umask allows — and a throw in between \
+            leaves it there.
+            """
+        )
+        #expect(
+            !source.contains(".atomic"),
+            """
+            ControlEndpointFile asks Foundation to publish a file atomically. `.atomic` renames a \
+            temporary of Foundation's own making, created under the umask, so the mode can only be \
+            applied afterwards — which is the ordering this file exists to avoid.
+            """
+        )
+
+        let creation = try #require(
+            source.range(of: "createFile("),
+            "the write path no longer creates the file it will publish"
+        )
+        let publication = try #require(
+            source.range(of: "rename("),
+            "the write path no longer publishes by rename"
+        )
+        // A guard rather than an expectation: the slice below would trap on an inverted range, and a
+        // crash reports worse than a failure does.
+        guard creation.upperBound < publication.lowerBound else {
+            Issue.record("the file is created after it is published, which cannot be the intended order")
+            return
+        }
+        #expect(
+            source[creation.upperBound..<publication.lowerBound].contains("0o600"),
+            """
+            0o600 is no longer applied between creating the temporary and renaming it into place. \
+            The mode has to be on the file before it takes the real name; `rename(2)` carries it \
+            across, and anything applied afterwards is applied to a file that is already published.
+            """
+        )
+    }
+
+    /// The text of a file in `Sources/ControlPlane`, with whole-line `//` comments removed.
+    ///
+    /// Located from `#filePath` rather than from a bundle: this file is
+    /// `Tests/ControlPlaneTests/ControlServerTests.swift`, so the repository root is three
+    /// directories above it, and both CI jobs build from the checkout.
+    static func controlPlaneSource(
+        _ fileName: String,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ControlPlane", isDirectory: true)
+            .appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Issue.record(
+                "no source at \(url.path), derived from #filePath three directories up",
+                sourceLocation: sourceLocation
+            )
+            return ""
+        }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return text
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
     }
 
     /// A discovery file is a file on disk, and `baseURL` is a field in it. Trusting that field sends

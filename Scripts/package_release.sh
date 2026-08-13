@@ -3,11 +3,20 @@
 # /usr/local/bin, in one double-click.
 #
 # It exists because shipping two zips makes the user do the packaging by hand, and one of those
-# steps fails silently. Measured on the v1.7.0 assets: the CLI ships ad-hoc signed with no team
-# identifier, so a copy carrying the download quarantine flag is killed with SIGKILL — exit 137,
-# nothing on stdout or stderr. Someone follows the instructions, runs `mimic --version`, and gets
-# silence. An installer payload is laid down without that flag, and the postinstall below strips it
-# anyway, so the problem cannot reach a user.
+# steps fails silently: the CLI is *built* ad-hoc signed with no team identifier —
+# `"CODE_SIGN_IDENTITY": "-"` on the `MimicCLI` target in Project.swift — so unless MIMIC_SIGN_APP
+# re-signs it, a copy carrying the download quarantine flag is killed with SIGKILL, exit 137, nothing
+# on stdout or stderr. Someone follows the instructions, runs `mimic --version`, and gets silence. An
+# installer payload is laid down without that flag, and the postinstall below strips it anyway, so
+# the problem cannot reach a user.
+#
+# This paragraph used to attribute that to a measurement on "the v1.7.0 assets", and no release of
+# this project carries that version: the newest entry in CHANGELOG.md is 0.9.3, MARKETING_VERSION in
+# Project.swift is 0.9.3, and `grep -rn '1\.7\.0' .` now finds one line in the whole tree: this one.
+# The first release, 0.9.0, already "ships as a signed and notarised installer", so the two-zip
+# arrangement described above was never a shipped release here at all. The mechanism is real and is
+# what this script defends against; the provenance was not recoverable, so it is gone rather than
+# restated with a different number.
 #
 # Signing is opt-in through the environment. With the three variables set the output is signed,
 # notarised and stapled, and opens with no warning at all. Without them it still builds, so the

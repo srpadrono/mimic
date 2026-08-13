@@ -381,19 +381,21 @@ public actor MimicControlService: ControlHost {
         do {
             try await engine.start(configuration: project.serverConfiguration)
             serverState = .running(port: project.serverConfiguration.port)
+        // Both codes come from the factories in Domain rather than being spelled out here. They were
+        // written inline in these three arms while `AppControlHost` — the host every `mimic`
+        // invocation actually reaches — could not report a start failure at all, so "both hosts
+        // answer the same" was a claim with only one side of it implemented. Now that the shipped
+        // host records the failure too, the two sentences have to be one sentence, and the cheapest
+        // way to keep that true is for there to be one of them.
         } catch let error as MockServerError {
             serverState = .error(error.localizedDescription)
             if case let .portInUse(port) = error {
-                throw ControlError(
-                    code: "server.portInUse",
-                    message: "Port \(port) is already in use. Choose another with `--port`.",
-                    details: ["port": String(port)]
-                )
+                throw ControlError.serverPortInUse(port: port)
             }
-            throw ControlError(code: "server.startFailed", message: error.localizedDescription)
+            throw ControlError.serverStartFailed(error.localizedDescription)
         } catch {
             serverState = .error(error.localizedDescription)
-            throw ControlError(code: "server.startFailed", message: error.localizedDescription)
+            throw ControlError.serverStartFailed(error.localizedDescription)
         }
 
         // The address comes from the same builder the status report uses, so the sentence and the

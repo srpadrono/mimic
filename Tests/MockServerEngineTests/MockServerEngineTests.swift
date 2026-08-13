@@ -8,10 +8,16 @@ import FoundationNetworking
 import Domain
 @testable import MockServerEngine
 
-/// Every case here binds a real socket, so the suite carries a time limit: a bind that never
+/// Many cases here bind a real socket, so the suite carries a time limit: a bind that never
 /// completes, or a wait on a stream that never yields, otherwise hangs the whole run with no
 /// indication of which test is stuck. One minute is the finest granularity `.timeLimit` offers and is
 /// far above what any of these needs — the point is a bound, not a deadline.
+///
+/// The rest deliberately bind nothing. Error mapping, the lifecycle refusals, and the route store's
+/// own decisions are all reachable without a listener, and a case that needs no port should not take
+/// one — it is one more thing that can fail for a reason the test is not about. This header used to
+/// open "every case here binds a real socket", which was untrue of several of them before this
+/// sentence was written and is why the claim is now a shape rather than a count.
 @Suite("MockServerEngine", .serialized, .timeLimit(.minutes(1)))
 struct MockServerEngineTests {
 
@@ -78,10 +84,11 @@ struct MockServerEngineTests {
     /// into a `MockRouteStore` the engine holds privately, so the observation has to come back out
     /// through the engine: `journeyStatus()` is a straight read of that store and needs no socket.
     ///
-    /// It also pins the difference between the two overloads, which is the part a caller can get
-    /// wrong: the three-argument form replaces the journey, the two-argument form leaves it alone.
-    /// `MockServerRuntime.updateMocks` calls the three-argument one on every project change, so a
-    /// two-argument call that quietly cleared the journey would stop a running flow mid-run.
+    /// It also pins the difference between the endpoints-only overload and the ones that carry a
+    /// journey, which is the part a caller can get wrong: a form taking `journey:` replaces the
+    /// journey, the two-argument form leaves it alone. `MockServerRuntime.updateMocks` calls one of
+    /// the journey-carrying forms on every project change, so a two-argument call that quietly
+    /// cleared the journey would stop a running flow mid-run.
     @Test func updateConfigurationReachesTheRouteStore() async {
         let engine = MockServerEngine()
         let scenario = Scenario(name: "Success", statusCode: 200, body: "{}")
@@ -115,6 +122,60 @@ struct MockServerEngineTests {
         // …and clearing it explicitly does.
         await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: nil)
         #expect(await engine.journeyStatus() == nil)
+    }
+
+    /// Whether a push is an activation is compared against a **high-water mark**, not for equality
+    /// and not for difference, and both halves of that matter.
+    ///
+    /// Pushes reach the engine from unstructured tasks — `MockServerRuntime.updateMocks` starts a
+    /// fresh `Task` for each one and keeps no ordering between them — so a push can land after a
+    /// newer one. A straggler carrying an epoch that a newer push already superseded must not rewind
+    /// the run that newer push started, and it must not lower the mark either, or the epoch still in
+    /// force would look like a fresh activation the next time an ordinary edit re-sends the project.
+    ///
+    /// No socket: `advanceJourney()` moves the cursor exactly as a served request would, and what is
+    /// under test is the store's decision, not the wire.
+    @Test("An out-of-order configuration push does not restart the run")
+    func supersededActivationEpochDoesNotRestartTheRun() async throws {
+        let engine = MockServerEngine()
+        let journey = Journey(
+            name: "Flow",
+            steps: [
+                JourneyStep(
+                    name: "one",
+                    method: .get,
+                    path: "/a",
+                    outcome: .respond(JourneyResponse(statusCode: 500))
+                ),
+                JourneyStep(
+                    name: "two",
+                    method: .get,
+                    path: "/a",
+                    outcome: .respond(JourneyResponse(statusCode: 200))
+                ),
+            ]
+        )
+
+        await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: journey, activationEpoch: 2)
+        _ = await engine.advanceJourney()
+        let midRun = try #require(await engine.journeyStatus())
+        #expect(midRun.currentStepIndex == 1)
+
+        // Epoch 1 was overtaken by epoch 2 above: a straggler, not an activation.
+        await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: journey, activationEpoch: 1)
+        let afterStraggler = try #require(await engine.journeyStatus())
+        #expect(afterStraggler.currentStepIndex == 1)
+
+        // The epoch still in force, re-sent — which is every project mutation between one activation
+        // and the next. It only stays inert because the straggler did not lower the mark.
+        await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: journey, activationEpoch: 2)
+        let afterRePush = try #require(await engine.journeyStatus())
+        #expect(afterRePush.currentStepIndex == 1)
+
+        // …and the next real activation still lands.
+        await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: journey, activationEpoch: 3)
+        let afterActivation = try #require(await engine.journeyStatus())
+        #expect(afterActivation.currentStepIndex == 0)
     }
 
     @Test func logStreamYieldsEntryAfterHTTPRequest() async throws {

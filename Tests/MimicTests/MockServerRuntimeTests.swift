@@ -137,6 +137,74 @@ struct MockServerRuntimeTests {
         func advanceJourney() async -> JourneyStatus? { restartAnswer }
     }
 
+    /// An engine whose `start` does not return until it is released.
+    ///
+    /// The interval between `MockServerRuntime.startServer()` publishing `.starting` and the engine
+    /// binding is the whole subject of ``configuringDuringABindCannotChangeThePublishedPort``, and
+    /// without a gate its width is the scheduler's business rather than the test's. Sleeping rather
+    /// than spinning, so the actor is handed back on every suspension and `startConfigurations` stays
+    /// readable while a start is parked here — the same shape ``GatedEngine`` above uses to park a
+    /// journey-status read.
+    actor GatedStartEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+
+        private(set) var startConfigurations: [ServerConfiguration] = []
+        private var isHoldingStart = true
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func release() { isHoldingStart = false }
+
+        func start(configuration: ServerConfiguration) async throws {
+            startConfigurations.append(configuration)
+            while isHoldingStart {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+        }
+
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+    }
+
+    /// An engine that reports a journey cursor only for a journey it has actually been handed.
+    ///
+    /// That is what makes it a witness for the ordering rather than a stub: a status read that
+    /// overtook the push it was supposed to follow finds nothing here, instead of finding an answer
+    /// that happens to look right.
+    actor PushRecordingEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private var pushed: Journey?
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
+            pushed = journey
+        }
+
+        func journeyStatus() async -> JourneyStatus? {
+            guard let pushed else { return nil }
+            return JourneyStatus.make(journey: pushed, state: nil)
+        }
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(2),
         interval: Duration = .milliseconds(20),
@@ -201,19 +269,84 @@ struct MockServerRuntimeTests {
         #expect(startConfigurations.first?.globalDelayMs == 120)
     }
 
-    @Test("Port conflicts surface an alert and keep the server stopped")
+    /// The read-then-read across the bind, driven.
+    ///
+    /// `serverConfiguration` is a mutable property here and `.serverConfigure` is *project*-scoped, so
+    /// `AppControlHost` applies it with no lifecycle guard at all — `mimic server start` followed by
+    /// `mimic server configure --port 9000` lands here while the engine is still binding.
+    /// `startServer()` used to read the property twice, once on either side of `await engine.start`:
+    /// it bound the port the first read carried and published the port the second one did, so a script
+    /// was handed a `baseURL` nothing was listening on.
+    ///
+    /// The gate is what makes this a claim rather than a coincidence. Without it the bind usually
+    /// completes before the reconfigure lands, and the assertion passes against the broken version.
+    @Test("A configure arriving mid-bind cannot change the port the runtime publishes")
+    func configuringDuringABindCannotChangeThePublishedPort() async throws {
+        let engine = GatedStartEngine()
+        let manager = MockServerRuntime(engine: engine)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+
+        manager.startServer()
+        // Parked inside `engine.start`, which is the state the reconfigure has to arrive in.
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+        #expect(manager.serverState == .starting)
+
+        manager.serverConfiguration = ServerConfiguration(port: 9000, globalDelayMs: 0)
+        await engine.release()
+
+        try await waitUntil { manager.serverState.runningPort != nil }
+        #expect(
+            manager.serverState == .running(port: 8080),
+            "the runtime published the reconfigured port for a listener bound to the old one"
+        )
+        let boundPorts = await engine.startConfigurations.map(\.port)
+        #expect(boundPorts == [8080])
+    }
+
+    /// A port conflict is a *failure*, not a stop.
+    ///
+    /// It used to publish `.stopped`, which is indistinguishable from a server nobody started, and the
+    /// only other trace was `portConflictAlert` — which nothing outside `WorkspaceView` reads and a
+    /// headless run never renders. `AppControlHost.serverStart` has already answered by the time the
+    /// bind fails, so the state and `startFailure` are the whole of what a later `mimic server status`
+    /// has to report from.
+    @Test("A port conflict is an error state carrying the code a script branches on")
     func startServerPortConflict() async throws {
         let engine = FakeEngine()
         await engine.setStartError(MockServerError.portInUse(port: 8080))
         let manager = MockServerRuntime(engine: engine)
 
         manager.startServer()
-        try await waitUntil {
-            manager.serverState == .stopped && manager.portConflictAlert?.conflictingPort == 8080
-        }
+        try await waitUntil { manager.serverState.isError }
 
+        // The engine's own sentence, which is what `MimicControlService` puts in its `.error` state
+        // for the same failure — so the two hosts cannot word `server status` differently.
+        #expect(manager.serverState == .error("Port 8080 is already in use."))
+        #expect(manager.startFailure?.code == "server.portInUse")
+        #expect(manager.startFailure?.details?["port"] == "8080")
+        // The window's alert is unchanged: it is what offers the next port.
+        #expect(manager.portConflictAlert?.conflictingPort == 8080)
         #expect(manager.portConflictAlert?.suggestedPort == 8081)
         #expect(manager.genericStartError == nil)
+    }
+
+    /// A start that succeeds clears whatever the previous one failed with, so a stale code cannot be
+    /// reported next to a running server.
+    @Test("A retry after a conflict clears the recorded failure")
+    func retryClearsTheRecordedStartFailure() async throws {
+        let engine = FakeEngine()
+        await engine.setStartError(MockServerError.portInUse(port: 8080))
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.startServer()
+        try await waitUntil { manager.startFailure != nil }
+
+        await engine.setStartError(nil)
+        manager.retryStartOnNextPort(from: 8080)
+        try await waitUntil { manager.serverState.runningPort == 8081 }
+
+        #expect(manager.startFailure == nil)
+        #expect(manager.portConflictAlert == nil)
     }
 
     @Test("Generic start failures set error state and message")
@@ -319,6 +452,31 @@ struct MockServerRuntimeTests {
             manager.journeyStatus?.journeyName == "Fresh",
             "the superseded refresh republished a cursor the restart had already replaced"
         )
+    }
+
+    /// The engine's cursor is only readable once the push that put the journey there has landed.
+    ///
+    /// `updateMocks` reaches the engine from an unstructured task. A status read issued straight after
+    /// it hops to the engine actor from the *currently running* task — so its job is enqueued on that
+    /// actor before the push task has even been scheduled — and answers about the configuration the
+    /// engine still had. That ordering is deterministic rather than lucky, which is why this test needs
+    /// no gate: `PushRecordingEngine` reports nothing at all until a journey has reached it, so a read
+    /// that overtook the push comes back `nil`.
+    @Test("The awaited journey status waits for the push that preceded it")
+    func awaitedJourneyStatusWaitsForThePush() async throws {
+        let engine = PushRecordingEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Flow"))
+        let status = await manager.journeyStatusAfterPendingUpdates()
+
+        #expect(
+            status?.journeyName == "Flow",
+            "the status was read before the push that loaded the journey reached the engine"
+        )
+        // …and the mirror the window reads settles on the same answer rather than on the superseded
+        // refresh the push task issues on its way out.
+        #expect(manager.journeyStatus?.journeyName == "Flow")
     }
 
     @Test("Request logs are appended and capped at the maximum")

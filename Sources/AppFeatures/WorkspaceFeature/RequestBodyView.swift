@@ -74,7 +74,12 @@ struct RequestBodyView: View {
         }
         .padding(DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.tertiary.opacity(0.3))
+        // `DSColors.codeWell`, not a hand-written `tertiary.opacity(0.3)`. This was the literal that
+        // put the syntax palette's contrast readings on a surface nothing paints: the token's comment
+        // named `tertiary` — the opaque well `DSCodeBlock` fills with — while the only view in the app
+        // that draws `DSColors.Syntax` is this one, on a 30% wash of it. Naming the composite is what
+        // lets `DSContrastTests` measure the background this actually has.
+        .background(DSColors.codeWell)
         .task(id: RenderKey(payload: payload, searchText: searchText)) {
             let payload = payload
             let searchText = searchText
@@ -125,6 +130,17 @@ struct RequestBodyView: View {
     }
 
     /// Marks every occurrence of `term`, returning how many there were.
+    ///
+    /// **A hit takes a foreground as well as a background, and that pairing is the whole legibility of
+    /// the feature.** This used to set `backgroundColor` alone and leave each run in whatever syntax
+    /// colour `coloured(_:)` had given it — a saturated hue over a 35% amber wash. Composited and read
+    /// back on `searchHit` over ``DSColors/codeWell`` over a panel, `key`, `string`, `number` and
+    /// `literal` measured **4.28 / 3.22 / 3.08 / 3.06** in light and **2.29 / 3.21 / 3.64 / 2.62** in
+    /// dark: eight readings, none of them at AA, on the one run of text the reader deliberately asked
+    /// to find. `DSColors.Syntax.searchHitText` takes the worst of the same eight to 5.52.
+    ///
+    /// Order matters — `render(payload:searchText:)` colours first and highlights second, so this
+    /// assignment is what wins on the runs it touches.
     @discardableResult
     nonisolated static func highlight(_ term: String, in text: inout AttributedString) -> Int {
         // An empty term matches at every index; without this guard the loop below never advances.
@@ -136,6 +152,7 @@ struct RequestBodyView: View {
         while searchStart < text.endIndex,
               let found = text[searchStart...].range(of: term, options: .caseInsensitive) {
             text[found].backgroundColor = DSColors.Syntax.searchHit
+            text[found].foregroundColor = DSColors.Syntax.searchHitText
             matches += 1
             searchStart = found.upperBound
         }

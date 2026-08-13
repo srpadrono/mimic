@@ -105,6 +105,13 @@ public struct ControlClient: Sendable {
         // `409` carries `project.noneOpen` — and that error names the problem far better than a bare
         // status number does. `Output.emit` turns `ok: false` into `.commandFailed`, which exits 4,
         // the code docs/CLI.md pins for "Mimic refused it".
+        //
+        // This `try?` is a *format probe*, and it is only sound because `ControlResponse.ok` is a
+        // non-optional `Bool` on a synthesized decoder: a reply without it cannot decode, so a
+        // success here really is evidence the body is an envelope. A probe into an all-Optional type
+        // proves nothing — see `ProjectCommand.Import` and `JourneyFile.readSpec`, both of which
+        // were accepting the wrong document for exactly that reason. If `ok` ever gains a fallback,
+        // this needs a discriminator of its own.
         if let decoded = try? ControlCoding.decode(ControlResponse.self, from: data) {
             return decoded
         }
@@ -214,6 +221,12 @@ public enum ControlEndpointFileReader {
     /// a test cannot name a pid it can guarantee is dead: pick a plausible-looking one and the kernel
     /// is free to hand it to somebody between the fixture being written and the file being read, so
     /// the assertion passes or fails depending on what else the machine is doing.
+    ///
+    /// The `try?` on the decode is safe for the reason the one in ``ControlClient/send(_:)`` is:
+    /// every field of ``Endpoint`` except `token` is non-optional on a synthesized decoder, so a
+    /// file that decodes really does carry the `pid` this checks and the `port` resolution derives
+    /// from. `token` is Optional deliberately — a pre-token instance's file still decodes, so the
+    /// CLI can say "that Mimic is too old" instead of "unexpected response".
     public static func discover(
         searchURLs: [URL]? = nil,
         isProcessAlive: (Int) -> Bool = ControlEndpointFileReader.isProcessAlive

@@ -78,13 +78,52 @@ public actor MockServerEngine {
         await routeStore.update(endpoints: endpoints, globalDelayMs: globalDelayMs)
     }
 
-    /// Replaces the live configuration including the active journey.
+    /// Replaces the live configuration including the active journey, without claiming the push is an
+    /// activation. A run already in progress on the same journey with the same steps survives it.
+    ///
+    /// Kept as its own entry point beside the overload below rather than folded into it with a
+    /// default argument, because a default argument does not satisfy a protocol requirement and this
+    /// exact signature is one: `MockServerEngineProtocol` in `AppFeatures` declares it, and
+    /// `extension MockServerEngine: MockServerEngineProtocol {}` is what conforms.
     public func updateConfiguration(
         endpoints: [Endpoint],
         globalDelayMs: Int,
         journey: Journey?
     ) async {
-        await routeStore.update(endpoints: endpoints, globalDelayMs: globalDelayMs, journey: journey)
+        await routeStore.update(
+            endpoints: endpoints,
+            globalDelayMs: globalDelayMs,
+            journey: journey,
+            activationEpoch: nil
+        )
+    }
+
+    /// Replaces the live configuration and says which activation the push belongs to.
+    ///
+    /// `activationEpoch` is the caller's running count of the journey activations it has performed.
+    /// A push carrying a higher count than any this engine has seen resets the journey run even when
+    /// the journey is unchanged — re-activating the journey that is already active is otherwise
+    /// indistinguishable from re-sending the same project, and the two have to behave differently.
+    /// See ``MockRouteStore/update(endpoints:globalDelayMs:journey:activationEpoch:)`` for why it is
+    /// a count rather than a flag.
+    ///
+    /// **Nothing outside this module calls it yet**, so `mimic journey activate` against the journey
+    /// already active still does not restart the run — the engine can now be told, and no host tells
+    /// it. `grep -rn activationEpoch --include='*.swift' Sources Tests` is the check; every hit is in
+    /// `MockServerEngine` or its own tests until `MockServerRuntime.updateMocks` and
+    /// `MimicControlService.pushConfigurationToEngine` pass a count they keep.
+    public func updateConfiguration(
+        endpoints: [Endpoint],
+        globalDelayMs: Int,
+        journey: Journey?,
+        activationEpoch: Int
+    ) async {
+        await routeStore.update(
+            endpoints: endpoints,
+            globalDelayMs: globalDelayMs,
+            journey: journey,
+            activationEpoch: activationEpoch
+        )
     }
 
     // MARK: - Journey runtime control

@@ -17,11 +17,19 @@ request traffic — so frontend work can start before the backend exists. An emb
 It is also a testing platform: 47 operations — every project, server, endpoint, scenario, journey and
 request-log operation the window performs — are available as commands, so UI tests, integration
 tests, and AI agents can reproduce a whole application scenario without driving the UI. The one
-workflow that is not a command is **spec import**: `SpecImport` is linked by `AppFeatures` alone, so
-turning a HAR or an OpenAPI document into endpoints happens in the window and nowhere else. A script
-parses the file itself and issues `endpointCreate` + `scenarioUpdate` per route — which is precisely
-what `AppState.commitImportedCandidates` does after the review sheet is confirmed, so the rules
-applied are the same either way.
+workflow that is not a command is **spec import**: `SpecImport` is linked by `AppFeatures` and by the
+app bundle, and by nothing else — neither `ControlPlane` nor `MimicCLICore` depends on it, in either
+manifest — so turning a HAR or an OpenAPI document into endpoints happens in the window and nowhere
+else. A script parses the file itself and issues `endpointCreate` + `scenarioUpdate` per route —
+which is precisely what `AppState.commitImportedCandidates` does after the review sheet is confirmed,
+so the rules applied are the same either way.
+
+That sentence used to read "linked by `AppFeatures` alone", which the app target's own dependency
+list contradicts, and it was checked by nobody: [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py)
+now reads both manifests on every CI run and fails if `ControlPlane` or the CLI can reach
+`SpecImport` by any path, so this paragraph and the five others like it — in AGENTS.md, README.md,
+[CLI.md](CLI.md), [GRAPHQL.md](GRAPHQL.md) and [ROADMAP.md](ROADMAP.md) — cannot quietly stop being
+true.
 
 ## Domain language
 

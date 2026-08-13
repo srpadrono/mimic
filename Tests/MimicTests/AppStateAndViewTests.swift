@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Testing
 import Domain
+import MockServerEngine
 import Persistence
 @testable import SpecImport
 @testable import AppFeatures
@@ -976,6 +977,140 @@ struct AppStateAndViewTests {
         #expect(response.ok)
         #expect(response.result?.journeyStatus?.journeyName == AdvancingEngine.answerName)
         #expect(await engine.advanceCallCount == 1)
+    }
+
+    /// The window's host used to build this reply from the *document* —
+    /// `JourneyStatus.make(journey:state:nil)`, a run that has not started — whatever the engine was
+    /// doing. `MockRouteStore.update` keeps the run state when the same journey with the same steps is
+    /// pushed again, so a harness re-activating between test cases was told step 1 was next while the
+    /// engine was mid-run. No arrangement of the engine could have changed that answer, because the
+    /// engine was never asked.
+    ///
+    /// `MidRunEngine` makes both halves visible: it reports nothing until a journey has actually
+    /// reached it, so a reply built before the push landed is distinguishable; and the cursor it
+    /// reports is one nothing built from the document could produce, so a reply built from the
+    /// document is distinguishable too.
+    @Test("`journey activate` reports the engine's cursor, not a fresh run built from the document")
+    func controlHostActivateReportsTheEngineCursor() async throws {
+        let engine = MidRunEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+        let added = await host.execute(.journeyAddTemplate(templateID: "payment-retry", name: "Flow"))
+        #expect(added.ok)
+
+        let activated = await host.execute(.journeyActivate(journey: .name("Flow")))
+
+        #expect(activated.ok)
+        let status = try #require(activated.result?.journeyStatus)
+        #expect(status.journeyName == "Flow")
+        // The two markers a fabricated status could never carry: it is built from a fresh
+        // `JourneyRunState`, whose cursor is 0 and which has served nothing.
+        #expect(status.currentStepIndex == MidRunEngine.cursor)
+        #expect(status.totalServed == MidRunEngine.totalServed)
+    }
+
+    /// An engine that answers `journeyStatus()` from the journey it was actually handed, mid-run.
+    ///
+    /// The `payment-retry` template has two steps, so a cursor of 1 is a real position rather than a
+    /// finished run — `JourneyStatus.make` reports `currentStepIndex` as `nil` once the cursor reaches
+    /// `steps.count`.
+    actor MidRunEngine: MockServerEngineProtocol {
+        static let cursor = 1
+        static let totalServed = 3
+
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private var pushed: Journey?
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
+            pushed = journey
+        }
+
+        func journeyStatus() async -> JourneyStatus? {
+            guard let pushed else { return nil }
+            return JourneyStatus.make(
+                journey: pushed,
+                state: JourneyRunState(
+                    journeyID: pushed.id,
+                    cursor: Self.cursor,
+                    servedCountsByStepID: [:],
+                    forceAdvancedStepIDs: [],
+                    isComplete: false,
+                    totalServed: Self.totalServed
+                )
+            )
+        }
+    }
+
+    /// The channel a failed bind had none of.
+    ///
+    /// `serverStart` answers before the engine binds — a declared contract difference, pinned in
+    /// `HostParityTests` — so the failure has to survive until the caller polls. It used to leave the
+    /// runtime `.stopped` with a `portConflictAlert` only `WorkspaceView` reads, so `mimic server
+    /// status` answered `stopped` with no `baseURL`: the same answer as a server nobody started. Run
+    /// headless — which is the same app bundle with `MIMIC_HEADLESS=1` — no alert is rendered at all,
+    /// so the failure reached nobody.
+    @Test("A bind that fails after `server start` has answered is reported by `server status`")
+    func controlHostReportsABindThatFailed() async throws {
+        let engine = FailingStartEngine(failure: .portInUse(port: 8080))
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+
+        appState.createProject(name: "Checkout", port: 8080)
+
+        let started = await host.execute(.serverStart(port: nil))
+        #expect(started.ok, "the start is optimistic: the bind is still ahead of the reply")
+        #expect(started.result?.server?.state == "starting")
+
+        try await waitUntil { appState.serverState.isError }
+
+        let status = await host.execute(.serverStatus)
+        #expect(status.ok)
+        #expect(status.result?.server?.state == "error")
+        #expect(status.result?.server?.errorCode == "server.portInUse")
+        #expect(status.result?.server?.message == "Port 8080 is already in use.")
+        #expect(status.result?.server?.baseURL == nil)
+
+        // …and reaches `mimic state`, which is the other command a script polls after an optimistic
+        // reply, because that carries the same report.
+        let state = await host.execute(.state)
+        #expect(state.result?.state?.server?.errorCode == "server.portInUse")
+        #expect(state.result?.state?.server?.state == "error")
+    }
+
+    /// An engine whose `start` always throws. Typed to `MockServerError` rather than `any Error` so
+    /// the value crossing into the actor is `Sendable` by its own declaration.
+    actor FailingStartEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private let failure: MockServerError
+
+        init(failure: MockServerError) {
+            self.failure = failure
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws { throw failure }
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
     }
 
     /// An engine that answers `advanceJourney()` with a status nothing else in the test could have

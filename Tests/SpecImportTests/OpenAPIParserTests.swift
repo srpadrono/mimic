@@ -813,6 +813,10 @@ struct OpenAPIParserTests {
         let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
 
         #expect(candidates[0].responseBody?.contains("csv,data") == true)
+        // This document declares no `produces` at all — not on the operation, not at the top. That
+        // used to import as `.plainText`; it is now JSON, which is what the body already was:
+        // `AnyCodableValue.toJSONString()` runs the example through `JSONEncoder`.
+        #expect(candidates[0].responseContentType == .json)
     }
 
     // MARK: - Content types as real specs declare them
@@ -853,6 +857,34 @@ struct OpenAPIParserTests {
         #expect(users.responseBody != nil, "a JSON endpoint with no schema still gets a fallback body")
         // An operation's own `produces` still wins over the document's.
         #expect(report.responseContentType == .plainText)
+    }
+
+    /// The other half of the same miss, and the same pair of bugs. Swagger 2 gives `produces` no
+    /// default and a spec may omit it entirely; `swagger2ContentType` answered `.plainText` for that
+    /// (`?? []`, then an empty `contains`), and `parseSwagger2` reaches for the fallback body only
+    /// when the content type is `.json` — so the spec that says least imported with the wrong
+    /// content type *and* no body at all.
+    @Test("A spec that declares no `produces` anywhere imports as JSON, with a body")
+    func swagger2DefaultsToJSONWhenNothingIsDeclared() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "summary": "List all users",
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.responseContentType == .json)
+        #expect(candidate.responseBody != nil, "`.plainText` here also short-circuits the fallback body")
     }
 
     /// `application/json` is not the only spelling of JSON, and both of these appear in specs that

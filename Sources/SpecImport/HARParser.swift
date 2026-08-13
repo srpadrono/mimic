@@ -17,6 +17,9 @@ public struct ImportCandidate: Identifiable, Sendable {
     public let graphqlOperation: String?
     public let bodySizeBytes: Int
     public let bodySizeExceedsLimit: Bool
+    /// Something already covers this method, path and GraphQL operation: an endpoint the project
+    /// holds, **or an earlier candidate in the same import**. Flagged and deselected either way —
+    /// see ``ImportRouteLedger`` for why the earlier one is the one left selected.
     public let isDuplicate: Bool
 
     /// Explicit rather than memberwise so `graphqlOperation` can default — it is meaningful for a
@@ -73,17 +76,26 @@ public enum HARParser {
     /// Parse HAR file data into import candidates.
     /// - Parameters:
     ///   - data: Raw JSON data of the HAR file.
-    ///   - existingEndpoints: Current project endpoints for duplicate detection.
-    /// - Returns: Array of import candidates.
+    ///   - existingEndpoints: Current project endpoints. One half of duplicate detection; the other
+    ///     is the entries already read from this same capture.
+    /// - Returns: Array of import candidates, one per usable entry — repeats included, flagged.
     public static func parse(
         data: Data,
         existingEndpoints: [Endpoint] = []
     ) async throws -> [ImportCandidate] {
         try await Task.detached {
             let harFile = try JSONDecoder().decode(HARFile.self, from: data)
-            return harFile.log.entries.compactMap { entry in
-                candidateFromEntry(entry, existingEndpoints: existingEndpoints)
+            // One ledger, threaded through the entries in order. This was a `compactMap` with
+            // `existingEndpoints` captured once before it and nothing accumulated, so `isDuplicate`
+            // could only ever mean "already in the project" — and a capture of real traffic hits the
+            // same route repeatedly by definition. See ``ImportRouteLedger``.
+            var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
+            var candidates: [ImportCandidate] = []
+            for entry in harFile.log.entries {
+                guard let candidate = candidateFromEntry(entry, ledger: &ledger) else { continue }
+                candidates.append(candidate)
             }
+            return candidates
         }.value
     }
 
@@ -91,7 +103,7 @@ public enum HARParser {
 
     private static func candidateFromEntry(
         _ entry: HAREntry,
-        existingEndpoints: [Endpoint]
+        ledger: inout ImportRouteLedger
     ) -> ImportCandidate? {
         guard let method = httpMethod(from: entry.request.method) else { return nil }
         let path = extractPath(from: entry.request.url)
@@ -119,7 +131,7 @@ public enum HARParser {
             responseBody: responseBody,
             responseContentType: contentType,
             graphqlOperation: operation?.name,
-            existingEndpoints: existingEndpoints
+            ledger: &ledger
         )
     }
 
@@ -132,7 +144,8 @@ public enum HARParser {
         HTTPMethod(rawValue: raw.uppercased())
     }
 
-    /// Extract the path component from a full URL.
+    /// Extract the path component from a full URL, **percent-encoded**, which is the form the
+    /// running server compares against.
     ///
     /// The result always begins with `/`, because an endpoint whose path does not cannot match any
     /// request the server will ever receive — it imports, it appears in the list, and it is dead.
@@ -144,6 +157,24 @@ public enum HARParser {
     /// scheme is what separates the authority from the path, and it is only safe to do when the first
     /// segment actually looks like a hostname: `users/123` is a relative path, not a host called
     /// `users`.
+    ///
+    /// **`percentEncodedPath`, not `path`, and this is the seam.** A route has to be written in one
+    /// encoding on both sides of it, and the serving side does not offer a choice: `VaporConfigurator`
+    /// builds its `IncomingRequest` from `req.url.path`, and Vapor's `URI.path` getter is
+    /// `components?.percentEncodedPath` with `%3B` mapped back to `;`
+    /// (`Sources/Vapor/Utilities/URI.swift:179` in Vapor 4.121.3, the revision both `Package.resolved`
+    /// files pin), built from the raw request line by `URI.init(path:)` — the decoder's own comment
+    /// says why it must be that initialiser and not `URI.init(string:)`.
+    /// `PathPattern.specificity` then compares segments with
+    /// `!=` on those raw strings. So `.path` — which is decoded — imported a capture of
+    /// `/v1/caf%C3%A9/items` as `/v1/café/items`, and the endpoint 404'd for the rest of its life;
+    /// `EndpointValidator.validatePath` waves it through, because a decoded path is not malformed,
+    /// only unmatchable.
+    ///
+    /// Decoding at the serving boundary instead was the alternative, and it is worse: `%2F` decodes
+    /// to `/`, so decoding before the split would change how many segments a request has, and it
+    /// would have to be done inside `PathPattern` — where it would apply to every endpoint in every
+    /// project rather than to the one place that reads a wire-form URL.
     static func extractPath(from urlString: String) -> String {
         var components = URLComponents(string: urlString)
 
@@ -155,13 +186,19 @@ public enum HARParser {
            // Only when there is a path left after the authority. `logo.png` is one dotted segment
            // with nothing behind it, and re-parsing it as a host would leave the path empty and lose
            // the segment entirely — a relative filename is a path, not a bare host.
-           !withScheme.path.isEmpty {
+           !withScheme.percentEncodedPath.isEmpty {
             components = withScheme
         }
 
-        let path = components?.path ?? urlString
+        let path = components?.percentEncodedPath ?? urlString
         guard !path.isEmpty else { return "/" }
-        return path.hasPrefix("/") ? path : "/\(path)"
+        let routable = path.hasPrefix("/") ? path : "/\(path)"
+        // The one place the two sides would still disagree. Vapor's `URI.path` getter maps `%3B`
+        // back to `;` unconditionally; the reason is written beside its `urlPathAllowedIsBroken`
+        // branch — "On Linux and in older Xcode versions, URLComponents incorrectly treats `;` as
+        // *not* allowed in the path component." Undo it here too, or a captured `%3B` is a segment
+        // the server can never hand the matcher.
+        return routable.replacingOccurrences(of: "%3B", with: ";", options: .literal)
     }
 
     /// Suggest a group tag from the first meaningful path segment.

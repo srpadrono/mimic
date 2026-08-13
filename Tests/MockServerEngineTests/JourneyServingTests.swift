@@ -76,6 +76,30 @@ struct JourneyServingTests {
         return Reply(status: http.statusCode, body: String(decoding: data, as: UTF8.self), headers: headers)
     }
 
+    /// Fires `count` identical requests at once and returns the statuses that came back.
+    ///
+    /// Extracted so the two cases that assert the cursor is race-free issue the burst the same way:
+    /// one of them checks the property on a fresh run, the other checks it still holds on a run a
+    /// re-activation has just restarted.
+    static func concurrentStatuses(
+        count: Int,
+        _ method: String,
+        _ path: String,
+        baseURL: URL,
+        session: URLSession
+    ) async throws -> [Int] {
+        try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<count {
+                group.addTask {
+                    try await Self.call(method, path, baseURL: baseURL, session: session).status
+                }
+            }
+            var result: [Int] = []
+            for try await status in group { result.append(status) }
+            return result
+        }
+    }
+
     static func endpoint(_ method: HTTPMethod, _ path: String, _ status: Int, body: String = "from-endpoint") -> Endpoint {
         let scenario = Scenario(name: "Default", statusCode: status, body: body)
         return Endpoint(
@@ -347,18 +371,67 @@ struct JourneyServingTests {
 
         try await Self.withEngine(journey: journey) { _, baseURL in
             let session = Self.session()
-            let observed = try await withThrowingTaskGroup(of: Int.self) { group in
-                for _ in statuses.indices {
-                    group.addTask {
-                        try await Self.call("GET", "inbox", baseURL: baseURL, session: session).status
-                    }
-                }
-                var result: [Int] = []
-                for try await status in group { result.append(status) }
-                return result
-            }
+            let observed = try await Self.concurrentStatuses(
+                count: statuses.count,
+                "GET",
+                "inbox",
+                baseURL: baseURL,
+                session: session
+            )
 
             #expect(Set(observed) == Set(statuses), "each step must be served exactly once")
+        }
+    }
+
+    /// The reset a re-activation performs replaces the whole `JourneyRunState`, which is the same
+    /// thing `resolve` reads and writes — so it has to leave the cursor as race-free as it found it.
+    ///
+    /// Two bursts, either side of a re-activation. The first pins the property the suite already
+    /// covered; the second pins it on a run the activation restarted, and is also the strongest
+    /// evidence that the restart happened at all: with the reset missing, the ten steps are still
+    /// exhausted and every request in the second burst falls through to the endpoints — of which
+    /// there are none — so all ten come back `404`.
+    @Test("A re-activated run still serves each step exactly once under concurrency")
+    func reactivationKeepsStepsDistinctUnderConcurrency() async throws {
+        let statuses = [500, 501, 502, 503, 504, 505, 506, 507, 508, 509]
+        let journey = Journey(
+            name: "Race",
+            steps: statuses.map { status in
+                JourneyStep(
+                    name: "step-\(status)",
+                    method: .get,
+                    path: "/inbox",
+                    outcome: .respond(JourneyResponse(statusCode: status))
+                )
+            }
+        )
+
+        try await Self.withEngine(journey: journey) { engine, baseURL in
+            let session = Self.session()
+            let first = try await Self.concurrentStatuses(
+                count: statuses.count,
+                "GET",
+                "inbox",
+                baseURL: baseURL,
+                session: session
+            )
+            #expect(Set(first) == Set(statuses), "each step must be served exactly once")
+
+            await engine.updateConfiguration(
+                endpoints: [],
+                globalDelayMs: 0,
+                journey: journey,
+                activationEpoch: 1
+            )
+
+            let second = try await Self.concurrentStatuses(
+                count: statuses.count,
+                "GET",
+                "inbox",
+                baseURL: baseURL,
+                session: session
+            )
+            #expect(Set(second) == Set(statuses), "the restarted run must serve each step exactly once too")
         }
     }
 
@@ -449,6 +522,81 @@ struct JourneyServingTests {
 
             let declined = try await Self.call("POST", "payments", baseURL: baseURL, session: session)
             #expect(declined.status == 402)
+        }
+    }
+
+    @Test("Re-activating the journey that is already active starts its run over")
+    func reactivatingTheSameJourneyResetsTheRun() async throws {
+        let journey = try Self.journeyFromTemplate("retry-after-failure")
+
+        try await Self.withEngine(journey: journey) { engine, baseURL in
+            let session = Self.session()
+            _ = try await Self.call("POST", "login", baseURL: baseURL, session: session)
+            let midRun = try #require(await engine.journeyStatus())
+            #expect(midRun.currentStepIndex == 1)
+
+            // Same journey, same steps, same endpoints: this push is argument-for-argument identical
+            // to the re-push `rePushingTheSameConfigurationLeavesTheRunAlone` sends, and only the
+            // epoch says it is an activation. Nothing here could have been reset by the id/steps
+            // comparison, which is the point.
+            await engine.updateConfiguration(
+                endpoints: [],
+                globalDelayMs: 0,
+                journey: journey,
+                activationEpoch: 1
+            )
+
+            let restarted = try #require(await engine.journeyStatus())
+            #expect(restarted.currentStepIndex == 0)
+            #expect(restarted.totalServed == 0)
+
+            // The flow really does replay rather than merely reporting that it would: step one
+            // answers again, which it cannot do while it is still retired.
+            let replayed = try await Self.call("POST", "login", baseURL: baseURL, session: session)
+            #expect(replayed.status == 200)
+            #expect(replayed.body.contains("mimic-session-token"))
+        }
+    }
+
+    /// The other half of the rule above, and the one with more to lose. After an activation *every*
+    /// push carries that same epoch until the next activation — endpoint edits, scenario switches,
+    /// a `server configure`, an autosave — so an epoch that reset on equality rather than on
+    /// advance would restart a live run on every keystroke in the editor.
+    @Test("Re-sending the same project mid-run leaves the run where it stood")
+    func rePushingTheSameConfigurationLeavesTheRunAlone() async throws {
+        let journey = try Self.journeyFromTemplate("retry-after-failure")
+
+        try await Self.withEngine(journey: journey) { engine, baseURL in
+            let session = Self.session()
+            await engine.updateConfiguration(
+                endpoints: [],
+                globalDelayMs: 0,
+                journey: journey,
+                activationEpoch: 4
+            )
+            _ = try await Self.call("POST", "login", baseURL: baseURL, session: session)
+            let failed = try await Self.call("GET", "account-summary", baseURL: baseURL, session: session)
+            #expect(failed.status == 500)
+
+            // A re-push carrying the epoch already in force…
+            await engine.updateConfiguration(
+                endpoints: [],
+                globalDelayMs: 0,
+                journey: journey,
+                activationEpoch: 4
+            )
+            // …and one that names no activation at all, which is what the three-argument overload is.
+            await engine.updateConfiguration(endpoints: [], globalDelayMs: 0, journey: journey)
+
+            let afterRePush = try #require(await engine.journeyStatus())
+            #expect(afterRePush.currentStepIndex == 2)
+            #expect(afterRePush.totalServed == 2)
+
+            // Decisive over HTTP as well as in the report: the retry succeeds, because the failing
+            // summary step stays retired. A run reset by either push would answer 500 again.
+            let recovered = try await Self.call("GET", "account-summary", baseURL: baseURL, session: session)
+            #expect(recovered.status == 200)
+            #expect(recovered.body.contains("1520.44"))
         }
     }
 

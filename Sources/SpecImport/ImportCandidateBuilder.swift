@@ -7,6 +7,8 @@ enum ImportCandidateBuilder {
     /// - Parameter documentBasePath: The prefix the source document declares for every route in it,
     ///   exactly as written — Swagger 2's `basePath`, or the first entry of OpenAPI 3's `servers`.
     ///   `nil` for a HAR, whose entries carry whole URLs and no document-level prefix.
+    /// - Parameter ledger: Every route this import has already accounted for. Passed `inout` because
+    ///   a candidate claims its own route as it is built — see ``ImportRouteLedger``.
     static func makeCandidate(
         method: HTTPMethod,
         path: String,
@@ -18,7 +20,7 @@ enum ImportCandidateBuilder {
         responseBody: String?,
         responseContentType: Scenario.ContentType,
         graphqlOperation: String? = nil,
-        existingEndpoints: [Endpoint]
+        ledger: inout ImportRouteLedger
     ) -> ImportCandidate {
         // Filtered here rather than in each parser: a header that describes the original transfer is
         // wrong to replay no matter which format it was read from, and one chokepoint means a future
@@ -44,11 +46,11 @@ enum ImportCandidateBuilder {
         // Compared on the *normalised* route, so a spec re-imported over endpoints it created before
         // is still recognised: what the project holds is `/v2/pet/:petId`, and what the document says
         // is `/pet/{petId}`.
-        let isDuplicate = existingEndpoints.contains { endpoint in
-            endpoint.method == method
-                && endpoint.path == route
-                && endpoint.graphqlOperation == graphqlOperation
-        }
+        let isDuplicate = ledger.isAlreadyClaimed(
+            method: method,
+            path: route,
+            graphqlOperation: graphqlOperation
+        )
 
         return ImportCandidate(
             id: UUID(),
@@ -112,5 +114,62 @@ enum ImportCandidateBuilder {
                     && !segment.hasPrefix(ImportPath.wildcardMarker)
                     && !segment.allSatisfy(\.isNumber)
             }
+    }
+}
+
+/// Every route an import has already accounted for: the endpoints the project holds, **plus the
+/// candidates produced so far in this same batch**.
+///
+/// The second half is what was missing, and it is a HAR that needs it: a spec's `paths` is a
+/// dictionary keyed by the route as written, so one document cannot list the same path twice —
+/// though two different templates can still normalise onto one route, and that is now caught here
+/// too — while a capture of real traffic repeats routes by definition.
+/// `HARParser.parse` computed `isDuplicate` against a list of existing
+/// endpoints captured once before the loop and accumulated nothing, so four hits on `/cart` produced
+/// four candidates all flagged clean and all pre-selected. `ImportCommitter` issues one
+/// `.endpointCreate` per selected candidate and `ProjectCommandExecutor` appends, so all four landed
+/// on one method and path — and `RequestMatcher.match` replaces its best only on *strictly greater*
+/// specificity, so the first answered every request and the other three were unreachable rows
+/// carrying responses the user could see in the review sheet and never reach.
+///
+/// **The first claim on a route keeps it**, which is a choice and not the only defensible one. Three
+/// reasons for it over last-write-wins:
+///
+/// - It is the same direction as the rule for an endpoint the project already holds, which is not
+///   negotiable: what exists wins, and the candidate arrives deselected. One rule, applied whether
+///   the earlier claim is in the project or three entries up the capture.
+/// - It agrees with what the server does. `RequestMatcher.match` keeps the first endpoint of equal
+///   specificity, so if a user overrides the defaults and selects several repeats, the one that
+///   answers is the one that was selected for them. Under last-wins the default and the override
+///   would name different rows.
+/// - Deselection is a default, not a decision. Every repeat still appears in the review sheet with
+///   its own status and size, flagged the way a pre-existing duplicate is flagged, and the user can
+///   flip which one lands — that is what makes the choice visible rather than silent.
+struct ImportRouteLedger {
+    /// What makes two candidates the same mock. Method and route alone would call every GraphQL
+    /// operation after the first a duplicate of the one before it: they all share `POST /graphql`.
+    private struct Claim: Hashable {
+        let method: HTTPMethod
+        let path: String
+        let graphqlOperation: String?
+    }
+
+    private var claims: Set<Claim>
+
+    init(existingEndpoints: [Endpoint]) {
+        claims = Set(existingEndpoints.map {
+            Claim(method: $0.method, path: $0.path, graphqlOperation: $0.graphqlOperation)
+        })
+    }
+
+    /// `true` when this route was already spoken for — by an endpoint the project holds, or by an
+    /// earlier candidate in this import. Records it either way, so the *next* repeat is answered
+    /// too.
+    mutating func isAlreadyClaimed(
+        method: HTTPMethod,
+        path: String,
+        graphqlOperation: String?
+    ) -> Bool {
+        claims.insert(Claim(method: method, path: path, graphqlOperation: graphqlOperation)).inserted == false
     }
 }

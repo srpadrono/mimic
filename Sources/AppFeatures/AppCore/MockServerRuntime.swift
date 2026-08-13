@@ -43,6 +43,15 @@ final class MockServerRuntime {
     var portConflictAlert: PortConflictAlertData?
     var genericStartError: String?
 
+    /// Why the last start attempt failed, with the code a script branches on — `nil` once a new
+    /// attempt begins, and never set without ``serverState`` becoming `.error` in the same hop.
+    ///
+    /// Held apart from the two properties above because those are *presentation* state: `WorkspaceView`
+    /// sets `portConflictAlert` back to `nil` the moment the user dismisses the sheet, and a headless
+    /// run renders neither of them. `mimic server status` has to be able to read the failure whether or
+    /// not a window happened to show it, which is what `AppControlHost` reports this on.
+    var startFailure: ControlError?
+
     /// Mirror of the engine's journey cursor.
     ///
     /// The engine is the authority — it advances the cursor as it serves — so this is refreshed after
@@ -82,21 +91,52 @@ final class MockServerRuntime {
     /// When it does accept, the state is `.starting` — not `.running` — by the time this returns. The
     /// engine binds inside the task below, so "started" is never true synchronously and no caller may
     /// report it as if it were.
+    ///
+    /// **The configuration is captured once, before the bind.** ``serverConfiguration`` is a mutable
+    /// property of this object and `.serverConfigure` is *project*-scoped, so `AppControlHost` applies
+    /// it through `ProjectCommandExecutor` with no lifecycle guard whatsoever — a `mimic server
+    /// configure --port 9000` arriving while the bind is in flight lands here through
+    /// `applyProject`. This method used to read `serverConfiguration` twice, once on either side of
+    /// the `await`: it bound the port the first read carried and published the port the second one
+    /// did. A script that configured while starting was handed a `baseURL` nothing was listening on.
+    /// The `portInUse` arm never had the defect, because the port it reports comes off the error the
+    /// engine threw rather than off this property.
+    ///
+    /// **A failure is recorded as well as rendered.** The bind fails after `serverStart` has already
+    /// answered, so the state below and ``startFailure`` beside it are the only things a later
+    /// `mimic server status` can read; a port conflict used to leave `.stopped`, which is what a
+    /// server nobody started looks like.
     func startServer() {
         guard serverState == .stopped || serverState.isError else { return }
         serverState = .starting
+        // A new attempt supersedes whatever the previous one failed with.
+        startFailure = nil
 
+        let configuration = serverConfiguration
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                try await engine.start(configuration: serverConfiguration)
-                serverState = .running(port: serverConfiguration.port)
-            } catch MockServerError.portInUse(let port) {
-                serverState = .stopped
-                portConflictAlert = PortConflictAlertData(conflictingPort: port)
+                try await engine.start(configuration: configuration)
+                serverState = .running(port: configuration.port)
+            } catch let error as MockServerError {
+                // The engine's own sentence, which is exactly what `MimicControlService` puts in its
+                // `.error` state for the same failure — so `mimic server status` reads the same
+                // whichever host answered it. The `--port` hint the service adds belongs to the error
+                // it throws from `server start`, and stays on `startFailure` here.
+                let message = error.localizedDescription
+                serverState = .error(message)
+                if case let .portInUse(port) = error {
+                    startFailure = ControlError.serverPortInUse(port: port)
+                    portConflictAlert = PortConflictAlertData(conflictingPort: port)
+                } else {
+                    startFailure = ControlError.serverStartFailed(message)
+                    genericStartError = message
+                }
             } catch {
-                serverState = .error(error.localizedDescription)
-                genericStartError = error.localizedDescription
+                let message = error.localizedDescription
+                serverState = .error(message)
+                startFailure = ControlError.serverStartFailed(message)
+                genericStartError = message
             }
         }
     }
@@ -135,9 +175,17 @@ final class MockServerRuntime {
         startServer()
     }
 
+    /// The configuration push most recently dispatched to the engine.
+    ///
+    /// Kept so a caller that has to *report* the engine's cursor can wait for the push it just caused
+    /// to land. The push reaches the engine from an unstructured task, so a status read issued
+    /// straight after it is a race the read wins: it hops to the engine actor before the push task has
+    /// even started, and answers about the journey the engine still had.
+    private var pendingMockUpdate: Task<Void, Never>?
+
     func updateMocks(endpoints: [Endpoint], journey: Journey? = nil) {
         let globalDelayMs = serverConfiguration.globalDelayMs
-        Task { @MainActor [weak self] in
+        pendingMockUpdate = Task { @MainActor [weak self] in
             guard let self else { return }
             await engine.updateConfiguration(
                 endpoints: endpoints,
@@ -213,6 +261,27 @@ final class MockServerRuntime {
             let status = await engine.journeyStatus()
             setJourneyStatus(status, ticket: ticket)
         }
+    }
+
+    /// The engine's cursor, read only once the configuration push dispatched most recently has landed.
+    ///
+    /// The `async` twin of ``refreshJourneyStatus()``, in the same way
+    /// ``advanceJourneyReportingStatus()`` is of ``advanceJourney()`` and for the same reason: a
+    /// control call has to answer with what the engine holds *now*, and both the published mirror and
+    /// a bare `engine.journeyStatus()` answer with what it held before the command.
+    ///
+    /// The wait is what makes it correct rather than merely awaited. Activating a journey pushes the
+    /// project to the engine from ``updateMocks(endpoints:journey:)``, which dispatches; without
+    /// waiting for that task this would reach the engine actor first and report the *previous*
+    /// journey. The ticket is taken after the wait, so this write outranks the mirror refresh the push
+    /// task issues on its way out — the two read the same engine either way, so it orders them rather
+    /// than choosing between them.
+    func journeyStatusAfterPendingUpdates() async -> JourneyStatus? {
+        await pendingMockUpdate?.value
+        let ticket = nextJourneyStatusTicket()
+        let status = await engine.journeyStatus()
+        setJourneyStatus(status, ticket: ticket)
+        return status
     }
 
     private func nextJourneyStatusTicket() -> Int {

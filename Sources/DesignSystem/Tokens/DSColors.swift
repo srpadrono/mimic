@@ -8,15 +8,45 @@ import SwiftUI
 /// background work that formats a request body — which is precisely the work that must not run on
 /// the main actor.
 public nonisolated enum DSColors {
+    // MARK: - Components
+
+    /// One appearance's worth of a token, as sRGB components.
+    ///
+    /// Most of this palette is declared straight as a `Color`, which is all a SwiftUI view needs.
+    /// `DSJSONEditor` is the exception: `CodeEditorView`'s `Theme` takes an `NSColor` per field and
+    /// per appearance, so the editor carried its own copy of every hue as a literal — and the copies
+    /// had drifted from the tokens they claimed to mirror. Its light `numberColour` was
+    /// `(0.63, 0.39, 0.0)` where ``Syntax/number`` is `(0.58, 0.35, 0.0)`, and its light
+    /// `keywordColour` `(0.0, 0.40, 0.85)` where ``Syntax/literal`` is `(0.0, 0.38, 0.85)`: the two
+    /// values those tokens held before they were darkened. Both themes are built from the constants
+    /// below now, so a hue exists once.
+    ///
+    /// Only the tokens that editor needs carry one. The rest of the palette has no second consumer
+    /// that needs components, and writing every one of them out twice would be a cost with nothing on
+    /// the other side of it.
+    nonisolated struct Ink: Sendable {
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+
+        func nsColor(opacity: CGFloat = 1.0) -> NSColor {
+            NSColor(red: red, green: green, blue: blue, opacity: opacity)
+        }
+    }
+
     // MARK: - Surface roles (60/30/10 rule)
 
     /// Main window background, editor canvas
-    public static let dominant = Color(light: .init(red: 0.973, green: 0.973, blue: 0.980),
-                                       dark: .init(red: 0.110, green: 0.110, blue: 0.118))
+    static let dominantLightInk = Ink(red: 0.973, green: 0.973, blue: 0.980)
+    static let dominantDarkInk = Ink(red: 0.110, green: 0.110, blue: 0.118)
+    public static let dominant = Color(light: dominantLightInk.nsColor(),
+                                       dark: dominantDarkInk.nsColor())
 
     /// Sidebar, inspector, toolbars — elevated surface
-    public static let secondary = Color(light: .init(red: 0.941, green: 0.941, blue: 0.949),
-                                        dark: .init(red: 0.173, green: 0.173, blue: 0.180))
+    static let secondaryLightInk = Ink(red: 0.941, green: 0.941, blue: 0.949)
+    static let secondaryDarkInk = Ink(red: 0.173, green: 0.173, blue: 0.180)
+    public static let secondary = Color(light: secondaryLightInk.nsColor(),
+                                        dark: secondaryDarkInk.nsColor())
 
     /// Input fields, wells, recessed areas
     public static let tertiary = Color(light: .init(red: 0.910, green: 0.910, blue: 0.925),
@@ -100,9 +130,30 @@ public nonisolated enum DSColors {
     /// because ``warning`` and ``success`` did not move — only what draws a status code did.
     public static let rowStripe = tertiary.opacity(0.25)
 
-    /// Primary accent — electric blue
-    public static let accent = Color(light: .init(red: 0.039, green: 0.518, blue: 1.0),
-                                     dark: .init(red: 0.039, green: 0.518, blue: 1.0))
+    /// The well a payload is read in — the surface ``Syntax`` is actually drawn on.
+    ///
+    /// It exists because the syntax palette's own comment named the wrong surface for months, and a
+    /// literal opacity at one call site is what made that possible: `RequestBodyView` wrote
+    /// `tertiary.opacity(0.3)` by hand, so no test could name the background the window paints. The
+    /// same failure `band` and `rowStripe` were extracted for.
+    ///
+    /// **It is a wash, so its host is part of it.** Composited and read back in sRGB, over the editor
+    /// canvas it lands on **0.9541** in light and **0.1451** in dark; over a panel, on 0.9317 and
+    /// 0.1892. The request detail scrolls its body over ``dominant``, so the first pair is what the
+    /// window draws today — but the view carries no opinion about its host, and the panel is the
+    /// harder of the two in dark mode, so `DSContrastTests.syntaxColoursOnTheWellTheyAreDrawnIn`
+    /// requires both. On the harder bed the four value hues — key, string, number, literal — read
+    /// 6.83 / 5.13 / 4.91 / 4.88 in light and 4.60 / 6.44 / 7.31 / 5.26 in dark. The worst of the
+    /// eight is dark ``Syntax/key`` at 4.60, and all eight clear the floor.
+    ///
+    /// ``Syntax/punctuation`` is ``labelTertiary`` and clears nothing anywhere, which is the point of
+    /// it — braces and commas are structure you look past, not text you read.
+    public static let codeWell = tertiary.opacity(0.3)
+
+    /// Primary accent — electric blue. One value in both appearances, which is why it takes one
+    /// ``Ink`` rather than a pair.
+    static let accentInk = Ink(red: 0.039, green: 0.518, blue: 1.0)
+    public static let accent = Color(light: accentInk.nsColor(), dark: accentInk.nsColor())
 
     /// The accent when it is a *word* rather than a fill.
     ///
@@ -165,6 +216,26 @@ public nonisolated enum DSColors {
     /// 4.07 there.
     public static let destructive = Color(light: .init(red: 0.80, green: 0.10, blue: 0.08),
                                           dark: .init(red: 1.0, green: 0.484, blue: 0.453))
+
+    /// Destructive as a *filled slab with white text on it* — the exact counterpart of ``accentFill``,
+    /// and needed for the same reason one appearance at a time.
+    ///
+    /// `DSButton`'s destructive variant draws `.white` on ``destructive``. In light that is the deep
+    /// red, and white on it measures **5.64:1**. In dark it is the salmon that variant shares with a
+    /// 500's label — a colour chosen to be legible *as ink on a dark panel*, which is the opposite
+    /// requirement — and white on it measures **2.52:1**, the worst reading anywhere in this palette.
+    ///
+    /// One value in both appearances, exactly as `accentFill` is, and for the argument that token
+    /// already makes: white on a slab does not change with the window's mode, so a slab that has white
+    /// on it should not either. Taking the light red into both keeps 5.64 on each side.
+    ///
+    /// This is the one correction here that no call site in the window was waiting for:
+    /// `grep -rn 'variant: \.destructive' Sources` finds a single hit, in `DSComponentPreviews`. It is
+    /// made anyway because `DSContrastTests.filledButtonsKeepTheirLabelAboveAAInEveryState` sweeps
+    /// `DSButtonVariant.allCases`, and a variant excluded from a sweep to keep it green is the habit
+    /// this wave exists to break.
+    public static let destructiveFill = Color(light: .init(red: 0.80, green: 0.10, blue: 0.08),
+                                              dark: .init(red: 0.80, green: 0.10, blue: 0.08))
 
     // MARK: - Semantic
 
@@ -325,21 +396,50 @@ public nonisolated enum DSColors {
 
     // MARK: - HTTP Method Colors
 
-    /// Maps an HTTP method string to a distinct, selection-safe color.
+    /// Maps an HTTP method string to a distinct colour, readable on every bed a badge lands on.
+    ///
+    /// **"Selection-safe" is what this used to claim, and a selected row is precisely where it
+    /// failed.** `DSMethodBadge` draws the colour this returns as its label *and*, at 16%, as the fill
+    /// behind it, so the background is a function of the foreground — the same shape as a status pill,
+    /// one component over. Measured that way on a bare panel the seven methods ran 4.50–4.54 in light,
+    /// which is the floor itself rather than a margin, and in dark `PATCH` read 3.78, `DELETE` 3.84
+    /// and `HEAD`/`OPTIONS` 4.04. Those four were *recorded* in `DSContrastTests` and left alone.
+    ///
+    /// A bare panel is the easiest bed a badge has. The request log stripes its rows, lights the one
+    /// under the pointer with `accentSubtle` at 60%, and fills the selected one with `accentSubtle`
+    /// outright — and that full-strength wash is reached three more ways, since the import review's
+    /// hovered row takes it and the sidebar and the journey step row both wear it through
+    /// `dsHoverHighlight`. All four of those rows carry a badge. On that bed — the worst of them,
+    /// because the accent wash moves a light surface down and a dark one up — the old hues read
+    /// **3.97–4.04** in light and **3.41–4.93** in dark: all six light values missed, and five of the
+    /// six dark ones. No fill alpha fixes that — at 16% the dark worst is 3.41, and with *no fill at
+    /// all* it is still only 4.20. The hues themselves had to move.
+    ///
+    /// Each light hue is its old value scaled about 0.89 toward black, and each dark one lifted toward
+    /// white by between 0 and 38% — which keeps the hue and moves only the luminance. `PUT`'s dark
+    /// amber is untouched: it already read 4.93 on the selected row, the only one that did. Measured
+    /// after the change across seven beds (panel, canvas, sheet, stripe, hover, selected, band) in both
+    /// appearances, all 84 readings clear 4.5 and the worst is **4.57** — dark `POST` on a selected
+    /// row. `DSContrastTests.methodBadgeClearsAAOnEveryBedItLandsOn` holds every one of them.
+    ///
+    /// One bed is deliberately not asserted: the sidebar is a `List(selection:)` with
+    /// `.listStyle(.sidebar)`, so its selected row is painted by AppKit with
+    /// `NSColor.selectedContentBackgroundColor`, whose value follows the user's accent preference.
+    /// A number pinned against that would be a fact about the machine running the test.
     public static func methodColor(for method: String) -> Color {
         switch method.uppercased() {
-        case "GET":              Color(light: .init(red: 0.0, green: 0.413, blue: 0.393),
-                                       dark: .init(red: 0.259, green: 0.784, blue: 0.757))
-        case "POST":             Color(light: .init(red: 0.110, green: 0.424, blue: 0.197),
-                                       dark: .init(red: 0.306, green: 0.812, blue: 0.427))
-        case "PUT":              Color(light: .init(red: 0.520, green: 0.328, blue: 0.055),
+        case "GET":              Color(light: .init(red: 0.0, green: 0.368, blue: 0.350),
+                                       dark: .init(red: 0.337, green: 0.808, blue: 0.784))
+        case "POST":             Color(light: .init(red: 0.098, green: 0.377, blue: 0.175),
+                                       dark: .init(red: 0.345, green: 0.824, blue: 0.459))
+        case "PUT":              Color(light: .init(red: 0.463, green: 0.292, blue: 0.049),
                                        dark: .init(red: 1.0, green: 0.694, blue: 0.306))
-        case "PATCH":            Color(light: .init(red: 0.505, green: 0.239, blue: 0.697),
-                                       dark: .init(red: 0.749, green: 0.478, blue: 0.969))
-        case "DELETE":           Color(light: .init(red: 0.663, green: 0.196, blue: 0.196),
-                                       dark: .init(red: 1.0, green: 0.392, blue: 0.392))
-        case "HEAD", "OPTIONS":  Color(light: .init(red: 0.371, green: 0.371, blue: 0.386),
-                                       dark: .init(red: 0.627, green: 0.627, blue: 0.647))
+        case "PATCH":            Color(light: .init(red: 0.450, green: 0.213, blue: 0.620),
+                                       dark: .init(red: 0.839, green: 0.667, blue: 0.980))
+        case "DELETE":           Color(light: .init(red: 0.592, green: 0.175, blue: 0.175),
+                                       dark: .init(red: 1.0, green: 0.624, blue: 0.624))
+        case "HEAD", "OPTIONS":  Color(light: .init(red: 0.330, green: 0.330, blue: 0.343),
+                                       dark: .init(red: 0.737, green: 0.737, blue: 0.753))
         default:                 .secondary
         }
     }
@@ -348,49 +448,87 @@ public nonisolated enum DSColors {
 
     /// Colors for rendering a JSON payload.
     ///
-    /// Drawn from the same hues as ``methodColor(for:)`` rather than a stock editor theme, so a
-    /// coloured body reads as part of Mimic instead of an embedded text editor. Keys carry the most
-    /// saturated hue because scanning a response means scanning its keys.
-    /// Every light variant here is darker than its `methodColor` cousin, and that is the point.
+    /// Drawn from the same hue families as ``methodColor(for:)`` rather than from a stock editor
+    /// theme, so a coloured body reads as part of Mimic instead of an embedded text editor. Keys carry
+    /// the most saturated hue because scanning a response means scanning its keys.
     ///
     /// A method badge is three bold characters on a tinted pill; a payload is hundreds of 11pt
-    /// monospaced characters on a near-white surface, and it is the densest reading in the app.
-    /// Measured against that surface, the badge hues gave 2.2:1 for numbers and 2.8:1 for strings —
-    /// under half the 4.5:1 that 11pt text needs. The dark variants were already fine and are
-    /// untouched; only the light side moved.
+    /// monospaced characters, and it is the densest reading in the app. The two palettes are therefore
+    /// tuned against different backgrounds and hold different values — `PUT`'s dark amber and
+    /// ``number``'s are the one pair that still coincide, which
+    /// `DSContrastTests.methodBadgeClearsAAOnEveryBedItLandsOn` states so that it is a fact somebody
+    /// checked rather than one nobody noticed.
     ///
-    /// **The surface to measure against is the well, not the window.** These are drawn inside
-    /// `DSJSONEditor` and `DSCodeBlock`, whose fill is ``tertiary`` — a step darker than the canvas,
-    /// so it is the harder of the two backgrounds and the one the numbers below are taken on.
-    /// Rendered in sRGB and read back there, two of the four had not in fact cleared the bar the
-    /// paragraph above sets: `number` measured **4.00:1** and `literal` **4.40:1** in light mode
-    /// while `key` and `string` sat at 6.46 and 4.87. Both now clear it — 4.65 and 4.63 — and neither
-    /// dark variant is touched.
+    /// This comment used to claim "every light variant here is darker than its `methodColor` cousin",
+    /// and measured in L\* that was true of `key` alone (34.5 against `PATCH`'s 40.0) and false of
+    /// `string` (42.2 against `GET`'s 39.6) and `number` (43.4 against `PUT`'s 40.2). Since the badge
+    /// hues moved down to survive a selected row it is now false of all three — `GET`, `PUT` and
+    /// `PATCH` sit at L\* 35.5 and only `key`, at 34.5, is darker than the badge beside it. Read the
+    /// relationship as a shared hue, not as a rule about lightness.
+    ///
+    /// **The surface to measure against is the well the body is read in, and this comment named the
+    /// wrong one.** It said these were drawn inside `DSJSONEditor` and `DSCodeBlock`, "whose fill is
+    /// ``tertiary``". Neither half holds. `DSJSONEditor` sets no background at all — its surface is
+    /// its `CodeEditorView` `Theme`'s `backgroundColour`, which is ``dominant`` — and it colours from
+    /// that theme rather than from these tokens. `DSCodeBlock` does fill with `tertiary`, but it draws
+    /// `labelPrimary` and nothing else, and in `grep -rn DSCodeBlock Sources Tests` every hit outside
+    /// its own file is a preview, a doc comment, or a rendering test — it is placed in no feature
+    /// module. The one place in the app that draws these tokens is `RequestBodyView`, on ``codeWell``.
+    ///
+    /// So the readings this paragraph used to quote — `number` at 4.00 and `literal` at 4.40 on
+    /// `tertiary`, taken to 4.66 and 4.63 — were taken on a surface nothing paints. On `codeWell` the
+    /// four clear 4.5 in both appearances and on either host; the token's own comment carries the
+    /// eight numbers, and `DSContrastTests` requires them there rather than on `tertiary`. That move
+    /// also settles the dark `key`, which the suite had recorded as the palette's one failure at 3.97
+    /// on the `tertiary` well: on the well it is actually drawn in it reads 5.35 over the canvas and
+    /// 4.60 over a panel.
     public enum Syntax {
         /// Object keys — the thing you actually look for in a payload.
-        public static let key = Color(light: .init(red: 0.46, green: 0.14, blue: 0.70),
-                                      dark: .init(red: 0.749, green: 0.478, blue: 0.969))
+        static let keyLightInk = Ink(red: 0.46, green: 0.14, blue: 0.70)
+        static let keyDarkInk = Ink(red: 0.749, green: 0.478, blue: 0.969)
+        public static let key = Color(light: keyLightInk.nsColor(), dark: keyDarkInk.nsColor())
 
         /// String values.
-        public static let string = Color(light: .init(red: 0.0, green: 0.44, blue: 0.42),
-                                         dark: .init(red: 0.259, green: 0.784, blue: 0.757))
+        static let stringLightInk = Ink(red: 0.0, green: 0.44, blue: 0.42)
+        static let stringDarkInk = Ink(red: 0.259, green: 0.784, blue: 0.757)
+        public static let string = Color(light: stringLightInk.nsColor(), dark: stringDarkInk.nsColor())
 
         /// Numeric values. Amber is the hardest hue to carry on a light surface — its luminance is
         /// almost all green — so the light variant is the one that had furthest to move.
-        public static let number = Color(light: .init(red: 0.58, green: 0.35, blue: 0.0),
-                                         dark: .init(red: 1.0, green: 0.694, blue: 0.306))
+        static let numberLightInk = Ink(red: 0.58, green: 0.35, blue: 0.0)
+        static let numberDarkInk = Ink(red: 1.0, green: 0.694, blue: 0.306)
+        public static let number = Color(light: numberLightInk.nsColor(), dark: numberDarkInk.nsColor())
 
         /// `true`, `false`, and `null`. Not `accent`: the shared blue is tuned for fills and
-        /// selection, where it sits behind white, and reads at 3.3:1 as small text on a light body.
+        /// selection, where it sits behind white, and reads at 3.20:1 as small text on a light panel.
         /// This is the same reasoning ``DSColors/accentText`` carries, and the same dark value.
-        public static let literal = Color(light: .init(red: 0.0, green: 0.38, blue: 0.85),
-                                          dark: .init(red: 0.316, green: 0.657, blue: 1.0))
+        static let literalLightInk = Ink(red: 0.0, green: 0.38, blue: 0.85)
+        static let literalDarkInk = Ink(red: 0.316, green: 0.657, blue: 1.0)
+        public static let literal = Color(light: literalLightInk.nsColor(), dark: literalDarkInk.nsColor())
 
         /// Braces, brackets, commas, colons — structure, deliberately quiet.
         public static let punctuation = labelTertiary
 
         /// Background behind a search hit inside a body.
         public static let searchHit = warning.opacity(0.35)
+
+        /// The ink a search hit is drawn in, and the whole reason a hit is legible at all.
+        ///
+        /// ``searchHit`` is a 35% wash of ``warning``, which is a *lot* of amber, and the highlighter
+        /// used to set only the background — leaving each run in whatever syntax colour it already
+        /// had. Composited and read back on `searchHit` over ``codeWell`` over a panel, those four
+        /// read **4.28 / 3.22 / 3.08 / 3.06** in light and **2.29 / 3.21 / 3.64 / 2.62** in dark (key,
+        /// string, number, literal). Eight readings, none of them at AA, on the one run of text
+        /// somebody deliberately asked to find — and off that bed, on the bare ``codeWell``, the same
+        /// four tokens read 4.60–8.49 across both hosts and both appearances. It was the highlight
+        /// that failed, not the palette.
+        ///
+        /// ``labelPrimary`` is the answer because a found run is not a token any more, it is the
+        /// answer to a question: it takes the strongest ink in the body and the syntax colour steps
+        /// aside for it, which is what a find highlight does in every editor. On the same composite it
+        /// reads **10.02** over the canvas and **9.68** over a panel in light, **6.11** and **5.52** in
+        /// dark — the worst of the four is 5.52, better than a full point of margin.
+        public static let searchHitText = labelPrimary
     }
 
     // MARK: - HTTP status code color

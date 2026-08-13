@@ -150,6 +150,27 @@ struct HARParserTests {
         #expect(HARParser.extractPath(from: "https://example.com") == "/")
     }
 
+    /// The importer and the server have to spell a route the same way, and the server offers no
+    /// choice about which way: `VaporConfigurator` matches on `req.url.path`, and Vapor's `URI.path`
+    /// getter returns `percentEncodedPath` (Vapor 4.121.3, `Sources/Vapor/Utilities/URI.swift:179` —
+    /// the revision `Package.resolved` pins), built from the raw request line. This returned
+    /// `URLComponents.path`, which is decoded, so a capture of an encoded segment imported as a
+    /// string no request could ever equal.
+    @Test("An extracted path keeps the encoding the server will compare against")
+    func extractedPathsStayPercentEncoded() {
+        // The two things a real capture encodes: a non-ASCII segment, and a space.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/caf%C3%A9/items") == "/v1/caf%C3%A9/items")
+        #expect(HARParser.extractPath(from: "https://api.test/v1/my%20files/a.txt") == "/v1/my%20files/a.txt")
+        // An encoded slash stays encoded, and it is the reason this side of the seam was the one
+        // pinned: decoded, `%2F` would turn one segment into two and change how many segments
+        // `PathPattern` counts.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/a%2Fb/items") == "/v1/a%2Fb/items")
+        // The one exception Vapor's getter makes, mirrored here so the two sides still agree.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/a%3Bb/items") == "/v1/a;b/items")
+        // An ASCII path is untouched, which is every capture that already worked.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/users/123") == "/v1/users/123")
+    }
+
     // MARK: - Group Tag Suggestion
 
     @Test("Suggests group tag from meaningful path segment")

@@ -608,22 +608,85 @@ struct JourneyBehaviorOptions: ParsableArguments, Sendable {
 
 /// Reading and writing journey files.
 enum JourneyFile {
-    /// Accepts either a bare ``JourneySpec`` or a full ``Journey``, because both are things a caller
-    /// plausibly has: one hand-written, one produced by `mimic journey get`.
+    /// Keys that appear in a serialized ``Journey`` and in no ``JourneySpec``. Both are read from the
+    /// JSON before anything is decoded, because the shape has to be *decided* rather than guessed at
+    /// by trying decoders in an order — see ``readSpec(_:)``.
     ///
-    /// A `steps` array is required. Every field of `JourneySpec` is optional — that is what makes
-    /// partial updates work — so *any* JSON object decodes as an empty spec. Without this check an
-    /// unrelated file would be accepted and quietly produce a journey with no steps.
+    /// They are string literals because the coding keys they name are `private` on `Journey` and
+    /// `JourneyStep`. Two keys rather than one so that neither is load-bearing alone: renaming either
+    /// property still leaves a serialized `Journey` classified correctly by the other.
+    /// `readsAFullJourney` in `MimicCLICoreTests` round-trips a real `Journey` through this function
+    /// and asserts its statuses, headers and bodies survive, so it fails if the classification stops
+    /// working at all.
+    private static let journeyStepOutcomeKey = "outcome"
+    private static let journeyIdentityKey = "id"
+
+    /// Accepts either a bare ``JourneySpec`` — what a caller writes by hand, and what `mimic journey
+    /// export` produces — or a serialized ``Journey``.
+    ///
+    /// The second is not what `mimic journey get` *prints*: that prints a `ControlResult`, so the
+    /// journey is the value under its `journey` key. A `Journey` reaches a file by being lifted out
+    /// of one (`mimic journey get "X" | jq .journey > flow.json`) or out of the `journeys` array of a
+    /// `mimic project export` document, and both are ordinary things to have done.
+    ///
+    /// **The shape is decided by a key only a `Journey` has, never by which type decodes first.**
+    /// This used to try `JourneySpec` and accept it on `spec.steps != nil`, and that can never
+    /// distinguish the two: every property of `JourneySpec`/`JourneyStepSpec` is Optional with a
+    /// synthesized decoder, and a `Journey` *does* carry a `steps` array, so it decoded as a spec
+    /// whose `statusCode`, `headers`, `body`, `contentType` and `failure` were all nil — those live
+    /// under each step's `outcome`, which the spec has no property for. The `Journey` branch was
+    /// unreachable for exactly the documents it existed to handle, so importing one flattened every
+    /// step to a bare 200 with an empty body — `ProjectCommandExecutor.makeStep` reads a nil
+    /// `statusCode` as `?? 200` and a nil `failure` as "respond" — and every `connectionDrop` and
+    /// `timeout` became a 200. Exit 0.
+    ///
+    /// So: a step object carrying `outcome`, or a top-level `id`, means the file is a `Journey`, and
+    /// it is then decoded as one with `try` — a half-converted document fails loudly naming the key
+    /// it lacks instead of quietly losing its responses. Everything else is a `JourneySpec`, also
+    /// decoded with `try`, so a malformed field is reported rather than falling through to "this is
+    /// not a journey file".
+    ///
+    /// A `steps` array is still required first. Every field of `JourneySpec` is optional — that is
+    /// what makes partial updates work — so *any* JSON object decodes as an empty spec, and without
+    /// that check an unrelated file would be accepted and quietly produce a journey with no steps.
     static func readSpec(_ path: String) throws -> JourneySpec {
         let data = try FileInput.read(path)
 
-        if let spec = try? ControlCoding.decode(JourneySpec.self, from: data), spec.steps != nil {
-            return spec
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let steps = object["steps"] as? [Any]
+        else { throw notAJourneyFile(path) }
+
+        let carriesOutcome = steps.contains { step in
+            guard let step = step as? [String: Any] else { return false }
+            return step.keys.contains(journeyStepOutcomeKey)
         }
-        if let journey = try? ControlCoding.decode(Journey.self, from: data), !journey.steps.isEmpty {
-            return spec(from: journey)
+        let looksLikeAJourney = carriesOutcome || object.keys.contains(journeyIdentityKey)
+
+        guard looksLikeAJourney else {
+            do {
+                return try ControlCoding.decode(JourneySpec.self, from: data)
+            } catch {
+                throw CLIFailure.badArgument("\(path) is not a valid journey file: \(error)")
+            }
         }
-        throw CLIFailure.badArgument(
+
+        do {
+            return spec(from: try ControlCoding.decode(Journey.self, from: data))
+        } catch {
+            let tell = carriesOutcome ? "a step with an \"outcome\"" : "a top-level \"id\""
+            throw CLIFailure.badArgument(
+                """
+                \(path) looks like a whole journey — it has \(tell) — but it could not be read as \
+                one: \(error)
+                A file with neither is read as a journey spec, whose steps carry "statusCode", \
+                "headers", "body" and "failure" directly instead of an "outcome".
+                """
+            )
+        }
+    }
+
+    private static func notAJourneyFile(_ path: String) -> CLIFailure {
+        CLIFailure.badArgument(
             """
             \(path) is not a journey file: expected a JSON object with a "steps" array, e.g.
               { "name": "Retry after failure", "steps": [

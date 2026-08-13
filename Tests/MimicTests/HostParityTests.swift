@@ -913,7 +913,10 @@ struct HostParityTests {
         SharedImplementation(kind: .reset, shared: "ControlMessages.reset, and the state it carries"),
         SharedImplementation(
             kind: .serverStatus,
-            shared: "HostReport.serverStatus — the state string, the loopback baseURL, the message"
+            shared: """
+            HostReport.serverStatus — the state string, the loopback baseURL, the message. Not \
+            `errorCode`, which only the window populates; see contractDifferences.
+            """
         ),
         SharedImplementation(
             kind: .serverStart,
@@ -1174,6 +1177,22 @@ struct HostParityTests {
             which is the state `MockServerRuntime.stopServer()` drops the command in — so the \
             sentence was the one thing about it that could not be trusted. See \
             `serverLifecycleReportsWhatTheRuntimeDid`.
+            """
+        ),
+        ContractDifference(
+            kind: .serverStatus,
+            window: #"after a failed bind: state "error", the engine's sentence, and errorCode"#,
+            headless: #"after a failed bind: state "error" and the engine's sentence, no errorCode"#,
+            reason: """
+            The same asynchronous lifecycle again, seen from the report. The service awaits \
+            `engine.start` and throws `server.portInUse` as the answer to `server start`, so the code \
+            has already reached the caller by the time any status is asked for. The window's start has \
+            answered "starting" before the bind fails, so its only remaining channel is the status \
+            report — which is why `ServerStatusReport.errorCode` exists and why only this host fills \
+            it in. Everything else in the report is `HostReport.serverStatus` for both, including the \
+            `error` state and the message, which both take from the engine's own error. Populating \
+            `errorCode` on the service as well would close even this, and is a change in \
+            `MimicControlService`, which the work that added the field did not own.
             """
         ),
     ]
@@ -1451,6 +1470,32 @@ struct HostParityTests {
 
         let responses = try await expectParity(.projectExport(project: .name("Just created")), on: hosts)
         #expect(responses.window.result?.project?.name == "Just created")
+    }
+
+    /// Was a DIVERGENCE, now parity: a port outside 1–65535 is refused by both hosts, and refused
+    /// before anything is created.
+    ///
+    /// `AppControlHost.projectCreate` ran no validator at all, and nothing downstream of it does
+    /// either: `AppState.createProject` hands the number to `ProjectWorkspace.createProject`, which
+    /// builds a `ServerConfiguration` from it and saves it. So `mimic project create X --port 70000`
+    /// was accepted and stored against a window instance and refused with `request.invalid` by a
+    /// daemon — while the arm one screen above it, `serverStart`, had been validating the same value
+    /// through the same validator all along.
+    ///
+    /// The listing afterwards is the half a reply cannot show: an accepted-then-stored project and a
+    /// refusal both leave the caller holding one response, and only the store says which happened.
+    @Test("An out-of-range port is refused by both hosts, and creates nothing")
+    func anInvalidPortIsRefusedOnProjectCreate() async throws {
+        let hosts = try makeHosts()
+
+        let responses = try await expectParity(.projectCreate(name: "Bad port", port: 70_000), on: hosts)
+        #expect(responses.window.ok == false)
+        #expect(responses.window.error?.code == "request.invalid")
+        #expect(responses.headless.error?.code == "request.invalid")
+
+        let listed = try await expectParity(.projectList, on: hosts)
+        #expect(listed.window.result?.projects?.isEmpty == true)
+        #expect(listed.headless.result?.projects?.isEmpty == true)
     }
 
     /// A name that matches nothing is refused by both, and always was — the window had to search for

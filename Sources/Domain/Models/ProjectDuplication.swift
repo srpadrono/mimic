@@ -37,16 +37,25 @@ import Foundation
 ///
 /// ## Each helper enumerates its model's stored properties by hand
 ///
-/// Nothing checks that the lists are complete. The structurally complete form —
-/// `var copy = self; copy.id = UUID()`, which cannot drop a field because it never names one — is
-/// unavailable: `id` is a `let` on ``MockProject``, ``Endpoint``, ``Scenario``, ``Journey`` and
-/// ``JourneyStep``, so no copy can remint one in place. Widening those five to `var` would buy the
-/// safer copy, and it is a trade for a human to make rather than a cleanup: it gives up an identity
-/// that cannot change under a holder in exchange for a duplication that cannot silently drop a field.
+/// The structurally complete form — `var copy = self; copy.id = UUID()`, which cannot drop a field
+/// because it never names one — is unavailable: `id` is a `let` on ``MockProject``, ``Endpoint``,
+/// ``Scenario``, ``Journey`` and ``JourneyStep``, so no copy can remint one in place. Widening those
+/// five to `var` would buy the safer copy, and it is a trade for a human to make rather than a
+/// cleanup: it gives up an identity that cannot change under a holder in exchange for a duplication
+/// that cannot silently drop a field.
 ///
 /// Until then each helper below states the field list it must track, and adding a property to one of
-/// those models means coming back here. Miss it and duplication drops the new field in silence — no
-/// error, just a copy that is quietly not one.
+/// those models means coming back here. What has changed is what happens if you do not:
+/// `Tests/DomainTests/DuplicationCompletenessTests.swift` drives the check from the *types* rather
+/// than from these lists — it reflects over each model's stored properties and requires its fixture
+/// to differ from a default-constructed value on every one of them, then compares source and copy as
+/// encoded documents with identifiers rewritten by order of first appearance. A field this file
+/// forgets comes back at its default, which the fixture is guaranteed not to be using, so the
+/// comparison fails and names it. Two things it still cannot do: cover `MockProject.schemaVersion`,
+/// which is a `let` stamped by the initialiser and so identical in the fixture and in a
+/// default-constructed project; and *insist* that the fixture varies a field belonging to a type that
+/// file does not list — the encoded comparison still sees such a field, but only for as long as the
+/// fixture happens to give it a value that is not the default.
 extension MockProject {
 
     /// A copy of this project under `name`, sharing no identifier with it.

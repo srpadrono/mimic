@@ -24,8 +24,10 @@ Real limitations, not planned work:
 
 - **Spec import is the one workflow a script cannot reach.** Everything else the window does is a
   `ControlCommand`; parsing a HAR or an OpenAPI/Swagger document into endpoints is not, because
-  `SpecImport` is linked by the app alone — neither `ControlPlane` nor `MimicCLICore` depends on it,
-  in either manifest. An agent that wants a spec's routes parses the file itself and issues
+  `SpecImport` is linked by `AppFeatures` and the app bundle alone — neither `ControlPlane` nor
+  `MimicCLICore` depends on it, in either manifest, which
+  [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py) checks on every CI run rather
+  than leaving to review. An agent that wants a spec's routes parses the file itself and issues
   `endpointCreate` + `scenarioUpdate` per route, which is what the window's own review sheet does on
   commit, so nothing about the resulting project differs. What is missing is the parse and the
   review, and closing the gap means a command that carries a document and returns candidates — a

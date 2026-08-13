@@ -58,7 +58,7 @@ esac
 PRODUCTION_SOURCES=(Sources App/Sources Tools)
 
 # Every suite folder under `Tests/`, and until this line they were in scope for *none* of the
-# six rules — including the sleep rule, which exists because of tests. Nothing about `.textCase(`,
+# rules — including the sleep rule, which exists because of tests. Nothing about `.textCase(`,
 # `@AppStorage` or `asyncAfter` stops being a defect in a fixture: a test is where each of them is
 # most likely to be reached for, because "it is only a test" is the argument that makes all three feel
 # harmless, and a view fixture that shouts is one copy-paste from a view that ships.
@@ -77,9 +77,9 @@ UI_TESTS=(MimicUITests)
 #
 # This used to be `sed 's|//.*||'`, which knows nothing about string literals and so cut at the `//`
 # in every URL. That made the whole check evadable by accident: planting
-# `Text("see https://example.com").textCase(.uppercase)` in Sources/DesignSystem printed "6 house
-# rules checked, no violations" and exited 0, while the same line with the URL removed exited 1 —
-# both run against this tree. The hazard was already known one directory over. The compiler-settings
+# `Text("see https://example.com").textCase(.uppercase)` in Sources/DesignSystem printed
+# "…house rules checked, no violations" and exited 0, while the same line with the URL removed
+# exited 1 — both run against this tree. The hazard was already known one directory over. The compiler-settings
 # check in .github/workflows/ci.yml deliberately declines to strip trailing comments from
 # Package.swift, saying "`//` also appears inside every `.package(url:)`"; nobody connected that to
 # the scanner standing on it.
@@ -90,9 +90,15 @@ UI_TESTS=(MimicUITests)
 #
 # String *contents* are kept rather than blanked, on purpose. A house rule can legitimately be about
 # a literal — "never widen the control plane's binding beyond 127.0.0.1" is one this could grow into
-# — and blanking would make that rule unwritable here. It costs nothing today: running all six
-# patterns over Sources, App/Sources, Tests and MimicUITests with no stripping at all puts every hit
-# in a `//` comment and none inside a literal.
+# — and blanking would make that rule unwritable here. It costs nothing today, which was re-measured
+# rather than carried forward: running each rule's pattern over the trees *that rule* scans, with no
+# stripping at all, every hit is either inside a `//` comment or on one of the two lines an
+# allow-list already names, and none is inside a string literal.
+#
+# The scope qualifier is load-bearing and this sentence used to leave it out — it claimed the run
+# over "Sources, App/Sources, Tests and MimicUITests" put every hit in a comment, which is false for
+# the sleep rule: `ControlPlaneCoordinator.swift` and `DSJSONEditor.swift` both sleep in production
+# code, on purpose, and that rule does not scan `Sources` for exactly that reason.
 #
 # There are no `/* */` block comments anywhere in those four trees (`grep -rn '/\*'` over them returns
 # nothing), so the lexer does not know about them; if one appears it will need to. Every line is
@@ -308,7 +314,7 @@ fi
 
 # Swift is not a literal-string language, and every rule below used to be written as though it were.
 # Three spellings walked straight through, each one planted as real code in a file under
-# `Sources/DesignSystem` and confirmed to leave this script printing "6 house rules checked, no
+# `Sources/DesignSystem` and confirmed to leave this script printing "…house rules checked, no
 # violations" and exiting 0:
 #
 #     Text("x").textCase (.uppercase)       — a space between the member and its argument list
@@ -382,6 +388,36 @@ report \
     let alert = Alert (title: Text("Delete endpoint?"))
     let alert = SwiftUI.Alert(title: Text("Delete endpoint?"))
     let alert = SwiftUI . Alert (title: Text("Delete endpoint?"))' \
+    "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
+
+# The one AGENTS.md bullet that publishes the command it wants run — "`grep -rn
+# '\.font(\.system(size: [0-9]' Sources` prints exactly those two; a third means somebody hand-wrote
+# a rung" — and until this rule nothing ran it. `DSGlyph`'s own doc comment ends on the same
+# sentence, calling that grep "the whole check". A check that exists only as a string in two files
+# is not a check.
+#
+# The pattern is a *call site* applying a bare number, not a `.system(size:)` anywhere: `DSTypography`
+# declares the type scale with thirteen of them and is the right place for a literal. Requiring the
+# enclosing `.font(` is what tells those apart, and `[^)]*` between them cannot cross a `)`, so it
+# admits a qualifier — `Font.system`, `SwiftUI.Font.system` — without reaching into a neighbouring
+# call. A size named symbolically (`DSGlyph.inline`, `size.glyphSize`) never matches, because the
+# rung after `size:` has to be a digit.
+#
+# Two exemptions, and they are the two the bullet itself names, pinned to their exact spellings the
+# way the sleep rule below pins its one: the welcome window's 26pt first-run clock, which is an
+# illustration rather than a glyph, and its 14pt action glyph, which sits a point above the ladder's
+# ceiling on a stated visual judgement. Both say which they are at the call site. Anything else,
+# including anything below `DSGlyph.minimum`, is caught here — a separate floor rule would have
+# nothing left to catch, since a bare `size: 7` is already a bare literal and the exemptions name
+# only 26 and 14.
+report \
+    'AGENTS.md "Visual standard": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
+    "${DOT}font${WS}\([^)]*${DOT}system${WS}\(${WS}size:${WS}[0-9]" \
+    'WelcomeWindow\.swift:[0-9]+:.*\.font\(\.system\(size: (26, weight: \.regular|14)\)\)' \
+    'Image(systemName: "gear").font(.system(size: 7))
+    Image(systemName: "gear").font(.system (size: 7))
+    Image(systemName: "gear") . font ( . system ( size: 7 ) )
+    Image(systemName: "gear").font(SwiftUI.Font.system(size: 7))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
 # UI tests only, and this one genuinely is: `waitForExistence` is an XCUIElement method, and no target
