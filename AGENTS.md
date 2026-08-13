@@ -75,7 +75,7 @@ at generation time, not written by anyone here.
 This section used to say the per-module schemes "build the frameworks but do not bundle their test
 targets", and that is why `Mimic-Workspace` was presented as the only way to run a unit suite. It
 cannot be right: [`Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) — the sole
-producer of the coverage numbers — runs `xcodebuild -scheme Domain test` and six more against exactly
+producer of the README's coverage numbers — runs `xcodebuild -scheme Domain test` and six more against exactly
 those schemes, and `Scripts/update_readme_coverage.py` then reads the `Domain.xcresult`,
 `ControlPlane.xcresult` … bundles they leave behind. A scheme with nothing testable in it fails
 immediately with *"Scheme X is not currently configured for the test action"* and produces no bundle,

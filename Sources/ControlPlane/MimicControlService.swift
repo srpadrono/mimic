@@ -493,7 +493,7 @@ public actor MimicControlService: ControlHost {
     /// port, so the report falls back to the default rather than inventing one. Everything after
     /// that — the state string, whether a `baseURL` is present, what it says — is
     /// ``HostReport/serverStatus(state:configuredPort:globalDelayMs:)``, shared with the window,
-    /// which is where the twenty-eight-line copy of this switch used to live.
+    /// which is where the copy of this switch used to live.
     private func makeServerStatus() -> ServerStatusReport {
         HostReport.serverStatus(
             state: serverState,

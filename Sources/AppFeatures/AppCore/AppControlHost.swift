@@ -591,7 +591,7 @@ final class AppControlHost: ControlHost {
     ///
     /// Only the three values are this host's to read; the switch that turns them into a report — the
     /// state string, whether a `baseURL` is present and what it says — is shared with the service,
-    /// where the identical twenty-eight lines used to sit.
+    /// where the identical switch used to sit.
     private func makeServerStatus(_ appState: AppState) -> ServerStatusReport {
         HostReport.serverStatus(
             state: appState.serverState,

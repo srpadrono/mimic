@@ -8,7 +8,7 @@ import Foundation
 /// the live cursor sits, what has been logged — and each host reads that state its own way. What it
 /// does *not* need is its own copy of the arithmetic and shaping applied to those values afterwards,
 /// and that copy is what had been drifting: `MimicControlService.makeServerStatus` and
-/// `AppControlHost.makeServerStatus` were the same twenty-eight-line switch written twice, and
+/// `AppControlHost.makeServerStatus` were the same switch, written twice, and
 /// `makeState` derived the same three fields from the same project in two places.
 ///
 /// So the split is: a host reads its own state and hands the values over; everything downstream of

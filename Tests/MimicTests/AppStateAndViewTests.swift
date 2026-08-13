@@ -1085,8 +1085,8 @@ struct AppStateAndViewTests {
 
 /// A candidate shaped like one `SpecImport` produces, with every field the committer reads settable.
 ///
-/// File-scope rather than a method on a suite, because both import suites below need it — and one of them deliberately builds no `AppState` at all and two of
-/// them deliberately build no `AppState` at all.
+/// File-scope rather than a method on a suite, because both import suites below need it — and one of
+/// them deliberately builds no `AppState` at all.
 @MainActor
 private func makeCandidate(
     method: HTTPMethod = .get,

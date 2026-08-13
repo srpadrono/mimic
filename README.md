@@ -311,7 +311,6 @@ of its groups, which is what a newly added suite looks like before anybody write
 
 ### Coverage
 
-<!-- coverage:generated:start -->
 **Coverage is measured on every CI run, and the numbers are on the run page.** The macOS job's
 `Test (unit suites)` step runs the `Mimic-Workspace` scheme with `-enableCodeCoverage YES` and
 writes its result bundle to a named path; the `Coverage report` step reads that bundle with
@@ -338,6 +337,8 @@ per-scheme bundles the full suite produces, and committed by whoever ran it:
 **No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
 number is either so low it never fires or red on the run that introduces it. Measuring first, then
 setting the floor against a baseline, is the order.
+
+<!-- coverage:generated:start -->
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
