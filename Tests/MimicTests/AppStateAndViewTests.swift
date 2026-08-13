@@ -675,13 +675,15 @@ struct AppStateAndViewTests {
         try await waitUntil { await (engine.pushedEpochs.last ?? afterActivation) > afterActivation }
         let afterReactivation = try #require(await engine.pushedEpochs.last)
 
-        // An id naming no journey mutates nothing and pushes nothing, so it must not leave a raised
-        // count behind for the next unrelated edit to carry out — that would restart a run nobody
-        // touched. Asserted through a following edit, since the invalid call itself pushes nothing.
+        // An id naming no journey must not raise the count. It DOES still push —
+        // `mutateCurrentProject` reassigns `currentProject` unconditionally, so the `didSet` fires
+        // and a push goes out carrying whatever the count is — which is exactly why the count must
+        // be unraised: that push is a re-push of an unchanged document, and raised it would restart
+        // the run this test just started.
         //
-        // Waited on the push *count* rather than on the epoch: the epoch is supposed not to move
-        // here, so a predicate written about its value is true before the edit's push has landed and
-        // the assertion below would race it.
+        // Waited on the push *count* rather than on the epoch, and the invalid activation's own push
+        // is why: the epoch is supposed not to move here, so a predicate about its value is true
+        // before either push has landed and the assertion below would race both of them.
         let pushCountBefore = await engine.pushedEpochs.count
         appState.activateJourney(id: UUID())
         _ = appState.addJourney(name: "Unrelated")
@@ -723,7 +725,8 @@ struct AppStateAndViewTests {
     /// when the *identity* of the open project changed, and pushed endpoints alone otherwise — so
     /// this edit reached the project and stopped there. The engine kept the old delay, the editor's
     /// "Global delay" row showed a value nothing had changed, and `mimic server status` reported the
-    /// old port, while the headless service — which keeps no second copy — got it right.
+    /// old port — a defect only possible because the runtime keeps a second copy of the
+    /// configuration at all.
     @Test("A configuration change reaches the engine, not just the project")
     func serverConfigureReachesTheEngine() async throws {
         let engine = StubEngine()
@@ -975,9 +978,10 @@ struct AppStateAndViewTests {
 
     // MARK: - Control host
     //
-    // `AppControlHost` had no unit test anywhere in the repo, which is how the four divergences
-    // between it and `MimicControlService` shipped unnoticed. These cover the seam a script actually
-    // hits: the window's host answering the same commands the headless one does.
+    // `AppControlHost` had no unit test anywhere in the repo, which is how four divergences between
+    // it and the since-deleted second host shipped unnoticed — the better-tested host was the one
+    // nothing in production constructed. These cover the seam a script actually hits; the sweeps in
+    // `HostCommandSweepTests` cover that every command reaches an arm at all.
 
     @Test("A port given to `server start` is written to the project, not just to the runtime")
     func controlHostPersistsTheStartPort() async throws {
@@ -996,10 +1000,10 @@ struct AppStateAndViewTests {
         try await waitUntil { await engine.startConfigurations.last?.port == 9100 }
     }
 
-    /// The window's host and the headless service answer `reset` with the same sentence, because they
-    /// build it in the same place. This one used to report `Reset all.` — true of the request, silent
-    /// about the instance, and different from what a daemon says to the identical command.
-    @Test("Reset reports what was cleared, the same way the headless service does")
+    /// The sentence comes from `ControlMessages.reset`, not from this arm — which is what stopped it
+    /// reporting `Reset all.`: true of the request, silent about the instance. The wording is pinned
+    /// here because a script string-matches on it.
+    @Test("Reset reports what was cleared, in ControlMessages' words")
     func controlHostResetNamesWhatWasCleared() async throws {
         let appState = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
         let host = AppControlHost(appState: appState, repository: appState.repository)
@@ -1026,7 +1030,7 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.serverConfiguration.port == 8080)
     }
 
-    /// The half `HostParityTests` cannot see, because its stub engine reports no cursor at all.
+    /// The half a routing sweep cannot see, because a sweep's stub engine reports no cursor at all.
     ///
     /// `mimic journey advance` has to answer with the position the advance *produced*. The window's
     /// host used to dispatch the advance and then read `MockServerRuntime`'s mirror of the cursor —
@@ -1137,8 +1141,8 @@ struct AppStateAndViewTests {
 
     /// The channel a failed bind had none of.
     ///
-    /// `serverStart` answers before the engine binds — a declared contract difference, pinned in
-    /// `HostParityTests` — so the failure has to survive until the caller polls. It used to leave the
+    /// `serverStart` answers before the engine binds — the reply is optimistic by contract, and says
+    /// so — so the failure has to survive until the caller polls. It used to leave the
     /// runtime `.stopped` with a `portConflictAlert` only `WorkspaceView` reads, so `mimic server
     /// status` answered `stopped` with no `baseURL`: the same answer as a server nobody started. Run
     /// headless — which is the same app bundle with `MIMIC_HEADLESS=1` — no alert is rendered at all,
@@ -1223,7 +1227,7 @@ struct AppStateAndViewTests {
 
     /// The window's host used to store an imported document itself, as
     /// `Task { try? await repository.save(document) }` sitting beside a success envelope. The reply
-    /// stays optimistic — that is a declared contract difference, pinned in `HostParityTests` — but
+    /// stays optimistic — by contract, and `ControlMessages.projectImporting`'s verb says so — but
     /// the `try?` meant a refused write reached nobody at all: `mimic project import` exited 0 on an
     /// import that never happened, and the window said nothing either.
     ///

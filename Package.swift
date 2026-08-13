@@ -85,17 +85,19 @@ let package = Package(
 
         .target(
             name: "ControlPlane",
+            // Domain and Vapor only, since the owner's decision to delete `MimicControlService` and
+            // `MimicDaemon` — the two files that were the module's whole use of Persistence and
+            // MockServerEngine. `check_module_edges.py` forbids those edges now, so putting one back
+            // is a decision to be argued, not an accident.
             dependencies: [
                 "Domain",
-                "Persistence",
-                "MockServerEngine",
                 .product(name: "Vapor", package: "vapor"),
             ],
             path: "Sources/ControlPlane"
         ),
         .testTarget(
             name: "ControlPlaneTests",
-            dependencies: ["ControlPlane", "Persistence", "MockServerEngine", "Domain"],
+            dependencies: ["ControlPlane", "Domain"],
             path: "Tests/ControlPlaneTests",
             exclude: ["ControlPlaneTests.entitlements"]
         ),

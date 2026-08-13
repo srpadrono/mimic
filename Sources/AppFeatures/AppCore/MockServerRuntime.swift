@@ -136,10 +136,9 @@ final class MockServerRuntime {
                 try await engine.start(configuration: configuration)
                 serverState = .running(port: configuration.port)
             } catch let error as MockServerError {
-                // The engine's own sentence, which is exactly what `MimicControlService` puts in its
-                // `.error` state for the same failure — so `mimic server status` reads the same
-                // whichever host answered it. The `--port` hint the service adds belongs to the error
-                // it throws from `server start`, and stays on `startFailure` here.
+                // The engine's own sentence goes into the state, so `mimic server status` reads the
+                // engine's diagnosis rather than a paraphrase; the `--port` hint lives on
+                // `startFailure`'s code and message, which is the half a script branches on.
                 let message = error.localizedDescription
                 serverState = .error(message)
                 if case let .portInUse(port) = error {
@@ -215,9 +214,11 @@ final class MockServerRuntime {
     private(set) var journeyActivationEpoch = 0
 
     /// Records that an activation is about to be pushed. Call this *before* the mutation that causes
-    /// the push, and only when the activation will actually take effect — an id naming no journey
-    /// mutates nothing, so a count incremented for one would be carried by the next unrelated push
-    /// and would restart a run nobody asked to restart.
+    /// the push, and only when the activation will actually take effect. An id naming no journey
+    /// still causes a push — `ProjectWorkspace.mutateCurrentProject` reassigns `currentProject`
+    /// unconditionally and its `didSet` fires on every assignment — but that push is a re-push of an
+    /// unchanged document, so it must carry the *un*raised count; raised, it would restart a run
+    /// nobody asked to restart.
     func noteJourneyActivation() {
         journeyActivationEpoch += 1
     }

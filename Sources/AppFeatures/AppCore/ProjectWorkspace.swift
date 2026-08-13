@@ -35,9 +35,10 @@ final class ProjectWorkspace {
     /// create's insert land *after* it and put the project back. `mimic project duplicate Foo` in the
     /// same position reported "not found" for a project the caller had just been told was created.
     ///
-    /// `MimicControlService` never had this because it saves before it answers. Chaining the tasks
-    /// gives the window the same guarantee without making it wait: the writes reach the store in the
-    /// order they were asked for, whatever order the callers' replies arrive in.
+    /// A host that saves before it answers never has this problem — the price is that every caller
+    /// waits out the write. Chaining the tasks gives the window the same guarantee without making it
+    /// wait: the writes reach the store in the order they were asked for, whatever order the
+    /// callers' replies arrive in.
     ///
     /// ``importProject(_:)`` is in the chain too, and is the only member that does *not* answer
     /// early — it awaits its own write to report whether the store took the document. Being `async`

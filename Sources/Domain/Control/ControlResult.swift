@@ -191,11 +191,12 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// production constructs. Declared here so the host that *is* reachable can report the same code
     /// for the same failure rather than inventing a second spelling of it.
     ///
-    /// **Both hosts call this**, which is what makes "they answer the same" a fact about the code
-    /// rather than about two literals that happen to match: `AppControlHost` through
-    /// `MockServerRuntime.startFailure`, and `MimicControlService.startServer` from the
-    /// `catch let error as MockServerError` arm that used to spell the message out. `ControlServer`
-    /// maps the code to `409` and `mimic server status` reads it from whichever host answered.
+    /// Reached through `MockServerRuntime.startFailure`, which `AppControlHost.makeServerStatus`
+    /// reports as `errorCode` on `mimic server status` — the bind fails after `serverStart` has
+    /// already answered, so a stored code is the only way the failure survives until the poll.
+    /// `ControlServer.httpStatus` maps it to `409`. Declared in Domain rather than beside its caller
+    /// because it is part of the control API's stable vocabulary (docs/CLI.md names it), not an
+    /// implementation detail of the runtime.
     public static func serverPortInUse(port: Int) -> ControlError {
         ControlError(
             code: "server.portInUse",
@@ -206,18 +207,18 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
 
     /// A start that failed for any other reason, carrying the engine's own sentence.
     ///
-    /// Same provenance as ``serverPortInUse(port:)`` and reached from the same four places: the two
-    /// `catch` arms around `MimicControlService`'s `engine.start`, and the two around
-    /// `MockServerRuntime`'s. The message is the engine's own `localizedDescription` at every one of
-    /// them, so the two hosts cannot describe the same failure differently.
+    /// Same provenance as ``serverPortInUse(port:)``: any start failure that is not a port conflict,
+    /// reached from the two `catch` arms around `MockServerRuntime`'s `engine.start`. The message is
+    /// the engine's own `localizedDescription` at both, so the sentence a script reads is the
+    /// engine's diagnosis rather than a paraphrase of it.
     public static func serverStartFailed(_ message: String) -> ControlError {
         ControlError(code: "server.startFailed", message: message)
     }
 
     /// A project name that is empty, or is nothing but whitespace.
     ///
-    /// Shared by ``ProjectCommandExecutor`` (rename) and both hosts (create), which is three places
-    /// that each spelled the sentence out.
+    /// Shared by ``ProjectCommandExecutor`` (rename) and the host (create) — call sites that each
+    /// used to spell the sentence out privately.
     public static let emptyProjectName = ControlError.invalid("Project name must not be empty.")
 
     /// A ``ProjectRef`` carrying neither an id nor a usable name.
@@ -292,7 +293,7 @@ public struct ControlState: Codable, Sendable, Equatable {
     /// The control API contract this instance speaks. A caller checks this, not a marketing version,
     /// before assuming a command exists.
     public var apiVersion: String
-    /// The host application's version when there is one; `nil` for a headless daemon.
+    /// The host application's version when there is one; `nil` when the host has none to report.
     public var appVersion: String?
     /// `app` when a GUI instance is hosting the control plane, `headless` when it runs windowless.
     public var mode: String
@@ -340,17 +341,17 @@ public struct ServerStatusReport: Codable, Sendable, Equatable {
     /// The stable, dotted code for the failure ``message`` describes — `server.portInUse`,
     /// `server.startFailed` — and `nil` whenever the server is not in an error state.
     ///
-    /// A host that binds inside the call it was asked from can simply *throw* one of these codes, and
-    /// `MimicControlService` does: it awaits `engine.start` and answers `serverStart` with the
-    /// failure. `AppControlHost` cannot. `MockServerRuntime` binds from a task of its own, so
-    /// `serverStart` has already answered "starting, poll `mimic server status`" by the time the bind
-    /// fails — and for a port conflict the only channel left was `MockServerRuntime.portConflictAlert`,
-    /// which nothing but `WorkspaceView` reads and which a headless run never renders at all. The code
-    /// therefore has to survive until the poll arrives, which is what this field is for.
+    /// A host that binds inside the call it was asked from could simply *throw* one of these codes —
+    /// the deleted `MimicControlService` did exactly that. The shipped host cannot:
+    /// `MockServerRuntime` binds from a task of its own, so `serverStart` has already answered
+    /// "starting, poll `mimic server status`" by the time the bind fails — and for a port conflict
+    /// the only channel left was `MockServerRuntime.portConflictAlert`, which nothing but
+    /// `WorkspaceView` reads and which a headless run never renders at all. The code therefore has to
+    /// survive until the poll arrives, which is what this field is for.
     ///
-    /// It is a code and not a second sentence, because ``message`` already carries the sentence: both
-    /// hosts put the engine error's own `localizedDescription` into the `ServerState.error` this report
-    /// is built from.
+    /// It is a code and not a second sentence, because ``message`` already carries the sentence:
+    /// the runtime puts the engine error's own `localizedDescription` into the `ServerState.error`
+    /// this report is built from.
     public var errorCode: String?
 
     public init(

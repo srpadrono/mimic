@@ -5,15 +5,16 @@ import Testing
 /// The reporting a host-scoped command does *after* it has read its own state.
 ///
 /// Every assertion here used to be unreachable from a test, because the code it covers did not exist
-/// as a unit: `MimicControlService` and `AppControlHost` each carried their own copy of the server
-/// status switch, the state builder, the summary merge and the request-log selection, and the only
-/// way to ask either of them a question was to stand up a repository, an engine or a whole window.
-/// `HostParityTests` could then check that the two agreed with *each other* — which is a weaker claim
-/// than that either is right, and says nothing at all when both are wrong in the same way.
+/// as a unit: while the tree carried two hosts, each held its own copy of the server status switch,
+/// the state builder, the summary merge and the request-log selection, and the only way to ask
+/// either a question was to stand up a repository, an engine or a whole window. The parity suite of
+/// that era could check that the two agreed with *each other* — a weaker claim than that either is
+/// right, and one that says nothing at all when both are wrong in the same way.
 ///
-/// So these are the assertions about what the answer should *be*. `HostParityTests` stays the
-/// assertion that both hosts route through this code; the two together are what "one implementation
-/// of the rules" means for the host-scoped minority.
+/// The second host is deleted now, and these are the assertions about what the answer should *be* —
+/// the strong half. `HostCommandSweepTests` covers that `AppControlHost` routes every command to an
+/// arm at all; the two together are what "one implementation of the rules" means for the
+/// host-scoped minority.
 @Suite("Host report")
 struct HostReportTests {
 
@@ -200,8 +201,8 @@ struct HostReportTests {
         #expect(summaries[1].journeyCount == 4)
     }
 
-    /// No overlay is the headless service's case: it saves before it answers, so the store is never
-    /// behind it.
+    /// No overlay is the case for a caller whose store is never behind its session — a host that
+    /// saves before it answers passes `nil` here.
     @Test("With no open project the listing is the store, unmodified")
     func summariesWithoutAnOverlay() {
         let stored = MockProject(name: "Checkout")
@@ -263,7 +264,7 @@ struct HostReportTests {
 
     /// **Redaction is not optional.** `logList` is the one command that hands captured traffic to
     /// somebody else, and the traffic is the app-under-test's real credentials. It is applied here so
-    /// that neither host can answer with a less redacted log than the other.
+    /// that no host arm can answer with a less redacted log than this shared code decides.
     @Test("Credentials are redacted on the way out, and the held log is left intact")
     func credentialsAreRedacted() throws {
         let entry = RequestLog(
@@ -290,11 +291,11 @@ struct HostReportTests {
     }
 }
 
-/// The sentences both hosts have to say identically, asserted against the words rather than against
-/// each other.
+/// The control replies' stable vocabulary, asserted against the words themselves.
 ///
-/// `HostParityTests` compares the two hosts; it cannot tell a shared sentence that is right from a
-/// shared sentence that is wrong. These pin the words.
+/// A comparison between two producers of a sentence cannot tell a shared sentence that is right
+/// from a shared sentence that is wrong — which is what the old two-host parity suite was limited
+/// to. These pin the words a script actually string-matches on.
 @Suite("Control messages")
 struct ControlMessagesTests {
 
@@ -316,13 +317,13 @@ struct ControlMessagesTests {
         #expect(ControlMessages.logCleared(count: 12) == "Cleared 12 request log entries.")
     }
 
-    @Test("Server lifecycle answers that are the same from either host")
+    @Test("Server lifecycle answers come from one vocabulary")
     func serverSentences() {
         #expect(ControlMessages.serverAlreadyRunning(port: 9099) == "Server already running on port 9099.")
         #expect(ControlMessages.serverNotRunning == "Server is not running.")
     }
 
-    @Test("Journey runtime answers that are the same from either host")
+    @Test("Journey runtime answers come from one vocabulary")
     func journeySentences() {
         #expect(
             ControlMessages.journeyActivated(name: "Retry after failure", stepCount: 4)
@@ -352,12 +353,11 @@ struct ControlMessagesTests {
     }
 }
 
-/// Resolving a `ProjectRef` — the lookup both hosts do before they touch a project by name.
+/// Resolving a `ProjectRef` — the lookup the host does before it touches a project by name.
 ///
-/// It was a private copy in each: `AppControlHost.requireNamedProject` and the tail of
-/// `MimicControlService.resolveStoredProject`. Two copies of "which failure does a reference that
-/// names nothing produce" is two chances to answer `project.notFound` for a lookup that never
-/// happened.
+/// It was a private copy in each of the two hosts the tree used to carry: two copies of "which
+/// failure does a reference that names nothing produce" is two chances to answer `project.notFound`
+/// for a lookup that never happened.
 @Suite("Project reference resolution")
 struct ProjectReferenceTests {
 

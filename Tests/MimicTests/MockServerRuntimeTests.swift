@@ -319,8 +319,8 @@ struct MockServerRuntimeTests {
         manager.startServer()
         try await waitUntil { manager.serverState.isError }
 
-        // The engine's own sentence, which is what `MimicControlService` puts in its `.error` state
-        // for the same failure — so the two hosts cannot word `server status` differently.
+        // The engine's own sentence, verbatim — `server status` reports the engine's diagnosis
+        // rather than a paraphrase of it.
         #expect(manager.serverState == .error("Port 8080 is already in use."))
         #expect(manager.startFailure?.code == "server.portInUse")
         #expect(manager.startFailure?.details?["port"] == "8080")

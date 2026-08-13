@@ -123,30 +123,28 @@ and signals whatever pid it names — it quit developers' own instances, on ever
 `CommandKind` case, a `scope` for it, and handling it in `ProjectCommandExecutor` if it is
 project-scoped. The window, the CLI and the HTTP API all call that, so they cannot disagree. Never
 implement the same rule twice. Three more steps are easy to miss: a `CommandCatalog` descriptor, and
-a sample in each of the two lists the sweeps run on — `HostParityTests.sample(for:)` (which fails the
-*build*, being a `default`-free switch over `CommandKind`) and `ControlCommandSamples.all` in
-`DomainTests` (which fails the suite).
+a sample in each of the two lists the sweeps run on — `HostCommandSweepTests.sample(for:)` (which
+fails the *build*, being a `default`-free switch over `CommandKind`) and `ControlCommandSamples.all`
+in `DomainTests` (which fails the suite).
 
 **What the compiler enforces is narrower than it looks.** `ControlCommand.kind` and
 `CommandKind.scope` have no `default:`, so a new command cannot compile until it is named and
-classified. The three switches that *dispatch* it — `ProjectCommandExecutor.apply`,
-`MimicControlService.run`, `AppControlHost.perform` — all end in a `default:` that throws at runtime
-naming the command; closing them would mean re-listing the twenty-one or twenty-six cases each one
-declines, which is the hand-maintained duplication `CommandKind.scope` exists to remove.
+classified. The switches that *dispatch* it — `ProjectCommandExecutor.apply` and
+`AppControlHost.perform` — end in a `default:` that throws at runtime naming the command; closing
+them would mean re-listing every case each one declines, which is the hand-maintained duplication
+`CommandKind.scope` exists to remove.
 
 Sweeps over `CommandKind.allCases` cover the gap instead, and a new command has to survive all of
-them: the executor from both sides (`DomainTests`), both hosts with and without a project open
-(`HostParityTests`), the catalog, and the CLI, where `ControlTransportTests` requires some `mimic`
-invocation to emit every kind.
+them: the executor from both sides (`DomainTests`), the host with and without a project open
+(`HostCommandSweepTests`), the catalog, and the CLI, where `ControlTransportTests` requires some
+`mimic` invocation to emit every kind.
 
 A host-scoped command — one about server lifecycle, project selection, the journey cursor or the log,
-which no pure function of the project can express — goes to both `ControlHost` conformances:
-`AppControlHost` and `MimicControlService`. **Test `AppControlHost`.** It is the only one a shipped
-build reaches:
-`mimic daemon start` launches `Mimic.app` with `MIMIC_HEADLESS=1` rather than running
-`MimicControlService`, so a green `ControlPlaneTests` says nothing about what `mimic` does. The full
-account, and what is undecided about it, is in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#two-hosts-one-shipped).
+which no pure function of the project can express — goes to `AppControlHost`, the one `ControlHost`
+in production: `mimic daemon start` launches `Mimic.app` with `MIMIC_HEADLESS=1`, headless being a
+mode of the app rather than a second process. (The unreachable second host the module used to carry
+was deleted by the owner's decision — the account is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#one-host).)
 
 **Spec import is the deliberate hole in that surface.** `SpecImport` is linked by the app — by
 `AppFeatures` and by the app target — and by neither `ControlPlane` nor `MimicCLICore`, so HAR and

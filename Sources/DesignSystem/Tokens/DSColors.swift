@@ -220,10 +220,11 @@ public nonisolated enum DSColors {
     /// Destructive as a *filled slab with white text on it* — the exact counterpart of ``accentFill``,
     /// and needed for the same reason one appearance at a time.
     ///
-    /// `DSButton`'s destructive variant draws `.white` on ``destructive``. In light that is the deep
-    /// red, and white on it measures **5.64:1**. In dark it is the salmon that variant shares with a
-    /// 500's label — a colour chosen to be legible *as ink on a dark panel*, which is the opposite
-    /// requirement — and white on it measures **2.52:1**, the worst reading anywhere in this palette.
+    /// `DSButton`'s destructive variant *used to* draw `.white` on ``destructive``, and this token is
+    /// what it draws on now. In light the old fill was the deep red, and white on it measures
+    /// **5.64:1**. In dark it was the salmon that variant shared with a 500's label — a colour chosen
+    /// to be legible *as ink on a dark panel*, which is the opposite requirement — and white on it
+    /// measures **2.52:1**, the worst reading anywhere in this palette.
     ///
     /// One value in both appearances, exactly as `accentFill` is, and for the argument that token
     /// already makes: white on a slab does not change with the window's mode, so a slab that has white

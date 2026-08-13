@@ -859,6 +859,15 @@ struct DSContrastTests {
     /// `List(selection:)` at `.listStyle(.sidebar)`, so AppKit paints its selected row with
     /// `NSColor.selectedContentBackgroundColor` — a colour that follows the user's accent preference,
     /// and therefore a number about the machine running the test rather than about this palette.
+    /// The two washes are composited over the panel alone, and that is a boundary to know about
+    /// rather than an oversight: every hoverable or selectable row that carries a badge is drawn on
+    /// a `secondary` panel today — the sidebar, the traffic list, the request log. A wash over a
+    /// *sheet* would be a harder bed in dark mode (`surfaceElevated` is lighter than `secondary`
+    /// there, and the accent washes over it read under 4.5), but nothing in the window paints that
+    /// combination, and this suite's rule is to enumerate the beds from the code that draws them —
+    /// inventing one would flag a failure no screen can show. If a badge-bearing list ever lands on
+    /// a sheet, add `sheet`-composited washes here and expect the dark readings to force a token
+    /// change.
     private func badgeSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
         let panel = try resolve(DSColors.secondary, in: appearance)
         let hovered = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)

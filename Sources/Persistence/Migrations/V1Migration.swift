@@ -129,7 +129,9 @@ enum AppMigrations {
             try db.create(index: "journeyStep_journeyID", on: "journeyStep", columns: ["journeyID"])
 
             // Key-value store for instance-level state the control plane needs to survive a restart
-            // (most importantly: which project is open in a headless daemon).
+            // (as designed: which project a windowless instance had open. Nothing reads it today —
+            // the type that did went with the deleted second host — but a v1 migration is frozen
+            // and real databases carry the table).
             try db.create(table: "setting") { t in
                 t.column("key", .text).primaryKey().notNull()
                 t.column("value", .text).notNull()

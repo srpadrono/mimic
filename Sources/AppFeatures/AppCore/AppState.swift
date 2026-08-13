@@ -499,9 +499,12 @@ final class AppState {
     /// `MockRouteStore` looking identical, so the count below is what tells them apart.
     ///
     /// Noted before the mutation, because the push leaves synchronously from `currentProject`'s
-    /// `didSet` inside `mutateCurrentProject`, and only when the activation will actually take
-    /// effect: an id naming no journey mutates nothing and issues no push, so a count incremented
-    /// for one would ride out on the next unrelated edit and restart a run nobody touched.
+    /// `didSet` inside `mutateCurrentProject` — and only when the activation will actually take
+    /// effect. An id naming no journey leaves `activeJourneyID` untouched, but it still *pushes*:
+    /// `mutateCurrentProject` reassigns `currentProject` whether or not the closure changed
+    /// anything, and the `didSet` fires on every assignment. That push is argument-for-argument a
+    /// re-push, so it must carry the *un*raised count — raised, it would restart a run nobody
+    /// touched, on that push or on the next unrelated edit's.
     ///
     /// Clearing is not an activation and needs no count — a nil journey drops the run state outright.
     func activateJourney(id: UUID?) {

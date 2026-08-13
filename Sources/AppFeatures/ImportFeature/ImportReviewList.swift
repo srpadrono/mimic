@@ -323,8 +323,11 @@ private struct ImportCandidateRow: View {
                     RoundedRectangle(cornerRadius: DSCornerRadius.xs)
                         .fill(DSColors.warningText.opacity(0.12))
                 )
-                .help("An endpoint with this method and path already exists")
-                .accessibilityLabel("Duplicate of an existing endpoint")
+                // "Already covered", not "already exists": since `ImportRouteLedger`, a repeat is
+                // flagged whether the cover is an endpoint the project holds or an earlier row of
+                // this same import — and for a capture of real traffic the second is the common case.
+                .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
+                .accessibilityLabel("Duplicate — this method and path is already covered")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
                 .font(DSTypography.caption)

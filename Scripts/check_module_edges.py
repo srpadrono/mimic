@@ -54,6 +54,15 @@ FORBIDDEN = [
     ("Project.swift", "MimicCLICore", "GRDB", "the CLI is a client, never a host"),
     ("Project.swift", "MimicCLI", "Vapor", "the CLI is a client, never a host"),
     ("Project.swift", "MimicCLI", "GRDB", "the CLI is a client, never a host"),
+    # The owner resolved the two-host fork by deleting `MimicControlService` and `MimicDaemon` —
+    # the module's only users of a store and an engine. ControlPlane is the HTTP layer and the
+    # discovery file over the `ControlHost` protocol; the host is supplied by the app. An edge onto
+    # either module reappearing means a second host is growing back, which is a decision to argue
+    # (AGENTS.md, "One host"), not a dependency to add in passing.
+    ("Package.swift", "ControlPlane", "Persistence", "ControlPlane holds no host of its own"),
+    ("Package.swift", "ControlPlane", "MockServerEngine", "ControlPlane holds no host of its own"),
+    ("Project.swift", "ControlPlane", "Persistence", "ControlPlane holds no host of its own"),
+    ("Project.swift", "ControlPlane", "MockServerEngine", "ControlPlane holds no host of its own"),
 ]
 
 # (manifest, target, direct dependency). These are what make the absences above mean something:
@@ -64,17 +73,22 @@ REQUIRED_EDGES = [
     ("Package.swift", "MimicCLICore", "Domain"),
     ("Package.swift", "MimicCLICore", "ArgumentParser"),
     ("Package.swift", "mimic", "MimicCLICore"),
-    ("Package.swift", "ControlPlane", "Persistence"),
-    ("Package.swift", "ControlPlane", "MockServerEngine"),
     ("Package.swift", "ControlPlane", "Vapor"),
+    # The forbidden list above says Persistence and MockServerEngine must not appear under
+    # ControlPlane, so something must prove the parser still sees those names at all — otherwise a
+    # parser gone blind to a dependency shape reports the absences as compliance. `AppFeatures`
+    # carries both edges in Project.swift; Package.swift declares no app-level targets, so there the
+    # proof is each module's own test target, which necessarily names it.
+    ("Package.swift", "PersistenceTests", "Persistence"),
+    ("Package.swift", "MockServerEngineTests", "MockServerEngine"),
     ("Package.swift", "Persistence", "GRDB"),
     ("Package.swift", "SpecImportTests", "SpecImport"),
     ("Project.swift", "MimicCLICore", "Domain"),
     ("Project.swift", "MimicCLICore", "ArgumentParser"),
     ("Project.swift", "MimicCLI", "MimicCLICore"),
-    ("Project.swift", "ControlPlane", "Persistence"),
-    ("Project.swift", "ControlPlane", "MockServerEngine"),
     ("Project.swift", "ControlPlane", "Vapor"),
+    ("Project.swift", "AppFeatures", "Persistence"),
+    ("Project.swift", "AppFeatures", "MockServerEngine"),
     ("Project.swift", "Persistence", "GRDB"),
     ("Project.swift", "AppFeatures", "SpecImport"),
 ]

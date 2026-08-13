@@ -34,16 +34,16 @@ Real limitations, not planned work:
   larger change than it looks, because it would give `ControlPlane` a dependency it has deliberately
   never had. Note that `mimic project import` is a different operation: it reads a Mimic project
   export.
-- **`mimic daemon start` runs the app, not a daemon.** It sets `--headless` on `mimic app start`,
-  which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app hides its Dock icon and serves the
-  control API through `AppControlHost`. `MimicDaemon` and `MimicControlService` in `ControlPlane` —
-  a complete windowless composition root, and the target of every host-level test in `ControlPlaneTests` — are
-  unreachable from any shipped path. Headless works, and works through the same code path the window
-  uses, which is an argument for the current arrangement rather than against it; the cost is that
-  the better-tested host is the one nobody runs, and four divergences between the two shipped before
-  anyone noticed. Wiring the daemon up (so a headless Mimic needs no GUI app bundle) or removing it
-  are both open; the decision is a human's to make, and the code is deliberately left in place until
-  it is made. Detail in [ARCHITECTURE.md](ARCHITECTURE.md#two-hosts-one-shipped).
+- **`mimic daemon start` runs the app, not a daemon — by decision now, not by accident.** It sets
+  `--headless` on `mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app
+  hides its Dock icon and serves the control API through `AppControlHost`, the same code path the
+  window uses. The windowless composition root that used to sit unreachable beside it
+  (`MimicDaemon` + `MimicControlService`) was deleted by the owner rather than wired up, so a
+  headless Mimic keeps needing the app bundle — the accepted cost — and every rule is implemented
+  once. Revisiting that trade means bringing the pair back from git history *and* giving it a real
+  binary; `Scripts/check_module_edges.py` fails CI on the store/engine edges it would need, so the
+  revisit is a visible argument rather than an accretion. Detail in
+  [ARCHITECTURE.md](ARCHITECTURE.md#one-host).
 - **Matching ignores headers and body.** A request is routed by method, path, and — for GraphQL —
   operation. Two calls that differ only in their body or in an auth header cannot be told apart. The
   matcher already receives both, so this is a feature that hasn't been built rather than a design

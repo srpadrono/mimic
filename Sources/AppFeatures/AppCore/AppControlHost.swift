@@ -10,18 +10,17 @@ import Persistence
 /// commands onto the live ``AppState``, so an endpoint created from a script appears in the sidebar
 /// immediately and a journey activated in the UI is what the CLI reports.
 ///
-/// Project-scoped commands go through `ProjectCommandExecutor`, exactly as they do in the headless
-/// service; only the genuinely stateful minority is implemented here.
+/// Project-scoped commands go through `ProjectCommandExecutor`, like every caller of the command
+/// surface; only the genuinely stateful minority is implemented here.
 @MainActor
 final class AppControlHost: ControlHost {
 
     private weak var appState: AppState?
     /// Held across the suspension in `serverStart`, so two lifecycle *commands* cannot interleave.
-    /// `MimicControlService` carries the same flag for the same reason; the two hosts are meant to
-    /// answer identically and this is one of the places that has to be written twice to stay true.
+    /// (The deleted `MimicControlService` carried the same flag for the same reason.)
     ///
-    /// It covers less here than it does there, and the difference is the whole of the defect the two
-    /// lifecycle arms below were rewritten for. The service holds this flag across `engine.start`
+    /// It covers less here than a flag like it can, and the difference is the whole of the defect the
+    /// two lifecycle arms below were rewritten for. A host that binds inline holds such a flag across `engine.start`
     /// itself, so it is set for as long as the bind takes. This one is released on `defer` when the
     /// arm returns — and `AppState.startServer()` returns as soon as the runtime has published
     /// `.starting`, with the bind still ahead of it in a task of its own. The transition therefore
@@ -53,8 +52,8 @@ final class AppControlHost: ControlHost {
     /// "a read of session state … runs to completion in one hop with nothing able to interleave". It
     /// was true before the store lookups landed and it is not now, and it was asserting exactly the
     /// atomicity the control server's concurrency safety rested on. Two concurrent `serverStart`s can
-    /// interleave across that `await`, which is why the arm carries its own guard below — the same one
-    /// `MimicControlService` grew in the same change, refusing with `server.busy` rather than queueing.
+    /// interleave across that `await`, which is why the arm carries its own guard below, refusing
+    /// with `server.busy` rather than queueing.
     ///
     /// It then said "everything else here is still a single-hop read", and that had already stopped
     /// being true: the `journeyAdvance` arm awaits the engine, and does so precisely because reading
@@ -71,7 +70,7 @@ final class AppControlHost: ControlHost {
             return .failure(.internalFailure("The Mimic session is no longer available."))
         }
 
-        // Project-scoped: one implementation, shared with the CLI and the headless service.
+        // Project-scoped: one implementation, shared with every caller of the executor.
         if var project = appState.currentProject {
             do {
                 if let outcome = try ProjectCommandExecutor.apply(command, to: &project) {
@@ -93,8 +92,8 @@ final class AppControlHost: ControlHost {
         // of these; it declined only because there is no project to apply them to.
         //
         // This used to be a twenty-six-case list at the bottom of the switch below, mirrored case for
-        // case by `MimicControlService` and complemented by the executor's own twenty-one — one fact
-        // written three times and kept in agreement by hand. `CommandKind.scope` is that fact now,
+        // case by the since-deleted `MimicControlService` and complemented by the executor's own
+        // twenty-one — one fact written three times and kept in agreement by hand. `CommandKind.scope` is that fact now,
         // and its switch carries no `default`, so a command added later still cannot compile until
         // somebody decides which side of the line it falls on, which is the only thing naming
         // twenty-six cases here was buying.
@@ -103,7 +102,8 @@ final class AppControlHost: ControlHost {
         switch command {
         case .ping:
             // Mode comes from the same source the discovery file uses, so the two cannot disagree;
-            // the sentence around it is `ControlMessages`', so neither can the two hosts.
+            // the sentence around it is `ControlMessages`', so a script's string-match target is a
+            // constant rather than this arm's wording.
             return .success(.message(ControlMessages.ping(mode: mode, pid: pid)))
 
         case .describeCommands:
@@ -113,9 +113,8 @@ final class AppControlHost: ControlHost {
             return .success(.init(state: makeState(appState)))
 
         case let .reset(scope):
-            // The reply is built by `ControlMessages`, the same way the headless service builds it.
-            // This used to report `Reset \(scope.rawValue).` — true of the request, silent about the
-            // instance, and different from what the same command answers against a daemon. A script
+            // The reply is built by `ControlMessages`, not by this arm. It used to report
+            // `Reset \(scope.rawValue).` — true of the request, silent about the instance. A script
             // driving both got two answers to one question.
             var clearedLogEntries: Int?
             if scope == .logs || scope == .all {
@@ -146,8 +145,8 @@ final class AppControlHost: ControlHost {
             // Set before the first suspension below, cleared however this arm leaves. Two scripts —
             // or one script racing itself — asking to start at once would otherwise both cross the
             // `await` on `serverConfigure` and both call `startServer()`. Refused rather than queued,
-            // and with the same code the headless service uses, so a caller gets one answer to this
-            // whatever it is talking to.
+            // and with `ControlError.serverBusy` from Domain, so a caller gets the one stable code
+            // for this whatever arm produced it.
             guard !isChangingServerState else { return .failure(.serverBusy) }
             isChangingServerState = true
             defer { isChangingServerState = false }
@@ -159,7 +158,7 @@ final class AppControlHost: ControlHost {
             // `.error` and drops it otherwise, which is what made the old unconditional "Starting the
             // server on port N." a report of something that had not happened.
             //
-            // Refused with the code the headless service uses for the same collision, rather than
+            // Refused with `ControlError.serverBusy`, rather than
             // queued: `server.busy` maps to 409, and a caller that is told to poll `server status`
             // has everything it needs to retry. Switched with no `default` so a new `ServerState`
             // case cannot be added without deciding which side of this it falls on.
@@ -175,7 +174,7 @@ final class AppControlHost: ControlHost {
                 // `mimic server start --port` is a change to the project, and validating it here and
                 // then applying it somewhere the project cannot see is how the two came apart. The
                 // executor validates too, but keeping the check here means the caller gets
-                // `port.invalid` rather than a start that quietly used the old port.
+                // `request.invalid` rather than a start that quietly used the old port.
                 do {
                     try EndpointValidator.validatePort(port)
                 } catch {
@@ -185,9 +184,9 @@ final class AppControlHost: ControlHost {
                 guard configured.ok else { return configured }
             }
             // Already up. Read after the `await` above, not before it: a port supplied here is still
-            // written to the project — which is what `MimicControlService.startServer` does in the
-            // same position — and only then is the caller told the bind it asked for is not going to
-            // happen. Word for word the service's sentence, so a script gets one answer from either.
+            // written to the project, and only then is the caller told the bind it asked for is not
+            // going to happen — the sentence is `ControlMessages.serverAlreadyRunning`, so a script
+            // reads one stable answer rather than this arm's own wording.
             if case let .running(runningPort) = appState.serverState {
                 return .success(.init(
                     message: ControlMessages.serverAlreadyRunning(port: runningPort),
@@ -227,12 +226,12 @@ final class AppControlHost: ControlHost {
                     server: makeServerStatus(appState)
                 ))
             case .starting, .stopping:
-                // Refused rather than dropped or queued, with the code and the sentence the headless
-                // service uses for the same collision. The runtime cannot cancel a bind in progress,
+                // Refused rather than dropped or queued, with `ControlError.serverBusy`'s stable
+                // code and sentence. The runtime cannot cancel a bind in progress,
                 // and a caller told "stopping" would never poll again.
                 return .failure(.serverBusy)
             case .stopped, .error:
-                // Nothing to stop, in the sentence `ControlMessages` holds for both hosts.
+                // Nothing to stop, in the sentence `ControlMessages` holds.
                 return .success(.init(
                     message: ControlMessages.serverNotRunning,
                     server: makeServerStatus(appState)
@@ -332,7 +331,7 @@ final class AppControlHost: ControlHost {
 
         case let .logList(limit, unmatchedOnly):
             // Filter, trim and redaction are `HostReport`'s, so this arm cannot answer a different
-            // selection — or a less redacted one — than the headless service does. `appState.requestLogs`
+            // selection — or a less redacted one — than that shared code decides. `appState.requestLogs`
             // keeps the real values, because in the app's own window they are the developer's own
             // traffic on the developer's own screen; it is handing them to a *caller* that needs the
             // guard, and that is the path this goes through.
@@ -384,7 +383,8 @@ final class AppControlHost: ControlHost {
     ) async -> ControlResponse {
         switch command {
         case .projectList:
-            // The store, counted the way `MimicControlService.projectSummaries` counts it.
+            // The store, with the counts the store's own grouped query reports —
+            // `HostReport.projectSummaries` does the merge.
             //
             // This used to map `AppState.recentProjects`, and recents cannot answer the question: it
             // is a ten-entry `UserDefaults` cache holding an id, a name and a last-opened date, so
@@ -421,11 +421,11 @@ final class AppControlHost: ControlHost {
 
         case let .projectCreate(name, port):
             guard let trimmed = name.nilIfEmpty else { return .failure(.emptyProjectName) }
-            // Validated where `MimicControlService.run` validates it, and where the `serverStart` arm
-            // above already validated the same value. This arm did not, and nothing downstream does:
-            // `AppState.createProject` hands the number straight to `ProjectWorkspace.createProject`,
-            // which builds a `ServerConfiguration` from it and saves it. So `mimic project create X
-            // --port 70000` was accepted here, stored, and refused by a daemon for the same command.
+            // Validated where the `serverStart` arm above already validates the same value. This arm
+            // did not, and nothing downstream does: `AppState.createProject` hands the number
+            // straight to `ProjectWorkspace.createProject`, which builds a `ServerConfiguration`
+            // from it and saves it. So `mimic project create X --port 70000` was accepted and stored
+            // — an out-of-range port a script only discovered when `server start` later refused it.
             if let port {
                 do {
                     try EndpointValidator.validatePort(port)
@@ -490,7 +490,7 @@ final class AppControlHost: ControlHost {
             }
 
         case let .projectImport(document, activate):
-            // Same guard as the headless service: an import is the only way into a project that skips
+            // Whole-document validation, because an import is the only way into a project that skips
             // the per-field validators, so it validates the whole document before anything is stored.
             do {
                 try ProjectValidator.validate(document)
@@ -570,8 +570,8 @@ final class AppControlHost: ControlHost {
     }
 
     /// The whole document a reference names — endpoints and journeys included, which is what an export
-    /// has to carry. Mirrors `MimicControlService.resolveStoredProject`, including which failure each
-    /// dead end produces.
+    /// has to carry. Which failure each dead end produces is `MockProject.requireNamed`'s decision,
+    /// in Domain, not this method's.
     private func resolveStoredProject(_ ref: ProjectRef) async throws -> MockProject {
         // Same wait, same reason as `resolveStoredProjectID` above: this is the read behind
         // `mimic project export`, and exporting a project created by the previous command has to
@@ -592,21 +592,18 @@ final class AppControlHost: ControlHost {
         // `allProjects` returns stubs, so the name is matched against those and the winner loaded.
         // The matching itself is `MockProject.requireNamed` in Domain — the trim, the fold, the
         // first-match rule and which of `request.invalid` / `project.notFound` each dead end
-        // produces. It was a private copy here and another inside
-        // `MimicControlService.resolveStoredProject`.
+        // produces. It used to be a private copy here and another in the since-deleted second host.
         let stored = try await repository.allProjects()
         let match = try MockProject.requireNamed(ref, in: stored)
         return try await repository.load(id: match.id)
     }
 
-    /// Turns a thrown failure into the reply the headless service gives for the same one, so a script
-    /// branching on `error.code` gets the same string from either host.
+    /// Turns a thrown failure into a reply built from the stable vocabulary in Domain, so a script
+    /// branching on `error.code` matches against constants rather than this method's own wording.
     ///
-    /// The two branches that can be shared are: `ControlError` passes through, and a store failure is
-    /// `ControlError.persistenceFailure` — the same constructor `MimicControlService.execute` uses,
-    /// rather than the `"persistence.failure"` string literal each of them used to spell out. The
-    /// *shape* stays duplicated because it cannot move: `PersistenceError` lives in `Persistence`,
-    /// which Domain does not and must not see.
+    /// `ControlError` passes through, and a store failure is `ControlError.persistenceFailure` — the
+    /// constructor, not a `"persistence.failure"` string literal spelled out at the catch site,
+    /// which is what this used to do.
     private func failureResponse(for error: any Error) -> ControlResponse {
         if let error = error as? ControlError { return .failure(error) }
         if let error = error as? PersistenceError { return .failure(.persistenceFailure(error)) }
@@ -623,9 +620,9 @@ final class AppControlHost: ControlHost {
     ///
     /// Everything below the parameters — the project summary, the endpoint and journey counts — is
     /// ``HostReport/state(appVersion:mode:pid:server:project:activeJourney:requestLogCount:)``, so
-    /// the window cannot derive them differently from the headless service. What stays here is what
-    /// only this host can answer: where its version comes from (`Bundle.main`, which a service is
-    /// told instead), and that the live cursor is read from the runtime with the not-yet-started
+    /// the derivations live in Domain rather than in this arm. What stays here is what
+    /// only this host can answer: where its version comes from (`Bundle.main`),
+    /// and that the live cursor is read from the runtime with the not-yet-started
     /// journey as the fallback.
     private func makeState(_ appState: AppState) -> ControlState {
         HostReport.state(

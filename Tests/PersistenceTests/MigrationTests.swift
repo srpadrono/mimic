@@ -192,7 +192,7 @@ struct MigrationTests {
             #expect(stored == MockProject.currentSchemaVersion + 1)
             #expect(supported == MockProject.currentSchemaVersion)
 
-            // The message is what reaches the user — both hosts map `PersistenceError` onto
+            // The message is what reaches the user — the host maps `PersistenceError` onto
             // `persistence.failure` with `localizedDescription` — so "update Mimic" has to be
             // actionable, which means showing how far ahead the store is.
             let message = try #require(error.errorDescription)

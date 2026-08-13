@@ -107,12 +107,12 @@ public actor MockServerEngine {
     /// See ``MockRouteStore/update(endpoints:globalDelayMs:journey:activationEpoch:)`` for why it is
     /// a count rather than a flag.
     ///
-    /// **Both hosts call this**, each keeping its own count: `MockServerRuntime.updateMocks` reads
-    /// the one `AppState.activateJourney(id:)` bumps, and `MimicControlService.pushConfigurationToEngine`
-    /// the one its `activateJourney` bumps. `grep -rn activationEpoch --include='*.swift' Sources`
-    /// is the check, and it has to keep finding a hit in each of those three files: if the only hits
-    /// left are in this module, an activation has stopped being distinguishable from an edit again
-    /// and `mimic journey activate` against the already-active journey silently resumes mid-run.
+    /// **The production caller is `MockServerRuntime.updateMocks`**, which passes the count
+    /// `AppState.activateJourney(id:)` bumps. `grep -rn activationEpoch --include='*.swift' Sources`
+    /// is the check, and it has to keep finding a hit in `MockServerRuntime.swift` and
+    /// `AppState.swift`: if the only hits left are in this module, an activation has stopped being
+    /// distinguishable from an edit again and `mimic journey activate` against the already-active
+    /// journey silently resumes mid-run.
     ///
     /// The three-argument overload above passes `nil` and is the right call for anything that is not
     /// an activation.

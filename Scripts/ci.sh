@@ -218,7 +218,7 @@ step "House rules"
 #     stripped comments with `sed 's|//.*||'`;
 #   - spaced and module-qualified, the case that made it evadable by a space bar. `.textCase
 #     (.uppercase)`, `SwiftUI.Alert(…)` and `DispatchQueue . main . asyncAfter(…)`, planted together
-#     as real code under `Sources/`, left a full scan of this tree reporting "6 house rules checked,
+#     as real code under `Sources/`, left a full scan of this tree reporting "…house rules checked,
 #     no violations" and exiting 0.
 #
 # Both runs matter and neither substitutes for the other: the first says the scanner can see, the

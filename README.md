@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-987%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-947%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -229,49 +229,42 @@ The rule that keeps the window and the CLI honest: **every project-scoped operat
 `ProjectCommandExecutor` in `Domain`**, which all three surfaces call. A rule can only be written
 once.
 
-### Known issue: `mimic daemon start` runs the app, not the daemon
+### One host: `mimic daemon start` runs the app, headless
 
-`ControlPlane` contains `MimicDaemon` and `MimicControlService` — a full windowless Mimic, store and
-engine and command handling included. Nothing reaches them. `mimic daemon start` sets `--headless` on
-`mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app hides itself from the
-Dock and serves the control API through `AppControlHost`, exactly as it does with a window open.
-Nothing outside `MimicDaemon.swift` names the type:
+`mimic daemon start` sets `--headless` on `mimic app start`, which launches `Mimic.app` with
+`MIMIC_HEADLESS=1`; the app hides itself from the Dock and serves the control API through
+`AppControlHost`, exactly as it does with a window open. Headless is a mode of the app, not a
+separate process — and that code path is the one a developer watches all day, which is a real
+argument in its favour.
 
-```bash
-grep -rn MimicDaemon --include=*.swift . | grep -v '^\./Sources/ControlPlane/MimicDaemon\.swift:'
-```
-
-prints nothing. (The unfiltered grep used to be quoted here as returning "one hit, its own
-declaration". It returns two — a doc comment in that file now quotes the grep, so the check moved its
-own result.)
-
-Nothing is broken by this — headless works, and it works through the same code path a developer
-watches all day, which is a real argument in its favour. What it costs is honesty about the tests:
-every host-level test in `ControlPlaneTests` exercises the host that does not ship, while the host that does had
-no unit test at all until four behavioural divergences between the two had already been released.
-Whether to wire the daemon up or delete it is an open question; leaving the documentation implying
-that CI runs a separate daemon is not. See
-[AGENTS.md](AGENTS.md#two-hosts-one-of-them-shipped--a-known-issue) and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#two-hosts-one-shipped).
+It used to be half of a known issue. `ControlPlane` also contained `MimicDaemon` and
+`MimicControlService` — a full windowless Mimic, store and engine and command handling included —
+that nothing in production ever constructed, while every host-level test in `ControlPlaneTests`
+exercised it rather than the host that ships. The owner resolved the fork by deleting the pair:
+`ControlPlane` now holds the HTTP server, the discovery file and the `ControlHost` protocol, depends
+on `Domain` and Vapor alone, and `Scripts/check_module_edges.py` fails CI if an edge onto a store or
+an engine reappears under it. The sweeps in `Tests/MimicTests/HostCommandSweepTests.swift` drive
+every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain language and the reasoning.
 
 ## Testing
 
-987 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+947 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 646 | Linux or macOS — `swift test` |
+| Domain, persistence, engine, control plane, import, CLI | 621 | Linux or macOS — `swift test` |
 | Design system | 54 | macOS — needs SwiftUI |
-| App and coordination | 247 | macOS — hosted by the app |
+| App and coordination | 232 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
-The portable 646 break down as Domain 211, SpecImport 124, MimicCLICore 121, MockServerEngine 69,
-Persistence 68, ControlPlane 53. The app's 247 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 92, `MimicTests` 118, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+The portable 621 break down as Domain 211, SpecImport 124, MimicCLICore 121, MockServerEngine 69,
+Persistence 67, ControlPlane 29. The app's 232 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 92, `MimicTests` 103, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
@@ -288,7 +281,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 646, no Xcode needed
+swift test                    # the portable 621, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites + coverage, Release, UI tests
 ```
 

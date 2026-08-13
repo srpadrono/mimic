@@ -109,10 +109,14 @@ let project = Project(
             ])
         ),
 
-        // ControlPlane — the automation surface: a loopback HTTP admin API over the same engine and
-        // store the window uses. Hosted by the app; also runnable headless for CI.
-        // SWIFT_DEFAULT_ACTOR_ISOLATION overridden to "none" — it owns a Vapor application and an
-        // actor-isolated service, neither of which belongs on the main actor.
+        // ControlPlane — the automation surface: the loopback HTTP admin API (`ControlServer`) and
+        // the 0600 discovery file (`ControlEndpointFile`). The host behind the API is supplied by
+        // the app (`AppControlHost`); this module holds no host of its own since the owner's
+        // decision to delete `MimicControlService` and `MimicDaemon`, which is why it depends on
+        // Domain and Vapor alone — the deleted pair was its whole use of Persistence and
+        // MockServerEngine, and `check_module_edges.py` now forbids both edges.
+        // SWIFT_DEFAULT_ACTOR_ISOLATION overridden to "none" — it owns a Vapor application, which
+        // does not belong on the main actor.
         .target(
             name: "ControlPlane",
             destinations: [.mac],
@@ -121,8 +125,6 @@ let project = Project(
             buildableFolders: ["Sources/ControlPlane"],
             dependencies: [
                 .target(name: "Domain"),
-                .target(name: "Persistence"),
-                .target(name: "MockServerEngine"),
                 .external(name: "Vapor"),
             ],
             settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
@@ -136,8 +138,6 @@ let project = Project(
             entitlements: .file(path: "Tests/ControlPlaneTests/ControlPlaneTests.entitlements"),
             dependencies: [
                 .target(name: "ControlPlane"),
-                .target(name: "Persistence"),
-                .target(name: "MockServerEngine"),
                 .target(name: "Domain"),
             ],
             settings: .settings(base: [

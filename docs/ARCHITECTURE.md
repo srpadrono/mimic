@@ -100,11 +100,10 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   window's reaction: `ProjectWorkspace.openProject(id:)` treats *any* load failure as "the store does
   not have it", so a newer-schema project drops out of recents silently instead of explaining itself.
 - **ControlPlane** — `ControlServer` (a loopback-only Vapor app), `ControlEndpointFile` (the `0600`
-  discovery file), and `MimicControlService` + `MimicDaemon` (a windowless Mimic: store + engine +
-  log + rules). `ControlHost` is the protocol both `MimicControlService` and the app's
-  `AppControlHost` satisfy, so the HTTP layer does not know which it is serving — but in a shipped
-  build it is always serving `AppControlHost`. See **[Two hosts, one shipped](#two-hosts-one-shipped)**
-  before changing anything in this module.
+  discovery file), and `ControlHost`, the protocol the server serves so the HTTP layer does not know
+  who is answering. In production the answerer is always the app's `AppControlHost`. The module
+  depends on Domain and Vapor alone — see **[One host](#one-host)** for the windowless second host
+  it used to carry and why the owner deleted it.
 - **SpecImport** — HAR/OpenAPI/Swagger parsing → `ImportCandidate`s. Linked by `AppFeatures` and by
   the `Mimic` app target (`Project.swift` declares it on both); neither `ControlPlane` nor
   `MimicCLICore` links it, in `Package.swift` or in `Project.swift`. That missing edge is the whole
@@ -119,72 +118,43 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   - `AppControlHost` — maps control commands onto the live session, so `mimic` drives the window.
 - **MimicCLICore** — the `mimic` command surface as a library, so it is unit-testable. A client only.
 
-## Two hosts, one shipped
-
-The module map above is honest about what exists and misleading about what runs, so this needs saying
-plainly: **`MimicDaemon` and `MimicControlService` are not reachable from any shipped path.**
+## One host
 
 `mimic daemon start` reads like the entry point to a separate headless process. It is not.
 `DaemonCommand.Start` constructs an `AppCommand.Start`, sets `headless = true`, and calls its
 `run()`. `AppLauncher.launch(headless:)` then puts `MIMIC_HEADLESS=1` into the child environment and
-executes `Mimic.app/Contents/MacOS/Mimic` — the GUI bundle. Inside it, `HeadlessMode` sets the
+executes `Mimic.app/Contents/MacOS/Mimic` — the app bundle. Inside it, `HeadlessMode` sets the
 activation policy to `.accessory` (no Dock icon, no window, but `NSApplication` still runs its event
 loop, which the embedded servers need) and `ControlPlaneCoordinator` starts
 `ControlServer(host: AppControlHost(…), mode: "headless")`. The `"headless"` reported by `mimic ping`
-and written into the discovery file names a *mode of the app*. There is no second binary.
+and written into the discovery file names a *mode of the app*. There is no second binary, and — as
+of the owner's decision recorded here — no second host either.
 
-```bash
-# Nothing outside the file names the type. Prints nothing; exits 1.
-grep -rn MimicDaemon --include=*.swift . | grep -v '^\./Sources/ControlPlane/MimicDaemon\.swift:'
-```
+There used to be one. `ControlPlane` carried `MimicControlService` + `MimicDaemon`, a windowless
+Mimic with a store, an engine and command handling of its own, reachable from no shipped path: the
+host every `mimic` invocation actually hit was `AppControlHost`, while every host-level test in
+`ControlPlaneTests` exercised the service — so the better-tested host was the dead one, and a green
+`ControlPlaneTests` was evidence about code no user runs. Four behavioural divergences between the
+two shipped before a parity suite existed to catch them. Faced with wiring the daemon to a real
+binary or deleting it, the owner chose deletion: headless-as-a-mode covers what a daemon was for,
+and one implementation of every rule is worth more than a second binary. The git history keeps both
+files if that trade is ever revisited.
 
-The unfiltered grep — which this document and README.md both used to present as returning "one hit,
-its own declaration" — returns two, because a doc comment inside that file now quotes the grep. Its
-own documentation moves the number, so filter the file out and read what is left.
+What enforces the new shape:
 
-`MimicControlService` is referenced only by `MimicDaemon`, by doc comments, and by two test suites —
-`Tests/ControlPlaneTests`, which exercises it as the product, and `Tests/MimicTests/HostParityTests`,
-which drives it *beside* `AppControlHost` precisely to catch them drifting. Both source files ship in
-the framework and never execute. (A line count stood here; it is gone because it changes whenever
-anybody edits a comment in either file, and `wc -l` answers it on demand.)
-
-Three consequences worth understanding before you touch this area:
-
-- **The two hosts are meant to answer identically, and only one is ever exercised by a user.** Two
-  divergences were found by reading and fixed — a port passed to `server start` reached the runtime but
-  was never written to the project, and `reset` answered with a different sentence than the headless
-  service does; both are pinned in `Tests/MimicTests/AppStateAndViewTests.swift`. In both, the tests
-  were right about the code they ran and wrong about the product.
-  `Tests/MimicTests/HostParityTests` now drives commands through both hosts and separates the two
-  kinds of difference: a `contractDifferences` table of answers that are *allowed* to differ, each
-  with the reason (the window's host answers project lifecycle optimistically because its store
-  access is async, and the caller confirms with `state`), and a set of `DIVERGENCE` tests pinning
-  differences nobody defends, so that closing one is a visible edit to this suite rather than a
-  silent change in behaviour. A difference that is written down is a contract; one that is not is a
-  bug waiting to be found by a user.
-- **The test coverage points the wrong way.** Every test in `ControlPlaneTests` that exercises a
-  host runs against `MimicControlService` — `ControlServiceTests` builds one directly,
-  `ControlServerTests` stands a `ControlServer` on top of one. What needs no host at all is the
-  `Endpoint discovery` suite plus two unit tests in `ControlServerTests`: the Host-header pinning
-  check and the one holding `alreadyRunning` and `shuttingDown` apart. `AppControlHost` has a handful of its own in
-  `Tests/MimicTests/AppStateAndViewTests.swift`, added only after those divergences shipped, plus
-  `HostParityTests`, which drives it against its twin. A green `ControlPlaneTests` is still not
-  evidence that `mimic` works.
-- **The compiler does not make the dormant host keep up; a test does.** Both hosts' dispatch switches
-  end in a `default:` that throws at runtime naming the command, so a new one compiles with neither
-  host implementing it. This document previously said the opposite — that the switches carried no
-  `default` and a new command could not compile until both handled it — and that claim was the reason
-  nobody worried about `MimicControlService` rotting. What actually holds the two together now is
-  `HostParityTests`: two sweeps drive every host-scoped `CommandKind` through both hosts and fail if
-  either answers from its unimplemented arm, and the sample list they run on is a `default`-free
-  switch, so the *build* breaks until a new command has a payload to sweep with. That is what keeps
-  wiring the daemon up later a small change rather than a rewrite.
-
-Whether to give `MimicDaemon` a real `mimic daemon` binary — which would let a headless Mimic run
-without a GUI-capable app bundle, useful on a bare CI box — or to delete it and fold `ControlPlane`
-down to the server and the discovery file, is an open architectural question. It is deliberately not
-decided here. What this section exists to prevent is the previous state, where the docs described a
-headless service as the thing CI runs and nothing said otherwise.
+- **The module edge is a CI gate.** `ControlPlane` depends on Domain and Vapor alone;
+  `Scripts/check_module_edges.py` fails on an edge onto Persistence or MockServerEngine from it,
+  because a store or an engine under `ControlPlane` is a second host regrowing.
+- **The sweeps drive the shipped host.** `Tests/MimicTests/HostCommandSweepTests.swift` walks every
+  host-scoped `CommandKind` through `AppControlHost`, with and without a project open, and fails if
+  any answers from the unimplemented arm; its sample list is a `default`-free switch over
+  `CommandKind`, so the *build* breaks until a new command has a payload to sweep with. The answers
+  that used to be parity-compared against the second host are pinned to their literal values there,
+  which is the stronger claim — two hosts could drift together, a literal cannot.
+- **`ControlServerTests` tests the HTTP layer.** It stands `ControlServer` on `LoopbackTestHost`, a
+  fixture that routes project-scoped commands through the production executor and answers a handful
+  of host-scoped arms with session glue built from the same Domain pieces (`HostReport`,
+  `ControlMessages`, `EndpointValidator`). Host behaviour is `MimicTests`' to cover, directly.
 
 ## Key decisions (the "why")
 
@@ -201,17 +171,17 @@ headless service as the thing CI runs and nothing said otherwise.
   have no `default:` and are the compile-time half — `ControlCommand.kind`, which forces a new case
   to be named, and `CommandKind.scope`, which forces it onto one side of the project/host line.
 
-  The three switches that *dispatch* a command — `ProjectCommandExecutor.apply` and both hosts —
-  each end in a `default:` instead, because each is a switch over `ControlCommand` while its caller
-  has already narrowed by `CommandKind`, and the compiler cannot see that narrowing; closing them
-  would restore the three hand-written case lists (twenty-one on one side, twenty-six on the other)
-  that `scope` was introduced to collapse into one. Each tail throws and names the command rather
-  than falling through to a plausible lie like "no project is open".
+  The switches that *dispatch* a command — `ProjectCommandExecutor.apply` and the host's
+  `AppControlHost.perform` — each end in a `default:` instead, because each is a switch over
+  `ControlCommand` while its caller has already narrowed by `CommandKind`, and the compiler cannot
+  see that narrowing; closing them would restore the hand-written case lists that `scope` was
+  introduced to collapse into one. Each tail throws and names the command rather than falling
+  through to a plausible lie like "no project is open".
 
   What replaces the compile check is a set of sweeps over `allCases`, one per surface. `DomainTests`
   puts a sample of every kind through `apply` from both sides, so a project-scoped command reaching
-  the executor's tail — or a host-scoped one being swallowed there — fails. `HostParityTests` does
-  the same through **both hosts**, with and without a project open, asserting neither answered from
+  the executor's tail — or a host-scoped one being swallowed there — fails. `HostCommandSweepTests`
+  does the same through the host, with and without a project open, asserting it never answered from
   its unimplemented arm; its sample list is a `default`-free switch over `CommandKind`, so a new
   command stops that target compiling until it is covered. `ControlTransportTests` requires some
   `mimic` invocation to emit every kind. And the catalog is checked against `allCases` rather than

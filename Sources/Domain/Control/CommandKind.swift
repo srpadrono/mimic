@@ -90,8 +90,8 @@ public enum CommandScope: String, Sendable {
     /// A function of the open project. Applied by ``ProjectCommandExecutor``, once, for every host.
     case project
     /// Needs host state — which project is open, whether the server is running, where the live
-    /// journey cursor sits, what has been logged. Implemented by `MimicControlService` and
-    /// `AppControlHost` separately.
+    /// journey cursor sits, what has been logged. Implemented by `AppControlHost`, the one
+    /// `ControlHost` in production since the owner deleted the unreachable second one.
     case host
 }
 

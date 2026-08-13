@@ -1,19 +1,20 @@
 import Foundation
 
-/// Sentences both hosts have to say identically.
+/// The sentences a control reply is made of, held apart from any host.
 ///
-/// A command's *reply* is part of its contract: a script that runs `mimic reset` against a running
-/// window and against a headless daemon is entitled to the same answer, and AGENTS.md's rule about
-/// implementing a rule once is not only about the mutation — it is about everything the caller can
-/// observe. `ProjectCommandExecutor` already guarantees this for the project-scoped majority, because
-/// those commands have exactly one implementation. The genuinely stateful minority is implemented
-/// twice by necessity, and that is where the wording drifted: the service reported
-/// `Reset 12 log entries and journey "Checkout"` while the window reported `Reset all.`
+/// A command's *reply* is part of its contract: a script string-matches on it, so the wording is a
+/// stable surface, and AGENTS.md's rule about implementing a rule once is not only about the
+/// mutation — it is about everything the caller can observe. `ProjectCommandExecutor` already
+/// guarantees this for the project-scoped majority, because those commands have exactly one
+/// implementation. This type is the same guarantee for the host-scoped minority's wording, and it
+/// was born of the failure mode it prevents: while the tree carried two hosts, each spelled these
+/// sentences out privately, and one reported `Reset 12 log entries and journey "Checkout"` where
+/// the other reported `Reset all.` The second host is deleted; the discipline stays, because "the
+/// arm's own wording" versus "the vocabulary" is a real boundary even with one host — a reply built
+/// here cannot drift when somebody rewrites an arm.
 ///
-/// Only the parts that are a pure function of what happened live here. What the two hosts genuinely
-/// do differently — one persists through a repository and awaits, the other mutates a live session
-/// and returns — stays split, and staying split is easier to see once the accidental differences are
-/// gone.
+/// Only the parts that are a pure function of what happened live here. What a host genuinely does —
+/// persist, mutate a session, await an engine — is its own, and stays beside the state it touches.
 public enum ControlMessages {
 
     /// What a `reset` reports, from what it actually cleared.
@@ -56,7 +57,7 @@ public enum ControlMessages {
     /// A start against an instance already bound to the port asked for.
     ///
     /// Benign on purpose: a script that ensures the server is up should not have to ask first, so
-    /// this is a success from both hosts rather than a collision.
+    /// this is a success rather than a collision.
     public static func serverAlreadyRunning(port: Int) -> String {
         "Server already running on port \(port)."
     }
@@ -86,16 +87,16 @@ public enum ControlMessages {
 
     // MARK: - Project import
 
-    /// The two tenses of the import reply.
+    /// The two tenses of the import reply, spelled as two functions over one sentence so the tail
+    /// cannot be written twice.
     ///
-    /// This is the one place a difference between the hosts is deliberate, so it is spelled as two
-    /// functions over one sentence rather than hidden behind a flag: the headless service awaits its
-    /// repository and can report what it stored, the window's save is a task and can only report what
-    /// it accepted. `HostParityTests.contractDifferences` records the difference; what the pair here
-    /// removes is the *rest* of the sentence being written twice. The two tails agreed when this was
-    /// written, and nothing would have noticed if they stopped: `message` is an allowed difference
-    /// for this command in `HostParityTests` precisely because of the verb, so the comparison that
-    /// would have caught a drifting tail is the one turned off for it.
+    /// The verb is a fact about the caller's save. The shipped host answers `projectImporting` —
+    /// its save is a task in the write chain, so it can only report what it *accepted* — while a
+    /// host that awaits its store before answering reports `projectImported`, what it *stored*.
+    /// Nothing in production says the past tense today (the second host that did is deleted;
+    /// `ControlServerTests`' fixture, which saves synchronously in memory, still does), and the pair
+    /// is kept because the distinction is the honest one: if the window's import reply is ever made
+    /// to await the chain, the change is one verb here rather than a resworded sentence there.
     public static func projectImported(name: String, endpointCount: Int, journeyCount: Int) -> String {
         projectImport(
             verb: "Imported",

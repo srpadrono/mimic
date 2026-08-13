@@ -1,20 +1,19 @@
 import Foundation
 
-/// The parts of a host-scoped answer that are a pure function of values every host already holds.
+/// The parts of a host-scoped answer that are a pure function of values the host already holds.
 ///
 /// ``ProjectCommandExecutor`` is the repository's answer for the project-scoped majority: one
 /// implementation, so the window and a script cannot drift. The host-scoped minority genuinely needs
 /// state the open document does not hold — which project is open, whether the engine is bound, where
-/// the live cursor sits, what has been logged — and each host reads that state its own way. What it
-/// does *not* need is its own copy of the arithmetic and shaping applied to those values afterwards,
-/// and that copy is what had been drifting: `MimicControlService.makeServerStatus` and
-/// `AppControlHost.makeServerStatus` were the same switch, written twice, and
-/// `makeState` derived the same three fields from the same project in two places.
-///
-/// So the split is: a host reads its own state and hands the values over; everything downstream of
-/// that — the state string, the loopback URL, the counts, the summary merge, the log's filter and
-/// trim — happens here, once. A difference in one of those is now impossible rather than merely
-/// tested for, which is the strongest form the parity claim can take.
+/// the live cursor sits, what has been logged. What answering does *not* need is a private copy of
+/// the arithmetic and shaping applied to those values afterwards, and this type exists because that
+/// copy demonstrably drifts: while the tree carried two hosts, `makeServerStatus` was the same
+/// switch written twice and `makeState` derived the same three fields from the same project in two
+/// places, and they had come apart. The second host is deleted now (AGENTS.md, "One host"); this
+/// split survives it, because it is the same discipline the executor applies to the other side of
+/// the line — the host reads its own state and hands the values over, and everything downstream —
+/// the state string, the loopback URL, the counts, the summary merge, the log's filter and trim —
+/// happens here, once, where `DomainTests` can reach it without standing up a session.
 ///
 /// Foundation only, and deliberately: nothing here may reach an engine, a store or a window. A helper
 /// that needs one of those is not a report, it is the host's own work, and it belongs in the host.
@@ -25,8 +24,8 @@ public enum HostReport {
     /// The address a caller points a client at while the mock server is bound.
     ///
     /// Loopback is not a default here, it is the contract — the mock server binds `127.0.0.1` and the
-    /// control plane refuses to widen (see AGENTS.md). Built in one place because it was built in
-    /// three: both hosts' status reports and the service's "Server running at …" sentence.
+    /// control plane refuses to widen (see AGENTS.md). Built in one place because it used to be
+    /// built in three, across the two hosts the tree then carried, and the copies had drifted.
     public static func loopbackBaseURL(port: Int) -> String {
         "http://127.0.0.1:\(port)"
     }
@@ -127,8 +126,8 @@ public enum HostReport {
     ///
     /// `openProject` is the one asymmetry, and it is a real one rather than an accident: the window
     /// answers the open project from the session because an edit made a moment ago is still sitting
-    /// in the autosave debounce, so the stored row is the one that can be behind. The headless
-    /// service saves before it answers and passes `nil`.
+    /// in the autosave debounce, so the stored row is the one that can be behind. A caller whose
+    /// store is never behind its session passes `nil` and the listing is the store, unmodified.
     public static func projectSummaries(
         of stored: [MockProject],
         counts: [UUID: ProjectCounts],
@@ -159,10 +158,10 @@ public enum HostReport {
     /// under test sent, and what it sends is real — a staging bearer token, a session cookie, an API
     /// key. Inside the app's own window that is exactly what you want to see; `logList` is the one
     /// command that hands captured traffic to somebody else, so it is applied on the way out here
-    /// rather than trusted to two hosts to remember. See ``RequestLog/redactingCredentials()``.
+    /// rather than trusted to a host arm to remember. See ``RequestLog/redactingCredentials()``.
     ///
-    /// A negative `limit` is floored at zero rather than refused, matching what both hosts did: a
-    /// caller asking for -1 entries gets none, not an error about arithmetic.
+    /// A negative `limit` is floored at zero rather than refused: a caller asking for -1 entries
+    /// gets none, not an error about arithmetic.
     public static func requestLog(
         from logs: [RequestLog],
         limit: Int?,

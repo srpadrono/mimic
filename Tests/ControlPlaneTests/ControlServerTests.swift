@@ -7,9 +7,16 @@ import FoundationNetworking
 import Testing
 @testable import ControlPlane
 @testable import Domain
-@testable import Persistence
 
 /// The HTTP surface, exercised the way a `curl`-driven script or a non-Swift agent would.
+///
+/// The host behind the server is ``LoopbackTestHost``, a fixture at the bottom of this file — not a
+/// production host. These tests used to stand `ControlServer` on `MimicControlService`, the
+/// self-contained headless service, until the owner resolved the two-host fork by deleting it (see
+/// "One host" in AGENTS.md). What this suite covers is `ControlServer` itself — authentication,
+/// Host pinning, error→status mapping, body limits, loopback binding, the wire encoding — and for
+/// that it needs *a* host, not *the* host: the shipped host's behaviour has its own suite in
+/// `MimicTests`, driven directly rather than over a socket.
 ///
 /// Time-limited because every case here binds a real socket: a bind that never completes, or a
 /// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
@@ -27,16 +34,11 @@ struct ControlServerTests {
     @TaskLocal static var currentToken: String?
 
     static func withServer(
-        _ body: (URL, MimicControlService) async throws -> Void
+        _ body: (URL, LoopbackTestHost) async throws -> Void
     ) async throws {
-        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
-        let service = MimicControlService(
-            repository: GRDBProjectRepository(dbQueue: queue),
-            settings: SettingsStore(dbQueue: queue),
-            mode: "headless"
-        )
+        let host = LoopbackTestHost()
         // An explicit token keeps the suite independent of `MIMIC_CONTROL_TOKEN` in the environment.
-        let server = ControlServer(host: service, mode: "headless", token: ControlToken.generate())
+        let server = ControlServer(host: host, mode: "headless", token: ControlToken.generate())
         // Port 0 lets the OS pick, and `advertise: false` keeps the test from overwriting a real
         // instance's discovery file.
         let port = try await server.start(port: 0, advertise: false)
@@ -44,15 +46,13 @@ struct ControlServerTests {
 
         do {
             try await Self.$currentToken.withValue(server.token) {
-                try await body(baseURL, service)
+                try await body(baseURL, host)
             }
         } catch {
             try? await server.stop()
-            await service.shutdown()
             throw error
         }
         try await server.stop()
-        await service.shutdown()
     }
 
     struct Reply {
@@ -183,15 +183,10 @@ struct ControlServerTests {
     /// that only passed when it happened would be a flake in the other direction.
     @Test("A start racing a stop on the control port is never told the port is in use")
     func startDuringStopIsRefusedRatherThanColliding() async throws {
-        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
-        let service = MimicControlService(
-            repository: GRDBProjectRepository(dbQueue: queue),
-            settings: SettingsStore(dbQueue: queue),
-            mode: "headless"
-        )
+        let host = LoopbackTestHost()
 
         for attempt in 1...3 {
-            let server = ControlServer(host: service, mode: "headless", token: ControlToken.generate())
+            let server = ControlServer(host: host, mode: "headless", token: ControlToken.generate())
             // `advertise: false` throughout: a discovery file here would overwrite a real instance's.
             let port = try await server.start(port: 0, advertise: false)
 
@@ -212,8 +207,6 @@ struct ControlServerTests {
             )
             try? await server.stop()
         }
-
-        await service.shutdown()
     }
 
     /// The two refusals name different problems, and the difference is what the caller does next:
@@ -512,8 +505,8 @@ struct ControlServerTests {
 
     @Test("logList redacts credentials the app under test sent")
     func logListRedactsCredentials() async throws {
-        try await Self.withServer { baseURL, service in
-            await service.appendLog(RequestLog(
+        try await Self.withServer { baseURL, host in
+            await host.appendLog(RequestLog(
                 method: .post,
                 path: "/v1/token",
                 requestHeaders: [
@@ -567,6 +560,120 @@ struct ControlServerTests {
             if !host.hasPrefix("127.") { return host }
         }
         return nil
+    }
+}
+
+/// The host these tests stand `ControlServer` on. A fixture, deliberately not a host.
+///
+/// Project-scoped commands go through ``ProjectCommandExecutor`` — the production implementation of
+/// every rule, the same calls the shipped host makes — over one in-memory project. The handful of
+/// host-scoped arms the HTTP tests actually reach are trivial session glue, built from the same
+/// Domain pieces the shipped host builds its replies from (`ControlMessages`, `HostReport`,
+/// `EndpointValidator`, `JourneyStatus.make`), so what travels over the wire in these tests is the
+/// shape production sends. Every other host-scoped command answers `internalFailure` naming this
+/// type: a future test reaching for an arm this fixture does not carry fails loudly instead of
+/// passing against an accidental default.
+///
+/// No store and no engine, on purpose. What `ControlServerTests` covers is the HTTP layer; the
+/// shipped host's behaviour — persistence ordering, the engine, the write chain — is covered in
+/// `MimicTests`, against `AppControlHost` itself.
+actor LoopbackTestHost: ControlHost {
+    private var project: MockProject?
+    private var logs: [RequestLog] = []
+
+    func appendLog(_ log: RequestLog) {
+        logs.append(log)
+    }
+
+    func execute(_ command: ControlCommand) async -> ControlResponse {
+        // The executor first, exactly as the shipped host orders it: it answers every project-scoped
+        // command and returns nil for a host-scoped one.
+        if var open = project {
+            do {
+                if let outcome = try ProjectCommandExecutor.apply(command, to: &open) {
+                    if outcome.didMutate { project = open }
+                    return .success(outcome.result)
+                }
+            } catch let error as ControlError {
+                return .failure(error)
+            } catch {
+                return .failure(.internalFailure(error.localizedDescription))
+            }
+        } else if command.kind.scope == .project {
+            return .failure(.noProjectOpen)
+        }
+
+        switch command {
+        case .ping:
+            return .success(.message(ControlMessages.ping(mode: "headless", pid: Int(ProcessInfo.processInfo.processIdentifier))))
+
+        case .describeCommands:
+            return .success(.init(commands: CommandCatalog.descriptors))
+
+        case .state:
+            return .success(.init(state: HostReport.state(
+                appVersion: nil,
+                mode: "headless",
+                pid: Int(ProcessInfo.processInfo.processIdentifier),
+                server: HostReport.serverStatus(state: .stopped, configuredPort: 8080, globalDelayMs: 0),
+                project: project,
+                activeJourney: activeJourneyStatus(),
+                requestLogCount: logs.count
+            )))
+
+        case let .projectCreate(name, port):
+            let configuration = ServerConfiguration(port: port ?? 8080, globalDelayMs: 0)
+            let created = MockProject(name: name, serverConfiguration: configuration)
+            if let port {
+                do { try EndpointValidator.validatePort(port) } catch { return .failure(.validation(error)) }
+            }
+            project = created
+            return .success(.init(message: "Created project \"\(name)\".", project: created))
+
+        case let .projectImport(document, _):
+            // Held to the same rules as the shipped hosts hold it to, through the same validator.
+            do { try EndpointValidator.validate(document) } catch { return .failure(.validation(error)) }
+            project = document
+            return .success(.init(
+                message: ControlMessages.projectImported(
+                    name: document.name,
+                    endpointCount: document.endpoints.count,
+                    journeyCount: document.journeys.count
+                ),
+                project: document
+            ))
+
+        case let .journeyActivate(ref):
+            guard var open = project else { return .failure(.noProjectOpen) }
+            guard let ref, let journey = open.journey(matching: ref) else {
+                return .failure(.internalFailure("LoopbackTestHost only activates by reference."))
+            }
+            open.activeJourneyID = journey.id
+            project = open
+            return .success(.init(
+                message: ControlMessages.journeyActivated(name: journey.name, stepCount: journey.steps.count),
+                journey: journey,
+                journeyStatus: JourneyStatus.make(journey: journey, state: nil)
+            ))
+
+        case .journeyStatus:
+            guard let status = activeJourneyStatus() else { return .failure(.noActiveJourney) }
+            return .success(.init(journeyStatus: status))
+
+        case let .logList(limit, unmatchedOnly):
+            return .success(.init(logs: HostReport.requestLog(from: logs, limit: limit, unmatchedOnly: unmatchedOnly)))
+
+        default:
+            return .failure(.internalFailure(
+                "\(command.kind.rawValue) is not part of the LoopbackTestHost fixture — add the arm if an HTTP test needs it."
+            ))
+        }
+    }
+
+    private func activeJourneyStatus() -> JourneyStatus? {
+        guard let project, let id = project.activeJourneyID,
+              let journey = project.journeys.first(where: { $0.id == id }) else { return nil }
+        return JourneyStatus.make(journey: journey, state: nil)
     }
 }
 
