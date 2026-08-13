@@ -873,6 +873,211 @@ struct HostParityTests {
         #expect(windowState.activeJourney?.journeyName == headlessState.activeJourney?.journeyName)
     }
 
+    // MARK: - Consolidated into Domain
+
+    /// A host-scoped answer that is no longer written twice, and what moved.
+    ///
+    /// **This table is the difference between two kinds of parity, and the distinction matters when
+    /// reading a green run of this suite.** Everything else here is parity *by test*: two
+    /// implementations exist, they are driven side by side, and the run says they agreed today. The
+    /// entries below are parity *by construction*: there is one implementation, in Domain, and both
+    /// hosts call it — so the only way they can disagree is for somebody to stop calling it, which is
+    /// what ``consolidatedRepliesComeFromDomain()`` is for. It compares each reply against the value
+    /// Domain produces rather than against the other host, because two hosts that have both inlined
+    /// the same wrong sentence agree perfectly.
+    ///
+    /// Still parity by test only — two implementations, held together by this file:
+    ///
+    /// - `projectCreate`, `projectOpen`, `projectClose`, `projectDelete`, `projectDuplicate`,
+    ///   `projectExport`, `projectImport`, `projectList` — the window initiates through `AppState`
+    ///   and the service awaits a repository. Five of them are declared contract differences below.
+    /// - `serverStart` and `serverStop`'s success sentences — one reports intent, the other a bind.
+    /// - `journeyAdvance`'s sentence — the service names the position it reached.
+    /// - `state` and `serverStatus`'s *inputs* — which project is open, what the engine is doing.
+    ///   The shaping is shared; reading the state is not, and cannot be.
+    ///
+    /// One helper moved to Domain that only the window reaches: `MockProject.matches`, the
+    /// open-project shortcut. The service has no equivalent — it saves before it answers, so the
+    /// store is never behind it — so that is a consolidation of the window's own two copies rather
+    /// than of a cross-host pair. `DomainTests.ProjectReferenceTests` covers it, including that it
+    /// and `requireNamed` pick the same project.
+    private struct SharedImplementation {
+        let kind: CommandKind
+        /// What is now built in Domain rather than in each host.
+        let shared: String
+    }
+
+    private static let sharedByConstruction: [SharedImplementation] = [
+        SharedImplementation(kind: .ping, shared: "ControlMessages.ping(mode:pid:)"),
+        SharedImplementation(kind: .state, shared: "HostReport.state — the summary and both counts"),
+        SharedImplementation(kind: .reset, shared: "ControlMessages.reset, and the state it carries"),
+        SharedImplementation(
+            kind: .serverStatus,
+            shared: "HostReport.serverStatus — the state string, the loopback baseURL, the message"
+        ),
+        SharedImplementation(
+            kind: .serverStart,
+            shared: "ControlMessages.serverAlreadyRunning(port:), ControlError.serverBusy"
+        ),
+        SharedImplementation(
+            kind: .serverStop,
+            shared: "ControlMessages.serverNotRunning, ControlError.serverBusy"
+        ),
+        SharedImplementation(
+            kind: .journeyActivate,
+            shared: "ControlMessages.journeyActivated(name:stepCount:) and .journeyCleared"
+        ),
+        SharedImplementation(kind: .journeyRestart, shared: "ControlMessages.journeyRestarted(name:)"),
+        SharedImplementation(kind: .logList, shared: "HostReport.requestLog — filter, trim, redaction"),
+        SharedImplementation(kind: .logClear, shared: "ControlMessages.logCleared(count:)"),
+        SharedImplementation(kind: .projectList, shared: "HostReport.projectSummaries — the count merge"),
+        SharedImplementation(
+            kind: .projectImport,
+            shared: "ControlMessages.projectImporting/projectImported — one sentence, two verbs"
+        ),
+        SharedImplementation(
+            kind: .projectCreate,
+            shared: "ControlError.emptyProjectName, String.nilIfEmpty"
+        ),
+        SharedImplementation(
+            kind: .projectExport,
+            shared: "MockProject.requireNamed — the by-name store lookup"
+        ),
+        SharedImplementation(
+            kind: .projectOpen,
+            shared: "MockProject.requireNamed — the by-name store lookup"
+        ),
+        SharedImplementation(
+            kind: .projectDelete,
+            shared: "MockProject.requireNamed — the by-name store lookup"
+        ),
+        SharedImplementation(
+            kind: .projectDuplicate,
+            shared: "MockProject.requireNamed — the by-name store lookup"
+        ),
+    ]
+
+    /// The table above can only ever name host-scoped commands, for the mirror of the reason
+    /// ``contractDifferences`` can: a project-scoped command was *already* one implementation, so
+    /// listing one here would be claiming credit for `ProjectCommandExecutor`.
+    @Test("Only host-scoped commands are listed as newly consolidated")
+    func sharedImplementationsNameOnlyHostScopedCommands() {
+        for entry in Self.sharedByConstruction {
+            #expect(
+                entry.kind.scope == .host,
+                "\(entry.kind.rawValue) is project-scoped: it was never implemented twice"
+            )
+            #expect(
+                entry.shared.count > 10,
+                "\(entry.kind.rawValue) is listed as consolidated without saying what moved"
+            )
+        }
+        let kinds = Self.sharedByConstruction.map(\.kind)
+        #expect(Set(kinds).count == kinds.count, "A command is listed twice in sharedByConstruction.")
+    }
+
+    /// The consolidation, driven: each reply is required to equal what Domain builds, not merely what
+    /// the other host said.
+    ///
+    /// Comparing the two hosts is what the rest of this suite does, and it cannot see a sentence both
+    /// of them have inlined identically — which is precisely how `logClear`'s pluralisation and the
+    /// server lifecycle sentences came to exist in two files. Reading the expectation out of
+    /// `ControlMessages` and `HostReport` instead means the assertion fails the moment either host
+    /// stops calling the shared code, whatever it starts saying instead.
+    @Test("Replies consolidated into Domain are answered from Domain, by both hosts")
+    func consolidatedRepliesComeFromDomain() async throws {
+        let hosts = try makeHosts()
+        try await seedProject(hosts, name: "Checkout", port: 9099)
+
+        // `ping` is the one sentence `expectParity` is not allowed to compare — it carries this
+        // instance's pid — so before the consolidation nothing in any suite looked at it at all. It
+        // is built once now, which makes it checkable against the builder.
+        let expectedPing = ControlMessages.ping(
+            mode: HeadlessMode.isEnabled ? "headless" : "app",
+            pid: Int(ProcessInfo.processInfo.processIdentifier)
+        )
+        let pinged = try await expectParity(.ping, on: hosts)
+        #expect(pinged.window.result?.message == expectedPing)
+        #expect(pinged.headless.result?.message == expectedPing)
+
+        // The pluralising sentence that lived in both hosts. The singular/plural itself is pinned in
+        // `DomainTests.ControlMessagesTests`; what is pinned here is that both hosts ask for it.
+        let cleared = try await expectParity(.logClear, on: hosts)
+        #expect(cleared.window.result?.message == ControlMessages.logCleared(count: 0))
+
+        // The status switch — twenty-eight identical lines in each host. Built from the report's own
+        // port and delay, so what this pins is the shaping: the state string, the absence of a
+        // `baseURL` while nothing is bound, and the absence of a message.
+        let status = try await expectParity(.serverStatus, on: hosts)
+        let report = try #require(status.window.result?.server)
+        #expect(report == HostReport.serverStatus(
+            state: .stopped,
+            configuredPort: report.port,
+            globalDelayMs: report.globalDelayMs
+        ))
+        #expect(report.port == 9099, "the seeded project's port is not what `server status` reports")
+
+        // Nothing is bound, so a stop is the shared "nothing to do" sentence from both.
+        let idle = try await expectParity(.serverStop, on: hosts)
+        #expect(idle.window.result?.message == ControlMessages.serverNotRunning)
+
+        // Journey activation, both halves.
+        let added = try await expectParity(
+            .journeyAddTemplate(templateID: "payment-retry", name: "Flow"),
+            on: hosts
+        )
+        let stepCount = try #require(added.window.result?.journey?.steps.count)
+        let activated = try await expectParity(.journeyActivate(journey: .name("Flow")), on: hosts)
+        #expect(
+            activated.window.result?.message
+                == ControlMessages.journeyActivated(name: "Flow", stepCount: stepCount)
+        )
+
+        // `run` rather than `expectParity`, and deliberately: the service reports the *engine's*
+        // restarted cursor while the window reports the journey as not-yet-started, and comparing a
+        // real engine against `ParityStubEngine` is the fixture limit already recorded for
+        // `journeyAdvance`. The sentence is the part that was written twice, and it is the part
+        // checked here — against Domain, from both.
+        let restarted = await run(.journeyRestart, on: hosts)
+        #expect(restarted.window.ok)
+        #expect(restarted.headless.ok)
+        #expect(restarted.window.result?.message == ControlMessages.journeyRestarted(name: "Flow"))
+        #expect(restarted.headless.result?.message == ControlMessages.journeyRestarted(name: "Flow"))
+
+        let deactivated = try await expectParity(.journeyActivate(journey: nil), on: hosts)
+        #expect(deactivated.window.result?.message == ControlMessages.journeyCleared)
+    }
+
+    /// The half of the import sentence that is *not* a contract difference.
+    ///
+    /// `projectImportDiffersInTenseOnly` below checks the verbs. This checks the claim the two
+    /// functions in `ControlMessages` exist to make: everything after the verb is one sentence, so
+    /// the counted tail cannot drift on one host while the other keeps the old wording — which is a
+    /// difference `expectParity` would never see, since `message` is an allowed difference for this
+    /// command precisely because of the verb.
+    @Test("Import says the same thing after the verb from both hosts")
+    func importSentencesDifferOnlyInTheirVerb() async throws {
+        let hosts = try makeHosts()
+        var document = MockProject(name: "Fixture")
+        _ = try ProjectCommandExecutor.apply(
+            .endpointCreate(name: "Login", method: .post, path: "/login", spec: nil),
+            to: &document
+        )
+
+        let responses = try await expectParity(
+            .projectImport(project: document, activate: false),
+            on: hosts
+        )
+
+        let window = try #require(responses.window.result?.message)
+        let headless = try #require(responses.headless.result?.message)
+        #expect(window == ControlMessages.projectImporting(name: "Fixture", endpointCount: 1, journeyCount: 0))
+        #expect(headless == ControlMessages.projectImported(name: "Fixture", endpointCount: 1, journeyCount: 0))
+        // Same sentence, one verb apart. "Importing" is a character longer than "Imported", which is
+        // the whole of the difference the two hosts are allowed.
+        #expect(window.dropFirst("Importing".count) == headless.dropFirst("Imported".count))
+    }
+
     // MARK: - Declared contract differences
 
     /// A difference that is contract rather than drift, with the reason it is allowed to exist.
@@ -1088,8 +1293,13 @@ struct HostParityTests {
         let restart = await hosts.window.execute(.serverStart(port: nil))
         #expect(restart.ok == false)
         #expect(restart.error?.code == "server.busy")
-        let portsDuringStart = await hosts.engine.startedPorts
-        #expect(portsDuringStart == [9099])
+        // Polled, not read once. `MockServerRuntime.startServer()` publishes `.starting`
+        // synchronously and reaches `engine.start` in a task of its own — which is the whole window
+        // this test exists to describe — so a bare read here races the bind it is asserting. It
+        // would pass on a fast runner and fail on a loaded one, and a flaky assertion inside a test
+        // named for a concurrency defect is worse than none.
+        let startEngine = hosts.engine
+        try await waitUntilAsync { await startEngine.startedPorts == [9099] }
 
         // Bound only after the fixture lets go. `appState` and `engine` are pulled out into locals
         // because the two polls run in differently-isolated closures — one on the main actor reading

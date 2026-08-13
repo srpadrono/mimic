@@ -5,16 +5,14 @@ import Testing
 
 /// What `--format text` actually prints.
 ///
-/// Every `render*` function here is a pure `ControlResult -> String`, and until this file none of
-/// them was asserted anywhere: `CLIOutputTests` in `CLIParsingTests.swift` covers the journey and
-/// status renderers, the empty-collection sentences, one populated state block and the padding
-/// helper, and nothing else. The rest of the surface — every row a human reads out of
-/// `mimic endpoint list`, `mimic scenario list`, `mimic project list`, `mimic log list`,
-/// `mimic describe` — was rendered by code no test had ever run.
+/// `CLIOutputTests` in `CLIParsingTests.swift` drives the journey, status and state renderers, the
+/// empty-collection sentences and `padded(to:)`. Everything else was rendered by code no test had
+/// ever run — which is every *populated* row a human reads out of `mimic endpoint list`,
+/// `mimic scenario list`, `mimic project list`, `mimic log list` and `mimic commands`.
 ///
 /// The expectations are whole lines rather than `contains` checks on purpose. These are column
-/// layouts, and a column that silently moves is exactly the regression a substring match cannot
-/// see; `padded(to:)` is the only thing holding them apart.
+/// layouts held apart by nothing but `padded(to:)`, and a column that silently moves is exactly the
+/// regression a substring match cannot see.
 @Suite("CLI text rendering")
 struct TextRendererTests {
 
@@ -307,9 +305,10 @@ struct TextRendererTests {
 
     @Test("A status line marks the cursor, and an outcome it cannot name renders as ?")
     func statusStepLines() {
-        // Neither a status code nor a failure label: unreachable through `JourneyStatus.make`, which
-        // always fills one of the two, but reachable here — the CLI decodes this DTO from whatever
-        // instance answered, and `renderStatus` is the only thing between that and a crash-free line.
+        // Neither a status code nor a failure label. `JourneyStatus.make` always fills exactly one —
+        // `.respond` sets the code, `.networkFailure` sets the label — but the CLI does not build
+        // this DTO, it decodes it from whatever instance answered, and both fields are optional on
+        // the wire. `?` is what stands between that payload and a column with nothing in it.
         let unknown = JourneyStepProgress(
             id: UUID(),
             index: 0,
@@ -446,9 +445,9 @@ struct TextRendererTests {
 
     @Test("A value exactly as wide as its column still gets a separator")
     func paddingAtTheColumnWidth() {
-        // The boundary `count >= width` guards: at exactly the column width a value would otherwise
-        // butt straight against the next column, so `GET /a-40-character-path200 Happy path` is one
-        // off-by-one away.
+        // The boundary `count >= width` guards. Weaken it to `>` and a value exactly as wide as its
+        // column runs straight into the next one — a 40-character path would render as
+        // `…/api/v1/checkout200 Happy path`, which is the one width no fixture happens to have.
         #expect("0123456789".padded(to: 10) == "0123456789 ")
         #expect("01234567890".padded(to: 10) == "01234567890 ")
         #expect("abc".padded(to: 6) == "abc   ")
@@ -500,8 +499,8 @@ struct OutputContractTests {
         }
     }
 
-    @Test("An error that is not a CLIFailure exits non-zero")
-    func exitCodeForAForeignError() {
+    @Test("The exit-code mapper answers for a CLIFailure and gives anything else a non-zero code")
+    func exitCodeMapping() {
         // Nothing in `Sources` calls this today — `MimicCommand.run` reads `CLIFailure.exitCode`
         // directly and hands everything else to ArgumentParser's own `exitCode(for:)` — so this
         // assertion is the only thing holding the mapping for the next caller that reaches for it.

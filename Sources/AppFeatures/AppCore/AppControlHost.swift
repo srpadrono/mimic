@@ -91,10 +91,9 @@ final class AppControlHost: ControlHost {
 
         switch command {
         case .ping:
-            // Mode comes from the same source the discovery file uses, so the two cannot disagree.
-            return .success(.message(
-                "Mimic control plane \(ControlAPI.version) (\(mode), pid \(pid))."
-            ))
+            // Mode comes from the same source the discovery file uses, so the two cannot disagree;
+            // the sentence around it is `ControlMessages`', so neither can the two hosts.
+            return .success(.message(ControlMessages.ping(mode: mode, pid: pid)))
 
         case .describeCommands:
             return .success(.init(commands: CommandCatalog.descriptors))
@@ -138,7 +137,7 @@ final class AppControlHost: ControlHost {
             // `await` on `serverConfigure` and both call `startServer()`. Refused rather than queued,
             // and with the same code the headless service uses, so a caller gets one answer to this
             // whatever it is talking to.
-            guard !isChangingServerState else { return .failure(Self.serverBusy) }
+            guard !isChangingServerState else { return .failure(.serverBusy) }
             isChangingServerState = true
             defer { isChangingServerState = false }
 
@@ -155,7 +154,7 @@ final class AppControlHost: ControlHost {
             // case cannot be added without deciding which side of this it falls on.
             switch appState.serverState {
             case .starting, .stopping:
-                return .failure(Self.serverBusy)
+                return .failure(.serverBusy)
             case .stopped, .running, .error:
                 break
             }
@@ -180,7 +179,7 @@ final class AppControlHost: ControlHost {
             // happen. Word for word the service's sentence, so a script gets one answer from either.
             if case let .running(runningPort) = appState.serverState {
                 return .success(.init(
-                    message: "Server already running on port \(runningPort).",
+                    message: ControlMessages.serverAlreadyRunning(port: runningPort),
                     server: makeServerStatus(appState)
                 ))
             }
@@ -198,7 +197,7 @@ final class AppControlHost: ControlHost {
             // No suspension in this arm today, so the guard is about the *other* one: a stop arriving
             // while a start is mid-`await` would otherwise tell the engine to stop a server the start
             // has not asked for yet.
-            guard !isChangingServerState else { return .failure(Self.serverBusy) }
+            guard !isChangingServerState else { return .failure(.serverBusy) }
             // The reply is decided by the state the stop is applied to, because
             // `MockServerRuntime.stopServer()` acts only on `.running` and drops the command
             // silently everywhere else. This arm used to answer "Stopping the server." regardless,
@@ -220,11 +219,11 @@ final class AppControlHost: ControlHost {
                 // Refused rather than dropped or queued, with the code and the sentence the headless
                 // service uses for the same collision. The runtime cannot cancel a bind in progress,
                 // and a caller told "stopping" would never poll again.
-                return .failure(Self.serverBusy)
+                return .failure(.serverBusy)
             case .stopped, .error:
-                // Nothing to stop, said the way `MimicControlService.stopServer` says it.
+                // Nothing to stop, in the sentence `ControlMessages` holds for both hosts.
                 return .success(.init(
-                    message: "Server is not running.",
+                    message: ControlMessages.serverNotRunning,
                     server: makeServerStatus(appState)
                 ))
             }
@@ -238,14 +237,17 @@ final class AppControlHost: ControlHost {
             guard let project = appState.currentProject else { return .failure(.noProjectOpen) }
             guard let ref else {
                 appState.activateJourney(id: nil)
-                return .success(.message("Cleared the active journey; endpoints now answer directly."))
+                return .success(.message(ControlMessages.journeyCleared))
             }
             guard let journey = project.journey(matching: ref) else {
                 return .failure(.journeyNotFound(ref))
             }
             appState.activateJourney(id: journey.id)
             return .success(.init(
-                message: "Activated journey \"\(journey.name)\" (\(journey.steps.count) steps).",
+                message: ControlMessages.journeyActivated(
+                    name: journey.name,
+                    stepCount: journey.steps.count
+                ),
                 journey: journey,
                 journeyStatus: JourneyStatus.make(journey: journey, state: nil)
             ))
@@ -255,7 +257,7 @@ final class AppControlHost: ControlHost {
             guard let journey = appState.activeJourney else { return .failure(.noActiveJourney) }
             appState.restartActiveJourney()
             return .success(.init(
-                message: "Restarted journey \"\(journey.name)\".",
+                message: ControlMessages.journeyRestarted(name: journey.name),
                 journeyStatus: JourneyStatus.make(journey: journey, state: nil)
             ))
 
@@ -288,20 +290,23 @@ final class AppControlHost: ControlHost {
         // MARK: Logs
 
         case let .logList(limit, unmatchedOnly):
-            var entries = appState.requestLogs
-            if unmatchedOnly == true {
-                entries = entries.filter(\.outcome.isMissingConfiguration)
-            }
-            if let limit { entries = Array(entries.suffix(max(0, limit))) }
-            // Redacted on the way out. `appState.requestLogs` keeps the real values, because in the
-            // app's own window they are the developer's own traffic on the developer's own screen —
-            // it is handing them to a *caller* that needs the guard.
-            return .success(.init(logs: entries.map { $0.redactingCredentials() }))
+            // Filter, trim and redaction are `HostReport`'s, so this arm cannot answer a different
+            // selection — or a less redacted one — than the headless service does. `appState.requestLogs`
+            // keeps the real values, because in the app's own window they are the developer's own
+            // traffic on the developer's own screen; it is handing them to a *caller* that needs the
+            // guard, and that is the path this goes through.
+            return .success(.init(
+                logs: HostReport.requestLog(
+                    from: appState.requestLogs,
+                    limit: limit,
+                    unmatchedOnly: unmatchedOnly
+                )
+            ))
 
         case .logClear:
             let count = appState.requestLogs.count
             appState.requestLogs = []
-            return .success(.message("Cleared \(count) request log \(count == 1 ? "entry" : "entries")."))
+            return .success(.message(ControlMessages.logCleared(count: count)))
 
         // MARK: Projects — these touch the store, so they are answered asynchronously
 
@@ -356,33 +361,25 @@ final class AppControlHost: ControlHost {
             do {
                 let stored = try await repository.allProjects()
                 // `allProjects` returns stubs with no children; the store counts them in two grouped
-                // queries. A project with neither has no row in `counts`, and the stub's own zeroes
-                // are already the right answer.
+                // queries. Merging those counts onto the stubs is `HostReport.projectSummaries`,
+                // shared with the service — including that a project with neither child has no row
+                // in `counts` and the stub's own zeroes are already the right answer.
                 let counts = (try? await repository.projectCounts()) ?? [:]
-                let open = appState.currentProject
-                let summaries = stored.map { project -> ProjectSummary in
-                    // The open project is answered from the session rather than from the store, for
-                    // the reason `projectExport` is: an edit made a moment ago is still sitting in
-                    // the autosave debounce, so the stored row is the one that can be behind. The
-                    // service needs no equivalent — it saves before it answers.
-                    if let open, open.id == project.id { return ProjectSummary(open) }
-                    var summary = ProjectSummary(project)
-                    if let count = counts[project.id] {
-                        summary.endpointCount = count.endpoints
-                        summary.journeyCount = count.journeys
-                    }
-                    return summary
-                }
-                return .success(.init(projects: summaries))
+                // The open project is answered from the session rather than from the store, for the
+                // reason `projectExport` is: an edit made a moment ago is still sitting in the
+                // autosave debounce, so the stored row is the one that can be behind. That overlay
+                // is the whole of what this host passes and the service does not.
+                return .success(.init(projects: HostReport.projectSummaries(
+                    of: stored,
+                    counts: counts,
+                    openProject: appState.currentProject
+                )))
             } catch {
                 return failureResponse(for: error)
             }
 
         case let .projectCreate(name, port):
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                return .failure(.invalid("Project name must not be empty."))
-            }
+            guard let trimmed = name.nilIfEmpty else { return .failure(.emptyProjectName) }
             appState.createProject(name: trimmed, port: port ?? ServerConfiguration.default.port)
             return .success(.message("Creating and opening project \"\(trimmed)\"."))
 
@@ -429,7 +426,7 @@ final class AppControlHost: ControlHost {
             // The open project is still answered from the session rather than re-read: an export
             // taken straight after an edit has to contain it, and that edit is sitting in the
             // autosave debounce. Anything else exists only in the store.
-            if let open = appState.currentProject, Self.matches(open, ref) {
+            if let open = appState.currentProject, open.matches(ref) {
                 return .success(.init(project: open))
             }
             do {
@@ -454,9 +451,15 @@ final class AppControlHost: ControlHost {
             // that never happened. `AppState.importProject` reports a refused write on the status the
             // window renders, and only opens the document once it is actually stored.
             appState.importProject(document, activate: activate)
+            // Present tense, and that is the whole of the declared difference from the service: the
+            // save above is still in flight, so this reports what was accepted rather than what is
+            // stored. The counted tail is the same sentence in both, built once.
             return .success(.init(
-                message: "Importing project \"\(document.name)\" "
-                    + "(\(document.endpoints.count) endpoints, \(document.journeys.count) journeys).",
+                message: ControlMessages.projectImporting(
+                    name: document.name,
+                    endpointCount: document.endpoints.count,
+                    journeyCount: document.journeys.count
+                ),
                 project: document
             ))
 
@@ -472,13 +475,9 @@ final class AppControlHost: ControlHost {
         }
     }
 
-    /// Word for word what `MimicControlService.serverBusy` says, because the two hosts are meant to be
-    /// indistinguishable to a caller and a lifecycle collision is the kind of thing a script branches
-    /// on. `server.busy` maps to `409` in `ControlServer.httpStatus`.
-    private static let serverBusy = ControlError(
-        code: "server.busy",
-        message: "The server is already starting or stopping. Try again in a moment."
-    )
+    // `ControlError.serverBusy` used to be declared here, and again in `MimicControlService`, with a
+    // comment promising the two said the same thing word for word. It lives in Domain now, so the
+    // promise is the declaration.
 
     // MARK: - Resolving a project reference
 
@@ -499,7 +498,7 @@ final class AppControlHost: ControlHost {
     /// before its write lands, so a script that creates a project and immediately names it would
     /// otherwise be told it does not exist.
     private func resolveStoredProjectID(_ ref: ProjectRef, appState: AppState) async throws -> UUID {
-        if let open = appState.currentProject, Self.matches(open, ref) { return open.id }
+        if let open = appState.currentProject, open.matches(ref) { return open.id }
 
         // A script's previous command may still be writing. `mimic project create Foo` answers before
         // its insert lands, so `mimic project duplicate Foo` a moment later read a store that did not
@@ -514,7 +513,7 @@ final class AppControlHost: ControlHost {
             }
             return id
         }
-        return try Self.requireNamedProject(ref, in: stored).id
+        return try MockProject.requireNamed(ref, in: stored).id
     }
 
     /// The whole document a reference names — endpoints and journeys included, which is what an export
@@ -538,45 +537,26 @@ final class AppControlHost: ControlHost {
             // with no diagnosis.
         }
         // `allProjects` returns stubs, so the name is matched against those and the winner loaded.
+        // The matching itself is `MockProject.requireNamed` in Domain — the trim, the fold, the
+        // first-match rule and which of `request.invalid` / `project.notFound` each dead end
+        // produces. It was a private copy here and another inside
+        // `MimicControlService.resolveStoredProject`.
         let stored = try await repository.allProjects()
-        let match = try Self.requireNamedProject(ref, in: stored)
+        let match = try MockProject.requireNamed(ref, in: stored)
         return try await repository.load(id: match.id)
-    }
-
-    private static func requireNamedProject(
-        _ ref: ProjectRef,
-        in stored: [MockProject]
-    ) throws -> MockProject {
-        guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
-            throw ControlError.invalid("Provide a project id or name.")
-        }
-        let key = name.lowercased()
-        guard let match = stored.first(where: { $0.name.lowercased() == key }) else {
-            throw ControlError.projectNotFound(ref)
-        }
-        return match
-    }
-
-    /// Whether `project` is the one `ref` names. An id decides on its own when there is one; names are
-    /// matched case-insensitively, which is what ``ProjectRef`` promises.
-    private static func matches(_ project: MockProject, _ ref: ProjectRef) -> Bool {
-        if let id = ref.id { return project.id == id }
-        guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
-            return false
-        }
-        return project.name.caseInsensitiveCompare(name) == .orderedSame
     }
 
     /// Turns a thrown failure into the reply the headless service gives for the same one, so a script
     /// branching on `error.code` gets the same string from either host.
+    ///
+    /// The two branches that can be shared are: `ControlError` passes through, and a store failure is
+    /// `ControlError.persistenceFailure` — the same constructor `MimicControlService.execute` uses,
+    /// rather than the `"persistence.failure"` string literal each of them used to spell out. The
+    /// *shape* stays duplicated because it cannot move: `PersistenceError` lives in `Persistence`,
+    /// which Domain does not and must not see.
     private func failureResponse(for error: any Error) -> ControlResponse {
         if let error = error as? ControlError { return .failure(error) }
-        if let error = error as? PersistenceError {
-            return .failure(ControlError(
-                code: "persistence.failure",
-                message: error.localizedDescription
-            ))
-        }
+        if let error = error as? PersistenceError { return .failure(.persistenceFailure(error)) }
         return .failure(.internalFailure(error.localizedDescription))
     }
 
@@ -586,47 +566,37 @@ final class AppControlHost: ControlHost {
 
     private var mode: String { HeadlessMode.isEnabled ? "headless" : "app" }
 
+    /// This session's state, in the shape the wire uses.
+    ///
+    /// Everything below the parameters — the project summary, the endpoint and journey counts — is
+    /// ``HostReport/state(appVersion:mode:pid:server:project:activeJourney:requestLogCount:)``, so
+    /// the window cannot derive them differently from the headless service. What stays here is what
+    /// only this host can answer: where its version comes from (`Bundle.main`, which a service is
+    /// told instead), and that the live cursor is read from the runtime with the not-yet-started
+    /// journey as the fallback.
     private func makeState(_ appState: AppState) -> ControlState {
-        ControlState(
+        HostReport.state(
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-            mode: HeadlessMode.isEnabled ? "headless" : "app",
+            mode: mode,
             pid: pid,
             server: makeServerStatus(appState),
-            project: appState.currentProject.map(ProjectSummary.init),
-            endpointCount: appState.currentProject?.endpoints.count ?? 0,
-            journeyCount: appState.currentProject?.journeys.count ?? 0,
+            project: appState.currentProject,
             activeJourney: appState.activeJourneyStatus
                 ?? appState.activeJourney.map { JourneyStatus.make(journey: $0, state: nil) },
             requestLogCount: appState.requestLogs.count
         )
     }
 
+    /// The session's server state, in the shape the wire uses.
+    ///
+    /// Only the three values are this host's to read; the switch that turns them into a report — the
+    /// state string, whether a `baseURL` is present and what it says — is shared with the service,
+    /// where the identical twenty-eight lines used to sit.
     private func makeServerStatus(_ appState: AppState) -> ServerStatusReport {
-        let port = appState.serverConfiguration.port
-        let delay = appState.serverConfiguration.globalDelayMs
-
-        switch appState.serverState {
-        case let .running(runningPort):
-            return ServerStatusReport(
-                state: "running",
-                port: runningPort,
-                baseURL: "http://127.0.0.1:\(runningPort)",
-                globalDelayMs: delay
-            )
-        case .stopped:
-            return ServerStatusReport(state: "stopped", port: port, baseURL: nil, globalDelayMs: delay)
-        case .starting:
-            return ServerStatusReport(state: "starting", port: port, baseURL: nil, globalDelayMs: delay)
-        case .stopping:
-            return ServerStatusReport(state: "stopping", port: port, baseURL: nil, globalDelayMs: delay)
-        case let .error(message):
-            return ServerStatusReport(
-                state: "error",
-                port: port,
-                baseURL: nil,
-                globalDelayMs: delay,
-                message: message
-            )
-        }
+        HostReport.serverStatus(
+            state: appState.serverState,
+            configuredPort: appState.serverConfiguration.port,
+            globalDelayMs: appState.serverConfiguration.globalDelayMs
+        )
     }
 }

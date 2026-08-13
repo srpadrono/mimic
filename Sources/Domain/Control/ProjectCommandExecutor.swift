@@ -49,7 +49,7 @@ public enum ProjectCommandExecutor {
 
         case let .projectRename(name):
             guard let trimmed = name.nilIfEmpty else {
-                throw ControlError.invalid("Project name must not be empty.")
+                throw ControlError.emptyProjectName
             }
             project.name = trimmed
             return mutated(.init(message: "Renamed project to \"\(trimmed)\".", project: project))
@@ -544,7 +544,10 @@ extension String {
     /// name with the spaces still on it while `journey create` — which trimmed a second time by hand
     /// — did not, and how `--path " /login "` reached `validatePath` with the spaces attached. Every
     /// caller here wants the trimmed form; a body is never passed through this property.
-    var nilIfEmpty: String? {
+    /// `public` because it is not only the executor's any more: both hosts call it to trim a project
+    /// name before deciding whether it is empty, where each used to spell the trim out itself. Two
+    /// copies of "what counts as empty" is exactly the kind of rule that drifts a space at a time.
+    public var nilIfEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }

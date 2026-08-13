@@ -104,7 +104,7 @@ public actor MimicControlService: ControlHost {
         } catch let error as ControlError {
             return .failure(error)
         } catch let error as PersistenceError {
-            return .failure(ControlError(code: "persistence.failure", message: error.localizedDescription))
+            return .failure(.persistenceFailure(error))
         } catch {
             return .failure(.internalFailure(error.localizedDescription))
         }
@@ -141,7 +141,7 @@ public actor MimicControlService: ControlHost {
         // MARK: Discovery
 
         case .ping:
-            return .init(message: "Mimic control plane \(ControlAPI.version) (\(mode), pid \(currentPID)).")
+            return .init(message: ControlMessages.ping(mode: mode, pid: currentPID))
 
         case .describeCommands:
             return .init(commands: CommandCatalog.descriptors)
@@ -158,8 +158,7 @@ public actor MimicControlService: ControlHost {
             return .init(projects: try await projectSummaries())
 
         case let .projectCreate(name, port):
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { throw ControlError.invalid("Project name must not be empty.") }
+            guard let trimmed = name.nilIfEmpty else { throw ControlError.emptyProjectName }
             if let port { try validatePort(port) }
             let project = MockProject(
                 name: trimmed,
@@ -226,9 +225,14 @@ public actor MimicControlService: ControlHost {
             if activate {
                 try await open(document)
             }
+            // Past tense, and that is the whole of the declared difference from the window: the save
+            // above was awaited, so this reports what is stored rather than what was accepted.
             return .init(
-                message: "Imported project \"\(document.name)\" "
-                    + "(\(document.endpoints.count) endpoints, \(document.journeys.count) journeys).",
+                message: ControlMessages.projectImported(
+                    name: document.name,
+                    endpointCount: document.endpoints.count,
+                    journeyCount: document.journeys.count
+                ),
                 project: document
             )
 
@@ -251,7 +255,10 @@ public actor MimicControlService: ControlHost {
         case .journeyRestart:
             _ = try requireOpenProject()
             guard let status = await engine.restartJourney() else { throw ControlError.noActiveJourney }
-            return .init(message: "Restarted journey \"\(status.journeyName)\".", journeyStatus: status)
+            return .init(
+                message: ControlMessages.journeyRestarted(name: status.journeyName),
+                journeyStatus: status
+            )
 
         case .journeyAdvance:
             _ = try requireOpenProject()
@@ -267,21 +274,21 @@ public actor MimicControlService: ControlHost {
         // MARK: Logs
 
         case let .logList(limit, unmatchedOnly):
-            var entries = requestLogs
-            // Filtering before the limit is the useful order: "the last 20 requests I have no mock
-            // for", not "whichever of the last 20 happened to be unmatched".
-            if unmatchedOnly == true {
-                entries = entries.filter(\.outcome.isMissingConfiguration)
-            }
-            if let limit { entries = Array(entries.suffix(max(0, limit))) }
-            // Redacted on the way out: these are the app-under-test's real credentials, and the log is
-            // the one command that hands captured traffic to a caller. See `redactingCredentials()`.
-            return .init(logs: entries.map { $0.redactingCredentials() })
+            // Filter, trim and redaction all live in `HostReport` — including the order they are
+            // applied in and the redaction itself, which is the one part of this command that must
+            // not be left to two hosts to remember.
+            return .init(
+                logs: HostReport.requestLog(
+                    from: requestLogs,
+                    limit: limit,
+                    unmatchedOnly: unmatchedOnly
+                )
+            )
 
         case .logClear:
             let count = requestLogs.count
             requestLogs = []
-            return .message("Cleared \(count) request log \(count == 1 ? "entry" : "entries").")
+            return .message(ControlMessages.logCleared(count: count))
 
         // MARK: Declared host-scoped, not implemented above
         //
@@ -304,13 +311,13 @@ public actor MimicControlService: ControlHost {
 
         // Everything from here to the `defer` runs without a suspension, so a second `serverStart`
         // cannot reach the engine while this one is still deciding.
-        guard !isChangingServerState else { throw Self.serverBusy }
+        guard !isChangingServerState else { throw ControlError.serverBusy }
         if case let .running(runningPort) = serverState, port == nil || port == runningPort {
             // Answered from this actor's own state rather than from `await engine.isRunning`, which
             // is the check that could not be trusted. Starting twice stays benign — a script that
             // ensures the server is up should not have to ask first.
             return .init(
-                message: "Server already running on port \(runningPort).",
+                message: ControlMessages.serverAlreadyRunning(port: runningPort),
                 server: makeServerStatus()
             )
         }
@@ -338,7 +345,7 @@ public actor MimicControlService: ControlHost {
         // port that is actually bound, and this branch knows only that *something* is.
         if await engine.isRunning {
             return .init(
-                message: "Server already running on port \(project.serverConfiguration.port).",
+                message: ControlMessages.serverAlreadyRunning(port: project.serverConfiguration.port),
                 server: makeServerStatus()
             )
         }
@@ -362,37 +369,32 @@ public actor MimicControlService: ControlHost {
             throw ControlError(code: "server.startFailed", message: error.localizedDescription)
         }
 
-        return .init(
-            message: "Server running at http://127.0.0.1:\(project.serverConfiguration.port).",
-            server: makeServerStatus()
-        )
+        // The address comes from the same builder the status report uses, so the sentence and the
+        // `baseURL` field beside it cannot name two different places.
+        let address = HostReport.loopbackBaseURL(port: project.serverConfiguration.port)
+        return .init(message: "Server running at \(address).", server: makeServerStatus())
     }
 
     private func stopServer() async throws -> ControlResult {
         // The same flag as `startServer`, and it has to be the same one: a stop overlapping a start
         // is the pair that leaves a listener nobody owns, because `engine.stop` clears the engine's
         // own `app` before it awaits the shutdown.
-        guard !isChangingServerState else { throw Self.serverBusy }
+        guard !isChangingServerState else { throw ControlError.serverBusy }
         isChangingServerState = true
         defer { isChangingServerState = false }
 
         guard await engine.isRunning else {
             serverState = .stopped
-            return .init(message: "Server is not running.", server: makeServerStatus())
+            return .init(message: ControlMessages.serverNotRunning, server: makeServerStatus())
         }
         try? await engine.stop()
         serverState = .stopped
         return .init(message: "Server stopped.", server: makeServerStatus())
     }
 
-    /// Refused rather than queued: two callers asking for a lifecycle change at once is a script
-    /// racing itself, and a reply saying so is more useful than one that waits and then reports on
-    /// somebody else's start. `server.busy` maps to `409` in `ControlServer.httpStatus`, alongside
-    /// the other "well-formed, but not right now" codes.
-    private static let serverBusy = ControlError(
-        code: "server.busy",
-        message: "The server is already starting or stopping. Try again in a moment."
-    )
+    // `ControlError.serverBusy` used to be declared here, and again in `AppControlHost`, with a
+    // comment in the second promising it matched this one word for word. It lives in Domain now, so
+    // the promise is the declaration.
 
     // MARK: - Journeys
 
@@ -405,7 +407,7 @@ public actor MimicControlService: ControlHost {
             openProject = project
             try await repository.save(project)
             await pushConfigurationToEngine()
-            return .message("Cleared the active journey; endpoints now answer directly.")
+            return .message(ControlMessages.journeyCleared)
         }
 
         guard let journey = project.journey(matching: ref) else {
@@ -420,7 +422,10 @@ public actor MimicControlService: ControlHost {
         await pushConfigurationToEngine()
 
         return .init(
-            message: "Activated journey \"\(journey.name)\" (\(journey.steps.count) steps).",
+            message: ControlMessages.journeyActivated(
+                name: journey.name,
+                stepCount: journey.steps.count
+            ),
             journey: journey,
             journeyStatus: await journeyStatus()
         )
@@ -469,61 +474,41 @@ public actor MimicControlService: ControlHost {
         // different instants — the hardest kind of wrong answer to reproduce.
         let journey = await journeyStatus()
         let project = openProject
-        return ControlState(
+        // Shaping — the summary and the two counts derived from `project` — is `HostReport`'s, so it
+        // cannot differ from the window's. What is left here is what this instance alone knows.
+        return HostReport.state(
             appVersion: appVersion,
             mode: mode,
             pid: currentPID,
             server: makeServerStatus(),
-            project: project.map(ProjectSummary.init),
-            endpointCount: project?.endpoints.count ?? 0,
-            journeyCount: project?.journeys.count ?? 0,
+            project: project,
             activeJourney: journey,
             requestLogCount: requestLogs.count
         )
     }
 
+    /// This service's server state, in the shape the wire uses.
+    ///
+    /// Only the two values are this actor's to know: with no project open there is no configured
+    /// port, so the report falls back to the default rather than inventing one. Everything after
+    /// that — the state string, whether a `baseURL` is present, what it says — is
+    /// ``HostReport/serverStatus(state:configuredPort:globalDelayMs:)``, shared with the window,
+    /// which is where the twenty-eight-line copy of this switch used to live.
     private func makeServerStatus() -> ServerStatusReport {
-        let port = openProject?.serverConfiguration.port ?? ServerConfiguration.default.port
-        let delay = openProject?.serverConfiguration.globalDelayMs ?? 0
-
-        switch serverState {
-        case .running(let runningPort):
-            return ServerStatusReport(
-                state: "running",
-                port: runningPort,
-                baseURL: "http://127.0.0.1:\(runningPort)",
-                globalDelayMs: delay
-            )
-        case .stopped:
-            return ServerStatusReport(state: "stopped", port: port, baseURL: nil, globalDelayMs: delay)
-        case .starting:
-            return ServerStatusReport(state: "starting", port: port, baseURL: nil, globalDelayMs: delay)
-        case .stopping:
-            return ServerStatusReport(state: "stopping", port: port, baseURL: nil, globalDelayMs: delay)
-        case let .error(message):
-            return ServerStatusReport(
-                state: "error",
-                port: port,
-                baseURL: nil,
-                globalDelayMs: delay,
-                message: message
-            )
-        }
+        HostReport.serverStatus(
+            state: serverState,
+            configuredPort: openProject?.serverConfiguration.port ?? ServerConfiguration.default.port,
+            globalDelayMs: openProject?.serverConfiguration.globalDelayMs ?? 0
+        )
     }
 
     private func projectSummaries() async throws -> [ProjectSummary] {
         let projects = try await repository.allProjects()
         // `allProjects` returns stubs without endpoints or journeys; the store fills in the counts.
         let counts = (try? await repository.projectCounts()) ?? [:]
-
-        return projects.map { project in
-            var summary = ProjectSummary(project)
-            if let count = counts[project.id] {
-                summary.endpointCount = count.endpoints
-                summary.journeyCount = count.journeys
-            }
-            return summary
-        }
+        // No open-project overlay: this service saves before it answers, so the stored row is never
+        // behind the session the way the window's can be mid-autosave.
+        return HostReport.projectSummaries(of: projects, counts: counts)
     }
 
     // MARK: - Helpers
@@ -548,14 +533,17 @@ public actor MimicControlService: ControlHost {
             // `project.notFound`, so a database Mimic could not open was indistinguishable from a
             // project that had genuinely been deleted, and "my projects vanished" had no diagnosis.
         }
-        guard let name = ref.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
-            throw ControlError.invalid("Provide a project id or name.")
-        }
-        let key = name.lowercased()
+        // Name resolution — the trim, the fold, the first-match rule, and which failure each dead end
+        // produces — is `MockProject.requireNamed`, shared with the window's host.
+        //
+        // The store is read before the reference is checked, which is a change of *order* from the
+        // hand-written version this replaced: a `ProjectRef` carrying neither id nor name used to be
+        // refused with `request.invalid` before `allProjects()` was called. With a store that
+        // answers, the reply is identical either way; with a store that cannot, that reference now
+        // reports the store's failure instead. That is the order `AppControlHost` already used, and
+        // one order is the point.
         let all = try await repository.allProjects()
-        guard let match = all.first(where: { $0.name.lowercased() == key }) else {
-            throw ControlError.projectNotFound(ref)
-        }
+        let match = try MockProject.requireNamed(ref, in: all)
         // `allProjects` returns stubs; load the full project so callers get endpoints and journeys.
         return try await repository.load(id: match.id)
     }

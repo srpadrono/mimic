@@ -16,31 +16,43 @@ import SwiftUI
 /// controls stacked on the same 22 points. The geometry is shared through the ladder instead, which
 /// is the only part the two need to agree on.
 ///
-/// **`.menuStyle(.borderlessButton)`, deprecated and kept on purpose — the reason is at the
-/// modifier.** The app's other two hand-styled menus take `.menuStyle(.button)`:
+/// **`.menuStyle(.borderlessButton)`, deprecated and still here — but no longer for the reason it
+/// was.** The app's other two hand-styled menus take `.menuStyle(.button)`:
 /// `DSFilterField.ScopeMenu` and `BreadcrumbJumpBar`'s crumbs both do, and Apple's deprecation
 /// message names `menuStyle(.button)` with `buttonStyle(.borderless)` as the replacement. This one
-/// does not follow them, because the menu style is what decides the AppKit element type and
-/// `MimicUITests/JourneyUITests.swift` separates two identically-labelled controls by element type
-/// alone. `.buttonStyle(.plain)` *is* shared with those two, and for the reason they give: the label
-/// below states its own foreground and switches it on hover, so `.borderless` would put a system
-/// accent tint back over a colour this component sets.
+/// stayed behind because the menu style decides the AppKit element type, and
+/// `MimicUITests/JourneyUITests.swift` separated two *identically-labelled* controls — the
+/// navigator's "+" and the journeys empty state's call to action — by element type alone: changing
+/// the style would have silently repointed that query at the other control. **That is fixed, and it
+/// was fixed at the labels rather than here.** The menu is now "Choose how to add a journey" and the
+/// empty state's button "Add journey", which is two names for two different actions and is what the
+/// suite should have been separating them by all along. `.buttonStyle(.plain)` *is* shared with the
+/// other two, and for the reason they give: the label below states its own foreground and switches
+/// it on hover, so `.borderless` would put a system accent tint back over a colour this component
+/// sets.
 ///
-/// The way out is to stop making element type load-bearing. This menu does set an
-/// `.accessibilityLabel` below; what it does not have is a *distinct* one — `JourneysNavigatorPage`
-/// records both the navigator's menu and the journeys empty state's button reporting "Add journey" —
-/// so the suite has nothing left to separate them by. Give the two different labels and the style
-/// stops carrying weight it was never meant to. That change has to run the XCUITest suite, which is
-/// why it is not this one.
+/// **What is left to answer before the style moves is about the pointer, not the tree.**
+/// `DSPanelHeaderButton` — the button this menu is shaped to match — is built as though a `.plain`
+/// button's hit target were its label and nothing more: its `DSControlHeight.field` frame, its hover
+/// well and a `.contentShape(Rectangle())` all sit *inside* the `Button`'s label, under a note
+/// saying bare `Image`s in `.plain` buttons "gave a ~11pt hit target". This component cannot copy
+/// that construction — `EndpointEditorView.moreMenu` records that a frame inside a `Menu`'s label
+/// fights the control the menu builds — so the frame and the well below are applied *outside* the
+/// `Menu`, which holds only while the menu style fills what it is offered. Whether a
+/// `.button`-styled `Menu` still fills those 22 points, or centres a 13pt glyph inside a well that
+/// lights up across the whole square, is not decidable by reading; and no XCUITest in this
+/// repository drives either of the two menus that already take `.button`, so the suite has never
+/// answered it either. Move this with a running window in front of you, and run the UI suite.
 ///
-/// This paragraph used to assert the opposite: that the component took `.button`, in a doc comment
+/// A paragraph here once asserted the opposite: that the component took `.button`, in a doc comment
 /// attached to a body that takes `.borderlessButton`. A comment that contradicts its own code is
 /// exactly how a "modernisation" that silently rewrites what a UI query resolves to gets made.
 ///
 /// **AppKit realizes this as a `MenuButton`.** A UI test reaches it through `app.menuButtons[…]`,
 /// never `app.buttons[…]` — and, inside a container that flattens its children's identifiers, by
-/// *label*. `JourneyUITests` matches the navigator's "+" on both at once, because the journeys empty
-/// state carries the same words on a plain `Button`.
+/// *label*. `JourneyUITests` still starts there, but the type is a locator now rather than the thing
+/// telling two controls apart: with the labels distinct it falls back to a label match across every
+/// element type, so the query answers the same before and after the style moves.
 public struct DSIconMenu<Content: View>: View {
     private let systemImage: String
     private let help: String
@@ -56,8 +68,11 @@ public struct DSIconMenu<Content: View>: View {
     ///   - help: The pointer tooltip.
     ///   - label: What VoiceOver reads, and what a UI test matches on when the enclosing container
     ///     has flattened the identifier. Defaults to `help`, and is split from it only where a call
-    ///     site already has two strings: the navigator's "+" is tooltipped "Add a journey" and
-    ///     labelled "Add journey", which is the string `JourneyUITests` knows it by.
+    ///     site needs the spoken name to differ from the tooltip: the navigator's "+" is tooltipped
+    ///     "Add a journey" and labelled "Choose how to add a journey", because it opens a chooser
+    ///     while the journeys empty state's button — "Add journey" — creates one outright. Two
+    ///     controls doing different things must not answer to the same name; they did, and the UI
+    ///     suite was left telling them apart by AppKit element type.
     ///   - identifier: Applied, but do not assume it survives — see the type's note.
     ///   - content: The menu's items.
     public init(
@@ -87,17 +102,15 @@ public struct DSIconMenu<Content: View>: View {
         }
         // `.borderlessButton` even though it is deprecated, and this is not an oversight.
         //
-        // A `Menu` with this style is realized by AppKit as an `NSPopUpButton`, which XCUITest sees
-        // as a `MenuButton`; `.button` is a push button that presents a menu, and is seen as a
-        // `Button`. `MimicUITests/JourneyUITests.swift` separates the navigator's "Add journey" menu
-        // from the empty state's identically-labelled "Add journey" *button* by element type alone —
-        // its page object says so at length, because the identifier is no help (`DSTabStrip` flattens
-        // its children's) and the label is shared. Modernising the style here silently rewrites what
-        // that query resolves to, in a suite this component's own commit did not touch.
+        // The element-type argument that used to be written here is gone, and so is the defect
+        // behind it: the navigator's "+" and the journeys empty state's button no longer share a
+        // label, so `JourneyUITests` no longer separates them by what AppKit realizes each as, and
+        // this modifier no longer decides which control a UI query finds.
         //
-        // The deeper fragility is the test's, not this component's: two controls that differ only by
-        // AppKit realization are one framework change away from swapping. Giving the menu its own
-        // accessibility label is the fix, and it belongs in a change that can run the UI suite.
+        // What holds it back now is the hit target — the frame and the well below sit outside this
+        // `Menu` rather than inside a `Button`'s label the way `DSPanelHeaderButton` puts them, and
+        // nothing here can tell you what a `.button`-styled `Menu` does with them. The type's note
+        // above says what to check in a running window before this line becomes `.menuStyle(.button)`.
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         // The label above draws the whole control; the system indicator would be a second glyph in a

@@ -272,11 +272,63 @@ jobs:
 
       # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
       # rendering tests. The rest of the suite already ran on Linux.
+      #
+      # This is also the only step in either job that *measures* how much of this code the tests
+      # reach, rather than reading the tree and reasoning about it. Until it carried
+      # `-enableCodeCoverage YES`, both README badges said `not measured` and meant it: every claim
+      # in this repository about what is and is not tested rested on grep.
+      # `Scripts/run_full_test_suite.sh` passes the flag too, but it needs a Mac and a human who
+      # remembers to run it, and no CI step passed it at all.
+      #
+      # `-resultBundlePath` is what makes the bundle findable afterwards. Without it xcodebuild
+      # writes to `~/Library/Developer/Xcode/DerivedData/**/Logs/Test/` — no step here passes
+      # `-derivedDataPath`, which is exactly why the artifact step at the bottom of this job globs
+      # that path — and the coverage step below would have to find its bundle by globbing a
+      # directory whose contents depend on which steps have run so far. Naming the path removes the
+      # guess, and the artifact step names the same path so a red run is still downloadable.
+      # `.artifacts/` is already in `.gitignore`, so nothing here can dirty the checkout.
+      #
+      # Two things this step does NOT do, deliberately:
+      #
+      #   - **No coverage floor.** Nobody has seen the number yet. A threshold set before a baseline
+      #     exists is either so low it never fires or so high it is red on arrival, and both teach
+      #     people to ignore it. The floor is the next step, once a few runs have published numbers
+      #     and somebody can pick one that means something.
+      #   - **No README rewrite.** The two badges are still written only by
+      #     `Scripts/run_full_test_suite.sh` on a Mac. This workflow runs with `contents: read` on
+      #     pull requests from forks; a job that edited tracked files would have nowhere to put them.
       - name: Test (unit suites)
         run: |
+          rm -rf .artifacts/coverage
+          mkdir -p .artifacts/coverage
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
             test -destination 'platform=macOS' -skip-testing:MimicUITests \
+            -enableCodeCoverage YES \
+            -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
             CODE_SIGN_IDENTITY=-
+
+      # (b) of the same change: the numbers go in the job summary, so a reviewer reads them on the
+      # run page instead of downloading an artifact and installing Xcode to open it.
+      #
+      # `continue-on-error`, and it is the whole reason this is a separate step rather than three
+      # more lines on the one above. Reading a result bundle is not a gate on anything: `xcrun
+      # xccov` is the one tool in this job whose behaviour could not be checked before this landed,
+      # and an unreadable bundle, a `--json` that a future Xcode spells differently, or a sandboxed
+      # app target that never wrote its `.profraw` must all show up as a warning on this step and a
+      # note in the summary — never as a red X on a commit whose tests passed. The script prints its
+      # reason to stdout for that reason: it lands in the summary next to where the table would be.
+      #
+      # `pipefail` because the pipe to `tee` would otherwise report `tee`'s status and this step
+      # could never warn at all — the same mistake `Scripts/ci.sh` documents at length about
+      # `pipestatus`.
+      - name: Coverage report
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/coverage/UnitTests.xcresult \
+            --title 'Code coverage (unit suites, XCUITest excluded)' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The reason this job exists. XCUITest is the only thing that exercises the real window — the
       # accessibility tree, the panel layout, and every flow a user actually takes.
@@ -329,11 +381,19 @@ jobs:
 
       # The result bundle is the only way to read a UI failure after the fact — it holds the failure
       # screenshots and the automatic UI hierarchy captures.
+      #
+      # Two paths now, because `-resultBundlePath` on the unit step *moves* that run's bundle out of
+      # DerivedData: the glob below would no longer find it, so it is named explicitly. It is also
+      # where the per-file coverage lives, for anyone who wants more than the per-target table in
+      # the summary. Still `if: failure()` — a coverage-instrumented bundle is large, and uploading
+      # one on every green run buys a reviewer nothing the summary has not already shown them.
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xcresult
-          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+            .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore

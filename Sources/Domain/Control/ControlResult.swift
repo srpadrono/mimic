@@ -168,6 +168,42 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         message: "No journey is active. Activate one with `mimic journey activate <name>`."
     )
 
+    /// Two lifecycle commands arriving at once.
+    ///
+    /// Refused rather than queued: two callers asking for a start or a stop together is a script
+    /// racing itself, and a reply saying so is more useful than one that waits and then reports on
+    /// somebody else's start. `server.busy` maps to `409` in `ControlServer.httpStatus`, alongside
+    /// the other "well-formed, but not right now" codes.
+    ///
+    /// Declared here rather than once per host. It was a `private static let` in each of
+    /// `MimicControlService` and `AppControlHost`, with a comment in the second promising it said
+    /// "word for word" what the first said — a promise nothing checked, on a code a script branches
+    /// on.
+    public static let serverBusy = ControlError(
+        code: "server.busy",
+        message: "The server is already starting or stopping. Try again in a moment."
+    )
+
+    /// A project name that is empty, or is nothing but whitespace.
+    ///
+    /// Shared by ``ProjectCommandExecutor`` (rename) and both hosts (create), which is three places
+    /// that each spelled the sentence out.
+    public static let emptyProjectName = ControlError.invalid("Project name must not be empty.")
+
+    /// A ``ProjectRef`` carrying neither an id nor a usable name.
+    ///
+    /// Distinct from ``projectNotFound(_:)`` on purpose: nothing was searched for, so telling the
+    /// caller no project matches would be describing a lookup that never happened.
+    public static let projectReferenceRequired = ControlError.invalid("Provide a project id or name.")
+
+    /// A store that could not answer — a locked database, an I/O error, a row that will not decode.
+    ///
+    /// Kept apart from ``projectNotFound(_:)`` deliberately: reporting a database Mimic cannot open
+    /// as a missing project is how "my projects vanished" ends up with no diagnosis.
+    public static func persistenceFailure(_ error: any Error) -> ControlError {
+        ControlError(code: "persistence.failure", message: error.localizedDescription)
+    }
+
     public static func invalid(_ message: String, code: String = "request.invalid") -> ControlError {
         ControlError(code: code, message: message)
     }

@@ -147,11 +147,31 @@ run_step build-debug "error:|warning:|BUILD" \
   -configuration Debug -destination 'platform=macOS' \
   CODE_SIGN_IDENTITY=- build
 
+# Coverage rides along with the unit suites, with the same two flags and the same bundle path the
+# workflow uses. Not for the sake of symmetry: this script's contract, stated in its header, is that
+# it runs the macOS job's commands with the macOS job's flags, so the one step in that job which
+# measures something would otherwise be the one step this script does not reproduce — and the number
+# a reviewer reads in a job summary would have no local counterpart to check it against.
 step "Test (all unit suites)"
+rm -rf .artifacts/coverage
+mkdir -p .artifacts/coverage
 run_step test-units "error:|✘|Test run with|TEST (SUCCEEDED|FAILED)" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
   test -destination 'platform=macOS' -skip-testing:MimicUITests \
+  -enableCodeCoverage YES \
+  -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
   CODE_SIGN_IDENTITY=-
+
+# Report-only, and `|| true` on purpose: the suites above have already passed by the time this runs,
+# and failing the local gate because a result bundle could not be *read* would be reporting a
+# reporting problem as a test failure. The same reasoning as `continue-on-error` on the workflow's
+# coverage step. It prints its own reason when it cannot produce a table.
+#
+# This does not touch README.md. Rewriting the two badges and the generated section is still
+# `Scripts/run_full_test_suite.sh`'s job — it measures each module through its own scheme, which is
+# a different and slower measurement than this one workspace-wide run.
+python3 Scripts/update_readme_coverage.py \
+  --result-bundle .artifacts/coverage/UnitTests.xcresult || true
 
 step "Release build gate"
 run_step build-release "error:|BUILD" \

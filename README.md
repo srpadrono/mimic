@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-885%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-928%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -258,20 +258,20 @@ that CI runs a separate daemon is not. See
 
 ## Testing
 
-885 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+928 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 579 | Linux or macOS — `swift test` |
+| Domain, persistence, engine, control plane, import, CLI | 603 | Linux or macOS — `swift test` |
 | Design system | 47 | macOS — needs SwiftUI |
-| App and coordination | 219 | macOS — hosted by the app |
+| App and coordination | 238 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
-The portable 579 break down as Domain 178, SpecImport 107, MimicCLICore 117, MockServerEngine 65,
-Persistence 65, ControlPlane 47. The app's 219 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 92, `MimicTests` 90, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+The portable 603 break down as Domain 202, SpecImport 107, MimicCLICore 117, MockServerEngine 65,
+Persistence 65, ControlPlane 47. The app's 238 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 92, `MimicTests` 109, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
@@ -288,8 +288,8 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 579, no Xcode needed
-./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
+swift test                    # the portable 603, no Xcode needed
+./Scripts/ci.sh               # full local gate: build, all suites + coverage, Release, UI tests
 ```
 
 The **Tests** badge at the top is hand-maintained, unlike the two coverage badges beside it, which
@@ -312,26 +312,39 @@ of its groups, which is what a newly added suite looks like before anybody write
 ### Coverage
 
 <!-- coverage:generated:start -->
-**Coverage has not been measured for this commit, and the two badges above say so rather than
-carrying a stale number.** They read `not measured` because nothing has run
-[`./Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) here — that script needs macOS
-and Xcode (it drives `xcodebuild` and reads the resulting `.xcresult` bundles with `xcrun xccov`),
-and the environments most of this tree's recent editing happened in have neither.
+**Coverage is measured on every CI run, and the numbers are on the run page.** The macOS job's
+`Test (unit suites)` step runs the `Mimic-Workspace` scheme with `-enableCodeCoverage YES` and
+writes its result bundle to a named path; the `Coverage report` step reads that bundle with
+`xcrun xccov` and prints a per-target table into the **job summary**. So the answer to "how much of
+this is actually exercised" is a link away rather than a script somebody has to remember to run.
 
-This is a placeholder in the sense that the numbers are absent, but not in the sense that somebody
-forgot: running the script on a Mac rewrites this block and both badges from the measured bundles.
-Until then, an absent number is the honest one — the alternative is a figure quoted from a run
-nobody can point at, which is precisely how the test counts above drifted twice.
+Where to look: any run of [`.github/workflows/ci.yml`](.github/workflows/ci.yml), under the
+**Build and test (macOS)** job's summary. Two things sit outside that measurement, both
+structurally: XCUITest, because the step doing the measuring is the one that skips it, and everything
+the Linux job runs, because gathering coverage needs the Xcode toolchain. On a red run the bundle is
+uploaded as the `xcresult` artifact, which is where per-file detail lives.
+
+**The two badges above still read `not measured`, and that is now a different fact from the one this
+section used to record.** The number exists; nothing publishes it here. This workflow holds
+`contents: read` and writes nothing back to the repository, so both badges are still rewritten only
+by [`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py) — from a Mac, out of the
+per-scheme bundles the full suite produces, and committed by whoever ran it:
 
 ```bash
+./Scripts/ci.sh                     # the CI gate locally, and prints the same per-target table
 ./Scripts/run_full_test_suite.sh    # macOS + Xcode; rewrites this section and the two badges
 ```
+
+**No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
+number is either so low it never fires or red on the run that introduces it. Measuring first, then
+setting the floor against a baseline, is the order.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
 `main`, in two jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
-minutes, macOS runs `tuist generate`, the Debug build, the app-level suites, XCUITest and the Release
-gate. Both runners are free on a public repository. (This section used to say Actions could not start
+minutes, macOS runs `tuist generate`, the Debug build, the app-level suites — measured, with the
+per-target coverage table printed into the job summary — XCUITest and the Release gate. Both runners
+are free on a public repository. (This section used to say Actions could not start
 a job here at all — true while the repository was private and a billing block killed every run in
 about two seconds; making it public resolved it.)
 

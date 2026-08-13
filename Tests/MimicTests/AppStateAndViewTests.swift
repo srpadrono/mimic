@@ -1082,3 +1082,305 @@ struct AppStateAndViewTests {
         #expect(response.error?.code == "project.noneOpen")
     }
 }
+
+/// A candidate shaped like one `SpecImport` produces, with every field the committer reads settable.
+///
+/// File-scope rather than a method on a suite, because both import suites below need it — and one of them deliberately builds no `AppState` at all and two of
+/// them deliberately build no `AppState` at all.
+@MainActor
+private func makeCandidate(
+    method: HTTPMethod = .get,
+    path: String = "/api/v1/users",
+    name: String = "List users",
+    groupTag: String? = "Users",
+    statusCode: Int = 200,
+    headers: [String: String] = ["Content-Type": "application/json"],
+    graphqlOperation: String? = nil,
+    isSelected: Bool = true
+) -> ImportCandidate {
+    ImportCandidate(
+        isSelected: isSelected,
+        method: method,
+        path: path,
+        suggestedName: name,
+        suggestedGroupTag: groupTag,
+        statusCode: statusCode,
+        responseHeaders: headers,
+        responseBody: #"{"ok":true}"#,
+        responseContentType: .json,
+        graphqlOperation: graphqlOperation,
+        bodySizeBytes: 11,
+        bodySizeExceedsLimit: false,
+        isDuplicate: false
+    )
+}
+
+/// The import commit pipeline, driven with no `AppState` anywhere in the test.
+///
+/// That is most of the point of `ImportCommitter` existing: this whole suite used to require an
+/// in-memory GRDB store, a `UserDefaults` suite and a `MockServerRuntime` to ask what a bad status
+/// code does to one candidate.
+@Suite("Import committer")
+@MainActor
+struct ImportCommitterTests {
+
+    @Test("Selected candidates become endpoints carrying their captured response")
+    func selectedCandidatesBecomeEndpoints() throws {
+        let outcome = ImportCommitter(project: MockProject(name: "Fixture")).commit([
+            makeCandidate(method: .post, path: "/api/v1/users", name: "Create user"),
+            makeCandidate(method: .delete, path: "/api/v1/users/1", isSelected: false),
+        ])
+
+        let project = try #require(outcome.project)
+        #expect(project.endpoints.count == 1)
+
+        let endpoint = try #require(project.endpoints.first)
+        #expect(endpoint.name == "Create user")
+        #expect(endpoint.method == .post)
+        #expect(endpoint.groupTag == "Users")
+
+        let scenario = try #require(endpoint.scenarios.first { $0.id == endpoint.activeScenarioID })
+        #expect(scenario.name == "Imported")
+        #expect(scenario.statusCode == 200)
+        #expect(scenario.body == #"{"ok":true}"#)
+        #expect(outcome.report == .cleared)
+    }
+
+    @Test("A GraphQL candidate carries its operation onto the endpoint")
+    func graphqlCandidateKeepsItsOperation() throws {
+        let outcome = ImportCommitter(project: MockProject(name: "Fixture")).commit([
+            makeCandidate(method: .post, path: "/graphql", graphqlOperation: "GetUser"),
+        ])
+
+        // Without it the mock would answer every other call to `/graphql` as well, which is the one
+        // thing a captured GraphQL endpoint must not do.
+        let endpoint = try #require(outcome.project?.endpoints.first)
+        #expect(endpoint.graphqlOperation == "GetUser")
+    }
+
+    @Test("Confirming with nothing ticked attempts nothing and reports nothing")
+    func emptySelectionIsANoOp() {
+        let outcome = ImportCommitter(project: MockProject(name: "Fixture")).commit([
+            makeCandidate(isSelected: false),
+        ])
+
+        #expect(outcome.project == nil)
+        // Not `.cleared`. The two are different instructions: clearing here would wipe the reason a
+        // previous command left on screen, having attempted nothing of its own.
+        #expect(outcome.report == .unchanged)
+    }
+
+    @Test("With no project open every candidate is refused, and said so")
+    func noProjectOpenRefusesEverything() throws {
+        let outcome = ImportCommitter(project: nil).commit([
+            makeCandidate(),
+            makeCandidate(path: "/api/v1/orders"),
+        ])
+
+        #expect(outcome.project == nil)
+        #expect(outcome.report.message == "Skipped all 2 imported endpoints: no project is open.")
+    }
+
+    /// The shape a real HAR produces: a browser writes `"status": 0` for every cancelled, blocked or
+    /// transport-failed request, and a session's worth of traffic normally contains several.
+    @Test("A refused candidate leaves no endpoint behind, and does not take the good ones with it")
+    func aRefusedCandidateRollsBackAlone() throws {
+        let outcome = ImportCommitter(project: MockProject(name: "Fixture")).commit([
+            makeCandidate(path: "/api/v1/cancelled", statusCode: 0),
+            makeCandidate(path: "/api/v1/orders", name: "List orders"),
+        ])
+
+        let project = try #require(outcome.project)
+        // An endpoint created by the first command and left without its captured response is a mock
+        // nobody asked for, standing in for the one they did.
+        #expect(project.endpoints.map(\.path) == ["/api/v1/orders"])
+
+        let message = try #require(outcome.report.message)
+        #expect(message.hasPrefix("Skipped 1 of 2 imported endpoints:"))
+        #expect(message.contains("GET /api/v1/cancelled — Invalid status code: 0"))
+    }
+
+    @Test("A header that would split the response block is refused by name")
+    func aCRLFHeaderIsRefused() throws {
+        let outcome = ImportCommitter(project: MockProject(name: "Fixture")).commit([
+            makeCandidate(path: "/api/v1/trace", headers: ["X-Trace": "a\r\nSet-Cookie: evil=1"]),
+        ])
+
+        // Nothing survived, so there is nothing to publish — and publishing is what pushes to the
+        // engine and restarts the autosave debounce.
+        #expect(outcome.project == nil)
+        let message = try #require(outcome.report.message)
+        #expect(message.contains(#"Invalid value for header "X-Trace""#))
+    }
+
+    @Test("The early checks are exactly the ones the executor would apply")
+    func rejectionNamesTheFailingField() throws {
+        #expect(ImportCommitter.rejection(for: makeCandidate()) == nil)
+
+        let badPath = try #require(ImportCommitter.rejection(for: makeCandidate(path: "v1/things")))
+        #expect(badPath.contains("Path must start with '/'"))
+
+        let badStatus = try #require(ImportCommitter.rejection(for: makeCandidate(statusCode: 0)))
+        #expect(badStatus.contains("Invalid status code: 0"))
+    }
+}
+
+/// The two questions the capture sheet asks about a selection, as functions of the logs alone.
+@Suite("Journey capture heuristics")
+@MainActor
+struct JourneyCaptureTests {
+
+    /// Fixed timestamps rather than `Date()`: the ordering rule is the thing under test, so the
+    /// clock must not be part of it.
+    private static func log(
+        _ path: String,
+        secondsAgo: TimeInterval,
+        outcome: RequestOutcome = .endpoint
+    ) -> RequestLog {
+        RequestLog(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000 - secondsAgo),
+            method: .get,
+            path: path,
+            responseStatusCode: 200,
+            outcome: outcome
+        )
+    }
+
+    @Test("A run is named after its earliest call, not the first row handed over")
+    func namesAfterTheEarliestCall() {
+        // Newest first, which is how the request log draws by default — so the row a user hands over
+        // first is normally the last thing that happened.
+        let logs = [Self.log("/checkout", secondsAgo: 0), Self.log("/cart", secondsAgo: 30)]
+
+        #expect(JourneyCapture.name(capturing: logs) == "Cart flow")
+        // And the facade `WorkspaceView` calls still answers the same thing.
+        #expect(AppState.journeyName(capturing: logs) == "Cart flow")
+    }
+
+    @Test("Requests a journey already answered are not what the new flow is named after")
+    func skipsJourneyAnsweredRequests() {
+        let logs = [
+            Self.log("/session", secondsAgo: 90, outcome: .journey),
+            Self.log("/cart", secondsAgo: 30),
+        ]
+
+        #expect(JourneyCapture.name(capturing: logs) == "Cart flow")
+    }
+
+    @Test("A selection with nothing capturable in it still yields a usable name")
+    func fallsBackWhenEverythingIsFiltered() {
+        let nothing: [RequestLog] = []
+        #expect(JourneyCapture.name(capturing: nothing) == "Captured flow")
+
+        let onlyJourneyTraffic = [Self.log("/cart", secondsAgo: 5, outcome: .journey)]
+        #expect(JourneyCapture.name(capturing: onlyJourneyTraffic) == "Captured flow")
+    }
+
+    @Test("The step count is what the journey would hold, not the number of rows")
+    func stepCountCollapsesRepeatsAndDropsJourneyTraffic() {
+        // Four identical polls and one request a journey already answered: one step.
+        let polls = (0..<4).map { Self.log("/status", secondsAgo: TimeInterval(40 - $0 * 10)) }
+        let logs = polls + [Self.log("/session", secondsAgo: 90, outcome: .journey)]
+
+        #expect(logs.count == 5)
+        #expect(JourneyCapture.stepCount(logs) == 1)
+        #expect(AppState.capturedStepCount(logs) == 1)
+    }
+}
+
+/// What is left on `AppState` once the pipeline, the heuristics and the flags are elsewhere: it has
+/// to still answer to every name a view already writes, and it has to publish exactly when the
+/// committer says something survived.
+@Suite("AppState's facade over its collaborators")
+@MainActor
+struct AppStateFacadeTests {
+
+    private func makeAppState() throws -> AppState {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let defaults = UserDefaults(suiteName: "AppStateFacadeTests.\(UUID().uuidString)")!
+        return AppState(
+            projectRepository: GRDBProjectRepository(dbQueue: dbQueue),
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+    }
+
+    @Test("The presentation flags a view writes reach the object that holds them, and back")
+    func presentationFlagsForwardBothWays() throws {
+        let appState = try makeAppState()
+        let journeyID = UUID()
+
+        appState.showNewEndpointSheet = true
+        appState.showNewProjectSheet = true
+        appState.navigatorRequest = .journeys
+        appState.selectedJourneyID = journeyID
+
+        // A stored property re-added to `AppState` would shadow the forwarder and leave these at
+        // their defaults, while every view carried on compiling.
+        #expect(appState.presentation.showNewEndpointSheet)
+        #expect(appState.presentation.showNewProjectSheet)
+        #expect(appState.presentation.navigatorRequest == .journeys)
+        #expect(appState.presentation.selectedJourneyID == journeyID)
+
+        appState.presentation.navigatorRequest = .endpoints
+        appState.presentation.selectedJourneyID = nil
+        #expect(appState.navigatorRequest == .endpoints)
+        #expect(appState.selectedJourneyID == nil)
+    }
+
+    @Test("Deleting the selected journey still moves the selection, through the forwarder")
+    func deletingTheSelectedJourneyMovesTheSelection() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Fixture", port: 8083)
+
+        let first = try #require(appState.addJourney(name: "First"))
+        let second = try #require(appState.addJourney(name: "Second"))
+        appState.selectedJourneyID = second.id
+
+        appState.deleteJourney(id: second.id)
+
+        #expect(appState.selectedJourneyID == first.id)
+        #expect(appState.presentation.selectedJourneyID == first.id)
+    }
+
+    @Test("A commit that lands publishes the project once")
+    func commitPublishesWhatSurvived() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Fixture", port: 8084)
+
+        appState.commitImportedCandidates([makeCandidate(method: .post, name: "Create user")])
+
+        #expect(appState.currentProject?.endpoints.map(\.name) == ["Create user"])
+        #expect(appState.lastCommandError == nil)
+    }
+
+    @Test("An import in which nothing survived does not touch the open project")
+    func fullyRefusedImportLeavesTheProjectAlone() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Fixture", port: 8085)
+        let before = try #require(appState.currentProject)
+
+        appState.commitImportedCandidates([makeCandidate(path: "/api/v1/cancelled", statusCode: 0)])
+
+        // Byte for byte, `modifiedAt` included: assigning `currentProject` is what pushes the whole
+        // project to the engine and restarts the autosave debounce, and a refused import earns
+        // neither.
+        #expect(appState.currentProject == before)
+        let refusal = try #require(appState.lastCommandError)
+        #expect(refusal.contains("Invalid status code: 0"))
+    }
+
+    @Test("An import that selected nothing leaves the previous failure on screen")
+    func emptySelectionDoesNotClearTheErrorChannel() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Fixture", port: 8086)
+
+        appState.commitImportedCandidates([makeCandidate(path: "/api/v1/cancelled", statusCode: 0)])
+        let refusal = try #require(appState.lastCommandError)
+
+        // Confirming a sheet with nothing ticked attempts nothing, so it must say nothing — clearing
+        // here would erase the reason for the refusal above with a command that did no work.
+        appState.commitImportedCandidates([makeCandidate(isSelected: false)])
+
+        #expect(appState.lastCommandError == refusal)
+    }
+}

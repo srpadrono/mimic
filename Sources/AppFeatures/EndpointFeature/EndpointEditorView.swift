@@ -248,12 +248,15 @@ struct EndpointEditorView: View {
     ///
     /// What this note used to argue was that `.menuStyle(.borderlessButton)` was right here and
     /// `.button` right for `BreadcrumbJumpBar` — which split the app's four hand-styled menus two
-    /// and two. The component takes `.borderlessButton` for both, and deliberately: the menu style
-    /// decides the AppKit element type, and `JourneyUITests` separates two identically-labelled
-    /// "Add journey" controls by element type alone. `.buttonStyle(.plain)` *is* shared with the
-    /// breadcrumb and `DSFilterField.ScopeMenu`; see `DSIconMenu`'s own note for why `.plain` and
-    /// not the `.borderless` Apple's deprecation message suggests, and for what has to change
-    /// before the style can be modernised.
+    /// and two. The component takes `.borderlessButton` for both, and the reason it still does has
+    /// changed: it used to be that the menu style decides the AppKit element type and
+    /// `JourneyUITests` separated two identically-labelled "Add journey" controls by element type
+    /// alone. That is fixed — the journeys navigator's menu and the journeys empty state's button
+    /// carry different labels now, and the suite separates them by name. What is left is the hit
+    /// target, which is the question `DSIconMenu`'s own note ends on and which this menu shares:
+    /// its 22pt frame and hover well sit outside the `Menu`, not inside a `Button`'s label.
+    /// `.buttonStyle(.plain)` *is* shared with the breadcrumb and `DSFilterField.ScopeMenu`; see
+    /// that note for why `.plain` and not the `.borderless` Apple's deprecation message suggests.
     ///
     /// The alert stays here. It is this endpoint's confirmation, not a property of icon menus.
     @ViewBuilder

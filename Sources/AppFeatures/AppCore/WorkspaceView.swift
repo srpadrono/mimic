@@ -516,10 +516,18 @@ struct WorkspaceView: View {
         DSIconMenu(
             systemImage: "plus",
             help: "Add a journey",
-            // "Add journey", not the tooltip's "Add a journey": `JourneyUITests` separates this
-            // control from the empty state's identically-worded call to action by element type and
-            // by *this* label, because `DSTabStrip` flattens the identifier it is given.
-            label: "Add journey",
+            // Neither the tooltip's words nor the empty state's, and that is the whole point. This
+            // control *opens a chooser* — a new empty journey, or one built from a template — while
+            // `JourneyNavigatorList`'s empty state offers "Add journey" and creates one outright.
+            // Both used to answer to "Add journey": VoiceOver named two different actions
+            // identically, and `JourneyUITests` was left telling them apart by AppKit element type,
+            // a `MenuButton` here against a `Button` there. Element type is not identity — it is a
+            // property of the menu *style* — so modernising `DSIconMenu` off the deprecated
+            // `.menuStyle(.borderlessButton)` would have repointed the suite's query at the empty
+            // state's button, where every wait for a menu item would then time out. The label is
+            // also the only handle the suite has: `DSTabStrip` stamps its own identifier over the
+            // one passed below.
+            label: "Choose how to add a journey",
             identifier: "journeys.addJourneyButton"
         ) {
             // Opens a naming sheet rather than creating a "New journey" outright, which is what the

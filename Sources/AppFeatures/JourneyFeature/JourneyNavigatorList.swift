@@ -63,6 +63,14 @@ struct JourneyNavigatorList: View {
                     message: "A journey scripts an ordered sequence of responses, so one endpoint can "
                         + "fail and then succeed on the retry. Add one to script a flow endpoints "
                         + "alone can't express.",
+                    // This must stay different from the navigator "+" menu's label above the list
+                    // ("Choose how to add a journey", set in `WorkspaceView.addJourneyMenu`). The
+                    // two controls do different things: this one creates a journey outright — no
+                    // ellipsis, no sheet, straight to `onAdd` — while that one opens a chooser. They
+                    // carried the same words until the UI suite was found telling them apart by
+                    // AppKit element type, which is a property of a menu style rather than of either
+                    // control's identity. `DSEmptyState` speaks this string to VoiceOver as the
+                    // button's label, so the copy and the name are the same decision.
                     actionTitle: "Add journey",
                     identifier: "journeys.empty",
                     action: onAdd

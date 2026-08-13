@@ -34,18 +34,28 @@ final class AppState {
     nonisolated(unsafe) static var instancesCreated = 0
     #endif
 
-    var showNewEndpointSheet = false
-    /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
-    /// and an open workspace — File ▸ New Project has to work from either.
-    var showNewProjectSheet = false
-    /// A menu or CLI request to switch the sidebar to a given navigator. Consumed by `WorkspaceView`
-    /// and reset, because the menu sits above the window that owns the sidebar's state.
-    ///
-    /// This is how Journeys ▸ Show Journeys arrives too. There used to be a separate `showJourneys`
-    /// flag that opened a window; journeys have one home now, so there is one request.
-    var navigatorRequest: NavigatorTab?
-    /// The journey being edited in the navigator.
-    var selectedJourneyID: UUID?
+    /// What the window is presenting and what it has selected. Held apart because none of it is a
+    /// fact about the project — see ``WindowPresentation``. The four properties below forward to it
+    /// with their original names and types, so every `appState.showNewProjectSheet = true` and every
+    /// `$appState.selectedJourneyID` in the views still reads and writes the same thing.
+    let presentation: WindowPresentation
+
+    var showNewEndpointSheet: Bool {
+        get { presentation.showNewEndpointSheet }
+        set { presentation.showNewEndpointSheet = newValue }
+    }
+    var showNewProjectSheet: Bool {
+        get { presentation.showNewProjectSheet }
+        set { presentation.showNewProjectSheet = newValue }
+    }
+    var navigatorRequest: NavigatorTab? {
+        get { presentation.navigatorRequest }
+        set { presentation.navigatorRequest = newValue }
+    }
+    var selectedJourneyID: UUID? {
+        get { presentation.selectedJourneyID }
+        set { presentation.selectedJourneyID = newValue }
+    }
     var serverState: ServerState { server.serverState }
     /// The open project's configuration — read from the project, not from the runtime's copy.
     ///
@@ -126,13 +136,15 @@ final class AppState {
         server: MockServerRuntime = MockServerRuntime(),
         projectRepository: any ProjectRepository,
         recentProjectsStore: RecentProjectsStore,
-        panelLayoutStore: PanelLayoutStore = PanelLayoutStore()
+        panelLayoutStore: PanelLayoutStore = PanelLayoutStore(),
+        presentation: WindowPresentation = WindowPresentation()
     ) {
         #if DEBUG
         Self.instancesCreated += 1
         #endif
         self.server = server
         self.panelLayoutStore = panelLayoutStore
+        self.presentation = presentation
         repository = projectRepository
         projects = ProjectWorkspace(
             projectRepository: projectRepository,
@@ -302,149 +314,37 @@ final class AppState {
         _ = run(.serverConfigure(port: nil, globalDelayMs: delayMs))
     }
 
-    /// Adds the selected candidates to the open project — through the executor, so an import is held
-    /// to exactly the rules an edit is.
+    /// Adds the selected candidates to the open project, through ``ImportCommitter`` — which applies
+    /// them with `ProjectCommandExecutor`, so an import is held to exactly the rules an edit is.
     ///
-    /// This used to build `Scenario` and `Endpoint` inline and append them, which made importing the
-    /// one way into a project that validated nothing. `ProjectCommandExecutor` guards every edit and
-    /// `ProjectValidator` guards `projectImport`; this went around both, and `SpecImport` does not
-    /// validate either — it reports what it read.
+    /// The pipeline itself moved out: it is a transformation of a `MockProject` by a list of
+    /// candidates, and it needed a store, a runtime and a live session to reach only because it was a
+    /// method here. What is left is the part that genuinely belongs to a session — publishing the
+    /// project the commit produced, scheduling the save, and reporting what was refused.
     ///
-    /// Real captures make that reachable rather than theoretical. A browser writes `"status": 0` into
-    /// a HAR for every cancelled, blocked or transport-failed request, and a session's worth of
-    /// traffic normally contains several. Stored verbatim, that 0 reached the serving path, where
-    /// `VaporConfigurator.clampedStatusCode` answered 200 while the editor showed 0 and flagged the
-    /// user's own field as invalid — the request and the window disagreeing about the same mock. A
-    /// response header carrying CR or LF went the same way: accepted here, silently dropped when the
-    /// response was written, under a comment in `VaporConfigurator` promising that "the validators on
-    /// the editing and import paths are where a bad header gets a real error message".
-    ///
-    /// Refused candidates are reported, never dropped. The signature stays `Void` because this method
-    /// is handed straight to `ImportView` as its `([ImportCandidate]) -> Void` commit action, so the
-    /// reasons go to `lastCommandError` — the channel `ContentView` already presents.
+    /// The signature stays `Void` because this method is handed straight to `ImportView` as its
+    /// `([ImportCandidate]) -> Void` commit action, so the reasons go to `lastCommandError` — the
+    /// channel `ContentView` already presents.
     func commitImportedCandidates(_ candidates: [ImportCandidate]) {
-        let selected = candidates.filter(\.isSelected)
-        guard !selected.isEmpty else { return }
-
-        // One copy, mutated through the executor, published once at the end.
-        //
-        // Routing this through `run(_:)` per command was correct about the rules and wrong about the
-        // cost: every mutating `run` assigns `currentProject`, and that `didSet` applies the whole
-        // project to the engine and reschedules the autosave debounce. A candidate takes two
-        // commands, so a 300-entry HAR — an ordinary size for a real capture — meant six hundred
-        // whole-project pushes to the engine actor and six hundred debounce restarts on the main
-        // actor, for one confirmation of one sheet. The rules still have exactly one implementation:
-        // this calls the same `ProjectCommandExecutor.apply` that `run(_:)` does.
-        guard var project = currentProject else {
-            lastCommandError = "Skipped all \(selected.count) imported endpoints: no project is open."
-            return
-        }
-
-        var rejections: [String] = []
-        var didMutate = false
-
-        for candidate in selected {
-            let route = "\(candidate.method.rawValue) \(candidate.path)"
-
-            // Checked before anything is created, because a candidate takes two commands — the
-            // endpoint, then its response — and a bad response caught only by the second would leave
-            // an endpoint behind still answering the placeholder 200 `makeEndpoint` gives it: a mock
-            // nobody captured, standing in for the one they did. These are the same validators the
-            // executor calls, so the rule still has a single implementation; only the moment it runs
-            // is different.
-            if let reason = Self.importRejection(for: candidate) {
-                rejections.append("\(route) — \(reason)")
-                continue
-            }
-
-            // Taken before the pair and restored if either half fails. Rolling back by value is what
-            // the old `endpointDelete` command was reaching for, and it cannot half-succeed: an
-            // endpoint created by the first command but left without its captured response is a mock
-            // nobody asked for, standing in for the one they did.
-            let beforeCandidate = project
-
-            do {
-                guard let created = try ProjectCommandExecutor.apply(
-                    .endpointCreate(
-                        name: candidate.suggestedName,
-                        method: candidate.method,
-                        path: candidate.path,
-                        // The executor reads an empty string as "clear", which is what a candidate
-                        // with no group and no GraphQL operation means.
-                        spec: EndpointSpec(
-                            groupTag: candidate.suggestedGroupTag ?? "",
-                            graphqlOperation: candidate.graphqlOperation ?? ""
-                        )
-                    ),
-                    to: &project
-                )?.result.endpoint,
-                    let scenarioID = created.activeScenarioID
-                else {
-                    project = beforeCandidate
-                    rejections.append("\(route) — the endpoint could not be created")
-                    continue
-                }
-
-                _ = try ProjectCommandExecutor.apply(
-                    .scenarioUpdate(
-                        endpoint: .id(created.id),
-                        scenario: .id(scenarioID),
-                        spec: ScenarioSpec(
-                            name: "Imported",
-                            statusCode: candidate.statusCode,
-                            headers: candidate.responseHeaders,
-                            body: candidate.responseBody,
-                            contentType: candidate.responseContentType
-                        )
-                    ),
-                    to: &project
-                )
-                didMutate = true
-            } catch let error as ControlError {
-                project = beforeCandidate
-                rejections.append("\(route) — \(error.message)")
-            } catch {
-                project = beforeCandidate
-                rejections.append("\(route) — \(error.localizedDescription)")
-            }
-        }
+        let outcome = ImportCommitter(project: currentProject).commit(candidates)
 
         // Published once, and only if something survived: assigning `currentProject` is what pushes
         // the project to the engine and restarts the autosave debounce, so an import in which every
-        // candidate was refused should cost neither.
-        if didMutate {
+        // candidate was refused should cost neither. `ImportCommitter` reports that by answering with
+        // no project rather than by handing back an unchanged one.
+        if var project = outcome.project {
             project.modifiedAt = Date()
             currentProject = project
             projects.scheduleAutosave()
         }
 
-        guard !rejections.isEmpty else {
-            lastCommandError = nil
-            return
-        }
-        // Assigned after the loop rather than inside it: every command that succeeds clears
-        // `lastCommandError`, so a reason recorded mid-import would be erased by the next candidate
-        // that lands — which is the silent drop this whole method exists to stop.
-        lastCommandError = """
-        Skipped \(rejections.count) of \(selected.count) imported endpoints:
-
-        \(rejections.joined(separator: "\n"))
-        """
-    }
-
-    /// Why an imported candidate cannot become an endpoint, or `nil` when it can.
-    ///
-    /// Exactly the three checks `ProjectCommandExecutor` would apply to the two commands
-    /// ``commitImportedCandidates(_:)`` runs — path on the create, status and headers on the
-    /// response — run early enough that a refusal costs no half-made endpoint.
-    private static func importRejection(for candidate: ImportCandidate) -> String? {
-        do {
-            try EndpointValidator.validatePath(candidate.path)
-            try EndpointValidator.validateStatusCode(candidate.statusCode)
-            try EndpointValidator.validateHeaders(candidate.responseHeaders)
-            return nil
-        } catch {
-            return error.localizedDescription
+        switch outcome.report {
+        // Nothing was selected, so nothing was attempted: a reason the previous command left in
+        // `lastCommandError` is still the truth about that command and must not be wiped by a
+        // no-op confirmation.
+        case .unchanged: break
+        case .cleared: lastCommandError = nil
+        case let .skipped(message): lastCommandError = message
         }
     }
 
@@ -559,41 +459,23 @@ final class AppState {
     /// How many steps a selection would actually produce, for the capture sheet to report before the
     /// user commits. Not `logs.count`: requests a journey already answered are dropped, and a run of
     /// identical polls collapses into one repeating step.
+    ///
+    /// The rule lives in ``JourneyCapture`` — it is a function of the logs, with no session in it.
+    /// This forwards so `WorkspaceView`'s call site is unchanged.
     static func capturedStepCount(_ logs: [RequestLog]) -> Int {
-        JourneyStepSpec.capturing(logs).count
+        JourneyCapture.stepCount(logs)
     }
 
     /// Names a journey captured from a run after the resource its *earliest* call touches — the call
-    /// the flow starts with, which is what people name a flow after.
-    ///
-    /// Chronological, not whichever row happens to be first in the selection: the log draws
-    /// newest-first by default, so "the first one handed over" is normally the last thing that
-    /// happened.
+    /// the flow starts with, which is what people name a flow after. See ``JourneyCapture``.
     static func journeyName(capturing logs: [RequestLog]) -> String {
-        let capturable = logs.filter { $0.outcome != .journey }
-        guard let first = capturable.min(by: { $0.timestamp < $1.timestamp }) else {
-            return "Captured flow"
-        }
-        return journeyName(capturing: first)
+        JourneyCapture.name(capturing: logs)
     }
 
     /// Names a new journey after the resource the first captured call touches, which is nearly always
-    /// what the flow is about.
+    /// what the flow is about. See ``JourneyCapture``.
     static func journeyName(capturing log: RequestLog) -> String {
-        let path = log.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? log.path
-        let resource = path
-            .split(separator: "/")
-            .map(String.init)
-            .last { segment in
-                let lower = segment.lowercased()
-                let isVersion = lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber)
-                return lower != "api" && !isVersion && !segment.allSatisfy(\.isNumber)
-            }
-        guard let resource else { return "Captured flow" }
-        // Sentence case, not title case: "Account summary flow" reads better next to a lowercase
-        // "flow" than "Account Summary Flow" does.
-        let words = resource.replacingOccurrences(of: "-", with: " ")
-        return "\(words.prefix(1).uppercased())\(words.dropFirst()) flow"
+        JourneyCapture.name(capturing: log)
     }
 
     func moveJourneyStep(journeyID: UUID, stepID: UUID, to index: Int) {

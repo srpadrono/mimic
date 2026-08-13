@@ -10,6 +10,45 @@ import Foundation
 /// ties.
 extension MockProject {
 
+    // MARK: Projects
+
+    /// Whether this project is the one `ref` names.
+    ///
+    /// An id decides on its own when there is one; otherwise the name is trimmed and matched
+    /// case-insensitively, which is what ``ProjectRef`` promises. A reference carrying neither is
+    /// matched by nothing — it names no project, so it cannot name this one.
+    ///
+    /// This is the check a host applies to the project it *already has open*, before going to the
+    /// store: `projectCreate` answers before its write has landed on the window's host, so a script
+    /// that creates a project and immediately names it would otherwise be told it does not exist.
+    public func matches(_ ref: ProjectRef) -> Bool {
+        if let id = ref.id { return self.id == id }
+        guard let name = ref.name?.nilIfEmpty else { return false }
+        return self.name.caseInsensitiveCompare(name) == .orderedSame
+    }
+
+    /// The stored project `ref` names by name, or the failure that says why not.
+    ///
+    /// Only the name is resolved here: an id is answered by the store directly (`load(id:)` on the
+    /// service, a membership check on the window), and how a host reaches its store is the host's
+    /// own business. What was being written twice is this — the trim, the fold, the first-match rule,
+    /// and *which* of the two failures each dead end produces.
+    ///
+    /// Matching folds case but not the stored name's own whitespace, which is what both hosts did
+    /// and is deliberately left alone: a project literally named `" Checkout"` is a different project
+    /// from `"Checkout"` as far as this lookup is concerned, and changing that is a behaviour change
+    /// rather than a consolidation.
+    public static func requireNamed(_ ref: ProjectRef, in stored: [MockProject]) throws -> MockProject {
+        guard let name = ref.name?.nilIfEmpty else {
+            throw ControlError.projectReferenceRequired
+        }
+        let key = name.lowercased()
+        guard let match = stored.first(where: { $0.name.lowercased() == key }) else {
+            throw ControlError.projectNotFound(ref)
+        }
+        return match
+    }
+
     // MARK: Endpoints
 
     public func endpointIndex(matching ref: EndpointRef) -> Int? {
