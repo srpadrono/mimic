@@ -1167,8 +1167,10 @@ struct AppStateAndViewTests {
         // …and reaches `mimic state`, which is the other command a script polls after an optimistic
         // reply, because that carries the same report.
         let state = await host.execute(.state)
-        #expect(state.result?.state?.server?.errorCode == "server.portInUse")
-        #expect(state.result?.state?.server?.state == "error")
+        // `ControlState.server` is non-optional — the chain is already conditional through `state?`,
+        // so a `?` after `server` is a compile error, not extra caution.
+        #expect(state.result?.state?.server.errorCode == "server.portInUse")
+        #expect(state.result?.state?.server.state == "error")
     }
 
     /// An engine whose `start` always throws. Typed to `MockServerError` rather than `any Error` so
