@@ -180,10 +180,20 @@ run_step test-ui "error:|Test Case|TEST (SUCCEEDED|FAILED)" \
 # backwards while you are still writing it. It stays fatal here, so this script can still go red; it
 # simply does not stand in front of the compiler.
 step "House rules"
-# The scanner before the tree. `--self-test` plants each rule's own pattern in a throwaway file and
-# asserts it is reported — including behind a URL in a string literal, which is the case that made
-# the whole check evadable for as long as it stripped comments with `sed 's|//.*||'`. It costs a
-# fraction of a second and it is the only thing standing between "no violations" and "no scan".
+# The scanner before the tree, because a linter with no test for its own scanner reports "no
+# violations" for whatever reason it likes — and this one has now had two reasons. `--self-test`
+# plants every rule in a throwaway file and asserts each spelling is reported:
+#
+#   - behind a URL in a string literal, the case that made the whole check evadable for as long as it
+#     stripped comments with `sed 's|//.*||'`;
+#   - spaced and module-qualified, the case that made it evadable by a space bar. `.textCase
+#     (.uppercase)`, `SwiftUI.Alert(…)` and `DispatchQueue . main . asyncAfter(…)`, planted together
+#     as real code under `Sources/`, left a full scan of this tree reporting "6 house rules checked,
+#     no violations" and exiting 0.
+#
+# Both runs matter and neither substitutes for the other: the first says the scanner can see, the
+# second says the tree is clean. It costs a fraction of a second and it is the only thing standing
+# between "no violations" and "no scan".
 Scripts/check_house_rules.sh --self-test
 Scripts/check_house_rules.sh
 

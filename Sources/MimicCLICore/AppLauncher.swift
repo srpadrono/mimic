@@ -175,7 +175,19 @@ public enum AppLauncher {
     /// is Mimic's, and `AppCommand.Stop` calls it first — do not add a caller here that skips it.
     public static func terminate(pid: Int) throws {
         guard pid > 0 else { throw CLIFailure.appUnavailable("Invalid pid \(pid).") }
-        guard kill(pid_t(pid), SIGTERM) == 0 else {
+        // Named rather than called inline, so a test can assert the one thing a refusal is *about*:
+        // that nothing was signalled at all. See `SignalDeliveryOverride`. Nothing in production
+        // binds it, so this is the same `kill(2)` call it has always been.
+        //
+        // Spelled out rather than coalesced, matching `confirmRunningInstance` above: each branch
+        // converts to the declared function type on its own line.
+        let deliver: @Sendable (pid_t, Int32) -> Int32
+        if let override = SignalDeliveryOverride.current {
+            deliver = override
+        } else {
+            deliver = { kill($0, $1) }
+        }
+        guard deliver(pid_t(pid), SIGTERM) == 0 else {
             throw CLIFailure.appUnavailable(
                 "Could not stop pid \(pid): \(String(cString: strerror(errno)))."
             )
@@ -224,4 +236,32 @@ public enum AppLauncher {
             """
         )
     }
+}
+
+/// Where `AppLauncher.terminate` delivers its signal, replaceable for the length of one task tree.
+///
+/// The guard above it — `confirmRunningInstance`, and the `pid > 0` check inside `terminate` — exists
+/// to *not* signal, and the only honest assertion about that is "nothing was signalled". While the
+/// delivery was a bare `kill(2)` there was no way to write one, and the attempt was worse than the
+/// gap: `AppCommand.Stop` reads the machine's real `control.json` and takes no injection, so a test
+/// driving `mimic app stop` far enough to reach the guard would, on a developer's machine with Mimic
+/// open and the guard one day removed, have discovered the regression by SIGTERMing their instance. A
+/// test that performs the harm it exists to prevent is not a test. Bound, the pid still travels the
+/// whole production path and the signal stops at the recorder.
+///
+/// It cannot send a signal anywhere one would not otherwise go, and it does not soften the guard:
+/// nothing in production binds it, so `current` is `nil` for every real invocation.
+///
+/// ```bash
+/// # The claim above, in one command — binding is `$current.withValue` and nothing else can do it.
+/// # Prints nothing; exits 1. Written with a character class so this comment is not its own hit.
+/// grep -rn 'SignalDeliveryOverride[.]\$current' Sources Tools App/Sources
+/// ```
+///
+/// A task local rather than a stored property or a mutable static, for the same two reasons
+/// `ControlTransportOverride` is one: ArgumentParser builds each subcommand out of argv, so there is
+/// no call site a test could hand a stub to, and a mutable global would be shared mutable state in a
+/// module that compiles nonisolated — two suites in parallel would overwrite each other's.
+public enum SignalDeliveryOverride {
+    @TaskLocal public static var current: (@Sendable (pid_t, Int32) -> Int32)?
 }

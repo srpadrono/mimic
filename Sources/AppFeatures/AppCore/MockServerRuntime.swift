@@ -71,6 +71,17 @@ final class MockServerRuntime {
         }
     }
 
+    /// Starts the engine — from `.stopped` or `.error`, and from nowhere else.
+    ///
+    /// **A start requested from any other state is dropped, and nothing is reported.** That is the
+    /// right shape for the window, which is the caller this was written for: `ServerToggleButton`
+    /// sends `onStart` only from those two states and is `.disabled(isTransitioning)` in between, so
+    /// the drop is unreachable from the button. It is a trap for anything that has to *answer* the
+    /// request instead — see the note on ``stopServer()``.
+    ///
+    /// When it does accept, the state is `.starting` — not `.running` — by the time this returns. The
+    /// engine binds inside the task below, so "started" is never true synchronously and no caller may
+    /// report it as if it were.
     func startServer() {
         guard serverState == .stopped || serverState.isError else { return }
         serverState = .starting
@@ -90,6 +101,19 @@ final class MockServerRuntime {
         }
     }
 
+    /// Stops the engine — from `.running`, and from nowhere else.
+    ///
+    /// The same contract as ``startServer()``, and the one that shipped a defect. `.starting` is the
+    /// state *every* stop issued straight after a start arrives in, because `startServer()` publishes
+    /// `.starting` and returns before the engine has bound; this method drops that stop, and
+    /// `AppControlHost`'s `.serverStop` arm answered "Stopping the server." regardless. `mimic server
+    /// start` followed by `mimic server stop` therefore reported a stop that never happened and left
+    /// the server up.
+    ///
+    /// The contract here is unchanged — the window's button cannot reach the drop, and cancelling a
+    /// bind that has not completed is not something this can do. What changed is the host: it reads
+    /// ``serverState`` first and refuses a stop mid-transition with `server.busy` rather than
+    /// claiming one it did not make. Any other caller that reports back owes the same check.
     func stopServer() {
         guard case .running = serverState else { return }
         serverState = .stopping

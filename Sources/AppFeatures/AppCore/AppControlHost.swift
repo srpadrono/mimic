@@ -16,9 +16,17 @@ import Persistence
 final class AppControlHost: ControlHost {
 
     private weak var appState: AppState?
-    /// Held across the suspension in `serverStart`, so two lifecycle requests cannot interleave.
+    /// Held across the suspension in `serverStart`, so two lifecycle *commands* cannot interleave.
     /// `MimicControlService` carries the same flag for the same reason; the two hosts are meant to
     /// answer identically and this is one of the places that has to be written twice to stay true.
+    ///
+    /// It covers less here than it does there, and the difference is the whole of the defect the two
+    /// lifecycle arms below were rewritten for. The service holds this flag across `engine.start`
+    /// itself, so it is set for as long as the bind takes. This one is released on `defer` when the
+    /// arm returns — and `AppState.startServer()` returns as soon as the runtime has published
+    /// `.starting`, with the bind still ahead of it in a task of its own. The transition therefore
+    /// outlives the command, and only `MockServerRuntime.serverState` knows about it. Both arms read
+    /// that state as well as this flag.
     private var isChangingServerState = false
     private let repository: any ProjectRepository
 
@@ -134,6 +142,24 @@ final class AppControlHost: ControlHost {
             isChangingServerState = true
             defer { isChangingServerState = false }
 
+            // A lifecycle change already in flight. The flag above cannot see this one: it is
+            // released on `defer` when *this* arm exits, while `MockServerRuntime` stays `.starting`
+            // until the engine binds inside a task of its own — so the transition outlives the
+            // command that began it. `startServer()` accepts a start only from `.stopped` or
+            // `.error` and drops it otherwise, which is what made the old unconditional "Starting the
+            // server on port N." a report of something that had not happened.
+            //
+            // Refused with the code the headless service uses for the same collision, rather than
+            // queued: `server.busy` maps to 409, and a caller that is told to poll `server status`
+            // has everything it needs to retry. Switched with no `default` so a new `ServerState`
+            // case cannot be added without deciding which side of this it falls on.
+            switch appState.serverState {
+            case .starting, .stopping:
+                return .failure(Self.serverBusy)
+            case .stopped, .running, .error:
+                break
+            }
+
             if let port {
                 // Through `.serverConfigure`, not by writing the runtime's copy: a port supplied to
                 // `mimic server start --port` is a change to the project, and validating it here and
@@ -148,6 +174,17 @@ final class AppControlHost: ControlHost {
                 let configured = await perform(.serverConfigure(port: port, globalDelayMs: nil))
                 guard configured.ok else { return configured }
             }
+            // Already up. Read after the `await` above, not before it: a port supplied here is still
+            // written to the project — which is what `MimicControlService.startServer` does in the
+            // same position — and only then is the caller told the bind it asked for is not going to
+            // happen. Word for word the service's sentence, so a script gets one answer from either.
+            if case let .running(runningPort) = appState.serverState {
+                return .success(.init(
+                    message: "Server already running on port \(runningPort).",
+                    server: makeServerStatus(appState)
+                ))
+            }
+
             appState.startServer()
             // The runtime starts asynchronously, so report the intent rather than claiming a state
             // that has not been reached. `mimic server status` is the way to confirm.
@@ -162,8 +199,35 @@ final class AppControlHost: ControlHost {
             // while a start is mid-`await` would otherwise tell the engine to stop a server the start
             // has not asked for yet.
             guard !isChangingServerState else { return .failure(Self.serverBusy) }
-            appState.stopServer()
-            return .success(.init(message: "Stopping the server.", server: makeServerStatus(appState)))
+            // The reply is decided by the state the stop is applied to, because
+            // `MockServerRuntime.stopServer()` acts only on `.running` and drops the command
+            // silently everywhere else. This arm used to answer "Stopping the server." regardless,
+            // so `mimic server start` followed by `mimic server stop` — the two arriving well inside
+            // the window where the engine has not bound yet and the state is `.starting` — reported a
+            // stop that never happened and left the server up. The guard above does not cover that
+            // window: it is released on `defer` when the start arm returns, and the start arm returns
+            // before the engine binds.
+            switch appState.serverState {
+            case .running:
+                appState.stopServer()
+                // Still optimistic — the runtime shuts the engine down from a task — but the stop was
+                // accepted, which is the only thing this sentence claims.
+                return .success(.init(
+                    message: "Stopping the server.",
+                    server: makeServerStatus(appState)
+                ))
+            case .starting, .stopping:
+                // Refused rather than dropped or queued, with the code and the sentence the headless
+                // service uses for the same collision. The runtime cannot cancel a bind in progress,
+                // and a caller told "stopping" would never poll again.
+                return .failure(Self.serverBusy)
+            case .stopped, .error:
+                // Nothing to stop, said the way `MimicControlService.stopServer` says it.
+                return .success(.init(
+                    message: "Server is not running.",
+                    server: makeServerStatus(appState)
+                ))
+            }
 
         case .serverStatus:
             return .success(.init(server: makeServerStatus(appState)))
@@ -274,30 +338,45 @@ final class AppControlHost: ControlHost {
     ) async -> ControlResponse {
         switch command {
         case .projectList:
-            // Recents are the app's own listing and are already loaded, so this one can answer fully.
-            let summaries = appState.recentProjects.map { entry in
-                ProjectSummary(
-                    id: entry.id,
-                    name: entry.name,
-                    port: appState.currentProject?.id == entry.id
-                        ? appState.serverConfiguration.port
-                        : ServerConfiguration.default.port,
-                    globalDelayMs: appState.currentProject?.id == entry.id
-                        ? appState.serverConfiguration.globalDelayMs
-                        : 0,
-                    endpointCount: appState.currentProject?.id == entry.id
-                        ? appState.currentProject?.endpoints.count ?? 0
-                        : 0,
-                    journeyCount: appState.currentProject?.id == entry.id
-                        ? appState.currentProject?.journeys.count ?? 0
-                        : 0,
-                    activeJourneyID: appState.currentProject?.id == entry.id
-                        ? appState.currentProject?.activeJourneyID
-                        : nil,
-                    modifiedAt: Date()
-                )
+            // The store, counted the way `MimicControlService.projectSummaries` counts it.
+            //
+            // This used to map `AppState.recentProjects`, and recents cannot answer the question: it
+            // is a ten-entry `UserDefaults` cache holding an id, a name and a last-opened date, so
+            // every other field in a `ProjectSummary` had to be invented. Every project the session
+            // did not have open was reported as serving on `ServerConfiguration.default.port` with a
+            // zero delay, no endpoints, no journeys and no active journey, and *every* row — the open
+            // one included — carried `modifiedAt: Date()`, the instant of the call. A script that
+            // listed projects to find the port to point a client at was handed 8080 for all of them,
+            // and the identical command against a daemon answered correctly. The suite that was
+            // supposed to catch it compared which fields were populated rather than what was in them.
+            //
+            // Same wait as `resolveStoredProjectID` below, and for the same reason: `projectCreate`
+            // answers before its insert lands, so listing straight after creating has to see it.
+            await appState.projects.awaitPendingStoreWrites()
+            do {
+                let stored = try await repository.allProjects()
+                // `allProjects` returns stubs with no children; the store counts them in two grouped
+                // queries. A project with neither has no row in `counts`, and the stub's own zeroes
+                // are already the right answer.
+                let counts = (try? await repository.projectCounts()) ?? [:]
+                let open = appState.currentProject
+                let summaries = stored.map { project -> ProjectSummary in
+                    // The open project is answered from the session rather than from the store, for
+                    // the reason `projectExport` is: an edit made a moment ago is still sitting in
+                    // the autosave debounce, so the stored row is the one that can be behind. The
+                    // service needs no equivalent — it saves before it answers.
+                    if let open, open.id == project.id { return ProjectSummary(open) }
+                    var summary = ProjectSummary(project)
+                    if let count = counts[project.id] {
+                        summary.endpointCount = count.endpoints
+                        summary.journeyCount = count.journeys
+                    }
+                    return summary
+                }
+                return .success(.init(projects: summaries))
+            } catch {
+                return failureResponse(for: error)
             }
-            return .success(.init(projects: summaries))
 
         case let .projectCreate(name, port):
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

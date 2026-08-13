@@ -25,14 +25,29 @@ import Persistence
 ///   string — a difference there is drift, not wording.
 /// - **which result fields are populated**, compared as the JSON keys `ControlCoding` writes. A
 ///   caller that reads `result.project` is broken by its absence however friendly the message is.
+/// - **what is in those fields** — the encoded `ControlResult`, value for value, minus an explicit
+///   allowance list.
 ///
-/// Prose is asserted in exactly two places: where both hosts build the sentence in the *same* place
-/// (``ControlMessages/reset(clearedLogEntries:restartedJourneyName:)``), and where the difference is
-/// itself the thing being pinned — see ``contractDifferences`` and the `DIVERGENCE` tests. `ping` and
-/// `logClear` are deliberately *not* pinned even though the two hosts agree on them today: those
-/// sentences are written out longhand in both files, and a test asserting they match would be
-/// asserting a coincidence rather than a contract. They are noted here so the omission reads as a
-/// decision rather than an oversight.
+/// The last of those is the one that matters, and it is what this suite was missing. Comparing the
+/// key set alone let two hosts agree perfectly while answering with different ports, counts, names
+/// and timestamps — and one of them was doing exactly that. `projectList` was answered from the
+/// window's recents cache, so every project the session did not have open was reported as serving on
+/// `ServerConfiguration.default.port` with zero endpoints and zero journeys, and every row carried a
+/// `modifiedAt` of `Date()`; `projects` was populated on both sides, so "host parity" read green.
+///
+/// Two things are normalised before the values are compared, because they are properties of the
+/// *fixture* rather than of either host: UUIDs, which each host mints independently and which are
+/// replaced by a placeholder that still asserts the field's presence (``isMintedIdentifier(key:value:)``),
+/// and the wall-clock timestamps in ``universalAllowances``. Everything else that is allowed to
+/// differ is named per command in ``allowancesByCommand``, each entry carrying the reason.
+///
+/// Prose is therefore compared as well, and the two sentences this suite once declined to pin are no
+/// longer treated alike. `logClear` builds the same sentence from the same count in both files and is
+/// now held to it — a wording change on one side should fail here. `ping` stays unpinned, but for a
+/// reason rather than a preference: its sentence carries this instance's pid and mode, which two real
+/// instances do not share, so it is allowed for the same reason `state`'s `pid` is. Where a
+/// difference is itself the thing being pinned, see ``contractDifferences`` and the `DIVERGENCE`
+/// tests.
 @Suite("Host parity", .serialized)
 @MainActor
 struct HostParityTests {
@@ -52,6 +67,11 @@ struct HostParityTests {
         /// alive. Drop this and every command against the window answers "The Mimic session is no
         /// longer available." — a suite that would look like a broken host rather than a freed one.
         let appState: AppState
+        /// The engine behind the window's runtime, so a lifecycle test can assert what the runtime
+        /// actually asked it to do rather than what the host said about it. A host sentence cannot
+        /// see a command dropped on the way to the engine, which is the whole of the defect
+        /// ``serverLifecycleReportsWhatTheRuntimeDid`` covers.
+        let engine: ParityStubEngine
     }
 
     private struct ParityResponses {
@@ -68,6 +88,22 @@ struct HostParityTests {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
 
+        /// What the runtime actually asked of the engine, which is the only witness a lifecycle test
+        /// has. A dropped command and an executed one produce the same reply from a host that answers
+        /// with a fixed sentence — and one of them did.
+        private(set) var startedPorts: [Int] = []
+        private(set) var stopCount = 0
+
+        /// Holds `start` open, so `.starting` is a state a test can stand in rather than a window it
+        /// has to race.
+        ///
+        /// Without it, the interval between `startServer()` publishing `.starting` and the engine
+        /// binding is decided by the scheduler: the stop under test would sometimes arrive at
+        /// `.running` instead, and pass for the wrong reason. Sleeping rather than spinning, so the
+        /// actor is handed back on every suspension and the counters above stay readable while a
+        /// start is parked here — the shape `MockServerRuntimeTests.GatedEngine` already uses.
+        private var isHoldingStart = false
+
         init() {
             (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
         }
@@ -76,11 +112,19 @@ struct HostParityTests {
             logContinuation.finish()
         }
 
+        func holdStart() { isHoldingStart = true }
+
+        func releaseStart() { isHoldingStart = false }
+
         func start(configuration: ServerConfiguration) async throws {
-            // Nothing binds a port here; the runtime only needs the call to return.
+            // Nothing binds a port here; the runtime only needs the call to return — eventually.
+            startedPorts.append(configuration.port)
+            while isHoldingStart {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
         }
 
-        func stop() async throws {}
+        func stop() async throws { stopCount += 1 }
 
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
     }
@@ -101,8 +145,9 @@ struct HostParityTests {
         // Its own defaults suite, so a run cannot inherit — or overwrite — a real recents list or a
         // real window arrangement. `PanelLayoutStore()` would bind to `.standard` and do exactly that.
         let defaults = try #require(UserDefaults(suiteName: "HostParityTests.\(UUID().uuidString)"))
+        let engine = ParityStubEngine()
         let appState = AppState(
-            server: MockServerRuntime(engine: ParityStubEngine()),
+            server: MockServerRuntime(engine: engine),
             projectRepository: GRDBProjectRepository(dbQueue: windowQueue),
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
             panelLayoutStore: PanelLayoutStore(defaults: defaults)
@@ -111,8 +156,45 @@ struct HostParityTests {
         return ParityHosts(
             window: AppControlHost(appState: appState, repository: appState.repository),
             headless: headless,
-            appState: appState
+            appState: appState,
+            engine: engine
         )
+    }
+
+    /// Polls `predicate` until it holds or the timeout elapses.
+    ///
+    /// The lifecycle test below waits on work the runtime dispatched to a task of its own —
+    /// `engine.start` and `engine.stop` are both reached that way — and a fixed sleep would be either
+    /// flaky or slow. Private and duplicated from `MockServerRuntimeTests` because a test target is a
+    /// module and neither suite exports its helpers.
+    private func waitUntil(
+        timeout: Duration = .seconds(2),
+        interval: Duration = .milliseconds(20),
+        _ predicate: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if predicate() { return }
+            try await Task.sleep(for: interval)
+        }
+        Issue.record("Timed out waiting for condition")
+    }
+
+    /// The same poll for a predicate that has to ask an actor. Named apart from ``waitUntil(timeout:interval:_:)``
+    /// rather than overloaded on the closure's effects, which is the shape that resolves to whichever
+    /// overload the compiler happens to prefer — `MockServerRuntimeTests` keeps the pair for the same
+    /// reason.
+    private func waitUntilAsync(
+        timeout: Duration = .seconds(2),
+        interval: Duration = .milliseconds(20),
+        _ predicate: @escaping () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await predicate() { return }
+            try await Task.sleep(for: interval)
+        }
+        Issue.record("Timed out waiting for condition")
     }
 
     /// Opens the same project on both hosts, through the command surface rather than around it.
@@ -177,6 +259,22 @@ struct HostParityTests {
             sourceLocation: sourceLocation
         )
 
+        // …and what is *in* those fields, which the check above cannot see. Kept as a second
+        // assertion rather than folded into it because the key-set message is the readable one when
+        // a field goes missing, and this one is the readable one when a value goes wrong.
+        let allowed = Self.allowedDifferingFields(for: command.kind)
+        let windowValues = try Self.comparableJSON(responses.window.result, allowing: allowed)
+        let headlessValues = try Self.comparableJSON(responses.headless.result, allowing: allowed)
+        let valueSummary = "\(name) answered with different values.\n"
+            + "  window:   \(windowValues)\n"
+            + "  headless: \(headlessValues)\n"
+            + "  allowed to differ: \(allowed.sorted())"
+        #expect(
+            windowValues == headlessValues,
+            "\(valueSummary)",
+            sourceLocation: sourceLocation
+        )
+
         return responses
     }
 
@@ -193,6 +291,209 @@ struct HostParityTests {
             return []
         }
         return Set(object.keys)
+    }
+
+    // MARK: - What two hosts are allowed to answer differently
+
+    /// One result field the two hosts may legitimately disagree about, and why.
+    ///
+    /// Written as data rather than as a `guard` inside each test, so the exceptions are enumerable:
+    /// an allowance nobody can list is indistinguishable from an assertion nobody wrote.
+    private struct AllowedDifference {
+        /// The JSON key, matched wherever it appears in the encoded result — `pid` and `appVersion`
+        /// sit inside `state`, `modifiedAt` inside `project` and inside every entry of `projects`.
+        let field: String
+        let reason: String
+    }
+
+    /// Allowed for every command, because they describe *when* an answer was produced rather than
+    /// what it says.
+    ///
+    /// Each of these is a wall-clock instant stamped independently by two hosts that did the same
+    /// work microseconds apart. Requiring them to match would be requiring the two to run in the same
+    /// instant, which is not a contract anything can keep.
+    private static let universalAllowances: [AllowedDifference] = [
+        AllowedDifference(
+            field: "createdAt",
+            reason: "Each host builds its own `MockProject`, so the two are created a moment apart."
+        ),
+        AllowedDifference(
+            field: "modifiedAt",
+            reason: """
+            Stamped with `Date()` by whichever host applied the mutation, and by the store underneath \
+            it. Two hosts mutating the same document in sequence cannot land on one instant.
+            """
+        ),
+        AllowedDifference(
+            field: "timestamp",
+            reason: "A `RequestLog` records when the request was served; two engines serve at two instants."
+        ),
+    ]
+
+    /// Allowed for one command, with the reason that command in particular may differ.
+    ///
+    /// Deliberately short. Every entry is a place this suite has stopped being able to see a
+    /// divergence, so adding one is a cost and not a convenience: the reasons here are either an
+    /// artefact of running two hosts in a single test process (`pid`, and the `ping` sentence that
+    /// embeds it), an artefact of the stub engine the window is given (`journeyAdvance`), or a
+    /// contract difference already written down in ``contractDifferences`` (`projectImport`'s tense).
+    /// Nothing is listed because it was easier than fixing it.
+    private static let allowancesByCommand: [CommandKind: [AllowedDifference]] = [
+        .ping: [
+            AllowedDifference(
+                field: "message",
+                reason: """
+                The sentence carries this instance's pid and mode. They match here only because one \
+                test process is hosting both hosts; two real instances are two processes, so pinning \
+                the sentence would pin the fixture. Same reason as `pid` under `state` below.
+                """
+            ),
+        ],
+        .state: [
+            AllowedDifference(
+                field: "pid",
+                reason: """
+                Two instances are two processes. This fixture runs both hosts inside one, so the two \
+                agree here for a reason that has nothing to do with either host.
+                """
+            ),
+            AllowedDifference(
+                field: "appVersion",
+                reason: """
+                The window reads `Bundle.main`; the service is told, and this fixture tells it \
+                nothing. That is a difference in what each instance *is*, not in how it answers — and \
+                it is a difference in presence as well as value, which is why allowed fields are \
+                dropped rather than blanked.
+                """
+            ),
+        ],
+        .reset: [
+            AllowedDifference(field: "pid", reason: "`reset` carries a `state`; see `.state` above."),
+            AllowedDifference(field: "appVersion", reason: "`reset` carries a `state`; see `.state` above."),
+        ],
+        .projectImport: [
+            AllowedDifference(
+                field: "message",
+                reason: """
+                A declared contract difference: "Importing project …" from the window, whose save is a \
+                detached task, and "Imported project …" from the service, whose save is awaited. The \
+                `project` field — the part a caller reads — is compared and must match.
+                """
+            ),
+        ],
+        .journeyAdvance: [
+            AllowedDifference(
+                field: "message",
+                reason: """
+                The service names the position it advanced to; the window does not. Both sentences are \
+                built from a cursor, and this fixture's window engine has none — see the field below.
+                """
+            ),
+            AllowedDifference(
+                field: "journeyStatus",
+                reason: """
+                A fixture limit, not a contract one. `ParityStubEngine` takes the protocol's default \
+                `advanceJourney()`, which reports no cursor, so the window answers from its \
+                not-yet-started fallback while the service answers from a real engine that moved. \
+                That the window reports the *engine's* answer is asserted where an engine can be made \
+                to answer: `AppStateAndViewTests.controlHostAdvanceReportsTheEngineAnswer`.
+                """
+            ),
+        ],
+    ]
+
+    private static func allowedDifferingFields(for kind: CommandKind) -> Set<String> {
+        Set((universalAllowances + (allowancesByCommand[kind] ?? [])).map(\.field))
+    }
+
+    /// The encoded result with the allowed fields removed and minted UUIDs blanked, as a string two
+    /// hosts' answers can be compared by.
+    ///
+    /// Allowed fields are **removed** rather than blanked, because an allowance has to cover presence
+    /// as well as value: `appVersion` is `nil` on the service in this fixture and non-`nil` on the
+    /// window, so a blanked value would still leave one object carrying a key the other does not.
+    /// Everything else keeps its key, so a field appearing on one side alone still fails.
+    private static func comparableJSON(
+        _ result: ControlResult?,
+        allowing allowed: Set<String>
+    ) throws -> String {
+        guard let result else { return "(no result)" }
+        let data = try ControlCoding.encoder().encode(result)
+        let decoded = try JSONSerialization.jsonObject(with: data)
+        let normalised = normalise(decoded, allowing: allowed)
+        let encoded = try JSONSerialization.data(
+            withJSONObject: normalised,
+            options: [.sortedKeys, .fragmentsAllowed]
+        )
+        return String(decoding: encoded, as: UTF8.self)
+    }
+
+    private static func normalise(_ value: Any, allowing allowed: Set<String>) -> Any {
+        if let object = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, nested) in object where !allowed.contains(key) {
+                if isMintedIdentifier(key: key, value: nested) {
+                    result[key] = "<minted uuid>"
+                } else {
+                    result[key] = normalise(nested, allowing: allowed)
+                }
+            }
+            return result
+        }
+        if let array = value as? [Any] {
+            return array.map { normalise($0, allowing: allowed) }
+        }
+        return value
+    }
+
+    /// Whether this key holds a UUID each host minted for itself.
+    ///
+    /// Every id in a result graph is one: the two hosts create their own project, so its id, its
+    /// endpoints', its scenarios', its journeys' and its steps' are all independently generated and
+    /// can never match. The value is checked as well as the key name on purpose —
+    /// `JourneyTemplates.Template.id` is a stable kebab-case handle, not a UUID, and it stays
+    /// compared. The key keeps its place with a placeholder, so an id present on one side and absent
+    /// on the other (a dangling `activeJourneyID`, say) still fails.
+    private static func isMintedIdentifier(key: String, value: Any) -> Bool {
+        guard key == "id" || key.hasSuffix("ID") else { return false }
+        guard let text = value as? String else { return false }
+        return UUID(uuidString: text) != nil
+    }
+
+    /// An allowance describes a real field and carries a real reason.
+    ///
+    /// Cheap, and it is the check that stops the list becoming a place to make a failure go away:
+    /// a blank reason, or a duplicate entry quietly added beside an existing one, is how an
+    /// exceptions table turns into a suppression table.
+    @Test("Every allowed difference names a field once and says why")
+    func allowedDifferencesAreJustified() {
+        var lists: [String: [AllowedDifference]] = ["(universal)": Self.universalAllowances]
+        for (kind, allowances) in Self.allowancesByCommand {
+            lists[kind.rawValue] = allowances
+        }
+        for (owner, allowances) in lists {
+            let fields = allowances.map(\.field)
+            #expect(
+                Set(fields).count == fields.count,
+                "\(owner) lists a field twice: \(fields.sorted())"
+            )
+            for allowance in allowances {
+                #expect(
+                    allowance.reason.count > 20,
+                    "\(owner).\(allowance.field) is allowed to differ with no reason given"
+                )
+            }
+        }
+        // Universal allowances are applied to every command, so repeating one per command is a sign
+        // somebody stopped reading the list before adding to it.
+        let universal = Set(Self.universalAllowances.map(\.field))
+        for (kind, allowances) in Self.allowancesByCommand {
+            let repeated = Set(allowances.map(\.field)).intersection(universal)
+            #expect(
+                repeated.isEmpty,
+                "\(kind.rawValue) repeats an already-universal allowance: \(repeated.sorted())"
+            )
+        }
     }
 
     // MARK: - Routing: every kind reaches an implementation
@@ -556,9 +857,10 @@ struct HostParityTests {
         )
 
         // `state` is the command a caller polls after every optimistic reply, so the counts it carries
-        // are the ones a script actually depends on. `appVersion` is left out of the comparison on
-        // purpose: the window reads its own bundle and the service is told, which is a difference in
-        // what each instance *is*, not in how it answers.
+        // are the ones a script actually depends on. `expectParity` already compares all of this by
+        // value — `appVersion` and `pid` excepted, for the reasons in `allowancesByCommand` — and the
+        // field-by-field expectations are kept because they name what failed instead of printing two
+        // JSON documents to diff by eye.
         let state = try await expectParity(.state, on: hosts)
         let windowState = try #require(state.window.result?.state)
         let headlessState = try #require(state.headless.result?.state)
@@ -633,31 +935,41 @@ struct HostParityTests {
             differs: the window's save is a detached task, the service's is awaited.
             """
         ),
-        ContractDifference(
-            kind: .projectList,
-            window: "ok, the session's recents — counts only for the open project",
-            headless: "ok, every stored project with accurate counts",
-            reason: """
-            The window lists what it has already loaded, because the recents list is the app's own \
-            listing and is on screen. The service reads the store. Both populate `projects`; what is \
-            in them is not the same question.
-            """
-        ),
+        // `projectList` was here, and is not any more. The window answered from its recents cache —
+        // `ServerConfiguration.default.port`, zero counts and a fabricated `modifiedAt` for every
+        // project it did not have open — and the row called it a contract difference on the grounds
+        // that "the recents list is the app's own listing and is on screen". That justified the
+        // *source*, not the wrong values, and a script cannot use a listing whose ports are invented.
+        // Both hosts read the store now; see `projectListReportsTheStoredProjects`.
         ContractDifference(
             kind: .serverStart,
             window: #"ok, "Starting the server on port N. Poll `mimic server status` to confirm.""#,
             headless: #"ok, "Server running at http://127.0.0.1:N." once it is actually bound"#,
             reason: """
             `MockServerRuntime` starts the engine from a task, so the window can only report the \
-            intent. The service awaits `engine.start` and can report the bound address — which is \
-            also why this suite never drives it: doing so would open a socket.
+            intent; the service awaits `engine.start` and can report the bound address — which is \
+            also why this suite never drives the service's, since doing so would open a socket. The \
+            difference is now confined to that: a start against an instance already running on the \
+            port asked for gets "Server already running on port N." from both, and a start that \
+            collides with a lifecycle change already in flight gets `server.busy` from both. What \
+            counts as "in flight" is not the same on the two — the service holds its flag across \
+            `engine.start`, the window reads `MockServerRuntime.serverState`, which stays `.starting` \
+            after the command that began it has returned — but the answer a caller sees is.
             """
         ),
         ContractDifference(
             kind: .serverStop,
-            window: #"ok, "Stopping the server.""#,
-            headless: #"ok, "Server stopped." — or "Server is not running." when it was not"#,
-            reason: "The same asynchronous lifecycle as serverStart, from the other end."
+            window: #"ok, "Stopping the server." — the runtime shuts the engine down from a task"#,
+            headless: #"ok, "Server stopped." once the engine has actually stopped"#,
+            reason: """
+            The same asynchronous lifecycle as serverStart, from the other end, and now the whole of \
+            the difference: both answer a stop with nothing running "Server is not running.", and \
+            both refuse one that collides with a lifecycle change in flight with `server.busy`. The \
+            window used to answer "Stopping the server." from *every* state — including `.starting`, \
+            which is the state `MockServerRuntime.stopServer()` drops the command in — so the \
+            sentence was the one thing about it that could not be trusted. See \
+            `serverLifecycleReportsWhatTheRuntimeDid`.
+            """
         ),
     ]
 
@@ -722,29 +1034,135 @@ struct HostParityTests {
         #expect(responses.headless.result?.project?.id == document.id)
     }
 
-    /// Server lifecycle, from both ends, without binding anything.
+    /// Server lifecycle on the window's host, asserted by what the engine was asked to do.
     ///
-    /// Only the window is asked to start: the service would put a real listener on the port, and a
-    /// parity suite has no business opening sockets. What the service answers instead is recorded in
-    /// ``contractDifferences``.
-    @Test("The window reports the intent to start and to stop; the service reports the outcome")
-    func serverLifecycleIsOptimisticOnTheWindowHost() async throws {
+    /// This test used to assert the *sentences* — `#expect(stopped.window.result?.message ==
+    /// "Stopping the server.")` — and that is exactly how the defect it now covers survived a green
+    /// suite for as long as it did. `AppControlHost` answered that sentence from every state, while
+    /// `MockServerRuntime.stopServer()` acts only on `.running` and drops the command everywhere
+    /// else. `.starting` is where *every* stop issued straight after a start arrives, because
+    /// `startServer()` publishes `.starting` and returns with the bind still ahead of it — so
+    /// `mimic server start && mimic server stop` reported a stop it had not made and left the server
+    /// up. An assertion on the reply agreed with the bug; only the engine can tell them apart.
+    ///
+    /// Only the window is driven here: the service's start would put a real listener on the port, and
+    /// a parity suite has no business opening sockets. What the service answers is recorded in
+    /// ``contractDifferences`` and covered by `ControlPlaneTests`.
+    @Test("Server lifecycle is answered by what the runtime did, not by a fixed sentence")
+    func serverLifecycleReportsWhatTheRuntimeDid() async throws {
         let hosts = try makeHosts()
         try await seedProject(hosts, port: 9099)
 
+        // Nothing is running, so there is nothing to stop — and both hosts now say so in the same
+        // words, which is why this one goes through `expectParity`.
+        let idle = try await expectParity(.serverStop, on: hosts)
+        #expect(idle.window.ok)
+        #expect(idle.window.result?.message == "Server is not running.")
+        #expect(idle.window.result?.server?.state == "stopped")
+        let stopsBeforeAnyStart = await hosts.engine.stopCount
+        #expect(stopsBeforeAnyStart == 0)
+
+        // Held open, so the runtime is `.starting` for as long as this test needs it to be rather
+        // than for however long the scheduler happens to take.
+        await hosts.engine.holdStart()
         let started = await hosts.window.execute(.serverStart(port: nil))
         #expect(started.ok)
         #expect(
             started.result?.message
                 == "Starting the server on port 9099. Poll `mimic server status` to confirm."
         )
+        // Reported as intent, not as a bind: `.starting` is what the runtime is in when the arm
+        // returns, and saying "running" here would be the same class of claim as the stop below.
+        #expect(started.result?.server?.state == "starting")
 
-        let stopped = await run(.serverStop, on: hosts)
-        #expect(stopped.window.result?.message == "Stopping the server.")
-        #expect(stopped.headless.result?.message == "Server is not running.")
+        // The defect, driven. A stop arriving before the engine has bound must not be answered with
+        // a success sentence, and must not reach the engine.
+        let duringStart = await hosts.window.execute(.serverStop)
+        #expect(duringStart.ok == false)
+        #expect(duringStart.error?.code == "server.busy")
+        let stopsDuringStart = await hosts.engine.stopCount
+        #expect(stopsDuringStart == 0)
+
+        // The same window from the other end: a second start would have been dropped by
+        // `startServer()`'s own guard while the reply claimed a bind on port 9099.
+        let restart = await hosts.window.execute(.serverStart(port: nil))
+        #expect(restart.ok == false)
+        #expect(restart.error?.code == "server.busy")
+        let portsDuringStart = await hosts.engine.startedPorts
+        #expect(portsDuringStart == [9099])
+
+        // Bound only after the fixture lets go. `appState` and `engine` are pulled out into locals
+        // because the two polls run in differently-isolated closures — one on the main actor reading
+        // the session, one nonisolated asking the engine — and `ParityHosts` is neither.
+        let appState = hosts.appState
+        let engine = hosts.engine
+        await engine.releaseStart()
+        try await waitUntil { appState.serverState.runningPort == 9099 }
+
+        // Up, so a start is answered as such — in the service's words — instead of reporting a bind
+        // that `startServer()` would have dropped.
+        let again = await hosts.window.execute(.serverStart(port: nil))
+        #expect(again.ok)
+        #expect(again.result?.message == "Server already running on port 9099.")
+        let portsAfterSecondStart = await engine.startedPorts
+        #expect(portsAfterSecondStart == [9099])
+
+        // …and only now is "Stopping the server." true. The engine is the proof; the runtime reaches
+        // it from a task of its own, so the count is polled rather than read.
+        let stopping = await hosts.window.execute(.serverStop)
+        #expect(stopping.ok)
+        #expect(stopping.result?.message == "Stopping the server.")
+        try await waitUntilAsync { await engine.stopCount == 1 }
     }
 
     // MARK: - Divergences
+
+    /// Was a DIVERGENCE, now parity: `project list` reports the store from both hosts.
+    ///
+    /// The window's arm mapped `AppState.recentProjects`, and recents cannot answer the question: it
+    /// is a ten-entry `UserDefaults` cache holding an id, a name and a last-opened date, so every
+    /// other field of a `ProjectSummary` was invented. Every project the session did not have open was
+    /// reported as serving on `ServerConfiguration.default.port` with no endpoints and no journeys,
+    /// and every row — the open one included — carried `modifiedAt: Date()`, the instant of the call.
+    /// A script that listed projects to find the port to point a client at was handed 8080 for all of
+    /// them, while the identical command against a daemon answered correctly.
+    ///
+    /// It went unnoticed because this suite compared which fields were populated: `projects` was
+    /// populated on both sides, so the row was recorded in ``contractDifferences`` as a legitimate
+    /// difference of *source* rather than read as a wrong answer. Value comparison is what turns that
+    /// into a failure, and this test is what makes it specific.
+    ///
+    /// The endpoint and the journey are added *after* the project is created on purpose: on the
+    /// window those edits go through the autosave debounce, so the stored row still says zero when
+    /// this runs. That is the case the open-project overlay exists for — and the case a listing built
+    /// from the store alone would get wrong in the opposite direction.
+    @Test("Both hosts list the stored projects, with the port and counts each one really has")
+    func projectListReportsTheStoredProjects() async throws {
+        let hosts = try makeHosts()
+        try await seedProject(hosts, name: "Checkout", port: 9099)
+        try await expectParity(
+            .endpointCreate(name: "Login", method: .post, path: "/login", spec: nil),
+            on: hosts
+        )
+        try await expectParity(.journeyAddTemplate(templateID: "payment-retry", name: "Flow"), on: hosts)
+
+        let listed = try await expectParity(.projectList, on: hosts)
+
+        let windowProjects = try #require(listed.window.result?.projects)
+        #expect(windowProjects.count == 1)
+        // The three the window used to fabricate. Each is asserted against the value the project
+        // actually holds, so a listing that fell back to the defaults again fails here rather than
+        // only in `expectParity`'s value comparison.
+        #expect(windowProjects.first?.name == "Checkout")
+        #expect(windowProjects.first?.port == 9099)
+        #expect(windowProjects.first?.endpointCount == 1)
+        #expect(windowProjects.first?.journeyCount == 1)
+
+        let headlessProjects = try #require(listed.headless.result?.projects)
+        #expect(headlessProjects.map(\.port) == windowProjects.map(\.port))
+        #expect(headlessProjects.map(\.endpointCount) == windowProjects.map(\.endpointCount))
+        #expect(headlessProjects.map(\.journeyCount) == windowProjects.map(\.journeyCount))
+    }
 
     /// Was a DIVERGENCE, now parity: `projectExport` takes a project reference and both hosts honour
     /// it.
@@ -894,11 +1312,15 @@ struct HostParityTests {
     /// engine's own answer, falling back to the not-yet-started journey exactly as `journeyRestart`
     /// and `journeyStatus` beside it already did.
     ///
-    /// **What this suite can and cannot see.** Field presence is the whole of the parity claim here,
-    /// because the window's engine in this fixture is `ParityStubEngine`, which takes the protocol's
-    /// default `advanceJourney()` and reports no cursor at all — so the window's reply comes from the
-    /// fallback rather than from an engine that moved. That the *engine's* answer is what gets
-    /// reported is asserted where an engine can be made to answer:
+    /// **What this suite can and cannot see.** Field presence is the whole of the parity claim here —
+    /// `journeyAdvance` is the one command whose `journeyStatus` is allowed to differ, and its
+    /// `message` with it. The window's engine in this fixture is `ParityStubEngine`, which takes the
+    /// protocol's default `advanceJourney()` and reports no cursor at all, so the window's reply comes
+    /// from the fallback while the service's comes from a real engine that moved; the reasons sit in
+    /// ``allowancesByCommand``. Giving the stub a real cursor would not fix it — the runtime pushes
+    /// the journey to the engine from an unstructured task, so whether the engine has it by the time
+    /// the advance arrives is a race, and the assertion would be flaky rather than strict. That the
+    /// *engine's* answer is what gets reported is asserted where an engine can be made to answer:
     /// `AppStateAndViewTests.controlHostAdvanceReportsTheEngineAnswer`.
     @Test("Advancing a journey reports a status from both hosts")
     func journeyAdvanceReportsAStatusFromBothHosts() async throws {
@@ -914,9 +1336,19 @@ struct HostParityTests {
         #expect(responses.window.result?.journeyStatus?.journeyName == "Flow")
         #expect(responses.headless.result?.journeyStatus?.journeyName == "Flow")
 
-        // The query beside it agrees too, which is what makes this a property of the command surface
+        // The query beside it answers too, which is what makes this a property of the command surface
         // rather than of one arm.
-        let queried = try await expectParity(.journeyStatus, on: hosts)
-        #expect(queried.window.result?.journeyStatus != nil)
+        //
+        // Deliberately `run` and not `expectParity`: the advance above moved the service's cursor and
+        // could not move the window's, because `ParityStubEngine` has none. By this point in *this*
+        // test the two statuses have genuinely diverged, and comparing them would be comparing a stub
+        // against a real engine. Everywhere else in this suite `journeyStatus` goes through
+        // `expectParity` and is compared in full — see `aScriptedFlowAgreesAtEveryStep`, where both
+        // hosts are asked for it with the cursor untouched.
+        let queried = await run(.journeyStatus, on: hosts)
+        #expect(queried.window.ok)
+        #expect(queried.headless.ok)
+        #expect(queried.window.result?.journeyStatus?.journeyName == "Flow")
+        #expect(queried.headless.result?.journeyStatus?.journeyName == "Flow")
     }
 }
