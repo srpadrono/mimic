@@ -99,9 +99,14 @@ session cookie for a staging API. Two consequences:
 
 ### Imported captures carry whatever was captured
 
-Importing a HAR or an OpenAPI spec drops credential *headers* — `Authorization`, `Proxy-Authorization`,
-`Cookie` and `Set-Cookie` are not copied onto the mock, because a header is framing and dropping one
-does not change the payload the client reads.
+Importing a HAR or an OpenAPI spec drops credential *headers* — `Authorization`,
+`Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key` and `X-Auth-Token` are not copied onto the
+mock, because a header is framing and dropping one does not change the payload the client reads.
+
+That list is `RequestLog.sensitiveHeaderNames` in `Domain`, and it is the same one the request log
+redacts with. It was not always: the importer carried its own narrower copy naming the first four, so
+an imported `X-API-Key` was redacted out of a log the developer had already seen and copied into a
+mock that might be committed to a repository. The narrower list guarded the riskier path.
 
 **Response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands with the
 real token in it.

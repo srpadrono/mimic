@@ -131,8 +131,14 @@ public enum ProjectValidator {
         // A document from a *newer* build, checked first because nothing below can be trusted to mean
         // what it says once the schema has moved. Decoding does not stop one: `MockProject.init(from:)`
         // keeps whatever version the document declares, unknown keys are dropped in silence, and the
-        // synthesised encoder writes the higher number back out — so a v3 document imported here
-        // becomes a v2 project still claiming to be v3, having quietly lost whatever v3 added.
+        // synthesised encoder writes the higher number back out — so a v4 document imported here
+        // becomes a v3 project still claiming to be v4, having quietly lost whatever v4 added.
+        //
+        // The numbers moved once already: this read v3-over-v2 until `currentSchemaVersion` was
+        // corrected to 3, which is the version the tree has carried since `v3_graphql_operation`
+        // added `graphqlOperation` to the document. An illustration written in literals has to be
+        // renumbered whenever the constant moves — `MockProject.currentSchemaVersion` is the value,
+        // and this sentence is only ever describing the shape of the failure.
         //
         // The version is checked here and nowhere else in `Sources`, which covers the import path —
         // where a *foreign* document arrives. It does not cover a store written by a newer build, and

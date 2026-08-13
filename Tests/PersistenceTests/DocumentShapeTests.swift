@@ -16,10 +16,14 @@ import Domain
 /// `currentSchemaVersion + 1`, so it holds for *any* value of the constant, a stale one included.
 ///
 /// What that needs is a fact the constant cannot supply about itself, so this records one: the set of
-/// key paths a fully-populated project encodes to. Add a field anywhere in the document and the set
-/// changes, and the only way to make the suite green again is to look at this file — which is where
-/// the version bump is asked for. It cannot *force* the bump (nothing can force an integer to move),
-/// but it does make adding a field to the document silent-proof.
+/// key paths a fully-populated project encodes to. Add a field to any of the seven types listed in
+/// `documentTypes` and the set changes, and the only way to make the suite green again is to look at
+/// this file — which is where the version bump is asked for. It cannot *force* the bump (nothing can
+/// force an integer to move), but it does make adding a field to those types silent-proof.
+///
+/// The boundary is `documentTypes`, and it is hand-written: a field on a type *not* on that list —
+/// a nested type introduced later, say — is still invisible here. Adding a type to the document
+/// means adding it there in the same edit, which is the one thing this file cannot check for you.
 @Suite("Stored document shape")
 struct DocumentShapeTests {
 
