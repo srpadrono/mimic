@@ -82,6 +82,9 @@ struct ImportHeaderPolicyTests {
             #expect(ImportHeaderPolicy.shouldDrop(asCaptured), "\(asCaptured) is a credential in Domain")
 
             // Through the chokepoint every importer goes through, not just the predicate.
+            // The ledger is per-import and the builder claims a route into it, so it is declared
+            // here rather than passed empty: one candidate, one ledger, nothing pre-existing.
+            var ledger = ImportRouteLedger(existingEndpoints: [])
             let candidate = ImportCandidateBuilder.makeCandidate(
                 method: .post,
                 path: "/session",
@@ -89,7 +92,7 @@ struct ImportHeaderPolicyTests {
                 responseHeaders: [asCaptured: "s3cret", "Content-Type": "application/json"],
                 responseBody: #"{"ok":true}"#,
                 responseContentType: .json,
-                existingEndpoints: []
+                ledger: &ledger
             )
             #expect(
                 candidate.responseHeaders[asCaptured] == nil,
@@ -140,6 +143,7 @@ struct ImportHeaderPolicyTests {
 
     @Test("Every importer gets the policy, because it is applied where candidates are built")
     func policyAppliesToEveryImporter() {
+        var ledger = ImportRouteLedger(existingEndpoints: [])
         let candidate = ImportCandidateBuilder.makeCandidate(
             method: .get,
             path: "/things",
@@ -151,7 +155,7 @@ struct ImportHeaderPolicyTests {
             ],
             responseBody: #"{"ok":true}"#,
             responseContentType: .json,
-            existingEndpoints: []
+            ledger: &ledger
         )
         #expect(candidate.responseHeaders["Content-Encoding"] == nil)
         #expect(candidate.responseHeaders["Content-Length"] == nil)

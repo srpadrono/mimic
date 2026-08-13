@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-986%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-987%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -258,7 +258,7 @@ that CI runs a separate daemon is not. See
 
 ## Testing
 
-986 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+987 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
@@ -266,12 +266,12 @@ for UI.
 |-------|-------|---------------|
 | Domain, persistence, engine, control plane, import, CLI | 646 | Linux or macOS — `swift test` |
 | Design system | 54 | macOS — needs SwiftUI |
-| App and coordination | 246 | macOS — hosted by the app |
+| App and coordination | 247 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
 The portable 646 break down as Domain 211, SpecImport 124, MimicCLICore 121, MockServerEngine 69,
-Persistence 68, ControlPlane 53. The app's 246 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 92, `MimicTests` 117, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+Persistence 68, ControlPlane 53. The app's 247 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 92, `MimicTests` 118, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:

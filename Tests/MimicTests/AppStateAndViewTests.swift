@@ -41,6 +41,40 @@ struct AppStateAndViewTests {
         }
     }
 
+    /// Records the activation epoch of every push, which is the one thing no other double sees.
+    ///
+    /// It implements the *four*-argument `updateConfiguration` rather than the three-argument one, so
+    /// it observes what `MockServerRuntime` actually sends. A double that only implements the
+    /// three-argument version still records a push — the protocol extension forwards to it — and
+    /// would therefore pass whether or not the count was ever threaded through, which is exactly how
+    /// the engine gained an activation epoch that no host passed it.
+    actor EpochRecordingEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private(set) var pushedEpochs: [Int] = []
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func updateConfiguration(
+            endpoints: [Endpoint],
+            globalDelayMs: Int,
+            journey: Journey?,
+            activationEpoch: Int
+        ) async {
+            pushedEpochs.append(activationEpoch)
+        }
+    }
+
     @discardableResult
     private func render<V: View>(
         _ view: V,
@@ -611,6 +645,51 @@ struct AppStateAndViewTests {
         #expect(scheduledActivations == 1)
         #expect(context.knownTestSuites == ["com.devxa.Mimic.UITests"])
         #expect(context.databaseURL == URL(fileURLWithPath: "/tmp/named-by-harness.sqlite"))
+    }
+
+    /// The seam that made the engine's activation epoch inert: it existed, `MockRouteStore` acted on
+    /// it, `MockServerEngineTests` covered it, and no host passed one — so `mimic journey activate`
+    /// against the already-active journey went on resuming mid-run with a green suite. Nothing below
+    /// tests `MockRouteStore`; this tests only that the count leaves `AppState` and arrives, which is
+    /// the half that was missing.
+    @Test("Activating raises the epoch the engine is pushed; an ordinary edit does not")
+    func activationEpochReachesTheEngine() async throws {
+        let engine = EpochRecordingEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+
+        appState.createProject(name: "Epoch", port: 9861)
+        let journey = try #require(appState.addJourney(name: "Retry"))
+        try await waitUntil { await engine.pushedEpochs.isEmpty == false }
+
+        // An edit — a journey was just added — must not look like an activation.
+        let beforeActivation = try #require(await engine.pushedEpochs.last)
+
+        appState.activateJourney(id: journey.id)
+        try await waitUntil { await (engine.pushedEpochs.last ?? beforeActivation) > beforeActivation }
+        let afterActivation = try #require(await engine.pushedEpochs.last)
+
+        // The case the whole mechanism exists for: activating what is already active. Nothing in the
+        // pushed endpoints or journey differs from the push before it, so the count is the only thing
+        // that can say a run should restart.
+        appState.activateJourney(id: journey.id)
+        try await waitUntil { await (engine.pushedEpochs.last ?? afterActivation) > afterActivation }
+        let afterReactivation = try #require(await engine.pushedEpochs.last)
+
+        // An id naming no journey mutates nothing and pushes nothing, so it must not leave a raised
+        // count behind for the next unrelated edit to carry out — that would restart a run nobody
+        // touched. Asserted through a following edit, since the invalid call itself pushes nothing.
+        //
+        // Waited on the push *count* rather than on the epoch: the epoch is supposed not to move
+        // here, so a predicate written about its value is true before the edit's push has landed and
+        // the assertion below would race it.
+        let pushCountBefore = await engine.pushedEpochs.count
+        appState.activateJourney(id: UUID())
+        _ = appState.addJourney(name: "Unrelated")
+        try await waitUntil { await engine.pushedEpochs.count > pushCountBefore }
+        #expect(
+            await engine.pushedEpochs.last == afterReactivation,
+            "an activation that named nothing must not raise the count an ordinary edit then carries"
+        )
     }
 
     @Test("AppState server wrappers forward to the injected server")

@@ -257,11 +257,16 @@ final class AppControlHost: ControlHost {
             // The engine's own cursor, awaited — not a fabricated one.
             //
             // This used to answer `JourneyStatus.make(journey:state:nil)`, which reports a run that
-            // has not started, whatever the engine was actually doing. `MockRouteStore.update` keeps
-            // the run state when the same journey with the same steps is pushed again, so a harness
-            // re-activating between test cases was told step 1 was next while the engine was mid-run
-            // — and the reply was built from the document, so nothing about the engine could ever
-            // have changed it.
+            // has not started, whatever the engine was actually doing — the reply was built from the
+            // document, so nothing about the engine could ever have changed it.
+            //
+            // That was two defects wearing one symptom, and they needed separate fixes. The reply is
+            // the engine's now; and `MockRouteStore` resets the run on a re-activation, which it did
+            // not, because an activation of the already-active journey pushes the same endpoints and
+            // the same journey as any other edit. It still keeps the run state for *that* — a plain
+            // re-push must not restart anything — and tells the two apart by the activation count
+            // `MockServerRuntime` carries. Together they mean a harness re-activating between cases
+            // gets a fresh run and is told so, rather than getting neither and being told it had both.
             //
             // Routed through the runtime rather than asking the engine directly because activation
             // reaches the engine from a task: `activateJourney` writes `currentProject`, whose `didSet`

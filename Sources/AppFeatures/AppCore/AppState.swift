@@ -491,9 +491,23 @@ final class AppState {
 
     /// Selects the journey that overlays endpoint resolution. Passing `nil` clears it.
     ///
-    /// Pushing the project to the engine is what resets the cursor, so activating always begins a
-    /// clean run — the same guarantee `mimic journey activate` gives.
+    /// **Activating always begins a clean run, including a re-activation of the journey already
+    /// active** — which is the case that makes this more than an assignment. Pushing the project is
+    /// *not* what resets the cursor, and this comment claimed for a long time that it was: a push
+    /// carrying the same journey with the same steps is how every other edit to the open document
+    /// reaches the engine, and one of those must leave a run in progress alone. The two arrive at
+    /// `MockRouteStore` looking identical, so the count below is what tells them apart.
+    ///
+    /// Noted before the mutation, because the push leaves synchronously from `currentProject`'s
+    /// `didSet` inside `mutateCurrentProject`, and only when the activation will actually take
+    /// effect: an id naming no journey mutates nothing and issues no push, so a count incremented
+    /// for one would ride out on the next unrelated edit and restart a run nobody touched.
+    ///
+    /// Clearing is not an activation and needs no count — a nil journey drops the run state outright.
     func activateJourney(id: UUID?) {
+        if let id, projects.currentProject?.journeys.contains(where: { $0.id == id }) == true {
+            server.noteJourneyActivation()
+        }
         _ = mutateCurrentProject { project in
             guard let id else {
                 project.activeJourneyID = nil

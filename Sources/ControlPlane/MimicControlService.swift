@@ -452,8 +452,16 @@ public actor MimicControlService: ControlHost {
         // run the next `project open` knew nothing about.
         try await repository.save(project)
         openProject = project
-        // Pushing the configuration is what resets the cursor: the engine sees a different journey
-        // and starts a fresh run, so activating is always a clean start.
+        // Counted before the push, and only here — the write above may throw, and an activation that
+        // never reached the store must not be the one that restarts a run.
+        //
+        // This comment used to say "pushing the configuration is what resets the cursor: the engine
+        // sees a different journey and starts a fresh run, so activating is always a clean start."
+        // The first half was true and the conclusion did not follow: re-activating the journey that
+        // is already active pushes the *same* journey, which is indistinguishable from the push any
+        // other edit causes, and the engine rightly left the run alone. The count is what separates
+        // them. See ``MockRouteStore/update(endpoints:globalDelayMs:journey:activationEpoch:)``.
+        journeyActivationEpoch += 1
         await pushConfigurationToEngine()
 
         return .init(
@@ -591,11 +599,24 @@ public actor MimicControlService: ControlHost {
 
     /// Mirrors the open project onto the engine after every mutation, so what the server answers and
     /// what the store holds can never disagree.
+    /// How many journey activations this service has performed, carried on every push.
+    ///
+    /// The same count `MockServerRuntime` keeps, for the same reason: activating the journey that is
+    /// already active sends the engine the same endpoints and the same journey as any other mutation
+    /// of the open document, and only one of those may restart a run. Kept here rather than derived,
+    /// because there is nothing in the pushed arguments to derive it from.
+    ///
+    /// Incremented by ``activateJourney(_:)`` alone — every other caller of
+    /// ``pushConfigurationToEngine()`` is an edit, and an edit that leaves the journey and its steps
+    /// untouched must leave a run in progress alone.
+    private var journeyActivationEpoch = 0
+
     private func pushConfigurationToEngine() async {
         await engine.updateConfiguration(
             endpoints: openProject?.endpoints ?? [],
             globalDelayMs: openProject?.serverConfiguration.globalDelayMs ?? 0,
-            journey: openProject?.activeJourney
+            journey: openProject?.activeJourney,
+            activationEpoch: journeyActivationEpoch
         )
     }
 

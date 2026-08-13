@@ -10,6 +10,12 @@ protocol MockServerEngineProtocol: Sendable {
     func stop() async throws
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async
+    func updateConfiguration(
+        endpoints: [Endpoint],
+        globalDelayMs: Int,
+        journey: Journey?,
+        activationEpoch: Int
+    ) async
     func restartJourney() async -> JourneyStatus?
     func advanceJourney() async -> JourneyStatus?
     func journeyStatus() async -> JourneyStatus?
@@ -24,6 +30,17 @@ extension MockServerEngine: MockServerEngineProtocol {}
 extension MockServerEngineProtocol {
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
         await updateConfiguration(endpoints: endpoints, globalDelayMs: globalDelayMs)
+    }
+
+    /// Defaulted so a fake that ignores journeys does not have to know what an activation epoch is.
+    /// Dropping the count is the honest default for such a double: it keeps no run to reset.
+    func updateConfiguration(
+        endpoints: [Endpoint],
+        globalDelayMs: Int,
+        journey: Journey?,
+        activationEpoch: Int
+    ) async {
+        await updateConfiguration(endpoints: endpoints, globalDelayMs: globalDelayMs, journey: journey)
     }
 
     func restartJourney() async -> JourneyStatus? { nil }
@@ -183,14 +200,38 @@ final class MockServerRuntime {
     /// even started, and answers about the journey the engine still had.
     private var pendingMockUpdate: Task<Void, Never>?
 
+    /// How many journey activations this session has performed, carried on every configuration push.
+    ///
+    /// The engine cannot tell a re-activation from a re-push by looking at the arguments: activating
+    /// the journey that is already active sends the same endpoints and the same journey as any other
+    /// mutation of the open document, and the two must behave differently — one restarts the run, the
+    /// other must leave it alone. This count is how the caller says which happened.
+    ///
+    /// A count read by whatever push goes out next, rather than a flag set and cleared, because the
+    /// activation does not issue the push: ``AppState/activateJourney(id:)`` writes `activeJourneyID`
+    /// and the push leaves from `currentProject`'s `didSet`, which every mutation shares. A flag would
+    /// have to survive that gap and be cleared on the far side; a count does not care how many pushes
+    /// follow it, because `MockRouteStore` compares it against a high-water mark with `>`.
+    private(set) var journeyActivationEpoch = 0
+
+    /// Records that an activation is about to be pushed. Call this *before* the mutation that causes
+    /// the push, and only when the activation will actually take effect — an id naming no journey
+    /// mutates nothing, so a count incremented for one would be carried by the next unrelated push
+    /// and would restart a run nobody asked to restart.
+    func noteJourneyActivation() {
+        journeyActivationEpoch += 1
+    }
+
     func updateMocks(endpoints: [Endpoint], journey: Journey? = nil) {
         let globalDelayMs = serverConfiguration.globalDelayMs
+        let activationEpoch = journeyActivationEpoch
         pendingMockUpdate = Task { @MainActor [weak self] in
             guard let self else { return }
             await engine.updateConfiguration(
                 endpoints: endpoints,
                 globalDelayMs: globalDelayMs,
-                journey: journey
+                journey: journey,
+                activationEpoch: activationEpoch
             )
             refreshJourneyStatus()
         }
