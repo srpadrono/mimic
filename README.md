@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-861%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-885%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -258,18 +258,18 @@ that CI runs a separate daemon is not. See
 
 ## Testing
 
-861 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+885 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 555 | Linux or macOS — `swift test` |
+| Domain, persistence, engine, control plane, import, CLI | 579 | Linux or macOS — `swift test` |
 | Design system | 47 | macOS — needs SwiftUI |
 | App and coordination | 219 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
-The portable 555 break down as Domain 178, SpecImport 107, MimicCLICore 93, MockServerEngine 65,
+The portable 579 break down as Domain 178, SpecImport 107, MimicCLICore 117, MockServerEngine 65,
 Persistence 65, ControlPlane 47. The app's 219 are the six folders `MimicTests` builds —
 `WorkspaceFeatureTests` 92, `MimicTests` 90, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
@@ -288,7 +288,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 555, no Xcode needed
+swift test                    # the portable 579, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
 ```
 
