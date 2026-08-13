@@ -40,7 +40,7 @@ Every instance mints a fresh token at startup — 32 bytes from the system CSPRN
 its discovery file:
 
 ```
-~/Library/Application Support/devxa.Mimic/control.json          # daemon
+~/Library/Application Support/devxa.Mimic/control.json          # outside the sandbox
 ~/Library/Containers/devxa.Mimic/Data/…/control.json            # sandboxed app
 ```
 

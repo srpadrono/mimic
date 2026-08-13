@@ -67,7 +67,7 @@ Use these terms exactly; they are the names in code.
 Mimic (app) → AppFeatures → Domain
                           → Persistence      → Domain
                           → MockServerEngine → Domain (+ Vapor)
-                          → ControlPlane     → Domain, Persistence, MockServerEngine (+ Vapor)
+                          → ControlPlane     → Domain (+ Vapor)
                           → SpecImport       → Domain
                           → DesignSystem     (SwiftUI only)
 
@@ -89,7 +89,7 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   throws `PersistenceError.unsupportedSchemaVersion` naming both numbers, because the fields this
   build does not know about are exactly the ones a partial read would drop. `allProjects` is
   deliberately *not* filtered — a project you cannot open is still a project you have, and hiding it
-  would look exactly like "the recents list is empty". Both hosts map `PersistenceError` to
+  would look exactly like "the recents list is empty". The host maps `PersistenceError` to
   `persistence.failure` with that message, so `mimic project open` prints it.
 
   Two things this does not do. It does not carry the stored number into the value: `toDomain()`

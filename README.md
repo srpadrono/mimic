@@ -208,8 +208,6 @@ flowchart TB
     E --> C
     F --> C
     H --> C
-    H --> D
-    H --> E
     I["mimic (CLI)"] --> J["MimicCLICore"]
     J --> C
 ```
@@ -220,7 +218,7 @@ flowchart TB
 | `MockServerEngine` | The embedded Vapor runtime: start/stop, serving, the request-log stream. |
 | `Persistence` | GRDB storage behind a `ProjectRepository` port. |
 | `SpecImport` | HAR / OpenAPI / Swagger → normalized import candidates. |
-| `ControlPlane` | The automation surface: a loopback-only HTTP API over the same engine and store the window uses. Also holds a windowless composition root that nothing currently reaches — see below. |
+| `ControlPlane` | The automation surface: a loopback-only HTTP API and the discovery file, over the `ControlHost` protocol the app implements. Domain and Vapor only. |
 | `MimicCLICore` | The whole `mimic` command surface, as a testable library. Links neither Vapor nor GRDB. |
 | `DesignSystem` | SwiftUI tokens and components. No Domain coupling. |
 | `AppFeatures` | Screens, navigation, and the `AppState` coordinator — the only module that knows full workflows. |

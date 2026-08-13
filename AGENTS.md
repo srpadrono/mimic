@@ -254,7 +254,7 @@ them put a field in the same place, the parser has only ever been asked to read 
 Mimic (app) → AppFeatures → Domain
                           → Persistence   → Domain
                           → MockServerEngine → Domain (+ Vapor)
-                          → ControlPlane  → Domain, Persistence, MockServerEngine (+ Vapor)
+                          → ControlPlane  → Domain (+ Vapor)
                           → SpecImport    → Domain
                           → DesignSystem  (SwiftUI only)
 
