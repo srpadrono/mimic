@@ -159,11 +159,23 @@ public nonisolated enum DSColors {
     public static let success = Color(light: .init(red: 0.047, green: 0.491, blue: 0.189),
                                       dark: .init(red: 0.188, green: 0.820, blue: 0.345))
 
-    /// Warning — amber. Same story, and worse: the shared amber measured **2.1:1** on light. Amber
-    /// is the hardest hue to read on white, so the light variant is pushed a long way down — to
-    /// **4.60:1** against `dominant`. Green is 0.39 rather than 0.40 for one reason: 0.40 computes
-    /// to 4.49:1, which fails AA by a hundredth. Amber's luminance is almost all green, so that
-    /// channel is the one to move, and one step is enough.
+    /// Warning — amber. Same story, and worse: the amber the light side split off from — the dark
+    /// variant below, which both appearances used to share — measures **2.06:1** against white. Amber
+    /// is the hardest hue to carry on a light surface, because its luminance is almost all green, so
+    /// the light variant is pushed a long way down: **4.60:1** on `secondary` and **4.94** on
+    /// `dominant`.
+    ///
+    /// Both surfaces are named because the panel is the one that decides. It is the harder of the
+    /// two, it is where a 404 in the request log is actually read, and the amber clears AA there by a
+    /// tenth. The green channel is what moves to buy that, and it stops at 0.373 because the margin
+    /// is genuinely that thin: 0.384 already reads **4.48** on a panel and misses, 0.39 reads 4.44,
+    /// 0.40 reads 4.32. A hundredth of this one channel is the whole difference.
+    ///
+    /// This paragraph used to attribute its 4.60 to `dominant` — the *easier* surface, which
+    /// understated the margin on the canvas and overstated how near the floor the amber sits on a
+    /// panel — and to argue for "0.39 rather than 0.40", neither of which is the constant below and
+    /// neither of which clears a panel. `DSContrastTests.semanticColoursClearAAAsText` pins all three
+    /// channels and both readings, so the constant and the argument about it cannot drift apart again.
     public static let warning = Color(light: .init(red: 0.602, green: 0.373, blue: 0.0),
                                       dark: .init(red: 1.0, green: 0.624, blue: 0.039))
 

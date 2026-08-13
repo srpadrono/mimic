@@ -117,8 +117,16 @@ private nonisolated func grey(_ delta: Double, below surface: RGBA) -> RGBA {
 /// Tolerances are explicit and stated per kind, because the comments quote rounded figures. Where a
 /// comment's number turns out not to reproduce, the assertion states the **measured** value and the
 /// discrepancy is named at the assertion and in the test's own doc comment: a test bent to fit a wrong
-/// number would leave the palette exactly as unchecked as it was. There are five such findings, all
-/// of them in comments rather than in constants, and each is called out where it lives.
+/// number would leave the palette exactly as unchecked as it was. Every one of those findings is in a
+/// comment rather than in a constant, and each is called out where it lives — numbered, so a reader
+/// can follow one back to the token it is about.
+///
+/// **No count of them is stated here, and one used to be.** It read "there are five" while eight
+/// findings were labelled below, across six numbers — a hand-maintained mirror of a list the tests
+/// beneath it already write out in full, and one that can go stale in either direction: upwards the
+/// first time a finding is split into 5a/5b/5c, downwards whenever one is fixed in the palette rather
+/// than only recorded here. 5a and 5b have now been fixed there, and their paragraph records what the
+/// `warning` comment used to claim rather than what it still claims.
 @Suite("DesignSystem colour contrast")
 @MainActor
 struct DSContrastTests {
@@ -487,20 +495,16 @@ struct DSContrastTests {
     /// 200 in the request log, a 500 in the traffic list — which is why each carries a light variant
     /// pushed far away from its dark one, and a ratio in its comment.
     ///
-    /// **Finding 5a — `warning` names the wrong surface.** "the light variant is pushed a long way
-    /// down — to **4.60:1** against `dominant`". 4.60 is the reading against **`secondary`**; against
-    /// `dominant` the amber measures **4.94**. The number is right and the token beside it is not,
-    /// which is the more misleading of the two errors: `dominant` is the *easier* surface, so the
-    /// comment understates the amber's margin on the canvas and overstates how near the floor it sits
-    /// on a panel.
-    ///
-    /// **Finding 5b — `warning` describes a green channel the token does not have.** "Green is 0.39
-    /// rather than 0.40 for one reason: 0.40 computes to 4.49:1". The constant two lines below reads
-    /// **0.373**, and no surface in this palette gives 0.40 a reading of 4.49 (it is 4.63 on
-    /// `dominant`, 4.32 on `secondary`). What shipped is darker than the value the paragraph names and
-    /// clears AA on a panel, which 0.39 would not have — 0.39 measures 4.43 there. The three channels
-    /// are asserted directly, so the token cannot quietly drift back toward the value its own comment
-    /// describes.
+    /// **Findings 5a and 5b — corrected in the token's own comment, and recorded here because that is
+    /// what these assertions were built to make possible.** `warning` used to attribute its light
+    /// reading — "pushed a long way down — to **4.60:1** against `dominant`" — to the wrong surface:
+    /// 4.60 is the reading on **`secondary`**, and `dominant` measures **4.94**. `dominant` is the
+    /// *easier* of the two, so naming it understated the amber's margin on the canvas and overstated
+    /// how near the floor it sits on a panel. The same paragraph then argued "Green is 0.39 rather
+    /// than 0.40" against a constant that reads **0.373**, and neither of the two values it named
+    /// clears AA on a panel: 0.39 measures 4.44 there and 0.40 measures 4.32. Both surfaces and all
+    /// three channels are asserted below, which is what keeps the rewritten comment checkable rather
+    /// than merely newer.
     ///
     /// The `success` comment's "4.8:1" names no surface; it is the reading on `surfaceElevated`
     /// (4.83), between the panel's 4.62 and the canvas's 4.96.
@@ -513,7 +517,7 @@ struct DSContrastTests {
         #expect(isClose(amber.blue, 0.0, within: componentTolerance))
 
         // Against `secondary` — the panel, the harder of the two, and the surface the comment's 4.60
-        // was actually taken on.
+        // is taken on.
         let amberOnPanel = try contrast(DSColors.warning, on: DSColors.secondary, in: .light)
         let greenOnPanel = try contrast(DSColors.success, on: DSColors.secondary, in: .light)
         let redOnPanel = try contrast(DSColors.destructive, on: DSColors.secondary, in: .light)
@@ -521,7 +525,8 @@ struct DSContrastTests {
         #expect(isClose(greenOnPanel, 4.62, within: ratioTolerance))
         #expect(isClose(redOnPanel, 4.95, within: ratioTolerance))
 
-        // Against `dominant` — the canvas the warning comment names but did not measure.
+        // Against `dominant` — the canvas, the second of the two readings the warning comment now
+        // states rather than the one it used to quote in place of the panel's.
         let amberOnCanvas = try contrast(DSColors.warning, on: DSColors.dominant, in: .light)
         let greenOnCanvas = try contrast(DSColors.success, on: DSColors.dominant, in: .light)
         let redOnCanvas = try contrast(DSColors.destructive, on: DSColors.dominant, in: .light)

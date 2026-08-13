@@ -97,37 +97,76 @@ enum RequestLogQuery {
             }
         }
 
+        // Descending is the ascending predicate with its **operands** swapped, never its answer
+        // negated. This used to end on `sortAscending ? result : !result`, and `!(a < b)` is `a >= b`:
+        // for two rows whose keys are equal it answered *true* in both directions, so the comparator
+        // simultaneously claimed left precedes right and right precedes left. `sort(by:)` requires a
+        // strict weak ordering and promises nothing about its output when it does not get one — the
+        // result was not "the ascending one reversed", it was whatever the sort's internals happened
+        // to do with a contradiction. Ties are not the exotic case here either: a session repeats
+        // methods, paths, status codes, endpoint names and scenario names constantly, and the
+        // timestamp is the only column of the six that does not normally hold duplicates at all.
         filteredLogs.sort { left, right in
-            let result: Bool
-            switch sortField {
-            case .method:
-                result = left.method.rawValue < right.method.rawValue
-            case .path:
-                result = left.path < right.path
-            case .endpoint:
-                result = endpointName(for: left.matchedEndpointID, endpoints: endpoints) ?? ""
-                    < endpointName(for: right.matchedEndpointID, endpoints: endpoints) ?? ""
-            case .scenario:
-                result = scenarioName(
-                    endpointID: left.matchedEndpointID,
-                    scenarioID: left.matchedScenarioID,
-                    endpoints: endpoints
-                ) ?? ""
-                    < scenarioName(
-                        endpointID: right.matchedEndpointID,
-                        scenarioID: right.matchedScenarioID,
-                        endpoints: endpoints
-                    ) ?? ""
-            case .status:
-                result = (left.responseStatusCode ?? 0) < (right.responseStatusCode ?? 0)
-            case .timestamp:
-                result = left.timestamp < right.timestamp
-            }
-
-            return sortAscending ? result : !result
+            sortAscending
+                ? isOrderedBefore(left, right, sortField: sortField, endpoints: endpoints)
+                : isOrderedBefore(right, left, sortField: sortField, endpoints: endpoints)
         }
 
         return filteredLogs
+    }
+
+    /// Whether `left` belongs before `right` with the column sorted ascending.
+    ///
+    /// One direction only, on purpose: the other is this with the operands swapped — see the note at
+    /// the call site for what negating the answer instead did to equal rows.
+    ///
+    /// Rows whose sorted column is equal fall through to the timestamp. That secondary key is what
+    /// makes the order *fully specified* rather than merely legal: `sort(by:)` is not documented as
+    /// stable, so on a column with duplicates two equal rows are otherwise free to swap places on
+    /// every re-sort, and the log would redraw in a different order after an unrelated filter
+    /// keystroke. It reverses along with everything else, so descending puts the newest of a set of
+    /// equals first. Two entries carrying the same timestamp *and* the same key compare equal in both
+    /// directions, which is precisely what a strict weak ordering asks for.
+    nonisolated static func isOrderedBefore(
+        _ left: RequestLog,
+        _ right: RequestLog,
+        sortField: SortField,
+        endpoints: [Endpoint]
+    ) -> Bool {
+        switch sortField {
+        case .method:
+            if left.method.rawValue != right.method.rawValue {
+                return left.method.rawValue < right.method.rawValue
+            }
+        case .path:
+            if left.path != right.path {
+                return left.path < right.path
+            }
+        case .endpoint:
+            let leftName = endpointName(for: left.matchedEndpointID, endpoints: endpoints) ?? ""
+            let rightName = endpointName(for: right.matchedEndpointID, endpoints: endpoints) ?? ""
+            if leftName != rightName { return leftName < rightName }
+        case .scenario:
+            let leftName = scenarioName(
+                endpointID: left.matchedEndpointID,
+                scenarioID: left.matchedScenarioID,
+                endpoints: endpoints
+            ) ?? ""
+            let rightName = scenarioName(
+                endpointID: right.matchedEndpointID,
+                scenarioID: right.matchedScenarioID,
+                endpoints: endpoints
+            ) ?? ""
+            if leftName != rightName { return leftName < rightName }
+        case .status:
+            let leftCode = left.responseStatusCode ?? 0
+            let rightCode = right.responseStatusCode ?? 0
+            if leftCode != rightCode { return leftCode < rightCode }
+        case .timestamp:
+            break
+        }
+
+        return left.timestamp < right.timestamp
     }
 
     /// The path to mock for a logged request: the query string is dropped, because it is a property

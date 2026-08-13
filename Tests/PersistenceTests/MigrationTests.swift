@@ -221,6 +221,12 @@ struct MigrationTests {
 
     /// The guard on its own, at both boundaries: the current version and every older one are opened,
     /// and only a version this build does not know is refused.
+    ///
+    /// Note what it does *not* pin, because that gap is how `graphqlOperation` came to ship inside
+    /// documents still stamped version 2: this is written entirely in terms of
+    /// `MockProject.currentSchemaVersion`, so it passes whatever that constant happens to be —
+    /// including a value the document has already outgrown. `DocumentShapeTests` is the half that
+    /// notices the document changing shape underneath it.
     @Test("Only a version ahead of this build is refused")
     func schemaVersionGuardBoundaries() throws {
         var record = ProjectRecord(from: MockProject(name: "Boundaries"))

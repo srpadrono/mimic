@@ -156,8 +156,9 @@ Three consequences worth understanding before you touch this area:
   bug waiting to be found by a user.
 - **The test coverage points the wrong way.** Every test in `ControlPlaneTests` that exercises a
   host runs against `MimicControlService` — `ControlServiceTests` builds one directly,
-  `ControlServerTests` stands a `ControlServer` on top of one. The rest of `ControlServerTests` is an
-  `Endpoint discovery` suite and a Host-header check that need no host. `AppControlHost` has a handful of its own in
+  `ControlServerTests` stands a `ControlServer` on top of one. What needs no host at all is the
+  `Endpoint discovery` suite plus two unit tests in `ControlServerTests`: the Host-header pinning
+  check and the one holding `alreadyRunning` and `shuttingDown` apart. `AppControlHost` has a handful of its own in
   `Tests/MimicTests/AppStateAndViewTests.swift`, added only after those divergences shipped, plus
   `HostParityTests`, which drives it against its twin. A green `ControlPlaneTests` is still not
   evidence that `mimic` works.

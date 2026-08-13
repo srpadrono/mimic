@@ -256,10 +256,16 @@ struct AppStateAndViewTests {
         appState.genericStartError = "Server failed"
 
         let endpoint = try #require(appState.addEndpoint(name: "Users", method: .get, path: "/users"))
-        var updatedEndpoint = endpoint
-        updatedEndpoint.name = "Users v2"
-        updatedEndpoint.path = "/v2/users"
-        appState.updateEndpoint(updatedEndpoint)
+        // Through the command, because there is no longer any other way in. `AppState` used to carry
+        // an `updateEndpoint(_:)` that wrote a whole `Endpoint` into the project directly, past the
+        // path check `applyEndpointSpec` runs — a second implementation of an edit, and this line was
+        // its only caller anywhere in the repository.
+        let host = AppControlHost(appState: appState, repository: appState.repository)
+        let renamed = await host.execute(.endpointUpdate(
+            endpoint: .id(endpoint.id),
+            spec: EndpointSpec(name: "Users v2", path: "/v2/users")
+        ))
+        #expect(renamed.ok)
         appState.scheduleAutosave()
 
         // The debounce is 500 ms and the write follows it, so the condition to wait for is the write

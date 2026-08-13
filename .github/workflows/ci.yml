@@ -131,6 +131,13 @@ jobs:
       # from the tree and fails on any disagreement, including a suite folder that exists and appears
       # in none of the groups — which is what a newly added suite looks like before anybody writes it
       # into the table, and is exactly how the newest one was found.
+      #
+      # Two more hand-maintained facts are settled the same way. The **operation count** is recomputed
+      # from `CommandKind` and checked against the five places four documents state it — the number
+      # `DomainTests` used to assert with a literal that had to be edited alongside them. And a
+      # **folder under `Tests/` that neither manifest declares** fails here: `Package.swift` names the
+      # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
+      # runner compiles, which on a green pipeline is indistinguishable from one that passed.
       - name: Documented counts
         run: python3 Scripts/check_doc_counts.py
 
@@ -143,6 +150,26 @@ jobs:
 
       - name: Build
         run: swift build --build-tests
+
+      # `Lockfiles agree` above compares the two lockfiles with each other, before anything runs.
+      # This compares one of them with what the build just did to it, and the two catch different
+      # things: that check fails on drift a human committed, and this one fails on drift the runner
+      # itself introduced. `swift build` re-resolves and rewrites `Package.resolved` whenever a
+      # declared range resolves differently here than it did on the machine that committed it — and
+      # it does so silently, so the `Test` step below would be reporting on versions no reviewer
+      # ever saw, which is the exact failure the pre-flight check was added for.
+      #
+      # `safe.directory` first because this job is a container running as root over a workspace git
+      # may decline to treat as its own; without it the step could fail for ownership rather than
+      # for drift, which is a red X that teaches nothing. It cannot hide a real diff — the
+      # `git diff` still has to run and still has to come back clean.
+      - name: Package.resolved unchanged by the build
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git diff --exit-code -- Package.resolved || {
+            echo "::error::swift build re-resolved Package.resolved (diff above). The versions this job tested are not the versions in the commit. Reproduce with 'swift build', commit the result, and move Tuist/Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
+            exit 1
+          }
 
       # Domain, Persistence, MockServerEngine, ControlPlane, SpecImport and MimicCLICore — including
       # the tests that bind real sockets and serve real HTTP.
@@ -202,10 +229,24 @@ jobs:
           key: ${{ runner.os }}-tuist-${{ hashFiles('Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
           restore-keys: ${{ runner.os }}-tuist-
 
+      # The macOS half of the same invariant. `tuist install` is a SwiftPM resolve behind another
+      # name, so it rewrites `Tuist/Package.resolved` on exactly the same trigger — a range that
+      # resolves differently on this runner than on the machine that committed it. It is checked
+      # here rather than in a step of its own so that it lands before `tuist generate`: the
+      # workspace every step below builds and tests is generated from whatever `install` resolved,
+      # and a lockfile that moved is a workspace that does not match the commit.
+      #
+      # This job has no counterpart to the Linux `Lockfiles agree` step because that check is
+      # platform-independent and running it twice buys nothing — but it means this line is the only
+      # thing standing between a re-resolved Tuist lockfile and a green run.
       - name: Resolve and generate
         run: |
           tuist version
           tuist install
+          git diff --exit-code -- Tuist/Package.resolved || {
+            echo "::error::tuist install re-resolved Tuist/Package.resolved (diff above). The workspace this job generated is not the one the commit describes. Reproduce with 'tuist install', commit the result, and move Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
+            exit 1
+          }
           tuist generate --no-open
 
       # Tuist reports failures as an unhelpful "Error" and writes the reason to a session log the

@@ -59,6 +59,62 @@ struct ImportHeaderPolicyTests {
         #expect(kept["Content-Type"] == "application/json")
     }
 
+    @Test("Every name Domain calls a credential is dropped on the way into a mock")
+    func everyDomainCredentialIsDroppedOnImport() {
+        // Driven off `RequestLog.sensitiveHeaderNames` rather than a list written out here, because a
+        // literal in this test would be the same defect one layer up: two lists of credential names
+        // that agree on the day they are written and then drift. They had already drifted — the
+        // import policy carried four of Domain's six, missing `x-api-key` and `x-auth-token`, so a
+        // captured API key was redacted out of the request log and replayed into an endpoint the user
+        // may commit. This fails if anything ever puts a second list back.
+        #expect(
+            RequestLog.sensitiveHeaderNames.isEmpty == false,
+            "an empty Domain list would make every case below vacuous"
+        )
+
+        for lowercased in RequestLog.sensitiveHeaderNames {
+            // Domain stores names lowercased; a capture records them the way the wire had them.
+            // Derived rather than listed, so this covers whatever the set contains.
+            let asCaptured = lowercased.split(separator: "-")
+                .map { String($0).capitalized }
+                .joined(separator: "-")
+
+            #expect(ImportHeaderPolicy.shouldDrop(asCaptured), "\(asCaptured) is a credential in Domain")
+
+            // Through the chokepoint every importer goes through, not just the predicate.
+            let candidate = ImportCandidateBuilder.makeCandidate(
+                method: .post,
+                path: "/session",
+                statusCode: 200,
+                responseHeaders: [asCaptured: "s3cret", "Content-Type": "application/json"],
+                responseBody: #"{"ok":true}"#,
+                responseContentType: .json,
+                existingEndpoints: []
+            )
+            #expect(
+                candidate.responseHeaders[asCaptured] == nil,
+                "\(asCaptured) would be written into an endpoint a user may commit"
+            )
+            #expect(candidate.responseHeaders["Content-Type"] == "application/json")
+        }
+    }
+
+    @Test("An API key echoed by a login response does not reach a committed mock")
+    func apiKeyAndAuthTokenAreDropped() {
+        // The two names the import policy used to be missing, named rather than looped, so that
+        // narrowing *both* lists together — which the sweep above would not catch, since it only
+        // checks that import agrees with Domain — still fails here. A login response handing back
+        // `X-Auth-Token` is the ordinary case, not a contrived one.
+        let kept = ImportHeaderPolicy.replayable([
+            "X-API-Key": "live_pk_abc123",
+            "X-Auth-Token": "eyJhbGciOiJIUzI1NiJ9",
+            "Content-Type": "application/json",
+        ])
+        #expect(kept["X-API-Key"] == nil)
+        #expect(kept["X-Auth-Token"] == nil)
+        #expect(kept["Content-Type"] == "application/json")
+    }
+
     @Test("Headers describing the response itself are kept")
     func semanticHeadersSurvive() {
         let kept = ImportHeaderPolicy.replayable([

@@ -252,14 +252,14 @@ final class AppState {
         run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
     }
 
-    func updateEndpoint(_ updated: Endpoint) {
-        // A whole-value replacement, which the editor produces; the executor's spec API is for
-        // partial edits, so this one stays a direct write.
-        _ = mutateCurrentProject {
-            guard let index = $0.endpoints.firstIndex(where: { $0.id == updated.id }) else { return }
-            $0.endpoints[index] = updated
-        }
-    }
+    // There is deliberately no `updateEndpoint(_ updated: Endpoint)`. One used to sit here, writing a
+    // whole `Endpoint` into the open project through `mutateCurrentProject` — a second way to mutate
+    // the document, past the checks `ProjectCommandExecutor.applyEndpointSpec` runs on
+    // `.endpointUpdate` (the path validator, and the delay's own `>= 0`). Its comment justified itself
+    // by saying the editor produced whole values; `EndpointEditorActions` carries no name or path
+    // action, so the only caller in the repository was a test. Every field edit is `.endpointUpdate`
+    // with an `EndpointSpec`, which is what `updateEndpointDelay` and `updateEndpointGroupTag` below
+    // already do.
 
     func deleteEndpoint(id: UUID) {
         _ = run(.endpointDelete(endpoint: .id(id)))

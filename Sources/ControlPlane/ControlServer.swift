@@ -172,7 +172,36 @@ public actor ControlServer {
         }
 
         // Everything else. One route, one command vocabulary — see `ControlCommand`.
-        application.post(prefix, "command") { request async -> Response in
+        //
+        // The explicit cap is the whole reason this is `on(.POST, …)` rather than `post(…)`. Vapor's
+        // default body strategy is `.collect(maxSize: nil)`, which resolves to
+        // `Routes.defaultMaxBodySize` — **16 KB**. `projectImport` posts a whole `MockProject`,
+        // captured response bodies and all, and those bodies are what make such a document big: one
+        // endpoint holding a 1.4 KB captured response costs about 2 KB encoded — JSON escaping of the
+        // body's own quotes is most of the difference — so 16 KB is roughly *eight endpoints*. The
+        // fixture in `ControlServerTests.largeProjectImportIsAccepted` measures it.
+        //
+        // Past the limit, `Request.BodyStream.consume` fails the collect with
+        // `Abort(.payloadTooLarge)` *before* this closure runs, so nothing here saw the request and the
+        // caller got a 413 carrying Vapor's own `{"error":true,…}` instead of a `ControlResponse` —
+        // which `ControlClient.send` reports as `http.413`, an exit-4 "Mimic refused it" that no
+        // `ControlCommand` can produce and no error code explains.
+        //
+        // 4 MB rather than the 10 MB `VaporConfigurator` gives the mock server, because the two are
+        // bounding different things: the engine has to absorb whatever the app under test uploads,
+        // while everything that reaches this route is a document Mimic itself wrote. At the ~2 KB an
+        // endpoint costs above, 4 MB is room for around two thousand of them — far past any project
+        // somebody configured by hand, and 256 times what the default allowed.
+        //
+        // And it stays a bound rather than becoming a bigger round number, because `collect`
+        // accumulates the entire body in memory before the handler is called, once per in-flight
+        // request, in a process the user opened to mock an API rather than to run a server. Loopback
+        // binding and the token keep the number of concurrent callers small; they are admission
+        // control, not a memory limit, and the two are not substitutes.
+        application.on(
+            .POST, prefix, "command",
+            body: .collect(maxSize: "4mb")
+        ) { request async -> Response in
             if let denial = Self.denial(for: request, token: token) { return denial }
             // `request.body.string` rather than `Data(buffer:)`: the latter lives in
             // NIOFoundationCompat, and this project builds with member-import visibility enabled, so a

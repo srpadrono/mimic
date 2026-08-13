@@ -108,10 +108,31 @@ step "Portable modules (swift test — macOS toolchain, not the Linux container)
 run_step portable-modules "error:|✘|Test run with" \
   swift test
 
+# The lockfile check at the top of this script compares the two lockfiles with each other, before
+# anything is compiled. This compares one of them with what the run just did to it, which is a
+# different failure: that check catches drift somebody committed, this one catches drift the build
+# introduced. `swift test` builds first, and a build re-resolves and rewrites `Package.resolved`
+# whenever a declared range resolves differently on this machine than on the one that committed it —
+# silently, so the suite that just passed was run against versions nobody has reviewed.
+#
+# The message stops short of saying `swift test` did it, because unlike a CI checkout a laptop's tree
+# can already be dirty: a developer who has just bumped a dependency and not yet committed sees this
+# too, and telling them the build did something they did it themselves would be a lie in the one
+# place a person is looking for the truth.
+git diff --exit-code -- Package.resolved \
+  || { printf '\n\033[1;31mPackage.resolved differs from the commit (diff above).\033[0m\nIf `swift test` re-resolved it, the suite that just passed ran against versions that are not in the commit. If you changed it yourself, commit it. Either way Tuist/Package.resolved has to move with it — Scripts/check_lockfiles.py is what says whether they still agree.\n' >&2; exit 1; }
+
 # These two already failed the script on their own — they are plain commands under `set -e`, with no
 # pipeline to swallow the status — so they are left alone.
 step "Resolve dependencies"
 tuist install
+
+# The other half, and the same reasoning: `tuist install` is a SwiftPM resolve under another name,
+# so it rewrites `Tuist/Package.resolved` on the same trigger. Checked here rather than after
+# `tuist generate` because everything below is built from the workspace that generate produces out
+# of whatever this resolve decided.
+git diff --exit-code -- Tuist/Package.resolved \
+  || { printf '\n\033[1;31mTuist/Package.resolved differs from the commit (diff above).\033[0m\nIf `tuist install` re-resolved it, the workspace generated below is not the one the commit describes. If you changed it yourself, commit it. Either way Package.resolved has to move with it — Scripts/check_lockfiles.py is what says whether they still agree.\n' >&2; exit 1; }
 
 step "Generate project"
 tuist generate --no-open
@@ -171,6 +192,11 @@ Scripts/check_house_rules.sh
 # twice claimed a figure the tree did not support. This recounts `@Test` and `func test`
 # declarations per folder and fails if any number README states has drifted, printing the true ones.
 #
+# It settles the operation count the same way, from `CommandKind` rather than from anybody's memory
+# of the five places it is written down; and it fails on a folder under `Tests/` that neither
+# manifest declares, because a suite no build target names is a suite nobody runs and it looks
+# exactly like one that does.
+#
 # Also in .github/workflows/ci.yml, and this comment used to argue at length that it should not be —
 # that a contributor's pull request should go red for a defect in the code, not for a hand count in a
 # document they may not own. That reasoning was wrong about which failure is cheaper. A count that is
@@ -178,7 +204,7 @@ Scripts/check_house_rules.sh
 # fix is one command whose output names the numbers to paste, and it takes seconds on a runner with
 # no Swift involved. The README's coverage section still works the other way because populating it
 # needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
-step "README test counts"
+step "Documented counts"
 python3 Scripts/check_doc_counts.py
 
 # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh

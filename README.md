@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-842%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-851%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -64,8 +64,11 @@ mimic server start
 curl localhost:8080/account-summary        # {"balance":128.4}
 ```
 
-Everything above is also a click in the window — the CLI and the UI call the same code, so they
-cannot disagree.
+Everything above is also a click in the window, and the two reach it the same way: an endpoint or
+scenario edit is applied by `ProjectCommandExecutor` in `Domain` whichever surface asked, and the
+stateful rest — project selection, server lifecycle, the journey cursor, the log — goes through the
+one `AppState` the window is drawing. `mimic project create` runs `appState.createProject`, the same
+call the New Project sheet makes.
 
 ## Journeys
 
@@ -94,8 +97,9 @@ a dropped connection or a timeout, which exercise retry and offline code that no
 reach. Requests a journey doesn't script fall through to your endpoints, so a journey only describes
 the steps that matter.
 
-Nine templates cover the flows teams reproduce most: payment retry, session expiry, MFA challenge,
-maintenance window, progressive loading, offline-to-online, feature-flag rollout, edge cases.
+Nine templates cover the flows teams reproduce most: retry after failure (the one above), payment
+retry, session expiry, MFA challenge, maintenance window, progressive loading, offline-to-online,
+feature-flag rollout, edge cases.
 
 → [docs/JOURNEYS.md](docs/JOURNEYS.md)
 
@@ -254,20 +258,20 @@ that CI runs a separate daemon is not. See
 
 ## Testing
 
-842 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+851 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 542 | Linux or macOS — `swift test` |
+| Domain, persistence, engine, control plane, import, CLI | 547 | Linux or macOS — `swift test` |
 | Design system | 47 | macOS — needs SwiftUI |
-| App and coordination | 213 | macOS — hosted by the app |
+| App and coordination | 217 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 40 | macOS, interactive session |
 
-The portable 542 break down as Domain 178, SpecImport 105, MimicCLICore 85, MockServerEngine 65,
-Persistence 63, ControlPlane 46. The app's 213 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 88, `MimicTests` 88, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+The portable 547 break down as Domain 178, SpecImport 107, MimicCLICore 85, MockServerEngine 65,
+Persistence 65, ControlPlane 47. The app's 217 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 92, `MimicTests` 88, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
@@ -284,7 +288,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 542, no Xcode needed
+swift test                    # the portable 547, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites, Release, UI tests
 ```
 

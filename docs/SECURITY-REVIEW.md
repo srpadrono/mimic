@@ -3,6 +3,14 @@
 **Date:** 2026-07-31 · **Commit reviewed:** `1146008` · **Scope:** the whole app — control plane,
 mock server engine, persistence, spec import, CLI, entitlements, CI.
 
+> **Neither identifier in that line resolves here.** `git cat-file -t 1146008` answers *"Not a valid
+> object name"*, this repository's first commit is dated 2026-08-04 — after the review date above —
+> and the version has been `0.9.x` throughout (`MARKETING_VERSION` in `Project.swift`). So read the
+> header as provenance that cannot be checked, and the findings on their own merits: each names the
+> code path and the regression test that now guards it, and those *are* checkable. Left as written
+> rather than renumbered, because inventing a plausible commit would be worse than an obviously
+> unresolvable one.
+
 All findings below have been fixed. Each has a regression test; the test names are given so the
 guard can be found again when someone wonders why the code is shaped this way.
 
@@ -179,7 +187,11 @@ Worth recording, because it is most of the codebase:
 - Schema example generation is depth-capped at 3, so a cyclic schema cannot recurse forever.
 - No user-supplied regex anywhere, so no ReDoS.
 - `UITestSupport` is `#if DEBUG`-gated as documented.
-- Dependencies current (Vapor 4.122.0, NIO 2.101.3); no known-vulnerable pins.
+- The review found no known-vulnerable dependency pins. It quoted Vapor 4.122.0 and NIO 2.101.3 as
+  the current ones; both manifests now resolve **Vapor 4.121.3 and NIO 2.97.1**, which is where the
+  two lockfiles were reconciled when CI began checking that they agree — SwiftPM had been resolving
+  ahead of Tuist on 21 shared packages. `Package.resolved` is the authority for what ships, not this
+  sentence.
 - CI workflow has no injection surface and exposes no secrets.
 
 ## Method and limits

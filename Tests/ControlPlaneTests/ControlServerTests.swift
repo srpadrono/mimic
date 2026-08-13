@@ -407,6 +407,107 @@ struct ControlServerTests {
         }
     }
 
+    // MARK: - Request body size
+
+    /// The command route used to take Vapor's default body strategy — `.collect(maxSize: nil)`, which
+    /// resolves to `Routes.defaultMaxBodySize`, **16 KB**. `projectImport` posts a whole `MockProject`,
+    /// captured response bodies included. An endpoint of the fixture below encodes to about 2 KB, so
+    /// the default was worth roughly eight of them; past that, `mimic project import` was answered
+    /// `413 Payload Too Large` by Vapor before `ControlServer` saw the request at all.
+    /// `MockServerEngine`'s `VaporConfigurator` had passed `.collect(maxSize: "10mb")` for served
+    /// traffic all along; the control plane was the surface nobody sized.
+    ///
+    /// Two things about the fixture are what make this test able to fail, and both are deliberate.
+    ///
+    /// It is built from endpoints and scenarios rather than one padded string, so it stays a test about
+    /// a document a person could really import: change how a `MockProject` encodes and this still
+    /// measures what actually reaches the wire.
+    ///
+    /// And it is *hundreds* of KB rather than the ~17 KB that would nominally clear the old limit,
+    /// because `maxSize` is only ever consulted for a **streamed** body. `HTTPServerRequestDecoder`
+    /// stores the body as `.collected` when the first `.body` part it sees already equals
+    /// `Content-Length`, and the route's `collect` is then skipped outright — the responder runs it
+    /// only `if … request.body.data == nil`. A body small enough to arrive in one socket read would
+    /// therefore be accepted with the cap removed, and this test would pass while asserting nothing.
+    /// Vapor's `ServerBootstrap` sets `maxMessagesPerRead` to 1 and overrides no receive allocator, so
+    /// NIO's `AdaptiveRecvByteBufferAllocator` applies at its defaults, whose ceiling is 64 KiB: a
+    /// document several times that cannot arrive whole however the kernel schedules the reads.
+    @Test("A project document far past Vapor's 16 KB default still imports over HTTP")
+    func largeProjectImportIsAccepted() async throws {
+        try await Self.withServer { baseURL, _ in
+            let endpointCount = 120
+            let project = Self.bulkyProject(endpointCount: endpointCount, recordsPerBody: 24)
+            let encoded = try ControlCoding.encoder().encode(
+                ControlCommand.projectImport(project: project, activate: false)
+            )
+
+            // The test's own precondition. A generator that quietly shrank — a shorter record, fewer
+            // endpoints — would leave every assertion below passing against a body the 16 KB default
+            // would have allowed, which is the shape of assertion this repo has been bitten by before.
+            #expect(
+                encoded.count > 64 * 1024,
+                "the fixture must be too large to arrive in a single socket read; it was \(encoded.count) bytes"
+            )
+
+            var request = URLRequest(url: baseURL.appendingPathComponent("\(ControlAPI.version)/command"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(Self.currentToken, forHTTPHeaderField: ControlAPI.tokenHeaderName)
+            request.httpBody = encoded
+
+            // Sent by hand rather than through `Self.post`, which decodes the envelope eagerly: a
+            // refused collect never reaches Mimic's code, so the reply is Vapor's own
+            // `{"error":true,…}` and decoding it as a `ControlResponse` throws a `DecodingError` that
+            // says nothing about the size. Read the status first and put the body in the message.
+            let (data, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            let http = try #require(response as? HTTPURLResponse)
+            #expect(
+                http.statusCode == 200,
+                "a \(encoded.count)-byte projectImport was refused: \(String(decoding: data, as: UTF8.self))"
+            )
+
+            // `try?` for the same reason: on a regression this is nil, and two clean expectation
+            // failures read better than a decoding error thrown out of the test.
+            let decoded = try? ControlCoding.decode(ControlResponse.self, from: data)
+            #expect(decoded?.ok == true)
+            // The echoed document is the proof the *whole* body arrived and decoded, not just the head.
+            #expect(decoded?.result?.project?.endpoints.count == endpointCount)
+        }
+    }
+
+    /// A project the size real ones reach, made of the thing that actually makes them big: one
+    /// captured response body per endpoint. No filler — every byte here is a value the app itself
+    /// could have stored.
+    static func bulkyProject(endpointCount: Int, recordsPerBody: Int) -> MockProject {
+        let endpoints = (0..<endpointCount).map { page -> Endpoint in
+            let scenario = Scenario(
+                name: "Default",
+                statusCode: 200,
+                headers: ["X-Page": "\(page)"],
+                body: Self.capturedBody(records: recordsPerBody, page: page)
+            )
+            return Endpoint(
+                name: "Catalogue page \(page)",
+                method: .get,
+                path: "/catalogue/page/\(page)",
+                scenarios: [scenario],
+                activeScenarioID: scenario.id
+            )
+        }
+        return MockProject(name: "Bulky catalogue", endpoints: endpoints)
+    }
+
+    /// A JSON array of records — the shape a captured list response has, and the reason a scenario
+    /// body is kilobytes rather than bytes.
+    static func capturedBody(records: Int, page: Int) -> String {
+        let rows = (0..<records).map { row -> String in
+            let id = page * records + row
+            let sku = "SKU-\(page)-\(row)"
+            return #"{"id":\#(id),"sku":"\#(sku)","name":"Widget \#(row)","price":\#(1999 + row)}"#
+        }
+        return "[" + rows.joined(separator: ",") + "]"
+    }
+
     // MARK: - Log redaction
 
     @Test("logList redacts credentials the app under test sent")

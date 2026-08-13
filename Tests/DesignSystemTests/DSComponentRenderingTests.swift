@@ -456,26 +456,81 @@ struct DSComponentRenderingTests {
         #expect(ladder.min() == DSGlyph.minimum)
     }
 
-    @Test("Token values and color mappings stay consistent")
+    /// The last two ladders in the module that were held by nothing but a chain of `<`.
+    ///
+    /// `laddersArePinned` above makes the argument for pinning by value and reaches for `DSSpacing` to
+    /// make it — "an ordering assertion cannot catch `DSSpacing.md` going from 12 to 10" — while
+    /// leaving `DSSpacing` itself, and `DSCornerRadius` beside it, on exactly the ordering it is
+    /// arguing against. That chain is what the loops below replace, and no coverage goes with it:
+    /// every rung it compared is now pinned outright, so it could not have failed without one of these
+    /// lines failing first.
+    ///
+    /// `DSAnimation` stays an ordering, deliberately. Its four values are durations rather than
+    /// geometry — nothing lines up against them, no rung is measured off another app, and 0.06 against
+    /// 0.07 is not a difference a reader could defend either way. What has to hold is that the tiers
+    /// stay in order and stay distinct, which is exactly what `<` says. The spacing and radius rungs
+    /// are the opposite case: they are measured against Xcode, and a panel's inset moving by two
+    /// points moves every panel in the window at once.
+    @Test("Spacing and radius are pinned by value; animation and method colours stay consistent")
     func tokenValuesStayConsistent() {
+        // rung, what the token reads, what it is measured to be
+        let spacing: [(String, CGFloat, CGFloat)] = [
+            ("xxs", DSSpacing.xxs, 2),
+            ("xs", DSSpacing.xs, 4),
+            ("sm", DSSpacing.sm, 6),
+            ("md", DSSpacing.md, 12),
+            ("lg", DSSpacing.lg, 16),
+            ("xl", DSSpacing.xl, 24),
+            ("xxl", DSSpacing.xxl, 32),
+            ("xxxl", DSSpacing.xxxl, 48)
+        ]
+        for (rung, measured, expected) in spacing {
+            #expect(
+                measured == expected,
+                """
+                DSSpacing.\(rung) is \(measured) where this pins \(expected), and every gap in the \
+                window that names that rung has moved with it. If the change is deliberate: check the \
+                new value against Xcode, rewrite the rung's own doc comment in DSSpacing.swift so it \
+                still describes what the number is for, and only then update this line. If it is not \
+                deliberate, put the value back.
+                """
+            )
+        }
+
+        let radius: [(String, CGFloat, CGFloat)] = [
+            ("xs", DSCornerRadius.xs, 3),
+            ("sm", DSCornerRadius.sm, 4),
+            ("md", DSCornerRadius.md, 6),
+            ("lg", DSCornerRadius.lg, 8),
+            ("xl", DSCornerRadius.xl, 12)
+        ]
+        for (rung, measured, expected) in radius {
+            #expect(
+                measured == expected,
+                """
+                DSCornerRadius.\(rung) is \(measured) where this pins \(expected). Radius is what \
+                makes two controls in one row read as the same kind of thing — `DSTextField`, \
+                `DSMethodBadge`, `DSPanelHeaderButton` and `DSIconMenu` all draw `sm` — so moving a \
+                rung reshapes call sites that never mention it. If the change is deliberate: update \
+                the rung's doc comment in DSCornerRadius.swift, then this line. Otherwise put it back.
+                """
+            )
+        }
+
+        // The one claim `DSSpacing` is load-bearing for outside its own ladder, and it is made in
+        // prose: "3 — the inset above and below a control's own text. Half of `DSSpacing.sm`, which is
+        // why it is not on the spacing scale." Stated where it can fail, exactly as `laddersArePinned`
+        // states `controlRow == row + sm * 2` for the two ladders it pins.
+        #expect(
+            DSControlHeight.verticalPadding == DSSpacing.sm / 2,
+            "DSControlGeometry says verticalPadding is half of DSSpacing.sm; one of the two moved."
+        )
+
         _ = DSAnimation.spring()
 
         #expect(DSAnimation.micro < DSAnimation.fast)
         #expect(DSAnimation.fast < DSAnimation.normal)
         #expect(DSAnimation.normal < DSAnimation.slow)
-
-        #expect(DSCornerRadius.xs < DSCornerRadius.sm)
-        #expect(DSCornerRadius.sm < DSCornerRadius.md)
-        #expect(DSCornerRadius.md < DSCornerRadius.lg)
-        #expect(DSCornerRadius.lg < DSCornerRadius.xl)
-
-        #expect(DSSpacing.xxs < DSSpacing.xs)
-        #expect(DSSpacing.xs < DSSpacing.sm)
-        #expect(DSSpacing.sm < DSSpacing.md)
-        #expect(DSSpacing.md < DSSpacing.lg)
-        #expect(DSSpacing.lg < DSSpacing.xl)
-        #expect(DSSpacing.xl < DSSpacing.xxl)
-        #expect(DSSpacing.xxl < DSSpacing.xxxl)
 
         #expect(DSColors.methodColor(for: "HEAD") != .secondary)
         #expect(DSColors.methodColor(for: "OPTIONS") != .secondary)

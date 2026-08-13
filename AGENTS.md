@@ -104,13 +104,24 @@ back in a couple of minutes. Both manifests declare those modules from the same 
 cannot drift in what they compile, only in how targets are declared. What they *can* drift in is
 dependency resolution: they resolve the same ranges into two separate lockfiles, and 21 packages —
 Vapor, NIO and GRDB among them — had already diverged, so this job was passing against versions the
-shipped `.pkg` does not contain. The Linux job now checks `Package.resolved` against
-`Tuist/Package.resolved` before it builds. Compiler settings are the other half, and the job now
-reports on them too — as a *warning*, not a failure: `Project.swift` sets
-`SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` and `Package.swift` sets nothing, so Linux still
-accepts an implicit transitive import that Xcode rejects. Enabling the flag on the SwiftPM side is the
-fix; it warns rather than fails because turning it on will surface real errors, and going red before
-anyone can iterate on them helps nobody. The gap is visible and tracked instead of silent.
+shipped `.pkg` does not contain. `Scripts/check_lockfiles.py` compares the two before the job builds
+anything, and a second step fails if `swift build` *re-resolved* `Package.resolved` on the way past —
+otherwise the versions the job tested are not the versions the commit names, and the drift check
+would have passed on a file the build then rewrote. The macOS job holds `tuist install` to the same
+rule for `Tuist/Package.resolved`.
+
+Compiler settings are the other half, and `Scripts/check_compiler_settings.py` splits them by what a
+disagreement costs. **The deployment floor fails**: `MACOSX_DEPLOYMENT_TARGET` in `Project.swift`
+against `platforms:` in `Package.swift` are one fact written twice, they have already come apart, and
+comparing two literals needs no toolchain. **The Swift settings warn.** `Project.swift`'s shared base
+sets four; run the script and it prints where each stands — today
+`SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` and `SWIFT_APPROACHABLE_CONCURRENCY` have no
+SwiftPM counterpart, so Linux still accepts an implicit transitive import that Xcode rejects, while
+`SWIFT_VERSION` and `SWIFT_DEFAULT_ACTOR_ISOLATION` are annotated as already-equivalent rather than
+missing. Declaring the two on the SwiftPM side is the fix; it warns rather than fails because turning
+them on lights up every portable module at once, and going red before anyone can iterate on the
+errors helps nobody. The gap is visible on every run instead of silent, and the step goes quiet on
+its own the day `swiftSettings:` lands.
 
 **macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
 app-level suites, **the XCUITest suite**, and the Release gate. The image label is load-bearing —
@@ -228,10 +239,10 @@ them put a field in the same place, the parser has only ever been asked to read 
 
   `Package.swift` sets no `defaultIsolation` at all, so on Linux the portable modules take the
   language default — nonisolated — which happens to be what the fourteen `"none"` overrides ask for.
-  The two agree today by coincidence, not by construction, and nothing checks that they still will:
-  the same unchecked-compiler-settings gap the CI section notes for
-  `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY`. Changing the base setting in `Project.swift`
-  would not move Linux with it.
+  The two agree by coincidence, not by construction, and changing the base setting in `Project.swift`
+  would not move Linux with it. `Scripts/check_compiler_settings.py` says exactly that on every run,
+  in those words, next to the other three `SWIFT_*` settings in the shared base — but it *reports*;
+  the Swift-settings half of that script never fails a build. Nothing enforces the agreement.
 - **Bundle ID:** `devxa.Mimic`
 - **Sandbox:** App Sandbox and Hardened Runtime enabled (relaxed only where a test target requires it,
   and for the `mimic` command line tool, which launches and signals the app)
@@ -320,12 +331,13 @@ execute, while `ControlServer.swift` and `ControlEndpointFile.swift` beside them
 comment in either file, so it was guaranteed to drift, and `wc -l` answers it on demand.)
 
 **This is the mechanism behind every divergence between the two hosts, and it works in the worst
-direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` holds two
+direction: the unreachable host is the better-tested one.** `Tests/ControlPlaneTests` holds two Swift
 files, and every test in them that exercises a *host* runs against `MimicControlService`:
 `ControlServiceTests` builds one directly, and `ControlServerTests` stands a `ControlServer` on top of
-one. (`ControlServerTests` also carries an `Endpoint discovery` suite and a Host-header unit test
-that stand up no host at all, several of them added by the same work that widened
-`ControlEndpointFile` — so "every test in both" was true when it was written and is not now.) `AppControlHost`, the host
+one. (Three things in `ControlServerTests` stand up no host at all: the `Endpoint discovery` suite —
+several of its tests added by the work that widened `ControlEndpointFile` — the Host-header pinning
+check, and the one holding the two control-server refusals apart. So "every test in both" was true
+when it was written and is not now.) `AppControlHost`, the host
 every `mimic` invocation actually reaches, has a handful of its own in
 `Tests/MimicTests/AppStateAndViewTests.swift` plus `Tests/MimicTests/HostParityTests.swift`, which
 drives both hosts together — all added after the fact. (Counts are left out deliberately; these
@@ -443,8 +455,19 @@ set of rules, because they used to follow none and the window read as three unre
   the way in". Six copies, and nothing checked that the promise held. The line weights were worse:
   twenty-three bare literals — eleven strokes, eight more hand-drawing the closing rule
   `DSDivider` exists to draw, three private constants, and `DSDividerStyle` itself.
-  `Tests/DesignSystemTests` pins all three ladders by value, because an ordering assertion cannot
-  catch `DSSpacing.md` going from 12 to 10.
+  **Every geometry ladder in `DesignSystem` is now pinned by value, not by ordering**, across three
+  tests in `Tests/DesignSystemTests/DSComponentRenderingTests.swift`: `laddersArePinned` takes
+  `DSBarHeight`, `DSControlHeight` and `DSStroke`, `glyphLadderIsPinned` takes `DSGlyph` and its
+  floor, and `tokenValuesStayConsistent` takes `DSSpacing` and `DSCornerRadius`. A chain of `<` cannot
+  catch `DSSpacing.md` going from 12 to 10 — every comparison stays true and every panel in the window
+  moves — and that sentence used to be this bullet's argument *for* value-pinning while `DSSpacing`
+  was the one ladder still held by the chain.
+
+  Two relationships are asserted alongside the values, because both are claims the tokens' own
+  comments make: `DSBarHeight.controlRow == DSControlHeight.row + DSSpacing.sm * 2`, and
+  `DSControlHeight.verticalPadding == DSSpacing.sm / 2`. `DSAnimation` is deliberately left ordered —
+  its rungs are durations, nothing lines up against them, and 0.06 against 0.07 is not a number
+  anybody could defend either way.
 - **A bar inside a pane takes `DSColors.band`; a panel's own header takes `DSColors.secondary`.**
   Column-header strips, section headers and the jump bar are the first kind. `band` is a tint, not the
   separator — the 0.5pt `DSColors.separator` rule each of them closes with does the separating, at

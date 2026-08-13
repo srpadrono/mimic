@@ -16,14 +16,26 @@ import SwiftUI
 /// controls stacked on the same 22 points. The geometry is shared through the ladder instead, which
 /// is the only part the two need to agree on.
 ///
-/// **`.menuStyle(.button)` + `.buttonStyle(.plain)`, not `.menuStyle(.borderlessButton)`.** Apple's
-/// deprecation message for the latter names this replacement, and it is the pairing
-/// `DSFilterField.ScopeMenu` and `BreadcrumbJumpBar`'s crumbs already wear. The crumb's note records
-/// what the borderless style actually did on screen: a borderless *menu* is realised as an
-/// `NSPopUpButton` that draws its own indicator **before** the label and ignores
-/// `.menuIndicator(.hidden)`. `.plain` is the deliberate half — not the `.borderless` the deprecation
-/// message suggests — because the label below states its own foreground and switches it on hover, and
-/// `.borderless` would put a system accent tint back over it.
+/// **`.menuStyle(.borderlessButton)`, deprecated and kept on purpose — the reason is at the
+/// modifier.** The app's other two hand-styled menus take `.menuStyle(.button)`:
+/// `DSFilterField.ScopeMenu` and `BreadcrumbJumpBar`'s crumbs both do, and Apple's deprecation
+/// message names `menuStyle(.button)` with `buttonStyle(.borderless)` as the replacement. This one
+/// does not follow them, because the menu style is what decides the AppKit element type and
+/// `MimicUITests/JourneyUITests.swift` separates two identically-labelled controls by element type
+/// alone. `.buttonStyle(.plain)` *is* shared with those two, and for the reason they give: the label
+/// below states its own foreground and switches it on hover, so `.borderless` would put a system
+/// accent tint back over a colour this component sets.
+///
+/// The way out is to stop making element type load-bearing. This menu does set an
+/// `.accessibilityLabel` below; what it does not have is a *distinct* one — `JourneysNavigatorPage`
+/// records both the navigator's menu and the journeys empty state's button reporting "Add journey" —
+/// so the suite has nothing left to separate them by. Give the two different labels and the style
+/// stops carrying weight it was never meant to. That change has to run the XCUITest suite, which is
+/// why it is not this one.
+///
+/// This paragraph used to assert the opposite: that the component took `.button`, in a doc comment
+/// attached to a body that takes `.borderlessButton`. A comment that contradicts its own code is
+/// exactly how a "modernisation" that silently rewrites what a UI query resolves to gets made.
 ///
 /// **AppKit realizes this as a `MenuButton`.** A UI test reaches it through `app.menuButtons[…]`,
 /// never `app.buttons[…]` — and, inside a container that flattens its children's identifiers, by

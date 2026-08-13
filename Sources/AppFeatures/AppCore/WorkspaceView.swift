@@ -416,7 +416,11 @@ struct WorkspaceView: View {
                 BreadcrumbJumpBar.Crumb(
                     id: "journey",
                     title: journeys.first { $0.id == appState.selectedJourneyID }?.name ?? "No journey",
-                    systemImage: "arrow.triangle.branch",
+                    // From `NavigatorTab`, not spelled out here: this crumb sits one bar below the
+                    // tab whose glyph it is repeating, and a literal is how the five empty states
+                    // `NavigatorTab.systemImage` was extracted for came to disagree with it in the
+                    // first place. Same value it already carried, now from the one place that picks it.
+                    systemImage: NavigatorTab.journeys.systemImage,
                     options: journeys.map {
                         BreadcrumbJumpBar.Option(
                             id: $0.id,

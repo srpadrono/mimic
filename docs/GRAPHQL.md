@@ -71,10 +71,15 @@ The same account query fails and then succeeds, exactly as in the REST version �
 
 ## Importing a capture
 
-`mimic` and the UI both split GraphQL traffic in a HAR by operation, so a capture of twenty distinct
-calls imports as twenty addressable mocks instead of twenty entries that all look like
-`POST /graphql` and fight over one route. Each is named after its operation and grouped under
-`GraphQL`.
+The window splits GraphQL traffic in a HAR by operation, so a capture of twenty distinct calls
+imports as twenty addressable mocks instead of twenty entries that all look like `POST /graphql` and
+fight over one route. Each is named after its operation and grouped under `GraphQL`.
+
+**Only the window**, and this line used to say "`mimic` and the UI both". It cannot: the splitting
+lives in `SpecImport.HARParser`, and `SpecImport` is linked by `AppFeatures` and the app target
+alone — `grep -n SpecImport Package.swift Project.swift` shows no edge from `MimicCLICore` or
+`ControlPlane` — which is the same missing edge behind there being no `mimic import` at all. A script
+reads the HAR itself and issues `mimic endpoint create --graphql-operation …` per operation.
 
 Two operations on the same route are not treated as duplicates of one another — the operation is what
 makes them distinct.

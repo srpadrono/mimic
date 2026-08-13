@@ -11,6 +11,13 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
 
     /// Header names whose values are replaced before a log entry is handed to anything but the local
     /// UI — see ``redactingCredentials()``.
+    ///
+    /// This is the repository's one answer to "which headers are credentials", and the log is no
+    /// longer its only reader: `SpecImport`'s `ImportHeaderPolicy` asks the same question of a
+    /// captured response header before copying it onto an imported mock. It used to answer with a
+    /// private list of its own that was missing `x-api-key` and `x-auth-token`, so a captured API key
+    /// was redacted out of the log — the developer's own traffic on their own screen — and replayed
+    /// into an endpoint they may commit to a repository. Narrowing this set now widens that too.
     public static let sensitiveHeaderNames: Set<String> = [
         "authorization",
         "proxy-authorization",

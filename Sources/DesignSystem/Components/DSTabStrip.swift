@@ -239,14 +239,19 @@ public struct DSTabStrip: View {
             return isHovered ? DSColors.labelPrimary : DSColors.labelSecondary
         }
 
-        /// Capped, because the badge overlays the corner of a 22pt circle — four digits would reach
-        /// across the icon it is annotating and into the next tab's share of the row.
+        /// Whether there is anything to badge at all — presence, not a count.
+        ///
+        /// This said "Capped, because … four digits would reach across the icon", which describes a
+        /// numeric badge: `badge` above draws an 8pt dot and renders no digits, so there is nothing
+        /// here to cap. Nothing else in this type caps either. `nil` and `0` are deliberately the same
+        /// answer, which is what `Tab.badge`'s own note promises — a count that has just cleared loses
+        /// its dot rather than showing a zero.
         private var hasBadge: Bool {
             (tab.badge ?? 0) > 0
         }
 
-        /// The real number, not the capped one: "99+" is a layout compromise, and VoiceOver has no
-        /// column to run out of.
+        /// The count itself, which is the one thing the dot cannot carry. The dot says *that* there
+        /// is something; VoiceOver has no 22pt circle to fit a number into, so it is told *how many*.
         private var badgeAnnouncement: String {
             guard let badge = tab.badge, badge > 0 else { return "" }
             return "\(badge)"
