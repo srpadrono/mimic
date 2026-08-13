@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-947%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-946%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -249,7 +249,7 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-947 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+946 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
@@ -258,7 +258,7 @@ for UI.
 | Domain, persistence, engine, control plane, import, CLI | 621 | Linux or macOS — `swift test` |
 | Design system | 54 | macOS — needs SwiftUI |
 | App and coordination | 232 | macOS — hosted by the app |
-| macOS UI (XCUITest) | 40 | macOS, interactive session |
+| macOS UI (XCUITest) | 39 | macOS, interactive session |
 
 The portable 621 break down as Domain 211, SpecImport 124, MimicCLICore 121, MockServerEngine 69,
 Persistence 67, ControlPlane 29. The app's 232 are the six folders `MimicTests` builds —
