@@ -631,8 +631,10 @@ actor LoopbackTestHost: ControlHost {
             return .success(.init(message: "Created project \"\(name)\".", project: created))
 
         case let .projectImport(document, _):
-            // Held to the same rules as the shipped hosts hold it to, through the same validator.
-            do { try EndpointValidator.validate(document) } catch { return .failure(.validation(error)) }
+            // Held to the same rules as the shipped host holds it to, through the same validator —
+            // `ProjectValidator`, the whole-document one, not `EndpointValidator`'s per-field
+            // helpers beside it.
+            do { try ProjectValidator.validate(document) } catch { return .failure(.validation(error)) }
             project = document
             return .success(.init(
                 message: ControlMessages.projectImported(
