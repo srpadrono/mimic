@@ -1,7 +1,7 @@
-#if canImport(Darwin)
 // `pid_t` and `SIGTERM` are C, and this file names both. Imported explicitly, the way
-// Tests/MockServerEngineTests/PlatformSockets.swift does, rather than relied on through whatever
+// Tests/MockServerEngineTests/PlatformSockets.swift does, rather than leaned on through whatever
 // Foundation happens to re-export on each platform — CI compiles this on Linux too.
+#if canImport(Darwin)
 import Darwin
 #else
 import Glibc
@@ -131,16 +131,20 @@ private final class RecordedSignals: @unchecked Sendable {
 /// CLIParsingTests asserts about stopping is that `terminate` refuses pid `0` and pid `-5`, which is
 /// a statement about one `guard` inside `terminate` and says nothing about the confirmation.
 ///
-/// Every refusal below asserts the same second thing: that nothing was signalled. That is the half a
-/// refusal is actually *about*, and `SignalDeliveryOverride` is what makes it writable — while the
-/// delivery was a bare `kill(2)` a test could only assert that an error came back, which a guard
-/// that threw *after* signalling would satisfy just as well.
+/// Every case below records signals instead of delivering them, and asserts what was delivered — but
+/// what that assertion is worth differs by level, and it is worth saying where. At the confirmation
+/// level it is a statement about *shape*: `confirmRunningInstance` has no path to `terminate` today,
+/// so it fails for the refactor that gives it one — folding the confirmation and the signal into a
+/// single call is exactly the tidy-up somebody reaches for — and not for a guard that stopped
+/// guarding. The case that fails for *that* is the last one, which runs `mimic app stop` from argv.
+/// `SignalDeliveryOverride` is what makes that one safe to run at all.
 @Suite("Confirming an instance before it is signalled")
 struct InstanceConfirmationTests {
 
     /// Runs `confirmRunningInstance` against a stub instance and returns what it refused with, or
-    /// `nil` when it confirmed. Signals are recorded rather than delivered throughout, so a
-    /// regression in the guard fails a test instead of reaching a process.
+    /// `nil` when it confirmed. It binds the signal recorder as well, so every caller can assert that
+    /// confirming did not become signalling — see the note on the suite for what that is and is not
+    /// evidence of at this level.
     private static func refusal(
         pid: Int,
         instance: StubInstance,
@@ -196,7 +200,7 @@ struct InstanceConfirmationTests {
         // file's port while the transport it was handed reports 8787.
         #expect(message?.contains("http://127.0.0.1:8911") == true)
         #expect(instance.commands.map(\.kind) == [.state], "the instance is asked for its own state")
-        #expect(signals.delivered.isEmpty, "a pid the instance disowned was signalled anyway")
+        #expect(signals.delivered.isEmpty, "confirming a pid must never be signalling it")
     }
 
     /// Nothing answered at all — the port is closed, or the process behind it is wedged. A file that
@@ -218,7 +222,7 @@ struct InstanceConfirmationTests {
         // instance whose token this CLI does not have arrives down this same path.
         #expect(message?.contains("did not confirm") == true, "refused with: \(message ?? "nothing")")
         #expect(message?.contains("Connection refused") == true, "the underlying reason was dropped")
-        #expect(signals.delivered.isEmpty, "a pid nothing answered for was signalled anyway")
+        #expect(signals.delivered.isEmpty, "confirming a pid must never be signalling it")
     }
 
     /// Something answered, and it was not a Mimic reporting itself: a `401` from an instance whose
@@ -238,7 +242,7 @@ struct InstanceConfirmationTests {
             message?.contains("answered, but not with the state a Mimic reports") == true,
             "refused with: \(message ?? "nothing")"
         )
-        #expect(signals.delivered.isEmpty, "an answer with no pid in it was treated as confirmation")
+        #expect(signals.delivered.isEmpty, "confirming a pid must never be signalling it")
     }
 
     // MARK: The accepting path
@@ -266,10 +270,10 @@ struct InstanceConfirmationTests {
     /// `SIGTERM` and not `SIGKILL` is a published guarantee, not an implementation detail: docs/CLI.md
     /// says pending saves flush, and they only do because the app gets a signal it can handle.
     ///
-    /// The pid is the implausible one `ControlClientTests` already uses for a process that is not
-    /// there, and that is the point: this is the one case here that asks for a delivery, so if the
-    /// override ever stopped being consulted the fallback must not be able to find anything. It
-    /// would fail with `ESRCH` — this test red, nothing on the machine touched.
+    /// The pid is the implausible one `ControlClientTests` already writes for a process that is not
+    /// there, and that is deliberate: this is the only case in the file that asks for a delivery, so
+    /// if the override ever stopped being consulted the fallback must not be able to find anything.
+    /// A pid nothing owns makes `terminate` throw — this test red, nothing on the machine touched.
     @Test("A confirmed pid is sent SIGTERM, and nothing else is")
     func terminateSendsSigterm() throws {
         let signals = RecordedSignals()
@@ -283,10 +287,10 @@ struct InstanceConfirmationTests {
         #expect(signals.delivered.first?.signal == SIGTERM)
     }
 
-    /// The `App launching` suite in CLIParsingTests already asserts that these throw. The half it
-    /// could not assert is this one — that the delivery never happened — because the delivery *was*
-    /// `kill(2)`, so a guard that had stopped firing would have been reported by the signal rather
-    /// than by the assertion. A non-positive pid is not a process id, which is why
+    /// The `App launching` suite in CLIParsingTests already asserts that pid `0` and pid `-5` throw.
+    /// The half it could not assert is this one — that the delivery never happened — because the
+    /// delivery *was* `kill(2)`, so a guard that had stopped firing would have been reported by the
+    /// signal rather than by the assertion. A non-positive pid is not a process id, which is why
     /// `ControlEndpointFileReader.isProcessAlive` refuses one too.
     @Test("A pid that is not a pid is refused before anything is signalled", arguments: [0, -1, -5])
     func anInvalidPidIsNeverSignalled(pid: Int) {

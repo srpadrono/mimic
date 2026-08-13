@@ -170,8 +170,7 @@ enum TextRenderer {
             text += "\nproject      (none open)"
         }
         if let journey = state.activeJourney {
-            let position = journey.currentStepIndex.map { "step \($0 + 1)/\(journey.totalSteps)" } ?? "complete"
-            text += "\njourney      \(journey.journeyName) — \(position)"
+            text += "\njourney      \(journey.journeyName) — \(runPosition(journey))"
         } else {
             text += "\njourney      (none active)"
         }
@@ -243,14 +242,24 @@ enum TextRenderer {
         return text
     }
 
+    /// Where a run stands, in one phrase. Shared because the two renderers that need it read the
+    /// same field two different ways, and both readings were wrong in the same place.
+    ///
+    /// A nil `currentStepIndex` says only that the cursor names no step. `renderStatus` defaulted it
+    /// to zero and printed `step 1/0`; `renderState` mapped it to `complete` and reported a journey
+    /// that had never run as finished. A journey with no steps is one command away —
+    /// `mimic journey create Flow --activate` sends `journeyCreate` with a spec carrying no steps and
+    /// then `journeyActivate`, whose reply is `JourneyStatus.make(journey:state: nil)`: `isComplete`
+    /// false, cursor `0`, `totalSteps` `0`, so the index is nil — and it renders through both.
+    static func runPosition(_ status: JourneyStatus) -> String {
+        guard let index = status.currentStepIndex else {
+            return status.isComplete ? "complete" : "no current step"
+        }
+        return "step \(index + 1)/\(status.totalSteps)"
+    }
+
     static func renderStatus(_ status: JourneyStatus) -> String {
-        var lines = [
-            "\(status.journeyName) — "
-                + (status.isComplete
-                    ? "complete"
-                    : "step \((status.currentStepIndex ?? 0) + 1)/\(status.totalSteps)")
-                + ", \(status.totalServed) served",
-        ]
+        var lines = ["\(status.journeyName) — \(runPosition(status)), \(status.totalServed) served"]
         for step in status.steps {
             let marker = step.isCurrent ? "▶" : (step.isExhausted ? "✓" : " ")
             let outcome = step.failure ?? step.statusCode.map(String.init) ?? "?"
