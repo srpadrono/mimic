@@ -352,6 +352,14 @@ jobs:
       # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
       # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
       # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
+      #
+      # What the retry does NOT do — observed on this job, 2026-08-14 — is turn the step green: a
+      # test that failed once and passed on the rerun (`testCapturingSelectedRequestsAsJourney`,
+      # final summary "Executed 28 tests, with 0 failures") still ended the step with "Failing
+      # tests:" naming it and exit 65. So red here means "failed at least once", not "failed".
+      # Before treating a red run as a hard break, read the tail: a listed failing test above a
+      # passing final suite summary is the retry having already told you it was transient — the
+      # step's value in that case is the flake's name, not the verdict.
       - name: Test (UI)
         run: |
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
