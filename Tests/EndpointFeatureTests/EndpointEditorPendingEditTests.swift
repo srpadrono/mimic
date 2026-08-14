@@ -21,6 +21,7 @@ import Domain
 /// endpoint by the code under test, so a change to `syncedValues` cannot quietly move what a test
 /// believes was on screen.
 @Suite("Endpoint editor pending edits")
+@MainActor
 struct EndpointEditorPendingEditTests {
 
     /// What one endpoint was asked to write, so a test can say *which* endpoint received an edit
