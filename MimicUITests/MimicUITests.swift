@@ -391,6 +391,20 @@ struct RequestDetailPage {
     var path: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.path").firstMatch
     }
+
+    /// The path the inspector is currently showing, as one string, for comparing two moments.
+    ///
+    /// Label *and* value, because which of the two a `StaticText` carries its text in depends on
+    /// how SwiftUI realized it — the rule this suite learned from `DSEmptyState`, whose text
+    /// arrives as the value. Returns empty when the element is absent, so a caller polling for a
+    /// change cannot mistake "gone" for "unchanged".
+    func shownPath() -> String {
+        let element = path
+        guard element.exists else { return "" }
+        let value = element.value.map { String(describing: $0) } ?? ""
+        return "\(element.label)|\(value)"
+    }
+
     var status: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.status").firstMatch
     }
@@ -1466,17 +1480,32 @@ final class MimicUITests: XCTestCase {
             requestDetail.waitForPanelTitle("Request"),
             "Clicking a row should show it in the inspector"
         )
+        XCTAssertTrue(
+            requestDetail.path.waitForExistence(timeout: 5),
+            "Request detail should name the request it is showing"
+        )
 
+        // What the inspector says *before* the press, so the assertion is that the selection moved
+        // rather than that it landed on a particular path. Which row is second depends on the log's
+        // sort order, and a test that hard-codes one of the two paths passes or fails on that rather
+        // than on the keyboard.
+        let before = requestDetail.shownPath()
         app.typeKey(.downArrow, modifierFlags: [])
 
-        // The selection moved if the inspector is now showing the *other* request. Asserting on the
-        // path rather than on a selection highlight, because the inspector is what a user reads and
-        // it is the thing that would silently stop following the keyboard.
-        let secondPath = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "/api/orders", "/api/orders"))
-            .firstMatch
-        XCTAssertTrue(
-            secondPath.waitForExistence(timeout: 5),
+        // Polled by re-querying one identified element, never by walking the tree: an
+        // `app.descendants(matching: .any)` carrying a `CONTAINS` predicate evaluates it against
+        // every element in the window and times out inside XCUITest's own query evaluation, which
+        // is how this test first failed. `waitForExistence` on an element that already exists is
+        // the suite's idiom for spacing out a poll without `sleep`.
+        var after = before
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, after == before {
+            _ = requestDetail.path.waitForExistence(timeout: 0.3)
+            after = requestDetail.shownPath()
+        }
+        XCTAssertNotEqual(
+            after,
+            before,
             "The down arrow should move the selection to the next row and show it in the inspector"
         )
 
