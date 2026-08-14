@@ -11,7 +11,7 @@
 #     come from `Glibc` rather than `Darwin`, and some C types are wider — the differences
 #     `Tests/MockServerEngineTests/PlatformSockets.swift` exists to hold. A green run here is not
 #     evidence the Linux job will be green, and structurally cannot be. To check that, run what
-#     AGENTS.md prescribes:
+#     the skill mimic-build-and-test prescribes (references/cli-e2e.md):
 #
 #         docker run --rm -v "$PWD":/src -w /src swift:6.2 swift test
 #

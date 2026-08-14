@@ -15,7 +15,7 @@ import SwiftUI
 /// - **The label colour comes from `DSColors.httpStatusColor(for:)`**, which returns the *text*
 ///   variants — the pill fills itself with a wash of its own label colour, and the base semantic
 ///   tokens do not survive that composite (see ``DSColors/warningText``).
-/// - **Only a 4xx or 5xx is filled.** The house rule (AGENTS.md: "a filled colour swatch is for
+/// - **Only a 4xx or 5xx is filled.** The house rule (skill `mimic-window-design`: "a filled colour swatch is for
 ///   something that needs attention") and also a contrast rule: a filled 3xx cannot clear AA on any
 ///   surface — 4.48:1 on a panel is its best — which is why `httpStatusColor(for:)`'s own comment
 ///   forbids filling one. The gate lives here so no call site can reopen that composite.

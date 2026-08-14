@@ -193,7 +193,7 @@ struct EndpointTrafficList: View {
     }
 
     /// `DSStatusPill` carries the fill gate — only a 4xx or 5xx is filled, which is the house rule
-    /// (`AGENTS.md`: "a filled colour swatch is for something that needs attention … a column of
+    /// (skill `mimic-window-design`: "a filled colour swatch is for something that needs attention … a column of
     /// filled pills is a wall of colour that says nothing, because everything in it is shouting
     /// equally"). This chip and the row pill below used to be two hand-drawn spellings of the same
     /// convention, sitting in this one file disagreeing until the gate was copied between them.

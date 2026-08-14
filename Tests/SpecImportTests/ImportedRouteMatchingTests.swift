@@ -15,7 +15,8 @@ import Domain
 /// even the literal routes were wrong.
 ///
 /// Every fixture in the suite that carried a `basePath` carried `"/"` — the one value for which the
-/// prefix is a no-op. AGENTS.md names that shape exactly: "a fixture whose every instance agrees on
+/// prefix is a no-op. The skill `mimic-build-and-test` (`references/real-inputs.md`) names that
+/// shape exactly: "a fixture whose every instance agrees on
 /// something the format does not require. If all of them put a field in the same place, the parser
 /// has only ever been asked to read it there."
 ///

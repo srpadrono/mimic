@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # First, and before anything is installed, because it is the cheapest thing in the workflow: a
-      # few greps over the Swift sources, no toolchain, under a second. It decides the AGENTS.md rules
+      # few greps over the Swift sources, no toolchain, under a second. It decides the house rules
       # that are literal enough for a grep to settle — casing, `@AppStorage`, `asyncAfter`, the
       # deprecated `Alert()`, and the two XCUITest waiting rules. Each had been broken at least once
       # and caught only by somebody happening to read the diff, which is not a mechanism.

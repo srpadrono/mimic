@@ -888,7 +888,8 @@ struct DSContrastTests {
     /// The 3xx arm, which is the one `httpStatusColor(for:)` cannot lift over the floor by choosing a
     /// colour — and the reason that is acceptable.
     ///
-    /// AGENTS.md already says a redirect gets no fill: "**A filled colour swatch is for something
+    /// The visual standard already says a redirect gets no fill (skill `mimic-window-design`):
+    /// "**A filled colour swatch is for something
     /// that needs attention.** Status codes in the traffic list are coloured text; only 4xx and 5xx
     /// get a fill." Read as text, which is what a 3xx is, `accentText` clears AA on all seven
     /// surfaces in both appearances — where ``DSColors/accent``, the fill blue this function used to
@@ -1358,7 +1359,7 @@ struct DSContrastTests {
         }
     }
 
-    // MARK: - The structural rules AGENTS.md states
+    // MARK: - The structural rules the visual standard states (skill mimic-window-design)
 
     /// "**Nothing a user must read sits at `labelTertiary`.** It is 36% alpha — right for a timestamp
     /// or a separator, wrong for a control's own label. Unselected tab icons live at `labelSecondary`
