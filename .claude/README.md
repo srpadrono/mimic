@@ -12,7 +12,14 @@ when it grew past 800 lines; four are local Swift guidance; `improve-codebase-ar
 vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](../skills-lock.json).
 
 Adding a skill means adding the directory under `.agents/skills/` **and** the symlink here. A skill
-that exists in only one of the two places is invisible to half the agents that work on this repo.
+that exists in only one of the two places is invisible to half the agents that work on this repo —
+silently, because nothing fails, the rule is simply never read.
+
+[`Scripts/check_skills.py`](../Scripts/check_skills.py) is what makes that impossible to ship. It
+runs in `ci.sh` and in the Linux CI job, and it settles three things: the mirror is complete and is
+symlinks rather than copies, every `SKILL.md`'s front matter names its own directory, and AGENTS.md's
+routing table covers every skill and points only at real ones. It needs no toolchain, so it also
+runs in a web session.
 
 ## `hooks/session-start.sh`
 

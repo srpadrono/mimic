@@ -20,6 +20,7 @@
       "Bash(python3 Scripts/check_module_edges.py:*)",
       "Bash(python3 Scripts/check_compiler_settings.py:*)",
       "Bash(python3 Scripts/check_lockfiles.py:*)",
+      "Bash(python3 Scripts/check_skills.py:*)",
       "Bash(./Scripts/check_house_rules.sh:*)",
       "Bash(./Scripts/ci.sh:*)",
       "Bash(xcodebuild:*)",

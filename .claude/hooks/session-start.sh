@@ -65,6 +65,7 @@ else
     echo "python3 Scripts/check_module_edges.py      # the module boundaries, from both manifests"
     echo "python3 Scripts/check_compiler_settings.py # deployment floor + Swift settings drift"
     echo "python3 Scripts/check_lockfiles.py         # Package.resolved vs. Tuist/Package.resolved"
+    echo "python3 Scripts/check_skills.py            # skill mirror, front matter, routing table"
     echo "./Scripts/check_house_rules.sh             # the literal house rules (find/awk/grep only)"
     echo '```'
     echo

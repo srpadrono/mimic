@@ -233,7 +233,7 @@ Scripts/check_house_rules.sh
 # declarations per folder and fails if any number README states has drifted, printing the true ones.
 #
 # It settles the operation count the same way, from `CommandKind` rather than from anybody's memory
-# of the five places it is written down; and it fails on a folder under `Tests/` that neither
+# of everywhere it is written down; and it fails on a folder under `Tests/` that neither
 # manifest declares, because a suite no build target names is a suite nobody runs and it looks
 # exactly like one that does.
 #
@@ -246,6 +246,17 @@ Scripts/check_house_rules.sh
 # needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
 step "Documented counts"
 python3 Scripts/check_doc_counts.py
+
+# The third document check, and the newest. AGENTS.md was reduced to a router when it passed 800
+# lines — it keeps what is true on every task and sends the rest to a skill under `.agents/skills/` —
+# which traded one large file for three promises: that `.claude/skills/` mirrors the skills by
+# symlink, that each `SKILL.md`'s front matter names its own directory, and that the routing table
+# covers every skill and points only at real ones. Each one fails silently. A skill missing from the
+# mirror is invisible to Claude Code while remaining perfectly present to everything else; a skill
+# missing from the table is one no agent thinks to load. Nothing goes red, the rule is simply never
+# read, which is the same failure mode as a house rule kept only by review.
+step "Skill layout"
+python3 Scripts/check_skills.py
 
 # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
 #
