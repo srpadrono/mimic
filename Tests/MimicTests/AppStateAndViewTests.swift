@@ -616,7 +616,7 @@ struct AppStateAndViewTests {
 
         #expect(defaults.object(forKey: "recentProjects") == nil)
         #expect(defaults.object(forKey: "lastOpenedProjectID") == nil)
-        #expect(FileManager.default.fileExists(atPath: dbURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: store.url.path) == false)
     }
 
     @Test("Mimic app activation and reset context helpers are injectable")
