@@ -242,10 +242,11 @@ struct HostCommandSweepTests {
                 response.error?.code != Self.unimplementedCommandCode,
                 "\(kind.rawValue): the host has no arm for it — \(response.error?.message ?? "")"
             )
+            // One literal, not a `+` of two: `#expect`'s comment parameter converts a string
+            // *literal*, and a concatenated `String` expression is not one.
             #expect(
                 response.error?.code != ControlError.noProjectOpen.code,
-                "\(kind.rawValue): answered \"no project open\" with one open — "
-                    + "the routing failure this sweep exists to catch"
+                "\(kind.rawValue): answered \"no project open\" with one open — the routing failure this sweep exists to catch"
             )
         }
     }
