@@ -888,7 +888,12 @@ struct AppStateAndViewTests {
         UITestSupport.resetApp(knownTestSuites: [], databaseURL: nil, fileManager: .default)
 
         #expect(FileManager.default.fileExists(atPath: dbURL.path))
-        #expect(FileManager.default.fileExists(atPath: dbURL.appendingPathExtension("wal").path))
+        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+            #expect(
+                FileManager.default.fileExists(atPath: sidecar.path),
+                "a reset that was given no store deleted a sidecar anyway"
+            )
+        }
     }
 
     @Test("The store to reset comes from MIMIC_DATABASE_PATH, and only from there")

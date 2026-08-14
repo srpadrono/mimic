@@ -398,11 +398,16 @@ jobs:
       # never reaches back to the assertion and the artifact was effectively opaque. `xcresulttool`
       # exists on this runner, so ask it while we are here. `continue-on-error` on top of
       # `if: failure()`: a diagnostic that can redden a run it was reading is worse than none.
-      - name: UI failure details
+      - name: Test failure details
         if: failure()
         continue-on-error: true
         run: |
-          bundle="$(ls -dt "$DERIVED_DATA"/Logs/Test/*.xcresult 2>/dev/null | head -1)"
+          # Both bundle locations, newest first. This used to look only under `$DERIVED_DATA`, which
+          # is where the UI suite writes — so on a *unit* failure, whose bundle the coverage step
+          # puts in `.artifacts/coverage`, the step it exists to serve printed "no xcresult found"
+          # and the assertion had to be read out of the raw log instead. Naming both is the whole
+          # fix; `ls -dt` across them picks whichever run actually failed.
+          bundle="$(ls -dt "$DERIVED_DATA"/Logs/Test/*.xcresult .artifacts/coverage/*.xcresult 2>/dev/null | head -1)"
           if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
           echo "== $bundle"
           xcrun xcresulttool get test-results summary --path "$bundle" || true
