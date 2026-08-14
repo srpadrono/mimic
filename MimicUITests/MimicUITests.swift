@@ -307,10 +307,13 @@ struct RequestLogDrawerPage {
     /// Button, identifier: 'requestLog-110693C9…', label: 'Unmatched'
     /// ```
     ///
-    /// Clicking any one of them selects its row, which is why `firstLogRow` works. Reaching for two
-    /// *different* rows must go through ``distinctRows(limit:)`` — `element(boundBy: 0)` and
-    /// `element(boundBy: 1)` land in the same row, and a ⌘-click on the second then toggles the
-    /// first back off, which reads as a selection that refuses to grow.
+    /// One composed element per logged row. `RequestLogDrawerView` collapses each row with
+    /// `.accessibilityElement(children: .ignore)` and a composed spoken label ("GET /api/orders,
+    /// status 200"), so a row is a single element carrying the `requestLog-<uuid>` identifier —
+    /// which may realize as a Button, hence `.any` rather than a cell query. This used to say the
+    /// opposite ("several per row … six elements for every logged request"), from before the rows
+    /// composed their labels; ``distinctRows(limit:)``'s dedupe is a no-op now and kept only as
+    /// safety against the realization changing again.
     var allRowCells: XCUIElementQuery {
         app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-"))
@@ -331,9 +334,10 @@ struct RequestLogDrawerPage {
 
     /// Waits for the log to hold at least `count` distinct rows.
     ///
-    /// Counts rows rather than elements — the cell fan-out above means a single request already
-    /// satisfies `allRowCells.count >= 2`, so waiting on that would return before the second request
-    /// had arrived and the test would race the server.
+    /// Counts distinct identifiers rather than raw elements. With the rows composed into one element
+    /// each the two counts agree today, but this helper predates that — rows used to fan out into
+    /// several elements, and a single request satisfied `allRowCells.count >= 2` — and counting
+    /// distinct ids is the version that stays correct whichever way the realization goes.
     func waitForRowCount(_ count: Int, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -1263,22 +1267,47 @@ final class MimicUITests: XCTestCase {
         let firstRow = rows[0]
         let secondRow = rows[1]
 
+        // ⌘-click adds the second row to the selection instead of replacing it — the row reads
+        // `NSEvent.modifierFlags` at click time, and this held-modifier dance is the only way to
+        // exercise that from a test. It is not replaceable with `typeKey("a", .command)`: the
+        // drawer implements no Select All (selection changes only through clicks), so ⌘A selects
+        // nothing and the menu below would name one row for the wrong reason.
+        //
+        // The menu naming a *count* is the real check: a selection collapsed to one row says
+        // "Add to journey" instead, so the assertion cannot pass for the wrong reason.
+        //
+        // When this assertion spends several runs failing while the dance looks right, suspect the
+        // *menu's visibility* before the modifier. Five consecutive CI runs failed here after the
+        // row composed itself with `.accessibilityElement(children: .ignore)` — the menu, then
+        // attached *beneath* that modifier, still opened for the pointer, but its items surfaced
+        // through the swallowed subtree and never existed as elements, so `app.menuItems` matched
+        // nothing whatever the selection held. That read as a dropped modifier, and the retry
+        // iteration resumed *after* the failed test rather than re-running it, so "passes on
+        // retry" was a misreading of the resumed suite's log. The row now attaches its menu after
+        // forming the element, and the failure message below prints what the tree actually holds.
+        let captureMenu = app.menuItems["Add 2 requests to journey"]
+        let collapsedMenu = app.menuItems["Add to journey"]
         firstRow.click()
-        // ⌘-click adds to the selection instead of replacing it. If the modifier does not reach the
-        // app this reads as a plain click, the selection collapses to one row, and the menu below
-        // says "Add to journey" instead of naming a count — which is what makes this assertion the
-        // real check.
         XCUIElement.perform(withKeyModifiers: .command) {
             secondRow.click()
         }
-
         secondRow.rightClick()
-
-        let captureMenu = app.menuItems["Add 2 requests to journey"]
-        XCTAssertTrue(
-            captureMenu.waitForExistence(timeout: 5),
-            "The context menu should offer to capture the whole selection, not just the clicked row"
-        )
+        // Polled together — waiting out one item's timeout before looking at the other is the
+        // `a || b` trap rule 9 of the UI Definition of Done names.
+        _ = UITestApp.waitForAny([captureMenu, collapsedMenu], timeout: 5)
+        if !captureMenu.exists {
+            // Name what the runner actually saw, so a red run's CI failure step prints a diagnosis
+            // instead of a hypothesis: the singular menu means the modifier did not reach the app;
+            // no menu items at all means the menu never opened — or opened with its items invisible
+            // to the tree, which is the swallowed-subtree failure above. (`menus` counts open
+            // AXMenu elements, so "menu open, items missing" and "no menu" read differently here.)
+            let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
+            XCTFail(
+                "The context menu should offer to capture the whole selection, not just the clicked "
+                    + "row. collapsed=\(collapsedMenu.exists) openMenus=\(app.menus.count) "
+                    + "visibleMenuItems=\(visible)"
+            )
+        }
         captureMenu.click()
 
         let newJourneyItem = app.menuItems["New journey from these 2 requests\u{2026}"]
@@ -1501,8 +1530,16 @@ final class MimicUITests: XCTestCase {
             "Status code field should update to 401"
         )
 
-        // Ensure the debounced status edit is autosaved before closing (closing drops a not-yet-saved
-        // edit). The reopened-editor check below is the authoritative persistence verification.
+        // Kept, but no longer for the reason it was written. Closing used to *drop* a not-yet-saved
+        // edit — `ProjectWorkspace.closeProject()` cleared `currentProject`, and the pending
+        // debounced write then woke, found the guard false, and returned having saved nothing. It now
+        // flushes the pending edit first, capturing the project by value, so this wait is no longer
+        // load-bearing.
+        //
+        // It stays because it costs nothing and because what this test is *for* is the round trip
+        // through the store, not the flush: waiting here means a failure below says "the store lost
+        // it" rather than "something about the timing". `Tests/MimicTests/ProjectWorkspaceTests.swift`
+        // covers the flush itself, without the debounce in the way.
         waitForAsyncSave()
 
         closeProjectViaMenu()

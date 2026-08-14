@@ -24,24 +24,41 @@ struct JourneysNavigatorPage {
     /// label comes from `NavigatorTab.journeys.help`.
     var tab: XCUIElement { app.buttons["Show journeys"].firstMatch }
 
-    /// The navigator's add control: a `MenuButton`, matched by **label and element type**.
+    /// The navigator's add control, matched by **its own label** — which nothing else carries.
     ///
-    /// Both halves matter, and getting either wrong finds the wrong thing. Dumped from
-    /// `app.debugDescription` with the Journeys tab showing and no journeys yet:
+    /// This used to match on label *and element type*, and the element type was the half doing the
+    /// separating. Dumped from `app.debugDescription` back then, with the Journeys tab showing and
+    /// no journeys yet, the two controls read:
     ///
     /// ```
     /// MenuButton, identifier: 'ds.tabstrip.navigator',   label: 'Add journey'   ← this one
     /// Button,     identifier: 'ds.empty.journeys.empty', label: 'Add journey'   ← the empty state
     /// ```
     ///
-    /// The identifier is no use: `DSTabStrip` flattens its children's, so this reports the strip's.
-    /// The label alone is no use either — the empty state's call to action carries the same words and
-    /// adds a journey *directly* rather than opening the menu, so a query that resolved to it would
-    /// wait forever for a menu item that never appears. `Menu` is the only one AppKit realizes as a
-    /// `MenuButton`, which separates them exactly.
-    var addButton: XCUIElement { app.menuButtons["Add journey"].firstMatch }
+    /// Same words on two controls that do different things: this one opens a chooser, the empty
+    /// state's adds a journey outright — so a query that resolved to the wrong one would wait
+    /// forever for a menu item that never appears. `MenuButton` versus `Button` separated them, and
+    /// that is a property of `DSIconMenu`'s *menu style*, not of either control. It made a
+    /// deprecated modifier unmovable: change the style and this query silently changes what it
+    /// finds. The labels are distinct now — "Choose how to add a journey" here,
+    /// `JourneyNavigatorList`'s "Add journey" there — and each says what its control does.
+    ///
+    /// The identifier is still no use: `DSTabStrip` flattens its children's, so the
+    /// `journeys.addJourneyButton` set on the menu reports as the strip's own name. The element
+    /// type is now only a *locator*, and it is tried both ways for the reason
+    /// `RequestDetailPage.tab(_:)` gives — so that a style change breaks nothing here. Today
+    /// `DSIconMenu` still takes `.menuStyle(.borderlessButton)`, which AppKit realizes as a
+    /// `MenuButton`, and the first branch is the one that answers.
+    var addButton: XCUIElement {
+        let byMenuButton = app.menuButtons["Choose how to add a journey"].firstMatch
+        if byMenuButton.exists { return byMenuButton }
+        return app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Choose how to add a journey"))
+            .firstMatch
+    }
 
-    /// The empty state's own call to action — the *other* "Add journey", kept apart deliberately.
+    /// The empty state's own call to action, which creates a journey outright rather than opening
+    /// the menu above. `DSEmptyState` speaks its visible title as the button's label.
     var emptyStateAddButton: XCUIElement { app.buttons["Add journey"].firstMatch }
 
     var newEmptyMenuItem: XCUIElement { app.menuItems["journeys.newEmptyMenuItem"] }
@@ -169,7 +186,9 @@ final class JourneyUITests: XCTestCase {
         ]
         application.launchEnvironment["MIMIC_DEFAULTS_SUITE"] = Self.testSuite
         // Port 0 lets the OS pick, so a test run neither collides with a developer's running instance
-        // nor with a second run on the same machine.
+        // nor with a second run on the same machine. The discovery-file half of that isolation —
+        // MIMIC_CONTROL_FILE — is exported by the launch contract itself, in
+        // `UITestApp.launchAndBringToForeground`, so no suite can launch without it.
         application.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
 
         app = application
@@ -247,7 +266,18 @@ final class JourneyUITests: XCTestCase {
             journeys.emptyStateHeading.waitForExistence(timeout: 5),
             "A project with no journeys should explain what a journey is"
         )
-        XCTAssertTrue(journeys.addButton.exists, "Add control should be available")
+
+        // Both ways of adding a journey are on screen in this state, and they are asserted together
+        // because they used to answer to the same name — "Add journey" on the navigator's menu and
+        // on the empty state's button — which left this suite separating them by AppKit element
+        // type. Each query names one label and nothing else, so the two resolving at once *is* the
+        // assertion that they are still two names on two controls: give either control the other's
+        // label and one of these two queries stops matching anything at all.
+        XCTAssertTrue(journeys.addButton.exists, "The navigator's add menu should be available")
+        XCTAssertTrue(
+            journeys.emptyStateAddButton.exists,
+            "The empty state should offer its own way to create a journey"
+        )
     }
 
     @MainActor

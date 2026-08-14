@@ -26,16 +26,16 @@ enum SortField: String {
 /// its own: a system popup, a bordered pill, a filled well and a bare icon. Xcode's equivalent bars
 /// run a single control idiom end to end, and the only way to keep that true here past the next edit
 /// is to have the numbers live in one place rather than be matched by hand.
+///
+/// The numbers are read from the design system rather than restated here. This enum used to hold
+/// four literals and a comment promising they matched `DSFilterField` — a coupling across a module
+/// boundary, asserted in prose and verified by nobody. `DSControlHeight` and `DSStroke` are where
+/// that promise now lives, so adopting the component later cannot change this row's shape.
 private enum HeaderControl {
-    /// 3pt above and below the content.
-    static let verticalPadding: CGFloat = 3
-    /// 20pt — content plus `verticalPadding` top and bottom, which is also where `DSFilterField`
-    /// settles, so a panel that later adopts that component does not change shape on the way in.
-    static let height: CGFloat = 20
-    /// 4pt, from `DSCornerRadius.sm`.
-    static let cornerRadius: CGFloat = DSCornerRadius.sm
-    /// A hairline, not a border. At 1pt the row reads as a form.
-    static let borderWidth: CGFloat = 0.5
+    static let verticalPadding = DSControlHeight.verticalPadding
+    static let height = DSControlHeight.row
+    static let cornerRadius = DSCornerRadius.sm
+    static let borderWidth = DSStroke.hairline
 }
 
 private extension View {
@@ -97,37 +97,76 @@ enum RequestLogQuery {
             }
         }
 
+        // Descending is the ascending predicate with its **operands** swapped, never its answer
+        // negated. This used to end on `sortAscending ? result : !result`, and `!(a < b)` is `a >= b`:
+        // for two rows whose keys are equal it answered *true* in both directions, so the comparator
+        // simultaneously claimed left precedes right and right precedes left. `sort(by:)` requires a
+        // strict weak ordering and promises nothing about its output when it does not get one — the
+        // result was not "the ascending one reversed", it was whatever the sort's internals happened
+        // to do with a contradiction. Ties are not the exotic case here either: a session repeats
+        // methods, paths, status codes, endpoint names and scenario names constantly, and the
+        // timestamp is the only column of the six that does not normally hold duplicates at all.
         filteredLogs.sort { left, right in
-            let result: Bool
-            switch sortField {
-            case .method:
-                result = left.method.rawValue < right.method.rawValue
-            case .path:
-                result = left.path < right.path
-            case .endpoint:
-                result = endpointName(for: left.matchedEndpointID, endpoints: endpoints) ?? ""
-                    < endpointName(for: right.matchedEndpointID, endpoints: endpoints) ?? ""
-            case .scenario:
-                result = scenarioName(
-                    endpointID: left.matchedEndpointID,
-                    scenarioID: left.matchedScenarioID,
-                    endpoints: endpoints
-                ) ?? ""
-                    < scenarioName(
-                        endpointID: right.matchedEndpointID,
-                        scenarioID: right.matchedScenarioID,
-                        endpoints: endpoints
-                    ) ?? ""
-            case .status:
-                result = (left.responseStatusCode ?? 0) < (right.responseStatusCode ?? 0)
-            case .timestamp:
-                result = left.timestamp < right.timestamp
-            }
-
-            return sortAscending ? result : !result
+            sortAscending
+                ? isOrderedBefore(left, right, sortField: sortField, endpoints: endpoints)
+                : isOrderedBefore(right, left, sortField: sortField, endpoints: endpoints)
         }
 
         return filteredLogs
+    }
+
+    /// Whether `left` belongs before `right` with the column sorted ascending.
+    ///
+    /// One direction only, on purpose: the other is this with the operands swapped — see the note at
+    /// the call site for what negating the answer instead did to equal rows.
+    ///
+    /// Rows whose sorted column is equal fall through to the timestamp. That secondary key is what
+    /// makes the order *fully specified* rather than merely legal: `sort(by:)` is not documented as
+    /// stable, so on a column with duplicates two equal rows are otherwise free to swap places on
+    /// every re-sort, and the log would redraw in a different order after an unrelated filter
+    /// keystroke. It reverses along with everything else, so descending puts the newest of a set of
+    /// equals first. Two entries carrying the same timestamp *and* the same key compare equal in both
+    /// directions, which is precisely what a strict weak ordering asks for.
+    nonisolated static func isOrderedBefore(
+        _ left: RequestLog,
+        _ right: RequestLog,
+        sortField: SortField,
+        endpoints: [Endpoint]
+    ) -> Bool {
+        switch sortField {
+        case .method:
+            if left.method.rawValue != right.method.rawValue {
+                return left.method.rawValue < right.method.rawValue
+            }
+        case .path:
+            if left.path != right.path {
+                return left.path < right.path
+            }
+        case .endpoint:
+            let leftName = endpointName(for: left.matchedEndpointID, endpoints: endpoints) ?? ""
+            let rightName = endpointName(for: right.matchedEndpointID, endpoints: endpoints) ?? ""
+            if leftName != rightName { return leftName < rightName }
+        case .scenario:
+            let leftName = scenarioName(
+                endpointID: left.matchedEndpointID,
+                scenarioID: left.matchedScenarioID,
+                endpoints: endpoints
+            ) ?? ""
+            let rightName = scenarioName(
+                endpointID: right.matchedEndpointID,
+                scenarioID: right.matchedScenarioID,
+                endpoints: endpoints
+            ) ?? ""
+            if leftName != rightName { return leftName < rightName }
+        case .status:
+            let leftCode = left.responseStatusCode ?? 0
+            let rightCode = right.responseStatusCode ?? 0
+            if leftCode != rightCode { return leftCode < rightCode }
+        case .timestamp:
+            break
+        }
+
+        return left.timestamp < right.timestamp
     }
 
     /// The path to mock for a logged request: the query string is dropped, because it is a property
@@ -339,58 +378,6 @@ struct RequestLogDrawerView: View {
         .onAppear { updateLogs() }
     }
 
-    // MARK: - Unmatched filter
-
-    /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
-    /// that is always coloured has stopped saying anything.
-    private func unmatchedFilterForeground(count: Int) -> Color {
-        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
-        return DSColors.labelSecondary
-    }
-
-    /// A one-click answer to "what is my app calling that I have not mocked?".
-    ///
-    /// The count is on the control itself, so a missing mock is visible without opening the filter —
-    /// which is the whole point: you notice it while debugging something else.
-    @ViewBuilder
-    private var unmatchedFilterToggle: some View {
-        let count = RequestLogQuery.unmatchedCount(logs: requestLogs)
-
-        // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
-        // to advertise the count made the control look pressed whenever there was anything to count —
-        // so a filter that was off read as on, every time it mattered. On and off have to look
-        // different from each other before either can carry a colour.
-        Button {
-            unmatchedOnly.toggle()
-        } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 10))
-                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                    .font(DSTypography.caption)
-            }
-            .foregroundStyle(unmatchedFilterForeground(count: count))
-            // The same well as the filter field beside it — one height, one radius, one hairline.
-            // These two were written independently and drifted by a couple of points, which is
-            // exactly the kind of difference nobody can name and everybody can see.
-            .headerControlWell(
-                fill: unmatchedOnly ? DSColors.httpStatusColor(for: 404).opacity(0.12) : .clear,
-                stroke: unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(count == 0 && !unmatchedOnly)
-        .animation(.easeOut(duration: DSAnimation.micro), value: unmatchedOnly)
-        .help("Show only requests that matched no endpoint — the ones you are missing a mock for.")
-        .accessibilityIdentifier("drawer.unmatchedFilter")
-        .accessibilityLabel(
-            count > 0
-                ? "Show only unmatched requests, \(count) so far"
-                : "Show only unmatched requests"
-        )
-    }
-
     // MARK: - Toolbar
 
     /// The drawer's single row of chrome.
@@ -421,11 +408,14 @@ struct RequestLogDrawerView: View {
                     .accessibilityIdentifier("drawer.methodFilter")
                     .accessibilityLabel("Filter by method")
 
-                    unmatchedFilterToggle
+                    UnmatchedFilterToggle(
+                        count: RequestLogQuery.unmatchedCount(logs: requestLogs),
+                        unmatchedOnly: $unmatchedOnly
+                    )
 
                     HStack(spacing: DSSpacing.xs) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: DSGlyph.inline, weight: .medium))
                             .foregroundStyle(DSColors.labelTertiary)
                         TextField("Filter", text: $filterText)
                             .textFieldStyle(.plain)
@@ -492,7 +482,10 @@ struct RequestLogDrawerView: View {
             title: title,
             isActive: sortField == field,
             isAscending: sortAscending,
-            width: width
+            width: width,
+            // Keyed on the sort field rather than the title, so the name a test holds does not move
+            // when a column is relabelled — the same reason the rows below are keyed on `log.id`.
+            identifier: "drawer.columnHeader.\(field.rawValue)"
         ) {
             (sortField, sortAscending) = Self.nextSortState(
                 currentField: sortField,
@@ -737,6 +730,88 @@ struct RequestLogDrawerView: View {
     }
 }
 
+// MARK: - Unmatched filter
+
+/// A one-click answer to "what is my app calling that I have not mocked?".
+///
+/// The count is on the control itself, so a missing mock is visible without opening the filter —
+/// which is the whole point: you notice it while debugging something else.
+///
+/// Its own view so the hover state stays local, which is the same reason `SortableColumnHeader`
+/// below is one: held on the drawer, a `@State` flag toggled by the pointer crossing this control
+/// would re-evaluate the panel's whole body — the table of up to a thousand rows included — twice per
+/// pass of the mouse.
+private struct UnmatchedFilterToggle: View {
+    let count: Int
+    @Binding var unmatchedOnly: Bool
+
+    @State private var isHovered = false
+
+    var body: some View {
+        // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
+        // to advertise the count made the control look pressed whenever there was anything to count —
+        // so a filter that was off read as on, every time it mattered. On and off have to look
+        // different from each other before either can carry a colour.
+        Button {
+            unmatchedOnly.toggle()
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: DSGlyph.inline))
+                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
+                    .font(DSTypography.caption)
+            }
+            .foregroundStyle(foreground)
+            // The same well as the filter field beside it — one height, one radius, one hairline.
+            // These two were written independently and drifted by a couple of points, which is
+            // exactly the kind of difference nobody can name and everybody can see.
+            .headerControlWell(fill: fill, stroke: stroke)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isInert)
+        // This control had no pointer response of any kind, which in a row where the clear button is
+        // a `DSPanelHeaderButton` and the method filter is a native popup made it the one thing in
+        // the drawer's chrome that looked the same whether or not you were about to click it.
+        //
+        // Gated on `isInert` for the reason `ServerToggleButton` states: a well that answers a
+        // pointer which cannot click is the same lie as a live-looking dead control.
+        .onHover { isHovered = $0 && !isInert }
+        .animation(.easeOut(duration: DSAnimation.micro), value: unmatchedOnly)
+        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .help("Show only requests that matched no endpoint — the ones you are missing a mock for.")
+        .accessibilityIdentifier("drawer.unmatchedFilter")
+        .accessibilityLabel(
+            count > 0
+                ? "Show only unmatched requests, \(count) so far"
+                : "Show only unmatched requests"
+        )
+    }
+
+    /// Nothing to filter to and not already filtering: the control is disabled, so it neither reacts
+    /// to the pointer nor carries a colour.
+    private var isInert: Bool { count == 0 && !unmatchedOnly }
+
+    /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
+    /// that is always coloured has stopped saying anything.
+    private var foreground: Color {
+        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
+        return DSColors.labelSecondary
+    }
+
+    /// On, the well stays amber under the pointer rather than being overpainted by a blue that means
+    /// nothing here — the rule `ServerToggleButton`'s running glow follows. Off, it takes
+    /// `accentSubtle`, which is the app's one hover fill.
+    private var fill: Color {
+        if unmatchedOnly { return DSColors.httpStatusColor(for: 404).opacity(0.12) }
+        return isHovered ? DSColors.accentSubtle : .clear
+    }
+
+    private var stroke: Color {
+        unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
+    }
+}
+
 // MARK: - Column Header
 
 /// One sortable column title.
@@ -748,19 +823,27 @@ struct RequestLogDrawerView: View {
 /// Its own view so the hover highlight stays local. Kept on the table as a `hoveredField`, one
 /// pointer crossing the row would re-evaluate all six columns — `DSTabStrip.TabButton` is the same
 /// shape for the same reason.
+///
+/// **It is a `Button`, so it is named like one.** All six of these shipped with no accessibility
+/// identifier and no label, on the type or at the call site — six interactive controls that VoiceOver
+/// could only announce by reading the word inside them, with nothing saying they sorted anything and
+/// nothing a UI test could address. The sort direction rides in the value rather than the label, so
+/// the label stays a stable string while the state underneath it moves, exactly as `DSTabStrip` does
+/// with its badge count.
 private struct SortableColumnHeader: View {
     let title: String
     let isActive: Bool
     let isAscending: Bool
     /// `nil` for the flexible column, which takes whatever the fixed ones leave.
     let width: CGFloat?
+    let identifier: String
     let sort: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
         Button(action: sort) {
-            HStack(spacing: 2) {
+            HStack(spacing: DSSpacing.xxs) {
                 Text(title)
                     .font(DSTypography.caption)
                     // The sorted column should be legible as sorted from across the row, without
@@ -770,7 +853,9 @@ private struct SortableColumnHeader: View {
 
                 if isActive {
                     Image(systemName: isAscending ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        // `inlineSmall`, the rung `DSGlyph` names a column header's sort chevron for:
+                        // it qualifies the title beside it rather than being the control itself.
+                        .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
                         .foregroundStyle(DSColors.accentText)
                 }
             }
@@ -786,6 +871,18 @@ private struct SortableColumnHeader: View {
         // change and no hover, so the columns looked exactly like a static legend.
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .help("Sort by \(title.lowercased())")
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel("Sort by \(title.lowercased())")
+        .accessibilityValue(sortStateAnnouncement)
+    }
+
+    /// Which way this column is currently sorting, or nothing when it is not the sorted one. A value
+    /// rather than part of the label, so "Sort by status" stays the same string whichever direction
+    /// the arrow is pointing.
+    private var sortStateAnnouncement: String {
+        guard isActive else { return "" }
+        return isAscending ? "sorted ascending" : "sorted descending"
     }
 
     private var titleColor: Color {
@@ -828,7 +925,9 @@ struct RequestLogTableRow: View {
     var body: some View {
         HStack(spacing: 0) {
             // Method
-            DSMethodBadge(method: log.method.rawValue, size: .compact)
+            // Keyed by the log entry, not by the method: every GET row shared one identifier when the
+            // badge defaulted to the method name, so a query for it resolved to an arbitrary row.
+            DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: log.id.uuidString)
                 .frame(width: LogColumns.method, alignment: .leading)
 
             // Path
@@ -864,6 +963,38 @@ struct RequestLogTableRow: View {
                 .frame(width: LogColumns.time, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
+        .frame(height: 26)
+        .background(rowBackground)
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle()
+                    .fill(DSColors.accent)
+                    .frame(width: 2)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect(.current) }
+        .onHover { isHovered = $0 }
+        // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
+        // was the only interactive row in the window that composed none: a bare `.isButton` over
+        // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
+        // "Unmatched"…) with nothing saying they were one request. The trait comes after the
+        // element is formed, because a trait added to the children is a trait the element has
+        // already passed over — and the row is a tap target rather than a `Button` in the first
+        // place because a button would swallow the modifier chords the selection depends on.
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
+        .accessibilityLabel(Self.spokenLabel(for: log))
+        // The menu attaches after the element is formed, exactly as the scenario row orders it —
+        // and here that ordering is load-bearing, not stylistic. This menu used to sit before the
+        // `.accessibilityElement(children: .ignore)` above, which collapses the accessibility of
+        // everything beneath it: the menu still opened for a pointer, but its items surfaced
+        // through the swallowed subtree and so never existed as elements. VoiceOver lost the menu,
+        // and the UI test that opens it read "no menu appeared" — deterministically, on every run,
+        // which spent five CI rounds masquerading as a flaky modifier. Attached out here, the open
+        // menu's items are ordinary elements again. It also widens the right-click target from the
+        // padded content to the full row frame, matching where the row already takes a left click.
         .contextMenu {
             // Going from "this call is unmocked" to "it is mocked now" should not require retyping
             // the method and path into a sheet.
@@ -908,22 +1039,6 @@ struct RequestLogTableRow: View {
                 .accessibilityIdentifier("requestLog.addToJourneyMenu.\(log.id.uuidString)")
             }
         }
-        .frame(height: 26)
-        .background(rowBackground)
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Rectangle()
-                    .fill(DSColors.accent)
-                    .frame(width: 2)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect(.current) }
-        .onHover { isHovered = $0 }
-        // The row is a tap target rather than a `Button`, because a button would swallow the
-        // modifier chords the selection depends on. VoiceOver still has to read it as one.
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
     }
 
     private var rowBackground: Color {
@@ -965,22 +1080,26 @@ struct RequestLogTableRow: View {
         }
     }
 
-    @ViewBuilder
+    /// `DSStatusPill` carries the whole convention — the `>= 400` fill gate, the text-variant
+    /// colours, and the failure arm. The last one is why this is a component and not a pattern:
+    /// this row used to spell a failed request `log.responseStatusCode ?? 0` and drew a bare grey
+    /// `0` with no fill — a status no server ever sent, styled as ordinary — while
+    /// `EndpointTrafficRow` rendered the same log as a filled destructive em dash. The em dash is
+    /// the defended treatment, and the row now inherits it instead of re-deciding it.
     private var statusPill: some View {
-        let code = log.responseStatusCode ?? 0
-        let color = DSColors.httpStatusColor(for: code)
-        // Filled only when it is a failure. Every row has a status, so filling all of them made a
-        // column of swatches in which nothing stood out — which is the opposite of what colour on a
-        // status code is for. The traffic list in the inspector follows the same rule.
-        let isFailure = code >= 400
-        Text("\(code)")
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(color)
-            .padding(.horizontal, isFailure ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                    .fill(isFailure ? color.opacity(0.12) : Color.clear)
-            }
+        DSStatusPill(statusCode: log.responseStatusCode)
+    }
+
+    /// What VoiceOver reads for the row — same composition as `EndpointTrafficRow.spokenLabel`,
+    /// which is this row one panel over. `static` so `WorkspaceFeatureTests` can hold the three
+    /// arms without hosting a window.
+    nonisolated static func spokenLabel(for log: RequestLog) -> String {
+        if let code = log.responseStatusCode {
+            return "\(log.method.rawValue) \(log.path), status \(code)"
+        }
+        if let failureLabel = log.failureLabel {
+            return "\(log.method.rawValue) \(log.path), failed: \(failureLabel)"
+        }
+        return "\(log.method.rawValue) \(log.path), no response"
     }
 }

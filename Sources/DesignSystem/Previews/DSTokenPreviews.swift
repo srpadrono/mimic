@@ -1,5 +1,12 @@
 import SwiftUI
 
+// Guarded so previews do not ship.
+//
+// `#Preview` expands to a `PreviewRegistry` conformance, which is compiled into whatever
+// configuration builds the file — and nothing here was gated, so 386 lines of preview scaffolding
+// went into the Release binary. Every `#Preview` elsewhere in this project is already inside
+// `#if DEBUG`; the design system's were the exception.
+#if DEBUG
 #Preview("Spacing Scale") {
     VStack(alignment: .leading, spacing: DSSpacing.sm) {
         spacingRow("xxs", DSSpacing.xxs)
@@ -90,7 +97,7 @@ private func colorRow(_ name: String, _ color: Color) -> some View {
             .frame(width: 24, height: 24)
             .overlay(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(DSColors.border, lineWidth: 0.5)
+                    .stroke(DSColors.border, lineWidth: DSStroke.hairline)
             )
         Text(name).font(DSTypography.body)
     }
@@ -109,3 +116,4 @@ private func animRow(_ name: String, _ value: Double) -> some View {
         Text(String(format: "%.2fs", value)).font(DSTypography.label).foregroundStyle(.secondary)
     }
 }
+#endif

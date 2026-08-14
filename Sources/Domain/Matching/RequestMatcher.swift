@@ -145,7 +145,11 @@ public enum RequestMatcher {
             guard let scenario = endpoint.scenarios.first(where: { $0.id == activeID }) else { continue }
 
             let specificity = MatchSpecificity(matchedOperation: matchedOperation, literalSegments: segments)
-            if best == nil || specificity > best!.specificity {
+            // `best.map { … } ?? true` rather than `best == nil || specificity > best!.specificity`.
+            // The force-unwrap was safe by short-circuit, but this is the request-serving hot path in
+            // an in-process server, where a `!` that stops being safe is a crash of the whole app
+            // rather than a failed request.
+            if best.map({ specificity > $0.specificity }) ?? true {
                 best = (endpoint, scenario, specificity)
             }
         }

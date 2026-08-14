@@ -301,28 +301,11 @@ struct JourneyPersistenceTests {
     }
 }
 
-@Suite("Instance settings")
-struct SettingsStoreTests {
-
-    @Test("The open project survives a restart, so a daemon comes back where it left off")
-    func openProjectPersists() async throws {
-        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
-        let store = SettingsStore(dbQueue: queue)
-        let id = UUID()
-
-        #expect(try await store.uuid(.openProjectID) == nil)
-        try await store.set(.openProjectID, to: id)
-        #expect(try await store.uuid(.openProjectID) == id)
-
-        // Writing again overwrites rather than conflicting on the primary key.
-        let replacement = UUID()
-        try await store.set(.openProjectID, to: replacement)
-        #expect(try await store.uuid(.openProjectID) == replacement)
-
-        try await store.set(.openProjectID, to: UUID?.none)
-        #expect(try await store.uuid(.openProjectID) == nil)
-    }
-}
+// `SettingsStoreTests` stood here. `SettingsStore` went with the second host: its one purpose was
+// remembering which project a windowless instance had open, its one production consumer was the
+// deleted `MimicControlService`, and the window keeps that memory in `RecentProjectsStore` instead.
+// The `settings` table it read stays in the schema — migrations are frozen and real databases carry
+// the table — it is simply no longer read or written by anything.
 
 @Suite("Database location")
 struct DatabaseLocationTests {

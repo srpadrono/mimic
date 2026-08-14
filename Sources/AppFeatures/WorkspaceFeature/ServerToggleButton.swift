@@ -34,7 +34,12 @@ struct ServerToggleButton: View {
                     .frame(width: 26, height: 26)
 
                 Image(systemName: iconName)
-                    .font(.system(size: isTransitioning ? 10 : 12, weight: .semibold))
+                    // `controlLarge`, the rung `DSGlyph` names this exact control for — a glyph that
+                    // carries a row on its own — dropping to `inline` while a transition is in
+                    // flight. That drop is the one glyph in the window that deliberately changes rung
+                    // to say something, and it was written here as two bare numbers while the ladder
+                    // described it in prose a module away.
+                    .font(.system(size: isTransitioning ? DSGlyph.inline : DSGlyph.controlLarge, weight: .semibold))
                     .foregroundStyle(iconColor)
                     // Gated on Reduce Motion. `ServerStatusWell` in the same toolbar already does
                     // this; a perpetual rotation is exactly what the setting exists to stop.

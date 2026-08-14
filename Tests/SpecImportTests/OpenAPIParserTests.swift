@@ -363,11 +363,15 @@ struct OpenAPIParserTests {
 
     @Test("Parses a Swagger 2.0 spec")
     func parseSwagger2() async throws {
+        // `basePath: "/v1"` rather than the `"/"` this carried, and every other `basePath` fixture
+        // in the suite carried with it. `/` is the one value for which prepending the prefix and
+        // dropping it produce the same string, so a suite that only ever wrote `/` could not see
+        // that `basePath` was decoded and then read by nothing. See `ImportedRouteMatchingTests`.
         let spec = """
         {
             "swagger": "2.0",
             "info": { "title": "Test", "version": "1.0" },
-            "basePath": "/",
+            "basePath": "/v1",
             "paths": {
                 "/api/users": {
                     "get": {
@@ -395,7 +399,7 @@ struct OpenAPIParserTests {
 
         #expect(candidates.count == 2)
         let get = candidates.first { $0.method == .get }!
-        #expect(get.path == "/api/users")
+        #expect(get.path == "/v1/api/users", "the document's basePath is part of the route it serves")
         #expect(get.statusCode == 200)
         // The spec offers both `operationId: ListUsers` and `summary: "List all users"`, and the
         // summary wins: it is the sentence the spec's author wrote for a human, and this name becomes
@@ -410,6 +414,9 @@ struct OpenAPIParserTests {
 
     @Test("Swagger 2.0 generates fallback body with description when no schema")
     func swagger2FallbackWithDescription() async throws {
+        // This one keeps `"/"` on purpose. "A basePath of `/` adds nothing to the route" is a real
+        // case and has to stay covered; it just cannot be the *only* case covered, which is what it
+        // was — see `parseSwagger2` above and `ImportedRouteMatchingTests`.
         let spec = """
         {
             "swagger": "2.0",
@@ -474,6 +481,12 @@ struct OpenAPIParserTests {
         #expect(body.contains("Sucessful authentication."))
         #expect(body.contains("\"user\""))
         #expect(body.contains("\"passwd\""))
+
+        // This fixture carries two `{}` parameters and asserted only what ended up in the body. The
+        // route it produced — three literal segments, one of them the string `{user}` — could not
+        // answer the request the route describes, which is the thing an import exists to do.
+        #expect(candidates[0].path == "/basic-auth/:user/:passwd")
+        #expect(PathPattern.matches(requestPath: "/basic-auth/me/hunter2", pattern: candidates[0].path))
     }
 
     // MARK: - Status Code Selection
@@ -800,5 +813,193 @@ struct OpenAPIParserTests {
         let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
 
         #expect(candidates[0].responseBody?.contains("csv,data") == true)
+        // This document declares no `produces` at all — not on the operation, not at the top. That
+        // used to import as `.plainText`; it is now JSON, which is what the body already was:
+        // `AnyCodableValue.toJSONString()` runs the example through `JSONEncoder`.
+        #expect(candidates[0].responseContentType == .json)
+    }
+
+    // MARK: - Content types as real specs declare them
+
+    /// Every Swagger fixture above puts `produces` inside the operation. Real specs overwhelmingly
+    /// declare it once at the document level, which this parser did not decode at all — so those
+    /// specs imported as plain text, which then short-circuited the JSON body fallback and left every
+    /// endpoint with no body either. Two bugs, one missing field, and fixtures tidier than reality.
+    @Test("A document-level `produces` applies to operations that do not override it")
+    func swagger2HonoursDocumentLevelProduces() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "produces": ["application/json"],
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "operationId": "listUsers",
+                        "summary": "List all users",
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                },
+                "/api/report": {
+                    "get": {
+                        "produces": ["text/csv"],
+                        "responses": { "200": { "description": "A CSV report" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let users = try #require(candidates.first { $0.path == "/api/users" })
+        let report = try #require(candidates.first { $0.path == "/api/report" })
+
+        #expect(users.responseContentType == .json)
+        #expect(users.responseBody != nil, "a JSON endpoint with no schema still gets a fallback body")
+        // An operation's own `produces` still wins over the document's.
+        #expect(report.responseContentType == .plainText)
+    }
+
+    /// The other half of the same miss, and the same pair of bugs. Swagger 2 gives `produces` no
+    /// default and a spec may omit it entirely; `swagger2ContentType` answered `.plainText` for that
+    /// (`?? []`, then an empty `contains`), and `parseSwagger2` reaches for the fallback body only
+    /// when the content type is `.json` — so the spec that says least imported with the wrong
+    /// content type *and* no body at all.
+    @Test("A spec that declares no `produces` anywhere imports as JSON, with a body")
+    func swagger2DefaultsToJSONWhenNothingIsDeclared() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "summary": "List all users",
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.responseContentType == .json)
+        #expect(candidate.responseBody != nil, "`.plainText` here also short-circuits the fallback body")
+    }
+
+    /// `application/json` is not the only spelling of JSON, and both of these appear in specs that
+    /// ship. The exact-match test this replaced imported them as plain text.
+    @Test(
+        "JSON is recognised by more than an exact `application/json`",
+        arguments: ["application/json", "application/hal+json", "application/json; charset=utf-8", "application/vnd.api+json"]
+    )
+    func swagger2RecognisesJSONVariants(mimeType: String) async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "produces": ["\(mimeType)"],
+                        "responses": { "200": { "description": "A list of users" } }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseContentType == .json)
+    }
+
+    /// The example map is keyed by MIME type, and the two halves of a response used to be chosen
+    /// independently: `produces` decided the content type while the body took the
+    /// `application/json` example on an exact key hit — so a `text/plain` operation offering both
+    /// examples served the JSON body under a plain-text label.
+    @Test("The example served is the one for the content type the operation declares")
+    func swagger2PairsTheExampleWithTheDeclaredContentType() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/export": {
+                    "get": {
+                        "produces": ["text/plain"],
+                        "responses": {
+                            "200": {
+                                "description": "Export",
+                                "examples": {
+                                    "application/json": { "rows": 2 },
+                                    "text/plain": "csv,data"
+                                }
+                            }
+                        }
+                    }
+                },
+                "/api/rows": {
+                    "get": {
+                        "produces": ["application/json"],
+                        "responses": {
+                            "200": {
+                                "description": "Rows",
+                                "examples": {
+                                    "application/json": { "rows": 2 },
+                                    "text/plain": "csv,data"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let export = try #require(candidates.first { $0.path == "/api/export" })
+        let rows = try #require(candidates.first { $0.path == "/api/rows" })
+
+        #expect(export.responseContentType == .plainText)
+        #expect(export.responseBody?.contains("csv,data") == true, "a text/plain operation serves its text/plain example")
+        #expect(export.responseBody?.contains("rows") != true, "the JSON example belongs to the content type this operation did not declare")
+
+        // The JSON side of the same map still pairs the other way.
+        #expect(rows.responseContentType == .json)
+        #expect(rows.responseBody?.contains("\"rows\"") == true)
+    }
+
+    /// Swagger 2 candidates used to be constructed by hand instead of going through
+    /// `ImportCandidateBuilder`, so they carried their own duplicate rule — one that compared route
+    /// only, while the shared rule also compares the GraphQL operation. The header policy was skipped
+    /// on that path too. `ImportHeaderPolicyTests` claimed to cover "every importer" and could not:
+    /// it called the builder directly.
+    @Test("Swagger 2 candidates are built by the same chokepoint as every other importer")
+    func swagger2UsesTheSharedBuilder() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "produces": ["application/json"],
+            "paths": {
+                "/api/users": {
+                    "get": { "responses": { "200": { "description": "OK" } } }
+                }
+            }
+        }
+        """
+        let existing = Endpoint(
+            name: "Users",
+            method: .get,
+            path: "/api/users",
+            scenarios: [],
+            activeScenarioID: nil
+        )
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8), existingEndpoints: [existing])
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.isDuplicate)
+        #expect(candidate.isSelected == false, "a duplicate arrives unselected")
+        // The builder names and groups a candidate when the parser does not.
+        #expect(candidate.suggestedGroupTag != nil)
     }
 }

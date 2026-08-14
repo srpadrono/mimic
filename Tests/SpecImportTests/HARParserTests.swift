@@ -150,6 +150,27 @@ struct HARParserTests {
         #expect(HARParser.extractPath(from: "https://example.com") == "/")
     }
 
+    /// The importer and the server have to spell a route the same way, and the server offers no
+    /// choice about which way: `VaporConfigurator` matches on `req.url.path`, and Vapor's `URI.path`
+    /// getter returns `percentEncodedPath` (Vapor 4.121.3, `Sources/Vapor/Utilities/URI.swift:179` —
+    /// the revision `Package.resolved` pins), built from the raw request line. This returned
+    /// `URLComponents.path`, which is decoded, so a capture of an encoded segment imported as a
+    /// string no request could ever equal.
+    @Test("An extracted path keeps the encoding the server will compare against")
+    func extractedPathsStayPercentEncoded() {
+        // The two things a real capture encodes: a non-ASCII segment, and a space.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/caf%C3%A9/items") == "/v1/caf%C3%A9/items")
+        #expect(HARParser.extractPath(from: "https://api.test/v1/my%20files/a.txt") == "/v1/my%20files/a.txt")
+        // An encoded slash stays encoded, and it is the reason this side of the seam was the one
+        // pinned: decoded, `%2F` would turn one segment into two and change how many segments
+        // `PathPattern` counts.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/a%2Fb/items") == "/v1/a%2Fb/items")
+        // The one exception Vapor's getter makes, mirrored here so the two sides still agree.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/a%3Bb/items") == "/v1/a;b/items")
+        // An ASCII path is untouched, which is every capture that already worked.
+        #expect(HARParser.extractPath(from: "https://api.test/v1/users/123") == "/v1/users/123")
+    }
+
     // MARK: - Group Tag Suggestion
 
     @Test("Suggests group tag from meaningful path segment")
@@ -295,10 +316,37 @@ struct HARParserTests {
         #expect(megabytes.bodySizeLabel == "1.5 MB")
     }
 
-    @Test("Falls back to raw strings for invalid URL paths")
-    func extractsInvalidURLPaths() {
-        #expect(HARParser.extractPath(from: "api.example.com/users") == "api.example.com/users")
+    /// This used to assert `"api.example.com/users"` came back unchanged, and passed — codifying the
+    /// bug rather than the behaviour. A path with no leading slash matches no request the server can
+    /// receive, so that endpoint imported, appeared in the list, and answered nothing.
+    @Test("Every extracted path is routable, whatever the capture looked like")
+    func extractedPathsAreAlwaysRoutable() {
+        // A full URL: scheme and host stripped.
+        #expect(HARParser.extractPath(from: "https://api.example.com/v1/users") == "/v1/users")
+        // Already a path: unchanged.
         #expect(HARParser.extractPath(from: "/already/path") == "/already/path")
+        // Schemeless but host-shaped — `URLComponents` parses this as a relative reference and
+        // succeeds, which is why the old fallback never ran.
+        #expect(HARParser.extractPath(from: "api.example.com/users") == "/users")
+        // Genuinely relative, with no host to strip: a leading slash is added and nothing is lost.
+        #expect(HARParser.extractPath(from: "users/123") == "/users/123")
+        // A URL with no path at all still has to name one.
+        #expect(HARParser.extractPath(from: "https://api.example.com") == "/")
+        #expect(HARParser.extractPath(from: "") == "/")
+        // One dotted segment with nothing behind it is a filename, not a host — re-parsing it as one
+        // would leave an empty path and lose the segment. A bare hostname is indistinguishable from a
+        // filename here, so it is kept rather than dropped: showing the user `/api.example.com` in the
+        // import review is recoverable, silently importing `/` is not.
+        #expect(HARParser.extractPath(from: "logo.png") == "/logo.png")
+        #expect(HARParser.extractPath(from: "api.example.com") == "/api.example.com")
+
+        for capture in ["https://api.example.com/v1/users", "/already/path", "api.example.com/users",
+                        "users/123", "https://api.example.com", "", "?query=only", "#fragment"] {
+            #expect(
+                HARParser.extractPath(from: capture).hasPrefix("/"),
+                "\"\(capture)\" produced an unroutable path"
+            )
+        }
     }
 
     @Test("Decodes base64 response content and reproduces the body verbatim")
@@ -312,7 +360,7 @@ struct HARParserTests {
         let body = try await importedResponseBody(payload: payload, path: "/api/articles")
 
         #expect(body == payload)
-        #expect(!body.contains("REDACTED"))
+        #expect(body.contains("REDACTED") == false)
     }
 
     @Test("A captured credential is imported as captured, not rewritten")

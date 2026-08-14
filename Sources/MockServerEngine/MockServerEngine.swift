@@ -10,6 +10,9 @@ import Domain
 public actor MockServerEngine {
     private var app: Application?
     private var isStarting = false
+    /// Set for the whole of `stop()`, because `stop()` clears `app` before it awaits the shutdown and
+    /// `app == nil` is otherwise indistinguishable from "nothing is listening". See `start`.
+    private var isStopping = false
     private let routeStore = MockRouteStore()
 
     /// Single-consumer stream of served request logs. Bounded buffer drops the oldest entries if the
@@ -23,6 +26,13 @@ public actor MockServerEngine {
 
     public func start(configuration: ServerConfiguration) async throws {
         guard app == nil, !isStarting else { throw MockServerError.alreadyRunning }
+        // A stop in flight is invisible to the guard above: `stop()` sets `app = nil` and only then
+        // suspends on `server.shutdown()`, and an actor admits another call at that suspension — so a
+        // start arriving in that window sees `nil`, passes, and binds a port the outgoing application
+        // has not released. Reported as `.invalidState(.stopping)` rather than `.alreadyRunning`
+        // because the two ask different things of the caller: one means "you already have a server",
+        // this one means "ask again in a moment".
+        guard !isStopping else { throw MockServerError.invalidState(.stopping) }
         isStarting = true
         defer { isStarting = false }
 
@@ -49,7 +59,11 @@ public actor MockServerEngine {
 
     public func stop() async throws {
         guard let running = app else { throw MockServerError.notRunning }
+        // Both assignments happen before the first suspension, so no other call can observe the
+        // half-stopped state: `app` already cleared, the socket still open.
+        isStopping = true
         app = nil
+        defer { isStopping = false }
         await running.server.shutdown()
         try await running.asyncShutdown()
         // Intentionally does NOT finish `logContinuation` — the engine may be started again and the
@@ -64,13 +78,56 @@ public actor MockServerEngine {
         await routeStore.update(endpoints: endpoints, globalDelayMs: globalDelayMs)
     }
 
-    /// Replaces the live configuration including the active journey.
+    /// Replaces the live configuration including the active journey, without claiming the push is an
+    /// activation. A run already in progress on the same journey with the same steps survives it.
+    ///
+    /// Kept as its own entry point beside the overload below rather than folded into it with a
+    /// default argument, because a default argument does not satisfy a protocol requirement and this
+    /// exact signature is one: `MockServerEngineProtocol` in `AppFeatures` declares it, and
+    /// `extension MockServerEngine: MockServerEngineProtocol {}` is what conforms.
     public func updateConfiguration(
         endpoints: [Endpoint],
         globalDelayMs: Int,
         journey: Journey?
     ) async {
-        await routeStore.update(endpoints: endpoints, globalDelayMs: globalDelayMs, journey: journey)
+        await routeStore.update(
+            endpoints: endpoints,
+            globalDelayMs: globalDelayMs,
+            journey: journey,
+            activationEpoch: nil
+        )
+    }
+
+    /// Replaces the live configuration and says which activation the push belongs to.
+    ///
+    /// `activationEpoch` is the caller's running count of the journey activations it has performed.
+    /// A push carrying a higher count than any this engine has seen resets the journey run even when
+    /// the journey is unchanged — re-activating the journey that is already active is otherwise
+    /// indistinguishable from re-sending the same project, and the two have to behave differently.
+    /// See ``MockRouteStore/update(endpoints:globalDelayMs:journey:activationEpoch:)`` for why it is
+    /// a count rather than a flag.
+    ///
+    /// **The production caller is `MockServerRuntime.updateMocks`**, which passes the count
+    /// `AppState.activateJourney(id:)` bumps. `grep -rn activationEpoch --include='*.swift' Sources`
+    /// is the check, and it has to keep finding a hit in `MockServerRuntime.swift` and
+    /// `AppState.swift`: if the only hits left are in this module, an activation has stopped being
+    /// distinguishable from an edit again and `mimic journey activate` against the already-active
+    /// journey silently resumes mid-run.
+    ///
+    /// The three-argument overload above passes `nil` and is the right call for anything that is not
+    /// an activation.
+    public func updateConfiguration(
+        endpoints: [Endpoint],
+        globalDelayMs: Int,
+        journey: Journey?,
+        activationEpoch: Int
+    ) async {
+        await routeStore.update(
+            endpoints: endpoints,
+            globalDelayMs: globalDelayMs,
+            journey: journey,
+            activationEpoch: activationEpoch
+        )
     }
 
     // MARK: - Journey runtime control

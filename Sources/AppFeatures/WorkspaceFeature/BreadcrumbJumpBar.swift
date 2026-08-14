@@ -152,7 +152,7 @@ struct BreadcrumbJumpBar: View {
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .clipped()
         .accessibilityIdentifier("breadcrumb")
@@ -235,7 +235,9 @@ private struct BreadcrumbCrumbView: View {
         HStack(spacing: DSSpacing.xxs) {
             if let systemImage = crumb.systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .medium))
+                    // `inlineSmall`: this qualifies the crumb's title rather than being what makes
+                    // the crumb pressable — the chevron below is that.
+                    .font(.system(size: DSGlyph.inlineSmall, weight: .medium))
                     .accessibilityHidden(true)
             }
 
@@ -257,9 +259,10 @@ private struct BreadcrumbCrumbView: View {
             // 8pt: it marks the crumb as pressable without competing with the title it follows.
             if crumb.options.isEmpty == false {
                 Image(systemName: "chevron.up.chevron.down")
-                    // 8pt, the floor. At 7 the affordance that says "this crumb is a menu" was a
-                    // smudge, which is the same as not having it.
-                    .font(.system(size: 8, weight: .semibold))
+                    // `indicator`, which sits on `DSGlyph.minimum` — the floor. At 7 the affordance
+                    // that says "this crumb is a menu" was a smudge, which is the same as not having
+                    // it. `DSFilterField`'s scope pill draws the identical mark at the identical rung.
+                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
                     .foregroundStyle(DSColors.labelTertiary)
                     .accessibilityHidden(true)
             }
@@ -275,7 +278,9 @@ private struct BreadcrumbCrumbView: View {
 private struct BreadcrumbSeparator: View {
     var body: some View {
         Image(systemName: "chevron.right")
-            .font(.system(size: 8, weight: .semibold))
+            // `indicator` — a mark that annotates something else and never speaks on its own, which
+            // is exactly what punctuation between two crumbs is.
+            .font(.system(size: DSGlyph.indicator, weight: .semibold))
             .foregroundStyle(DSColors.labelTertiary)
             .accessibilityHidden(true)
     }
@@ -301,7 +306,10 @@ private struct BreadcrumbHistoryButton: View {
         Button(action: action) {
             Label(label, systemImage: systemImage)
                 .labelStyle(.iconOnly)
-                .font(.system(size: 10, weight: .semibold))
+                // `inline`, a rung below the `control` a panel-header button takes: this bar is
+                // `DSBarHeight.secondaryBar` and its arrows sit in an 18pt frame rather than a 22pt
+                // one, so a glyph at the control tier would stand proud of the chrome around it.
+                .font(.system(size: DSGlyph.inline, weight: .semibold))
                 .foregroundStyle(foreground)
                 .frame(width: 18, height: 18)
                 .background(

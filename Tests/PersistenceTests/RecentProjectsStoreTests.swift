@@ -109,4 +109,32 @@ struct RecentProjectsStoreTests {
         store.remove(id: id)
         #expect(store.lastOpenedProjectID() == nil)
     }
+
+    // MARK: - Recording without moving the restore target
+
+    /// A duplicate's copy and an imported document earn a list row without having been opened, so
+    /// recording them must not reassign the restore target: duplicate headlessly, quit without
+    /// another edit, and the app has to come back on the project that was on screen — not the copy.
+    @Test func recordAsNotLastOpenedKeepsTheRestoreTarget() {
+        let (store, _, _) = makeStore()
+        let onScreen = UUID()
+        let copy = UUID()
+        store.record(id: onScreen, name: "Checkout")
+        store.record(id: copy, name: "Checkout (Copy)", asLastOpened: false)
+
+        // The copy still takes the top row — it is the newest thing in the list — while the
+        // restore target stays on the project that was actually opened.
+        let entries = store.load()
+        #expect(entries.count == 2)
+        #expect(entries[0].id == copy)
+        #expect(store.lastOpenedProjectID() == onScreen)
+    }
+
+    /// With nothing ever opened there is no restore target, and recording a never-opened project
+    /// must not invent one: on next launch the app would open a project nobody had been in.
+    @Test func recordAsNotLastOpenedInventsNoTarget() {
+        let (store, _, _) = makeStore()
+        store.record(id: UUID(), name: "Imported", asLastOpened: false)
+        #expect(store.lastOpenedProjectID() == nil)
+    }
 }

@@ -5,20 +5,41 @@ import GRDB
 /// `v1` is the original project/endpoint/scenario schema. `v2` adds journeys — stored relationally
 /// rather than as a JSON blob so a step can be queried, reordered, and diffed like any other row.
 enum AppMigrations {
+
+    /// Opts a throwaway store into GRDB's erase-on-schema-change, for iterating on a migration.
+    ///
+    /// Honoured **only** alongside `MIMIC_DATABASE_PATH`. Erasing is not a debugging convenience that
+    /// can be aimed at whatever database happens to be open: GRDB compares the live schema against a
+    /// freshly migrated one and, on any difference, drops the file and rebuilds it empty. This used
+    /// to be `#if DEBUG` — unconditional, and applied by `makeAppDatabaseQueue` to the real
+    /// `mimic.sqlite` in Application Support. Debug is the configuration every developer runs, so the
+    /// next migration anybody added would have deleted every project of everyone who pulled it, and
+    /// the damage would have looked exactly like "the recents list is empty" — the same symptom, from
+    /// the same cause, as the UI-test reset this repository has already lost a project to.
+    ///
+    /// Requiring an explicit path is what makes it safe: the flag can only ever reach a store someone
+    /// deliberately pointed at. Nothing here computes a production path for itself.
+    static let eraseOnSchemaChangeEnvironmentKey = "MIMIC_ERASE_DB_ON_SCHEMA_CHANGE"
+
+    /// The migrator for a real store: it migrates forward, and never erases.
     static var migrator: DatabaseMigrator {
+        migrator(erasingOnSchemaChange: false)
+    }
+
+    static func migrator(erasingOnSchemaChange: Bool) -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
-
-        #if DEBUG
-        // In DEBUG builds, erase the database on schema changes so developers
-        // get a clean slate when iterating on the schema.
-        migrator.eraseDatabaseOnSchemaChange = true
-        #endif
-
+        migrator.eraseDatabaseOnSchemaChange = erasingOnSchemaChange
         registerAll(on: &migrator)
         return migrator
     }
 
-    /// The migrations themselves, without the DEBUG erase-on-schema-change behaviour.
+    /// Whether `environment` asks for — and is allowed — the erasing migrator.
+    static func erasesOnSchemaChange(environment: [String: String]) -> Bool {
+        environment[eraseOnSchemaChangeEnvironmentKey] == "1"
+            && environment[DatabaseFactory.databasePathEnvironmentKey]?.isEmpty == false
+    }
+
+    /// The migrations themselves, independent of the erase-on-schema-change flag.
     ///
     /// Separated so a test can verify that a real database *migrates forward* — with the erase flag
     /// set, an older database would simply be wiped and the test would prove nothing. It also means
@@ -108,7 +129,9 @@ enum AppMigrations {
             try db.create(index: "journeyStep_journeyID", on: "journeyStep", columns: ["journeyID"])
 
             // Key-value store for instance-level state the control plane needs to survive a restart
-            // (most importantly: which project is open in a headless daemon).
+            // (as designed: which project a windowless instance had open. Nothing reads it today —
+            // the type that did went with the deleted second host — but a v1 migration is frozen
+            // and real databases carry the table).
             try db.create(table: "setting") { t in
                 t.column("key", .text).primaryKey().notNull()
                 t.column("value", .text).notNull()
@@ -124,6 +147,21 @@ enum AppMigrations {
             try db.alter(table: "journeyStep") { t in
                 t.add(column: "graphqlOperation", .text)
             }
+        }
+
+        migrator.registerMigration("v4_foreign_key_indexes") { db in
+            // `journey` and `journeyStep` were given these in v2; `endpoint` and `scenario` never
+            // got theirs, which makes the omission an oversight rather than a policy. Both columns
+            // are the ones every read and every write joins on, so without an index each is a full
+            // table scan: `load` runs one per endpoint to fetch its scenarios, and `save` — which
+            // autosave fires on a debounce as you type — deletes and reinserts through the same
+            // columns. Additive DDL, no data movement.
+            //
+            // Safe to add only because `eraseDatabaseOnSchemaChange` no longer fires on a real store.
+            // Under the old `#if DEBUG` flag this migration would have been indistinguishable from
+            // "delete every project on the next launch".
+            try db.create(index: "endpoint_projectID", on: "endpoint", columns: ["projectID"])
+            try db.create(index: "scenario_endpointID", on: "scenario", columns: ["endpointID"])
         }
     }
 }

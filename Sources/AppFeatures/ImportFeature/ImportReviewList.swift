@@ -180,6 +180,16 @@ struct ImportReviewList: View {
                     .accessibilityIdentifier("import.bodySizeWarning")
             }
 
+            // Same class of warning as the size limit: a binary body — an image, a font, a
+            // compressed payload — cannot be carried by a text mock body, so it is dropped on import.
+            if candidates.contains(where: { $0.bodyIsBinary }) {
+                Label("Some entries have binary bodies, which import without one", systemImage: "exclamationmark.triangle")
+                    .font(DSTypography.label)
+                    .foregroundStyle(DSColors.warning)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("import.binaryBodyWarning")
+            }
+
             // Not a warning: nothing is wrong and nothing is lost, the rows are simply pre-answered.
             // It was amber, which made it indistinguishable at a glance from the line above it —
             // and a colour that means "look here" stops meaning anything once it is on everything.
@@ -312,15 +322,31 @@ private struct ImportCandidateRow: View {
         if candidate.isDuplicate {
             Label("Duplicate", systemImage: "doc.on.doc")
                 .font(DSTypography.caption)
-                .foregroundStyle(DSColors.warning)
+                // `warningText`, not `warning`: this flag fills itself with a 12% tint of its own
+                // colour, where the base amber reads 3.96:1 on a panel and 4.11 on the elevated
+                // surface this sheet is. The "Body dropped" flag below stays `warning` — it is a
+                // plain word on a plain surface, which is what that token is measured for.
+                .foregroundStyle(DSColors.warningText)
                 .padding(.horizontal, DSSpacing.xs)
                 .padding(.vertical, 1)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(DSColors.warning.opacity(0.12))
+                        .fill(DSColors.warningText.opacity(0.12))
                 )
-                .help("An endpoint with this method and path already exists")
-                .accessibilityLabel("Duplicate of an existing endpoint")
+                // "Already covered", not "already exists": since `ImportRouteLedger`, a repeat is
+                // flagged whether the cover is an endpoint the project holds or an earlier row of
+                // this same import — and for a capture of real traffic the second is the common case.
+                .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
+                .accessibilityLabel("Duplicate — this method and path is already covered")
+        } else if candidate.bodyIsBinary {
+            // Before the size branch, deliberately: a binary body's recorded size can also exceed
+            // the limit, and binary is the more specific reason there is no body.
+            Label("Binary body", systemImage: "exclamationmark.triangle")
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.warning)
+                .lineLimit(1)
+                .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
+                .accessibilityLabel("Binary body — the endpoint imports without it")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
                 .font(DSTypography.caption)

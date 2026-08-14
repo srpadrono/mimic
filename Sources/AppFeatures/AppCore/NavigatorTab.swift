@@ -26,7 +26,7 @@ enum NavigatorTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The canonical glyph for each noun, and the only place either is chosen.
+    /// The canonical glyph for each noun, and the only place in `AppFeatures` either is chosen.
     ///
     /// Every empty state that says a thing is absent or unselected — "No journeys", "No endpoint
     /// selected" — reads from here rather than naming a symbol of its own. Five of them used to name
@@ -35,8 +35,18 @@ enum NavigatorTab: String, CaseIterable, Identifiable, Sendable {
     /// showing a list glyph one row below a tab whose glyph was a branch — and `list.number` is close
     /// enough to the endpoints tab's `list.bullet.indent` to read as the *other* tab's icon.
     ///
+    /// The breadcrumb's journey crumb was the one that had drifted back: it spelled
+    /// `arrow.triangle.branch` out again, one bar below the tab it was repeating, so the two agreed
+    /// only for as long as nobody edited this property. It reads from here now.
+    ///
     /// An empty state about an event that has not happened yet keeps its own glyph. "No requests yet"
     /// is about arrival, not about endpoints, so `arrow.down.circle` is right there.
+    ///
+    /// ```bash
+    /// # Both names, everywhere. Prints this file, plus a DesignSystem preview drawing a specimen
+    /// # tab strip — that module cannot import this type, and is not choosing this app's tab icons.
+    /// grep -rn 'arrow\.triangle\.branch\|list\.bullet\.indent' Sources
+    /// ```
     var systemImage: String {
         switch self {
         case .endpoints: "list.bullet.indent"

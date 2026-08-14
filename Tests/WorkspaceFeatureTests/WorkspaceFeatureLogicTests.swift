@@ -176,13 +176,36 @@ struct WorkspaceFeatureLogicTests {
         #expect(groupedResult.ungrouped.count == 2)
     }
 
-    @Test("Request log table row and detail pane render")
-    func requestLogComponentsRender() {
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// Everything else here asserts on values, which is the right shape for logic — but a value test
+    /// never makes the view, so it cannot catch a trap in layout. These renders can: the request
+    /// detail, the scenario list and the new-scenario sheet each carry `@State` that is initialised
+    /// the first time they are hosted and never before.
+    ///
+    /// It replaces ten `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, a
+    /// quantity that has no negative values to find. Where these views have geometry worth pinning it
+    /// belongs beside the component that owns it — `DSComponentRenderingTests` measures the panel
+    /// chrome and the method badge — rather than being re-measured through a whole panel here.
+    @Test("Hosting the request log and scenario views does not trap during layout")
+    func hostingRequestLogAndScenarioViewsDoesNotTrap() {
         let endpoint = makeEndpoint()
         let log = makeLog(endpoint: endpoint, timestamp: 1_710_000_000)
         let emptyLog = makeLog(endpoint: endpoint, body: nil, timestamp: 1_710_000_010)
+        let activeScenario = try! #require(endpoint.scenarios.first)
+        let inactiveScenario = try! #require(endpoint.scenarios.last)
+        let headerlessLog = RequestLog(
+            timestamp: Date(timeIntervalSince1970: 1_710_000_200),
+            method: endpoint.method,
+            path: endpoint.path,
+            requestHeaders: [:],
+            requestBody: #"{"empty":true}"#,
+            matchedEndpointID: endpoint.id,
+            matchedScenarioID: endpoint.activeScenarioID,
+            responseStatusCode: 200
+        )
 
-        let rowSize = render(
+        render(
             VStack(spacing: 12) {
                 RequestLogTableRow(
                     log: log,
@@ -203,37 +226,19 @@ struct WorkspaceFeatureLogicTests {
             },
             size: CGSize(width: 900, height: 120)
         )
-        let summarySize = render(
-            RequestDetailInspector(log: log, initialTab: .summary)
-        )
-        let headersSize = render(
-            RequestDetailInspector(log: log, initialTab: .headers)
-        )
-        let bodySize = render(
-            RequestDetailInspector(log: log, initialTab: .body)
-        )
-        let emptyBodySize = render(
-            RequestDetailInspector(log: emptyLog, initialTab: .body)
-        )
-        let searchingSize = render(
-            RequestDetailInspector(log: log, initialTab: .body, initialSearchText: "queued")
+        render(RequestDetailInspector(log: log, initialTab: .summary))
+        render(RequestDetailInspector(log: log, initialTab: .headers))
+        render(RequestDetailInspector(log: log, initialTab: .body))
+        render(RequestDetailInspector(log: emptyLog, initialTab: .body))
+        render(RequestDetailInspector(log: log, initialTab: .body, initialSearchText: "queued"))
+        // A request that arrived with no headers at all, in the tab whose whole content is headers —
+        // and in a 300pt-wide panel, which is the width the inspector is actually dragged to.
+        render(
+            RequestDetailInspector(log: headerlessLog, initialTab: .headers),
+            size: CGSize(width: 300, height: 700)
         )
 
-        #expect(rowSize.width >= 0)
-        #expect(summarySize.height >= 0)
-        #expect(headersSize.height >= 0)
-        #expect(bodySize.width >= 0)
-        #expect(emptyBodySize.width >= 0)
-        #expect(searchingSize.width >= 0)
-    }
-
-    @Test("Scenario list row and sheet render")
-    func scenarioComponentsRender() {
-        let endpoint = makeEndpoint()
-        let activeScenario = try! #require(endpoint.scenarios.first)
-        let inactiveScenario = try! #require(endpoint.scenarios.last)
-
-        let listSize = render(
+        render(
             ScenarioListView(
                 endpoint: endpoint,
                 onSetActive: { _, _ in },
@@ -241,7 +246,7 @@ struct WorkspaceFeatureLogicTests {
                 onDelete: { _, _ in }
             )
         )
-        let rowSize = render(
+        render(
             VStack(spacing: 12) {
                 ScenarioRow(
                     scenario: activeScenario,
@@ -262,13 +267,7 @@ struct WorkspaceFeatureLogicTests {
             },
             size: CGSize(width: 420, height: 140)
         )
-        let sheetSize = render(
-            NewScenarioSheet { _ in }
-        )
-
-        #expect(listSize.height >= 0)
-        #expect(rowSize.width >= 0)
-        #expect(sheetSize.height >= 0)
+        render(NewScenarioSheet { _ in })
     }
 
 
@@ -333,6 +332,44 @@ struct WorkspaceFeatureLogicTests {
         #expect(formatted.contains("GET /missing"))
         #expect(formatted.contains("Headers:") == false)
         #expect(formatted.contains("Body:") == false)
+    }
+
+    /// What VoiceOver reads for a request log row — composed, like every other interactive row.
+    ///
+    /// The drawer row was the one interactive row in the window with no spoken label at all: a bare
+    /// `.isButton` trait over six loose cells, which VoiceOver read as disconnected fragments. The
+    /// label follows `EndpointTrafficRow.spokenLabel`'s composition exactly — method, path, then
+    /// the status or the failure — so the same request is announced the same way in the drawer and
+    /// in the inspector's traffic list. Three arms, and the ordering between them matters: a failed
+    /// request has a `failureLabel` and no status code, so the failure arm must only be reachable
+    /// when there is genuinely no code to speak.
+    @Test("A request log row speaks method, path, and what came back")
+    func requestLogRowSpokenLabel() {
+        let endpoint = makeEndpoint()
+
+        #expect(
+            RequestLogTableRow.spokenLabel(for: makeLog(endpoint: endpoint, timestamp: 1_710_000_000))
+                == "GET /api/users, status 200"
+        )
+
+        let failed = RequestLog(
+            method: .post,
+            path: "/api/orders",
+            responseStatusCode: nil,
+            failureLabel: "timeout 30000ms"
+        )
+        #expect(
+            RequestLogTableRow.spokenLabel(for: failed)
+                == "POST /api/orders, failed: timeout 30000ms"
+        )
+
+        let silent = RequestLog(
+            method: .get,
+            path: "/api/void",
+            responseStatusCode: nil,
+            failureLabel: nil
+        )
+        #expect(RequestLogTableRow.spokenLabel(for: silent) == "GET /api/void, no response")
     }
 
     @Test("Request log selection and clear helpers keep state consistent")
@@ -465,28 +502,6 @@ struct WorkspaceFeatureLogicTests {
         // ⌘⇧ toggles rather than replacing: of the two readings, the one that cannot discard a
         // selection is the right default.
         #expect(RequestLogDrawerView.SelectionModifier([.command, .shift]) == .toggle)
-    }
-
-    @Test("Request log detail renders empty headers state")
-    func requestLogDetailRendersEmptyHeadersState() {
-        let endpoint = makeEndpoint()
-        let log = RequestLog(
-            timestamp: Date(timeIntervalSince1970: 1_710_000_200),
-            method: endpoint.method,
-            path: endpoint.path,
-            requestHeaders: [:],
-            requestBody: #"{"empty":true}"#,
-            matchedEndpointID: endpoint.id,
-            matchedScenarioID: endpoint.activeScenarioID,
-            responseStatusCode: 200
-        )
-
-        let size = render(
-            RequestDetailInspector(log: log, initialTab: .headers),
-            size: CGSize(width: 300, height: 700)
-        )
-
-        #expect(size.width >= 0)
     }
 
     @Test("Server toggle helper starts and stops only for actionable states")

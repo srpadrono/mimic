@@ -168,6 +168,73 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         message: "No journey is active. Activate one with `mimic journey activate <name>`."
     )
 
+    /// Two lifecycle commands arriving at once.
+    ///
+    /// Refused rather than queued: two callers asking for a start or a stop together is a script
+    /// racing itself, and a reply saying so is more useful than one that waits and then reports on
+    /// somebody else's start. `server.busy` maps to `409` in `ControlServer.httpStatus`, alongside
+    /// the other "well-formed, but not right now" codes.
+    ///
+    /// Declared here rather than once per host. It was a `private static let` in each of
+    /// `MimicControlService` and `AppControlHost`, with a comment in the second promising it said
+    /// "word for word" what the first said — a promise nothing checked, on a code a script branches
+    /// on.
+    public static let serverBusy = ControlError(
+        code: "server.busy",
+        message: "The server is already starting or stopping. Try again in a moment."
+    )
+
+    /// The port a start asked for is already bound by something else.
+    ///
+    /// `server.portInUse` is documented in `docs/CLI.md` as a stable code and mapped to `409` by
+    /// `ControlServer.httpStatus`, and until now it could only ever be produced by the host nothing in
+    /// production constructs. Declared here so the host that *is* reachable can report the same code
+    /// for the same failure rather than inventing a second spelling of it.
+    ///
+    /// Reached through `MockServerRuntime.startFailure`, which `AppControlHost.makeServerStatus`
+    /// reports as `errorCode` on `mimic server status` — the bind fails after `serverStart` has
+    /// already answered, so a stored code is the only way the failure survives until the poll.
+    /// `ControlServer.httpStatus` maps it to `409`. Declared in Domain rather than beside its caller
+    /// because it is part of the control API's stable vocabulary (docs/CLI.md names it), not an
+    /// implementation detail of the runtime.
+    public static func serverPortInUse(port: Int) -> ControlError {
+        ControlError(
+            code: "server.portInUse",
+            message: "Port \(port) is already in use. Choose another with `--port`.",
+            details: ["port": String(port)]
+        )
+    }
+
+    /// A start that failed for any other reason, carrying the engine's own sentence.
+    ///
+    /// Same provenance as ``serverPortInUse(port:)``: any start failure that is not a port conflict,
+    /// reached from the two `catch` arms around `MockServerRuntime`'s `engine.start`. The message is
+    /// the engine's own `localizedDescription` at both, so the sentence a script reads is the
+    /// engine's diagnosis rather than a paraphrase of it.
+    public static func serverStartFailed(_ message: String) -> ControlError {
+        ControlError(code: "server.startFailed", message: message)
+    }
+
+    /// A project name that is empty, or is nothing but whitespace.
+    ///
+    /// Shared by ``ProjectCommandExecutor`` (rename) and the host (create) — call sites that each
+    /// used to spell the sentence out privately.
+    public static let emptyProjectName = ControlError.invalid("Project name must not be empty.")
+
+    /// A ``ProjectRef`` carrying neither an id nor a usable name.
+    ///
+    /// Distinct from ``projectNotFound(_:)`` on purpose: nothing was searched for, so telling the
+    /// caller no project matches would be describing a lookup that never happened.
+    public static let projectReferenceRequired = ControlError.invalid("Provide a project id or name.")
+
+    /// A store that could not answer — a locked database, an I/O error, a row that will not decode.
+    ///
+    /// Kept apart from ``projectNotFound(_:)`` deliberately: reporting a database Mimic cannot open
+    /// as a missing project is how "my projects vanished" ends up with no diagnosis.
+    public static func persistenceFailure(_ error: any Error) -> ControlError {
+        ControlError(code: "persistence.failure", message: error.localizedDescription)
+    }
+
     public static func invalid(_ message: String, code: String = "request.invalid") -> ControlError {
         ControlError(code: code, message: message)
     }
@@ -226,7 +293,7 @@ public struct ControlState: Codable, Sendable, Equatable {
     /// The control API contract this instance speaks. A caller checks this, not a marketing version,
     /// before assuming a command exists.
     public var apiVersion: String
-    /// The host application's version when there is one; `nil` for a headless daemon.
+    /// The host application's version when there is one; `nil` when the host has none to report.
     public var appVersion: String?
     /// `app` when a GUI instance is hosting the control plane, `headless` when it runs windowless.
     public var mode: String
@@ -237,6 +304,19 @@ public struct ControlState: Codable, Sendable, Equatable {
     public var journeyCount: Int
     public var activeJourney: JourneyStatus?
     public var requestLogCount: Int
+    /// Why this session is running against an in-memory store, and `nil` when the on-disk store
+    /// opened normally.
+    ///
+    /// Non-nil means nothing this instance is told to do survives it stopping: every write is
+    /// accepted, exits 0, and evaporates. The window surfaces the same fact as an alert; this field
+    /// is the only channel a caller with no window — `mimic state` against a headless run, a CI
+    /// harness — has to learn it. Optional on the wire so a payload from an instance that predates
+    /// the field decodes as "on disk" rather than failing, and presence is the signal a script
+    /// branches on.
+    public var storeFailure: String?
+
+    /// Presence read as the fact it encodes — the same shape the store's own `Opened` answers with.
+    public var storeIsEphemeral: Bool { storeFailure != nil }
 
     public init(
         apiVersion: String = ControlAPI.version,
@@ -248,7 +328,8 @@ public struct ControlState: Codable, Sendable, Equatable {
         endpointCount: Int,
         journeyCount: Int,
         activeJourney: JourneyStatus?,
-        requestLogCount: Int
+        requestLogCount: Int,
+        storeFailure: String? = nil
     ) {
         self.apiVersion = apiVersion
         self.appVersion = appVersion
@@ -260,6 +341,7 @@ public struct ControlState: Codable, Sendable, Equatable {
         self.journeyCount = journeyCount
         self.activeJourney = activeJourney
         self.requestLogCount = requestLogCount
+        self.storeFailure = storeFailure
     }
 }
 
@@ -271,13 +353,36 @@ public struct ServerStatusReport: Codable, Sendable, Equatable {
     public var baseURL: String?
     public var globalDelayMs: Int
     public var message: String?
+    /// The stable, dotted code for the failure ``message`` describes — `server.portInUse`,
+    /// `server.startFailed` — and `nil` whenever the server is not in an error state.
+    ///
+    /// A host that binds inside the call it was asked from could simply *throw* one of these codes —
+    /// the deleted `MimicControlService` did exactly that. The shipped host cannot:
+    /// `MockServerRuntime` binds from a task of its own, so `serverStart` has already answered
+    /// "starting, poll `mimic server status`" by the time the bind fails — and for a port conflict
+    /// the only channel left was `MockServerRuntime.portConflictAlert`, which nothing but
+    /// `WorkspaceView` reads and which a headless run never renders at all. The code therefore has to
+    /// survive until the poll arrives, which is what this field is for.
+    ///
+    /// It is a code and not a second sentence, because ``message`` already carries the sentence:
+    /// the runtime puts the engine error's own `localizedDescription` into the `ServerState.error`
+    /// this report is built from.
+    public var errorCode: String?
 
-    public init(state: String, port: Int, baseURL: String?, globalDelayMs: Int, message: String? = nil) {
+    public init(
+        state: String,
+        port: Int,
+        baseURL: String?,
+        globalDelayMs: Int,
+        message: String? = nil,
+        errorCode: String? = nil
+    ) {
         self.state = state
         self.port = port
         self.baseURL = baseURL
         self.globalDelayMs = globalDelayMs
         self.message = message
+        self.errorCode = errorCode
     }
 }
 

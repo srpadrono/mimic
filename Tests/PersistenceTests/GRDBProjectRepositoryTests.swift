@@ -131,19 +131,96 @@ struct GRDBProjectRepositoryTests {
 
     // MARK: - Duplicate project
 
-    @Test func duplicateProject() async throws {
+    /// This test used to duplicate `MockProject(name: "My Project")` — a project with no endpoints and
+    /// no journeys — and pass. Nothing else duplicated a project with anything in it, so a feature
+    /// that could not work on any real project shipped with two green tests over it.
+    ///
+    /// `endpoint.id`, `scenario.id`, `journey.id` and `journeyStep.id` are primary keys across the
+    /// whole database, not scoped to a project, and `save` deletes children by the incoming project's
+    /// id — which matches nothing for a project that does not exist yet — before inserting. So a copy
+    /// carrying the source's child ids collided with the original on the first insert, GRDB aborted,
+    /// and the entire write rolled back. The fixture is what hid it: with no children there is nothing
+    /// to collide.
+    @Test("Duplicating a project with content stores both, sharing no identifier")
+    func duplicateProjectWithContent() async throws {
         let repo = try makeRepo()
-        let original = MockProject(name: "My Project")
+
+        let ok = Scenario(name: "OK", statusCode: 200, body: "{}")
+        let unauthorized = Scenario(name: "Unauthorized", statusCode: 401)
+        let endpoint = Endpoint(
+            name: "Account",
+            method: .get,
+            path: "/account",
+            scenarios: [ok, unauthorized],
+            // The *second* scenario is active, so following it by position is actually exercised.
+            activeScenarioID: unauthorized.id,
+            groupTag: "Billing"
+        )
+        let journey = Journey(
+            name: "Retry",
+            steps: [
+                JourneyStep(name: "fails", method: .get, path: "/account",
+                            outcome: .respond(JourneyResponse(statusCode: 500))),
+                JourneyStep(name: "succeeds", method: .get, path: "/account",
+                            outcome: .respond(JourneyResponse(statusCode: 200))),
+            ]
+        )
+        let original = MockProject(
+            name: "My Project",
+            endpoints: [endpoint],
+            journeys: [journey],
+            activeJourneyID: journey.id
+        )
         try await repo.save(original)
 
-        let copy = MockProject(id: UUID(), name: original.name + " (Copy)", serverConfiguration: original.serverConfiguration, endpoints: original.endpoints)
+        let copy = original.duplicated(name: "\(original.name) (Copy)")
         try await repo.save(copy)
 
+        // Both survive. Before the fix, this `load` threw: the copy's write rolled back entirely.
         let loadedOriginal = try await repo.load(id: original.id)
         let loadedCopy = try await repo.load(id: copy.id)
 
-        #expect(loadedOriginal.id != loadedCopy.id)
         #expect(loadedCopy.name == "My Project (Copy)")
+        #expect(loadedOriginal.id != loadedCopy.id)
+
+        // Content is carried over.
+        #expect(loadedCopy.endpoints.count == 1)
+        #expect(loadedCopy.endpoints.first?.path == "/account")
+        #expect(loadedCopy.endpoints.first?.scenarios.count == 2)
+        #expect(loadedCopy.endpoints.first?.groupTag == "Billing")
+        #expect(loadedCopy.journeys.count == 1)
+        #expect(loadedCopy.journeys.first?.steps.count == 2)
+
+        // Identity is not. Every id in the copy is new, at every level of the tree — otherwise an
+        // edit to the copy reaches into the original's rows.
+        let originalIDs = Self.identifiers(of: loadedOriginal)
+        let copyIDs = Self.identifiers(of: loadedCopy)
+        #expect(originalIDs.isDisjoint(with: copyIDs), "shared ids: \(originalIDs.intersection(copyIDs))")
+
+        // The two references that point *into* the tree follow the copy, not the original.
+        let copiedEndpoint = try #require(loadedCopy.endpoints.first)
+        #expect(copiedEndpoint.activeScenarioID == copiedEndpoint.scenarios[1].id)
+        #expect(copiedEndpoint.scenarios[1].name == "Unauthorized")
+        #expect(loadedCopy.activeJourneyID == loadedCopy.journeys.first?.id)
+        #expect(loadedCopy.activeJourney?.name == "Retry")
+
+        // And the original is untouched by any of it.
+        #expect(loadedOriginal.endpoints.first?.activeScenarioID == unauthorized.id)
+        #expect(loadedOriginal.activeJourneyID == journey.id)
+    }
+
+    /// Every identifier in a project, at every level — the set a copy must not intersect.
+    private static func identifiers(of project: MockProject) -> Set<UUID> {
+        var ids: Set<UUID> = [project.id]
+        for endpoint in project.endpoints {
+            ids.insert(endpoint.id)
+            ids.formUnion(endpoint.scenarios.map(\.id))
+        }
+        for journey in project.journeys {
+            ids.insert(journey.id)
+            ids.formUnion(journey.steps.map(\.id))
+        }
+        return ids
     }
 
     // MARK: - Sort order

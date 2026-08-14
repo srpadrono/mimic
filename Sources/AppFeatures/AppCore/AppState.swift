@@ -34,25 +34,57 @@ final class AppState {
     nonisolated(unsafe) static var instancesCreated = 0
     #endif
 
-    var showNewEndpointSheet = false
-    /// The new-project sheet, presented by `ContentView` so one flag serves both the welcome window
-    /// and an open workspace — File ▸ New Project has to work from either.
-    var showNewProjectSheet = false
-    /// A menu or CLI request to switch the sidebar to a given navigator. Consumed by `WorkspaceView`
-    /// and reset, because the menu sits above the window that owns the sidebar's state.
-    ///
-    /// This is how Journeys ▸ Show Journeys arrives too. There used to be a separate `showJourneys`
-    /// flag that opened a window; journeys have one home now, so there is one request.
-    var navigatorRequest: NavigatorTab?
-    /// The journey being edited in the navigator.
-    var selectedJourneyID: UUID?
+    /// What the window is presenting and what it has selected. Held apart because none of it is a
+    /// fact about the project — see ``WindowPresentation``. The four properties below forward to it
+    /// with their original names and types, so every `appState.showNewProjectSheet = true` and every
+    /// `$appState.selectedJourneyID` in the views still reads and writes the same thing.
+    let presentation: WindowPresentation
 
-    private var syncConfigurationOnNextProjectChange = false
-
+    var showNewEndpointSheet: Bool {
+        get { presentation.showNewEndpointSheet }
+        set { presentation.showNewEndpointSheet = newValue }
+    }
+    var showNewProjectSheet: Bool {
+        get { presentation.showNewProjectSheet }
+        set { presentation.showNewProjectSheet = newValue }
+    }
+    var navigatorRequest: NavigatorTab? {
+        get { presentation.navigatorRequest }
+        set { presentation.navigatorRequest = newValue }
+    }
+    var selectedJourneyID: UUID? {
+        get { presentation.selectedJourneyID }
+        set { presentation.selectedJourneyID = newValue }
+    }
     var serverState: ServerState { server.serverState }
+    /// The open project's configuration — read from the project, not from the runtime's copy.
+    ///
+    /// The runtime keeps one because the engine needs a value to bind and a delay to apply, but the
+    /// project is what a user edits and what `mimic server configure` writes. Reading the runtime's
+    /// copy is how the editor's "Global delay" row and `mimic server status` came to report a number
+    /// the project no longer held. With no project open there is nothing to read, so the runtime's
+    /// value stands in — that is the welcome screen, where it is `.default`.
+    /// Symmetric on purpose: what the getter reads is what the setter writes.
+    ///
+    /// A getter sourced from the project and a setter that wrote only the runtime would compile, read
+    /// naturally, and silently discard every write while a project was open — and the next mutation
+    /// of anything else would overwrite the runtime's copy too, erasing it twice over. Writing the
+    /// project first is also what pushes the change to the engine, because `currentProject`'s `didSet`
+    /// applies the project; the second line is the fallback for the welcome screen, where there is no
+    /// project to hold the value.
     var serverConfiguration: ServerConfiguration {
-        get { server.serverConfiguration }
-        set { server.serverConfiguration = newValue }
+        get { currentProject?.serverConfiguration ?? server.serverConfiguration }
+        set {
+            if currentProject != nil {
+                currentProject?.serverConfiguration = newValue
+                // Every other project mutation reaches the disk through `run`, which schedules this.
+                // Writing the project directly and not scheduling it would store the change in memory
+                // and lose it on reopen — the same half-applied state this property was made
+                // symmetric to avoid, one layer down.
+                projects.scheduleAutosave()
+            }
+            server.serverConfiguration = newValue
+        }
     }
     var requestLogs: [RequestLog] {
         get { server.requestLogs }
@@ -66,6 +98,13 @@ final class AppState {
         get { server.genericStartError }
         set { server.genericStartError = newValue }
     }
+
+    /// Why the last start attempt failed, or `nil` when it did not fail.
+    ///
+    /// Read-only, and deliberately not one of the two alert channels above: those are cleared by the
+    /// window when the user dismisses them, and a headless instance renders neither. This is what
+    /// `AppControlHost` reports on `mimic server status`. See ``MockServerRuntime/startFailure``.
+    var serverStartFailure: ControlError? { server.startFailure }
 
     /// Presentation binding for the port-conflict alert — setting `false` dismisses it.
     /// Lets views bind directly (`$appState.isShowingPortConflict`) instead of building ad-hoc `Binding(get:set:)`.
@@ -104,20 +143,21 @@ final class AppState {
         server: MockServerRuntime = MockServerRuntime(),
         projectRepository: any ProjectRepository,
         recentProjectsStore: RecentProjectsStore,
-        panelLayoutStore: PanelLayoutStore = PanelLayoutStore()
+        panelLayoutStore: PanelLayoutStore = PanelLayoutStore(),
+        presentation: WindowPresentation = WindowPresentation()
     ) {
         #if DEBUG
         Self.instancesCreated += 1
         #endif
         self.server = server
         self.panelLayoutStore = panelLayoutStore
+        self.presentation = presentation
         repository = projectRepository
         projects = ProjectWorkspace(
             projectRepository: projectRepository,
             recentProjectsStore: recentProjectsStore
         )
         bindProjectWorkspace()
-        syncConfigurationOnNextProjectChange = true
         _ = projects.loadLastOpenedProject()
     }
 
@@ -209,7 +249,21 @@ final class AppState {
 
     func startServer() { server.startServer() }
     func stopServer() { server.stopServer() }
-    func retryStartOnNextPort(from port: Int) { server.retryStartOnNextPort(from: port) }
+    /// Accepts the next port after a conflict, and writes it to the project on the way.
+    ///
+    /// The port a user accepts here is a setting, not a runtime detail: it only lived on the runtime,
+    /// so it was lost the next time the project was opened, and — now that the project is what the
+    /// runtime is applied from — it would be overwritten by the next edit of anything else. One
+    /// command puts it where it belongs; the runtime call then clears the alert and starts.
+    func retryStartOnNextPort(from port: Int) {
+        // Only start once the port is stored. A conflict on 65535 makes the next port 65536, which
+        // the validator rejects — and starting anyway would leave the runtime bound to a port the
+        // project does not have, which is the divergence this whole path exists to close. `run` has
+        // already put the reason in `lastCommandError`, so the user is told rather than left with a
+        // server that quietly did not start.
+        guard run(.serverConfigure(port: port + 1, globalDelayMs: nil)) != nil else { return }
+        server.retryStartOnNextPort(from: port)
+    }
 
     // MARK: - Endpoints
 
@@ -217,14 +271,14 @@ final class AppState {
         run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
     }
 
-    func updateEndpoint(_ updated: Endpoint) {
-        // A whole-value replacement, which the editor produces; the executor's spec API is for
-        // partial edits, so this one stays a direct write.
-        _ = mutateCurrentProject {
-            guard let index = $0.endpoints.firstIndex(where: { $0.id == updated.id }) else { return }
-            $0.endpoints[index] = updated
-        }
-    }
+    // There is deliberately no `updateEndpoint(_ updated: Endpoint)`. One used to sit here, writing a
+    // whole `Endpoint` into the open project through `mutateCurrentProject` — a second way to mutate
+    // the document, past the checks `ProjectCommandExecutor.applyEndpointSpec` runs on
+    // `.endpointUpdate` (the path validator, and the delay's own `>= 0`). Its comment justified itself
+    // by saying the editor produced whole values; `EndpointEditorActions` carries no name or path
+    // action, so the only caller in the repository was a test. Every field edit is `.endpointUpdate`
+    // with an `EndpointSpec`, which is what `updateEndpointDelay` and `updateEndpointGroupTag` below
+    // already do.
 
     func deleteEndpoint(id: UUID) {
         _ = run(.endpointDelete(endpoint: .id(id)))
@@ -260,32 +314,44 @@ final class AppState {
         _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(groupTag: groupTag ?? "")))
     }
 
+    /// One writer. The command mutates the project, and applying the project is what reaches the
+    /// engine — the direct write to the runtime's copy that used to lead this method was the reason
+    /// the window appeared to work while `mimic server configure --delay` did not.
     func updateGlobalDelay(delayMs: Int) {
-        server.serverConfiguration.globalDelayMs = delayMs
         _ = run(.serverConfigure(port: nil, globalDelayMs: delayMs))
     }
 
+    /// Adds the selected candidates to the open project, through ``ImportCommitter`` — which applies
+    /// them with `ProjectCommandExecutor`, so an import is held to exactly the rules an edit is.
+    ///
+    /// The pipeline itself moved out: it is a transformation of a `MockProject` by a list of
+    /// candidates, and it needed a store, a runtime and a live session to reach only because it was a
+    /// method here. What is left is the part that genuinely belongs to a session — publishing the
+    /// project the commit produced, scheduling the save, and reporting what was refused.
+    ///
+    /// The signature stays `Void` because this method is handed straight to `ImportView` as its
+    /// `([ImportCandidate]) -> Void` commit action, so the reasons go to `lastCommandError` — the
+    /// channel `ContentView` already presents.
     func commitImportedCandidates(_ candidates: [ImportCandidate]) {
-        _ = mutateCurrentProject {
-            for candidate in candidates.filter(\.isSelected) {
-                let scenario = Scenario(
-                    name: "Imported",
-                    statusCode: candidate.statusCode,
-                    headers: candidate.responseHeaders,
-                    body: candidate.responseBody,
-                    bodyContentType: candidate.responseContentType
-                )
-                var endpoint = Endpoint(
-                    name: candidate.suggestedName,
-                    method: candidate.method,
-                    path: candidate.path,
-                    scenarios: [scenario],
-                    activeScenarioID: scenario.id
-                )
-                endpoint.groupTag = candidate.suggestedGroupTag
-                endpoint.graphqlOperation = candidate.graphqlOperation
-                $0.endpoints.append(endpoint)
-            }
+        let outcome = ImportCommitter(project: currentProject).commit(candidates)
+
+        // Published once, and only if something survived: assigning `currentProject` is what pushes
+        // the project to the engine and restarts the autosave debounce, so an import in which every
+        // candidate was refused should cost neither. `ImportCommitter` reports that by answering with
+        // no project rather than by handing back an unchanged one.
+        if var project = outcome.project {
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+        }
+
+        switch outcome.report {
+        // Nothing was selected, so nothing was attempted: a reason the previous command left in
+        // `lastCommandError` is still the truth about that command and must not be wiped by a
+        // no-op confirmation.
+        case .unchanged: break
+        case .cleared: lastCommandError = nil
+        case let .skipped(message): lastCommandError = message
         }
     }
 
@@ -400,41 +466,23 @@ final class AppState {
     /// How many steps a selection would actually produce, for the capture sheet to report before the
     /// user commits. Not `logs.count`: requests a journey already answered are dropped, and a run of
     /// identical polls collapses into one repeating step.
+    ///
+    /// The rule lives in ``JourneyCapture`` — it is a function of the logs, with no session in it.
+    /// This forwards so `WorkspaceView`'s call site is unchanged.
     static func capturedStepCount(_ logs: [RequestLog]) -> Int {
-        JourneyStepSpec.capturing(logs).count
+        JourneyCapture.stepCount(logs)
     }
 
     /// Names a journey captured from a run after the resource its *earliest* call touches — the call
-    /// the flow starts with, which is what people name a flow after.
-    ///
-    /// Chronological, not whichever row happens to be first in the selection: the log draws
-    /// newest-first by default, so "the first one handed over" is normally the last thing that
-    /// happened.
+    /// the flow starts with, which is what people name a flow after. See ``JourneyCapture``.
     static func journeyName(capturing logs: [RequestLog]) -> String {
-        let capturable = logs.filter { $0.outcome != .journey }
-        guard let first = capturable.min(by: { $0.timestamp < $1.timestamp }) else {
-            return "Captured flow"
-        }
-        return journeyName(capturing: first)
+        JourneyCapture.name(capturing: logs)
     }
 
     /// Names a new journey after the resource the first captured call touches, which is nearly always
-    /// what the flow is about.
+    /// what the flow is about. See ``JourneyCapture``.
     static func journeyName(capturing log: RequestLog) -> String {
-        let path = log.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? log.path
-        let resource = path
-            .split(separator: "/")
-            .map(String.init)
-            .last { segment in
-                let lower = segment.lowercased()
-                let isVersion = lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber)
-                return lower != "api" && !isVersion && !segment.allSatisfy(\.isNumber)
-            }
-        guard let resource else { return "Captured flow" }
-        // Sentence case, not title case: "Account summary flow" reads better next to a lowercase
-        // "flow" than "Account Summary Flow" does.
-        let words = resource.replacingOccurrences(of: "-", with: " ")
-        return "\(words.prefix(1).uppercased())\(words.dropFirst()) flow"
+        JourneyCapture.name(capturing: log)
     }
 
     func moveJourneyStep(journeyID: UUID, stepID: UUID, to index: Int) {
@@ -443,9 +491,26 @@ final class AppState {
 
     /// Selects the journey that overlays endpoint resolution. Passing `nil` clears it.
     ///
-    /// Pushing the project to the engine is what resets the cursor, so activating always begins a
-    /// clean run — the same guarantee `mimic journey activate` gives.
+    /// **Activating always begins a clean run, including a re-activation of the journey already
+    /// active** — which is the case that makes this more than an assignment. Pushing the project is
+    /// *not* what resets the cursor, and this comment claimed for a long time that it was: a push
+    /// carrying the same journey with the same steps is how every other edit to the open document
+    /// reaches the engine, and one of those must leave a run in progress alone. The two arrive at
+    /// `MockRouteStore` looking identical, so the count below is what tells them apart.
+    ///
+    /// Noted before the mutation, because the push leaves synchronously from `currentProject`'s
+    /// `didSet` inside `mutateCurrentProject` — and only when the activation will actually take
+    /// effect. An id naming no journey leaves `activeJourneyID` untouched, but it still *pushes*:
+    /// `mutateCurrentProject` reassigns `currentProject` whether or not the closure changed
+    /// anything, and the `didSet` fires on every assignment. That push is argument-for-argument a
+    /// re-push, so it must carry the *un*raised count — raised, it would restart a run nobody
+    /// touched, on that push or on the next unrelated edit's.
+    ///
+    /// Clearing is not an activation and needs no count — a nil journey drops the run state outright.
     func activateJourney(id: UUID?) {
+        if let id, projects.currentProject?.journeys.contains(where: { $0.id == id }) == true {
+            server.noteJourneyActivation()
+        }
         _ = mutateCurrentProject { project in
             guard let id else {
                 project.activeJourneyID = nil
@@ -459,6 +524,34 @@ final class AppState {
     func restartActiveJourney() { server.restartJourney() }
     func advanceActiveJourney() { server.advanceJourney() }
 
+    /// Advances the active journey and reports the cursor the engine moved it to.
+    ///
+    /// ``advanceActiveJourney()`` dispatches and returns, which is right for a menu item and wrong for
+    /// a control call: `mimic journey advance` has to answer with the position it produced, and
+    /// reading ``activeJourneyStatus`` straight after dispatching reads the mirror from *before* the
+    /// advance. Named apart rather than overloaded on `async`, because the synchronous one is handed
+    /// to a `Button` and to `JourneyRunControls` as a `() -> Void` action.
+    func advanceActiveJourneyReportingStatus() async -> JourneyStatus? {
+        await server.advanceJourneyReportingStatus()
+    }
+
+    /// Restarts the active journey and reports the cursor the engine reset it to — the restart-shaped
+    /// sibling of ``advanceActiveJourneyReportingStatus()``, for the same caller and the same reason.
+    func restartActiveJourneyReportingStatus() async -> JourneyStatus? {
+        await server.restartJourneyReportingStatus()
+    }
+
+    /// The engine's journey cursor, read once the configuration push this session most recently
+    /// dispatched has reached it.
+    ///
+    /// The one caller is `AppControlHost.journeyActivate`, which has to answer with where the run
+    /// actually stands. ``activateJourney(id:)`` reaches the engine through `currentProject`'s `didSet`
+    /// and therefore from a task, so anything asking the engine straight afterwards is asking before
+    /// the push arrived. See ``MockServerRuntime/journeyStatusAfterPendingUpdates()``.
+    func journeyStatusAfterPendingMockUpdates() async -> JourneyStatus? {
+        await server.journeyStatusAfterPendingUpdates()
+    }
+
     /// The last error a journey edit produced, for surfacing in the UI. Cleared on the next success.
     var lastCommandError: String?
 
@@ -471,14 +564,46 @@ final class AppState {
 
     func createProject(name: String, port: Int = 8080) {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
         _ = projects.createProject(name: name, port: port)
     }
 
     func openProject(id: UUID) {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
-        _ = projects.openProject(id: id)
+        projects.openProject(id: id)
+    }
+
+    /// The in-flight ``importProject(_:activate:)`` dispatch — retained, not fire-and-forget.
+    ///
+    /// `ProjectWorkspace.importProject` joins the write chain synchronously — but only once the
+    /// dispatch task has *run*, and between `importProject` returning and that first slice there
+    /// is a gap in which the chain has never heard of the import. A shutdown drain started inside
+    /// the gap would find nothing to wait for and exit with the document unwritten;
+    /// `ControlPlaneCoordinator.startPendingSave` awaits this handle before it drains, which
+    /// closes the gap without making the import's reply wait. Dispatches chain on their
+    /// predecessor for the same reason the store writes do: two imports back to back must join
+    /// the chain in the order they were asked for. `@ObservationIgnored` because a task handle is
+    /// shutdown bookkeeping, not something a view renders.
+    @ObservationIgnored private(set) var importTask: Task<Void, Never>?
+
+    /// Stores an imported document, and opens it when the caller asked for it.
+    ///
+    /// Activation waits for the write and goes through ``openProject(id:)`` rather than the
+    /// workspace's own: a document that the store refused is not a project to open — opening it would
+    /// only send `ProjectWorkspace.openProject` down its missing-project path and strike the entry
+    /// from recents — and switching projects has to stop the server the same way every other switch
+    /// does.
+    ///
+    /// A document whose id names the *open* project replaces the session copy too, superseding any
+    /// edit still sitting in the autosave debounce — the contract, and the two ways it used to
+    /// break, are written on `ProjectWorkspace.importProject`.
+    func importProject(_ document: MockProject, activate: Bool) {
+        importTask = Task { @MainActor [previousDispatch = importTask, weak self] in
+            await previousDispatch?.value
+            guard let self else { return }
+            let stored = await projects.importProject(document)
+            guard stored, activate else { return }
+            openProject(id: document.id)
+        }
     }
 
     /// The server serves *the open project*, so it cannot outlive one.
@@ -501,13 +626,11 @@ final class AppState {
     func deleteProject(id: UUID) {
         if currentProject?.id == id {
             stopServerForProjectChange()
-            syncConfigurationOnNextProjectChange = true
         }
         projects.deleteProject(id: id)
     }
     func closeProject() {
         stopServerForProjectChange()
-        syncConfigurationOnNextProjectChange = true
         projects.closeProject()
     }
     func scheduleAutosave() { projects.scheduleAutosave() }
@@ -540,22 +663,21 @@ final class AppState {
     }
 
     private func bindProjectWorkspace() {
+        // Every change applies the whole project, configuration included.
+        //
+        // This used to take the configuration only when the *identity* of the open project changed,
+        // behind a `syncConfigurationOnNextProjectChange` flag, and push endpoints alone otherwise.
+        // But the configuration is edited in place on the open project — `mimic server configure
+        // --delay 500` is a `.serverConfigure` command like any other — so that edit reached the
+        // project and stopped there. The engine kept the old delay, `mimic server status` reported
+        // the old port, the editor's "Global delay" row showed a number nothing had changed, and
+        // `startServer` bound whichever port the runtime happened to be holding. The window and the
+        // script disagreed about the same project, which is the one thing this seam exists to
+        // prevent — and the headless host, which keeps no second copy, behaved correctly all along.
         projects.onCurrentProjectChanged = { [weak self] project in
-            guard let self else { return }
-            if syncConfigurationOnNextProjectChange {
-                server.applyProject(project)
-                syncConfigurationOnNextProjectChange = false
-            } else {
-                server.updateMocks(
-                    endpoints: project?.endpoints ?? [],
-                    journey: project?.activeJourney
-                )
-            }
+            self?.server.applyProject(project)
         }
-        server.updateMocks(
-            endpoints: projects.currentProject?.endpoints ?? [],
-            journey: projects.currentProject?.activeJourney
-        )
+        server.applyProject(projects.currentProject)
     }
 
     @discardableResult

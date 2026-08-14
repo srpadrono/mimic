@@ -329,7 +329,11 @@ struct ScenarioRow: View {
             // being a checkmark and becomes a smudge — and it re-drew a mark AppKit already ships
             // optically corrected at this size.
             Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                // `controlProminent`, which is `DSTypography.body`'s size — the font the scenario
+                // name beside it is set in, so the mark sits level with the line rather than a point
+                // proud of it. The 8pt floor the note above invokes is the bottom of this same
+                // ladder, named as `DSGlyph.minimum`.
+                .font(.system(size: DSGlyph.controlProminent, weight: isActive ? .semibold : .regular))
                 .foregroundStyle(isActive ? DSColors.accentText : DSColors.labelSecondary)
                 .accessibilityIdentifier("inspector.scenario.\(scenario.name).indicator")
 
@@ -342,19 +346,10 @@ struct ScenarioRow: View {
             // Coloured text, and a fill only once the code is one you would want to stop on. This
             // list is a column of scenarios, and most of them answer 200: filling every row put a
             // block of green down the panel that carried no information, because nothing in it was
-            // any louder than anything else. Same rule, and the same `>= 400` seam, as the traffic
-            // list in `EndpointTrafficList`.
-            Text("\(scenario.statusCode)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.httpStatusColor(for: scenario.statusCode))
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background {
-                    if scenario.statusCode >= 400 {
-                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                            .fill(DSColors.httpStatusColor(for: scenario.statusCode).opacity(0.12))
-                    }
-                }
+            // any louder than anything else. `DSStatusPill` carries that `>= 400` seam for every
+            // panel at once — this row used to hand-draw it, and was the one site paying the fill's
+            // horizontal inset on unfilled codes too.
+            DSStatusPill(statusCode: scenario.statusCode)
 
             if isActive {
                 Text("Active")
@@ -373,6 +368,14 @@ struct ScenarioRow: View {
         .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
         .onTapGesture(perform: onTap)
         .accessibilityElement(children: .combine)
+        // After the element is formed, not before it — `EndpointTrafficRow` orders it the same way,
+        // because a trait added to the children is a trait the combine has already passed over.
+        //
+        // The row activates a scenario on tap, but a tap gesture carries no trait, so VoiceOver
+        // announced this as static text with no hint that it could be pressed. `RequestLogTableRow`
+        // and `EndpointTrafficRow` are the same shape and already restore it; this row and the
+        // journey editor's step row were the two that did not.
+        .accessibilityAddTraits(.isButton)
         .contextMenu {
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
             Divider()

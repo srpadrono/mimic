@@ -27,8 +27,19 @@ public struct GlobalOptions: ParsableArguments, Sendable {
 
     public init() {}
 
-    public func client() throws -> ControlClient {
-        try ControlClient.discover(explicitURL: url, timeout: timeout)
+    /// The transport this invocation talks to — one funnel, so every subcommand resolves `--url` and
+    /// `--timeout` the same way.
+    ///
+    /// It returns `any ControlTransport` rather than `ControlClient` so a test can bind a recording
+    /// stub in `ControlTransportOverride` and drive the real subcommand tree. Without that there is
+    /// no way in at all: ArgumentParser builds each command from argv, so there is no call site to
+    /// hand a client to, and the emitted `ControlCommand` of every runnable verb — 55 of them, the
+    /// 65 `AsyncParsableCommand` types in this module less the 10 that only group others — was
+    /// unassertable in consequence. The production path is unchanged: with nothing bound, this is the
+    /// same `ControlClient.discover` call it always made.
+    public func client() throws -> any ControlTransport {
+        if let override = ControlTransportOverride.current { return override }
+        return try ControlClient.discover(explicitURL: url, timeout: timeout)
     }
 }
 
@@ -153,14 +164,23 @@ enum TextRenderer {
         Mimic \(state.mode) (api \(state.apiVersion), pid \(state.pid))
         \(renderServer(state.server))
         """
+        // A session on the in-memory fallback has to say so here: the window shows an alert, and a
+        // headless run has no window — this line is the only place an unattended caller can learn
+        // that every write it was told succeeded evaporates at stop. The reason keeps its own
+        // lines, indented the way a server message is; blank lines are dropped, not indented.
+        if let storeFailure = state.storeFailure {
+            text += "\nstore        in memory — nothing will be saved"
+            for line in storeFailure.split(separator: "\n", omittingEmptySubsequences: true) {
+                text += "\n             \(line)"
+            }
+        }
         if let project = state.project {
             text += "\nproject      \(project.name) — \(state.endpointCount) endpoints, \(state.journeyCount) journeys"
         } else {
             text += "\nproject      (none open)"
         }
         if let journey = state.activeJourney {
-            let position = journey.currentStepIndex.map { "step \($0 + 1)/\(journey.totalSteps)" } ?? "complete"
-            text += "\njourney      \(journey.journeyName) — \(position)"
+            text += "\njourney      \(journey.journeyName) — \(runPosition(journey))"
         } else {
             text += "\njourney      (none active)"
         }
@@ -232,14 +252,24 @@ enum TextRenderer {
         return text
     }
 
+    /// Where a run stands, in one phrase. Shared because the two renderers that need it read the
+    /// same field two different ways, and both readings were wrong in the same place.
+    ///
+    /// A nil `currentStepIndex` says only that the cursor names no step. `renderStatus` defaulted it
+    /// to zero and printed `step 1/0`; `renderState` mapped it to `complete` and reported a journey
+    /// that had never run as finished. A journey with no steps is one command away —
+    /// `mimic journey create Flow --activate` sends `journeyCreate` with a spec carrying no steps and
+    /// then `journeyActivate`, whose reply is `JourneyStatus.make(journey:state: nil)`: `isComplete`
+    /// false, cursor `0`, `totalSteps` `0`, so the index is nil — and it renders through both.
+    static func runPosition(_ status: JourneyStatus) -> String {
+        guard let index = status.currentStepIndex else {
+            return status.isComplete ? "complete" : "no current step"
+        }
+        return "step \(index + 1)/\(status.totalSteps)"
+    }
+
     static func renderStatus(_ status: JourneyStatus) -> String {
-        var lines = [
-            "\(status.journeyName) — "
-                + (status.isComplete
-                    ? "complete"
-                    : "step \((status.currentStepIndex ?? 0) + 1)/\(status.totalSteps)")
-                + ", \(status.totalServed) served",
-        ]
+        var lines = ["\(status.journeyName) — \(runPosition(status)), \(status.totalServed) served"]
         for step in status.steps {
             let marker = step.isCurrent ? "▶" : (step.isExhausted ? "✓" : " ")
             let outcome = step.failure ?? step.statusCode.map(String.init) ?? "?"

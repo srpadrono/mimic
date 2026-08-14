@@ -14,8 +14,22 @@ responses, switch scenarios, script journeys, simulate latency and network failu
 request traffic — so frontend work can start before the backend exists. An embedded Vapor server runs
 **in-process** (direct Swift calls, never HTTP-to-self).
 
-It is also a testing platform: everything the window does is available as a command, so UI tests,
-integration tests, and AI agents can reproduce a whole application scenario without driving the UI.
+It is also a testing platform: 47 operations — every project, server, endpoint, scenario, journey and
+request-log operation the window performs — are available as commands, so UI tests, integration
+tests, and AI agents can reproduce a whole application scenario without driving the UI. The one
+workflow that is not a command is **spec import**: `SpecImport` is linked by `AppFeatures` and by the
+app bundle, and by nothing else — neither `ControlPlane` nor `MimicCLICore` depends on it, in either
+manifest — so turning a HAR or an OpenAPI document into endpoints happens in the window and nowhere
+else. A script parses the file itself and issues `endpointCreate` + `scenarioUpdate` per route —
+which is precisely what `AppState.commitImportedCandidates` does after the review sheet is confirmed,
+so the rules applied are the same either way.
+
+That sentence used to read "linked by `AppFeatures` alone", which the app target's own dependency
+list contradicts, and it was checked by nobody: [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py)
+now reads both manifests on every CI run and fails if `ControlPlane` or the CLI can reach
+`SpecImport` by any path, so this paragraph and the five others like it — in AGENTS.md, README.md,
+[CLI.md](CLI.md), [GRAPHQL.md](GRAPHQL.md) and [ROADMAP.md](ROADMAP.md) — cannot quietly stop being
+true.
 
 ## Domain language
 
@@ -53,28 +67,57 @@ Use these terms exactly; they are the names in code.
 Mimic (app) → AppFeatures → Domain
                           → Persistence      → Domain
                           → MockServerEngine → Domain (+ Vapor)
-                          → ControlPlane     → Domain, Persistence, MockServerEngine (+ Vapor)
+                          → ControlPlane     → Domain (+ Vapor)
                           → SpecImport       → Domain
                           → DesignSystem     (SwiftUI only)
 
 mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 ```
 
+The map draws the import graph — who calls whom. The `Mimic` target's dependency list is wider than
+its one drawn edge: `Project.swift` declares every module on the app target directly, because the
+app is the composition root that bundles the frameworks it ships. The code under `App/Sources`
+imports no module of this repository but `AppFeatures` (plus the system frameworks); the extra
+links carry no calls.
+
 - **Domain** — value types + pure rules. Imports Foundation only. No SwiftUI/Vapor/GRDB. Holds:
   - models, `RequestMatcher`/`resolve`, validation
   - `JourneyResolver` / `JourneyRunState` / `MockResolver` — journey resolution as a pure function
   - `ControlCommand` / `ProjectCommandExecutor` — the command language and its pure interpreter
   - `CommandCatalog` — runtime self-description; `JourneyTemplates` — the built-in journey library
+  - `ControlEndpointDiscovery` — the read half of the control-plane discovery-file contract (file
+    I/O and `kill(2)` liveness — the one deliberately impure corner, shared by the CLI and the
+    control plane so the contract exists once)
 - **MockServerEngine** — `MockServerEngine` actor owns the Vapor app + a `MockRouteStore` snapshot of
   the live configuration *and the journey cursor*; serves requests by asking Domain to `plan`, applies
   the delay or the transport failure, and yields one `RequestLog` per request to a single `logStream`.
 - **Persistence** — GRDB storage behind the `ProjectRepository` port; the app injects the port, not
   the concrete store. Journeys and steps are stored relationally, so a step can be reordered and
-  diffed like any other row.
-- **ControlPlane** — `MimicControlService` (a windowless Mimic: store + engine + log + rules) and
-  `ControlServer` (a loopback-only Vapor app exposing it). `ControlHost` is the protocol both it and
-  the app's `AppControlHost` satisfy, so the HTTP layer does not know which it is serving.
-- **SpecImport** — HAR/OpenAPI/Swagger parsing → `ImportCandidate`s.
+  diffed like any other row. `load` now **refuses a row written by a newer build**: the stored
+  `schemaVersion` is checked before a single field is read, and a document from ahead of this one
+  throws `PersistenceError.unsupportedSchemaVersion` naming both numbers, because the fields this
+  build does not know about are exactly the ones a partial read would drop. `allProjects` is
+  deliberately *not* filtered — a project you cannot open is still a project you have, and hiding it
+  would look exactly like "the recents list is empty". The host maps `PersistenceError` to
+  `persistence.failure` with that message, so `mimic project open` prints it.
+
+  Two things this does not do. It does not carry the stored number into the value: `toDomain()`
+  rebuilds through `MockProject`'s memberwise initialiser, which stamps `currentSchemaVersion`, and
+  changing that needs a `schemaVersion:` parameter in Domain. On the `load` path that is a real
+  forward migration rather than a relabelling — nothing from ahead of this build gets past the guard,
+  and a row from behind it genuinely is the current shape once loaded. The window's reaction is
+  fixed separately: `ProjectWorkspace.openProject(id:)` strikes the recents entry only for
+  `PersistenceError.projectNotFound` and reports every other load failure — a newer-schema document
+  included — on `autosaveStatus`, keeping the entry and `lastOpenedProjectID`.
+- **ControlPlane** — `ControlServer` (a loopback-only Vapor app), `ControlEndpointFile` (the `0600`
+  discovery file), and `ControlHost`, the protocol the server serves so the HTTP layer does not know
+  who is answering. In production the answerer is always the app's `AppControlHost`. The module
+  depends on Domain and Vapor alone — see **[One host](#one-host)** for the windowless second host
+  it used to carry and why the owner deleted it.
+- **SpecImport** — HAR/OpenAPI/Swagger parsing → `ImportCandidate`s. Linked by `AppFeatures` and by
+  the `Mimic` app target (`Project.swift` declares it on both); neither `ControlPlane` nor
+  `MimicCLICore` links it, in `Package.swift` or in `Project.swift`. That missing edge is the whole
+  reason import has no command.
 - **DesignSystem** — `DS*` tokens and components; SwiftUI only, no Domain coupling.
 - **AppFeatures** — the only module that understands full user workflows. Coordination lives in:
   - `AppState` — the root `@Observable` for a session; coordinates endpoint/scenario/journey edits and
@@ -85,6 +128,44 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   - `AppControlHost` — maps control commands onto the live session, so `mimic` drives the window.
 - **MimicCLICore** — the `mimic` command surface as a library, so it is unit-testable. A client only.
 
+## One host
+
+`mimic daemon start` reads like the entry point to a separate headless process. It is not.
+`DaemonCommand.Start` constructs an `AppCommand.Start`, sets `headless = true`, and calls its
+`run()`. `AppLauncher.launch(headless:)` then puts `MIMIC_HEADLESS=1` into the child environment and
+executes `Mimic.app/Contents/MacOS/Mimic` — the app bundle. Inside it, `HeadlessMode` sets the
+activation policy to `.accessory` (no Dock icon, no window, but `NSApplication` still runs its event
+loop, which the embedded servers need) and `ControlPlaneCoordinator` starts
+`ControlServer(host: AppControlHost(…), mode: "headless")`. The `"headless"` reported by `mimic ping`
+and written into the discovery file names a *mode of the app*. There is no second binary, and — as
+of the owner's decision recorded here — no second host either.
+
+There used to be one. `ControlPlane` carried `MimicControlService` + `MimicDaemon`, a windowless
+Mimic with a store, an engine and command handling of its own, reachable from no shipped path: the
+host every `mimic` invocation actually hit was `AppControlHost`, while every host-level test in
+`ControlPlaneTests` exercised the service — so the better-tested host was the dead one, and a green
+`ControlPlaneTests` was evidence about code no user runs. Four behavioural divergences between the
+two shipped before a parity suite existed to catch them. Faced with wiring the daemon to a real
+binary or deleting it, the owner chose deletion: headless-as-a-mode covers what a daemon was for,
+and one implementation of every rule is worth more than a second binary. The git history keeps both
+files if that trade is ever revisited.
+
+What enforces the new shape:
+
+- **The module edge is a CI gate.** `ControlPlane` depends on Domain and Vapor alone;
+  `Scripts/check_module_edges.py` fails on an edge onto Persistence or MockServerEngine from it,
+  because a store or an engine under `ControlPlane` is a second host regrowing.
+- **The sweeps drive the shipped host.** `Tests/MimicTests/HostCommandSweepTests.swift` walks every
+  host-scoped `CommandKind` through `AppControlHost`, with and without a project open, and fails if
+  any answers from the unimplemented arm; its sample list is a `default`-free switch over
+  `CommandKind`, so the *build* breaks until a new command has a payload to sweep with. The answers
+  that used to be parity-compared against the second host are pinned to their literal values there,
+  which is the stronger claim — two hosts could drift together, a literal cannot.
+- **`ControlServerTests` tests the HTTP layer.** It stands `ControlServer` on `LoopbackTestHost`, a
+  fixture that routes project-scoped commands through the production executor and answers a handful
+  of host-scoped arms with session glue built from the same Domain pieces (`HostReport`,
+  `ControlMessages`, `EndpointValidator`). Host behaviour is `MimicTests`' to cover, directly.
+
 ## Key decisions (the "why")
 
 - **One implementation of the rules.** `ProjectCommandExecutor` applies every project-scoped operation
@@ -93,6 +174,28 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 - **Operations are data.** Modelling an operation as a `ControlCommand` value buys determinism (it is
   replayable and diffable), a single interpreter, and self-description — an agent can ask a running
   instance what it accepts instead of trusting documentation.
+- **Adding an operation is a compile error until it is *classified*, and a test failure until it is
+  routed.** A command carries associated values, so `ControlCommand` can never be `CaseIterable` —
+  and without a way to enumerate the surface, every list claiming to mirror it is a copy maintained
+  by hand. `CommandKind` is the join: no payloads, so it *is* `CaseIterable`. Two switches over it
+  have no `default:` and are the compile-time half — `ControlCommand.kind`, which forces a new case
+  to be named, and `CommandKind.scope`, which forces it onto one side of the project/host line.
+
+  The switches that *dispatch* a command — `ProjectCommandExecutor.apply` and the host's
+  `AppControlHost.perform` — each end in a `default:` instead, because each is a switch over
+  `ControlCommand` while its caller has already narrowed by `CommandKind`, and the compiler cannot
+  see that narrowing; closing them would restore the hand-written case lists that `scope` was
+  introduced to collapse into one. Each tail throws and names the command rather than falling
+  through to a plausible lie like "no project is open".
+
+  What replaces the compile check is a set of sweeps over `allCases`, one per surface. `DomainTests`
+  puts a sample of every kind through `apply` from both sides, so a project-scoped command reaching
+  the executor's tail — or a host-scoped one being swallowed there — fails. `HostCommandSweepTests`
+  does the same through the host, with and without a project open, asserting it never answered from
+  its unimplemented arm; its sample list is a `default`-free switch over `CommandKind`, so a new
+  command stops that target compiling until it is covered. `ControlTransportTests` requires some
+  `mimic` invocation to emit every kind. And the catalog is checked against `allCases` rather than
+  against a fourth hand-written list, which is what it used to be compared with: a copy of itself.
 - **The journey cursor lives in an actor.** `MockRouteStore.resolve` reads the cursor, picks a step,
   and writes the advanced cursor back in one non-reentrant step. A read-then-write would let two
   concurrent requests consume the same step, which is exactly the bug a journey cannot afford.

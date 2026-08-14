@@ -153,7 +153,7 @@ struct RequestDetailInspector: View {
     private var requestLine: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             HStack(spacing: DSSpacing.sm) {
-                DSMethodBadge(method: log.method.rawValue, size: .compact)
+                DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: "requestDetail.method")
                 statusPill
                 Spacer(minLength: 0)
                 Text(log.timestamp, style: .time)
@@ -191,31 +191,20 @@ struct RequestDetailInspector: View {
         .background(DSColors.band)
     }
 
+    /// `DSStatusPill` carries the convention this view used to hand-draw twice over: the failure
+    /// arm ("drop", "timeout" — `destructiveText` on a tint of itself, always filled, because the
+    /// base red reads 4.07:1 on a panel and 3.95 on the `band` this row actually is), and the
+    /// `>= 400` fill gate for codes (`accentText`, the 3xx, is the arm that cannot survive its own
+    /// fill: 4.35:1 on this `band`). A log with neither a failure label nor a code — nothing came
+    /// back at all — takes the component's em-dash failure arm; it used to render `?? 0` here, a
+    /// status no server ever sent, in secondary grey.
     @ViewBuilder
     private var statusPill: some View {
         if let failureLabel = log.failureLabel {
-            Text(failureLabel)
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.destructive)
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(DSColors.destructive.opacity(0.12))
-                )
+            DSStatusPill(failureLabel: failureLabel)
                 .accessibilityIdentifier("requestDetail.failure")
         } else {
-            let code = log.responseStatusCode ?? 0
-            let color = DSColors.httpStatusColor(for: code)
-            Text("\(code)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(color)
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                )
+            DSStatusPill(statusCode: log.responseStatusCode)
                 .accessibilityIdentifier("requestDetail.status")
         }
     }
@@ -244,7 +233,12 @@ struct RequestDetailInspector: View {
             if log.outcome.isMissingConfiguration {
                 Text("Nothing was configured for this call, so Mimic answered with its fallback. Right-click the row in the request log to create an endpoint for it.")
                     .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelTertiary)
+                    // `labelSecondary`. This sentence is the only place the panel explains what an
+                    // unmatched request is and what to do about it — and `DSContrastTests` asserts
+                    // that `labelTertiary` clears AA on no surface in this app, in either appearance.
+                    // The summary rows just above already carry that correction; this paragraph, and
+                    // the truncation note further down, were the two that did not.
+                    .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.unmatchedHint")
@@ -359,7 +353,7 @@ struct RequestDetailInspector: View {
     private var bodySearchField: some View {
         HStack(spacing: DSSpacing.xs) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: DSGlyph.inline, weight: .medium))
                 .foregroundStyle(DSColors.labelTertiary)
             TextField("Find in body", text: $searchText)
                 .textFieldStyle(.plain)
@@ -381,17 +375,18 @@ struct RequestDetailInspector: View {
             }
         }
         .padding(.horizontal, DSSpacing.sm)
-        // Pinned to 20, the height `DSFilterField` and the request log's header controls settle at.
-        // This well inferred its height from padding alone, so the app's two search fields were a
-        // point apart for no reason anyone chose.
-        .frame(height: 20)
+        // `DSControlHeight.row` — the rung `DSFilterField` and the request log's header controls
+        // stand on. This well inferred its height from padding alone, so the app's two search fields
+        // were a point apart for no reason anyone chose; the note that fixed that then wrote the
+        // number out by hand next to the name of the token holding it.
+        .frame(height: DSControlHeight.row)
         .background(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                 .fill(DSColors.tertiary)
         )
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         )
         .padding(.horizontal, DSSpacing.md)
         .padding(.bottom, DSSpacing.sm)
@@ -418,7 +413,9 @@ struct RequestDetailInspector: View {
                 if log.responseBodyTruncated {
                     Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
                         .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelTertiary)
+                        // The one thing telling you the payload above is not the whole payload. See
+                        // the unmatched note above for why this is not `labelTertiary`.
+                        .foregroundStyle(DSColors.labelSecondary)
                         .padding(.horizontal, DSSpacing.md)
                         .padding(.vertical, DSSpacing.xs)
                 }

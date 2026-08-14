@@ -133,7 +133,7 @@ public struct DSTabStrip: View {
             if drawsChrome {
                 Rectangle()
                     .fill(DSColors.separator)
-                    .frame(height: 0.5)
+                    .frame(height: DSStroke.hairline)
             }
         }
         // Paired deliberately. A bare identifier on a container makes every descendant report the
@@ -155,12 +155,21 @@ public struct DSTabStrip: View {
 
         /// The selection circle's diameter, and the icon's whole footprint. Fixed, whatever share of
         /// the row the cell gets.
-        private static let shapeSize: CGFloat = 22
+        ///
+        /// `DSControlHeight.field`, not a literal 22. `DSPanelHeaderButton` — which is what sits in
+        /// this strip's own accessory slot — takes the same rung, and the padding note above measures
+        /// the leading inset off this number, so the two agreeing has to be something the ladder
+        /// guarantees rather than something two files happen to say.
+        private static let shapeSize: CGFloat = DSControlHeight.field
 
         var body: some View {
             Button(action: select) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(size: 13, weight: .medium))
+                    // The top of `DSGlyph`'s ladder, which is what an icon-only strip costs: the icon
+                    // stands in for a word here rather than accompanying one, so it has to stay
+                    // legible at every width the panel can be dragged to. The padding note above
+                    // measures the leading inset off this exact number.
+                    .font(.system(size: DSGlyph.controlProminent, weight: .medium))
                     .foregroundStyle(iconColor)
                     .frame(width: Self.shapeSize, height: Self.shapeSize)
                     .background(Circle().fill(selectionFill))
@@ -230,14 +239,19 @@ public struct DSTabStrip: View {
             return isHovered ? DSColors.labelPrimary : DSColors.labelSecondary
         }
 
-        /// Capped, because the badge overlays the corner of a 22pt circle — four digits would reach
-        /// across the icon it is annotating and into the next tab's share of the row.
+        /// Whether there is anything to badge at all — presence, not a count.
+        ///
+        /// This said "Capped, because … four digits would reach across the icon", which describes a
+        /// numeric badge: `badge` above draws an 8pt dot and renders no digits, so there is nothing
+        /// here to cap. Nothing else in this type caps either. `nil` and `0` are deliberately the same
+        /// answer, which is what `Tab.badge`'s own note promises — a count that has just cleared loses
+        /// its dot rather than showing a zero.
         private var hasBadge: Bool {
             (tab.badge ?? 0) > 0
         }
 
-        /// The real number, not the capped one: "99+" is a layout compromise, and VoiceOver has no
-        /// column to run out of.
+        /// The count itself, which is the one thing the dot cannot carry. The dot says *that* there
+        /// is something; VoiceOver has no 22pt circle to fit a number into, so it is told *how many*.
         private var badgeAnnouncement: String {
             guard let badge = tab.badge, badge > 0 else { return "" }
             return "\(badge)"

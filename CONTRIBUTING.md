@@ -29,6 +29,28 @@ directories. SwiftPM builds the portable modules; Tuist builds the app, which ne
 bundle, entitlements and XCUITests. They cannot drift in *what* they compile — only in how targets
 are declared. Add a source file and both pick it up; add a *target* and both manifests need it.
 
+Three checks hold that together, and all three run in `./Scripts/ci.sh` and in the Linux CI job, as
+the same program rather than a copy of one:
+
+| Check | What it settles |
+|-------|-----------------|
+| [`Scripts/check_lockfiles.py`](Scripts/check_lockfiles.py) | `Package.resolved` and `Tuist/Package.resolved` pin the same versions. |
+| [`Scripts/check_compiler_settings.py`](Scripts/check_compiler_settings.py) | The deployment floors match (fails); the Swift settings one manifest sets and the other does not (warns). |
+| [`Scripts/check_module_edges.py`](Scripts/check_module_edges.py) | The module boundaries the documentation states — read from both manifests. |
+
+The third is the newest and the one worth knowing about before you edit a `dependencies:` array.
+Six documents state that `SpecImport` is unreachable from `ControlPlane` and from the CLI —
+AGENTS.md, README.md, [ARCHITECTURE.md](docs/ARCHITECTURE.md), [CLI.md](docs/CLI.md),
+[GRAPHQL.md](docs/GRAPHQL.md) and [ROADMAP.md](docs/ROADMAP.md) — and four places say the CLI links
+neither Vapor nor GRDB: three of those documents and a comment above the target in `Project.swift`
+itself. Every one of those sentences is a fact about two files, one line of either falsifies all of
+them, and nothing used to notice. It walks the **transitive** closure, because adding `SpecImport`
+to `Domain` would put the parsers in the CLI with every direct edge still absent, and it also
+asserts the edges that must exist — so it cannot pass by having stopped seeing the graph.
+
+If you deliberately change one of those boundaries, the check is the first thing to update; its
+header lists the documents that have to move with it.
+
 Anything SwiftPM compiles must also build on Linux, which is not macOS:
 
 - `URLSession` lives in `FoundationNetworking`, not `Foundation`
@@ -50,8 +72,7 @@ docker run --rm -v "$PWD":/src -w /src swift:6.2 \
 # Everything, in one go — build, all suites, Release gate, UI tests
 ./Scripts/ci.sh
 
-# Unit suites through the aggregate scheme (per-module schemes build frameworks
-# but do not bundle their test targets)
+# Every unit suite in one pass, through the aggregate scheme
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test \
   -destination 'platform=macOS' -skip-testing:MimicUITests
 
@@ -66,16 +87,69 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic test \
 # Release gate — run after any SPM/Tuist change
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release \
   CODE_SIGN_IDENTITY=- build
-
-# CLI end-to-end: launches Mimic headless against a throwaway store
-./Scripts/run_cli_e2e.sh
 ```
+
+`Project.swift` declares exactly one scheme, `Mimic`. Everything else you can pass to `-scheme` —
+`Mimic-Workspace` and one per module — is inferred by Tuist, and the inferred per-module schemes do
+carry their `<Module>Tests` target: `Scripts/run_full_test_suite.sh` runs `xcodebuild -scheme Domain
+test` and six more, and README's coverage section is generated from the `.xcresult` bundles they
+produce. (This file used to claim the opposite, which is why `Mimic-Workspace` was presented as the
+only way to run a unit suite. Prefer it because it covers everything in one pass, not because the
+others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
+generated.
+
+**The CLI end-to-end check is not part of `./Scripts/ci.sh`, on purpose.**
+
+```bash
+./Scripts/run_cli_e2e.sh   # launches Mimic headless against a throwaway store
+```
+
+It covers a seam nothing else does — process launch, discovery, real sockets — and it exercises
+whatever `mimic` and `Mimic.app` it can *find*, which by default is the installed build rather than
+the one you just compiled: neither `./Scripts/ci.sh` nor the commands above pass `-derivedDataPath`,
+so the products land outside the checkout while the script looks for `*Build/Products*` inside it and
+then falls back to `PATH`. Point `MIMIC_APP_PATH` at your build and put the matching `mimic` on
+`PATH`, or the green result is about a release you are not working on.
+
+It is safe to run on a machine with Mimic open, which it did not use to be: it stops the instance it
+launched by the pid `mimic app start` reported, and it exports `MIMIC_CONTROL_FILE="$WORK/control.json"`
+so the launched instance advertises itself inside its own temporary directory instead of overwriting
+the shared `control.json`. The old cleanup trap called `mimic app stop`, which reads that shared file
+and signals whatever pid it names — it quit developers' own instances, on every exit path.
 
 ## Conventions
 
-**Keep the rules in one place.** Adding an operation means adding a `ControlCommand` case and
-handling it in `ProjectCommandExecutor`. The window, the CLI and the HTTP API all call that, so they
-cannot disagree. Never implement the same rule twice.
+**Keep the rules in one place.** Adding an operation means adding a `ControlCommand` case, a matching
+`CommandKind` case, a `scope` for it, and handling it in `ProjectCommandExecutor` if it is
+project-scoped. The window, the CLI and the HTTP API all call that, so they cannot disagree. Never
+implement the same rule twice. Three more steps are easy to miss: a `CommandCatalog` descriptor, and
+a sample in each of the two lists the sweeps run on — `HostCommandSweepTests.sample(for:)` (which
+fails the *build*, being a `default`-free switch over `CommandKind`) and `ControlCommandSamples.all`
+in `DomainTests` (which fails the suite).
+
+**What the compiler enforces is narrower than it looks.** `ControlCommand.kind` and
+`CommandKind.scope` have no `default:`, so a new command cannot compile until it is named and
+classified. The switches that *dispatch* it — `ProjectCommandExecutor.apply` and
+`AppControlHost.perform` — end in a `default:` that throws at runtime naming the command; closing
+them would mean re-listing every case each one declines, which is the hand-maintained duplication
+`CommandKind.scope` exists to remove.
+
+Sweeps over `CommandKind.allCases` cover the gap instead, and a new command has to survive all of
+them: the executor from both sides (`DomainTests`), the host with and without a project open
+(`HostCommandSweepTests`), the catalog, and the CLI, where `ControlTransportTests` requires some
+`mimic` invocation to emit every kind.
+
+A host-scoped command — one about server lifecycle, project selection, the journey cursor or the log,
+which no pure function of the project can express — goes to `AppControlHost`, the one `ControlHost`
+in production: `mimic daemon start` launches `Mimic.app` with `MIMIC_HEADLESS=1`, headless being a
+mode of the app rather than a second process. (The unreachable second host the module used to carry
+was deleted by the owner's decision — the account is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#one-host).)
+
+**Spec import is the deliberate hole in that surface.** `SpecImport` is linked by the app — by
+`AppFeatures` and by the app target — and by neither `ControlPlane` nor `MimicCLICore`, so HAR and
+OpenAPI parsing has no command and no CLI verb. If you add one, you are adding a
+dependency edge `ControlPlane` has never had — treat it as an architecture change, not a feature.
 
 **Keep logic out of views.** Business rules belong in `Domain`; views stay declarative. If something
 is worth a test, it belongs behind a testable boundary (`resolve`, `plan`, `ProjectCommandExecutor`).
@@ -95,12 +169,20 @@ to a command or response shape.
 
 ## Testing against real inputs
 
-Two shipped bugs came from fixtures tidier than reality: a replayed `Content-Encoding: gzip` broke
-every real HAR import, and an appended `Content-Type` was emitted twice. When a feature consumes
-external input, add a case built from what a real server or browser actually produces —
+Three shipped bugs came from fixtures tidier than reality: a replayed `Content-Encoding: gzip` broke
+every real HAR import; an appended `Content-Type` was emitted twice; and every Swagger fixture in the
+suite declared `produces` inside the operation, while real specs overwhelmingly declare it once at the
+document level — which the parser did not read, so those specs imported as plain text and, because
+`.plainText` short-circuits the JSON body fallback, with no body either.
+
+The tell is a fixture whose every instance agrees on something the format does not require: if all of
+them put a field in the same place, the parser has only ever been asked to read it there. When a
+feature consumes external input, add a case built from what a real server, browser or spec generator
+actually produces —
 [`Tests/SpecImportTests/RealCaptureTests.swift`](Tests/SpecImportTests/RealCaptureTests.swift) and
 [`Tests/MockServerEngineTests/RealTrafficTests.swift`](Tests/MockServerEngineTests/RealTrafficTests.swift)
-are the homes for those.
+are the homes for HAR and traffic, and the OpenAPI/Swagger shape cases sit beside their parser in
+[`Tests/SpecImportTests/OpenAPIParserTests.swift`](Tests/SpecImportTests/OpenAPIParserTests.swift).
 
 ## UI changes
 

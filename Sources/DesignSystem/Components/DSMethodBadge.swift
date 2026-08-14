@@ -26,10 +26,17 @@ public struct DSMethodBadge: View {
     private let size: DSMethodBadgeSize
     private let identifier: String
 
-    public init(method: String, size: DSMethodBadgeSize = .standard, identifier: String = "") {
+    /// - Parameter identifier: required, and deliberately has no default.
+    ///
+    ///   It used to fall back to the method name, which reads as a sensible default and is not one:
+    ///   every GET row in the request log then emitted `ds.method.get`, so a hundred-row traffic list
+    ///   published a hundred elements sharing one identifier and `app.otherElements["ds.method.get"]`
+    ///   resolved to whichever AppKit happened to hand back first. An identifier that is not unique
+    ///   is worse than none, because a query written against it appears to work.
+    public init(method: String, size: DSMethodBadgeSize = .standard, identifier: String) {
         self.method = method.uppercased()
         self.size = size
-        self.identifier = identifier.isEmpty ? method.lowercased() : identifier
+        self.identifier = identifier
     }
 
     public var body: some View {
@@ -55,7 +62,7 @@ public struct DSMethodBadge: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(color.opacity(0.30), lineWidth: 0.5)
+                    .stroke(color.opacity(0.30), lineWidth: DSStroke.hairline)
             }
             .accessibilityIdentifier("ds.method.\(identifier)")
             .accessibilityLabel("\(method) method")

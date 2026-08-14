@@ -3,6 +3,217 @@
 Notable changes per release. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`MIMIC_CONTROL_FILE` relocates the control plane's discovery file**, so a CI job or an end-to-end
+  script can stand an instance up without writing over — or being discovered through — a developer's
+  own `control.json`. Honoured by both sides: the instance writes there, `mimic` searches *only*
+  there — the override replaces the default search list rather than joining the front of it — and
+  the parent directory is created `0700` on that path too. An isolated run needs only this and
+  `MIMIC_DATABASE_PATH`; the destination and the `X-Mimic-Token` credential both come out of the
+  relocated file. (While this entry sat unreleased the CLI briefly did *not* read the variable — it
+  carried its own copy of the discovery reader, so a run that moved the file also had to export a
+  destination and `MIMIC_CONTROL_TOKEN` by hand or be answered `401` on every route.) The discovery
+  reader is now implemented once, as `ControlEndpointDiscovery` in the `Domain` module — search
+  paths, the override, pid liveness, base-URL and token resolution, and the loopback token-pairing
+  rule — with `ControlPlane` keeping only the write side and delegating its path resolution there,
+  so the file a run writes and the file a run reads cannot drift apart again.
+- **`mimic state` names an in-memory session.** When the store cannot be opened the app falls back
+  to an ephemeral one, and the only surface that said so was an alert in a window a headless session
+  never shows — so a CI run on a locked store exited 0 on every command while nothing it did would
+  survive the stop. The state now carries the store failure, and the CLI renders a
+  `store  in memory — nothing will be saved` block with the reason beneath it.
+
+### Fixed
+
+- **⌘Q now drains the write chain before the app commits to terminating.** It could not before:
+  `willTerminate` is posted with nowhere left to suspend to, so the quit path blocked the main
+  thread and a chain drain awaited from there was a hop onto an actor nothing could service — the
+  documented deadlock a first attempt shipped. `applicationShouldTerminate` answering
+  `.terminateLater` keeps the runloop alive while the same drain the `SIGTERM` path uses runs, so a
+  quit behind an acknowledged `mimic project delete` no longer loses the delete or resurrects the
+  row; both doors share one flush, the final save joins the chain instead of bypassing it, and the
+  blocking `willTerminate` write survives only as a backstop for a termination that passed neither
+  door — standing down once a drain has begun, so an ordinary quit cannot write a second, unordered
+  copy of the save.
+- **An edit racing a chained delete can no longer resurrect the deleted project.** The debounced
+  autosave checked only that *a* project was open; an edit arriving while the delete was still in
+  flight enqueued a save of the doomed project in perfect chain order behind it. Deleted ids are
+  tombstoned until the delete settles — lifted again if the store refuses it — and every
+  `currentProject` lifecycle publish (create, close, delete, import) now invalidates an in-flight
+  open, which previously could land its stale load over the newer state.
+- **A duplicate or an inactive import no longer decides which project the next launch opens.** Both
+  recorded their result as the most recently opened project, so a headless `mimic project duplicate`
+  followed by a quit restored the copy instead of the project that was on screen. The recents row
+  and the restore target are recorded separately now; only an actual open moves the target.
+- **`mimic journey restart` reports the cursor the engine produced, and lands on the journey the
+  caller means.** The reply used to be fabricated from the document without asking the engine, and
+  the restart hopped past the config push chain — `mimic journey step add` followed by
+  `mimic journey restart` could restart the pre-edit journey. The restart now awaits the chain and
+  answers with the engine's cursor, as `journey advance` already did.
+- **`mimic journey create X --activate` activates the journey it just created.** Activation resolved
+  by name, names are not unique, and resolution takes the first match — in a project already holding
+  a journey named X, the older one was activated while the create still exited 0.
+- **The request log's `Content-Type` matches the wire when a scenario spells the header in a
+  different case.** The response is assembled case-insensitively but the logged copy was not, so a
+  scenario's `content-type` produced a log entry disagreeing with what was actually served.
+- **A Swagger 2 example body is paired with the content type the import actually chose.** The parser
+  picked `application/json` from the example map while `produces` decided the type independently, so
+  a spec producing another MIME type could import a body labelled with a type it never declared.
+- **UI test runs no longer overwrite — then delete — the developer's live `control.json`.** The
+  launch contract now exports `MIMIC_CONTROL_FILE` to a per-run throwaway sidecar for every suite,
+  so a test run's control-plane advertisement cannot displace the credential file a developer's own
+  instance is discovered through.
+- **Every store write in the app now joins one ordered chain.** The debounced autosave, the explicit
+  save and the close/switch flush previously raced the chained lifecycle writes, so an overtaken
+  save could re-insert a deleted project; `mimic project duplicate` of the open project omitted the
+  last half-second of edits; importing over the open project was overwritten by the stale session's
+  next autosave; and quitting just after `mimic project delete` could resurrect the deleted project
+  — the shutdown flush captured the project before draining the chain and saved it after. Duplicate
+  now reads the session copy when the reference names the open project, import over the open project
+  reconciles the session (the superseded debounce is dropped), the final shutdown save joins the
+  chain itself after draining it, and the quit machinery is under automated test for the first time.
+- **A stale configuration push can no longer overtake a newer one, and a stop during the bind window
+  is no longer dropped.** Engine pushes were independent unstructured tasks — whichever landed last
+  won, so a deleted endpoint could go on being served until the next edit; they now chain, each
+  awaiting its predecessor. And `stopServer()` acted only on `.running`, so `mimic server stop`
+  inside the window where the bind had not resolved reported a stop that never happened; a
+  mid-start stop is now remembered and applied when the bind completes.
+- **HAR import no longer imports a binary body as its base64 spelling.** A base64 body whose decoded
+  bytes are not valid UTF-8 — every image, font and gzipped asset in a real capture — fell through
+  to the literal base64 string as the mock's body, pre-selected and unflagged; the decode was also
+  strict, so newline-wrapped base64 (which real exporters write at MIME column widths) took the
+  same path even when the body underneath was text. Wrapped base64 now decodes; a body that cannot
+  be text imports without one and the candidate is flagged in the review sheet. Text bodies are
+  still reproduced verbatim.
+- **Duplicating a project created nothing, unless the project was empty.** `endpoint.id`,
+  `scenario.id`, `journey.id` and `journeyStep.id` are each a `PRIMARY KEY` on their own table —
+  unique across the database, not scoped to a project — and both hosts built the copy by wrapping a
+  fresh project id around the *source's* endpoints, scenarios, journeys and steps, ids included. The
+  first insert collided with rows the original still owned, GRDB aborted, and the whole write rolled
+  back. It failed silently in both directions: the window treated the throw as non-critical, and the
+  window's control host answers `mimic project duplicate` before the store is touched, so the CLI
+  exited `0`. `MockProject.duplicated(name:)` in `Domain` now remints every identifier in the tree and
+  repoints the two references that aim into it — an endpoint's active scenario, followed by position,
+  and the project's active journey, which would otherwise have dangled and silently deactivated. It is
+  the only implementation: `mimic endpoint duplicate` and `mimic project duplicate` used to disagree
+  about which scenario the copy serves, because the executor pointed a copy at its *first* scenario
+  while the other path followed the *active* one.
+- **Quitting no longer drops the edit you just made.** Autosave debounces by 500 ms, and both exit
+  paths — ⌘Q, and the `SIGTERM` that `mimic app stop` sends — ended the process without writing.
+  `mimic endpoint create` followed immediately by `mimic app stop` is two commands well inside that
+  window, and a script lost the endpoint the first one had just reported creating; silently, because
+  the window that shows "Save failed" is gone by then and the next launch simply reads an older
+  project. Both paths now write the open project before they go, bounded at two seconds so a wedged
+  store cannot hang the quit, and both drop the discovery file *before* that wait — it is credential
+  material, and a flush that runs out its deadline must not leave a live token on disk.
+- **Project-lifecycle commands reach the store in the order they were issued.** Create, duplicate and
+  delete answer before their write lands — that is what makes the window feel immediate — and each was
+  an independent unstructured task with no order between them. `mimic project create Foo` followed by
+  `mimic project delete Foo` is two commands inside one database round trip, and the delete could
+  reach the store first, remove nothing, and let the create's insert land after it and put the project
+  back; `mimic project duplicate Foo` in the same position reported "not found" for a project the
+  caller had just been told was created. The writes are chained now, so they land in the order asked
+  for whatever order the replies arrive in.
+- **A project written by a newer build is refused by name, not reported as missing.** The stored
+  document's `schemaVersion` is checked before a single field is read, and one from ahead of this
+  build throws `PersistenceError.unsupportedSchemaVersion` naming both numbers — the fields this build
+  does not know about are exactly the ones a partial read would drop, and a save afterwards would drop
+  them for good. `project list` still shows it: a project you cannot open is still a project you have,
+  and hiding it looks exactly like the store having lost it.
+- **`mimic app stop` confirms the pid before it signals.** It read a pid out of `control.json` and
+  handed it straight to `kill(2)`; a file left behind by a crashed instance names a pid the system may
+  since have reused, and the `SIGTERM` went to whoever owns it now. The CLI now asks the instance on
+  that file's own port for its state and requires the pid it reports to match. It ignores `--url` for
+  the same reason — a pid only means something on the machine the file was read from. A wedged
+  instance, or one whose file carries no token, can no longer be stopped this way; the refusal names
+  the pid and prints the `kill` to run by hand.
+- **A discovered token goes only to the instance that advertised it.** Destination and credential were
+  resolved independently, so `mimic state --url http://attacker.example` posted this machine's live
+  control-plane token to that host in an `X-Mimic-Token` header. The token from `control.json` is now
+  attached only when the URL's host is loopback *and* its port is the one that file advertised.
+  Reaching an instance through a forwarded port or from a container means setting
+  `MIMIC_CONTROL_TOKEN`, which is the caller naming a credential rather than the CLI guessing one.
+- **Two overlapping control-plane starts no longer strand one of them.** `start` suspends twice before
+  it records the application it built, and an actor admits another call at each suspension, so both
+  callers saw "not running", both bound a port, and the second overwrote the first — which then
+  listened for the life of the process, unreachable by `stop` and with its discovery file replaced. A
+  start arriving while a stop was still closing had the same shape from the other end, and is now a
+  distinct refusal that says to try again rather than one that says a port is in use.
+- **The request log shows what was actually sent.** It recorded the *configured* status while the
+  server serves a clamped one, so a scenario carrying `0` or `999` served `200` or `599` and the
+  traffic list reported `0` or `999` — and it listed response headers that the serving path had
+  refused as invalid, so a header containing a CRLF appeared to have been sent when nothing was. The
+  log is read precisely because the wire cannot be, which is the worst place for the two to disagree.
+- **A project document past 16 KB imports over the control API.** Vapor's default collect limit
+  applies per route, and `projectImport` posts a whole `MockProject` with its captured response bodies
+  in it — roughly eight endpoints' worth. Past that, the request failed before the handler ran and the
+  caller got Vapor's own `413` body instead of a `ControlResponse`, surfacing as an exit-4 `http.413`
+  that no error code explains. The command route now collects up to 4 MB.
+- **Swagger specs that declare `produces` once, at the document level, import as JSON.** The parser
+  read it only from the operation, so those specs — the overwhelming majority — imported as plain
+  text, and with no body either, since the plain-text path short-circuits the JSON body fallback.
+  Every Swagger fixture in the suite happened to declare `produces` inside the operation, which is why
+  two bugs hid behind one convention.
+- **A schema change no longer erases your projects.** `AppMigrations.migrator` set GRDB's
+  `eraseDatabaseOnSchemaChange` under `#if DEBUG`, and the app applied that migrator to the real
+  store in Application Support. Debug is the configuration every developer runs, so the next
+  migration added to the project would have dropped and rebuilt everyone's database empty. Erasing is
+  now opt-in and honoured only alongside an explicit `MIMIC_DATABASE_PATH`.
+- **A journey rehydrated against removed steps no longer takes the app down.** With the default
+  `orderedPerEndpoint` match mode, a cursor past the end of the step list built an invalid `Range`,
+  which is a trap rather than an error — inside the embedded server, so it ended the process.
+- **`mimic` exits 2 for bad usage, as documented.** An unknown subcommand or a missing argument
+  exited 64. `--match-mode`, `--completion` and `--unmatched` also silently ignored an unrecognised
+  value and reported success; they now fail.
+- **The control plane's discovery file is never world-readable.** It was written at the default
+  umask and chmodded afterwards, leaving the instance token readable by any local account for the
+  length of that window. The CLI also no longer trusts the `baseURL` string inside that file.
+- **Refused edits are reported.** Every validation failure raised by a window action was written to
+  a field nothing read, so a header containing a newline silently kept the old value.
+- **Restarting the control service logs again.** `shutdown()` cancelled the log drain, which finishes
+  the shared stream, so a later `start()` served traffic and recorded none of it.
+- A locked or unreadable database is no longer reported as "project not found".
+- The request log's method badges no longer share one accessibility identifier per HTTP method.
+- The sidebar's filter field shows a focus ring. `.textFieldStyle(.plain)` discards AppKit's, and
+  nothing replaced it, so tabbing into it changed nothing on screen — which under Full Keyboard
+  Access is not a polish item.
+
+### Changed
+
+- Adding a `ControlCommand` case is now a compile error until it is *named and classified* —
+  `ControlCommand.kind` and `CommandKind.scope` are switches with no `default` — and a test failure
+  until it is *routed*, in the executor and in both hosts. Routing is not compile-enforced: all three
+  dispatch switches end in a `default:` that throws at runtime, and sweeps over `CommandKind.allCases`
+  are what catch a command nobody implemented. The command catalog is checked against the enum rather
+  than against a copy of itself, and every catalog example is parsed by the CLI.
+- Endpoint, scenario and step names and paths are trimmed on the way in, as journey names already
+  were.
+- `Package.resolved` and `Tuist/Package.resolved` are pinned to one set of dependency versions, and
+  CI fails if they drift — Linux was testing a Vapor, NIO and GRDB build the installer never shipped.
+  The two were reconciled onto Vapor 4.121.3, NIO 2.97.1 and GRDB 7.10.0; twenty-one shared packages
+  had diverged.
+- Both manifests declare macOS 26, the floor every other artefact already stated.
+
+### Known issues
+
+- (The long-standing entry here — ⌘Q draining the open project's edit but not a project-lifecycle
+  write still in flight — moved to **Fixed** above: `applicationShouldTerminate` now answers
+  `.terminateLater` and drains the chain before AppKit commits to terminating.)
+
+## [0.9.3] — 2026-08-06
+
+### Fixed
+
+- **The request log drawer resizes like the other two panels.** It was the last one still driven by a
+  `DragGesture` writing into a frame, which could crash inside AppKit's constraint update with the
+  mouse still down; it is an `NSSplitViewItem` now, so hover, double-click and size restoration match
+  the navigator and the inspector.
+- **The journey editor's header stays reachable** when a journey has more steps than fit.
+- A release now fails rather than shipping a version that disagrees with the tag.
+
 ## [0.9.2] — 2026-08-04
 
 ### Fixed
@@ -100,5 +311,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.9.3]: https://github.com/srpadrono/mimic/releases/tag/v0.9.3
+[0.9.2]: https://github.com/srpadrono/mimic/releases/tag/v0.9.2
 [0.9.1]: https://github.com/srpadrono/mimic/releases/tag/v0.9.1
 [0.9.0]: https://github.com/srpadrono/mimic/releases/tag/v0.9.0

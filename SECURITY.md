@@ -40,7 +40,7 @@ Every instance mints a fresh token at startup — 32 bytes from the system CSPRN
 its discovery file:
 
 ```
-~/Library/Application Support/devxa.Mimic/control.json          # daemon
+~/Library/Application Support/devxa.Mimic/control.json          # outside the sandbox
 ~/Library/Containers/devxa.Mimic/Data/…/control.json            # sandboxed app
 ```
 
@@ -99,12 +99,19 @@ session cookie for a staging API. Two consequences:
 
 ### Imported captures carry whatever was captured
 
-Importing a HAR or an OpenAPI spec drops credential *headers* — `Authorization`, `Proxy-Authorization`,
-`Cookie` and `Set-Cookie` are not copied onto the mock, because a header is framing and dropping one
-does not change the payload the client reads.
+Importing a HAR or an OpenAPI spec drops credential *headers* — `Authorization`,
+`Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key` and `X-Auth-Token` are not copied onto the
+mock, because a header is framing and dropping one does not change the payload the client reads.
 
-**Response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands with the
-real token in it.
+That list is `RequestLog.sensitiveHeaderNames` in `Domain`, and it is the same one the request log
+redacts with. It was not always: the importer carried its own narrower copy naming the first four, so
+an imported `X-API-Key` was redacted out of a log the developer had already seen and copied into a
+mock that might be committed to a repository. The narrower list guarded the riskier path.
+
+**Text response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands
+with the real token in it. (A binary body — an image, a font, a compressed payload — cannot be
+carried by a text mock body at all: the candidate imports without one and the review sheet flags
+it.)
 
 There used to be a redaction pass over imported bodies, and it was removed because it broke more than
 it protected. The key match was a substring, so `author`, `keywords`, `shipping`, `shopping`,
@@ -133,7 +140,8 @@ serving path does not trust what it is given:
 
 ## Sandbox and entitlements
 
-The app runs under App Sandbox and Hardened Runtime with four entitlements:
+The app runs under App Sandbox and Hardened Runtime with three entitlements beyond the sandbox
+itself:
 
 | Entitlement | Why |
 |---|---|

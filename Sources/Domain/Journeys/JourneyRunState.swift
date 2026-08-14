@@ -33,6 +33,14 @@ public struct JourneyRunState: Codable, Sendable, Equatable {
     }
 
     /// Full initializer — used by persistence/tests to rehydrate a partially-run journey.
+    ///
+    /// `cursor` is clamped at zero, and that is the only value this initializer corrects. It is an
+    /// index into `journey.steps` and this type does not hold the journey, so the *upper* bound can
+    /// only be checked where the steps are — `JourneyResolver.matchingStep` does it there. The lower
+    /// bound needs no journey to judge: a negative cursor names no step in any journey, and
+    /// `currentStep(in:)` below already refuses one. Letting it through means a rehydrated `-1`
+    /// reaches the resolver and subscripts `steps[-1]`, which traps — in-process, inside the embedded
+    /// server, so it takes the app down rather than failing one request.
     public init(
         journeyID: UUID,
         cursor: Int,
@@ -42,7 +50,7 @@ public struct JourneyRunState: Codable, Sendable, Equatable {
         totalServed: Int
     ) {
         self.journeyID = journeyID
-        self.cursor = cursor
+        self.cursor = max(0, cursor)
         self.servedCountsByStepID = servedCountsByStepID
         self.forceAdvancedStepIDs = forceAdvancedStepIDs
         self.isComplete = isComplete

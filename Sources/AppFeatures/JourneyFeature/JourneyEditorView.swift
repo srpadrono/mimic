@@ -164,7 +164,7 @@ struct JourneyEditorView: View {
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityElement(children: .contain)
     }
@@ -309,6 +309,11 @@ struct JourneyEditorView: View {
                     )
                     .contentShape(Rectangle())
                     .onTapGesture { editingStepID = step.id }
+                    // A tap gesture carries no trait, so the row that opens the step editor was
+                    // announced as static text with no hint that it could be pressed.
+                    // `RequestLogTableRow` and `EndpointTrafficRow` restore it the same way; this row
+                    // and the inspector's scenario row were the two that did not.
+                    .accessibilityAddTraits(.isButton)
                     .contextMenu {
                         Button {
                             editingStepID = step.id

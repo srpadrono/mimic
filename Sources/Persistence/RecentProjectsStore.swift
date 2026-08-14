@@ -31,9 +31,15 @@ public final class RecentProjectsStore: @unchecked Sendable {
 
     // MARK: - Record
 
-    /// Records or updates a project entry and makes it the most-recently-opened.
-    /// Caps the list at 10 entries. Also persists the ID as lastOpenedProjectID.
-    public func record(id: UUID, name: String) {
+    /// Records or updates a project entry at the top of the list. Caps the list at 10 entries.
+    ///
+    /// `asLastOpened` decides whether the ID also becomes ``lastOpenedProjectID()`` — the project
+    /// the app restores on next launch. The list row and the restore target used to be one
+    /// unconditional write, and two callers record projects nobody has opened: a duplicate's copy
+    /// and an imported document left inactive. Duplicate or import headlessly, quit without another
+    /// edit, and the app came back on the copy instead of the project that was on screen. Pass
+    /// `false` to add the row and leave the restore target where it is.
+    public func record(id: UUID, name: String, asLastOpened: Bool = true) {
         var entries = load()
         // Remove any existing entry for this ID (avoids duplicates)
         entries.removeAll { $0.id == id }
@@ -48,7 +54,9 @@ public final class RecentProjectsStore: @unchecked Sendable {
         if let data = try? JSONEncoder().encode(entries) {
             defaults.set(data, forKey: Self.key)
         }
-        defaults.set(id.uuidString, forKey: Self.lastOpenedKey)
+        if asLastOpened {
+            defaults.set(id.uuidString, forKey: Self.lastOpenedKey)
+        }
     }
 
     // MARK: - Remove

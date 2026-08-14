@@ -27,9 +27,13 @@ permissions:
 # trailing comment is the human-readable version; the SHA is what actually runs.
 
 concurrency:
-  # A newer push makes an in-flight run irrelevant; cancel rather than queue behind it.
+  # A newer push makes an in-flight run irrelevant *on a pull request*, where only the tip matters.
+  # On `main` it does not: every commit there is an artefact someone may bisect to, and `github.ref`
+  # is `refs/heads/main` for pushes and manual runs alike, so they all shared one group. That has
+  # already happened — a `workflow_dispatch` on main was cancelled by the next push, leaving the
+  # commit before it with no completed run and no red X to say so. Both runners are free here.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
@@ -41,25 +45,147 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # First, and before anything is installed, because it is the cheapest thing in the workflow: a
+      # few greps over the Swift sources, no toolchain, under a second. It decides the AGENTS.md rules
+      # that are literal enough for a grep to settle — casing, `@AppStorage`, `asyncAfter`, the
+      # deprecated `Alert()`, and the two XCUITest waiting rules. Each had been broken at least once
+      # and caught only by somebody happening to read the diff, which is not a mechanism.
+      #
+      # It runs here rather than on macOS because it needs nothing a Mac has: it reads
+      # `MimicUITests/` as text, so the one job that never builds the UI suite is still the right
+      # place to check how it is written.
+      #
+      # `--self-test` first, and it is not ceremony. The scanner blanked comments with
+      # `sed 's|//.*||'`, which cut at the `//` in every URL, so any line carrying one defeated all
+      # six rules: a planted `Text("see https://example.com").textCase(.uppercase)` reported "no
+      # violations" and exited 0. That survived review of the script itself, so the scanner now
+      # plants each rule's pattern behind a URL in a string literal and asserts it is still caught,
+      # before it is trusted to say anything about the tree.
+      - name: House rules
+        run: |
+          ./Scripts/check_house_rules.sh --self-test
+          ./Scripts/check_house_rules.sh
+
       # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
       # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
-      - name: Install SQLite headers
+      #
+      # `python3` is here for the same reason and was found the same way: `swift:6.2` is a slim
+      # Ubuntu with no interpreter, so the two manifest checks below — plain stdlib Python — exited
+      # 127 with "python3: not found" on this workflow's first ever run. They had never executed
+      # before: the automatic triggers were disabled while the repository was private, and until this
+      # branch the checks did not exist. `python3-minimal` is the smallest thing that runs them;
+      # neither script imports anything outside the standard library, which is a constraint their own
+      # headers state so that this stays true.
+      - name: Install SQLite headers and Python
         run: |
           apt-get update
-          apt-get install -y libsqlite3-dev
+          apt-get install -y libsqlite3-dev python3-minimal
 
+      # Recorded, and then used in the cache key below. `container: swift:6.2` is a tag its owner
+      # repoints at each patch release, so `runner.os` alone keys a `.build` full of .swiftmodules at
+      # whatever compiler produced them — and restoring those into a newer one fails with "module
+      # compiled with Swift X cannot be imported by Swift Y", which reads as a source problem and
+      # reproduces nowhere locally.
       - name: Swift version
-        run: swift --version
+        id: swift
+        run: |
+          swift --version
+          echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-' | tr -s '-')" >> "$GITHUB_OUTPUT"
+
+      # The two manifests declare the same dependency ranges from the same directories, and then
+      # resolve them into two separate lockfiles. That is a drift generator: 21 packages had already
+      # diverged, including Vapor, NIO and GRDB — so this job's socket-binding suites were passing
+      # against versions the shipped .pkg does not contain. Nothing detected it, because the claim
+      # that the manifests "cannot drift" was written in prose rather than checked.
+      #
+      # The program explains the rest: why it compares the union rather than the intersection, and
+      # which two packages are legitimately one-sided. It is a file, not a heredoc, because this step
+      # and the matching one in `Scripts/ci.sh` used to hold a pasted copy each under a comment
+      # claiming they were character-for-character identical. They were not — the compiler-settings
+      # pair below had drifted — and a claim of that kind is worth exactly as much as whatever
+      # enforces it.
+      - name: Lockfiles agree
+        run: python3 Scripts/check_lockfiles.py
+
+      # The other half of the same drift, and it is now two checks with two different verdicts.
+      #
+      # The **deployment floor fails**: `MACOSX_DEPLOYMENT_TARGET` in Project.swift against
+      # `platforms:` in Package.swift. They are the same fact written twice, they have already come
+      # apart — `platforms:` said `.v15`, eleven majors below everything else, and nothing caught it
+      # because no job builds that manifest on a Mac and Linux ignores `platforms:` entirely — and
+      # comparing two literals needs no toolchain, so there is no reason to be gentle about it.
+      #
+      # The **Swift settings warn**: Project.swift sets four in its shared base, Package.swift sets
+      # none, and this job is therefore the looser gate — it accepts an implicit transitive import
+      # that Xcode rejects, because member-import visibility is enforced there and not here. Turning
+      # the setting on would light up every portable module at once, and this workflow is the only
+      # place a Linux compiler runs on this code, so those errors could only be fixed by pushing at a
+      # red pipeline and reading what came back. Warning keeps the gap on every run and in the job
+      # summary without blocking anyone; the step goes quiet on its own the day
+      # `swiftSettings: [.enableUpcomingFeature(...)]` lands.
+      - name: Compiler settings
+        run: python3 Scripts/check_compiler_settings.py
+
+      # The third manifest check, and the first one in this workflow that reads a *claim* rather than
+      # a count or a literal. Six documents state that `SpecImport` is unreachable from `ControlPlane`
+      # and from the CLI, and four that the CLI links neither Vapor nor GRDB — AGENTS.md, README.md,
+      # docs/ARCHITECTURE.md, docs/CLI.md, docs/GRAPHQL.md, docs/ROADMAP.md and a comment in
+      # Project.swift itself. Every one of them is a fact about two files, one line of either
+      # falsifies all of them, and until this step every gate here stayed green while it happened.
+      # docs/GRAPHQL.md used to print the grep a reader was meant to run by hand — an admission that
+      # nothing ran it for them — and now points at this program instead.
+      #
+      # Reachability rather than adjacency, because the cheap version is the one that fails to fire:
+      # `SpecImport` added to `Domain` would put the parsers in the CLI with every direct edge still
+      # absent. The program also asserts the edges that *are* supposed to exist, so a parser that
+      # stopped recognising `.external(name:)` cannot report a clean tree by seeing nothing.
+      - name: Module edges
+        run: python3 Scripts/check_module_edges.py
+
+      # README states a test total, a four-row table and two per-suite breakdowns, and all of them
+      # are hand-written. The repo's own README records that they have drifted twice. This recounts
+      # from the tree and fails on any disagreement, including a suite folder that exists and appears
+      # in none of the groups — which is what a newly added suite looks like before anybody writes it
+      # into the table, and is exactly how the newest one was found.
+      #
+      # Two more hand-maintained facts are settled the same way. The **operation count** is recomputed
+      # from `CommandKind` and checked against the five places four documents state it — the number
+      # `DomainTests` used to assert with a literal that had to be edited alongside them. And a
+      # **folder under `Tests/` that neither manifest declares** fails here: `Package.swift` names the
+      # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
+      # runner compiles, which on a green pipeline is indistinguishable from one that passed.
+      - name: Documented counts
+        run: python3 Scripts/check_doc_counts.py
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
-          restore-keys: ${{ runner.os }}-spm-
+          key: ${{ runner.os }}-${{ steps.swift.outputs.key }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: ${{ runner.os }}-${{ steps.swift.outputs.key }}-spm-
 
       - name: Build
         run: swift build --build-tests
+
+      # `Lockfiles agree` above compares the two lockfiles with each other, before anything runs.
+      # This compares one of them with what the build just did to it, and the two catch different
+      # things: that check fails on drift a human committed, and this one fails on drift the runner
+      # itself introduced. `swift build` re-resolves and rewrites `Package.resolved` whenever a
+      # declared range resolves differently here than it did on the machine that committed it — and
+      # it does so silently, so the `Test` step below would be reporting on versions no reviewer
+      # ever saw, which is the exact failure the pre-flight check was added for.
+      #
+      # `safe.directory` first because this job is a container running as root over a workspace git
+      # may decline to treat as its own; without it the step could fail for ownership rather than
+      # for drift, which is a red X that teaches nothing. It cannot hide a real diff — the
+      # `git diff` still has to run and still has to come back clean.
+      - name: Package.resolved unchanged by the build
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git diff --exit-code -- Package.resolved || {
+            echo "::error::swift build re-resolved Package.resolved (diff above). The versions this job tested are not the versions in the commit. Reproduce with 'swift build', commit the result, and move Tuist/Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
+            exit 1
+          }
 
       # Domain, Persistence, MockServerEngine, ControlPlane, SpecImport and MimicCLICore — including
       # the tests that bind real sockets and serve real HTTP.
@@ -119,10 +245,24 @@ jobs:
           key: ${{ runner.os }}-tuist-${{ hashFiles('Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
           restore-keys: ${{ runner.os }}-tuist-
 
+      # The macOS half of the same invariant. `tuist install` is a SwiftPM resolve behind another
+      # name, so it rewrites `Tuist/Package.resolved` on exactly the same trigger — a range that
+      # resolves differently on this runner than on the machine that committed it. It is checked
+      # here rather than in a step of its own so that it lands before `tuist generate`: the
+      # workspace every step below builds and tests is generated from whatever `install` resolved,
+      # and a lockfile that moved is a workspace that does not match the commit.
+      #
+      # This job has no counterpart to the Linux `Lockfiles agree` step because that check is
+      # platform-independent and running it twice buys nothing — but it means this line is the only
+      # thing standing between a re-resolved Tuist lockfile and a green run.
       - name: Resolve and generate
         run: |
           tuist version
           tuist install
+          git diff --exit-code -- Tuist/Package.resolved || {
+            echo "::error::tuist install re-resolved Tuist/Package.resolved (diff above). The workspace this job generated is not the one the commit describes. Reproduce with 'tuist install', commit the result, and move Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
+            exit 1
+          }
           tuist generate --no-open
 
       # Tuist reports failures as an unhelpful "Error" and writes the reason to a session log the
@@ -148,11 +288,63 @@ jobs:
 
       # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
       # rendering tests. The rest of the suite already ran on Linux.
+      #
+      # This is also the only step in either job that *measures* how much of this code the tests
+      # reach, rather than reading the tree and reasoning about it. Until it carried
+      # `-enableCodeCoverage YES`, both README badges said `not measured` and meant it: every claim
+      # in this repository about what is and is not tested rested on grep.
+      # `Scripts/run_full_test_suite.sh` passes the flag too, but it needs a Mac and a human who
+      # remembers to run it, and no CI step passed it at all.
+      #
+      # `-resultBundlePath` is what makes the bundle findable afterwards. Without it xcodebuild
+      # writes to `~/Library/Developer/Xcode/DerivedData/**/Logs/Test/` — no step here passes
+      # `-derivedDataPath`, which is exactly why the artifact step at the bottom of this job globs
+      # that path — and the coverage step below would have to find its bundle by globbing a
+      # directory whose contents depend on which steps have run so far. Naming the path removes the
+      # guess, and the artifact step names the same path so a red run is still downloadable.
+      # `.artifacts/` is already in `.gitignore`, so nothing here can dirty the checkout.
+      #
+      # Two things this step does NOT do, deliberately:
+      #
+      #   - **No coverage floor.** Nobody has seen the number yet. A threshold set before a baseline
+      #     exists is either so low it never fires or so high it is red on arrival, and both teach
+      #     people to ignore it. The floor is the next step, once a few runs have published numbers
+      #     and somebody can pick one that means something.
+      #   - **No README rewrite.** The two badges are still written only by
+      #     `Scripts/run_full_test_suite.sh` on a Mac. This workflow runs with `contents: read` on
+      #     pull requests from forks; a job that edited tracked files would have nowhere to put them.
       - name: Test (unit suites)
         run: |
+          rm -rf .artifacts/coverage
+          mkdir -p .artifacts/coverage
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
             test -destination 'platform=macOS' -skip-testing:MimicUITests \
+            -enableCodeCoverage YES \
+            -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
             CODE_SIGN_IDENTITY=-
+
+      # (b) of the same change: the numbers go in the job summary, so a reviewer reads them on the
+      # run page instead of downloading an artifact and installing Xcode to open it.
+      #
+      # `continue-on-error`, and it is the whole reason this is a separate step rather than three
+      # more lines on the one above. Reading a result bundle is not a gate on anything: `xcrun
+      # xccov` is the one tool in this job whose behaviour could not be checked before this landed,
+      # and an unreadable bundle, a `--json` that a future Xcode spells differently, or a sandboxed
+      # app target that never wrote its `.profraw` must all show up as a warning on this step and a
+      # note in the summary — never as a red X on a commit whose tests passed. The script prints its
+      # reason to stdout for that reason: it lands in the summary next to where the table would be.
+      #
+      # `pipefail` because the pipe to `tee` would otherwise report `tee`'s status and this step
+      # could never warn at all — the same mistake `Scripts/ci.sh` documents at length about
+      # `pipestatus`.
+      - name: Coverage report
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/coverage/UnitTests.xcresult \
+            --title 'Code coverage (unit suites, XCUITest excluded)' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The reason this job exists. XCUITest is the only thing that exercises the real window — the
       # accessibility tree, the panel layout, and every flow a user actually takes.
@@ -160,6 +352,14 @@ jobs:
       # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
       # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
       # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
+      #
+      # What the retry does NOT do — observed on this job, 2026-08-14 — is turn the step green: a
+      # test that failed once and passed on the rerun (`testCapturingSelectedRequestsAsJourney`,
+      # final summary "Executed 28 tests, with 0 failures") still ended the step with "Failing
+      # tests:" naming it and exit 65. So red here means "failed at least once", not "failed".
+      # Before treating a red run as a hard break, read the tail: a listed failing test above a
+      # passing final suite summary is the retry having already told you it was transient — the
+      # step's value in that case is the flake's name, not the verdict.
       - name: Test (UI)
         run: |
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
@@ -167,21 +367,142 @@ jobs:
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=-
 
-      # Release compiles with whole-module optimisation and different warnings-as-errors, so it
-      # catches things Debug does not. Run after the tests so a compile-only failure does not hide a
-      # test result.
+      # The failing assertion, in the job log, where a person can read it. The xcresult holds the
+      # message, the file and the line of every failure — and it ships as a ~280 MB artifact that
+      # needs a Mac and an Xcode to open, which in practice means nobody does: three consecutive red
+      # runs were diagnosed here from the *names* of failing tests alone, because the log's tail
+      # never reaches back to the assertion and the artifact was effectively opaque. `xcresulttool`
+      # exists on this runner, so ask it while we are here. `continue-on-error` on top of
+      # `if: failure()`: a diagnostic that can redden a run it was reading is worse than none.
+      - name: UI failure details
+        if: failure()
+        continue-on-error: true
+        run: |
+          bundle="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult 2>/dev/null | head -1)"
+          if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
+          echo "== $bundle"
+          xcrun xcresulttool get test-results summary --path "$bundle" || true
+          # Every failure with its message, file and line — the part the job log's tail cannot show.
+          xcrun xcresulttool get test-results tests --path "$bundle" \
+            | python3 -c '
+          import json, sys
+          def walk(node, path):
+              name = node.get("name") or node.get("nodeIdentifier") or ""
+              here = path + [name] if name else path
+              if node.get("result") == "Failed" and node.get("nodeType") in ("Test Case", "Repetition"):
+                  print(" / ".join(here), "->", node.get("result"))
+              if node.get("nodeType") == "Failure Message":
+                  print("    ", name)
+              for child in node.get("children", []):
+                  walk(child, here)
+          data = json.load(sys.stdin)
+          for root in data.get("testNodes", []):
+              walk(root, [])
+          ' || true
+
+      # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
+      #
+      # AGENTS.md and CONTRIBUTING.md both list it as a gate, and it is the only thing that covers
+      # process launch, discovery-file resolution and real HTTP end to end — so its absence is a real
+      # hole, recorded here so it stays a decision rather than an oversight. Two things block it, and
+      # neither can be fixed inside this file:
+      #
+      #   - It cannot find what this job built. `MIMIC_BIN` comes from
+      #     `find "$ROOT_DIR" … -path '*Build/Products*'`, which only matches when DerivedData sits
+      #     inside the checkout. No step above passes `-derivedDataPath`, so the products are under
+      #     `~/Library/Developer/Xcode/DerivedData` — the artifact step at the bottom of this job
+      #     reads them from exactly there — the `find` returns nothing, and the script falls through
+      #     to `command -v mimic` and exits 1 before running a single assertion.
+      #   - The app is resolved separately from the CLI. `AppLauncher.resolveExecutable` tries
+      #     `MIMIC_APP_PATH`, `/Applications/Mimic.app` and `~/Applications/Mimic.app`, none of which
+      #     a hosted runner has, so a working step has to plumb in *two* paths, not one.
+      #
+      # There used to be a third, and it was the one that mattered on a laptop rather than here: the
+      # cleanup trap called `mimic app stop`, which reads the single shared `control.json` and
+      # SIGTERMs whatever pid it names, so the script quit the developer's own instance. That is
+      # fixed — it kills the pid `mimic app start` reported, and `MIMIC_CONTROL_FILE` keeps its
+      # discovery file inside its own temporary directory — which is why the remaining two are
+      # plumbing rather than a hazard.
+      #
+      # Both are fixable here — export `MIMIC_APP_PATH` and a products directory read out of
+      # `xcodebuild -showBuildSettings` — but not verifiably without a Mac to run them on, and a step
+      # that fails for its own reasons is worse than a missing one: it teaches people to ignore red.
+
+      # Run after the tests so a compile-only failure does not hide a test result.
+      #
+      # This step's comment used to claim Release compiles with "different warnings-as-errors, so it
+      # catches things Debug does not". No build setting in this repository turns a warning into an
+      # error: neither manifest names a `*_TREAT_WARNINGS_AS_ERRORS` setting anywhere (the only two
+      # occurrences of that string in the tree are in this comment), and `Project.swift` declares its
+      # two configurations as bare `.debug(name: "Debug")` / `.release(name: "Release")` with no
+      # settings attached to either. Whatever differs between them comes from the defaults Tuist
+      # writes into the generated project, not from a choice made here — and a warning is a warning
+      # in both.
+      #
+      # Turning it on is worth doing and is deliberately *not* done from this file. An
+      # `xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` on the command line applies to every target
+      # in the workspace, Vapor, GRDB, NIO, OpenAPIKit, ArgumentParser and CodeEditorView included,
+      # and this repository does not get to decide whether those compile clean. The setting belongs
+      # per-target in `Project.swift` — on the eight `.staticFramework` targets plus the app and the
+      # `mimic` tool — and it cannot land until somebody has seen the warning inventory, which is
+      # what the step below now publishes on every run. Same order the coverage steps above follow:
+      # measure first, gate second.
       - name: Build (Release)
         run: |
+          set -o pipefail
+          mkdir -p .artifacts
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            -configuration Release CODE_SIGN_IDENTITY=- build
+            -configuration Release CODE_SIGN_IDENTITY=- build \
+            | tee .artifacts/release-build.log
+
+      # The baseline the paragraph above needs, and nothing more: it reports, it does not gate.
+      #
+      # `continue-on-error` is the whole point rather than caution. A warning count is not a verdict
+      # on a commit, and a step that reddens a run over one teaches people to ignore red — the same
+      # argument the coverage step makes for itself. Compiler output is also the one thing here whose
+      # exact shape could not be checked before this landed, so a diagnostic line spelled differently
+      # by a future Xcode must show up as an empty table, never as a failure on a commit whose tests
+      # passed.
+      #
+      # Dependency warnings are filtered out because they are not actionable here: SwiftPM checkouts
+      # live under `SourcePackages/`, and Tuist's own resolve under `Tuist/.build`. What is left is
+      # this repository's code, which is exactly the set a per-target setting in `Project.swift`
+      # would have to make clean first.
+      - name: Release warnings (reported, never a gate)
+        continue-on-error: true
+        run: |
+          warnings="$(grep -E ': warning: ' .artifacts/release-build.log \
+            | grep -vE 'SourcePackages/|Tuist/\.build/' | sort -u)"
+          count="$(printf '%s\n' "$warnings" | grep -c . || true)"
+          {
+            echo "### Release warnings in first-party sources"
+            echo
+            echo "**$count** distinct warning line(s). This step never fails the run — see the"
+            echo "comment above \`Build (Release)\` in \`.github/workflows/ci.yml\` for why"
+            echo "warnings-as-errors is not switched on from the command line."
+            if [ -n "$warnings" ]; then
+              echo
+              echo '```'
+              printf '%s\n' "$warnings" | head -50
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The result bundle is the only way to read a UI failure after the fact — it holds the failure
       # screenshots and the automatic UI hierarchy captures.
+      #
+      # Two paths now, because `-resultBundlePath` on the unit step *moves* that run's bundle out of
+      # DerivedData: the glob below would no longer find it, so it is named explicitly. It is also
+      # where the per-file coverage lives, for anyone who wants more than the per-target table in
+      # the summary. Still `if: failure()` — a coverage-instrumented bundle is large, and uploading
+      # one on every green run buys a reviewer nothing the summary has not already shown them.
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xcresult
-          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+            .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore

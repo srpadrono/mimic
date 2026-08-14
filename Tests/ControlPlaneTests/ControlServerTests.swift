@@ -7,10 +7,22 @@ import FoundationNetworking
 import Testing
 @testable import ControlPlane
 @testable import Domain
-@testable import Persistence
 
 /// The HTTP surface, exercised the way a `curl`-driven script or a non-Swift agent would.
-@Suite(.serialized)
+///
+/// The host behind the server is ``LoopbackTestHost``, a fixture at the bottom of this file — not a
+/// production host. These tests used to stand `ControlServer` on `MimicControlService`, the
+/// self-contained headless service, until the owner resolved the two-host fork by deleting it (see
+/// "One host" in AGENTS.md). What this suite covers is `ControlServer` itself — authentication,
+/// Host pinning, error→status mapping, body limits, loopback binding, the wire encoding — and for
+/// that it needs *a* host, not *the* host: the shipped host's behaviour has its own suite in
+/// `MimicTests`, driven directly rather than over a socket.
+///
+/// Time-limited because every case here binds a real socket: a bind that never completes, or a
+/// wait on traffic that never arrives, otherwise hangs the whole run with no indication of which
+/// test is stuck. A minute is the finest granularity `.timeLimit` offers and is far above what
+/// any of these needs — the point is a bound, not a deadline.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ControlServerTests {
 
     /// The token the test server was started with.
@@ -22,16 +34,11 @@ struct ControlServerTests {
     @TaskLocal static var currentToken: String?
 
     static func withServer(
-        _ body: (URL, MimicControlService) async throws -> Void
+        _ body: (URL, LoopbackTestHost) async throws -> Void
     ) async throws {
-        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
-        let service = MimicControlService(
-            repository: GRDBProjectRepository(dbQueue: queue),
-            settings: SettingsStore(dbQueue: queue),
-            mode: "headless"
-        )
+        let host = LoopbackTestHost()
         // An explicit token keeps the suite independent of `MIMIC_CONTROL_TOKEN` in the environment.
-        let server = ControlServer(host: service, mode: "headless", token: ControlToken.generate())
+        let server = ControlServer(host: host, mode: "headless", token: ControlToken.generate())
         // Port 0 lets the OS pick, and `advertise: false` keeps the test from overwriting a real
         // instance's discovery file.
         let port = try await server.start(port: 0, advertise: false)
@@ -39,15 +46,13 @@ struct ControlServerTests {
 
         do {
             try await Self.$currentToken.withValue(server.token) {
-                try await body(baseURL, service)
+                try await body(baseURL, host)
             }
         } catch {
             try? await server.stop()
-            await service.shutdown()
             throw error
         }
         try await server.stop()
-        await service.shutdown()
     }
 
     struct Reply {
@@ -161,6 +166,61 @@ struct ControlServerTests {
             #expect(invalid.status == 400)
             #expect(invalid.response.error?.code == "request.invalid")
         }
+    }
+
+    // MARK: - Lifecycle reentrancy
+
+    /// `stop()` clears `app` and *then* awaits the shutdown, and an actor admits another call at that
+    /// suspension. So the eight lines of reasoning above `start`'s first guard — written for two
+    /// overlapping *starts* — left the same window open from the other end: a start arriving mid-stop
+    /// saw `app == nil`, passed, and bound a port the outgoing application had not released.
+    ///
+    /// The window is a real race, so what is asserted is the outcome *set* rather than one ordering.
+    /// Whichever way the two land, the racing start must not come back as `portInUse`: the three
+    /// answers it may now give are `alreadyRunning` (it reached the actor first), `shuttingDown` (it
+    /// landed inside the window), and success (the stop had already finished). Nothing here can force
+    /// the interesting ordering — `Task.yield()` and the repeat count only make it likely — and a test
+    /// that only passed when it happened would be a flake in the other direction.
+    @Test("A start racing a stop on the control port is never told the port is in use")
+    func startDuringStopIsRefusedRatherThanColliding() async throws {
+        let host = LoopbackTestHost()
+
+        for attempt in 1...3 {
+            let server = ControlServer(host: host, mode: "headless", token: ControlToken.generate())
+            // `advertise: false` throughout: a discovery file here would overwrite a real instance's.
+            let port = try await server.start(port: 0, advertise: false)
+
+            let stopping = Task { try await server.stop() }
+            await Task.yield()
+
+            var raced: (any Error)?
+            do {
+                _ = try await server.start(port: port, advertise: false)
+            } catch {
+                raced = error
+            }
+            _ = try? await stopping.value
+
+            #expect(
+                raced as? ControlServerError != .portInUse(port: port),
+                "attempt \(attempt): a start racing a stop reported the control port in use"
+            )
+            try? await server.stop()
+        }
+    }
+
+    /// The two refusals name different problems, and the difference is what the caller does next:
+    /// `alreadyRunning` means "you already have one", `shuttingDown` means "ask again in a moment".
+    /// Reporting the second as the first is what sent `ControlPlaneCoordinator` down the
+    /// give-up-entirely path for a condition that clears itself.
+    @Test("The two control-server refusals do not say the same thing")
+    func controlServerRefusalsAreDistinguishable() {
+        #expect(ControlServerError.alreadyRunning != ControlServerError.shuttingDown)
+        #expect(
+            ControlServerError.alreadyRunning.errorDescription
+                != ControlServerError.shuttingDown.errorDescription
+        )
+        #expect(ControlServerError.shuttingDown.errorDescription?.contains("shutting down") == true)
     }
 
     @Test("An undecodable body is a 400 that says what to read next")
@@ -340,12 +400,113 @@ struct ControlServerTests {
         }
     }
 
+    // MARK: - Request body size
+
+    /// The command route used to take Vapor's default body strategy — `.collect(maxSize: nil)`, which
+    /// resolves to `Routes.defaultMaxBodySize`, **16 KB**. `projectImport` posts a whole `MockProject`,
+    /// captured response bodies included. An endpoint of the fixture below encodes to about 2 KB, so
+    /// the default was worth roughly eight of them; past that, `mimic project import` was answered
+    /// `413 Payload Too Large` by Vapor before `ControlServer` saw the request at all.
+    /// `MockServerEngine`'s `VaporConfigurator` had passed `.collect(maxSize: "10mb")` for served
+    /// traffic all along; the control plane was the surface nobody sized.
+    ///
+    /// Two things about the fixture are what make this test able to fail, and both are deliberate.
+    ///
+    /// It is built from endpoints and scenarios rather than one padded string, so it stays a test about
+    /// a document a person could really import: change how a `MockProject` encodes and this still
+    /// measures what actually reaches the wire.
+    ///
+    /// And it is *hundreds* of KB rather than the ~17 KB that would nominally clear the old limit,
+    /// because `maxSize` is only ever consulted for a **streamed** body. `HTTPServerRequestDecoder`
+    /// stores the body as `.collected` when the first `.body` part it sees already equals
+    /// `Content-Length`, and the route's `collect` is then skipped outright — the responder runs it
+    /// only `if … request.body.data == nil`. A body small enough to arrive in one socket read would
+    /// therefore be accepted with the cap removed, and this test would pass while asserting nothing.
+    /// Vapor's `ServerBootstrap` sets `maxMessagesPerRead` to 1 and overrides no receive allocator, so
+    /// NIO's `AdaptiveRecvByteBufferAllocator` applies at its defaults, whose ceiling is 64 KiB: a
+    /// document several times that cannot arrive whole however the kernel schedules the reads.
+    @Test("A project document far past Vapor's 16 KB default still imports over HTTP")
+    func largeProjectImportIsAccepted() async throws {
+        try await Self.withServer { baseURL, _ in
+            let endpointCount = 120
+            let project = Self.bulkyProject(endpointCount: endpointCount, recordsPerBody: 24)
+            let encoded = try ControlCoding.encoder().encode(
+                ControlCommand.projectImport(project: project, activate: false)
+            )
+
+            // The test's own precondition. A generator that quietly shrank — a shorter record, fewer
+            // endpoints — would leave every assertion below passing against a body the 16 KB default
+            // would have allowed, which is the shape of assertion this repo has been bitten by before.
+            #expect(
+                encoded.count > 64 * 1024,
+                "the fixture must be too large to arrive in a single socket read; it was \(encoded.count) bytes"
+            )
+
+            var request = URLRequest(url: baseURL.appendingPathComponent("\(ControlAPI.version)/command"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(Self.currentToken, forHTTPHeaderField: ControlAPI.tokenHeaderName)
+            request.httpBody = encoded
+
+            // Sent by hand rather than through `Self.post`, which decodes the envelope eagerly: a
+            // refused collect never reaches Mimic's code, so the reply is Vapor's own
+            // `{"error":true,…}` and decoding it as a `ControlResponse` throws a `DecodingError` that
+            // says nothing about the size. Read the status first and put the body in the message.
+            let (data, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            let http = try #require(response as? HTTPURLResponse)
+            #expect(
+                http.statusCode == 200,
+                "a \(encoded.count)-byte projectImport was refused: \(String(decoding: data, as: UTF8.self))"
+            )
+
+            // `try?` for the same reason: on a regression this is nil, and two clean expectation
+            // failures read better than a decoding error thrown out of the test.
+            let decoded = try? ControlCoding.decode(ControlResponse.self, from: data)
+            #expect(decoded?.ok == true)
+            // The echoed document is the proof the *whole* body arrived and decoded, not just the head.
+            #expect(decoded?.result?.project?.endpoints.count == endpointCount)
+        }
+    }
+
+    /// A project the size real ones reach, made of the thing that actually makes them big: one
+    /// captured response body per endpoint. No filler — every byte here is a value the app itself
+    /// could have stored.
+    static func bulkyProject(endpointCount: Int, recordsPerBody: Int) -> MockProject {
+        let endpoints = (0..<endpointCount).map { page -> Endpoint in
+            let scenario = Scenario(
+                name: "Default",
+                statusCode: 200,
+                headers: ["X-Page": "\(page)"],
+                body: Self.capturedBody(records: recordsPerBody, page: page)
+            )
+            return Endpoint(
+                name: "Catalogue page \(page)",
+                method: .get,
+                path: "/catalogue/page/\(page)",
+                scenarios: [scenario],
+                activeScenarioID: scenario.id
+            )
+        }
+        return MockProject(name: "Bulky catalogue", endpoints: endpoints)
+    }
+
+    /// A JSON array of records — the shape a captured list response has, and the reason a scenario
+    /// body is kilobytes rather than bytes.
+    static func capturedBody(records: Int, page: Int) -> String {
+        let rows = (0..<records).map { row -> String in
+            let id = page * records + row
+            let sku = "SKU-\(page)-\(row)"
+            return #"{"id":\#(id),"sku":"\#(sku)","name":"Widget \#(row)","price":\#(1999 + row)}"#
+        }
+        return "[" + rows.joined(separator: ",") + "]"
+    }
+
     // MARK: - Log redaction
 
     @Test("logList redacts credentials the app under test sent")
     func logListRedactsCredentials() async throws {
-        try await Self.withServer { baseURL, service in
-            await service.appendLog(RequestLog(
+        try await Self.withServer { baseURL, host in
+            await host.appendLog(RequestLog(
                 method: .post,
                 path: "/v1/token",
                 requestHeaders: [
@@ -402,47 +563,181 @@ struct ControlServerTests {
     }
 }
 
-@Suite("Endpoint discovery")
+/// The host these tests stand `ControlServer` on. A fixture, deliberately not a host.
+///
+/// Project-scoped commands go through ``ProjectCommandExecutor`` — the production implementation of
+/// every rule, the same calls the shipped host makes — over one in-memory project. The handful of
+/// host-scoped arms the HTTP tests actually reach are trivial session glue, built from the same
+/// Domain pieces the shipped host builds its replies from (`ControlMessages`, `HostReport`,
+/// `EndpointValidator`, `JourneyStatus.make`), so what travels over the wire in these tests is the
+/// shape production sends. Every other host-scoped command answers `internalFailure` naming this
+/// type: a future test reaching for an arm this fixture does not carry fails loudly instead of
+/// passing against an accidental default.
+///
+/// No store and no engine, on purpose. What `ControlServerTests` covers is the HTTP layer; the
+/// shipped host's behaviour — persistence ordering, the engine, the write chain — is covered in
+/// `MimicTests`, against `AppControlHost` itself.
+actor LoopbackTestHost: ControlHost {
+    private var project: MockProject?
+    private var logs: [RequestLog] = []
+
+    func appendLog(_ log: RequestLog) {
+        logs.append(log)
+    }
+
+    func execute(_ command: ControlCommand) async -> ControlResponse {
+        // The executor first, exactly as the shipped host orders it: it answers every project-scoped
+        // command and returns nil for a host-scoped one.
+        if var open = project {
+            do {
+                if let outcome = try ProjectCommandExecutor.apply(command, to: &open) {
+                    if outcome.didMutate { project = open }
+                    return .success(outcome.result)
+                }
+            } catch let error as ControlError {
+                return .failure(error)
+            } catch {
+                return .failure(.internalFailure(error.localizedDescription))
+            }
+        } else if command.kind.scope == .project {
+            return .failure(.noProjectOpen)
+        }
+
+        switch command {
+        case .ping:
+            return .success(.message(ControlMessages.ping(mode: "headless", pid: Int(ProcessInfo.processInfo.processIdentifier))))
+
+        case .describeCommands:
+            return .success(.init(commands: CommandCatalog.descriptors))
+
+        case .state:
+            return .success(.init(state: HostReport.state(
+                appVersion: nil,
+                mode: "headless",
+                pid: Int(ProcessInfo.processInfo.processIdentifier),
+                server: HostReport.serverStatus(state: .stopped, configuredPort: 8080, globalDelayMs: 0),
+                project: project,
+                activeJourney: activeJourneyStatus(),
+                requestLogCount: logs.count
+            )))
+
+        case let .projectCreate(name, port):
+            let configuration = ServerConfiguration(port: port ?? 8080, globalDelayMs: 0)
+            let created = MockProject(name: name, serverConfiguration: configuration)
+            if let port {
+                do { try EndpointValidator.validatePort(port) } catch { return .failure(.validation(error)) }
+            }
+            project = created
+            return .success(.init(message: "Created project \"\(name)\".", project: created))
+
+        case let .projectImport(document, _):
+            // Held to the same rules as the shipped host holds it to, through the same validator —
+            // `ProjectValidator`, the whole-document one, not `EndpointValidator`'s per-field
+            // helpers beside it.
+            do { try ProjectValidator.validate(document) } catch { return .failure(.validation(error)) }
+            project = document
+            return .success(.init(
+                message: ControlMessages.projectImported(
+                    name: document.name,
+                    endpointCount: document.endpoints.count,
+                    journeyCount: document.journeys.count
+                ),
+                project: document
+            ))
+
+        case let .journeyActivate(ref):
+            guard var open = project else { return .failure(.noProjectOpen) }
+            guard let ref, let journey = open.journey(matching: ref) else {
+                return .failure(.internalFailure("LoopbackTestHost only activates by reference."))
+            }
+            open.activeJourneyID = journey.id
+            project = open
+            return .success(.init(
+                message: ControlMessages.journeyActivated(name: journey.name, stepCount: journey.steps.count),
+                journey: journey,
+                journeyStatus: JourneyStatus.make(journey: journey, state: nil)
+            ))
+
+        case .journeyStatus:
+            guard let status = activeJourneyStatus() else { return .failure(.noActiveJourney) }
+            return .success(.init(journeyStatus: status))
+
+        case let .logList(limit, unmatchedOnly):
+            return .success(.init(logs: HostReport.requestLog(from: logs, limit: limit, unmatchedOnly: unmatchedOnly)))
+
+        default:
+            return .failure(.internalFailure(
+                "\(command.kind.rawValue) is not part of the LoopbackTestHost fixture — add the arm if an HTTP test needs it."
+            ))
+        }
+    }
+
+    private func activeJourneyStatus() -> JourneyStatus? {
+        guard let project, let id = project.activeJourneyID,
+              let journey = project.journeys.first(where: { $0.id == id }) else { return nil }
+        return JourneyStatus.make(journey: journey, state: nil)
+    }
+}
+
+
+/// The **write half** of the discovery-file contract: publication, mode discipline, and the
+/// writer's half of the `MIMIC_CONTROL_FILE` override.
+///
+/// The read half — search order, override-replaces-the-list, tilde expansion, the tampered
+/// `baseURL`, pid liveness, and the token-pairing rules — lives in `Domain` as
+/// `ControlEndpointDiscovery`, and its suite is `ControlEndpointDiscoveryTests` in `DomainTests`.
+/// This module used to carry a reader of its own and a suite asserting it, and every one of those
+/// assertions ran against code no production binary called; what stays here is what only the writer
+/// can regress. Where a case below needs to *read* a file back, it reads it through the Domain
+/// reader, because that is the one reader that exists — the cross-check that writer and reader mean
+/// the same bytes and the same path.
+@Suite("Endpoint discovery file — the write side")
 struct ControlEndpointFileTests {
 
-    @Test("An explicit URL beats the environment, which beats a discovery file")
-    func resolutionOrder() throws {
-        let discovered = ControlEndpoint(port: 1111, pid: 1, mode: "app")
+    /// The reader and the writer have to mean the same file, which is the whole point of resolving
+    /// the override in one place (`ControlEndpointDiscovery.overrideURL`): a process that advertises
+    /// at the override and then computes the *default* path on the way out would delete the
+    /// developer's advertisement and leave its own.
+    @Test("Writing, discovering and removing all follow the override together")
+    func overrideIsHonouredByWriteDiscoverAndRemove() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-override-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        #expect(ControlEndpointFile.resolveBaseURL(
-            explicit: "http://127.0.0.1:3333",
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:3333")
+        // Deliberately *not* created first: the write has to make its own parent, because the script
+        // that names the override names a path inside a directory it has just `mktemp -d`-ed and then
+        // a subdirectory that does not exist yet.
+        let target = directory.appendingPathComponent("nested").appendingPathComponent("control.json")
+        let environment = [ControlEndpointDiscovery.pathEnvironmentKey: target.path]
 
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:2222")
+        let resolved = try ControlEndpointFile.writeURL(environment: environment)
+        #expect(resolved.path == target.path)
 
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [ControlAPI.portEnvironmentKey: "4444"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:4444")
+        let endpoint = ControlEndpoint(
+            port: 8787,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            mode: "headless",
+            token: ControlToken.generate()
+        )
+        try ControlEndpointFile.write(endpoint, environment: environment)
+        #expect(FileManager.default.fileExists(atPath: target.path))
 
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [:],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:1111")
+        // The token is in there, so the override gets the same 0600 the computed path does — an
+        // isolated run is not a less sensitive one.
+        let mode = try #require(
+            FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(mode.int16Value & 0o777 == 0o600, "mode was \(String(mode.int16Value, radix: 8))")
 
-        #expect(ControlEndpointFile.resolveBaseURL(environment: [:], discovered: nil) == nil)
+        let discovered = try #require(ControlEndpointDiscovery.discover(environment: environment))
+        #expect(discovered == endpoint)
+
+        ControlEndpointFile.remove(environment: environment)
+        #expect(FileManager.default.fileExists(atPath: target.path) == false)
+        #expect(ControlEndpointDiscovery.discover(environment: environment) == nil)
     }
 
-    @Test("The sandboxed container is searched before the plain Application Support path")
-    func searchOrderPrefersTheAppContainer() {
-        let urls = ControlEndpointFile.searchURLs(homeDirectory: URL(fileURLWithPath: "/Users/test"))
-        #expect(urls.count == 2)
-        #expect(urls[0].path.contains("Library/Containers/devxa.Mimic"))
-        #expect(urls[1].path.contains("Library/Application Support/devxa.Mimic"))
-        #expect(urls.allSatisfy { $0.lastPathComponent == "control.json" })
-    }
-
-    @Test("A discovery file round-trips and carries a usable base URL")
+    @Test("A discovery file round-trips through the Domain reader and carries a usable base URL")
     func fileRoundTrip() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("mimic-discovery-\(UUID().uuidString)", isDirectory: true)
@@ -457,33 +752,200 @@ struct ControlEndpointFileTests {
         )
         try ControlEndpointFile.write(endpoint, to: url)
 
-        let discovered = try #require(ControlEndpointFile.discover(searchURLs: [url]))
+        let discovered = try #require(ControlEndpointDiscovery.discover(searchURLs: [url]))
         #expect(discovered == endpoint)
         #expect(discovered.baseURL == "http://127.0.0.1:8787")
 
         ControlEndpointFile.remove(at: url)
-        #expect(ControlEndpointFile.discover(searchURLs: [url]) == nil)
+        #expect(ControlEndpointDiscovery.discover(searchURLs: [url]) == nil)
     }
 
-    @Test("A file left by a crashed instance is skipped instead of hanging the CLI")
-    func staleFileIsIgnored() throws {
+    /// The file carries the instance's token, so its mode *is* the access control — and until this
+    /// test existed nothing anywhere asserted it. The write used to be `.atomic` followed by a
+    /// `chmod`, which publishes the token at the final path for as long as the second call takes,
+    /// and leaves it published forever if that call throws.
+    ///
+    /// **The mode assertions below cannot fail on their own, and the test's name used to promise
+    /// what they could not deliver.** `rename(2)` carries the source file's mode across with it, so
+    /// the published file reads `0600` whether the mode was put on the temporary *before* it was
+    /// published — the safe order — or chmod'd onto the target *after*, which is the shape the
+    /// finding is about. Both orders end at the same observable file, and the difference between
+    /// them is a window a few microseconds wide that no reading of the result can see. They are kept
+    /// because a write that lands at `0644` and stays there is still the failure worth catching
+    /// first; what they are not is a guard on the ordering.
+    ///
+    /// Two checks that *can* fail cover the rest: `publicationReplacesTheFileRatherThanRewritingIt`
+    /// below pins that the advertisement is published by replacing the directory entry rather than
+    /// by opening the real name and writing into it, and `writePathAppliesTheModeBeforePublishing`
+    /// reads the write path itself, because the ordering is a property of the code and not of its
+    /// output.
+    @Test("The discovery file is 0600 on a first write and on an overwrite")
+    func discoveryFileIsPrivate() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("mimic-stale-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("mimic-perms-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let url = directory.appendingPathComponent("control.json")
-        // A pid that is not running.
-        try ControlEndpointFile.write(ControlEndpoint(port: 8787, pid: 999_999, mode: "headless"), to: url)
+        let endpoint = ControlEndpoint(
+            port: 8787,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            mode: "headless",
+            token: ControlToken.generate()
+        )
 
-        #expect(ControlEndpointFile.discover(searchURLs: [url], isProcessAlive: { _ in false }) == nil)
-        #expect(ControlEndpointFile.discover(searchURLs: [url], isProcessAlive: { _ in true }) != nil)
+        try ControlEndpointFile.write(endpoint, to: url)
+        let mode = try #require(
+            FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(mode.int16Value & 0o777 == 0o600, "mode was \(String(mode.int16Value, radix: 8))")
+
+        // Overwriting an existing advertisement — a restart on a new port — must land at 0600 too,
+        // and must not inherit a wider mode from whatever was already there.
+        try ControlEndpointFile.write(endpoint, to: url)
+        let rewritten = try #require(
+            FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        )
+        #expect(rewritten.int16Value & 0o777 == 0o600)
+
+        // And no temporary file is left beside it.
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(siblings == ["control.json"], "leftover files: \(siblings)")
     }
 
-    @Test("The current process reads as alive, and pid 0 never does")
-    func livenessCheck() {
-        #expect(ControlEndpointFile.isProcessAlive(Int(ProcessInfo.processInfo.processIdentifier)))
-        #expect(ControlEndpointFile.isProcessAlive(0) == false)
-        #expect(ControlEndpointFile.isProcessAlive(-1) == false)
+    /// A hard link taken before an overwrite is the one thing that can see *how* the new
+    /// advertisement arrived.
+    ///
+    /// `rename(2)` swings the directory entry to a different inode, so a second link to the original
+    /// inode still holds the original bytes afterwards. A write that instead opened `control.json`
+    /// itself and truncated it — no temporary, no rename — would reach the same final content
+    /// through the same link, and would have published an empty file at the real name on the way
+    /// there, at whatever mode the umask allowed on a first write. That is the same class of failure
+    /// as chmod-after-rename, and unlike the mode of the finished file it is observable.
+    @Test("Publishing an advertisement replaces the file rather than rewriting it in place")
+    func publicationReplacesTheFileRatherThanRewritingIt() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-publish-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("control.json")
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+        try ControlEndpointFile.write(
+            ControlEndpoint(port: 8787, pid: pid, mode: "headless", token: ControlToken.generate()),
+            to: url
+        )
+
+        let witness = directory.appendingPathComponent("witness.json")
+        try FileManager.default.linkItem(at: url, to: witness)
+        let firstAdvertisement = try Data(contentsOf: url)
+
+        // A restart on a different port, so the two advertisements cannot be confused for each other.
+        try ControlEndpointFile.write(
+            ControlEndpoint(port: 8788, pid: pid, mode: "headless", token: ControlToken.generate()),
+            to: url
+        )
+
+        let published = try Data(contentsOf: url)
+        let throughTheOldLink = try Data(contentsOf: witness)
+
+        #expect(published != firstAdvertisement, "the overwrite did not take")
+        #expect(
+            throughTheOldLink == firstAdvertisement,
+            """
+            The second write reached the inode the first one published, so `control.json` was \
+            rewritten in place rather than replaced. A reader holding that path sees a truncated \
+            file mid-write, and a first write done this way lands at the umask default with the \
+            token already in it.
+            """
+        )
+    }
+
+    /// The ordering the finding is actually about, read off the write path itself.
+    ///
+    /// Nothing observable about the finished file distinguishes "mode applied to the temporary, then
+    /// renamed" from "renamed, then chmod'd" — see the note on `discoveryFileIsPrivate`. So this
+    /// asserts the property where it lives: `ControlEndpointFile` never chmods a path at all, never
+    /// asks `Data.write` to publish atomically on its behalf, and puts `0o600` on the file at the
+    /// moment it is created, which is before the `rename` that gives it its real name.
+    ///
+    /// Whole-line comments are dropped before any of that is looked for, for the reason
+    /// `Scripts/check_compiler_settings.py` drops them from the two manifests it compares:
+    /// `ControlEndpointFile.write`'s own documentation spells out both `setAttributes` and `.atomic`
+    /// while explaining why neither belongs in the write path, and a check that read them would be
+    /// answering from the explanation instead of from the code.
+    @Test("The write path applies the mode before it publishes, not after")
+    func writePathAppliesTheModeBeforePublishing() throws {
+        let source = try Self.controlPlaneSource("ControlEndpointFile.swift")
+
+        #expect(
+            !source.contains("setAttributes"),
+            """
+            ControlEndpointFile now chmods a path. If that is the discovery file, it is the finding \
+            coming back: between the rename that publishes the token and the chmod that narrows it, \
+            the file sits at the final path at whatever the umask allows — and a throw in between \
+            leaves it there.
+            """
+        )
+        #expect(
+            !source.contains(".atomic"),
+            """
+            ControlEndpointFile asks Foundation to publish a file atomically. `.atomic` renames a \
+            temporary of Foundation's own making, created under the umask, so the mode can only be \
+            applied afterwards — which is the ordering this file exists to avoid.
+            """
+        )
+
+        let creation = try #require(
+            source.range(of: "createFile("),
+            "the write path no longer creates the file it will publish"
+        )
+        let publication = try #require(
+            source.range(of: "rename("),
+            "the write path no longer publishes by rename"
+        )
+        // A guard rather than an expectation: the slice below would trap on an inverted range, and a
+        // crash reports worse than a failure does.
+        guard creation.upperBound < publication.lowerBound else {
+            Issue.record("the file is created after it is published, which cannot be the intended order")
+            return
+        }
+        #expect(
+            source[creation.upperBound..<publication.lowerBound].contains("0o600"),
+            """
+            0o600 is no longer applied between creating the temporary and renaming it into place. \
+            The mode has to be on the file before it takes the real name; `rename(2)` carries it \
+            across, and anything applied afterwards is applied to a file that is already published.
+            """
+        )
+    }
+
+    /// The text of a file in `Sources/ControlPlane`, with whole-line `//` comments removed.
+    ///
+    /// Located from `#filePath` rather than from a bundle: this file is
+    /// `Tests/ControlPlaneTests/ControlServerTests.swift`, so the repository root is three
+    /// directories above it, and both CI jobs build from the checkout.
+    static func controlPlaneSource(
+        _ fileName: String,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ControlPlane", isDirectory: true)
+            .appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Issue.record(
+                "no source at \(url.path), derived from #filePath three directories up",
+                sourceLocation: sourceLocation
+            )
+            return ""
+        }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return text
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
     }
 }

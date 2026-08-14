@@ -59,7 +59,8 @@ struct ImportFeatureRenderingTests {
         isSelected: Bool = true,
         isDuplicate: Bool = false,
         bodySizeBytes: Int = 128,
-        bodySizeExceedsLimit: Bool = false
+        bodySizeExceedsLimit: Bool = false,
+        bodyIsBinary: Bool = false
     ) -> ImportCandidate {
         ImportCandidate(
             id: UUID(),
@@ -70,10 +71,11 @@ struct ImportFeatureRenderingTests {
             suggestedGroupTag: "Users",
             statusCode: 200,
             responseHeaders: ["Content-Type": "application/json"],
-            responseBody: bodySizeExceedsLimit ? nil : #"{"ok":true}"#,
+            responseBody: bodySizeExceedsLimit || bodyIsBinary ? nil : #"{"ok":true}"#,
             responseContentType: .json,
             bodySizeBytes: bodySizeBytes,
             bodySizeExceedsLimit: bodySizeExceedsLimit,
+            bodyIsBinary: bodyIsBinary,
             isDuplicate: isDuplicate
         )
     }
@@ -326,24 +328,27 @@ struct ImportFeatureRenderingTests {
         #expect(dismissed)
     }
 
-    @Test("HAR import view renders empty state")
-    func rendersHARImportEmptyState() {
-        let size = render(
-            ImportView(kind: .har, existingEndpoints: []) { _ in }
-        )
-
-        #expect(size.width >= 0)
-    }
-
-
-    @Test("HAR import view renders parsing error and populated states")
-    func rendersHARImportAdditionalStates() {
+    /// The sheet is one size in every state it can be in.
+    ///
+    /// `ImportView` puts a 760×560 floor under `ImportWorkflowScreen`'s own 600×450, and it does that
+    /// because a real HAR is a browsing session rather than three entries: at 450pt the review showed
+    /// about a dozen rows while its own chrome took a fifth of the height. A floor only works if it is
+    /// the floor in every state — a sheet that opened dialog-sized to say "parsing", then jumped to
+    /// table size when the parse landed, would move under the pointer at the moment you are reaching
+    /// for a checkbox.
+    ///
+    /// So the states are compared with each other rather than against literals, and the floor itself
+    /// is asserted as a floor: a `>=` that fails the moment either frame is removed, without pinning a
+    /// number that belongs to the view.
+    @Test("The import sheet is the same size parsing, failed, empty and populated")
+    func importSheetKeepsOneSizeAcrossStates() {
         let candidates = [
             makeCandidate(),
             makeCandidate(method: .post, path: "/api/v1/sessions"),
         ]
 
-        let parsingSize = render(
+        let empty = render(ImportView(kind: .har, existingEndpoints: []) { _ in })
+        let parsing = render(
             ImportView(
                 kind: .har,
                 existingEndpoints: [],
@@ -352,7 +357,7 @@ struct ImportFeatureRenderingTests {
                 initialIsParsing: true
             ) { _ in }
         )
-        let errorSize = render(
+        let failed = render(
             ImportView(
                 kind: .har,
                 existingEndpoints: [],
@@ -361,7 +366,7 @@ struct ImportFeatureRenderingTests {
                 initialIsParsing: false
             ) { _ in }
         )
-        let populatedSize = render(
+        let populated = render(
             ImportView(
                 kind: .har,
                 existingEndpoints: [],
@@ -371,28 +376,29 @@ struct ImportFeatureRenderingTests {
             ) { _ in }
         )
 
-        #expect(parsingSize.height >= 0)
-        #expect(errorSize.width >= 0)
-        #expect(populatedSize.height >= 0)
+        #expect(parsing == empty)
+        #expect(failed == empty)
+        #expect(populated == empty)
+
+        // The floor `ImportView` states, not the dialog size the screen inside it asks for.
+        #expect(empty.width >= 760)
+        #expect(empty.height >= 560)
     }
 
-    @Test("OpenAPI import view renders empty state")
-    func rendersOpenAPIImportEmptyState() {
-        let size = render(
-            ImportView(kind: .openAPI, existingEndpoints: []) { _ in }
-        )
-
-        #expect(size.height >= 0)
-    }
-
-    @Test("OpenAPI import view renders parsing error and populated states")
-    func rendersOpenAPIImportAdditionalStates() {
-        let candidates = [
-            makeCandidate(path: "/api/v1/users"),
-            makeCandidate(method: .delete, path: "/api/v1/users/{id}"),
-        ]
-
-        let parsingSize = render(
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// The OpenAPI flow is the same screen with different copy, so it earns a render rather than a
+    /// second copy of the size test — and the review list has three rows that take three different
+    /// branches of the flag column, which is where its layout has gone wrong before. Column alignment
+    /// is not observable through a fitting size, so this is honestly a smoke test: it makes the views,
+    /// runs their layout, and fails only by trapping.
+    ///
+    /// It replaces five `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, which
+    /// cannot be negative.
+    @Test("Hosting every import state does not trap during layout")
+    func hostingImportStatesDoesNotTrap() {
+        render(ImportView(kind: .openAPI, existingEndpoints: []) { _ in })
+        render(
             ImportView(
                 kind: .openAPI,
                 existingEndpoints: [],
@@ -401,7 +407,7 @@ struct ImportFeatureRenderingTests {
                 initialIsParsing: true
             ) { _ in }
         )
-        let errorSize = render(
+        render(
             ImportView(
                 kind: .openAPI,
                 existingEndpoints: [],
@@ -410,33 +416,37 @@ struct ImportFeatureRenderingTests {
                 initialIsParsing: false
             ) { _ in }
         )
-        let populatedSize = render(
+        render(
             ImportView(
                 kind: .openAPI,
                 existingEndpoints: [],
-                initialCandidates: candidates,
+                initialCandidates: [
+                    makeCandidate(path: "/api/v1/users"),
+                    makeCandidate(method: .delete, path: "/api/v1/users/{id}"),
+                ],
                 initialParseError: nil,
                 initialIsParsing: false
             ) { _ in }
         )
 
-        #expect(parsingSize.height >= 0)
-        #expect(errorSize.width >= 0)
-        #expect(populatedSize.height >= 0)
-    }
-
-    @Test("Import review list renders warnings and selected summary")
-    func rendersImportReviewList() {
-        let candidates = [
-            makeCandidate(),
-            makeCandidate(method: .post, path: "/api/v1/login", isSelected: false, isDuplicate: true),
-            makeCandidate(method: .delete, path: "/api/v1/files", bodySizeBytes: 1_200_000, bodySizeExceedsLimit: true),
-        ]
-
-        let size = render(
-            ImportReviewHarness(candidates: candidates, onImport: {})
+        // One row per branch of `ImportCandidateRow.flag`: a duplicate, a binary body, an oversized
+        // body, and the ordinary row whose `else` draws `Color.clear` to hold the 92pt column open.
+        // The binary row also exercises the `import.binaryBodyWarning` footer beside the size one.
+        render(
+            ImportReviewHarness(
+                candidates: [
+                    makeCandidate(),
+                    makeCandidate(method: .post, path: "/api/v1/login", isSelected: false, isDuplicate: true),
+                    makeCandidate(
+                        method: .delete,
+                        path: "/api/v1/files",
+                        bodySizeBytes: 1_200_000,
+                        bodySizeExceedsLimit: true
+                    ),
+                    makeCandidate(method: .get, path: "/api/v1/logo.png", bodyIsBinary: true),
+                ],
+                onImport: {}
+            )
         )
-
-        #expect(size.width >= 0)
     }
 }

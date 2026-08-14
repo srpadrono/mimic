@@ -53,13 +53,31 @@ public enum JourneyResolver {
         journey: Journey,
         state: JourneyRunState
     ) -> Int? {
+        // A negative cursor names no step, and both branches below would subscript with it:
+        // `strictSequence` builds `-1..<0`, `orderedPerEndpoint` builds `-1..<count`, and each then
+        // reads `journey.steps[-1]`. `JourneyRunState`'s full initializer now clamps this at zero,
+        // and that is not a reason to drop the guard here — the initializer is only *one* of the two
+        // ways a value of that type comes into being. The other is `Codable`: the type declares no
+        // `init(from:)`, so the synthesized one assigns the stored properties directly and never
+        // runs the clamp. A persisted or hand-written `{"cursor":-1}` therefore arrives here exactly
+        // as it was written. Clamp where the value is constructed, guard where it is used as an
+        // index; neither alone covers both doors.
+        guard state.cursor >= 0 else { return nil }
+
         let searchRange: Range<Int>
         switch journey.matchMode {
         case .strictSequence:
             guard state.cursor < journey.steps.count else { return nil }
             searchRange = state.cursor..<(state.cursor + 1)
         case .orderedPerEndpoint:
-            searchRange = state.cursor..<journey.steps.count
+            // Clamped, because `a..<b` with `a > b` is not an empty range — it is a precondition
+            // failure, and this runs inside the embedded server, so the trap takes the whole app
+            // down with it. `strictSequence` guards the same condition one line up; this branch did
+            // not, and it is the default mode. A cursor past the end is reachable whenever a journey
+            // is rehydrated against steps that have since been removed — `JourneyRunState`'s public
+            // initializer exists for exactly that, and promises the run "degrades gracefully instead
+            // of silently replaying the wrong step". Nothing here was keeping that promise.
+            searchRange = min(state.cursor, journey.steps.count)..<journey.steps.count
         }
 
         for index in searchRange {

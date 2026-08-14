@@ -90,12 +90,16 @@ public struct DSEmptyState: View {
                 icon(systemImage)
             }
 
-            // Order matters, and getting it backwards is not a cosmetic mistake. `.fixedSize(vertical:)`
-            // resolves a `Text`'s ideal height against whatever width is proposed *at that point in
-            // the chain* — so capping the width afterwards is too late. With the cap last, a
-            // measurement pass that proposes a narrow width made the sentence wrap to a height of
-            // hundreds of points, and a `VStack` around it overflowed its window far enough to put
-            // the journey editor's "Add step" button 755pt above the top of its own window.
+            // One modifier, and the cap is all of it. A `Text` given a bounded width already wraps,
+            // so `.frame(maxWidth: 320)` is the whole rule: a readable measure whether this lands in
+            // a 220pt sidebar or a maximised centre pane.
+            //
+            // This note used to explain the *order* of `.fixedSize(horizontal: false, vertical: true)`
+            // against that cap, and neither `Text` here applies a `.fixedSize` any more. The type's
+            // own note above says not to add one back and why — combined with this view's
+            // `.frame(maxHeight: .infinity)` it made the whole view claim about a thousand points of
+            // height, which pushed the journey editor's header, behaviour section and run controls
+            // roughly 750pt above the top of their own window.
             Text(heading)
                 .font(DSTypography.heading)
                 .foregroundStyle(DSColors.labelPrimary)
@@ -107,8 +111,9 @@ public struct DSEmptyState: View {
                 .font(DSTypography.body)
                 .foregroundStyle(DSColors.labelSecondary)
                 .multilineTextAlignment(.center)
-                // Cap the measure first, then take the ideal height for that measure: wrap, never
-                // truncate, and never run the full width of a maximised centre pane.
+                // The same cap the heading takes. Uncapped, a sentence would run the full width of a
+                // maximised centre pane as one very long line; capped, it wraps — and it wraps rather
+                // than truncates because nothing here sets `.lineLimit`.
                 .frame(maxWidth: 320)
                 .accessibilityIdentifier("ds.empty.\(identifier).message")
 

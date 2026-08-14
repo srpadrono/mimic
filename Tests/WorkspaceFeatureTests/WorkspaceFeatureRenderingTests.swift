@@ -67,26 +67,64 @@ struct WorkspaceFeatureRenderingTests {
         )
     }
 
-    @Test("Autosave indicator renders all states")
-    func rendersAutosaveStates() {
-        let size = render(
-            VStack(spacing: 12) {
-                AutosaveStatusIndicator(status: .idle)
-                AutosaveStatusIndicator(status: .saving)
-                AutosaveStatusIndicator(status: .saved)
-                AutosaveStatusIndicator(status: .failed("Disk full"))
-            }
-        )
+    /// Idle is `EmptyView`, and that is the assertion.
+    ///
+    /// The indicator sits in a toolbar row beside controls that must not move: if the idle case drew
+    /// a placeholder — or a fixed frame holding room for the word "Saved" — the row would shift every
+    /// time an autosave settled, which is the kind of motion you notice without being able to name.
+    /// The other three states have to draw something, or the feature is invisible.
+    @Test("The idle autosave state occupies nothing, and the rest occupy something")
+    func autosaveIdleStateTakesNoRoom() {
+        let measure = CGSize(width: 240, height: 60)
+        let idle = render(AutosaveStatusIndicator(status: .idle), size: measure)
+        let saving = render(AutosaveStatusIndicator(status: .saving), size: measure)
+        let saved = render(AutosaveStatusIndicator(status: .saved), size: measure)
+        let failed = render(AutosaveStatusIndicator(status: .failed("Disk full")), size: measure)
 
-        #expect(size.height >= 0)
+        #expect(idle.height < saving.height)
+        #expect(idle.height < saved.height)
+        #expect(idle.height < failed.height)
+        #expect(idle.width < saving.width)
     }
 
+    /// The app's primary action keeps one footprint through the whole start/stop cycle.
+    ///
+    /// The glyph inside it does change size — 10pt while transitioning, 12pt otherwise — so without
+    /// the fixed 34pt frame around it the toolbar would resize twice every time the server was
+    /// started, and the controls beside it would slide. The number is deliberately larger than the
+    /// 18–22pt every other icon control takes, which is only defensible if it is the same 34 in all
+    /// five states.
+    @Test("The server toggle is one size in every server state")
+    func serverToggleKeepsOneFootprint() {
+        let measure = CGSize(width: 120, height: 80)
+        let stopped = render(ServerToggleButton(serverState: .stopped, onStart: {}, onStop: {}), size: measure)
+        let starting = render(ServerToggleButton(serverState: .starting, onStart: {}, onStop: {}), size: measure)
+        let running = render(ServerToggleButton(serverState: .running(port: 8080), onStart: {}, onStop: {}), size: measure)
+        let stopping = render(ServerToggleButton(serverState: .stopping, onStart: {}, onStop: {}), size: measure)
+        let errored = render(ServerToggleButton(serverState: .error("Port in use"), onStart: {}, onStop: {}), size: measure)
 
-    @Test("Inspector panel renders empty and populated states")
-    func rendersInspectorPanelStates() {
+        #expect(starting == stopped)
+        #expect(running == stopped)
+        #expect(stopping == stopped)
+        #expect(errored == stopped)
+    }
+
+    /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
+    ///
+    /// Hosting these panels runs their layout and every `@State` initialiser in them, which is where a
+    /// panel crashes if it is going to — the request log's divider used to throw
+    /// `NSInternalInconsistencyException` out of `_postWindowNeedsUpdateConstraints` during layout,
+    /// with no bad value anywhere for a unit test to catch.
+    ///
+    /// It replaces nine `#expect(size.width >= 0)` lines on `NSHostingController.fittingSize`, which
+    /// cannot be negative: they made the render look like an assertion when the render *was* the
+    /// assertion. The two tests above carry the geometry claims that can actually fail.
+    @Test("Hosting every panel state does not trap during layout")
+    func hostingPanelStatesDoesNotTrap() {
         let endpoint = makeEndpoint()
+        let log = makeLog(endpoint: endpoint)
 
-        let emptySize = render(
+        render(
             InspectorPanelView(
                 endpoint: nil,
                 onAddScenario: { _, _ in },
@@ -95,7 +133,7 @@ struct WorkspaceFeatureRenderingTests {
                 onDeleteScenario: { _, _ in }
             )
         )
-        let populatedSize = render(
+        render(
             InspectorPanelView(
                 endpoint: endpoint,
                 onAddScenario: { _, _ in },
@@ -105,30 +143,21 @@ struct WorkspaceFeatureRenderingTests {
             )
         )
 
-        #expect(emptySize.width >= 0)
-        #expect(populatedSize.height >= 0)
-    }
-
-    @Test("Request log drawer renders empty and populated content")
-    func rendersRequestLogDrawerStates() {
-        let endpoint = makeEndpoint()
-        let log = makeLog(endpoint: endpoint)
-
-        let emptySize = render(
+        render(
             RequestLogDrawerView(
                 requestLogs: [],
                 endpoints: [],
                 onClear: {}
             )
         )
-        let populatedSize = render(
+        render(
             RequestLogDrawerView(
                 requestLogs: [log],
                 endpoints: [endpoint],
                 onClear: {}
             )
         )
-        let selectedSize = render(
+        render(
             RequestLogDrawerView(
                 requestLogs: [log],
                 endpoints: [endpoint],
@@ -141,31 +170,13 @@ struct WorkspaceFeatureRenderingTests {
             )
         )
 
-        #expect(emptySize.width >= 0)
-        #expect(populatedSize.height >= 0)
-        #expect(selectedSize.height >= 0)
+        renderSidebarStates(endpoint: endpoint)
     }
 
-    @Test("Server toggle renders each state")
-    func rendersServerToggleStates() {
-        let size = render(
-            HStack(spacing: 16) {
-                ServerToggleButton(serverState: .stopped, onStart: {}, onStop: {})
-                ServerToggleButton(serverState: .starting, onStart: {}, onStop: {})
-                ServerToggleButton(serverState: .running(port: 8080), onStart: {}, onStop: {})
-                ServerToggleButton(serverState: .stopping, onStart: {}, onStop: {})
-                ServerToggleButton(serverState: .error("Port in use"), onStart: {}, onStop: {})
-            },
-            size: CGSize(width: 500, height: 80)
-        )
-
-        #expect(size.width >= 0)
-    }
-
-    @Test("Sidebar renders empty grouped and no-match states")
-    func rendersSidebarStates() {
-        let endpoint = makeEndpoint()
-        let emptySize = render(
+    /// Split out only to keep the smoke test above readable — the sidebar has three states worth
+    /// hosting, including the one where a search matches nothing, plus the row on its own.
+    private func renderSidebarStates(endpoint: Endpoint) {
+        render(
             SidebarView(
                 projectName: "Mimic",
                 endpoints: [],
@@ -175,7 +186,7 @@ struct WorkspaceFeatureRenderingTests {
                 onAddEndpoint: {}
             )
         )
-        let populatedSize = render(
+        render(
             SidebarView(
                 projectName: "Mimic",
                 endpoints: [
@@ -196,7 +207,7 @@ struct WorkspaceFeatureRenderingTests {
                 onAddEndpoint: {}
             )
         )
-        let noMatchesSize = render(
+        render(
             SidebarView(
                 projectName: "Mimic",
                 endpoints: [endpoint],
@@ -208,14 +219,9 @@ struct WorkspaceFeatureRenderingTests {
                 initialCollapsedSections: []
             )
         )
-        let rowSize = render(
+        render(
             EndpointSidebarRow(endpoint: endpoint),
             size: CGSize(width: 320, height: 60)
         )
-
-        #expect(emptySize.width >= 0)
-        #expect(populatedSize.height >= 0)
-        #expect(noMatchesSize.height >= 0)
-        #expect(rowSize.width >= 0)
     }
 }

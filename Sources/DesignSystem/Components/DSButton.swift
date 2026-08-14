@@ -1,7 +1,15 @@
 import SwiftUI
 
 /// Button style variant
-public enum DSButtonVariant {
+///
+/// `CaseIterable` so `DSContrastTests` can sweep every variant rather than a list of the ones
+/// somebody remembered. A variant added without a reading is what this conformance is for.
+///
+/// `nonisolated` for the reason `DSColors` is: this module compiles with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and a synthesized `allCases` that lands on the main
+/// actor is a witness `CaseIterable` never asked for. `DSContrastTests` marks its own `Appearance`
+/// the same way and says so.
+public nonisolated enum DSButtonVariant: CaseIterable {
     case primary
     case secondary
     case destructive
@@ -84,11 +92,88 @@ public struct DSButton: View {
     }
 }
 
+// MARK: - Colour
+
+extension DSButtonVariant {
+    /// The opaque slab a filled variant draws, or `nil` for the two that draw none.
+    ///
+    /// Lives on the variant rather than inside the style so the contrast suite measures the colour the
+    /// component actually fills with instead of a copy of it — the blind spot that let a status pill's
+    /// self-tint go unmeasured for months, moved one component over.
+    var fill: Color? {
+        switch self {
+        // `accentFill`, not `accent`: this is one of the two places the accent sits *behind white
+        // text*, and the system blue measures 3.65:1 there. See the token for why only this moved.
+        case .primary: return DSColors.accentFill
+        // `destructiveFill`, not `destructive`, for the same reason on the other side of the palette:
+        // white on the dark salmon reads 2.52:1.
+        case .destructive: return DSColors.destructiveFill
+        case .secondary, .ghost: return nil
+        }
+    }
+
+    /// The label's colour.
+    ///
+    /// Ghost takes `accentText`, not `accent`. A ghost button is nothing but its word, so that word is
+    /// the entire control. The fill blue measured 3.65:1 on a sheet and 2.80:1 once the pointer lit
+    /// the `accentSubtle` well beneath it — the label of the Cancel button in every sheet in the app,
+    /// getting *harder* to read the moment you aimed at it. Every other variant sits on a slab and is
+    /// unaffected.
+    var ink: Color {
+        switch self {
+        case .primary, .destructive: .white
+        case .secondary: DSColors.labelPrimary
+        case .ghost: DSColors.accentText
+        }
+    }
+}
+
+/// How far a filled variant darkens under the pointer and under a press.
+///
+/// **A wash of black over the slab, not an alpha on the slab**, and the difference is the whole point
+/// of this type. `shade` used to return `base.opacity(0.72)` when pressed, which does not darken
+/// anything: it dissolves the fill into whatever surface happens to be behind the button, and on a
+/// light one that means the slab moves *towards* the white label on it. Measured on the light canvas,
+/// a pressed primary button read **3.06:1** and a hovered one 3.88 — the app's main action, below AA
+/// for as long as your finger was down, while the same button at rest read 4.65. The comment above it
+/// described this as darkening on press and lifting very slightly on hover, and it was half wrong in
+/// each appearance: thinning the fill toward a light surface *lightens* both states, and toward a dark
+/// one it darkens both.
+///
+/// Black over an opaque fill can only reduce luminance, so a white label's contrast can only rise —
+/// and it rises by the same amount whatever the button is sitting on, which is what makes it
+/// assertable. Rendered and read back: `accentFill` goes 4.65 → 5.17 → 5.96 and `destructiveFill`
+/// 5.64 → 6.21 → 7.13. On `accentFill` the two steps measure ΔL\* 2.92 and 6.79 against the resting
+/// slab, so the press is unmistakable and the hover is about the size of the step `DSColors.band`
+/// makes off a dark panel (3.24) — present, and not a second press.
+nonisolated enum DSButtonShade {
+    /// At rest.
+    static let rest: Double = 0
+    /// Under the pointer.
+    static let hover: Double = 0.06
+    /// While held.
+    static let pressed: Double = 0.14
+
+    /// How dark the wash is in the given state.
+    static func alpha(isPressed: Bool, isHovered: Bool) -> Double {
+        if isPressed { return pressed }
+        return isHovered ? hover : rest
+    }
+
+    /// The wash drawn over a filled variant's slab.
+    ///
+    /// Black at *some* alpha in every state, zero included, rather than `.clear` when resting: one
+    /// colour whose only variable is a number is a thing a test can resolve and compare across the
+    /// three states, where `.clear` is a different colour that happens to draw nothing.
+    static func wash(isPressed: Bool, isHovered: Bool) -> Color {
+        .black.opacity(alpha(isPressed: isPressed, isHovered: isHovered))
+    }
+}
+
 // MARK: - Geometry
 
-/// A hairline, not a border — the same weight `DSFilterField` and the request log's header controls
-/// use. At 1pt a row of buttons reads as a form.
-private let dsButtonBorderWidth: CGFloat = 0.5
+/// A hairline, not a border. At 1pt a row of buttons reads as a form.
+private let dsButtonBorderWidth = DSStroke.hairline
 
 private extension DSButtonSize {
     /// Fixed, so two buttons of the same size are the same height whatever their titles.
@@ -98,9 +183,9 @@ private extension DSButtonSize {
     /// button — so a `.medium` button standing next to a system `Picker` in a sheet lines up.
     var height: CGFloat {
         switch self {
-        case .small: 20
-        case .medium: 22
-        case .large: 28
+        case .small: DSControlHeight.row
+        case .medium: DSControlHeight.field
+        case .large: DSControlHeight.prominent
         }
     }
 
@@ -112,12 +197,21 @@ private extension DSButtonSize {
         }
     }
 
-    /// Never below 8pt, and never smaller than the text it sits beside.
+    /// Never below 8pt, and a step *under* the line it sits beside rather than level with it.
+    ///
+    /// The rungs are `DSGlyph`'s: `.small` sets `DSTypography.label` (11) and takes the inline rung at
+    /// 10, while `.medium` and `.large` both set 13pt lines and take control rungs at 11 and 12.
+    ///
+    /// This used to promise the glyph was "never smaller than the text it sits beside", which no
+    /// size here has ever satisfied — and should not. An SF Symbol drawn at a line's own point size
+    /// reads *larger* than the line, because the glyph fills the em box where a letter leaves room
+    /// above and below it. Matching the numbers is what makes the warning triangle look oversized,
+    /// not what makes it match.
     var glyphSize: CGFloat {
         switch self {
-        case .small: 10
-        case .medium: 11
-        case .large: 12
+        case .small: DSGlyph.inline
+        case .medium: DSGlyph.control
+        case .large: DSGlyph.controlLarge
         }
     }
 
@@ -129,10 +223,9 @@ private extension DSButtonSize {
         }
     }
 
-    /// 3pt for the row sizes, which is what `DSFilterField` and the request log's controls use.
     var verticalPadding: CGFloat {
         switch self {
-        case .small, .medium: 3
+        case .small, .medium: DSControlHeight.verticalPadding
         case .large: DSSpacing.sm
         }
     }
@@ -174,10 +267,17 @@ private struct DSButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .foregroundStyle(foreground)
+                .foregroundStyle(variant.ink)
                 .background {
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .fill(background)
+                        // The shade is a layer *over* the slab, never an alpha applied to it — see
+                        // `DSButtonShade`. It is `.clear` for `secondary` and `ghost`, whose feedback
+                        // is the fill itself, so this layer changes nothing for them.
+                        .overlay {
+                            RoundedRectangle(cornerRadius: cornerRadius)
+                                .fill(shade)
+                        }
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius)
@@ -194,35 +294,27 @@ private struct DSButtonStyle: ButtonStyle {
                 .onHover { isHovered = $0 }
         }
 
-        /// Ghost takes `accentText`, not `accent`.
-        ///
-        /// A ghost button is nothing but its word, so that word is the entire control. The fill blue
-        /// measured 3.65:1 on a sheet and 2.80:1 once the pointer lit the `accentSubtle` well beneath
-        /// it — the label of the Cancel button in every sheet in the app, getting *harder* to read the
-        /// moment you aimed at it. Every other variant sits on a slab and is unaffected.
-        private var foreground: Color {
-            switch variant {
-            case .primary, .destructive: .white
-            case .secondary: DSColors.labelPrimary
-            case .ghost: DSColors.accentText
-            }
-        }
-
         /// Feedback is carried by the fill, not by a scale.
         ///
         /// The button used to grow 1.5% under the pointer and shrink 3% when pressed, and the whole
         /// thing was then clipped by a `clipShape` of the *unscaled* rounded rectangle applied
         /// outside the style — so hovering a bordered button visibly shaved its own border off.
         /// AppKit buttons do not change size when you point at them; they change colour.
+        ///
+        /// A filled variant's slab is its token, unmodified: the state is carried by `shade` below,
+        /// which draws over it rather than thinning it.
         private var background: Color {
             switch variant {
-            // `accentFill`, not `accent`: this is the one place the accent sits *behind white text*,
-            // and the system blue measures 3.64:1 there. See the token for why only this moved.
-            case .primary: shade(DSColors.accentFill)
-            case .destructive: shade(DSColors.destructive)
+            case .primary, .destructive: variant.fill ?? .clear
             case .secondary: unfilled(rest: DSColors.tertiary)
             case .ghost: unfilled(rest: .clear)
             }
+        }
+
+        /// The wash over a filled slab. `.clear` for the two variants whose feedback *is* their fill.
+        private var shade: Color {
+            guard variant.fill != nil else { return .clear }
+            return DSButtonShade.wash(isPressed: configuration.isPressed, isHovered: isHovered)
         }
 
         private var border: Color {
@@ -231,12 +323,6 @@ private struct DSButtonStyle: ButtonStyle {
             case .secondary: DSColors.border
             case .primary, .destructive, .ghost: .clear
             }
-        }
-
-        /// Filled variants darken on press and lift very slightly on hover.
-        private func shade(_ base: Color) -> Color {
-            if configuration.isPressed { return base.opacity(0.72) }
-            return isHovered ? base.opacity(0.88) : base
         }
 
         /// Unfilled variants borrow the design system's established hover tint rather than inventing

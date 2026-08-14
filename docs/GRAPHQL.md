@@ -31,6 +31,14 @@ pair — the alias is whatever the caller felt like typing.
 Comments are ignored, so a `# query Decoy { }` cannot masquerade as an operation, and variable
 definitions (`query GetUser($id: ID!)`) do not swallow the name.
 
+**Leading fragment definitions are skipped**, braces counted so nested selections close correctly.
+Most real clients emit their fragments ahead of the operation, and the scanner used to stop at the
+first `{` it found — the fragment's — and name the document after *its* first field. A body reading
+`fragment fields on User { name }` before `query GetUser { … }` therefore resolved to the operation
+`name`, so a mock declared for `GetUser` did not match and a well-formed request 404'd. A fragment
+whose braces never close still yields "not GraphQL", which falls back to path routing rather than
+matching on a name guessed out of a broken document.
+
 This is a tolerant scanner, not a GraphQL parser: it identifies operations in real traffic rather
 than validating a schema. A body it cannot read is simply "not GraphQL", and routing falls back to
 method and path as before.
@@ -63,19 +71,43 @@ The same account query fails and then succeeds, exactly as in the REST version �
 
 ## Importing a capture
 
-`mimic` and the UI both split GraphQL traffic in a HAR by operation, so a capture of twenty distinct
-calls imports as twenty addressable mocks instead of twenty entries that all look like
-`POST /graphql` and fight over one route. Each is named after its operation and grouped under
-`GraphQL`.
+The window splits GraphQL traffic in a HAR by operation, so a capture of twenty distinct calls
+imports as twenty addressable mocks instead of twenty entries that all look like `POST /graphql` and
+fight over one route. Each is named after its operation and grouped under `GraphQL`.
+
+**Only the window**, and this line used to say "`mimic` and the UI both". It cannot: the splitting
+lives in `SpecImport.HARParser`, and `SpecImport` is linked by `AppFeatures` and the app target
+alone — no edge reaches it from `MimicCLICore` or `ControlPlane` in either manifest, which is the
+same missing edge behind there being no `mimic import` at all. A script reads the HAR itself and
+issues `mimic endpoint create --graphql-operation …` per operation.
+
+This line used to publish a `grep` for the reader to run by hand. That is what
+[`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py) does now, on every CI run, over
+the transitive closure of both manifests rather than the direct edges a grep can see.
 
 Two operations on the same route are not treated as duplicates of one another — the operation is what
 makes them distinct.
 
 ## Known limits
 
-- **Batched requests are not matched.** Some clients POST a JSON *array* of operations and expect an
-  array back. No single mocked response can represent that honestly, so such a request matches
-  nothing and is reported as unmatched rather than silently answered with one of the operations.
+- **A batch never matches a mock that names an operation.** Some clients POST a JSON *array* of
+  operations and expect an array back. No single mocked response can represent that honestly, so
+  `GraphQLRequest.operation(inBody:)` answers `nil` for an array of more than one, and every
+  endpoint declaring `graphqlOperation` is then a non-match — not a weak one. A mock for
+  `SendPayment` will not answer a batch that contains `SendPayment`.
+
+  **A catch-all still answers it**, and this bullet used to say the opposite — "such a request
+  matches nothing and is reported as unmatched". A bare `POST /graphql` declares no operation, which
+  `RequestMatcher.operationSpecificity` scores as a match at the lowest specificity, exactly as the
+  precedence section above promises. So the catch-all's status and body are what the client gets,
+  and the array it expected is what it does not get.
+
+  **Nothing reports the batch as a batch.** With no catch-all the request falls to the same
+  `404` and the same `.unmatched` outcome in the request log that a typo'd path produces; there is
+  no distinct outcome, message or flag saying a batch arrived. `GraphQLRequest.isBatched` is the
+  predicate that would tell those two apart and nothing in `Sources` calls it — telling the client
+  means a new `ResolvedResponse`, the way `journeyBlocked` already carries its own reason, which is
+  a change in `RequestMatcher` rather than in the scanner.
 - **Persisted queries** that send only a hash carry no document to read, so there is nothing to
   match on. Mock them by hash on the path, or turn persisted queries off in your test build.
 - **`GET`-style GraphQL** (`?query=…`) is not parsed; the discriminator is read from the request body.

@@ -66,7 +66,7 @@ public struct DSSectionHeader<Trailing: View>: View {
                 // the other. Not `panelSeparator` either: that is heavier, and it is reserved for
                 // the seam *between* panels. This is a bar inside one.
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         // Paired, because this header carries a trailing control slot — "Add" and "Format" both
         // live there. A container identifier with no `.contain` renames every descendant to match

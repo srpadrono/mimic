@@ -36,6 +36,21 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
 
+    /// Keyboard focus, so the well answers the Tab key the way it already answers the pointer.
+    ///
+    /// `.textFieldStyle(.plain)` discards AppKit's own focus ring, and nothing replaced it — so this
+    /// field, the request log's and the request detail's were three places in the workspace where
+    /// tabbing in changed nothing on screen. That is the same defect as a control with no hover
+    /// state, applied to the keyboard, and for Full Keyboard Access it is not a polish item.
+    /// `DSTextField` already draws exactly this ring; it was simply the only thing in the module that
+    /// did.
+    ///
+    /// This fixes one of the three. The request log's field (`RequestLogDrawerView`) and the request
+    /// detail's (`RequestDetailInspector`) are still hand-rolled `TextField`s with no ring — they are
+    /// two of the three call sites that should be adopting this component rather than redrawing it,
+    /// and they get the ring for free when they do.
+    @FocusState private var isFocused: Bool
+
     public init(
         text: Binding<String>,
         scopeID: Binding<String>,
@@ -64,6 +79,7 @@ public struct DSFilterField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(DSTypography.codeSmall)
+                .focused($isFocused)
                 .accessibilityIdentifier("\(identifier).field")
                 .accessibilityLabel(placeholder)
 
@@ -86,12 +102,18 @@ public struct DSFilterField: View {
         // control states its own height — but this one never did, so its height was whatever the
         // scope `Menu` inside it happened to measure. The one control that promised to match its
         // neighbours was the only one not measuring itself.
-        .frame(height: 20)
+        .frame(height: DSControlHeight.row)
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                // Focused, the well differs from its neighbours by *state* and by nothing else —
+                // same colour and same weight `DSTextField` uses, so the two read as one idiom.
+                .stroke(
+                    isFocused ? DSColors.borderFocused : DSColors.border,
+                    lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline
+                )
         }
+        .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
         // Paired deliberately: an identifier alone on a container overrides its descendants', and
         // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
         .accessibilityIdentifier("ds.filterfield.\(identifier)")
@@ -128,8 +150,12 @@ public struct DSFilterField: View {
                     // filter searches". The magnifier belongs to the request detail's "Find in body",
                     // which really is a search. See the type's note for why one would not fit here
                     // anyway: it would land immediately beside this pill, two glyphs in one corner.
+                    //
+                    // `inlineSmall`, the quiet end of the inline tier: this glyph qualifies the pill
+                    // rather than being the pill's affordance — the chevron below is that — so it
+                    // sits a step under the title it may appear beside.
                     Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: DSGlyph.inlineSmall, weight: .medium))
 
                     if isScoped {
                         Text(title)
@@ -143,14 +169,16 @@ public struct DSFilterField: View {
                     //
                     // `chevron.up.chevron.down`, not a lone `chevron.down`: this picks one of N values
                     // and shows the one in force, which is a pop-up, and it is the same mark
-                    // `BreadcrumbJumpBar` puts on a crumb that has siblings. 8pt is the window's
-                    // menu-indicator size and the floor below which the mark becomes a smudge.
+                    // `BreadcrumbJumpBar` puts on a crumb that has siblings. `DSGlyph.indicator` is
+                    // the window's menu-indicator size, and it sits on `DSGlyph.minimum` — the floor
+                    // below which a mark stops reading as a mark. This pill is the case that floor
+                    // was written for.
                     //
                     // It takes the pill's own colour rather than dropping to `labelTertiary` the way
                     // the breadcrumb's does. There a title carries the message and the chevron only
                     // annotates it; here there is no title to annotate.
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
                 }
                 .foregroundStyle(foreground)
                 .padding(.horizontal, DSSpacing.xs)
@@ -165,7 +193,7 @@ public struct DSFilterField: View {
                     // visible on any surface only when it does not borrow that surface's colour.
                     Capsule()
                         .fill(DSColors.secondary)
-                        .stroke(DSColors.border, lineWidth: 0.5)
+                        .stroke(DSColors.border, lineWidth: DSStroke.hairline)
                 }
             }
             .onHover { isHovered = $0 }

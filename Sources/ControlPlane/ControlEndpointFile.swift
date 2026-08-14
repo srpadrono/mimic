@@ -1,46 +1,6 @@
 import Domain
 import Foundation
 
-/// How the CLI finds a running Mimic.
-///
-/// Whoever hosts the control plane writes a small discovery file; the CLI reads it. This exists
-/// because the sandboxed app and an unsandboxed CLI do not share a working directory, a port
-/// convention, or a process tree — a file in a known location is the one thing both can reach.
-/// Search order is deliberate: an explicit `MIMIC_CONTROL_URL` always wins, then the app's sandbox
-/// container, then the plain Application Support path a daemon uses.
-public struct ControlEndpoint: Codable, Sendable, Equatable {
-    public var apiVersion: String
-    public var port: Int
-    public var pid: Int
-    /// `app` or `headless`.
-    public var mode: String
-    public var baseURL: String
-    /// The per-instance token a caller must present as `X-Mimic-Token`.
-    ///
-    /// Carried in the discovery file on purpose: the file is the thing a local CLI can read and a web
-    /// page cannot, which is what makes it usable as a credential. It is written `0600` so it is also
-    /// the thing *another user on this machine* cannot read.
-    ///
-    /// Optional on decode so a CLI can give a clear "upgrade the app" message when it meets a file
-    /// written by an older instance, instead of failing to parse it.
-    public var token: String?
-
-    public init(
-        apiVersion: String = ControlAPI.version,
-        port: Int,
-        pid: Int,
-        mode: String,
-        token: String? = nil
-    ) {
-        self.apiVersion = apiVersion
-        self.port = port
-        self.pid = pid
-        self.mode = mode
-        self.baseURL = "http://127.0.0.1:\(port)"
-        self.token = token
-    }
-}
-
 /// Mints the per-instance token.
 ///
 /// A fresh token per process, never persisted beyond the discovery file: an instance that has exited
@@ -75,30 +35,40 @@ public enum ControlToken {
     }
 }
 
+/// The write half of the discovery-file contract: how a running instance advertises itself.
+///
+/// The *read* half — the search paths, the `MIMIC_CONTROL_FILE` override, pid liveness, and the
+/// resolution rules a client applies — is `ControlEndpointDiscovery` in `Domain`, and this enum
+/// delegates every path decision to it. It used to carry a reader of its own, a twin of the one the
+/// CLI carries, and the two drifted (see `ControlEndpointDiscovery`'s documentation); what stays
+/// here is only what a *writer* needs, because writing is the one thing a Vapor-linking host does
+/// that a client never should.
 public enum ControlEndpointFile {
-    public static let fileName = "control.json"
 
-    /// Every location a discovery file may live, most specific first.
+    /// Where *this* process should write its discovery file: wherever `MIMIC_CONTROL_FILE` names, or
+    /// alongside its own Application Support, whichever container that resolves to.
     ///
-    /// The app is sandboxed, so its "Application Support" is inside its container; a daemon launched
-    /// from a shell writes to the real one. A CLI must look in both, because it cannot know which
-    /// kind of instance is running.
-    public static func searchURLs(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> [URL] {
-        [
-            homeDirectory
-                .appendingPathComponent("Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic", isDirectory: true)
-                .appendingPathComponent(fileName),
-            homeDirectory
-                .appendingPathComponent("Library/Application Support/devxa.Mimic", isDirectory: true)
-                .appendingPathComponent(fileName),
-        ]
-    }
-
-    /// Where *this* process should write its discovery file: alongside its own Application Support,
-    /// whichever container that resolves to.
-    public static func writeURL() throws -> URL {
+    /// The override is resolved by `ControlEndpointDiscovery.overrideURL(in:)` — the same function
+    /// every reader resolves it with — so the file a run writes and the file a run reads cannot
+    /// drift apart. Computing the default path here while a reader honoured the override is how a
+    /// run would delete the developer's advertisement and leave its own behind — the exact pair of
+    /// mistakes `UITestSupport.databaseURL` exists to prevent for the store.
+    ///
+    /// Both branches create the parent directory, and both ask for `0700`: the file inside carries
+    /// this instance's token, so a directory somebody else can list is not a place to put it. The
+    /// override gets the same treatment as the computed path because it holds the same secret — an
+    /// isolated run is not a less sensitive one.
+    public static func writeURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> URL {
+        if let override = ControlEndpointDiscovery.overrideURL(in: environment) {
+            try FileManager.default.createDirectory(
+                at: override.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+            )
+            return override
+        }
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -106,71 +76,95 @@ public enum ControlEndpointFile {
             create: true
         )
         let directory = appSupport.appendingPathComponent("devxa.Mimic", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent(fileName)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+        )
+        return directory.appendingPathComponent(ControlEndpointDiscovery.fileName)
     }
 
-    /// Writes the discovery file `0600`.
+    /// Writes the discovery file `0600`, and never at any wider mode, even briefly.
     ///
     /// The file carries the instance's token, so its permissions are the access control. A plain
     /// `write(to:options:.atomic)` lands at `0644` under the default umask, which publishes the token
-    /// to every account on the machine — on a shared box or a CI host, that is the whole authentication
-    /// story undone. `.atomic` writes via a temporary file and renames, so the mode has to be applied
-    /// after the rename, not before.
-    public static func write(_ endpoint: ControlEndpoint, to url: URL? = nil) throws {
-        let target = try url ?? writeURL()
+    /// to every account on the machine — on a shared box or a CI host, that is the whole
+    /// authentication story undone.
+    ///
+    /// Chmod-after-write does not fix it, which is what this used to do: `.atomic` writes a temporary
+    /// file and renames it into place, so between that rename and the `setAttributes` call the token
+    /// is sitting at the final path, readable by anyone who is looking. A loop watching the path wins
+    /// that race trivially. Worse, if `setAttributes` threw, the throw left the world-readable file
+    /// behind — and `ControlServer` called this through `try?`, so nothing was reported either. That
+    /// half is fixed at the call site now: `ControlServer.start` catches what this throws and logs
+    /// it. Keep it that way. A hardened write whose caller discards the error is not hardened; it
+    /// only moves the silence one frame up.
+    ///
+    /// So the mode is applied to the temporary file *before* it becomes visible under the real name,
+    /// and `rename(2)` — which replaces atomically and carries the source's mode with it — publishes
+    /// it. A reader therefore sees either the old file or a complete `0600` one, and never a partial
+    /// or a wide one.
+    public static func write(
+        _ endpoint: ControlEndpoint,
+        to url: URL? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws {
+        let target = try url ?? writeURL(environment: environment)
         let data = try ControlCoding.encoder(pretty: true).encode(endpoint)
-        try data.write(to: target, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: Int16(0o600))],
-            ofItemAtPath: target.path
-        )
+
+        // Same directory, so the rename stays within one filesystem and is therefore atomic.
+        let temporary = target.deletingLastPathComponent()
+            .appendingPathComponent(".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier)")
+
+        let manager = FileManager.default
+        try? manager.removeItem(at: temporary)
+        guard manager.createFile(
+            atPath: temporary.path,
+            contents: nil,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o600))]
+        ) else {
+            throw ControlEndpointFileError.couldNotWrite(path: temporary.path)
+        }
+
+        do {
+            try data.write(to: temporary)
+            guard rename(temporary.path, target.path) == 0 else {
+                throw ControlEndpointFileError.couldNotWrite(path: target.path)
+            }
+        } catch {
+            try? manager.removeItem(at: temporary)
+            throw error
+        }
     }
 
     /// Removes the file so a stale endpoint never outlives the process that advertised it.
-    public static func remove(at url: URL? = nil) {
-        guard let target = try? (url ?? writeURL()) else { return }
+    ///
+    /// Takes the same environment as `writeURL`, so a process that advertised itself at
+    /// `MIMIC_CONTROL_FILE` removes *that* file on the way out. Computing the default path here
+    /// while the write went to an override is how a run would delete the developer's advertisement
+    /// and leave its own behind — the exact pair of mistakes `UITestSupport.databaseURL` exists to
+    /// prevent for the store, and the reason both paths come from one function here too.
+    public static func remove(
+        at url: URL? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        guard let target = try? (url ?? writeURL(environment: environment)) else { return }
         try? FileManager.default.removeItem(at: target)
     }
+}
 
-    /// Reads the first readable discovery file, skipping any whose process is gone — a crashed
-    /// instance must not make the CLI hang on a dead port.
-    public static func discover(
-        searchURLs: [URL]? = nil,
-        isProcessAlive: (Int) -> Bool = ControlEndpointFile.isProcessAlive
-    ) -> ControlEndpoint? {
-        for url in searchURLs ?? Self.searchURLs() {
-            guard let data = try? Data(contentsOf: url),
-                  let endpoint = try? ControlCoding.decode(ControlEndpoint.self, from: data)
-            else { continue }
-            guard isProcessAlive(endpoint.pid) else { continue }
-            return endpoint
-        }
-        return nil
-    }
+/// Why a discovery file could not be written.
+///
+/// Typed rather than a bare `NSError` because the caller — `ControlServer` — has to decide whether an
+/// instance that cannot advertise itself should still serve, and "the write failed" and "the rename
+/// failed" are the same decision.
+public enum ControlEndpointFileError: Error, LocalizedError, Equatable {
+    case couldNotWrite(path: String)
 
-    /// `kill(pid, 0)` succeeds for a live process and fails with `ESRCH` for a dead one.
-    /// An `EPERM` means the process exists but is owned by someone else — still alive.
-    public static func isProcessAlive(_ pid: Int) -> Bool {
-        guard pid > 0 else { return false }
-        if kill(pid_t(pid), 0) == 0 { return true }
-        return errno == EPERM
-    }
-
-    /// Resolves the base URL a client should use, honouring the environment override first.
-    public static func resolveBaseURL(
-        explicit: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        discovered: ControlEndpoint? = nil
-    ) -> URL? {
-        if let explicit, let url = URL(string: explicit) { return url }
-        if let override = environment[ControlAPI.urlEnvironmentKey], !override.isEmpty {
-            return URL(string: override)
+    public var errorDescription: String? {
+        switch self {
+        case let .couldNotWrite(path):
+            "Could not write the control discovery file at \(path)."
         }
-        if let port = environment[ControlAPI.portEnvironmentKey], let value = Int(port) {
-            return URL(string: "http://127.0.0.1:\(value)")
-        }
-        if let discovered { return URL(string: discovered.baseURL) }
-        return nil
     }
 }

@@ -158,10 +158,17 @@ struct RealCaptureTests {
         #expect(candidates.first?.bodySizeBytes == 0)
     }
 
-    @Test("A base64 capture is not imported as literal base64 text")
+    @Test("A base64 text capture is decoded rather than imported as literal base64")
     func base64EncodedBody() async throws {
         // Browsers base64 binary and sometimes text bodies. Importing the encoded form as the mock's
         // body would serve gibberish that looks superficially fine in a listing.
+        //
+        // This case covers the *text* half only — its fixture encodes UTF-8 JSON, so decoding can
+        // succeed. Its title used to claim the whole property ("a base64 capture is not imported as
+        // literal base64 text") while the binary half was both untested and false: a body whose
+        // decoded bytes are not UTF-8 fell through to exactly that literal import. The cases below
+        // hold the rest — two genuinely binary bodies, the newline-wrapped form real exporters
+        // write, and a declared-base64 body that will not decode at all.
         let encoded = Data(#"{"ok":true}"#.utf8).base64EncodedString()
         let candidates = try await HARParser.parse(
             data: Self.har(entries: Self.entry(
@@ -173,6 +180,103 @@ struct RealCaptureTests {
         )
         let body = try #require(candidates.first?.responseBody)
         #expect(body == #"{"ok":true}"#, "a base64 capture must be decoded, not stored verbatim")
+    }
+
+    @Test("A binary body — most of any real capture — imports without a body, flagged")
+    func binaryBase64Body() async throws {
+        // A PNG header and the gzip magic: the first bytes of two things every browsing session
+        // captures. Neither is valid UTF-8 — 0x89 and 0x8B can only continue a sequence, never
+        // start one — and that is the property every earlier base64 fixture lacked: each encoded
+        // UTF-8 JSON, so the decode-to-text step always succeeded and the fall-through that
+        // imported the literal base64 spelling as the body was unreachable from tests while being
+        // routine in use. AGENTS.md names this exact tell: a fixture whose every instance agrees
+        // on something the format does not require.
+        let pngHeader = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let gzipMagic = Data([0x1F, 0x8B, 0x08, 0x00])
+        #expect(String(data: pngHeader, encoding: .utf8) == nil, "the PNG fixture must not be decodable text")
+        #expect(String(data: gzipMagic, encoding: .utf8) == nil, "the gzip fixture must not be decodable text")
+
+        let pngEntry = Self.entry(
+            url: "https://api.test/assets/logo.png",
+            headers: #"{ "name": "content-type", "value": "image/png" }"#,
+            mimeType: "image/png",
+            text: pngHeader.base64EncodedString(),
+            extraContent: #", "encoding": "base64""#
+        )
+        let gzipEntry = Self.entry(
+            url: "https://api.test/v1/report.gz",
+            headers: #"{ "name": "content-type", "value": "application/gzip" }"#,
+            mimeType: "application/gzip",
+            text: gzipMagic.base64EncodedString(),
+            extraContent: #", "encoding": "base64""#
+        )
+        let candidates = try await HARParser.parse(
+            data: Self.har(entries: "\(pngEntry), \(gzipEntry)"),
+            existingEndpoints: []
+        )
+        #expect(candidates.count == 2)
+        let png = try #require(candidates.first { $0.path == "/assets/logo.png" })
+        let gzip = try #require(candidates.first { $0.path == "/v1/report.gz" })
+
+        for candidate in [png, gzip] {
+            #expect(
+                candidate.responseBody == nil,
+                "\(candidate.path): a String body cannot reproduce these bytes — the base64 spelling must not stand in for them"
+            )
+            #expect(candidate.bodyIsBinary, "\(candidate.path): the review sheet must be told why there is no body")
+            #expect(candidate.isSelected, "\(candidate.path): flagged like an oversized body, not excluded")
+            #expect(candidate.bodySizeExceedsLimit == false)
+        }
+        // The size shown in review is the capture's, not zero — mirroring the oversized path,
+        // where the body is gone but the row still says what was there.
+        #expect(png.bodySizeBytes == pngHeader.count)
+        #expect(gzip.bodySizeBytes == gzipMagic.count)
+    }
+
+    @Test("Newline-wrapped base64 — the MIME column width real exporters write — still decodes")
+    func newlineWrappedBase64Body() async throws {
+        // `Data(base64Encoded:)` is strict by default: the first line break fails the whole
+        // decode, and the failure used to take the same silent fall-through as a binary body — the
+        // wrapped spelling itself imported as the mock's body, even though the body was text.
+        let payload = #"{"rows":[{"id":1,"name":"alpha"},{"id":2,"name":"beta"},{"id":3,"name":"gamma"}],"total":3}"#
+        let wrapped = Data(payload.utf8).base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        #expect(wrapped.contains("\n"), "a fixture short enough not to wrap cannot fail")
+
+        let candidates = try await HARParser.parse(
+            data: Self.har(entries: Self.entry(
+                headers: #"{ "name": "content-type", "value": "application/json" }"#,
+                // The JSON escape, so the decoded `HARContent.text` carries real newlines.
+                text: wrapped.replacingOccurrences(of: "\n", with: "\\n"),
+                extraContent: #", "encoding": "base64""#
+            )),
+            existingEndpoints: []
+        )
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == payload)
+        #expect(candidate.bodyIsBinary == false)
+    }
+
+    @Test("A body declared base64 that will not decode is dropped, not imported as its spelling")
+    func undecodableBase64Body() async throws {
+        // Nine base64 digits is 4n+1, which no amount of ignored characters makes decodable. A
+        // body the capture declares to be an *encoding* of the payload must never import as if it
+        // were the payload itself.
+        let notBase64 = "!!!not-base64!!!"
+        #expect(
+            Data(base64Encoded: notBase64, options: .ignoreUnknownCharacters) == nil,
+            "the fixture must be undecodable, or this test tests the text path"
+        )
+        let candidates = try await HARParser.parse(
+            data: Self.har(entries: Self.entry(
+                headers: #"{ "name": "content-type", "value": "application/json" }"#,
+                text: notBase64,
+                extraContent: #", "encoding": "base64""#
+            )),
+            existingEndpoints: []
+        )
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == nil)
+        #expect(candidate.bodyIsBinary)
     }
 
     @Test("A body past the size limit is dropped rather than silently truncated")
@@ -188,6 +292,48 @@ struct RealCaptureTests {
         let candidate = try #require(candidates.first)
         #expect(candidate.bodySizeExceedsLimit)
         #expect(candidate.responseBody == nil, "a half-body would be worse than none")
+    }
+
+    // MARK: - Statuses real captures contain
+
+    @Test("A request the browser never completed carries status 0, which no mock can serve")
+    func cancelledRequestHasUnservableStatus() async throws {
+        // Chrome, Safari and Firefox all write `"status": 0` for a request that was cancelled,
+        // blocked by an extension or content blocker, or failed in transport — and a capture of a
+        // real session normally holds several of them. Every fixture in this suite until now carried
+        // a status the app could have served, so nothing here could see what happens when one does
+        // not.
+        //
+        // The parser reports what it read, and the candidate arrives pre-selected. What keeps that 0
+        // out of the store is `AppState.commitImportedCandidates`, which now runs the same
+        // `EndpointValidator` an edit runs. Before it did, the 0 was stored verbatim and
+        // `clampedStatusCode` served 200 for it — the editor showing a status the wire never used.
+        let entries = """
+        \(Self.entry(url: "https://api.test/v1/cancelled", status: 0, headers: "", text: "")),
+        \(Self.entry(headers: #"{ "name": "content-type", "value": "application/json" }"#))
+        """
+        let candidates = try await HARParser.parse(data: Self.har(entries: entries), existingEndpoints: [])
+        let cancelled = try #require(candidates.first(where: { $0.path == "/v1/cancelled" }))
+
+        #expect(cancelled.statusCode == 0)
+        #expect(cancelled.isSelected, "nothing but the commit path stands between this and the store")
+        #expect(
+            EndpointValidator.serveableStatusCodes.contains(cancelled.statusCode) == false,
+            "0 is not a status a response can be completed with, so the commit path must refuse it"
+        )
+
+        // And the entry beside it is untouched: one dead request must not cost the twenty around it.
+        //
+        // Found and asserted in two steps rather than as one `contains(where:)` over `path == …
+        // && statusCode == 200`. That spelling made the type checker give up — "unable to type-check
+        // this expression in reasonable time", inside the `#expect` expansion, failing the whole
+        // SpecImportTests batch on macOS while Linux compiled it. `&&` across a `String` comparison
+        // and an integer literal is enough to do it once a macro re-types the expression. This form
+        // also says which half is wrong when it fails.
+        #expect(candidates.count == 2)
+        let things = candidates.first { $0.path == "/v1/things" }
+        #expect(things != nil)
+        #expect(things?.statusCode == 200)
     }
 
     // MARK: - URLs real captures contain

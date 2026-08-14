@@ -19,8 +19,36 @@ public enum OpenAPIParser {
             }
             // Default: try OpenAPI 3.x
             let document = try JSONDecoder().decode(OpenAPI.Document.self, from: data)
-            return candidatesFromDocument(document, existingEndpoints: existingEndpoints)
+            return candidatesFromDocument(
+                document,
+                documentBasePath: openAPI3BasePath(in: data),
+                existingEndpoints: existingEndpoints
+            )
         }.value
+    }
+
+    /// The prefix an OpenAPI 3 document's first `servers` entry declares, or `nil` when it declares
+    /// none. ``ImportPath`` reduces it; this only has to hand over the string the document wrote.
+    ///
+    /// Decoded straight from the JSON rather than read off `OpenAPI.Document.servers`, for two
+    /// reasons. The prefix then arrives as the same kind of thing in both formats — a raw string
+    /// beside Swagger 2's `basePath` — so one function reduces both and they cannot diverge. And
+    /// nothing here has to reach into `URLTemplate`, which is declared in `OpenAPIKitCore`; this
+    /// module imports `OpenAPIKit30` and not that.
+    ///
+    /// Server variables are substituted with their declared defaults first, because that is what
+    /// the spec says an unbound variable means: `https://{region}.example.com/{tier}` with
+    /// `tier: { default: "v2" }` serves `/v2`.
+    static func openAPI3BasePath(in data: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(OpenAPIServersEnvelope.self, from: data),
+              let first = envelope.servers?.first,
+              var url = first.url
+        else { return nil }
+        for (name, variable) in first.variables ?? [:] {
+            guard let value = variable.default else { continue }
+            url = url.replacingOccurrences(of: "{\(name)}", with: value)
+        }
+        return url
     }
 
     // MARK: - Swagger 2.0
@@ -31,6 +59,7 @@ public enum OpenAPIParser {
     ) throws -> [ImportCandidate] {
         let doc = try JSONDecoder().decode(SwaggerDocument.self, from: data)
         var candidates: [ImportCandidate] = []
+        var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
         guard let paths = doc.paths else { return [] }
 
@@ -49,8 +78,14 @@ public enum OpenAPIParser {
                 guard let operation else { continue }
                 guard let method = HTTPMethod(rawValue: methodString) else { continue }
 
-                var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(from: operation, doc: doc)
-                let contentType: Scenario.ContentType = (operation.produces?.contains("application/json") ?? false) ? .json : .plainText
+                // Content type first, because the response extraction pairs the example it picks
+                // with it — see the examples branch in `extractSwagger2Response`.
+                let contentType = swagger2ContentType(operation: operation, doc: doc)
+                var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(
+                    from: operation,
+                    doc: doc,
+                    preferring: contentType
+                )
 
                 // Fallback: auto-generate body from operation metadata when no schema/examples
                 if exampleBody == nil && contentType == .json {
@@ -59,30 +94,26 @@ public enum OpenAPIParser {
                         parameters: operation.parameters
                     )
                 }
-                let name = suggestSwagger2Name(operation: operation, method: method, path: pathString)
-                let groupTag = HARParser.suggestGroupTag(path: pathString)
-                let bodySize = exampleBody?.utf8.count ?? 0
 
-                let isDuplicate = existingEndpoints.contains { ep in
-                    ep.method == method && ep.path == pathString
-                }
-
-                candidates.append(ImportCandidate(
-                    id: UUID(),
-                    isSelected: !isDuplicate,
+                // Through the builder, like every other importer. Built by hand, this path skipped
+                // `ImportHeaderPolicy` and carried its own duplicate rule — one that ignored the
+                // GraphQL operation the shared rule compares — so "one chokepoint means a future
+                // importer cannot forget" was true of the chokepoint and not of this caller.
+                candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
-                    suggestedName: name,
-                    suggestedGroupTag: groupTag,
+                    // Declared once at the top of the document and, until now, decoded and then read
+                    // by nothing: a spec saying `basePath: /v2` imported `/pet/{petId}` for a server
+                    // that answers `/v2/pet/42`.
+                    documentBasePath: doc.basePath,
+                    suggestedName: suggestedSwagger2Name(operation: operation),
                     statusCode: statusCode,
                     responseHeaders: [:],
-                    responseBody: bodySize > HARParser.bodySizeLimit ? nil : exampleBody,
+                    responseBody: exampleBody,
                     responseContentType: contentType,
                     // An OpenAPI document describes REST routes; GraphQL operations do not appear in one.
                     graphqlOperation: nil,
-                    bodySizeBytes: bodySize,
-                    bodySizeExceedsLimit: bodySize > HARParser.bodySizeLimit,
-                    isDuplicate: isDuplicate
+                    ledger: &ledger
                 ))
             }
         }
@@ -90,9 +121,32 @@ public enum OpenAPIParser {
         return candidates
     }
 
+    /// The content type an operation actually produces: its own `produces`, then the document's,
+    /// then — when the spec declares neither — JSON.
+    ///
+    /// Matched with the same rule the other importers use — a substring test, via
+    /// `ImportCandidateBuilder.detectContentType`. The exact `contains("application/json")` this
+    /// replaced missed `application/hal+json` and `application/json; charset=utf-8`, both of which
+    /// are ordinary things for a real spec to declare.
+    ///
+    /// **The default was `.plainText`**, reached through `?? []` and an empty `contains`, and it cost
+    /// the same pair of bugs the document-level `produces` cost: a spec that declares no `produces`
+    /// anywhere — which is legal, and which Swagger 2 gives no default for — imported as plain text,
+    /// and `parseSwagger2` only reaches for the fallback body when the content type is `.json`, so
+    /// those endpoints arrived with no body either. JSON is the answer a mock of an HTTP API is
+    /// almost always right to give, and it is the one that keeps the body.
+    static func swagger2ContentType(operation: SwaggerOperation, doc: SwaggerDocument) -> Scenario.ContentType {
+        // An operation's own list wins over the document's; an empty list declares nothing, so it
+        // falls through to the document rather than deciding for it.
+        let declared = operation.produces?.isEmpty == false ? operation.produces : doc.produces
+        guard let declared, !declared.isEmpty else { return .json }
+        return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json } ? .json : .plainText
+    }
+
     private static func extractSwagger2Response(
         from operation: SwaggerOperation,
-        doc: SwaggerDocument
+        doc: SwaggerDocument,
+        preferring contentType: Scenario.ContentType
     ) -> (statusCode: Int, body: String?, responseDescription: String?) {
         guard let responses = operation.responses else { return (200, nil, nil) }
 
@@ -116,14 +170,20 @@ public enum OpenAPIParser {
 
         guard let response = responses[bestKey ?? "200"] else { return (statusCode, nil, nil) }
 
-        // Check response examples
-        if let examples = response.examples {
-            if let jsonExample = examples["application/json"] {
-                return (statusCode, jsonExample.toJSONString(), response.description)
-            }
-            if let first = examples.first {
-                return (statusCode, first.value.toJSONString(), response.description)
-            }
+        // The examples map is keyed by MIME type, so the body handed back is the one for the content
+        // type the candidate will actually declare. The keys used to be consulted only for an exact
+        // `application/json` hit, so `produces: [text/plain]` beside a JSON example served the JSON
+        // body under a text/plain label — two halves of one response chosen independently. An exact
+        // key wins first, so a map holding both `application/json` and `application/hal+json` under
+        // `produces: [application/json]` serves the body actually named; then the same substring
+        // rule as `produces` itself, sorted so a map with no matching key picks the same fallback on
+        // every import instead of whatever order the hash gave.
+        if let examples = response.examples, !examples.isEmpty {
+            let keys = examples.keys.sorted()
+            let key = keys.first { $0 == contentType.rawValue }
+                ?? keys.first { ImportCandidateBuilder.detectContentType($0) == contentType }
+                ?? keys[0]
+            return (statusCode, examples[key]?.toJSONString(), response.description)
         }
 
         // Check schema example
@@ -143,21 +203,19 @@ public enum OpenAPIParser {
         return (statusCode, nil, response.description)
     }
 
-    private static func suggestSwagger2Name(
-        operation: SwaggerOperation,
-        method: HTTPMethod,
-        path: String
-    ) -> String {
-        suggestName(operationId: operation.operationId, summary: operation.summary, method: method, path: path)
+    private static func suggestedSwagger2Name(operation: SwaggerOperation) -> String? {
+        suggestedName(operationId: operation.operationId, summary: operation.summary)
     }
 
     // MARK: - Private
 
     private static func candidatesFromDocument(
         _ document: OpenAPI.Document,
+        documentBasePath: String?,
         existingEndpoints: [Endpoint]
     ) -> [ImportCandidate] {
         var candidates: [ImportCandidate] = []
+        var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
         // Sorted, like the Swagger 2 path below. `document.paths` is a dictionary, so iterating it
         // raw put the review list in whatever order the hash gave — the same file could list its
@@ -195,17 +253,23 @@ public enum OpenAPIParser {
                     from: operation,
                     document: document
                 )
-                let name = suggestName(operation: operation, method: method, path: pathString)
+                let name = suggestedName(operation: operation)
                 candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
+                    documentBasePath: documentBasePath,
                     suggestedName: name,
-                    suggestedGroupTag: HARParser.suggestGroupTag(path: pathString),
+                    // The group tag used to be passed in from here as
+                    // `HARParser.suggestGroupTag(path: pathString)`, which forwards to the very
+                    // function the builder falls back to — so it was a no-op for a literal route and
+                    // a divergence for a parameterised one, where only the builder's copy now knows
+                    // that a wildcard segment does not name a resource. One caller fewer, and the
+                    // two importers group identically by construction.
                     statusCode: statusCode,
                     responseHeaders: headers,
                     responseBody: exampleBody,
                     responseContentType: contentType,
-                    existingEndpoints: existingEndpoints
+                    ledger: &ledger
                 ))
             }
         }
@@ -380,11 +444,11 @@ public enum OpenAPIParser {
         }
     }
 
-    private static func suggestName(operation: OpenAPI.Operation, method: HTTPMethod, path: String) -> String {
-        suggestName(operationId: operation.operationId, summary: operation.summary, method: method, path: path)
+    private static func suggestedName(operation: OpenAPI.Operation) -> String? {
+        suggestedName(operationId: operation.operationId, summary: operation.summary)
     }
 
-    /// Shared name suggestion: summary → operationId → path-based fallback.
+    /// Shared name suggestion: summary → operationId → **nothing**, meaning the builder decides.
     ///
     /// **Summary first**, which is the reverse of what this used to do. `operationId` is a machine
     /// identifier and `summary` is the sentence the spec's author wrote for a human to read — and the
@@ -393,16 +457,22 @@ public enum OpenAPIParser {
     /// "GetAccountSummary": one run-together word, harder to read than the words beside it, and not
     /// the shape the HAR importer produces for the same endpoint ("Get Account-Summary").
     ///
-    /// The `operationId` fallback now splits camelCase as well as `_` and `-`, since camelCase is how
+    /// The `operationId` fallback splits camelCase as well as `_` and `-`, since camelCase is how
     /// operation ids are overwhelmingly written and splitting on separators alone left them joined.
-    private static func suggestName(operationId: String?, summary: String?, method: HTTPMethod, path: String) -> String {
+    ///
+    /// The last step returns `nil` rather than calling `ImportCandidateBuilder.suggestName` itself,
+    /// which is what it used to do. That call reached the right function with the wrong argument —
+    /// the path as the *document* spelled it — so a spec offering neither a summary nor an
+    /// `operationId` for `/pet/{petId}` was labelled "Get {Petid}" in the sidebar. Declining to name
+    /// it hands the decision back to the one place that holds the rewritten route.
+    private static func suggestedName(operationId: String?, summary: String?) -> String? {
         if let summary, !summary.isEmpty {
             return summary
         }
         if let operationId, !operationId.isEmpty {
             return humanized(operationId)
         }
-        return ImportCandidateBuilder.suggestName(method: method, path: path)
+        return nil
     }
 
     /// Turns `getAccountSummary`, `get_account_summary` or `get-account-summary` into
@@ -433,4 +503,28 @@ public enum OpenAPIParser {
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
     }
+}
+
+/// Just enough of an OpenAPI 3 document to read its `servers` array, decoded alongside the full
+/// parse rather than through it — see ``OpenAPIParser/openAPI3BasePath(in:)``.
+///
+/// Every field is optional, and the decode above is `try?`ed, so this can never be what fails an
+/// import: a document with no `servers`, or one whose entries carry keys this does not model,
+/// simply imports with no prefix — exactly as every document did before there was one.
+///
+/// It is not a validator, and must not be read as one. `OpenAPI.Document` has already decoded the
+/// same bytes by the time this runs, and it is the thing that rejects a genuinely malformed
+/// `servers` — `OpenAPI.Server` requires `url`, so an entry without one throws out of the full
+/// decode before this is ever reached.
+private struct OpenAPIServersEnvelope: Decodable {
+    struct Server: Decodable {
+        struct Variable: Decodable {
+            let `default`: String?
+        }
+
+        let url: String?
+        let variables: [String: Variable]?
+    }
+
+    let servers: [Server]?
 }

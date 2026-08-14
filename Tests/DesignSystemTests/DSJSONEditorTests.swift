@@ -37,17 +37,17 @@ struct DSJSONEditorTests {
 
     @Test("Invalid JSON returns false")
     func invalidJSON() {
-        #expect(!DSJSONEditor.validateJSON("{invalid}"))
+        #expect(DSJSONEditor.validateJSON("{invalid}") == false)
     }
 
     @Test("Incomplete JSON returns false")
     func incompleteJSON() {
-        #expect(!DSJSONEditor.validateJSON(#"{"key":"#))
+        #expect(DSJSONEditor.validateJSON(#"{"key":"#) == false)
     }
 
     @Test("Plain string is invalid JSON")
     func plainStringIsInvalid() {
-        #expect(!DSJSONEditor.validateJSON("hello"))
+        #expect(DSJSONEditor.validateJSON("hello") == false)
     }
 
     // MARK: - prettyPrint
@@ -145,33 +145,38 @@ struct DSJSONEditorTests {
 @Suite("DSColors")
 struct DSColorsTests {
 
-    @Test("httpStatusColor returns success color for 2xx")
+    // Each arm returns the *text* variant, not the base semantic token. A pill draws this colour as
+    // its label and, at 12%, as its own fill, and the base tokens do not survive that composite —
+    // `DSContrastTests.statusPillTextClearsAAOnItsOwnFill` is where that is measured. These four
+    // tests pin the boundaries of each range; the palette question is settled next door.
+
+    @Test("httpStatusColor returns the success text color for 2xx")
     func httpStatus2xx() {
-        let expected = DSColors.success
+        let expected = DSColors.successText
         #expect(DSColors.httpStatusColor(for: 200) == expected)
         #expect(DSColors.httpStatusColor(for: 201) == expected)
         #expect(DSColors.httpStatusColor(for: 299) == expected)
     }
 
-    @Test("httpStatusColor returns accent color for 3xx")
+    @Test("httpStatusColor returns the accent text color for 3xx")
     func httpStatus3xx() {
-        let expected = DSColors.accent
+        let expected = DSColors.accentText
         #expect(DSColors.httpStatusColor(for: 301) == expected)
         #expect(DSColors.httpStatusColor(for: 302) == expected)
         #expect(DSColors.httpStatusColor(for: 399) == expected)
     }
 
-    @Test("httpStatusColor returns warning color for 4xx")
+    @Test("httpStatusColor returns the warning text color for 4xx")
     func httpStatus4xx() {
-        let expected = DSColors.warning
+        let expected = DSColors.warningText
         #expect(DSColors.httpStatusColor(for: 400) == expected)
         #expect(DSColors.httpStatusColor(for: 404) == expected)
         #expect(DSColors.httpStatusColor(for: 499) == expected)
     }
 
-    @Test("httpStatusColor returns destructive color for 5xx")
+    @Test("httpStatusColor returns the destructive text color for 5xx")
     func httpStatus5xx() {
-        let expected = DSColors.destructive
+        let expected = DSColors.destructiveText
         #expect(DSColors.httpStatusColor(for: 500) == expected)
         #expect(DSColors.httpStatusColor(for: 503) == expected)
         #expect(DSColors.httpStatusColor(for: 599) == expected)
@@ -225,23 +230,29 @@ struct DSServerStateTests {
     }
 }
 
-@Suite("Panel chrome")
-struct DSPanelHeaderTests {
-
-    @Test("Every panel header is the same height, so panels line up across the window")
-    func headerHeightIsShared() {
-        // The number matters less than the fact that there is exactly one of it. Before this, the
-        // sidebar had no header, the request log had a tall one, and the inspector a third size.
-        #expect(DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height)
-        #expect(DSPanelHeader<EmptyView>.height > 0)
-    }
-
-    @Test("A header renders with and without a trailing accessory")
-    func headerRenders() {
-        _ = DSPanelHeader("Request Log", subtitle: "9 requests", identifier: "test")
-        _ = DSPanelHeader("Endpoints", identifier: "test") {
-            DSPanelHeaderButton(systemImage: "plus", help: "Add", identifier: "test.add") { }
-        }
-    }
-
-}
+// MARK: - Removed: `DSPanelHeaderTests`
+//
+// Two cases lived here and neither could fail.
+//
+// `headerHeightIsShared` asserted `DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height`
+// and `> 0`. `height` is a `static var` returning `DSBarHeight.panelHeader`, so the two generic
+// specialisations read the same stored constant: the comparison is `x == x`, true for every possible
+// value of the token, including a value that would break every panel in the window. The `> 0`
+// companion excluded zero and negatives and nothing else.
+//
+// `headerRenders` constructed two `DSPanelHeader` values into `_` and asserted nothing at all. A
+// `View` initialiser stores its arguments; it does not lay anything out, so the only way that case
+// could have failed is by trapping inside a memberwise assignment.
+//
+// The claims they were reaching for are made properly in `DSComponentRenderingTests`, which is where
+// the hosting harness that can actually measure a view lives:
+//
+// - `laddersArePinned` pins `DSBarHeight.panelHeader == 30` — the assertion an equality between two
+//   reads of one constant cannot make — and `DSPanelHeader<EmptyView>.height ==
+//   DSBarHeight.panelHeader`, so the view keeps taking its number from the ladder.
+// - `panelChromeSharesOneHeight` renders a bare header, a header *with* a subtitle and a trailing
+//   `DSPanelHeaderButton`, and a `DSTabStrip`, and measures all three against a `Color` fixed to the
+//   token. That is `headerRenders`'s intent — both shapes survive layout — plus the cross-panel
+//   alignment neither case here checked.
+//
+// Nothing is left to move, which is why this file now ends at `DSServerStateTests`.

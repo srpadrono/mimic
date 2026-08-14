@@ -63,6 +63,14 @@ struct JourneyNavigatorList: View {
                     message: "A journey scripts an ordered sequence of responses, so one endpoint can "
                         + "fail and then succeed on the retry. Add one to script a flow endpoints "
                         + "alone can't express.",
+                    // This must stay different from the navigator "+" menu's label above the list
+                    // ("Choose how to add a journey", set in `WorkspaceView.addJourneyMenu`). The
+                    // two controls do different things: this one creates a journey outright — no
+                    // ellipsis, no sheet, straight to `onAdd` — while that one opens a chooser. They
+                    // carried the same words until the UI suite was found telling them apart by
+                    // AppKit element type, which is a property of a menu style rather than of either
+                    // control's identity. `DSEmptyState` speaks this string to VoiceOver as the
+                    // button's label, so the copy and the name are the same decision.
                     actionTitle: "Add journey",
                     identifier: "journeys.empty",
                     action: onAdd
@@ -209,7 +217,7 @@ struct JourneyNavigatorRunStrip: View {
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("journeys.runControls")
@@ -326,7 +334,9 @@ private struct JourneyActivationToggle: View {
     @State private var isHovered = false
 
     private static let ringSize: CGFloat = 14
-    private static let targetSize: CGFloat = 20
+    /// The hit target around the ring. `DSControlHeight.row` — the rung a small control in a row of
+    /// other controls stands on, which is what this is.
+    private static let targetSize: CGFloat = DSControlHeight.row
 
     var body: some View {
         Button(action: onToggleActivation) {
@@ -336,10 +346,13 @@ private struct JourneyActivationToggle: View {
                 .frame(width: Self.ringSize, height: Self.ringSize)
                 .overlay {
                     if isActive {
-                        // 8pt, not 7. Below 8 an SF Symbol stops resolving into a shape you can read
-                        // and turns into a mark inside the ring that you take for a rendering fault.
+                        // `DSGlyph.indicator`, which sits on `DSGlyph.minimum` — the floor the house
+                        // rule states, and the reason this is 8 and not 7: below it an SF Symbol
+                        // stops resolving into a shape you can read and turns into a mark inside the
+                        // ring that you take for a rendering fault. The rule was quoted here in prose
+                        // on the line above the literal it was about.
                         Image(systemName: "play.fill")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: DSGlyph.indicator, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }

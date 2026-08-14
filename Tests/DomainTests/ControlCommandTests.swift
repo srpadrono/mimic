@@ -2,6 +2,59 @@ import Foundation
 import Testing
 @testable import Domain
 
+/// One sample of every command, complete by assertion rather than by good intentions.
+///
+/// Three tests need a list of commands: the wire-format round trip, and the two that check the
+/// executor routes each command to the side ``CommandKind/scope`` declares it belongs on. They used
+/// to carry a list each, and both lists were quietly partial — the host-scoped one named fifteen of
+/// twenty-one, and nothing in the file said so, because a list of examples reads exactly like a list
+/// of all of them.
+///
+/// `everyCommandHasASample` compares this one against `CommandKind.allCases`, so a command added
+/// without a sample fails the suite rather than being covered by none of the three. The payloads are
+/// deliberately awkward — ids that match nothing, references to endpoints an empty project does not
+/// have — because what is being checked here is routing and encoding, not success.
+enum ControlCommandSamples {
+    static let all: [ControlCommand] = [
+        .ping, .describeCommands, .state, .reset(scope: .journey),
+        .projectList, .projectCreate(name: "Checkout", port: 9090),
+        .projectOpen(project: .name("Checkout")), .projectClose,
+        .projectDelete(project: .id(UUID())), .projectRename(name: "Renamed"),
+        .projectDuplicate(project: .name("Checkout")), .projectExport(project: nil),
+        .projectImport(project: MockProject(name: "Imported"), activate: true),
+        .serverStart(port: 8081), .serverStop, .serverStatus,
+        .serverConfigure(port: 8080, globalDelayMs: 250),
+        .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
+        .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
+        .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
+        .endpointDelete(endpoint: .name("A")), .endpointDuplicate(endpoint: .route(.get, "/a")),
+        .scenarioList(endpoint: .route(.get, "/a")),
+        .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: ScenarioSpec(statusCode: 201)),
+        .scenarioUpdate(endpoint: .route(.get, "/a"), scenario: .name("S"), spec: ScenarioSpec(body: "{}")),
+        .scenarioDelete(endpoint: .route(.get, "/a"), scenario: .id(UUID())),
+        .scenarioActivate(endpoint: .route(.get, "/a"), scenario: .name("S")),
+        .journeyList, .journeyGet(journey: .name("J")),
+        .journeyCreate(name: "J", spec: JourneySpec(steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)])),
+        .journeyTemplateList, .journeyAddTemplate(templateID: "session-expiry", name: nil),
+        .journeyUpdate(journey: .name("J"), spec: JourneySpec(matchMode: .strictSequence)),
+        .journeyDelete(journey: .name("J")), .journeyDuplicate(journey: .name("J")),
+        .journeyStepAdd(journey: .name("J"), step: JourneyStepSpec(method: .get, path: "/a", failure: .connectionDrop), atIndex: 2),
+        .journeyStepsAdd(
+            journey: .name("J"),
+            steps: [
+                JourneyStepSpec(method: .get, path: "/a", statusCode: 500),
+                JourneyStepSpec(method: .get, path: "/a", statusCode: 200, repeatCount: 3),
+            ],
+            atIndex: nil
+        ),
+        .journeyStepUpdate(journey: .name("J"), step: .index(0), spec: JourneyStepSpec(statusCode: 500)),
+        .journeyStepRemove(journey: .name("J"), step: .index(1)),
+        .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
+        .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
+        .logList(limit: 50, unmatchedOnly: true), .logClear,
+    ]
+}
+
 @Suite("Control command execution")
 struct ControlCommandExecutionTests {
 
@@ -88,19 +141,56 @@ struct ControlCommandExecutionTests {
         }
     }
 
-    @Test("A duplicated endpoint gets fresh scenario ids so edits do not bleed back")
+    /// The fixture is the whole test: **the source's active scenario is not its first.**
+    ///
+    /// This used to duplicate an endpoint with one scenario and assert only
+    /// `activeScenarioID != nil`, which both implementations of duplication satisfied — the executor's
+    /// own, which pointed every copy at `scenarios.first`, and `copyingWithFreshIdentifiers()`, which
+    /// follows whichever scenario the source has active. With one scenario those are the same
+    /// scenario, so the divergence that made `mimic endpoint duplicate` and `mimic project duplicate`
+    /// produce different copies of the same endpoint was invisible here.
+    ///
+    /// Two scenarios with the second active is the smallest shape that tells them apart: an endpoint
+    /// serving "Server error" must duplicate into one that also serves "Server error", not into one
+    /// serving "Default".
+    @Test("A duplicated endpoint keeps fresh scenario ids and answers the way the original does")
     func duplicateEndpointIsIndependent() throws {
         var project = try Self.apply(
             .endpointCreate(name: "Login", method: .post, path: "/login", spec: nil),
             to: Self.project
         ).project
+        project = try Self.apply(
+            .scenarioCreate(
+                endpoint: .route(.post, "/login"),
+                name: "Server error",
+                spec: ScenarioSpec(statusCode: 500)
+            ),
+            to: project
+        ).project
+        project = try Self.apply(
+            .scenarioActivate(endpoint: .route(.post, "/login"), scenario: .name("Server error")),
+            to: project
+        ).project
         project = try Self.apply(.endpointDuplicate(endpoint: .route(.post, "/login")), to: project).project
 
         #expect(project.endpoints.count == 2)
-        let originalScenarioIDs = Set(project.endpoints[0].scenarios.map(\.id))
-        let copyScenarioIDs = Set(project.endpoints[1].scenarios.map(\.id))
+        let source = project.endpoints[0]
+        let copy = project.endpoints[1]
+
+        let originalScenarioIDs = Set(source.scenarios.map(\.id))
+        let copyScenarioIDs = Set(copy.scenarios.map(\.id))
         #expect(originalScenarioIDs.isDisjoint(with: copyScenarioIDs))
-        #expect(project.endpoints[1].activeScenarioID != nil)
+
+        let sourceActiveIndex = try #require(source.scenarios.firstIndex { $0.id == source.activeScenarioID })
+        #expect(sourceActiveIndex == 1, "the fixture is pointless unless the source's active scenario is not its first")
+
+        let copyActiveIndex = try #require(copy.scenarios.firstIndex { $0.id == copy.activeScenarioID })
+        #expect(
+            copyActiveIndex == sourceActiveIndex,
+            "the copy activated scenario \(copyActiveIndex) where the source has \(sourceActiveIndex)"
+        )
+        #expect(copy.scenarios[copyActiveIndex].name == "Server error")
+        #expect(copy.scenarios[copyActiveIndex].statusCode == 500)
     }
 
     @Test("An empty group tag clears the group, since a shell cannot pass JSON null")
@@ -486,20 +576,67 @@ struct ControlCommandExecutionTests {
         }
     }
 
-    // MARK: - Host-scoped commands
+    // MARK: - Scope routing
 
+    /// Driven from ``ControlCommandSamples`` rather than from a list written here, which named
+    /// fifteen of the twenty-one host-scoped commands and looked complete. Six of them — `projectOpen`,
+    /// `projectCreate`, `projectDelete`, `projectDuplicate`, `projectExport`, `projectImport` — were
+    /// never checked at all.
     @Test("Host-scoped commands are passed through, not silently swallowed")
     func hostScopedCommandsReturnNil() throws {
         var project = Self.project
-        for command: ControlCommand in [
-            .ping, .state, .serverStart(port: nil), .serverStop, .serverStatus,
-            .projectList, .projectClose, .journeyActivate(journey: nil), .journeyRestart,
-            .journeyAdvance, .journeyStatus, .logList(limit: nil, unmatchedOnly: nil), .logClear,
-            .reset(scope: .all), .describeCommands,
-        ] {
-            #expect(try ProjectCommandExecutor.apply(command, to: &project) == nil, "\(command) should be host-scoped")
+        for command in ControlCommandSamples.all where command.kind.scope == .host {
+            #expect(
+                try ProjectCommandExecutor.apply(command, to: &project) == nil,
+                "\(command.kind.rawValue) is host-scoped and must be declined here"
+            )
         }
     }
+
+    /// The other half, and the one the collapse of the three case lists made necessary.
+    ///
+    /// The executor's host-scoped tail is now a `default`, so the compiler no longer catches a
+    /// command that ``CommandKind/scope`` declares project-scoped and that nothing above the tail
+    /// applies. This does: every project-scoped kind is put through `apply`, and only `nil` — "not
+    /// mine" — fails it.
+    ///
+    /// The `catch` is the half that used to make the claim untrue. It asserted `error is ControlError`
+    /// and stopped — but the `default:` arm this test exists to catch throws
+    /// `ControlError.internalFailure`, which *is* a `ControlError`, so a project-scoped command the
+    /// executor does not apply passed here as cleanly as one that legitimately reported a missing
+    /// endpoint. The distinguishing fact is the code, so that is what is asserted: anything but
+    /// `internal.failure` is a real answer, and `internal.failure` is the executor saying in as many
+    /// words that it has no arm for the command.
+    @Test("Project-scoped commands are applied here, not handed back to the host")
+    func projectScopedCommandsAreApplied() {
+        for command in ControlCommandSamples.all where command.kind.scope == .project {
+            var project = Self.project
+            do {
+                let outcome = try ProjectCommandExecutor.apply(command, to: &project)
+                #expect(
+                    outcome != nil,
+                    "\(command.kind.rawValue) is project-scoped and must be applied here"
+                )
+            } catch let error as ControlError {
+                // Failing is still handling it. Most of these name an endpoint, scenario or journey
+                // the empty fixture does not have, and a `ControlError` saying what was missing is
+                // the right answer; `nil` would send the command on to a host that would report "no
+                // project is open", with one open.
+                #expect(
+                    error.code != Self.unappliedCommandCode,
+                    "\(command.kind.rawValue) reached the executor's unimplemented tail: \(error.message)"
+                )
+            } catch {
+                Issue.record("\(command.kind.rawValue) failed with a non-ControlError: \(error)")
+            }
+        }
+    }
+
+    /// The code `ProjectCommandExecutor`'s `default:` arm throws, spelled out once so the assertion
+    /// above cannot drift from it silently. It is `ControlError.internalFailure`'s code — deliberately
+    /// the same generic code the executor uses for anything unexpected, which is why the message is
+    /// included in the failure above.
+    static let unappliedCommandCode = ControlError.internalFailure("").code
 
     @Test("Read-only commands report that they changed nothing, so hosts skip persisting")
     func readsDoNotClaimMutation() throws {
@@ -544,48 +681,23 @@ struct ControlWireFormatTests {
         )
     }
 
+    /// "Every" in the test below, and in the two routing tests, is only as true as this. The list was
+    /// written inline in `commandsRoundTrip` and compared to nothing, so it was complete exactly as
+    /// long as everyone adding a command remembered it — the same failure `CommandKind` was
+    /// introduced to end for the catalog.
+    @Test("Every command has a sample, so the round-trip and routing checks cannot be partial")
+    func everyCommandHasASample() {
+        let kinds = ControlCommandSamples.all.map(\.kind)
+        #expect(
+            Set(kinds) == Set(CommandKind.allCases),
+            "no sample for: \(Set(CommandKind.allCases).subtracting(kinds).map(\.rawValue).sorted())"
+        )
+        #expect(kinds.count == CommandKind.allCases.count, "one sample per kind, no duplicates")
+    }
+
     @Test("Every command round-trips through JSON unchanged")
     func commandsRoundTrip() throws {
-        let commands: [ControlCommand] = [
-            .ping, .describeCommands, .state, .reset(scope: .journey),
-            .projectList, .projectCreate(name: "Checkout", port: 9090),
-            .projectOpen(project: .name("Checkout")), .projectClose,
-            .projectDelete(project: .id(UUID())), .projectRename(name: "Renamed"),
-            .projectDuplicate(project: .name("Checkout")), .projectExport(project: nil),
-            .projectImport(project: MockProject(name: "Imported"), activate: true),
-            .serverStart(port: 8081), .serverStop, .serverStatus,
-            .serverConfigure(port: 8080, globalDelayMs: 250),
-            .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
-            .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
-            .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
-            .endpointDelete(endpoint: .name("A")), .endpointDuplicate(endpoint: .route(.get, "/a")),
-            .scenarioList(endpoint: .route(.get, "/a")),
-            .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: ScenarioSpec(statusCode: 201)),
-            .scenarioUpdate(endpoint: .route(.get, "/a"), scenario: .name("S"), spec: ScenarioSpec(body: "{}")),
-            .scenarioDelete(endpoint: .route(.get, "/a"), scenario: .id(UUID())),
-            .scenarioActivate(endpoint: .route(.get, "/a"), scenario: .name("S")),
-            .journeyList, .journeyGet(journey: .name("J")),
-            .journeyCreate(name: "J", spec: JourneySpec(steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)])),
-            .journeyTemplateList, .journeyAddTemplate(templateID: "session-expiry", name: nil),
-            .journeyUpdate(journey: .name("J"), spec: JourneySpec(matchMode: .strictSequence)),
-            .journeyDelete(journey: .name("J")), .journeyDuplicate(journey: .name("J")),
-            .journeyStepAdd(journey: .name("J"), step: JourneyStepSpec(method: .get, path: "/a", failure: .connectionDrop), atIndex: 2),
-            .journeyStepsAdd(
-                journey: .name("J"),
-                steps: [
-                    JourneyStepSpec(method: .get, path: "/a", statusCode: 500),
-                    JourneyStepSpec(method: .get, path: "/a", statusCode: 200, repeatCount: 3),
-                ],
-                atIndex: nil
-            ),
-            .journeyStepUpdate(journey: .name("J"), step: .index(0), spec: JourneyStepSpec(statusCode: 500)),
-            .journeyStepRemove(journey: .name("J"), step: .index(1)),
-            .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
-            .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
-            .logList(limit: 50, unmatchedOnly: true), .logClear,
-        ]
-
-        for command in commands {
+        for command in ControlCommandSamples.all {
             let data = try JSONEncoder().encode(command)
             let decoded = try JSONDecoder().decode(ControlCommand.self, from: data)
             #expect(decoded == command, "round-trip changed \(command)")
@@ -617,30 +729,116 @@ struct ControlWireFormatTests {
         #expect(decoded.result == nil)
     }
 
-    @Test("The catalog describes every command case exactly once")
+    /// This used to compare the catalog against a set of string literals written out below it, and
+    /// the comment claimed "a new command that skips the catalog fails here". It could not: adding a
+    /// case to `ControlCommand` and forgetting the catalog left the literals unchanged too, so the
+    /// test compared the catalog against a copy of itself and passed. `CommandKind` is the join that
+    /// makes the assertion real — `ControlCommand.kind` switches over it exhaustively, so a new case
+    /// cannot compile until it is named there, and `allCases` then has nowhere to hide.
+    @Test("The catalog describes every command exactly once, with no invented names")
     func catalogCoversTheSurface() {
         let names = CommandCatalog.descriptors.map(\.name)
         #expect(Set(names).count == names.count, "duplicate descriptors: \(names)")
 
-        // Mirrors the case list; a new command that skips the catalog fails here.
-        let expected: Set<String> = [
-            "ping", "describeCommands", "state", "reset",
-            "projectList", "projectCreate", "projectOpen", "projectClose", "projectDelete",
-            "projectRename", "projectDuplicate", "projectExport", "projectImport",
-            "serverStart", "serverStop", "serverStatus", "serverConfigure",
-            "endpointList", "endpointGet", "endpointCreate", "endpointUpdate", "endpointDelete",
-            "endpointDuplicate",
-            "scenarioList", "scenarioCreate", "scenarioUpdate", "scenarioDelete", "scenarioActivate",
-            "journeyList", "journeyGet", "journeyCreate", "journeyTemplateList", "journeyAddTemplate",
-            "journeyUpdate", "journeyDelete", "journeyDuplicate", "journeyStepAdd",
-            "journeyStepsAdd",
-            "journeyStepUpdate", "journeyStepRemove", "journeyStepMove", "journeyActivate",
-            "journeyRestart", "journeyAdvance", "journeyStatus",
-            "logList", "logClear",
-        ]
-        #expect(Set(names) == expected)
+        let described = CommandCatalog.describedKinds
+        let missing = Set(CommandKind.allCases).subtracting(described)
+        #expect(missing.isEmpty, "commands with no catalog entry: \(missing.map(\.rawValue).sorted())")
+
+        // A descriptor whose name is not a real command is dropped by `describedKinds`, so the count
+        // comparison is what catches a typo'd or stale entry.
+        #expect(
+            described.count == names.count,
+            "descriptors naming no known command: \(names.filter { CommandKind(rawValue: $0) == nil })"
+        )
     }
 
+    /// Both hosts build this sentence, so it is a contract rather than a detail. It lived in each of
+    /// them separately: the service answered `Reset 12 log entries and journey "Checkout"` and the
+    /// window answered `Reset all.` — the same command, two answers, and a script driving both had no
+    /// way to tell which it was talking to.
+    @Test("A reset reports what it cleared, not what it was asked to clear")
+    func resetMessageNamesWhatWasCleared() {
+        // Nothing was in scope at all — a journey reset with no journey active.
+        #expect(ControlMessages.reset(clearedLogEntries: nil, restartedJourneyName: nil) == "Nothing to reset.")
+        // In scope but already empty. A count of zero is an answer: the log was cleared and held
+        // nothing, which is a different fact from the log never having been looked at.
+        #expect(ControlMessages.reset(clearedLogEntries: 0, restartedJourneyName: nil) == "Reset 0 log entries.")
+        #expect(ControlMessages.reset(clearedLogEntries: 1, restartedJourneyName: nil) == "Reset 1 log entry.")
+        #expect(ControlMessages.reset(clearedLogEntries: 12, restartedJourneyName: nil) == "Reset 12 log entries.")
+        #expect(ControlMessages.reset(clearedLogEntries: nil, restartedJourneyName: "Checkout")
+                == "Reset journey \"Checkout\".")
+        #expect(ControlMessages.reset(clearedLogEntries: 12, restartedJourneyName: "Checkout")
+                == "Reset 12 log entries and journey \"Checkout\".")
+    }
+
+    /// The count this used to end on — `CommandKind.allCases.count == 47` — is gone, and so are the
+    /// `26` and `21` in the scope test below.
+    ///
+    /// All three were a fourth hand-edited mirror of a fact the type system already knows, and the
+    /// weakest kind: adding a command and updating the number is one edit, so the assertion only ever
+    /// caught somebody who forgot to run the suite. What they were *reaching for* — that `allCases`
+    /// is a faithful index of the surface — is asserted structurally instead, and in the places that
+    /// can actually see it: ``ControlWireFormatTests/everyCommandHasASample()`` requires a
+    /// `ControlCommand` for every kind (so no kind is unreachable and no kind is sampled twice),
+    /// ``ControlWireFormatTests/catalogCoversTheSurface()`` requires a catalog entry for every kind,
+    /// and the two routing tests above require the executor's answer to agree with each kind's
+    /// declared scope.
+    @Test("Every command reports the kind it is")
+    func kindMatchesTheCase() {
+        #expect(ControlCommand.ping.kind == .ping)
+        #expect(ControlCommand.endpointList.kind == .endpointList)
+        #expect(ControlCommand.journeyStepMove(journey: .name("j"), step: .index(0), toIndex: 1).kind == .journeyStepMove)
+        #expect(ControlCommand.reset(scope: .all).kind == .reset)
+
+        // No two kinds share a raw value, which is what makes the catalog — keyed by that string —
+        // able to describe each command exactly once.
+        let rawValues = CommandKind.allCases.map(\.rawValue)
+        #expect(Set(rawValues).count == rawValues.count, "duplicate raw values in CommandKind")
+        #expect(rawValues.allSatisfy { CommandKind(rawValue: $0) != nil })
+    }
+
+    /// Every kind has a scope by construction — `CommandKind.scope` is a non-optional property whose
+    /// switch has no `default`, so the compiler will not let a new command past without one. What is
+    /// left to check is the *shape* of the partition, because a command changing sides is the one way
+    /// this consolidation can go wrong while still compiling everywhere.
+    ///
+    /// The partition is asserted as a partition rather than as two lengths. `26` and `21` were the
+    /// lengths of the two hand-written lists this replaced, and repeating them here re-created exactly
+    /// the maintenance-by-hand the consolidation removed: they had to be edited by whoever added a
+    /// command, and editing them is what the test was supposed to make unnecessary.
+    @Test("Every command kind falls on exactly one side of the project/host line")
+    func everyKindDeclaresAScope() {
+        let projectScoped = Set(CommandKind.allCases.filter { $0.scope == .project })
+        let hostScoped = Set(CommandKind.allCases.filter { $0.scope == .host })
+
+        #expect(projectScoped.isDisjoint(with: hostScoped))
+        #expect(projectScoped.union(hostScoped) == Set(CommandKind.allCases))
+        // Neither side may be empty: a scope property that answered one value for everything would
+        // satisfy the two assertions above and route the entire surface to one implementation.
+        #expect(projectScoped.isEmpty == false, "no command is project-scoped")
+        #expect(hostScoped.isEmpty == false, "no command is host-scoped")
+
+        // Anchors on both sides, so a wholesale flip cannot slip through by keeping the partition
+        // intact. The two `server*` ones are the pair that is easiest to get wrong: configuring
+        // writes the document, starting runs a process.
+        #expect(CommandKind.serverConfigure.scope == .project)
+        #expect(CommandKind.serverStart.scope == .host)
+        #expect(CommandKind.projectRename.scope == .project)
+        #expect(CommandKind.projectOpen.scope == .host)
+        #expect(CommandKind.journeyStepMove.scope == .project)
+        #expect(CommandKind.journeyActivate.scope == .host)
+    }
+
+    /// This is as much as `DomainTests` can say about the `cli` column, and it is not much: Domain
+    /// does not link `MimicCLICore` — the dependency runs the other way — so nothing here can tell
+    /// `mimic endpoint duplicate <METHOD> <PATH>` from `mimic endpoint frobnicate`. Both start with
+    /// `"mimic "`, and for a long time that was the entire assertion behind a catalog an agent
+    /// discovers the surface from.
+    ///
+    /// The real check lives where the parser does:
+    /// `MimicCLICoreTests.CatalogCLIExampleTests` expands every descriptor's example and feeds it
+    /// through `MimicCommand.parseAsRoot`. Keep this one — a missing or non-`mimic` spelling should
+    /// still fail the module that owns the catalog — but do not mistake it for coverage of the column.
     @Test("Every catalog entry names a CLI invocation")
     func catalogEntriesAreActionable() {
         for descriptor in CommandCatalog.descriptors {

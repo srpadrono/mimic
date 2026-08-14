@@ -75,8 +75,8 @@ private extension DSDividerStyle {
     /// separating two surfaces rather than two groups of rows.
     var thickness: CGFloat {
         switch self {
-        case .subtle, .standard: 0.5
-        case .strong: 1
+        case .subtle, .standard: DSStroke.hairline
+        case .strong: DSStroke.seam
         }
     }
 }

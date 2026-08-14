@@ -168,9 +168,21 @@ enum UITestSupport {
     ///
     /// Two changes make that impossible rather than unlikely:
     ///
-    /// - **The database is only ever deleted when `MIMIC_DATABASE_PATH` names it.** No override, no
-    ///   deletion. The harness points the app at a throwaway file per run, so the file this removes is
-    ///   one the harness created and nothing else can be reached.
+    /// - **The only file this can delete is the one ``databaseURL(environment:)`` names, and that is
+    ///   `nil` outside a UI test run.** The gate is ``isRunningUITests(environment:arguments:)`` —
+    ///   `-MimicResetForTesting`, or `MIMIC_DEFAULTS_SUITE` — and nothing else. Inside a run the file
+    ///   is the path the harness put in `MIMIC_DATABASE_PATH`, or, when it set none,
+    ///   `mimic-uitests.sqlite` computed beside the real store. `AppState.openStore` opens that same
+    ///   property, so the file a run writes and the file a run removes cannot drift apart.
+    ///
+    ///   This bullet used to read "the database is only ever deleted when `MIMIC_DATABASE_PATH` names
+    ///   it. No override, no deletion." That is false, and was false when it was written:
+    ///   ``databaseURL(environment:)`` falls back to `mimic-uitests.sqlite` for *any* UI test run, and
+    ///   `uiTestResetContextIsInertOutsideAUITestRun` in `MimicTests` asserts exactly that fallback —
+    ///   in the same test, and a few lines after, the assertion that `MIMIC_DATABASE_PATH` on its own
+    ///   does **not** arm the reset. So the override is neither necessary nor sufficient: it is the
+    ///   UI-test gate that keeps a developer's machine safe, and believing otherwise is how somebody
+    ///   would come to "simplify" that gate away.
     /// - **`.standard` is not touched at all.** It never needed to be: `AppState.resolveDefaults`
     ///   already routes a test run to the `MIMIC_DEFAULTS_SUITE` suite, so the recents list and the
     ///   panel layout a test sees are the suite's, and wiping `.standard` only ever damaged the

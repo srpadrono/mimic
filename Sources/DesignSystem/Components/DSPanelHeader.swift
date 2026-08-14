@@ -47,7 +47,26 @@ public struct DSPanelHeader<Accessory: View>: View {
             Text(title)
                 .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
-                .fixedSize()
+                // `.lineLimit(1)` with priority, not `.fixedSize()`.
+                //
+                // The subtitle below explains how `.fixedSize()` produced "narios" instead of
+                // "Scenarios" — and then the fix was applied to the subtitle while the modifier stayed
+                // on the title, which is the string the original defect was about. The mechanism never
+                // went away: a rigid child in an `HStack` that runs out of width is resolved by
+                // pushing the row's leading edge out of view, and the request log's header hands its
+                // accessory a picker, a toggle, a 120pt filter well and a button before this title
+                // gets a say. The subtitle merely absorbs the slack first, so it takes a narrow
+                // window rather than a long word to reach it.
+                //
+                // Positive priority is the half of the subtitle's lesson that works: it makes the
+                // title the *last* thing to yield without ever making the row demand width the panel
+                // does not have. A negative priority on the subtitle was the version that failed.
+                .lineLimit(1)
+                // Tail, where the subtitle truncates in the middle: a subtitle is usually a path or a
+                // count whose two ends both carry information, and a panel title is a word you can
+                // still recognise from its start.
+                .truncationMode(.tail)
+                .layoutPriority(1)
                 .accessibilityIdentifier("ds.panelheader.title.\(identifier)")
 
             if let subtitle {
@@ -90,7 +109,7 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // for an overlay or for `DSDivider`, and the split tracked nothing — the request
                 // detail's identity row closed lighter than a section header inside it.
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityIdentifier("ds.panelheader.\(identifier)")
         .accessibilityElement(children: .contain)
@@ -139,13 +158,18 @@ public struct DSPanelHeaderButton: View {
     public var body: some View {
         Button(role: role, action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
+                // `control`, the rung for a glyph that *is* the control. There is no title beside it
+                // to carry the meaning, which is the whole reason this tier sits above the inline one.
+                .font(.system(size: DSGlyph.control, weight: .medium))
                 // `labelSecondary` at rest, not `labelTertiary`. At 36% alpha the "add endpoint" and
                 // "clear log" buttons were nearly invisible until the pointer found them — a control
                 // you have to hunt for is one most people never discover. Same correction
                 // `DSTabStrip` made for its unselected tabs.
                 .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: 22, height: 22)
+                // `field`, the rung a single prominent control in a header stands on. This was a bare
+                // `22` in the module that declares the ladder, which is the one place a literal has no
+                // excuse: `DSTabStrip` wrote the same number for the same target a file away.
+                .frame(width: DSControlHeight.field, height: DSControlHeight.field)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                         .fill(isHovered ? DSColors.accentSubtle : Color.clear)

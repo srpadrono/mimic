@@ -175,7 +175,7 @@ struct WelcomeWindow: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: DSSpacing.xxs) {
             ActionRow(
                 icon: "plus.rectangle",
                 title: "Create new project\u{2026}",
@@ -246,6 +246,10 @@ struct WelcomeWindow: View {
             // in `labelTertiary` — the combination `DSEmptyState` records having already fixed once:
             // a large, thin shape at 36% alpha reads as a smudge rather than as a symbol, and this
             // one greets every first-run user.
+            //
+            // Off the `DSGlyph` ladder on purpose, and the ladder says so itself: an illustration is
+            // not a glyph. 26 is `DSEmptyState.glyphSize`, which this matches deliberately — folding
+            // it in would turn a scale with a defensible top rung at 13 into an open-ended one.
             Image(systemName: "clock")
                 .font(.system(size: 26, weight: .regular))
                 .foregroundStyle(DSColors.labelSecondary)
@@ -364,6 +368,12 @@ private struct ActionRow: View {
             action()
         } label: {
             HStack(spacing: DSSpacing.md) {
+                // A point above `DSGlyph.controlProminent` (13), the ladder's ceiling — so this is
+                // off the ladder rather than exempt from it, and `DSGlyph`'s own note names these
+                // welcome-window action glyphs as the one site in that position. Left at 14 because
+                // dropping it to the ceiling is a visual decision about the first screen a new user
+                // sees, not a mechanical substitution: unlike every other glyph on the ladder these
+                // stand in a padded action row rather than in a panel's chrome.
                 Image(systemName: icon)
                     .font(.system(size: 14))
                     .foregroundStyle(DSColors.accentText)

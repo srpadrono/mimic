@@ -40,16 +40,16 @@ private enum EditorRowMetrics {
 /// One height, one radius, one hairline — the rule the request log states for its own control row,
 /// applied here for the same reason: fields that differ by a couple of points read as unrelated
 /// controls that happen to be near each other.
+///
+/// Read from the design system rather than restated, so this row and the request log's cannot drift
+/// apart by a point the way four independently written literals eventually do. `field` is the rung a
+/// control a user types into stands on; it is also the minimum height of a row, so a row whose value
+/// is plain text keeps the rhythm of one holding a field.
 private enum EditorField {
-    /// 3pt above and below a 12pt monospaced line.
-    static let verticalPadding: CGFloat = 3
-    /// 22pt — the line plus `verticalPadding` top and bottom. Also the minimum height of a row, so a
-    /// row whose value is plain text keeps the rhythm of one holding a field.
-    static let height: CGFloat = 22
-    /// 4pt, from `DSCornerRadius.sm`.
-    static let cornerRadius: CGFloat = DSCornerRadius.sm
-    /// A hairline, not a border. At 1pt a column of these reads as a grid.
-    static let borderWidth: CGFloat = 0.5
+    static let verticalPadding = DSControlHeight.verticalPadding
+    static let height = DSControlHeight.field
+    static let cornerRadius = DSCornerRadius.sm
+    static let borderWidth = DSStroke.hairline
 }
 
 private extension View {
@@ -108,7 +108,6 @@ struct EndpointEditorView: View {
     @State private var delayError: String?
     @State private var isJSONValid = true
     @State private var showDeleteConfirmation = false
-    @State private var isMoreMenuHovered = false
     @State private var statusCommitTask: Task<Void, Never>?
     @State private var bodyCommitTask: Task<Void, Never>?
     @State private var headerCommitTask: Task<Void, Never>?
@@ -234,25 +233,39 @@ struct EndpointEditorView: View {
                 // `separator`, the weight every horizontal bar in this window ends with.
                 // `panelSeparator` is heavier and reserved for the seam *between* panels.
                 .fill(DSColors.separator)
-                .frame(height: 0.5)
+                .frame(height: DSStroke.hairline)
         }
         .accessibilityElement(children: .contain)
     }
 
     /// The endpoint's own actions.
     ///
-    /// `.borderlessButton`, deliberately — and this is the one place in the app where the *opposite*
-    /// choice from `BreadcrumbJumpBar` is correct. The breadcrumb needs `.button` because its label
-    /// is a word you read and a pop-up draws its indicator ahead of the label. Here the label is a
-    /// bare ellipsis, so the default bordered style only adds a permanent rounded well around it —
-    /// chrome Xcode does not draw on an inline "more" control either.
+    /// `DSIconMenu`, which is where the block this used to spell out now lives — the same block the
+    /// journeys navigator's "+" spelled out too, whose own note named this one as its twin. The hover
+    /// well is the point of the shape: an ellipsis that never responds to the pointer reads as
+    /// decoration, and the well has to sit on the `Menu` rather than inside its label, because a
+    /// `Menu` renders its own label and a frame in there fights the control it builds.
     ///
-    /// The hover well is the affordance instead: an ellipsis that never responds to the pointer
-    /// reads as decoration. It sits on the `Menu`, not inside the label — a `Menu` renders its own
-    /// label, so a frame and a `.contentShape` in there fight the control it builds.
+    /// What this note used to argue was that `.menuStyle(.borderlessButton)` was right here and
+    /// `.button` right for `BreadcrumbJumpBar` — which split the app's four hand-styled menus two
+    /// and two. The component takes `.borderlessButton` for both, and the reason it still does has
+    /// changed: it used to be that the menu style decides the AppKit element type and
+    /// `JourneyUITests` separated two identically-labelled "Add journey" controls by element type
+    /// alone. That is fixed — the journeys navigator's menu and the journeys empty state's button
+    /// carry different labels now, and the suite separates them by name. What is left is the hit
+    /// target, which is the question `DSIconMenu`'s own note ends on and which this menu shares:
+    /// its 22pt frame and hover well sit outside the `Menu`, not inside a `Button`'s label.
+    /// `.buttonStyle(.plain)` *is* shared with the breadcrumb and `DSFilterField.ScopeMenu`; see
+    /// that note for why `.plain` and not the `.borderless` Apple's deprecation message suggests.
+    ///
+    /// The alert stays here. It is this endpoint's confirmation, not a property of icon menus.
     @ViewBuilder
     private var moreMenu: some View {
-        Menu {
+        DSIconMenu(
+            systemImage: "ellipsis",
+            help: "More actions for this endpoint",
+            identifier: "endpointEditor.moreMenu"
+        ) {
             Button {
                 actions.onDuplicate()
             } label: {
@@ -264,22 +277,7 @@ struct EndpointEditorView: View {
             } label: {
                 Label("Delete endpoint\u{2026}", systemImage: "trash")
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isMoreMenuHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 22, height: 22)
-        .background {
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(isMoreMenuHovered ? DSColors.accentSubtle : Color.clear)
-        }
-        .onHover { isMoreMenuHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isMoreMenuHovered)
-        .help("More actions for this endpoint")
-        .accessibilityIdentifier("endpointEditor.moreMenu")
         .alert(
             "Delete endpoint?",
             isPresented: $showDeleteConfirmation
@@ -367,7 +365,10 @@ struct EndpointEditorView: View {
             if headers.isEmpty {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "tray")
-                        .font(.system(size: 11))
+                        // The rung that matches the line of type beside it: `DSGlyph.control` is 11,
+                        // which is `DSTypography.label`'s size, so the glyph sits level with the
+                        // sentence rather than a point proud of it.
+                        .font(.system(size: DSGlyph.control))
                         .foregroundStyle(DSColors.labelTertiary)
                         .accessibilityHidden(true)
 
@@ -423,12 +424,17 @@ struct EndpointEditorView: View {
                 // at you about rows you are not removing; the colour is for the things that
                 // need attention, and "remove this header" says what it does in its tooltip.
                 Image(systemName: "minus.circle")
-                    .font(.system(size: 12))
+                    .font(.system(size: DSGlyph.controlLarge))
                     .foregroundStyle(DSColors.labelSecondary)
                     .frame(width: EditorField.height, height: EditorField.height)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // The same hover well the two section-header actions above it wear. This button sat
+            // between them with none: a `.plain` button gives no pressed state and no pointer
+            // response, so the one control in the row that destroys something was also the only one
+            // that never acknowledged being pointed at.
+            .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
             .help("Remove this header")
             .accessibilityIdentifier("endpointEditor.removeHeader.\(index)")
             .accessibilityLabel("Remove header")
@@ -606,7 +612,9 @@ struct EndpointEditorView: View {
     private func validationNote(_ message: String, identifier: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 10, weight: .semibold))
+                // `inline`, the rung `DSTextField` and `DSJSONEditor` draw their validation marks at
+                // — this row is the third of the three and was the one still writing the number.
+                .font(.system(size: DSGlyph.inline, weight: .semibold))
 
             // Wraps rather than truncates: a validation message that ends in an ellipsis is a
             // validation message that has stopped explaining itself.
@@ -659,7 +667,7 @@ struct EndpointEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.lg)
-                .stroke(DSColors.border, lineWidth: 0.5)
+                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         )
     }
 

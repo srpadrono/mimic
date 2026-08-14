@@ -123,16 +123,80 @@ struct GraphQLOperationTests {
         #expect(operation?.name == "GetThing")
     }
 
-    @Test("Fragments before the operation do not become the operation")
+    /// This case could not fail, before the fragment fix or after it.
+    ///
+    /// It put the fragment *after* the query — which the scanner never reaches, because it stops at
+    /// the first selection set — and passed `operationName: "GetUser"`, which takes the `stated`
+    /// branch in `operation(inPayload:)` and returns without calling `parseDocument` at all. So the
+    /// name it asserted came from the payload's own field, and the parser under test was never run.
+    ///
+    /// Both halves of the fixture are now the opposite: the fragment comes first, which is where real
+    /// clients put it, and no `operationName` is sent, which is what forces the name to be read out
+    /// of the document. Before the fix this resolved to `"name"` — the fragment's first field — so an
+    /// endpoint declared for `GetUser` did not match and a well-formed request 404'd.
+    @Test("A fragment ahead of the operation does not become the operation")
     func fragmentsDoNotWin() {
         let operation = GraphQLRequest.operation(inBody: Self.body(
             query: """
-            query GetUser { user { ...fields } }
             fragment fields on User { name }
-            """,
-            operationName: "GetUser"
+            query GetUser { user { ...fields } }
+            """
         ))
         #expect(operation?.name == "GetUser")
+        #expect(operation?.kind == .query)
+        #expect(operation?.isInferred == true, "the name has to have come from the document")
+    }
+
+    /// The shapes a real client's fragment block actually takes, all ahead of the operation: several
+    /// fragments in a row, nested selection sets that have to close more than once, a directive on
+    /// the fragment itself, and an anonymous operation whose name then comes from its own root field
+    /// rather than from anything in the fragments.
+    @Test(
+        "Fragment blocks of every shape are stepped over",
+        arguments: [
+            (
+                """
+                fragment a on User { id }
+                fragment b on Inbox { count }
+                query GetUser { user { ...a } }
+                """,
+                "GetUser"
+            ),
+            (
+                """
+                fragment deep on User { profile { address { city } } }
+                query GetUser { user { ...deep } }
+                """,
+                "GetUser"
+            ),
+            (
+                """
+                fragment flagged on User @include(if: $withUser) { id }
+                mutation SendPayment { pay { id } }
+                """,
+                "SendPayment"
+            ),
+            (
+                """
+                fragment fields on User { name }
+                { accountSummary { balance } }
+                """,
+                "accountSummary"
+            ),
+        ]
+    )
+    func fragmentBlocksAreSkipped(query: String, expected: String) {
+        #expect(GraphQLRequest.operation(inBody: Self.body(query: query))?.name == expected)
+    }
+
+    /// A fragment whose braces never close leaves nothing trustworthy behind it, so the scanner gives
+    /// the answer it gives everything it cannot read: none. The request falls back to plain path
+    /// routing instead of matching on a name guessed out of a broken document.
+    @Test("An unterminated fragment degrades to no match rather than a wrong one")
+    func unterminatedFragmentYieldsNothing() {
+        #expect(GraphQLRequest.operation(inBody: Self.body(
+            query: "fragment fields on User { name query GetUser { user { id } }"
+        )) == nil)
     }
 
     // MARK: - Not GraphQL

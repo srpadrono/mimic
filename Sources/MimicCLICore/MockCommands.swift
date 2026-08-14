@@ -69,6 +69,19 @@ struct EndpointCommand: AsyncParsableCommand {
             let client = try options.client()
             let resolvedMethod = try ArgumentParsing.method(method)
 
+            // Response options describe the endpoint's default scenario. Applying them as a second
+            // command keeps `endpointCreate` a single-purpose operation while still letting one CLI
+            // invocation produce a fully configured, serving endpoint.
+            //
+            // **Resolved before anything is sent**, which is where it used to sit — after the create.
+            // `scenarioSpec()` reads `--body-file` off disk and converts `--content-type`, so
+            // `--body-file missing.json` and `--content-type xml` both threw *after* the endpoint
+            // existed: the run exited non-zero having left behind an endpoint answering the
+            // placeholder 200 `makeEndpoint` gives it — a mock nobody asked for, standing in for the
+            // one they did. `Update.run` below resolves its spec before it sends anything; this now
+            // matches it.
+            let spec = try response.scenarioSpec()
+
             let created = try await client.send(.endpointCreate(
                 name: name,
                 method: resolvedMethod,
@@ -79,10 +92,6 @@ struct EndpointCommand: AsyncParsableCommand {
                 throw CLIFailure.commandFailed(created.error ?? .internalFailure("Create failed."))
             }
 
-            // Response options describe the endpoint's default scenario. Applying them as a second
-            // command keeps `endpointCreate` a single-purpose operation while still letting one CLI
-            // invocation produce a fully configured, serving endpoint.
-            let spec = try response.scenarioSpec()
             let touchesResponse = spec != ScenarioSpec()
             guard touchesResponse, let endpoint = created.result?.endpoint else {
                 try Output(options).emit(created)
@@ -95,9 +104,45 @@ struct EndpointCommand: AsyncParsableCommand {
                 spec: spec
             ))
             guard updated.ok else {
-                throw CLIFailure.commandFailed(updated.error ?? .internalFailure("Response update failed."))
+                throw await rollBack(endpoint: endpoint, after: updated, using: client)
             }
             try Output(options).emit(try await client.send(.endpointGet(endpoint: .id(endpoint.id))))
+        }
+
+        /// Undoes the create when the response half is refused, and reports why it was refused.
+        ///
+        /// Resolving the spec first cannot cover this: `--status 700` and a header carrying CR or LF
+        /// are refused by `applyScenarioSpec` in the executor, on the instance, and only the instance
+        /// can say so. Validating them a second time here would put the same rule in two places and
+        /// hold this build's `EndpointValidator` against a possibly different build's — so the pair
+        /// is made atomic instead, the way `ImportCommitter` makes its own create-then-respond pair
+        /// atomic by restoring the project it started from.
+        ///
+        /// The refusal the caller sees is the instance's, unchanged, so the exit code stays `4` and
+        /// matches what `endpoint update --status 700` already reports. Only when the rollback itself
+        /// fails does the message grow: the endpoint is still there, and saying nothing about it
+        /// would be the silent orphan again under a different name.
+        private func rollBack(
+            endpoint: Endpoint,
+            after refusal: ControlResponse,
+            using client: any ControlTransport
+        ) async -> CLIFailure {
+            let failure = refusal.error ?? .internalFailure("Response update failed.")
+            let removed = try? await client.send(.endpointDelete(endpoint: .id(endpoint.id)))
+            guard removed?.ok == true else {
+                return CLIFailure.commandFailed(ControlError(
+                    code: failure.code,
+                    message: """
+                    \(failure.message)
+                    The endpoint \(endpoint.method.rawValue) \(endpoint.path) was created before this \
+                    failed and could not be removed again, so it is still answering its placeholder \
+                    response. Delete it with `mimic endpoint delete \(endpoint.method.rawValue) \
+                    \(endpoint.path)`.
+                    """,
+                    details: failure.details
+                ))
+            }
+            return CLIFailure.commandFailed(failure)
         }
     }
 

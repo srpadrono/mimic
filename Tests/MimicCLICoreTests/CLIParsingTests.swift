@@ -129,7 +129,12 @@ struct CLIParsingTests {
         #expect(try options.resolveBody() == payload)
     }
 
-    @Test("An unreadable body file is reported with its path")
+    /// The exit code here said `4` and `CLIFailure.fileUnreadable` has been `2` since the two codes
+    /// that sat on the wrong side of the line were swapped — a path the caller mistyped never leaves
+    /// the process, so it is bad usage rather than "Mimic refused it". The assertion was simply stale,
+    /// and stale in the direction that matters: it disagreed with `exitCodeContract` below, which
+    /// pins the same value for the same case, so the file contained both answers.
+    @Test("An unreadable body file is reported with its path, as bad usage")
     func missingBodyFile() throws {
         let options = try ResponseOptions.parse(["--body-file", "/nonexistent/mimic/body.json"])
         do {
@@ -137,7 +142,7 @@ struct CLIParsingTests {
             Issue.record("expected a failure")
         } catch let failure as CLIFailure {
             #expect(failure.errorDescription?.contains("/nonexistent/mimic/body.json") == true)
-            #expect(failure.exitCode == 4)
+            #expect(failure.exitCode == 2)
         }
     }
 
@@ -273,19 +278,66 @@ struct CLIParsingTests {
     @Test("Exit codes distinguish usage errors, missing instances, and failed commands")
     func exitCodeContract() {
         #expect(CLIFailure.badArgument("x").exitCode == 2)
-        #expect(CLIFailure.undecodable("x").exitCode == 2)
+        // A path the caller mistyped is bad usage; nothing was ever sent to Mimic.
+        #expect(CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode == 2)
         #expect(CLIFailure.noInstance.exitCode == 3)
         #expect(CLIFailure.unreachable(baseURL: URL(string: "http://127.0.0.1:1")!, underlying: "x").exitCode == 3)
         #expect(CLIFailure.commandFailed(.noProjectOpen).exitCode == 4)
-        #expect(CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode == 4)
+        // The arguments were fine and Mimic answered — just not with anything decodable.
+        #expect(CLIFailure.undecodable("x").exitCode == 4)
+    }
+
+    /// The contract is only real at the process boundary, and that is where it was broken: everything
+    /// above asserts `CLIFailure`, which `MimicCommand.run` never sees for a usage error. Those come
+    /// from ArgumentParser, whose usage exit status is `EX_USAGE` — so these invocations exited 64
+    /// while docs/CLI.md promised 2, and no test looked.
+    @Test(
+        "Usage errors exit 2 from the process, not just from CLIFailure",
+        arguments: [
+            ["nonsense"],
+            ["journey", "teleport"],
+            ["endpoint", "create"],
+            ["server", "configure", "--port", "not-a-number"],
+        ]
+    )
+    func usageErrorsExitTwo(arguments: [String]) async {
+        #expect(await MimicCommand.run(arguments: arguments) == 2)
+    }
+
+    /// The other half of the exit contract: mapping every non-success to 2 must not catch the two
+    /// requests that are not failures. `--version` matters most — it is the first thing the README
+    /// tells someone to run after installing, so an installer smoke test branches on it.
+    @Test("--help and --version are successes, not usage errors")
+    func helpAndVersionExitZero() async {
+        #expect(await MimicCommand.run(arguments: ["--help"]) == 0)
+        #expect(await MimicCommand.run(arguments: ["journey", "--help"]) == 0)
+        #expect(await MimicCommand.run(arguments: ["--version"]) == 0)
     }
 
     @Test("\"No instance\" says how to start one")
-    func noInstanceIsActionable() {
-        let message = try! #require(CLIFailure.noInstance.errorDescription)
+    func noInstanceIsActionable() throws {
+        let message = try #require(CLIFailure.noInstance.errorDescription)
         #expect(message.contains("mimic app start"))
         #expect(message.contains("mimic daemon start"))
         #expect(message.contains("MIMIC_CONTROL_URL"))
+    }
+
+    /// `JourneyBehaviorOptions.apply` used `try?`, so a misremembered value parsed to `nil`, was
+    /// written over the field, and the command exited 0 reporting a change it had not made. These are
+    /// the spellings someone actually reaches for.
+    @Test("A misspelled enum option is rejected rather than silently dropped")
+    func behaviorOptionsRejectUnknownValues() throws {
+        for bad in ["sequential", "", "STRICT_SEQUENCE", "ordered per endpoint"] {
+            #expect(throws: (any Error).self, "expected \"\(bad)\" to be rejected") {
+                _ = try ArgumentParsing.matchMode(bad)
+            }
+        }
+        #expect(throws: (any Error).self) { _ = try ArgumentParsing.completion("loop") }
+        #expect(throws: (any Error).self) { _ = try ArgumentParsing.unmatchedBehavior("ignore") }
+
+        var spec = JourneySpec()
+        spec.matchMode = try ArgumentParsing.matchMode("strict-sequence")
+        #expect(spec.matchMode == .strictSequence)
     }
 }
 
@@ -469,7 +521,25 @@ struct JourneyFileTests {
         #expect(spec.steps?[1].failure == .timeout(holdMs: 5_000))
     }
 
-    @Test("A file produced by `journey get` is also accepted")
+    /// Importing a whole `Journey` has to come back with the journey that went in.
+    ///
+    /// The fixture is one: the value a `mimic journey get` reply carries under `journey`, which is
+    /// also what each element of an exported project's `journeys` array looks like, and what lands in
+    /// a file after `mimic journey get "X" | jq .journey > flow.json`.
+    ///
+    /// It did not come back, and this test is why that went unnoticed for so long: it asserted `name`
+    /// and `steps?.count`, which are the two things a `Journey` keeps when it is misread as a
+    /// `JourneySpec`. `readSpec` tried `JourneySpec` first and accepted it whenever `steps` was
+    /// non-nil — and since every property of `JourneySpec`/`JourneyStepSpec` is Optional, a `Journey`
+    /// decodes as one with `statusCode`, `headers`, `body`, `contentType` and `failure` all nil,
+    /// because in a `Journey` those live under `outcome`. `ProjectCommandExecutor.makeStep` then
+    /// reads a nil `statusCode` as `?? 200` and a nil `failure` as "respond", so every step came back
+    /// a bare 200 with an empty body, and the run exited 0.
+    ///
+    /// So the assertions are the fields that were being destroyed: the 401, the header that makes it
+    /// a real challenge, and the bodies — taken from the template rather than retyped, so editing the
+    /// template cannot leave a stale expectation passing here.
+    @Test("A whole journey read from a file keeps every response it described")
     func readsAFullJourney() throws {
         var project = MockProject(name: "Checkout")
         _ = try ProjectCommandExecutor.apply(
@@ -481,7 +551,87 @@ struct JourneyFileTests {
 
         let spec = try JourneyFile.readSpec(path)
         #expect(spec.name == "Session")
-        #expect(spec.steps?.count == 5)
+
+        let steps = try #require(spec.steps)
+        let templateSteps = try #require(JourneyTemplates.sessionExpiry.spec.steps)
+        #expect(steps.count == 5)
+        #expect(steps.map(\.method) == templateSteps.map(\.method))
+        #expect(steps.map(\.path) == templateSteps.map(\.path))
+        #expect(steps.map(\.body) == templateSteps.map(\.body))
+        #expect(steps.compactMap(\.body).count == 5, "no step may come back with an empty body")
+
+        let statuses: [Int?] = [200, 200, 401, 200, 200]
+        #expect(steps.map(\.statusCode) == statuses)
+
+        // The step the whole template exists for: a 401 carrying the challenge header. Both halves
+        // are read out of the template so a change there fails here rather than passing quietly.
+        #expect(steps[2].statusCode == 401)
+        #expect(steps[2].headers == templateSteps[2].headers)
+        let challenge = try #require(steps[2].headers)
+        #expect(challenge["WWW-Authenticate"]?.contains("invalid_token") == true)
+    }
+
+    /// The other half of what the old reader flattened: a transport failure is not a status code, and
+    /// `makeStep` turns a step with no `failure` into a 200 response. Every `connectionDrop` and
+    /// `timeout` in a whole journey therefore came back as a success.
+    @Test("Transport failures survive a whole-journey file too")
+    func readsFailuresFromAFullJourney() throws {
+        var project = MockProject(name: "Checkout")
+        _ = try ProjectCommandExecutor.apply(
+            .journeyAddTemplate(templateID: "offline-to-online", name: "Offline"),
+            to: &project
+        )
+        let path = try Self.write(try ControlCoding.string(project.journeys[0], pretty: true))
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let spec = try JourneyFile.readSpec(path)
+        let steps = try #require(spec.steps)
+        let expected: [NetworkFailure?] = [.connectionDrop, .timeout(holdMs: 15_000), nil]
+        #expect(steps.map(\.failure) == expected)
+        #expect(steps[2].statusCode == 200, "only the last step is a response")
+    }
+
+    /// A document that is *part way* between the two shapes is refused, not guessed at.
+    ///
+    /// This is the failure mode the positive discriminator buys: `outcome` on a step — or a top-level
+    /// `id` — says "this is a `Journey`", and from there it must decode as one. Strip the outcomes
+    /// out of one and the old reader would have accepted the remains as a spec and silently produced
+    /// 200s; now it says which key it could not read.
+    ///
+    /// It also pins the discriminator against the non-fix: swapping the two decoders' order would
+    /// make this file fall through to the spec branch and be quietly accepted again.
+    @Test("A half-converted journey document is refused rather than read as a spec")
+    func refusesAnAmbiguousJourneyDocument() throws {
+        // Built by mangling a real serialized `Journey` rather than by hand: a `JourneyStepOutcome`
+        // encodes as `{"respond":{"_0":{…}}}` — the `_0` is Swift's synthesis for an unlabelled
+        // associated value — and a hand-typed approximation of that would fail to decode for a reason
+        // this test does not name.
+        var project = MockProject(name: "Checkout")
+        _ = try ProjectCommandExecutor.apply(
+            .journeyAddTemplate(templateID: "session-expiry", name: "Session"),
+            to: &project
+        )
+        let encoded = try ControlCoding.encoder().encode(project.journeys[0])
+        let decoded = try JSONSerialization.jsonObject(with: encoded)
+        var object = try #require(decoded as? [String: Any])
+        var steps = try #require(object["steps"] as? [[String: Any]])
+        #expect(steps[1].keys.contains("outcome"), "the document really did carry an outcome to strip")
+        _ = steps[1].removeValue(forKey: "outcome")
+        object["steps"] = steps
+
+        let mangled = try JSONSerialization.data(withJSONObject: object)
+        let path = try Self.write(String(decoding: mangled, as: UTF8.self))
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        do {
+            let spec = try JourneyFile.readSpec(path)
+            Issue.record("expected a refusal, got \(String(describing: spec.steps?.count)) steps")
+        } catch let failure as CLIFailure {
+            #expect(failure.exitCode == 2)
+            let message = failure.errorDescription ?? ""
+            #expect(message.contains(path))
+            #expect(message.contains("outcome"))
+        }
     }
 
     @Test("A journey round-trips through a file without ids leaking in")
@@ -558,7 +708,14 @@ struct AppLauncherTests {
         #expect(candidates.first?.path.contains("~") == false)
     }
 
-    @Test("When no bundle exists the error lists everywhere that was tried")
+    /// Mimic not being installed where the CLI looked is `3`, not `2`.
+    ///
+    /// It used to be `badArgument`, so a script branching on the code was told the *user had mistyped
+    /// something* when what had happened was that the app was not there. `3` already means "there is
+    /// no Mimic to talk to", and inside `mimic app start` the not-installed failure and the
+    /// never-answered failure (`waitForReadiness`, already `3`) are one condition that was being
+    /// reported under two codes. The contract stays at four documented values.
+    @Test("When no bundle exists the error lists everywhere that was tried, and exits 3")
     func missingBundleIsDiagnosable() {
         do {
             // Candidates are injected so the outcome does not depend on whether Mimic happens to be
@@ -576,7 +733,7 @@ struct AppLauncherTests {
             #expect(message.contains("/nowhere/Mimic.app"))
             #expect(message.contains("/also-nowhere/Mimic.app"))
             #expect(message.contains("MIMIC_APP_PATH"))
-            #expect(failure.exitCode == 2)
+            #expect(failure.exitCode == 3)
         } catch {
             Issue.record("expected a CLIFailure, got \(error)")
         }
@@ -586,5 +743,26 @@ struct AppLauncherTests {
     func refusesInvalidPid() {
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: 0) }
         #expect(throws: CLIFailure.self) { try AppLauncher.terminate(pid: -5) }
+        // And it is reported as "there is no Mimic to signal" rather than as a mistyped argument.
+        #expect(CLIFailure.appUnavailable("Invalid pid 0.").exitCode == 3)
+    }
+
+    /// The whole contract, in one place, including the case that joined it.
+    ///
+    /// `appUnavailable` deliberately shares `3` with `noInstance` and `unreachable` instead of
+    /// claiming a fifth code: all three are the same sentence about the world, and docs/CLI.md
+    /// publishes four values a caller may branch on.
+    @Test("The exit contract is four values, and appUnavailable did not add a fifth")
+    func exitCodesRemainFourValues() {
+        let codes: Set<Int32> = [
+            CLIFailure.badArgument("x").exitCode,
+            CLIFailure.fileUnreadable(path: "x", underlying: "y").exitCode,
+            CLIFailure.noInstance.exitCode,
+            CLIFailure.unreachable(baseURL: URL(string: "http://127.0.0.1:1")!, underlying: "x").exitCode,
+            CLIFailure.appUnavailable("Could not find Mimic.app.").exitCode,
+            CLIFailure.commandFailed(.noProjectOpen).exitCode,
+            CLIFailure.undecodable("x").exitCode,
+        ]
+        #expect(codes == [2, 3, 4])
     }
 }

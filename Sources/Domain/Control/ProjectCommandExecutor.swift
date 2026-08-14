@@ -30,14 +30,26 @@ public enum ProjectCommandExecutor {
         _ command: ControlCommand,
         to project: inout MockProject
     ) throws -> ProjectCommandOutcome? {
+        // Host-scoped commands — server lifecycle, project selection, journey runtime, logs,
+        // discovery — reach state a pure `inout MockProject` transformation cannot see, so they are
+        // the host's to answer. `nil` is the signal to keep looking, not a failure.
+        //
+        // This check used to be twenty-one cases named one by one at the bottom of the switch below,
+        // with the complementary twenty-six named at the bottom of `MimicControlService.run` and
+        // again at the bottom of `AppControlHost.perform`: one fact — which side of the line a
+        // command falls on — written out three times and kept in agreement by hand. It is written
+        // once now, as `CommandKind.scope`, whose own switch has no `default`, so a command added
+        // later still cannot compile until somebody has decided which side it belongs on. That
+        // decision is the only thing the three lists were really buying.
+        guard command.kind.scope == .project else { return nil }
+
         switch command {
 
         // MARK: Project metadata
 
         case let .projectRename(name):
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                throw ControlError.invalid("Project name must not be empty.")
+            guard let trimmed = name.nilIfEmpty else {
+                throw ControlError.emptyProjectName
             }
             project.name = trimmed
             return mutated(.init(message: "Renamed project to \"\(trimmed)\".", project: project))
@@ -64,9 +76,7 @@ public enum ProjectCommandExecutor {
             return read(.init(endpoints: project.endpoints))
 
         case let .endpointGet(ref):
-            guard let endpoint = project.endpoint(matching: ref) else {
-                throw ControlError.endpointNotFound(ref)
-            }
+            let endpoint = try project.requireEndpoint(ref)
             return read(.init(endpoint: endpoint))
 
         case let .endpointCreate(name, method, path, spec):
@@ -78,23 +88,17 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .endpointUpdate(ref, spec):
-            guard let index = project.endpointIndex(matching: ref) else {
-                throw ControlError.endpointNotFound(ref)
-            }
+            let index = try project.requireEndpointIndex(ref)
             try applyEndpointSpec(spec, to: &project.endpoints[index])
             return mutated(.init(message: "Updated endpoint.", endpoint: project.endpoints[index]))
 
         case let .endpointDelete(ref):
-            guard let index = project.endpointIndex(matching: ref) else {
-                throw ControlError.endpointNotFound(ref)
-            }
+            let index = try project.requireEndpointIndex(ref)
             let removed = project.endpoints.remove(at: index)
             return mutated(.init(message: "Deleted endpoint \(removed.method.rawValue) \(removed.path)."))
 
         case let .endpointDuplicate(ref):
-            guard let source = project.endpoint(matching: ref) else {
-                throw ControlError.endpointNotFound(ref)
-            }
+            let source = try project.requireEndpoint(ref)
             let copy = duplicate(source)
             project.endpoints.append(copy)
             return mutated(.init(message: "Duplicated endpoint as \"\(copy.name)\".", endpoint: copy))
@@ -102,15 +106,11 @@ public enum ProjectCommandExecutor {
         // MARK: Scenarios
 
         case let .scenarioList(ref):
-            guard let endpoint = project.endpoint(matching: ref) else {
-                throw ControlError.endpointNotFound(ref)
-            }
+            let endpoint = try project.requireEndpoint(ref)
             return read(.init(scenarios: endpoint.scenarios))
 
         case let .scenarioCreate(endpointRef, name, spec):
-            guard let index = project.endpointIndex(matching: endpointRef) else {
-                throw ControlError.endpointNotFound(endpointRef)
-            }
+            let index = try project.requireEndpointIndex(endpointRef)
             var scenario = Scenario(name: name)
             try applyScenarioSpec(spec ?? ScenarioSpec(), to: &scenario)
             project.endpoints[index].scenarios.append(scenario)
@@ -122,15 +122,11 @@ public enum ProjectCommandExecutor {
             return mutated(.init(message: "Created scenario \"\(scenario.name)\".", scenario: scenario))
 
         case let .scenarioUpdate(endpointRef, scenarioRef, spec):
-            guard let endpointIndex = project.endpointIndex(matching: endpointRef) else {
-                throw ControlError.endpointNotFound(endpointRef)
-            }
-            guard let scenarioIndex = project.scenarioIndex(
+            let endpointIndex = try project.requireEndpointIndex(endpointRef)
+            let scenarioIndex = try project.requireScenarioIndex(
                 in: project.endpoints[endpointIndex],
                 matching: scenarioRef
-            ) else {
-                throw ControlError.scenarioNotFound(scenarioRef)
-            }
+            )
             try applyScenarioSpec(spec, to: &project.endpoints[endpointIndex].scenarios[scenarioIndex])
             return mutated(.init(
                 message: "Updated scenario.",
@@ -138,15 +134,11 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .scenarioDelete(endpointRef, scenarioRef):
-            guard let endpointIndex = project.endpointIndex(matching: endpointRef) else {
-                throw ControlError.endpointNotFound(endpointRef)
-            }
-            guard let scenarioIndex = project.scenarioIndex(
+            let endpointIndex = try project.requireEndpointIndex(endpointRef)
+            let scenarioIndex = try project.requireScenarioIndex(
                 in: project.endpoints[endpointIndex],
                 matching: scenarioRef
-            ) else {
-                throw ControlError.scenarioNotFound(scenarioRef)
-            }
+            )
             let removed = project.endpoints[endpointIndex].scenarios.remove(at: scenarioIndex)
             if project.endpoints[endpointIndex].activeScenarioID == removed.id {
                 project.endpoints[endpointIndex].activeScenarioID =
@@ -155,15 +147,11 @@ public enum ProjectCommandExecutor {
             return mutated(.init(message: "Deleted scenario \"\(removed.name)\"."))
 
         case let .scenarioActivate(endpointRef, scenarioRef):
-            guard let endpointIndex = project.endpointIndex(matching: endpointRef) else {
-                throw ControlError.endpointNotFound(endpointRef)
-            }
-            guard let scenarioIndex = project.scenarioIndex(
+            let endpointIndex = try project.requireEndpointIndex(endpointRef)
+            let scenarioIndex = try project.requireScenarioIndex(
                 in: project.endpoints[endpointIndex],
                 matching: scenarioRef
-            ) else {
-                throw ControlError.scenarioNotFound(scenarioRef)
-            }
+            )
             let scenario = project.endpoints[endpointIndex].scenarios[scenarioIndex]
             project.endpoints[endpointIndex].activeScenarioID = scenario.id
             return mutated(.init(message: "Activated scenario \"\(scenario.name)\".", scenario: scenario))
@@ -174,19 +162,17 @@ public enum ProjectCommandExecutor {
             return read(.init(journeys: project.journeys))
 
         case let .journeyGet(ref):
-            guard let journey = project.journey(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let journey = try project.requireJourney(ref)
             return read(.init(journey: journey))
 
         case let .journeyCreate(name, spec):
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            guard let trimmed = name.nilIfEmpty else {
                 throw ControlError.invalid("Journey name must not be empty.")
             }
             var journey = Journey(name: trimmed)
+            // `applyJourneySpec` already prefers the spec's name over the one the journey was built
+            // with, so there is nothing left to reconcile afterwards.
             try applyJourneySpec(spec ?? JourneySpec(), to: &journey)
-            journey.name = spec?.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? trimmed
             project.journeys.append(journey)
             return mutated(.init(message: "Created journey \"\(journey.name)\".", journey: journey))
 
@@ -203,8 +189,9 @@ public enum ProjectCommandExecutor {
             }
             var journey = Journey(name: name?.nilIfEmpty ?? template.title)
             try applyJourneySpec(template.spec, to: &journey)
-            // The template's own `name` (if any) must not override an explicitly requested one.
-            journey.name = name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? template.title
+            // Applied after the spec, because the template's own `name` must not override a name the
+            // caller asked for explicitly.
+            journey.name = name?.nilIfEmpty ?? template.title
             project.journeys.append(journey)
             return mutated(.init(
                 message: "Added journey \"\(journey.name)\" from template \"\(template.id)\".",
@@ -212,16 +199,12 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .journeyUpdate(ref, spec):
-            guard let index = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let index = try project.requireJourneyIndex(ref)
             try applyJourneySpec(spec, to: &project.journeys[index])
             return mutated(.init(message: "Updated journey.", journey: project.journeys[index]))
 
         case let .journeyDelete(ref):
-            guard let index = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let index = try project.requireJourneyIndex(ref)
             let removed = project.journeys.remove(at: index)
             if project.activeJourneyID == removed.id {
                 project.activeJourneyID = nil
@@ -229,17 +212,13 @@ public enum ProjectCommandExecutor {
             return mutated(.init(message: "Deleted journey \"\(removed.name)\"."))
 
         case let .journeyDuplicate(ref):
-            guard let source = project.journey(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let source = try project.requireJourney(ref)
             let copy = duplicate(source)
             project.journeys.append(copy)
             return mutated(.init(message: "Duplicated journey as \"\(copy.name)\".", journey: copy))
 
         case let .journeyStepAdd(ref, spec, atIndex):
-            guard let journeyIndex = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let journeyIndex = try project.requireJourneyIndex(ref)
             let step = try makeStep(from: spec, position: project.journeys[journeyIndex].steps.count)
             let insertAt = min(max(0, atIndex ?? project.journeys[journeyIndex].steps.count),
                                project.journeys[journeyIndex].steps.count)
@@ -250,9 +229,7 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .journeyStepsAdd(ref, specs, atIndex):
-            guard let journeyIndex = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
+            let journeyIndex = try project.requireJourneyIndex(ref)
             // Every step is built before any is inserted, so a bad one in the middle leaves the
             // journey untouched rather than half-appended. `project` is `inout`; a throw partway
             // through a loop of inserts would commit the steps that came first.
@@ -270,22 +247,14 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .journeyStepUpdate(ref, stepRef, spec):
-            guard let journeyIndex = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
-            guard let stepIndex = project.journeys[journeyIndex].stepIndex(matching: stepRef) else {
-                throw ControlError.journeyStepNotFound(stepRef)
-            }
+            let journeyIndex = try project.requireJourneyIndex(ref)
+            let stepIndex = try project.journeys[journeyIndex].requireStepIndex(stepRef)
             try applyStepSpec(spec, to: &project.journeys[journeyIndex].steps[stepIndex])
             return mutated(.init(message: "Updated step.", journey: project.journeys[journeyIndex]))
 
         case let .journeyStepRemove(ref, stepRef):
-            guard let journeyIndex = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
-            guard let stepIndex = project.journeys[journeyIndex].stepIndex(matching: stepRef) else {
-                throw ControlError.journeyStepNotFound(stepRef)
-            }
+            let journeyIndex = try project.requireJourneyIndex(ref)
+            let stepIndex = try project.journeys[journeyIndex].requireStepIndex(stepRef)
             let removed = project.journeys[journeyIndex].steps.remove(at: stepIndex)
             return mutated(.init(
                 message: "Removed step \"\(removed.name)\".",
@@ -293,12 +262,8 @@ public enum ProjectCommandExecutor {
             ))
 
         case let .journeyStepMove(ref, stepRef, toIndex):
-            guard let journeyIndex = project.journeyIndex(matching: ref) else {
-                throw ControlError.journeyNotFound(ref)
-            }
-            guard let stepIndex = project.journeys[journeyIndex].stepIndex(matching: stepRef) else {
-                throw ControlError.journeyStepNotFound(stepRef)
-            }
+            let journeyIndex = try project.requireJourneyIndex(ref)
+            let stepIndex = try project.journeys[journeyIndex].requireStepIndex(stepRef)
             let step = project.journeys[journeyIndex].steps.remove(at: stepIndex)
             let destination = min(max(0, toIndex), project.journeys[journeyIndex].steps.count)
             project.journeys[journeyIndex].steps.insert(step, at: destination)
@@ -307,9 +272,22 @@ public enum ProjectCommandExecutor {
                 journey: project.journeys[journeyIndex]
             ))
 
+        // MARK: Declared project-scoped, not applied above
+        //
+        // Unreachable while `CommandKind.scope` and this switch agree, and the compiler cannot
+        // check that they do: the guard narrows by `CommandKind` while the switch is over
+        // `ControlCommand`. It throws rather than returning `nil` because `nil` sends the command on
+        // to the host, which would answer "no project is open" — with a project open, which is
+        // exactly the misdirection the old hand-written lists existed to prevent. Saying what is
+        // actually wrong is worth more than a plausible lie.
+        //
+        // `ControlCommandTests` runs one sample of every kind through here and fails when a
+        // project-scoped command is declined, so this arm costs a red suite rather than a broken
+        // script.
         default:
-            // Host-scoped: server lifecycle, project selection, journey runtime, logs, discovery.
-            return nil
+            throw ControlError.internalFailure(
+                "\(command.kind.rawValue) is project-scoped but ProjectCommandExecutor does not apply it."
+            )
         }
     }
 
@@ -380,9 +358,7 @@ public enum ProjectCommandExecutor {
     }
 
     static func applyJourneySpec(_ spec: JourneySpec, to journey: inout Journey) throws {
-        if let name = spec.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
-            journey.name = name
-        }
+        if let name = spec.name?.nilIfEmpty { journey.name = name }
         if let summary = spec.summary { journey.summary = summary.nilIfEmpty }
         if let matchMode = spec.matchMode { journey.matchMode = matchMode }
         if let completion = spec.completion { journey.completion = completion }
@@ -508,49 +484,31 @@ public enum ProjectCommandExecutor {
 
     // MARK: - Duplication
 
+    /// A copy of `source` named "… (Copy)", reminted by ``Endpoint/copyingWithFreshIdentifiers()``.
+    ///
+    /// The reminting is not repeated here, and that is the whole point. This arm used to build its own
+    /// copy, and it and the shared helper disagreed about one field: it pointed the copy at
+    /// `scenarios.first`, while the helper follows whichever scenario the source has *active*. So
+    /// `mimic endpoint duplicate` and `mimic project duplicate` produced different copies of the same
+    /// endpoint whenever its active scenario was not its first — duplicating an endpoint serving
+    /// "Server error" handed back one serving "Default".
+    ///
+    /// Following the source is the correct half: a duplicate should answer the way the original
+    /// answers. The rename is the only thing left that is specific to duplicating *within* a project,
+    /// where the copy lands in the same list as its original and two identical names tell the reader
+    /// nothing about which is which.
     static func duplicate(_ source: Endpoint) -> Endpoint {
-        // Fresh scenario ids, so editing the copy never mutates the original's responses.
-        let scenarios = source.scenarios.map {
-            Scenario(
-                name: $0.name,
-                statusCode: $0.statusCode,
-                headers: $0.headers,
-                body: $0.body,
-                bodyContentType: $0.bodyContentType
-            )
-        }
-        return Endpoint(
-            name: "\(source.name) (Copy)",
-            method: source.method,
-            path: source.path,
-            scenarios: scenarios,
-            activeScenarioID: scenarios.first?.id,
-            delayMs: source.delayMs,
-            groupTag: source.groupTag,
-            graphqlOperation: source.graphqlOperation
-        )
+        var copy = source.copyingWithFreshIdentifiers()
+        copy.name = "\(source.name) (Copy)"
+        return copy
     }
 
+    /// A copy of `source` named "… (Copy)", reminted by ``Journey/copyingWithFreshIdentifiers()``.
+    /// Same division of labour as the endpoint arm above: the helper owns identity, this owns the name.
     static func duplicate(_ source: Journey) -> Journey {
-        Journey(
-            name: "\(source.name) (Copy)",
-            summary: source.summary,
-            steps: source.steps.map {
-                JourneyStep(
-                    name: $0.name,
-                    method: $0.method,
-                    path: $0.path,
-                    outcome: $0.outcome,
-                    delayMs: $0.delayMs,
-                    repeatCount: $0.repeatCount,
-                    graphqlOperation: $0.graphqlOperation
-                )
-            },
-            matchMode: source.matchMode,
-            completion: source.completion,
-            unmatchedBehavior: source.unmatchedBehavior,
-            autoAdvance: source.autoAdvance
-        )
+        var copy = source.copyingWithFreshIdentifiers()
+        copy.name = "\(source.name) (Copy)"
+        return copy
     }
 
     // MARK: - Helpers
@@ -578,9 +536,19 @@ public enum ProjectCommandExecutor {
 }
 
 extension String {
-    /// `nil` for an empty (or whitespace-only) string — lets a caller clear an optional field from a
-    /// shell without constructing JSON null.
-    var nilIfEmpty: String? {
-        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self
+    /// The trimmed string, or `nil` when nothing survives the trim — which lets a caller clear an
+    /// optional field from a shell without constructing JSON null.
+    ///
+    /// It returns the *trimmed* value, not the original. Trimming only to decide emptiness and then
+    /// handing back the untrimmed string is how `mimic endpoint create --name " Login "` stored a
+    /// name with the spaces still on it while `journey create` — which trimmed a second time by hand
+    /// — did not, and how `--path " /login "` reached `validatePath` with the spaces attached. Every
+    /// caller here wants the trimmed form; a body is never passed through this property.
+    /// `public` because it is not only the executor's any more: both hosts call it to trim a project
+    /// name before deciding whether it is empty, where each used to spell the trim out itself. Two
+    /// copies of "what counts as empty" is exactly the kind of rule that drifts a space at a time.
+    public var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

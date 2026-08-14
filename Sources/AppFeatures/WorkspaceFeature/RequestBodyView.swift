@@ -37,7 +37,11 @@ struct RequestBodyView: View {
                 if !rendered.isFormatted {
                     Text("Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB.")
                         .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelTertiary)
+                        // `labelSecondary`. This is the sentence that explains why the payload below
+                        // is a wall of minified JSON rather than the indented view every other body
+                        // gets — without it the view looks broken. `DSContrastTests` asserts that
+                        // `labelTertiary` clears AA on no surface in this app, in either appearance.
+                        .foregroundStyle(DSColors.labelSecondary)
                 }
 
                 // The count lives here rather than next to the search field because only this view
@@ -46,7 +50,11 @@ struct RequestBodyView: View {
                 if !searchText.isEmpty {
                     Text(Self.matchSummary(rendered.matchCount))
                         .font(DSTypography.caption)
-                        .foregroundStyle(rendered.matchCount == 0 ? DSColors.labelTertiary : DSColors.warning)
+                        // "No matches in this body" is the answer to a search someone just typed, so
+                        // it is read rather than glanced past — the same reason the line above moved
+                        // off `labelTertiary`. Still quieter than the hit count, which keeps
+                        // `warning` because it is pointing at highlighted text further down.
+                        .foregroundStyle(rendered.matchCount == 0 ? DSColors.labelSecondary : DSColors.warning)
                         .accessibilityIdentifier("requestLog.body.\(identifier).matches")
                 }
 
@@ -66,16 +74,29 @@ struct RequestBodyView: View {
         }
         .padding(DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.tertiary.opacity(0.3))
+        // `DSColors.codeWell`, not a hand-written `tertiary.opacity(0.3)`. This was the literal that
+        // put the syntax palette's contrast readings on a surface nothing paints: the token's comment
+        // named `tertiary` — the opaque well `DSCodeBlock` fills with — while the only view in the app
+        // that draws `DSColors.Syntax` is this one, on a 30% wash of it. Naming the composite is what
+        // lets `DSContrastTests` measure the background this actually has.
+        .background(DSColors.codeWell)
         .task(id: RenderKey(payload: payload, searchText: searchText)) {
             let payload = payload
             let searchText = searchText
             // Detached rather than a plain `await`: with approachable concurrency a nonisolated
             // async function stays on the caller's actor, and tokenising 64 KB on the main actor is
             // exactly the hitch this is meant to avoid.
-            rendered = await Task.detached {
+            let result = await Task.detached {
                 Self.render(payload: payload, searchText: searchText)
             }.value
+            // Awaiting a non-throwing detached task swallows the cancellation `.task(id:)` sent
+            // when the id changed, so a slow render of the previous body could come back after the
+            // new one and sit on screen until the id next moved. Land only the render still asked
+            // for — the same guard the detached hops in `SidebarView` and `RequestLogDrawerView`
+            // close with.
+            if !Task.isCancelled {
+                rendered = result
+            }
         }
     }
 
@@ -117,6 +138,17 @@ struct RequestBodyView: View {
     }
 
     /// Marks every occurrence of `term`, returning how many there were.
+    ///
+    /// **A hit takes a foreground as well as a background, and that pairing is the whole legibility of
+    /// the feature.** This used to set `backgroundColor` alone and leave each run in whatever syntax
+    /// colour `coloured(_:)` had given it — a saturated hue over a 35% amber wash. Composited and read
+    /// back on `searchHit` over ``DSColors/codeWell`` over a panel, `key`, `string`, `number` and
+    /// `literal` measured **4.28 / 3.22 / 3.08 / 3.06** in light and **2.29 / 3.21 / 3.64 / 2.62** in
+    /// dark: eight readings, none of them at AA, on the one run of text the reader deliberately asked
+    /// to find. `DSColors.Syntax.searchHitText` takes the worst of the same eight to 5.52.
+    ///
+    /// Order matters — `render(payload:searchText:)` colours first and highlights second, so this
+    /// assignment is what wins on the runs it touches.
     @discardableResult
     nonisolated static func highlight(_ term: String, in text: inout AttributedString) -> Int {
         // An empty term matches at every index; without this guard the loop below never advances.
@@ -128,6 +160,7 @@ struct RequestBodyView: View {
         while searchStart < text.endIndex,
               let found = text[searchStart...].range(of: term, options: .caseInsensitive) {
             text[found].backgroundColor = DSColors.Syntax.searchHit
+            text[found].foregroundColor = DSColors.Syntax.searchHitText
             matches += 1
             searchStart = found.upperBound
         }
