@@ -320,8 +320,12 @@ public final class ControlPlaneCoordinator {
 
     private func terminationFlush() -> Task<Void, Never> {
         if let terminationFlushTask { return terminationFlushTask }
+        // `guard let`, not an optional chain: `self?.flushPendingSave()` would make the closure's
+        // implicit return `()?` and the task infer `Task<()?, Never>`, which does not assign to
+        // the memoized handle's declared type.
         let flush = Task { @MainActor [weak self] in
-            await self?.flushPendingSave()
+            guard let self else { return }
+            await self.flushPendingSave()
         }
         terminationFlushTask = flush
         return flush
