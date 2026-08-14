@@ -844,8 +844,12 @@ struct AppStateAndViewTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let dbURL = directory.appendingPathComponent("mimic.sqlite")
         try Data("db".utf8).write(to: dbURL)
-        try Data("wal".utf8).write(to: dbURL.appendingPathExtension("wal"))
-        try Data("shm".utf8).write(to: dbURL.appendingPathExtension("shm"))
+        // The names SQLite actually writes, taken from the same helper the reset deletes through —
+        // planting them by hand is how this test came to assert against `mimic.sqlite.wal`, a file
+        // nothing has ever created, and so passed while the reset left every real sidecar behind.
+        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+            try Data("sidecar".utf8).write(to: sidecar)
+        }
         return dbURL
     }
 
@@ -865,8 +869,12 @@ struct AppStateAndViewTests {
 
         #expect(UserDefaults(suiteName: suiteName)?.object(forKey: "recentProjects") == nil)
         #expect(FileManager.default.fileExists(atPath: dbURL.path) == false)
-        #expect(FileManager.default.fileExists(atPath: dbURL.appendingPathExtension("wal").path) == false)
-        #expect(FileManager.default.fileExists(atPath: dbURL.appendingPathExtension("shm").path) == false)
+        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+            #expect(
+                FileManager.default.fileExists(atPath: sidecar.path) == false,
+                "a sidecar SQLite would recover from survived the reset"
+            )
+        }
     }
 
     @Test("Without an explicit store, the UI test reset deletes nothing")

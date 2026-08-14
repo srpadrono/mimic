@@ -124,8 +124,9 @@ errors helps nobody. The gap is visible on every run instead of silent, and the 
 its own the day `swiftSettings:` lands.
 
 **macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
-app-level suites, **the XCUITest suite**, and the Release gate. The image label is load-bearing —
-macOS 26 and Swift 6.2 are the compile floor, not a preference.
+app-level suites, **the XCUITest suite**, the CLI end-to-end check — non-gating on its first rounds,
+for the reason below — and the Release gate. The image label is load-bearing — macOS 26 and Swift
+6.2 are the compile floor, not a preference.
 
 Two things about the macOS job are worth knowing before you edit it:
 
@@ -146,22 +147,39 @@ used to be commented out and the macOS job disabled. Making the repo public reso
 `./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing:
 lockfiles, compiler settings, `swift test`, `tuist install && generate`, the Debug build, every unit
 suite, the Release gate, the UI suite, `check_house_rules.sh --self-test` followed by the real house
-rules scan, and `check_doc_counts.py`. Its own header names the three things it cannot reproduce —
-`swift test` runs on this machine's toolchain rather than in the `swift:6.2` container, the UI suite
-runs without CI's `-retry-tests-on-failure`, and runner setup is absent — so read it rather than
-treating a green local run as a green CI run.
+rules scan, `check_doc_counts.py`, and — last, and gating here from the start — the CLI end-to-end
+check. Its own header names the three things it cannot reproduce — `swift test` runs on this
+machine's toolchain rather than in the `swift:6.2` container, the UI suite runs without CI's
+`-retry-tests-on-failure`, and runner setup is absent — so read it rather than treating a green local
+run as a green CI run.
 
-### `run_cli_e2e.sh`: what it needs, and why no gate runs it
+### `run_cli_e2e.sh`: what it needs, and what runs it
 
-It covers a seam nothing else does — process launch, discovery file, real sockets — and `ci.sh`
-still does not run it. That is deliberate and the reason is written into both `ci.sh` and
-`.github/workflows/ci.yml`: **it cannot find the CLI those gates just built.** No `xcodebuild` step
-in either passes `-derivedDataPath`, so the products land in DerivedData outside the checkout while
-the script looks for `*Build/Products*` *inside* it, then falls back to whatever `mimic` is on
-`PATH` — an installed build, not this one. `AppLauncher.resolveExecutable` picks the *app* the same
-way, independently (`MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`), so
-wiring it up means exporting two paths, both pointing at what the run just built. A green e2e against
-an installed build says nothing about the working tree.
+It covers a seam nothing else reaches — a real process launch, the discovery file on disk, a real
+control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)` called in
+process — and both `ci.sh` and the macOS job now run it. `ci.sh` runs it last; the macOS job runs it
+after the UI suite and before `Build (Release)`, so the Debug products it drives are the only ones
+in that directory.
+
+What kept it out was never safety, it was that **it could not find the CLI those gates had just
+built.** No `xcodebuild` step in either passed `-derivedDataPath`, so the products landed in
+DerivedData outside the checkout while the script looks for `*Build/Products*` *inside* it, and it
+fell through to whatever `mimic` was on `PATH` — an installed build, about which a green run says
+nothing. `AppLauncher.resolveExecutable` picks the *app* the same way and independently
+(`MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`), so wiring it up meant
+naming two paths, not one. Both callers now hold one `DERIVED_DATA` — `.artifacts/DerivedData`,
+inside the checkout — and pass it to **every** `xcodebuild` step, because those builds are shared and
+pointing one of them somewhere new makes the rest re-resolve and rebuild into the old location. Each
+then exports `MIMIC_BIN` and `MIMIC_APP_PATH` at `$DERIVED_DATA/Build/Products/Debug`, and checks
+both exist before the script starts, so "the products are not where this caller thinks" cannot arrive
+later disguised as a failed assertion. `MIMIC_BIN` from the environment now wins over the script's
+own `find`.
+
+**The macOS step is non-gating for its first rounds** — `continue-on-error: true`, with the condition
+for removing it written beside it — and it comes off as soon as one round is green. No machine has
+ever executed this script, so a first red run there is as likely to be a timing assumption written on
+a laptop, or the sandbox mismatch that step's own comment names, as anything wrong with the tree. In
+`ci.sh` it gates from the start, because a laptop failure is one you can read on the spot.
 
 What it is no longer is dangerous, and that is a recent change worth knowing because the old
 behaviour is what kept it out of the docs' recommended path:
@@ -441,11 +459,11 @@ set of rules, because they used to follow none and the window read as three unre
   audit does not re-flag it.
 - **A control's height comes from `DSControlHeight` and a line weight from `DSStroke`**, for the same
   reason and after the same failure. The rule above about controls sharing a row was being kept by
-  hand: `DSButtonSize`, `DSTextField`, `DSFilterField`, `DSStatusBadge`, `RequestLogDrawerView`'s
-  `HeaderControl` and `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
+  hand: `DSButtonSize`, `DSTextField`, `DSFilterField`, `RequestLogDrawerView`'s `HeaderControl` and
+  `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
   the same 3pt inset privately — two of them across a module boundary, one with a comment promising
   it matched `DSFilterField` "so a panel that later adopts that component does not change shape on
-  the way in". Six copies, and nothing checked that the promise held. The line weights were worse:
+  the way in". Five copies, and nothing checked that the promise held. The line weights were worse:
   twenty-three bare literals — eleven strokes, eight more hand-drawing the closing rule
   `DSDivider` exists to draw, three private constants, and `DSDividerStyle` itself.
   **Every geometry ladder in `DesignSystem` is now pinned by value, not by ordering**, across three

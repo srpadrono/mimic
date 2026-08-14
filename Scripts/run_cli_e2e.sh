@@ -59,19 +59,46 @@ export MIMIC_CONTROL_FILE="$WORK/control.json"
 # `ControlEndpointDiscovery.resolveToken` reads it first on the sending side, so both halves agree.
 export MIMIC_CONTROL_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
-# Prefer a freshly built CLI; fall back to one on PATH.
+# Which `mimic`, and which Mimic.app. Named rather than guessed wherever the caller knows.
+#
+# The two are resolved independently — this script picks the CLI, and `AppLauncher.resolveExecutable`
+# inside it picks the app from `MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`
+# — so a run that names only one of them tests a mixture: this working tree's CLI driving whatever app
+# happens to be installed, or the reverse. Both are printed below for that reason. The CI job exports
+# both at the products directory it just built.
+#
+# `MIMIC_BIN` from the environment wins over the search. The search is `find … -path '*Build/Products*'`
+# and only matches when DerivedData sits inside the checkout, which is a thing `-derivedDataPath` has
+# to have arranged; the fallback after it is whatever is on PATH, i.e. an *installed* build, and a
+# green run against that says nothing about the working tree.
 #
 # `|| true` because of `pipefail`, not because a failure here is acceptable: `head -1` closes the pipe
 # as soon as it has a line, so a `find` with several matches is killed by SIGPIPE and the pipeline
 # reports 141. The empty-result case is handled immediately below, which is the check that matters.
-MIMIC_BIN="$(find "$ROOT_DIR" -type f -name mimic -perm -u+x -path '*Build/Products*' 2>/dev/null | head -1 || true)"
+MIMIC_BIN="${MIMIC_BIN:-}"
+if [ -z "$MIMIC_BIN" ]; then
+  MIMIC_BIN="$(find "$ROOT_DIR" -type f -name mimic -perm -u+x -path '*Build/Products*' 2>/dev/null | head -1 || true)"
+fi
 if [ -z "$MIMIC_BIN" ]; then
   MIMIC_BIN="$(command -v mimic)" || {
     echo "Could not find the mimic binary. Build it with:" >&2
     echo "  xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug build" >&2
+    echo "and set MIMIC_BIN to it, or pass -derivedDataPath so the products land in the checkout." >&2
     exit 1
   }
 fi
+[ -x "$MIMIC_BIN" ] || { echo "MIMIC_BIN is $MIMIC_BIN, which is not executable." >&2; exit 1; }
+
+# Checked here rather than left to the launcher: `app start` would report it, but only after this
+# script has printed that it is launching something, and a path that does not exist is a typo in the
+# caller's environment rather than a fact about this run.
+if [ -n "${MIMIC_APP_PATH:-}" ] && [ ! -e "$MIMIC_APP_PATH" ]; then
+  echo "MIMIC_APP_PATH is set to $MIMIC_APP_PATH, which does not exist." >&2
+  exit 1
+fi
+
+echo "CLI: $MIMIC_BIN"
+echo "App: ${MIMIC_APP_PATH:-/Applications/Mimic.app or ~/Applications/Mimic.app (installed)}"
 
 # Set the moment `mimic app start` reports a pid, and read by nothing else. Declared before the trap
 # so `set -u` cannot turn an early exit into an unbound-variable error inside cleanup.
@@ -139,8 +166,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ -f "$MIMIC_CONTROL_FILE" ] || fail "the instance did not write its discovery file to
   $MIMIC_CONTROL_FILE
-so it wrote to the shared Application Support path instead, and this run has overwritten the file a
-developer's own Mimic advertises itself in. MIMIC_CONTROL_FILE is what redirects it."
+so either it wrote to the shared Application Support path instead — in which case this run has
+overwritten the file a developer's own Mimic advertises itself in, and MIMIC_CONTROL_FILE is what
+redirects it — or it could not write there at all, which is what a sandboxed app reaching outside
+its container looks like."
 
 echo "== scripting the journey from the product goal =="
 "$MIMIC_BIN" project create "CLI e2e" --port "$MOCK_PORT" >/dev/null || fail "project create"

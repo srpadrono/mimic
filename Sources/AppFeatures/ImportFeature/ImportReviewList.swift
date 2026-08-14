@@ -24,9 +24,57 @@ private enum ImportColumns {
     // path is flexible — takes the remaining space
 }
 
-/// One row of a dense table: 26pt, matching the request log.
-private enum ImportRow {
-    static let height: CGFloat = 26
+/// One row of a dense table — ``DSControlHeight/denseRow`` — and the fills and the ink that row
+/// draws.
+///
+/// The token is what makes this row and the request log's match, rather than a sentence in each
+/// file naming the other.
+///
+/// Internal rather than private so the contrast tests can measure *what the window paints* rather
+/// than a copy of it. A bed list written out inside a test is the blind spot every contrast failure
+/// in this repository has come through, and both values below are load-bearing.
+enum ImportRow {
+    static let height = DSControlHeight.denseRow
+
+    /// The ink every warning on a candidate row is drawn in: the "Duplicate" pill, the "Binary body"
+    /// and "Body dropped" flags, and the size of a body that will be dropped.
+    ///
+    /// ``DSColors/warningText``, not ``DSColors/warning``, for all four. The base amber is measured
+    /// as a plain word on a plain surface, and a candidate row is neither — it stripes, it washes
+    /// under the pointer, and the duplicate flag fills itself with a tint of its own colour. Read on
+    /// the wash below, base amber lands at **4.43** against the ``DSColors/surfaceElevated`` token
+    /// and **4.23** on a panel, both under the 4.5 this palette holds itself to, and it was 4.17 and
+    /// 4.01 while that wash was drawn at full strength.
+    ///
+    /// On the system material a sheet is really painted with, the same word *clears* — by **0.02** at
+    /// its worst, which is the thinnest margin anything in this palette passes on, and a margin that
+    /// belongs to a surface no token in this app names. That is the whole argument for moving: the
+    /// readability of a flag should not turn on which material a sheet turns out to have. This
+    /// token's worst reading anywhere on the row is **5.69**, and
+    /// `ImportReviewRowContrastTests` takes all of them, on every bed
+    /// ``background(isHovered:rowIndex:)`` can produce, over each of the three candidate surfaces.
+    ///
+    /// The footer's two summary labels keep the base ``DSColors/warning``: nothing stripes or washes
+    /// beneath them, which is the plain word on a plain surface that token is measured for.
+    static let warningInk = DSColors.warningText
+
+    /// The tint the "Duplicate" flag fills itself with — the same 12% `DSStatusPill` draws, written
+    /// here because this flag is a word in a `Label` rather than a status pill. The tests assert the
+    /// two numbers agree, which is what keeps a hand-drawn composite from drifting off the component
+    /// that owns it.
+    static let flagFillOpacity: Double = 0.12
+
+    /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing.
+    ///
+    /// Striped like the request log — at this density the eye needs help tracking one row across six
+    /// columns — and hovered at the same strength, ``DSColors/accentSubtle`` at 60%. Full strength is
+    /// what the request log reserves for a *selected* row, which is the strongest statement a row can
+    /// make and not one to spend on the pointer passing over. The weaker wash is also what keeps the
+    /// duplicate flag above AA on a dark sheet, where the full-strength bed reads 4.43.
+    static func background(isHovered: Bool, rowIndex: Int) -> Color {
+        if isHovered { return DSColors.accentSubtle.opacity(0.6) }
+        return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
+    }
 }
 
 /// Shared review list for import flows (HAR and OpenAPI).
@@ -293,7 +341,7 @@ private struct ImportCandidateRow: View {
 
             Text(candidate.bodySizeLabel)
                 .font(DSTypography.caption)
-                .foregroundStyle(candidate.bodySizeExceedsLimit ? DSColors.warning : DSColors.labelSecondary)
+                .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.size, alignment: .leading)
 
@@ -302,8 +350,20 @@ private struct ImportCandidateRow: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .frame(height: ImportRow.height)
-        .background(rowBackground)
+        .background(ImportRow.background(isHovered: isHovered, rowIndex: rowIndex))
         .contentShape(Rectangle())
+        // The row lights up under the pointer, so the row answers the click — the whole line is the
+        // target, not the 18pt checkbox at its leading edge. A surface that answers the pointer and
+        // nothing else is a control you find by trial, and this one had the hover, the content shape
+        // and the cross-fade already: everything except the action.
+        //
+        // A tap target rather than a `Button`, and without the `.isButton` trait a bare tap target
+        // usually earns. A button here would swallow the checkbox inside itself, and the trait would
+        // announce this `.contain` group — which carries no label of its own — as an unnamed button
+        // beside the control it duplicates. The click and the checkbox are one action, and the
+        // checkbox is the half that is already named ("Import GET /orders"), so that is the half
+        // assistive technology keeps.
+        .onTapGesture { candidate.isSelected.toggle() }
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
         .help(helpText)
@@ -322,16 +382,16 @@ private struct ImportCandidateRow: View {
         if candidate.isDuplicate {
             Label("Duplicate", systemImage: "doc.on.doc")
                 .font(DSTypography.caption)
-                // `warningText`, not `warning`: this flag fills itself with a 12% tint of its own
-                // colour, where the base amber reads 3.96:1 on a panel and 4.11 on the elevated
-                // surface this sheet is. The "Body dropped" flag below stays `warning` — it is a
-                // plain word on a plain surface, which is what that token is measured for.
-                .foregroundStyle(DSColors.warningText)
+                // The 12% tint of its own colour is the hardest bed on the row, and the first reason
+                // the flags take a text variant: base amber reads 3.96:1 on that composite over a
+                // panel and 4.11 over the elevated surface. The other three warnings on the row take
+                // the same ink — see ``ImportRow/warningInk`` for the beds that decided it.
+                .foregroundStyle(ImportRow.warningInk)
                 .padding(.horizontal, DSSpacing.xs)
                 .padding(.vertical, 1)
                 .background(
                     RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(DSColors.warningText.opacity(0.12))
+                        .fill(ImportRow.warningInk.opacity(ImportRow.flagFillOpacity))
                 )
                 // "Already covered", not "already exists": since `ImportRouteLedger`, a repeat is
                 // flagged whether the cover is an endpoint the project holds or an earlier row of
@@ -343,14 +403,14 @@ private struct ImportCandidateRow: View {
             // the limit, and binary is the more specific reason there is no body.
             Label("Binary body", systemImage: "exclamationmark.triangle")
                 .font(DSTypography.caption)
-                .foregroundStyle(DSColors.warning)
+                .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
                 .accessibilityLabel("Binary body — the endpoint imports without it")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
                 .font(DSTypography.caption)
-                .foregroundStyle(DSColors.warning)
+                .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")
                 .accessibilityLabel("Response body exceeds the limit and will not be imported")
@@ -358,22 +418,15 @@ private struct ImportCandidateRow: View {
             // Not decoration — this is what holds the column open, and without it the table's
             // headers sat above the wrong columns.
             //
-            // Most rows are neither a duplicate nor oversized, so both branches above were absent and
-            // the builder produced an `EmptyView`. An `HStack` drops an `EmptyView` entirely, taking
-            // the `.frame(width: ImportColumns.flag)` wrapped around it with it — so the row gave its
-            // flexible path column 92pt the header never gave its own, and Name, Status and Size each
-            // rendered about ninety points to the right of the title naming them. Only the columns
-            // *before* the flexible one lined up, which is why it read as the headers being wrong
-            // rather than the rows.
+            // Most rows are none of duplicate, binary or oversized, so every branch above was absent
+            // and the builder produced an `EmptyView`. An `HStack` drops an `EmptyView` entirely,
+            // taking the `.frame(width: ImportColumns.flag)` wrapped around it with it — so the row
+            // gave its flexible path column 92pt the header never gave its own, and Name, Status and
+            // Size each rendered about ninety points to the right of the title naming them. Only the
+            // columns *before* the flexible one lined up, which is why it read as the headers being
+            // wrong rather than the rows.
             Color.clear
         }
-    }
-
-    /// Striped like the request log: at this density the eye needs help tracking one row across six
-    /// columns.
-    private var rowBackground: Color {
-        if isHovered { return DSColors.accentSubtle }
-        return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
     }
 
     /// Carries what the row cannot: the group the endpoint will be filed under, which is derived

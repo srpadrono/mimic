@@ -69,7 +69,7 @@ docker run --rm -v "$PWD":/src -w /src swift:6.2 \
 ## Test gates
 
 ```bash
-# Everything, in one go — build, all suites, Release gate, UI tests
+# Everything, in one go — build, all suites, Release gate, UI tests, CLI end-to-end
 ./Scripts/ci.sh
 
 # Every unit suite in one pass, through the aggregate scheme
@@ -98,18 +98,26 @@ only way to run a unit suite. Prefer it because it covers everything in one pass
 others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
 generated.
 
-**The CLI end-to-end check is not part of `./Scripts/ci.sh`, on purpose.**
+**The CLI end-to-end check is part of `./Scripts/ci.sh` now, as its last step.** It can still be run
+on its own:
 
 ```bash
 ./Scripts/run_cli_e2e.sh   # launches Mimic headless against a throwaway store
 ```
 
-It covers a seam nothing else does — process launch, discovery, real sockets — and it exercises
-whatever `mimic` and `Mimic.app` it can *find*, which by default is the installed build rather than
-the one you just compiled: neither `./Scripts/ci.sh` nor the commands above pass `-derivedDataPath`,
-so the products land outside the checkout while the script looks for `*Build/Products*` inside it and
-then falls back to `PATH`. Point `MIMIC_APP_PATH` at your build and put the matching `mimic` on
-`PATH`, or the green result is about a release you are not working on.
+It covers a seam nothing else does — process launch, discovery, real sockets. What kept it out of the
+gates was that it exercised whatever `mimic` and `Mimic.app` it could *find*, which by default is the
+installed build rather than the one you just compiled: no `xcodebuild` step passed
+`-derivedDataPath`, so the products landed outside the checkout while the script looks for
+`*Build/Products*` inside it, and it fell back to `PATH`. `./Scripts/ci.sh` builds into
+`.artifacts/DerivedData` inside the checkout and hands the script `MIMIC_BIN` and `MIMIC_APP_PATH`
+from the Debug products it just produced, checking both exist first.
+
+Run on its own after the commands above, it resolves both by searching again — those commands pass no
+`-derivedDataPath` either — so set `MIMIC_BIN` and `MIMIC_APP_PATH` yourself, or the green result is
+about a release you are not working on. The macOS CI job runs it too, non-gating for its first
+rounds; the flag and the condition for taking it off sit beside the step in
+`.github/workflows/ci.yml`.
 
 It is safe to run on a machine with Mimic open, which it did not use to be: it stops the instance it
 launched by the pid `mimic app start` reported, and it exports `MIMIC_CONTROL_FILE="$WORK/control.json"`

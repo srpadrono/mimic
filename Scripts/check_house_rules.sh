@@ -147,9 +147,11 @@ BEGIN { ml = 0; mlterm = "" }
 '
 
 # A stripped mirror of the tree, filled in as the rules ask for files and reused after that, so the
-# six rules cost one pass of the lexer rather than six. Lazily rather than up front on purpose: a
-# mirror built by a separate `prepare` step is a mirror a seventh rule can be pointed past — it would
-# grep a file that was never stripped, find nothing, and report the rule as clean.
+# rules cost one pass of the lexer between them rather than one each. Lazily rather than up front on
+# purpose: a mirror built by a separate `prepare` step is a mirror the next rule can be pointed
+# past — it would grep a file that was never stripped, find nothing, and report the rule as clean.
+# The count is not written down anywhere here for the same reason; `rules_checked` counts the
+# `report` calls, and a number in a comment is a number that goes stale the next time one is added.
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mimic-house-rules.XXXXXX")"
 # One EXIT trap covers every way this script ends, which is worth having checked rather than assumed
 # now that `--self-test` plants probe files here. A clean run, a rule firing (`exit 1`) and the
@@ -357,6 +359,26 @@ report \
     @SwiftUI . AppStorage("inspectorWidth") var inspectorWidth = 280.0' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
+# The other half of the same family, and the reason it is a rule rather than a preference: SwiftUI's
+# pre-`@Observable` wrappers are not interchangeable with it. A view holding an `@Observable` model in
+# `@StateObject` does not compile (the wrapper requires `ObservableObject`), and the conversion that
+# makes it compile — conforming the model to `ObservableObject` and publishing its fields — reverts
+# the property-level invalidation `@Observable` exists to give, so one view re-rendering on every
+# field is the *quiet* outcome. `@EnvironmentObject` is in the list because a rule that names two of
+# three spellings is a rule people route around without meaning to; the modern spelling of that one
+# is `@Environment(Model.self)`, which this cannot match — the `Object` is required.
+#
+# No occurrence of any of the three exists in any scanned tree, so this starts green and stays cheap.
+report \
+    'AGENTS.md "Non-negotiable patterns": @Observable for new code — @StateObject/@ObservedObject/@EnvironmentObject need ObservableObject, and going back to it trades property-level invalidation for a view that re-renders on every published field.' \
+    "@${WS}([A-Za-z_][A-Za-z0-9_]*${DOT})?(StateObject|ObservedObject|EnvironmentObject)" \
+    '' \
+    '@StateObject private var workspace = ProjectWorkspace()
+    @ObservedObject var workspace: ProjectWorkspace
+    @SwiftUI.EnvironmentObject var workspace: ProjectWorkspace
+    @SwiftUI . StateObject private var workspace = ProjectWorkspace()' \
+    "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
+
 # Unanchored on the left on purpose, which is what makes the module-qualified spelling free: the
 # `Dispatch.` in `Dispatch.DispatchQueue.main.asyncAfter` sits outside the match rather than in front
 # of it. Still no trailing `\(` — a bare reference to the method is as much a violation as a call, and
@@ -419,6 +441,35 @@ report \
     Image(systemName: "gear") . font ( . system ( size: 7 ) )
     Image(systemName: "gear").font(SwiftUI.Font.system(size: 7))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
+
+# The rule the comment above `STRIP_COMMENTS` predicted this file would grow into — "a house rule can
+# legitimately be about a literal", and this is the literal it named.
+#
+# Production sources only, and that scope is the rule rather than an economy: `ControlServerTests`
+# lists `0.0.0.0` and `192.168.1.10:8787` among the `Host` values the server must refuse, in a string
+# literal the comment stripper deliberately keeps. Pointing this at `Tests/` would report the test
+# that proves the rule as a breach of it.
+#
+# Written as "the bind address must be 127.0.0.1" rather than as a list of forbidden addresses, which
+# is why the allow-list carries the permitted value instead of an exemption. A ban on `0.0.0.0` alone
+# would be walked past by `"::"`, by `"localhost"` — which resolves to whatever the resolver says,
+# including an address the app under test can route to — and above all by
+# `hostname = "\(configuredHost)"`, the shape widening actually takes: nobody types `0.0.0.0`, they
+# make it configurable. Anything that is not the literal loopback address is reported, including an
+# interpolation, and the four call sites in `Sources` are all the exact string.
+#
+# Whitespace-tolerant on both sides, unlike the two exemptions above it. Those name one line each and
+# should have to come back through here when that line is respaced; this one names a *value*, and a
+# reformat of `ControlServer.swift` turning the tree red would teach only that the check is noise.
+report \
+    'AGENTS.md "CLI and Control Plane" rule 10: never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
+    "hostname${WS}[=(]${WS}\"" \
+    'hostname[[:space:]]*[=(][[:space:]]*"127\.0\.0\.1"' \
+    'application.http.server.configuration.hostname = "0.0.0.0"
+    try await application.server.start(address: .hostname ("0.0.0.0", port: port))
+    application.http.server.configuration . hostname = "::"
+    application.http.server.configuration.hostname = "\(configuredHost)"' \
+    "${PRODUCTION_SOURCES[@]}"
 
 # UI tests only, and this one genuinely is: `waitForExistence` is an XCUIElement method, and no target
 # under `Tests/` so much as imports XCTest (`grep -rln 'import XCTest' Tests` returns nothing — they

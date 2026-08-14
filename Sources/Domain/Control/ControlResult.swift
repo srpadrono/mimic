@@ -102,18 +102,27 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         self.details = details
     }
 
+    /// The usual case: a code from the declared vocabulary.
+    ///
+    /// The `String` overload above stays because a code can come from outside it — `ControlClient`
+    /// builds `http.502` from a status nobody enumerated — but everything produced in this module
+    /// goes through here, so ``ControlErrorCode`` is the one place a code is spelled.
+    public init(code: ControlErrorCode, message: String, details: [String: String]? = nil) {
+        self.init(code: code.rawValue, message: message, details: details)
+    }
+
     public var errorDescription: String? { message }
 
     // MARK: Common failures
 
     public static let noProjectOpen = ControlError(
-        code: "project.noneOpen",
+        code: .noProjectOpen,
         message: "No project is open. Create one with `mimic project create <name>` or open an existing one."
     )
 
     public static func projectNotFound(_ ref: ProjectRef) -> ControlError {
         ControlError(
-            code: "project.notFound",
+            code: .projectNotFound,
             message: "No project matches \(describe(id: ref.id, name: ref.name)).",
             details: details(id: ref.id, name: ref.name)
         )
@@ -130,7 +139,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
             descriptor = describe(id: ref.id, name: ref.name)
         }
         return ControlError(
-            code: "endpoint.notFound",
+            code: .endpointNotFound,
             message: "No endpoint matches \(descriptor).",
             details: detail.isEmpty ? nil : detail
         )
@@ -138,7 +147,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
 
     public static func scenarioNotFound(_ ref: ScenarioRef) -> ControlError {
         ControlError(
-            code: "scenario.notFound",
+            code: .scenarioNotFound,
             message: "No scenario matches \(describe(id: ref.id, name: ref.name)).",
             details: details(id: ref.id, name: ref.name)
         )
@@ -146,7 +155,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
 
     public static func journeyNotFound(_ ref: JourneyRef) -> ControlError {
         ControlError(
-            code: "journey.notFound",
+            code: .journeyNotFound,
             message: "No journey matches \(describe(id: ref.id, name: ref.name)).",
             details: details(id: ref.id, name: ref.name)
         )
@@ -157,14 +166,14 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         if let index = ref.index { detail["index"] = String(index) }
         let descriptor = ref.index.map { "step index \($0)" } ?? describe(id: ref.id, name: ref.name)
         return ControlError(
-            code: "journeyStep.notFound",
+            code: .journeyStepNotFound,
             message: "No journey step matches \(descriptor).",
             details: detail.isEmpty ? nil : detail
         )
     }
 
     public static let noActiveJourney = ControlError(
-        code: "journey.noneActive",
+        code: .noActiveJourney,
         message: "No journey is active. Activate one with `mimic journey activate <name>`."
     )
 
@@ -180,7 +189,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// "word for word" what the first said — a promise nothing checked, on a code a script branches
     /// on.
     public static let serverBusy = ControlError(
-        code: "server.busy",
+        code: .serverBusy,
         message: "The server is already starting or stopping. Try again in a moment."
     )
 
@@ -199,7 +208,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// implementation detail of the runtime.
     public static func serverPortInUse(port: Int) -> ControlError {
         ControlError(
-            code: "server.portInUse",
+            code: .serverPortInUse,
             message: "Port \(port) is already in use. Choose another with `--port`.",
             details: ["port": String(port)]
         )
@@ -212,7 +221,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// the engine's own `localizedDescription` at both, so the sentence a script reads is the
     /// engine's diagnosis rather than a paraphrase of it.
     public static func serverStartFailed(_ message: String) -> ControlError {
-        ControlError(code: "server.startFailed", message: message)
+        ControlError(code: .serverStartFailed, message: message)
     }
 
     /// A project name that is empty, or is nothing but whitespace.
@@ -232,10 +241,10 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// Kept apart from ``projectNotFound(_:)`` deliberately: reporting a database Mimic cannot open
     /// as a missing project is how "my projects vanished" ends up with no diagnosis.
     public static func persistenceFailure(_ error: any Error) -> ControlError {
-        ControlError(code: "persistence.failure", message: error.localizedDescription)
+        ControlError(code: .persistenceFailure, message: error.localizedDescription)
     }
 
-    public static func invalid(_ message: String, code: String = "request.invalid") -> ControlError {
+    public static func invalid(_ message: String, code: String = ControlErrorCode.invalidRequest.rawValue) -> ControlError {
         ControlError(code: code, message: message)
     }
 
@@ -244,7 +253,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     /// The message names the file rather than the value: a token echoed into an error would end up in
     /// terminal scrollback, CI logs, and bug reports.
     public static let unauthorized = ControlError(
-        code: "request.unauthorized",
+        code: .unauthorized,
         message: """
         Missing or invalid \(ControlAPI.tokenHeaderName).
         The `mimic` CLI reads the token automatically from the running instance's control.json.
@@ -255,7 +264,7 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
 
     /// The request carried a browser `Origin`, or a `Host` that is not loopback.
     public static let forbiddenOrigin = ControlError(
-        code: "request.forbiddenOrigin",
+        code: .forbiddenOrigin,
         message: """
         The control API only answers same-machine, non-browser callers. \
         A request carrying an `Origin` header, or a `Host` that is not 127.0.0.1/[::1]/localhost, \
@@ -264,11 +273,11 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
     )
 
     public static func validation(_ error: any Error) -> ControlError {
-        ControlError(code: "request.invalid", message: error.localizedDescription)
+        ControlError(code: .invalidRequest, message: error.localizedDescription)
     }
 
     public static func internalFailure(_ message: String) -> ControlError {
-        ControlError(code: "internal.failure", message: message)
+        ControlError(code: .internalFailure, message: message)
     }
 
     private static func describe(id: UUID?, name: String?) -> String {

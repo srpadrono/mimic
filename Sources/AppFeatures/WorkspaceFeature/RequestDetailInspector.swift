@@ -48,6 +48,11 @@ struct RequestDetailInspector: View {
     @State private var searchText: String
     @State private var copyConfirmation: String?
     @State private var copyConfirmationTask: Task<Void, Never>?
+    /// This field is hand-rolled rather than a `DSFilterField`, so it owes the keyboard the ring
+    /// that component's documentation defines as the contract: `borderFocused` at `focusRing`
+    /// weight against `border` at `hairline` at rest. `.textFieldStyle(.plain)` discards AppKit's
+    /// own, and a field you cannot see the focus of is one you tab into blind.
+    @FocusState private var searchFieldIsFocused: Bool
 
     init(
         log: RequestLog,
@@ -358,6 +363,7 @@ struct RequestDetailInspector: View {
             TextField("Find in body", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(DSTypography.codeSmall)
+                .focused($searchFieldIsFocused)
                 .accessibilityIdentifier("requestDetail.bodySearchField")
                 .accessibilityLabel("Find in body")
 
@@ -386,8 +392,12 @@ struct RequestDetailInspector: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
+                .stroke(
+                    searchFieldIsFocused ? DSColors.borderFocused : DSColors.border,
+                    lineWidth: searchFieldIsFocused ? DSStroke.focusRing : DSStroke.hairline
+                )
         )
+        .animation(.easeOut(duration: DSAnimation.fast), value: searchFieldIsFocused)
         .padding(.horizontal, DSSpacing.md)
         .padding(.bottom, DSSpacing.sm)
     }

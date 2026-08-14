@@ -42,18 +42,6 @@ import SwiftUI
     .frame(width: 300)
 }
 
-// MARK: - DSStatusBadge
-
-#Preview("DSStatusBadge — States") {
-    HStack(spacing: DSSpacing.md) {
-        DSStatusBadge(state: .idle)
-        DSStatusBadge(state: .running)
-        DSStatusBadge(state: .stopped)
-        DSStatusBadge(state: .error)
-    }
-    .padding()
-}
-
 // MARK: - DSMethodBadge
 
 #Preview("DSMethodBadge — Standard") {

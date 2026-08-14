@@ -45,10 +45,11 @@ public struct DSFilterField: View {
     /// `DSTextField` already draws exactly this ring; it was simply the only thing in the module that
     /// did.
     ///
-    /// This fixes one of the three. The request log's field (`RequestLogDrawerView`) and the request
-    /// detail's (`RequestDetailInspector`) are still hand-rolled `TextField`s with no ring — they are
-    /// two of the three call sites that should be adopting this component rather than redrawing it,
-    /// and they get the ring for free when they do.
+    /// The line is the whole contract, and a field that does not adopt this component still owes it
+    /// to the keyboard: `DSColors.borderFocused` at `DSStroke.focusRing`, against `DSColors.border`
+    /// at `DSStroke.hairline` at rest. Adopting is not the only way to draw it — this well is a
+    /// capsule built around a scope pill, and a header row of rectangular wells has a reason to keep
+    /// its own shape and draw the same line itself.
     @FocusState private var isFocused: Bool
 
     public init(
@@ -112,6 +113,15 @@ public struct DSFilterField: View {
                     isFocused ? DSColors.borderFocused : DSColors.border,
                     lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline
                 )
+                // The whole track takes focus, not just the glyph-height strip the text occupies.
+                // AppKit's search field does this from anywhere inside its bezel, and here the
+                // difference is most of the control: the well is 20pt tall around one line of
+                // `codeSmall`, with `DSSpacing.sm` either side. It sits on the background rather
+                // than on the container so the text field, the scope pill and the clear button all
+                // keep the clicks that reach them — this only catches the ones that would land on
+                // nothing.
+                .contentShape(Capsule())
+                .onTapGesture { isFocused = true }
         }
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
         // Paired deliberately: an identifier alone on a container overrides its descendants', and
@@ -158,8 +168,15 @@ public struct DSFilterField: View {
                         .font(.system(size: DSGlyph.inlineSmall, weight: .medium))
 
                     if isScoped {
+                        // Truncated, because the pill is `.fixedSize()` below and a scope title is
+                        // caller-supplied text: without a limit the pill demands its ideal width from
+                        // a well that may be 120pt wide, and an `HStack` settles that by pushing its
+                        // *leading* edge — this pill — out of view. `DSPanelHeader` shipped exactly
+                        // that, rendering "narios" for "Scenarios".
                         Text(title)
                             .font(DSTypography.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
 
                     // At rest this is the *only* thing saying the pill is a control, because the pill

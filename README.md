@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-988%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1012%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -261,20 +261,20 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-988 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+1012 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 628 | Linux or macOS — `swift test` |
-| Design system | 61 | macOS — needs SwiftUI |
-| App and coordination | 259 | macOS — hosted by the app |
-| macOS UI (XCUITest) | 40 | macOS, interactive session |
+| Domain, persistence, engine, control plane, import, CLI | 631 | Linux or macOS — `swift test` |
+| Design system | 58 | macOS — needs SwiftUI |
+| App and coordination | 282 | macOS — hosted by the app |
+| macOS UI (XCUITest) | 41 | macOS, interactive session |
 
-The portable 628 break down as Domain 227, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
-Persistence 69, ControlPlane 21. The app's 259 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 93, `MimicTests` 129, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+The portable 631 break down as Domain 229, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
+Persistence 69, ControlPlane 22. The app's 282 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 109, `MimicTests` 134, `JourneyFeatureTests` 14, `ImportFeatureTests` 15,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
@@ -291,7 +291,7 @@ dependencies into two separate lockfiles, and that pair *can* drift, so CI check
 before it builds anything.
 
 ```bash
-swift test                    # the portable 628, no Xcode needed
+swift test                    # the portable 631, no Xcode needed
 ./Scripts/ci.sh               # full local gate: build, all suites + coverage, Release, UI tests
 ```
 

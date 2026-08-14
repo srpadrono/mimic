@@ -167,6 +167,26 @@ struct DSComponentRenderingTests {
                         actionTitle: "Create endpoint",
                         identifier: "empty"
                     ) {}
+                    // Both arms of the filter field, because they lay out differently: the first has
+                    // a scope pill carrying a title and a clear button in the row, the second has
+                    // neither and is the well with nothing but a field inside it.
+                    DSFilterField(
+                        text: .constant("/v1/accounts"),
+                        scopeID: .constant("body"),
+                        scopes: [
+                            DSFilterField.Scope(id: "any", title: "Anything"),
+                            DSFilterField.Scope(id: "body", title: "Response bodies")
+                        ],
+                        placeholder: "Filter endpoints",
+                        identifier: "scoped"
+                    )
+                    DSFilterField(
+                        text: .constant(""),
+                        scopeID: .constant(""),
+                        scopes: [],
+                        placeholder: "Filter endpoints",
+                        identifier: "unscoped"
+                    )
                     DSLoadingPlaceholder(identifier: "loading")
                         .frame(height: 160)
                     DSMethodBadge(method: "get", size: .standard, identifier: "get")
@@ -175,9 +195,6 @@ struct DSComponentRenderingTests {
                     DSSectionHeader("Actions", identifier: "actions") {
                         Button("Refresh") {}
                     }
-                    DSStatusBadge(state: .idle, identifier: "idle")
-                    DSStatusBadge(state: .running, identifier: "running")
-                    DSStatusBadge(state: .error, identifier: "error")
                     DSStatusPill(statusCode: 200)
                     DSStatusPill(statusCode: 500)
                     DSStatusPill(statusCode: nil)
@@ -320,6 +337,50 @@ struct DSComponentRenderingTests {
         #expect(badged == bare)
     }
 
+    /// "Controls sharing a row share their geometry", measured on the one control that spent longest
+    /// not measuring itself.
+    ///
+    /// `DSFilterField` documented a 20pt row from the day it was written and stated no height, so its
+    /// height was whatever the scope `Menu` inside it happened to want — which is the failure the
+    /// house rule is about, since a panel's chrome is built out of controls that are supposed to line
+    /// up. The scopeless arm is measured beside it because the pill is exactly what used to set the
+    /// number: a well with no pill in it must still stand on the same rung, or a panel's header
+    /// changes height depending on whether its filter has anything to be pointed at.
+    ///
+    /// Measured against a `Color` fixed to the token rather than against the literal 20, the way
+    /// `panelChromeSharesOneHeight` measures the bar rung.
+    @Test("A filter field stands on the control rung, with a scope pill and without one")
+    func filterFieldStandsOnTheControlRung() {
+        let measure = CGSize(width: 240, height: 80)
+        let ruler = render(Color.clear.frame(height: DSControlHeight.row), size: measure)
+        let scoped = render(
+            DSFilterField(
+                text: .constant("/v1/accounts"),
+                scopeID: .constant("body"),
+                scopes: [
+                    DSFilterField.Scope(id: "any", title: "Anything"),
+                    DSFilterField.Scope(id: "body", title: "Response bodies")
+                ],
+                placeholder: "Filter endpoints",
+                identifier: "scoped"
+            ),
+            size: measure
+        )
+        let unscoped = render(
+            DSFilterField(
+                text: .constant(""),
+                scopeID: .constant(""),
+                scopes: [],
+                placeholder: "Filter endpoints",
+                identifier: "unscoped"
+            ),
+            size: measure
+        )
+
+        #expect(scoped.height == ruler.height)
+        #expect(unscoped.height == ruler.height)
+    }
+
     /// The validation message is a row under the field, not an overlay on it.
     ///
     /// It sits as a sibling in `DSTextField`'s stack precisely so the form makes room for it — a
@@ -399,6 +460,7 @@ struct DSComponentRenderingTests {
 
         #expect(DSControlHeight.row == 20)
         #expect(DSControlHeight.field == 22)
+        #expect(DSControlHeight.denseRow == 26)
         #expect(DSControlHeight.prominent == 28)
         #expect(DSControlHeight.verticalPadding == 3)
 

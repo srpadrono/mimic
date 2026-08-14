@@ -25,6 +25,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never shows — so a CI run on a locked store exited 0 on every command while nothing it did would
   survive the stop. The state now carries the store failure, and the CLI renders a
   `store  in memory — nothing will be saved` block with the reason beneath it.
+- **The request log answers the keyboard.** ↑ and ↓ move the selection, ⇧↑ and ⇧↓ extend it from the
+  edge they are pushing against, Return collapses a multi-row selection onto the single row the
+  inspector shows, Escape clears it, and ⌘A takes every row the filter is currently showing. The rows
+  announce themselves too: each carries `.isSelected` while it is in the selection, and reads its
+  endpoint, scenario and outcome after the status, so the em dash meaning "nothing is configured for
+  this call" and the one meaning "a journey answered it" stop being the same silence. This is the
+  app's only multi-select surface and the one a journey is captured from — until now, capturing a
+  flow was a pointer-only workflow end to end.
 
 ### Fixed
 
@@ -175,11 +183,39 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a field nothing read, so a header containing a newline silently kept the old value.
 - **Restarting the control service logs again.** `shutdown()` cancelled the log drain, which finishes
   the shared stream, so a later `start()` served traffic and recorded none of it.
+- **The import review's warning flags are drawn in an ink that clears AA on the sheet's own rows.**
+  The "Binary body" and "Body dropped" flags and the size label of a body that will be dropped were
+  the base amber, and a candidate row is the wrong bed for it: the row stripes, and it washes under
+  the pointer. Read on that wash the base amber lands at 4.43 against the `surfaceElevated` token and
+  4.23 on a panel, both under the 4.5 this palette holds itself to; it cleared only on the system
+  material a sheet turns out to be painted with, and there by 0.02 at its worst — a margin belonging
+  to a surface no token in the app names. All four warnings on the row take `warningText` now, as the
+  duplicate flag beside them already did; its worst reading anywhere on the row is 5.69.
+- **A candidate row in the import review answers a click.** It lit up under the pointer, took a
+  content shape and cross-faded on hover — everything except an action — so the only thing that
+  actually toggled a candidate was the 18pt checkbox at the row's leading edge. The whole line is the
+  target now. It stays a tap target rather than becoming a `Button`, which would swallow the checkbox
+  inside itself and announce the row as an unnamed button beside the control it duplicates.
+- **A UI test reset removes SQLite's real sidecars.** It deleted `mimic-uitests.sqlite.wal` and
+  `.shm` — names SQLite has never written, because the suffix goes on the *file name* and is not a
+  path extension — so the store went and every sidecar it was written to remove stayed beside it.
+  That is not inert: a journal or a write-ahead log outliving its database is recovered from at the
+  next open, so pages a previous run committed could reappear in a store the run had asked to be
+  empty, and the failure looks like one test asserting against another's fixtures. All three of
+  `-wal`, `-shm` and `-journal` go now, rather than the one the current configuration happens to
+  produce — `DatabaseFactory` sets no `journalMode`, so a `DatabaseQueue` writes `-journal` today and
+  a configuration that later asks for WAL writes the other two.
 - A locked or unreadable database is no longer reported as "project not found".
 - The request log's method badges no longer share one accessibility identifier per HTTP method.
 - The sidebar's filter field shows a focus ring. `.textFieldStyle(.plain)` discards AppKit's, and
   nothing replaced it, so tabbing into it changed nothing on screen — which under Full Keyboard
   Access is not a polish item.
+- The request log's filter field and the request detail's find field show one too. Both are
+  hand-rolled `TextField`s at `.textFieldStyle(.plain)`, and both were named in `DSFilterField`'s own
+  documentation as the call sites still owing the ring. They draw the line that component defines —
+  `borderFocused` at `DSStroke.focusRing`, against `border` at a hairline at rest — rather than
+  adopting it, because that component is a capsule built around a scope pill and these are
+  rectangular wells.
 
 ### Changed
 
