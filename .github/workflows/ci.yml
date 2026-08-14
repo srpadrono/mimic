@@ -344,12 +344,17 @@ jobs:
         run: |
           rm -rf .artifacts/coverage
           mkdir -p .artifacts/coverage
+          # Kept on disk for the failure step below. A *compile* failure in a test target produces
+          # no test results at all — the xcresult comes back with `totalTestCount: 0` — so the step
+          # built to name the failing assertion has nothing to read, and the errors exist only in
+          # this output. `pipefail` so `tee` cannot swallow xcodebuild's status.
+          set -o pipefail
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
             test -destination 'platform=macOS' -skip-testing:MimicUITests \
             -derivedDataPath "$DERIVED_DATA" \
             -enableCodeCoverage YES \
             -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
-            CODE_SIGN_IDENTITY=-
+            CODE_SIGN_IDENTITY=- 2>&1 | tee .artifacts/unit-tests.log
 
       # (b) of the same change: the numbers go in the job summary, so a reviewer reads them on the
       # run page instead of downloading an artifact and installing Xcode to open it.
@@ -412,6 +417,15 @@ jobs:
           # puts in `.artifacts/coverage`, the step it exists to serve printed "no xcresult found"
           # and the assertion had to be read out of the raw log instead. Naming both is the whole
           # fix; `ls -dt` across them picks whichever run actually failed.
+          # Compile errors first, because an xcresult cannot carry one. A test target that fails to
+          # build produces a bundle with `totalTestCount: 0` and no failures in it — so this step,
+          # written to name the failing assertion, printed a summary saying nothing at all while the
+          # actual errors sat in the build output. Two rounds of this wave were diagnosed by pulling
+          # the raw job log instead, which is the archaeology the step exists to replace.
+          if [ -f .artifacts/unit-tests.log ]; then
+            echo "== compile errors, if any"
+            grep -E '(error|fatal error): ' .artifacts/unit-tests.log | head -40 || echo "   none — the failure is in the results below"
+          fi
           bundle="$(ls -dt "$DERIVED_DATA"/Logs/Test/*.xcresult .artifacts/coverage/*.xcresult 2>/dev/null | head -1)"
           if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
           echo "== $bundle"
