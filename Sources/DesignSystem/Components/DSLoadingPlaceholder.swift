@@ -2,8 +2,7 @@ import SwiftUI
 
 /// The skeleton a panel shows while its content is still being prepared.
 ///
-/// It pulses, and a pulse is a perpetual animation, which makes three things mandatory — the same
-/// three `DSStatusBadge` had to learn for its running-server halo.
+/// It pulses, and a pulse is a perpetual animation, which makes three things mandatory.
 ///
 /// **Reduce Motion is re-read, not read once.** The old version consulted it in `onAppear` and never
 /// again, so turning Reduce Motion on while a 64 KB body was formatting left the loop running for as

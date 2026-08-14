@@ -45,8 +45,8 @@ final class AppControlHost: ControlHost {
     /// Asynchronous because several arms have to leave the main actor: four of the project-lifecycle
     /// commands reach the store — three to check that the reference they were given names a real
     /// project, `projectExport` to read a document this session does not have open — `serverStart`
-    /// awaits a recursive `serverConfigure` when it is given a port, and `journeyAdvance` and
-    /// `journeyActivate` both await the engine for the cursor they report.
+    /// awaits a recursive `serverConfigure` when it is given a port, and every arm that reports the
+    /// journey cursor awaits the engine for it.
     ///
     /// **Which arms suspend is the interesting part**, and this comment used to say none of them did:
     /// "a read of session state … runs to completion in one hop with nothing able to interleave". It
@@ -59,12 +59,21 @@ final class AppControlHost: ControlHost {
     /// being true: the `journeyAdvance` arm awaits the engine, and does so precisely because reading
     /// the runtime's mirror in one hop answered with the cursor from before the command.
     ///
-    /// Four places in the switch below reach an `await`, and they are the four named above:
-    /// `serverStart` (only when it was given a port), `journeyActivate`, `journeyAdvance`, and the
-    /// single arm that hands the eight project-lifecycle commands to `performProjectCommand`. Every
-    /// other arm is a single-hop read of session state. Do not restate that as a count anywhere else —
-    /// this is the one place it is written down, and the arms are named so a reader can check it
-    /// against the switch rather than against another comment.
+    /// Eight arms below reach an `await`, and they are the ones named above: `state` and `reset`,
+    /// both through `makeState`; `serverStart`, only when it was given a port; the four journey
+    /// runtime arms — `journeyActivate`, `journeyRestart`, `journeyAdvance` and `journeyStatus`; and
+    /// the single arm that hands the eight project-lifecycle commands to `performProjectCommand`.
+    /// Every other arm is a single-hop read of session state. Do not restate that as a count
+    /// anywhere else — this is the one place it is written down, and the arms are named so a reader
+    /// can check it against the switch rather than against another comment.
+    ///
+    /// It read four while five arms suspended: `journeyRestart` had been awaiting the engine for a
+    /// wave without ever being named here. And the three arms whose whole job is *reporting* the
+    /// cursor — `journeyStatus`, `state` and `reset` — were answering from the runtime's published
+    /// mirror while their three siblings awaited the engine for the same value. `reset` was the
+    /// visible one: it dispatched a fire-and-forget restart and built its state on the very next
+    /// statement, so `mimic reset --scope journey` answered "Restarted journey X" with the position
+    /// from before the restart attached — one reply contradicting itself.
     private func perform(_ command: ControlCommand) async -> ControlResponse {
         guard let appState else {
             return .failure(.internalFailure("The Mimic session is no longer available."))
@@ -110,7 +119,7 @@ final class AppControlHost: ControlHost {
             return .success(.init(commands: CommandCatalog.descriptors))
 
         case .state:
-            return .success(.init(state: makeState(appState)))
+            return .success(.init(state: await makeState(appState)))
 
         case let .reset(scope):
             // The reply is built by `ControlMessages`, not by this arm. It used to report
@@ -124,10 +133,18 @@ final class AppControlHost: ControlHost {
 
             var restartedJourneyName: String?
             if scope == .journey || scope == .all {
-                // Read before the restart is requested: it is dispatched to the engine and does not
-                // report back synchronously, and the journey being rewound is the one active now.
+                // Read before the restart: the journey being rewound is the one active now.
                 restartedJourneyName = appState.activeJourney?.name
-                appState.restartActiveJourney()
+                // Awaited, so the state below cannot describe the run this line has just rewound
+                // as it stood before. `appState.restartActiveJourney()` used to stand here — the
+                // fire-and-forget form, which dispatches and returns — with `makeState` on the very
+                // next statement, so `mimic reset --scope journey` answered "Restarted journey X"
+                // carrying the pre-restart cursor: one reply contradicting itself.
+                //
+                // The answer is discarded rather than threaded into the reply because `makeState`
+                // asks the engine again anyway, and this call having *returned* is what puts that
+                // read behind the restart on the engine's own actor.
+                _ = await appState.restartActiveJourneyReportingStatus()
             }
 
             return .success(.init(
@@ -135,7 +152,7 @@ final class AppControlHost: ControlHost {
                     clearedLogEntries: clearedLogEntries,
                     restartedJourneyName: restartedJourneyName
                 ),
-                state: makeState(appState)
+                state: await makeState(appState)
             ))
 
         // MARK: Server
@@ -326,9 +343,18 @@ final class AppControlHost: ControlHost {
         case .journeyStatus:
             guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
             guard let journey = appState.activeJourney else { return .failure(.noActiveJourney) }
+            // The engine's cursor, awaited — the same round trip the three arms above make, and for
+            // the same reason. This used to read `activeJourneyStatus`, the runtime's mirror: right
+            // only when a served request or a configuration push had refreshed it recently enough,
+            // and empty on a script's first poll, which is when nothing has refreshed it at all. The
+            // command whose entire job is reporting where the run stands was the last one answering
+            // from the copy instead of from the thing that owns it.
+            let status = await appState.journeyStatusAfterPendingMockUpdates()
             return .success(.init(
-                journeyStatus: appState.activeJourneyStatus
-                    ?? JourneyStatus.make(journey: journey, state: nil)
+                // The fallback the three arms above use: with no journey loaded into the engine
+                // there is no cursor to report, and the journey as it stands is the honest answer
+                // rather than an omitted field.
+                journeyStatus: status ?? JourneyStatus.make(journey: journey, state: nil)
             ))
 
         // MARK: Logs
@@ -626,21 +652,31 @@ final class AppControlHost: ControlHost {
     /// ``HostReport/state(appVersion:mode:pid:server:project:activeJourney:requestLogCount:storeFailure:)``,
     /// so the derivations live in Domain rather than in this arm. What stays here is what
     /// only this host can answer: where its version comes from (`Bundle.main`),
-    /// that the live cursor is read from the runtime with the not-yet-started
+    /// that the live cursor is awaited from the engine with the not-yet-started
     /// journey as the fallback, and that the store fact is the session's own.
+    ///
+    /// **Awaited, and that is why this is `async`.** It read `appState.activeJourneyStatus` — the
+    /// runtime's published mirror, which exists so a view body need not await an actor — and
+    /// `mimic state` is precisely the command docs/CLI.md tells a script to poll after an
+    /// optimistic reply. The mirror is refreshed by served traffic and by configuration pushes, so a
+    /// poll landing between those reported the position from before whatever the script had just
+    /// asked for, and reported none at all before anything had refreshed it. The wait comes with the
+    /// primitive — ``AppState/journeyStatusAfterPendingMockUpdates()`` — and is not incidental: a
+    /// push still in flight is a configuration this state would otherwise describe as landed.
     ///
     /// `storeFailure` is not optional to pass. The in-memory fallback used to be surfaced only by
     /// the window's alert, so a headless session on a locked store ran fully ephemeral while every
     /// command exited 0 and `mimic state` looked healthy — and the CLI's primary audience is
     /// exactly the caller with no window to see the alert.
-    private func makeState(_ appState: AppState) -> ControlState {
-        HostReport.state(
+    private func makeState(_ appState: AppState) async -> ControlState {
+        let engineStatus = await appState.journeyStatusAfterPendingMockUpdates()
+        return HostReport.state(
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
             mode: mode,
             pid: pid,
             server: makeServerStatus(appState),
             project: appState.currentProject,
-            activeJourney: appState.activeJourneyStatus
+            activeJourney: engineStatus
                 ?? appState.activeJourney.map { JourneyStatus.make(journey: $0, state: nil) },
             requestLogCount: appState.requestLogs.count,
             storeFailure: appState.storeFailure

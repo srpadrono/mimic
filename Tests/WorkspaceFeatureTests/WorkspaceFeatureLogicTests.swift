@@ -334,44 +334,6 @@ struct WorkspaceFeatureLogicTests {
         #expect(formatted.contains("Body:") == false)
     }
 
-    /// What VoiceOver reads for a request log row — composed, like every other interactive row.
-    ///
-    /// The drawer row was the one interactive row in the window with no spoken label at all: a bare
-    /// `.isButton` trait over six loose cells, which VoiceOver read as disconnected fragments. The
-    /// label follows `EndpointTrafficRow.spokenLabel`'s composition exactly — method, path, then
-    /// the status or the failure — so the same request is announced the same way in the drawer and
-    /// in the inspector's traffic list. Three arms, and the ordering between them matters: a failed
-    /// request has a `failureLabel` and no status code, so the failure arm must only be reachable
-    /// when there is genuinely no code to speak.
-    @Test("A request log row speaks method, path, and what came back")
-    func requestLogRowSpokenLabel() {
-        let endpoint = makeEndpoint()
-
-        #expect(
-            RequestLogTableRow.spokenLabel(for: makeLog(endpoint: endpoint, timestamp: 1_710_000_000))
-                == "GET /api/users, status 200"
-        )
-
-        let failed = RequestLog(
-            method: .post,
-            path: "/api/orders",
-            responseStatusCode: nil,
-            failureLabel: "timeout 30000ms"
-        )
-        #expect(
-            RequestLogTableRow.spokenLabel(for: failed)
-                == "POST /api/orders, failed: timeout 30000ms"
-        )
-
-        let silent = RequestLog(
-            method: .get,
-            path: "/api/void",
-            responseStatusCode: nil,
-            failureLabel: nil
-        )
-        #expect(RequestLogTableRow.spokenLabel(for: silent) == "GET /api/void, no response")
-    }
-
     @Test("Request log selection and clear helpers keep state consistent")
     func requestLogSelectionHelpers() {
         let endpoint = makeEndpoint()

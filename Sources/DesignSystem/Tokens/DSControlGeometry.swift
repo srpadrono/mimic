@@ -5,14 +5,14 @@ import CoreGraphics
 /// `DSBarHeight` names the rungs a *bar* stands on. Nothing named the rungs a *control* stands on,
 /// and the house rule says controls sharing a row share their geometry — "height, corner radius,
 /// border weight and vertical padding come from one place, not from four independently written call
-/// sites". There were six places. `DSButtonSize`, `DSTextField`, `DSFilterField` and `DSStatusBadge`
-/// each declared the ladder privately, and `RequestLogDrawerView.HeaderControl` and
+/// sites". There were five places. `DSButtonSize`, `DSTextField` and `DSFilterField` each declared
+/// the ladder privately, and `RequestLogDrawerView.HeaderControl` and
 /// `EndpointEditorView.EditorField` declared it again in a different module — the first with a
 /// comment noting it matches `DSFilterField` "so a panel that later adopts that component does not
 /// change shape on the way in". That is a cross-module coupling asserted in prose, kept true by hand,
 /// and checked by nothing.
 ///
-/// Naming the rungs changes no pixel: all six already agreed. It means the seventh control starts
+/// Naming the rungs changes no pixel: all five already agreed. It means the sixth control starts
 /// from a list rather than from whatever its neighbour happened to measure.
 public enum DSControlHeight {
     /// 20 — a control that sits in a row of other controls: panel-header controls, badges, filter
@@ -23,6 +23,16 @@ public enum DSControlHeight {
     /// 22 — a control a user types into, or a single prominent action in a header. A 13pt line with
     /// ``verticalPadding`` above and below.
     public static let field: CGFloat = 22
+
+    /// 26 — one row of a dense table, which is a different thing from a control and is here because
+    /// nothing else names heights. `row` is 20 and `field` 22, and neither holds a `compact`
+    /// `DSMethodBadge` above a line of `codeSmall`; a table row is not something a user aims at, so
+    /// it is not measured against the controls it happens to sit near.
+    ///
+    /// Two rows in two modules stand on this number — the request log's traffic row and the import
+    /// review's candidate row — and until now they were two literals coupled by a sentence in each
+    /// file naming the other. `RequestLogDrawerView.LogRow`'s own comment asks for this rung by name.
+    public static let denseRow: CGFloat = 26
 
     /// 28 — the one-per-sheet primary action.
     public static let prominent: CGFloat = 28

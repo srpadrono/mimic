@@ -375,7 +375,7 @@ struct ScenarioRow: View {
         // announced this as static text with no hint that it could be pressed. `RequestLogTableRow`
         // and `EndpointTrafficRow` are the same shape and already restore it; this row and the
         // journey editor's step row were the two that did not.
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(rowTraits)
         .contextMenu {
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
             Divider()
@@ -383,8 +383,28 @@ struct ScenarioRow: View {
                 .disabled(isOnlyScenario)
         }
         .accessibilityIdentifier("inspector.scenario.\(scenario.name)")
-        .accessibilityLabel("\(scenario.name), status \(scenario.statusCode)\(isActive ? ", active" : "")")
+        .accessibilityLabel(Self.spokenLabel(scenario: scenario, isActive: isActive))
         .accessibilityValue(isActive ? "active" : "inactive")
+    }
+
+    /// `.isButton` always, and `.isSelected` on the scenario that answers.
+    ///
+    /// One scenario per endpoint is active, chosen by clicking a row — a selection, drawn here as an
+    /// accent bar, a filled mark and the word "Active". Three visual statements of it and, until the
+    /// trait, no programmatic one; `RequestLogTableRow.rowTraits` carries the same pair for the same
+    /// reason, so the two rows answer an assistive technology alike.
+    var rowTraits: AccessibilityTraits {
+        isActive ? [.isButton, .isSelected] : .isButton
+    }
+
+    /// What VoiceOver reads for the row. `static` so the composition can be pinned without hosting a
+    /// window, the way the request log's row label is.
+    ///
+    /// The active clause is said as well as carried in the trait and the value, because the trait is
+    /// what an assistive technology *queries* and this row sits in a plain `List` cell that does not
+    /// announce a selection on its behalf.
+    nonisolated static func spokenLabel(scenario: Scenario, isActive: Bool) -> String {
+        "\(scenario.name), status \(scenario.statusCode)\(isActive ? ", active" : "")"
     }
 }
 

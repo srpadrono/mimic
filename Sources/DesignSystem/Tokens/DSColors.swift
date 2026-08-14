@@ -118,11 +118,13 @@ public nonisolated enum DSColors {
     /// on a striped row now reads **6.08–6.32** plain and **5.10–5.15** filled, holds AA down to
     /// ΔL\* 11.9 plain and **5.6** filled, and at AppKit's 3.5 still reads 4.76 at worst.
     ///
-    /// So the ceiling belongs to the token that set it first. The base amber is still a word on
-    /// these rows — the import review's "Body dropped" flag sits on its stripes — and ``warning``
-    /// on a stripe reads **4.52**, clearing AA by 0.02 and crossing under it at **ΔL\* 0.9**. That
-    /// is the wall: about 0.2 ΔL\* of headroom, and AppKit's depth stays out of reach until the
-    /// base words stop being drawn on striped rows at all.
+    /// So the ceiling belongs to the token that set it first. ``warning`` on a stripe reads
+    /// **4.52**, clearing AA by 0.02 and crossing under it at **ΔL\* 0.9** — about 0.2 ΔL\* of
+    /// headroom, and that is the wall. No row draws the base amber on a stripe today; the import
+    /// review's row flags, the last that did, are ``warningText`` now. The wall stands anyway,
+    /// because these two are the palette's plain-word semantics and the next striped row to reach
+    /// for one inherits the 4.52 with it. AppKit's depth is a re-measurement of every token a stripe
+    /// carries, not a value to raise.
     ///
     /// Both generations of the ceiling are asserted in `DSContrastTests.rowStripeIsACeiling` —
     /// ``warning`` and ``success`` never moved, and the pill readings there are re-derived beside
@@ -260,16 +262,18 @@ public nonisolated enum DSColors {
     /// `dominant`.
     ///
     /// Both surfaces are named because the panel is the one that decides. It is the harder of the
-    /// two, it is where this amber is read as a *word* — the import review's "Body dropped" flag, a
-    /// blocked-by-journey outcome, a search-hit count — and it clears AA there by a tenth.
+    /// two, it is where this amber is read as a *word* — a blocked-by-journey outcome in the request
+    /// detail, a search-hit count above a body — and it clears AA there by a tenth.
     ///
-    /// Every one of those three is a plain word on a plain surface, which is the only thing this
-    /// constant is measured for. The list named a fourth, the import review's "Duplicate" flag, and
-    /// that one was wrong when it was written: `ImportReviewList` draws it on a 12% tint of itself,
-    /// where this amber reads 3.96 rather than 4.60 — a failure, cited as the example of a pass. It
-    /// is ``warningText`` now, so it is no longer a call site of this token at all. Check what a
-    /// candidate example is drawn *on* before adding it here; that is the whole distinction between
-    /// these two tokens.
+    /// Both of those are a plain word on a plain surface, which is the only thing this constant is
+    /// measured for. The list used to name the import review's row flags beside them, and the
+    /// "Duplicate" one was wrong when it was written: `ImportReviewList` draws it on a 12% tint of
+    /// itself, where this amber reads 3.96 rather than 4.60 — a failure, cited as the example of a
+    /// pass. Every warning on a candidate row is ``warningText`` now, and the reason widened to cover
+    /// all of them: that row stripes and washes under the pointer, so no part of it is a plain
+    /// surface. The sheet's *footer* summaries are, and they keep this token. Check what a candidate
+    /// example is drawn *on* before adding it here; that is the whole distinction between these two
+    /// tokens.
     ///
     /// The green channel is what moves to buy that, and it stops at 0.373 because the margin
     /// is genuinely that thin: 0.384 already reads **4.48** on a panel and misses, 0.39 reads 4.44,
@@ -364,9 +368,12 @@ public nonisolated enum DSColors {
                                               dark: .init(red: 1.0, green: 0.565, blue: 0.539))
 
     // MARK: - Server state colors
+    //
+    // Two of them. `ServerToggleButton` and `InspectorOverview` are the only views that draw server
+    // state, and both take `labelSecondary` for stopped, starting and stopping: a state nobody has
+    // to act on is a label rather than a signal. A token for the quiet states would be a colour
+    // with no call site.
 
-    /// Server idle / stopped state
-    public static let serverIdle = Color.secondary
     /// Server running state
     public static let serverRunning = success
     /// Server error state
@@ -426,13 +433,13 @@ public nonisolated enum DSColors {
     ///
     /// A bare panel is the easiest bed a badge has. The request log stripes its rows, lights the one
     /// under the pointer with `accentSubtle` at 60%, and fills the selected one with `accentSubtle`
-    /// outright — and that full-strength wash is reached three more ways, since the import review's
-    /// hovered row takes it and the sidebar and the journey step row both wear it through
-    /// `dsHoverHighlight`. All four of those rows carry a badge. On that bed — the worst of them,
-    /// because the accent wash moves a light surface down and a dark one up — the old hues read
-    /// **3.97–4.04** in light and **3.41–4.93** in dark: all six light values missed, and five of the
-    /// six dark ones. No fill alpha fixes that — at 16% the dark worst is 3.41, and with *no fill at
-    /// all* it is still only 4.20. The hues themselves had to move.
+    /// outright — and that full-strength wash is reached two more ways, since the sidebar and the
+    /// journey step row both wear it through `dsHoverHighlight`. All three of those rows carry a
+    /// badge. On that bed — the worst of them, because the accent wash moves a light surface down and
+    /// a dark one up — the old hues read **3.97–4.04** in light and **3.41–4.93** in dark: all six
+    /// light values missed, and five of the six dark ones. No fill alpha fixes that — at 16% the dark
+    /// worst is 3.41, and with *no fill at all* it is still only 4.20. The hues themselves had to
+    /// move.
     ///
     /// Each light hue is its old value scaled about 0.89 toward black, and each dark one lifted toward
     /// white by between 0 and 38% — which keeps the hue and moves only the luminance. `PUT`'s dark
@@ -595,30 +602,17 @@ public nonisolated enum DSColors {
     }
 }
 
-/// Server state mapped to color.
-public enum DSServerState {
-    case idle
-    case running
-    case stopped
-    case error
-
-    public var color: Color {
-        switch self {
-        case .idle, .stopped: DSColors.serverIdle
-        case .running: DSColors.serverRunning
-        case .error: DSColors.serverError
-        }
-    }
-
-    public var label: String {
-        switch self {
-        case .idle: "Idle"
-        case .running: "Running"
-        case .stopped: "Stopped"
-        case .error: "Error"
-        }
-    }
-}
+// MARK: - Removed: `DSServerState`
+//
+// A four-case enum — idle, running, stopped, error — with a colour and a label for each. Its only
+// consumer was `DSStatusBadge`, which nothing in the window drew, and it modelled a state machine
+// this app does not have: the real one carries five cases, `starting` and `stopping` among them,
+// and a badge that cannot say "Starting…" is not the badge this workspace needs. The two views that
+// do draw server state map it themselves, and to a different colour — `labelSecondary` for the
+// quiet states, where this enum returned `Color.secondary`.
+//
+// Bringing it back means answering that first. Git history holds the type, its badge and its four
+// tests.
 
 // MARK: - Color convenience for light/dark adaptive colors
 

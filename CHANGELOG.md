@@ -25,9 +25,60 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never shows — so a CI run on a locked store exited 0 on every command while nothing it did would
   survive the stop. The state now carries the store failure, and the CLI renders a
   `store  in memory — nothing will be saved` block with the reason beneath it.
+- **The request log answers the keyboard.** ↑ and ↓ move the selection, ⇧↑ and ⇧↓ extend it from the
+  edge they are pushing against, Return collapses a multi-row selection onto the single row the
+  inspector shows, Escape clears it, and ⌘A takes every row the filter is currently showing. The rows
+  announce themselves too: each carries `.isSelected` while it is in the selection, and reads its
+  endpoint, scenario and outcome after the status, so the em dash meaning "nothing is configured for
+  this call" and the one meaning "a journey answered it" stop being the same silence. This is the
+  app's only multi-select surface and the one a journey is captured from — until now, capturing a
+  flow was a pointer-only workflow end to end.
 
 ### Fixed
 
+- **The endpoint editor no longer throws away an edit you were still typing when you click another
+  endpoint.** Status code, response headers and response body commit 300 ms after the typing stops.
+  Selecting a different endpoint refills those fields from the newly selected one, and each refill
+  tripped the same `onChange` a keystroke does — whose first act is to cancel the timer holding the
+  value not yet written. Because every keystroke restarts that timer, what was lost was never the
+  tail of the edit: it was all of it, silently, with the editor showing the new endpoint as though
+  nothing had been typed. The pending writes now live in one object that survives the switch, each
+  closing over the endpoint it was typed into, and the selection change **finishes** them before the
+  fields are refilled. A change of *active scenario* within one endpoint still drops a pending edit —
+  the scenario write addresses "whichever scenario is active" rather than one by id, so landing it
+  after the switch would put the text in a scenario nobody typed it into; that seam is documented at
+  the call site.
+- **Pressing Return in the status code or body field no longer writes the value twice.** Return and
+  the Format button commit immediately but left the 300 ms timer running behind them, so the same
+  value was written again when it came round — two edits, two autosaves and two request-log
+  configuration pushes for one keystroke. Both now retire the timer first, as the status code path
+  already did.
+- **An edit made while a project is still opening is no longer lost.** `mimic project open` answers
+  before its load has landed, so an `endpoint create` issued straight after it edited the project
+  still on screen — and published without invalidating the load still in flight. The abandoned load
+  then landed on top, and the debounced autosave woke to a project it did not recognise and returned
+  having written nothing: both commands exited 0, no error was reported, and the save indicator never
+  left idle. `currentProject` is now `private(set)` with a single publish door that every edit goes
+  through, so an edit supersedes an in-flight open the way a create or a close already did, and the
+  autosave writes the document the edit was made to rather than whatever is open when the timer
+  fires. A settled delete supersedes an in-flight open whether or not it closed the window, and a
+  load can no longer land the window on a project whose delete is already in the chain.
+- **`mimic journey status`, `mimic state` and `mimic reset` report the cursor the engine actually
+  holds.** All three answered from the runtime's published mirror — a copy refreshed by served
+  traffic and by configuration pushes — so a script's first poll saw no cursor at all, and a poll
+  landing between refreshes saw the position from before whatever it had just asked for.
+  `mimic reset --scope journey` was the visible one: it dispatched the restart without waiting and
+  built its reply on the next statement, answering `Restarted journey "X"` with the pre-restart
+  position attached, one reply contradicting itself. All three now await the engine, as
+  `journey activate`, `journey restart` and `journey advance` already did. `mimic state` and
+  `mimic reset` consequently wait for a configuration push still in flight, which is deliberate: a
+  push that has not landed is not a configuration the state should describe as landed.
+- **`mimic project import` refuses an endpoint that carries scenarios but activates none of them.**
+  The reference check accepted it — written as "if an active scenario is named, it must exist", which
+  made *naming none* the accepted case. `RequestMatcher` declines both on consecutive lines, so such
+  an endpoint imported cleanly, appeared in the sidebar and answered 404 forever while the import
+  exited 0. An endpoint with no scenarios at all still validates: that is the state deleting the last
+  scenario legitimately leaves, and there is nothing it could have served either way.
 - **⌘Q now drains the write chain before the app commits to terminating.** It could not before:
   `willTerminate` is posted with nowhere left to suspend to, so the quit path blocked the main
   thread and a chain drain awaited from there was a hop onto an actor nothing could service — the
@@ -175,14 +226,61 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a field nothing read, so a header containing a newline silently kept the old value.
 - **Restarting the control service logs again.** `shutdown()` cancelled the log drain, which finishes
   the shared stream, so a later `start()` served traffic and recorded none of it.
+- **The import review's warning flags are drawn in an ink that clears AA on the sheet's own rows.**
+  The "Binary body" and "Body dropped" flags and the size label of a body that will be dropped were
+  the base amber, and a candidate row is the wrong bed for it: the row stripes, and it washes under
+  the pointer. Read on that wash the base amber lands at 4.43 against the `surfaceElevated` token and
+  4.23 on a panel, both under the 4.5 this palette holds itself to; it cleared only on the system
+  material a sheet turns out to be painted with, and there by 0.02 at its worst — a margin belonging
+  to a surface no token in the app names. All four warnings on the row take `warningText` now, as the
+  duplicate flag beside them already did; its worst reading anywhere on the row is 5.69.
+- **A candidate row in the import review answers a click.** It lit up under the pointer, took a
+  content shape and cross-faded on hover — everything except an action — so the only thing that
+  actually toggled a candidate was the 18pt checkbox at the row's leading edge. The whole line is the
+  target now. It stays a tap target rather than becoming a `Button`, which would swallow the checkbox
+  inside itself and announce the row as an unnamed button beside the control it duplicates.
+- **A UI test reset removes SQLite's real sidecars.** It deleted `mimic-uitests.sqlite.wal` and
+  `.shm` — names SQLite has never written, because the suffix goes on the *file name* and is not a
+  path extension — so the store went and every sidecar it was written to remove stayed beside it.
+  That is not inert: a journal or a write-ahead log outliving its database is recovered from at the
+  next open, so pages a previous run committed could reappear in a store the run had asked to be
+  empty, and the failure looks like one test asserting against another's fixtures. All three of
+  `-wal`, `-shm` and `-journal` go now, rather than the one the current configuration happens to
+  produce — `DatabaseFactory` sets no `journalMode`, so a `DatabaseQueue` writes `-journal` today and
+  a configuration that later asks for WAL writes the other two.
 - A locked or unreadable database is no longer reported as "project not found".
 - The request log's method badges no longer share one accessibility identifier per HTTP method.
 - The sidebar's filter field shows a focus ring. `.textFieldStyle(.plain)` discards AppKit's, and
   nothing replaced it, so tabbing into it changed nothing on screen — which under Full Keyboard
   Access is not a polish item.
+- The request log's filter field and the request detail's find field show one too. Both are
+  hand-rolled `TextField`s at `.textFieldStyle(.plain)`, and both were named in `DSFilterField`'s own
+  documentation as the call sites still owing the ring. They draw the line that component defines —
+  `borderFocused` at `DSStroke.focusRing`, against `border` at a hairline at rest — rather than
+  adopting it, because that component is a capsule built around a scope pill and these are
+  rectangular wells.
 
 ### Changed
 
+- The CLI reference now documents the output the CLI actually produces. `docs/CLI.md` promised that
+  "every response uses one envelope, so a caller branches on a single boolean" and showed
+  `{"ok": true, "result": {…}}` — a shape `mimic` has never printed. It prints the bare result on
+  stdout and, on failure, nothing on stdout and one `code: message` line on stderr, so the boolean a
+  script was told to branch on does not exist and the exit code is what carries the outcome. The
+  envelope is real on the HTTP wire, and the section that describes it now sits with the HTTP API
+  where it is true.
+- The house-rule scanner fails when a tree it was told to scan is not there. It fed its file list
+  from a process substitution, whose exit status `set -euo pipefail` cannot see, so renaming
+  `Sources` left the run printing `find: 'Sources': No such file or directory` on stderr and
+  `9 house rules checked, no violations.` on stdout, at exit 0 — the repository's only mechanical
+  style gate greening on nothing. Its `--self-test` could not have caught it, since every probe it
+  plants lives in a directory it has just created; a reachability case that scans a path which does
+  not exist now runs beside the nine rule cases.
+- `check_doc_counts.py` holds the port-binding-suites enumeration to the tree rather than to a hand
+  count, and both count checkers run their `--self-test` in CI before the real check. Two documents
+  named two suites that stand a server up while three do; the list is now derived from the tree, and
+  a document that stops making the claim, or names a suite that binds nothing, fails the same way a
+  missing one does.
 - Adding a `ControlCommand` case is now a compile error until it is *named and classified* —
   `ControlCommand.kind` and `CommandKind.scope` are switches with no `default` — and a test failure
   until it is *routed*, in the executor and in both hosts. Routing is not compile-enforced: all three

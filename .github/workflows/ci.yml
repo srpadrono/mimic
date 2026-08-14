@@ -155,7 +155,12 @@ jobs:
       # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
       # runner compiles, which on a green pipeline is indistinguishable from one that passed.
       - name: Documented counts
-        run: python3 Scripts/check_doc_counts.py
+        # The self-test runs first, as the house-rules step does: it holds the port-binding
+        # comparison to fixtures written in the script, so a checker that has stopped comparing
+        # fails here rather than reporting that every document agrees.
+        run: |
+          python3 Scripts/check_doc_counts.py --self-test
+          python3 Scripts/check_doc_counts.py
 
       # `Scripts/update_readme_coverage.py` is what writes the README's coverage badges and table,
       # and until this line it had no automated check of any kind. Half of it needs `xcrun xccov`
@@ -221,6 +226,24 @@ jobs:
     # empty value as "nothing to record" rather than as an error.
     outputs:
       coverage: ${{ steps.figures.outputs.json }}
+
+    # DerivedData inside the checkout, and **every** xcodebuild step below passes it.
+    #
+    # Not tidiness. `Scripts/run_cli_e2e.sh` finds the binary it drives with
+    # `find "$ROOT_DIR" … -path '*Build/Products*'`, so products under
+    # `~/Library/Developer/Xcode/DerivedData` are products it cannot see — which is why that script
+    # ran under no gate at all until this line existed, and why the step at the bottom of this job
+    # can now name what it just built.
+    #
+    # Every step, because the builds are shared: point one of them here and the rest re-resolve and
+    # rebuild the whole workspace into the default location instead of reusing this one. The two
+    # places that *read* DerivedData — the UI failure dump and the artifact upload — read it from
+    # here for the same reason.
+    #
+    # `.artifacts/` is in `.gitignore`, and so is any directory named `DerivedData`, so nothing here
+    # can dirty the checkout.
+    env:
+      DERIVED_DATA: .artifacts/DerivedData
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -303,10 +326,15 @@ jobs:
       # Ad-hoc signing throughout. The project carries a DEVELOPMENT_TEAM for local builds, but a
       # hosted runner has none of that team's certificates — and none are needed, because a macOS app
       # only has to be signed *somehow* to launch, which is what `-` means.
+      #
+      # The `Mimic` scheme builds the app **and** the `mimic` CLI — `Project.swift` puts both in its
+      # build action, because the CLI ships with the app — so this one step produces everything the
+      # end-to-end step at the bottom of this job drives.
       - name: Build (Debug)
         run: |
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
             -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGN_IDENTITY=- build
 
       # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
@@ -320,12 +348,11 @@ jobs:
       # remembers to run it, and no CI step passed it at all.
       #
       # `-resultBundlePath` is what makes the bundle findable afterwards. Without it xcodebuild
-      # writes to `~/Library/Developer/Xcode/DerivedData/**/Logs/Test/` — no step here passes
-      # `-derivedDataPath`, which is exactly why the artifact step at the bottom of this job globs
-      # that path — and the coverage step below would have to find its bundle by globbing a
-      # directory whose contents depend on which steps have run so far. Naming the path removes the
-      # guess, and the artifact step names the same path so a red run is still downloadable.
-      # `.artifacts/` is already in `.gitignore`, so nothing here can dirty the checkout.
+      # writes to `$DERIVED_DATA/Logs/Test/`, and the coverage step below would have to find its
+      # bundle by globbing a directory whose contents depend on which steps have run so far. Naming
+      # the path removes the guess, and the artifact step names the same path so a red run is still
+      # downloadable. `.artifacts/` is already in `.gitignore`, so nothing here can dirty the
+      # checkout.
       #
       # Two things this step does NOT do, deliberately:
       #
@@ -340,11 +367,17 @@ jobs:
         run: |
           rm -rf .artifacts/coverage
           mkdir -p .artifacts/coverage
+          # Kept on disk for the failure step below. A *compile* failure in a test target produces
+          # no test results at all — the xcresult comes back with `totalTestCount: 0` — so the step
+          # built to name the failing assertion has nothing to read, and the errors exist only in
+          # this output. `pipefail` so `tee` cannot swallow xcodebuild's status.
+          set -o pipefail
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
             test -destination 'platform=macOS' -skip-testing:MimicUITests \
+            -derivedDataPath "$DERIVED_DATA" \
             -enableCodeCoverage YES \
             -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
-            CODE_SIGN_IDENTITY=-
+            CODE_SIGN_IDENTITY=- 2>&1 | tee .artifacts/unit-tests.log
 
       # (b) of the same change: the numbers go in the job summary, so a reviewer reads them on the
       # run page instead of downloading an artifact and installing Xcode to open it.
@@ -429,6 +462,7 @@ jobs:
         run: |
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
             test -destination 'platform=macOS' -only-testing:MimicUITests \
+            -derivedDataPath "$DERIVED_DATA" \
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=-
 
@@ -439,11 +473,25 @@ jobs:
       # never reaches back to the assertion and the artifact was effectively opaque. `xcresulttool`
       # exists on this runner, so ask it while we are here. `continue-on-error` on top of
       # `if: failure()`: a diagnostic that can redden a run it was reading is worse than none.
-      - name: UI failure details
+      - name: Test failure details
         if: failure()
         continue-on-error: true
         run: |
-          bundle="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult 2>/dev/null | head -1)"
+          # Both bundle locations, newest first. This used to look only under `$DERIVED_DATA`, which
+          # is where the UI suite writes — so on a *unit* failure, whose bundle the coverage step
+          # puts in `.artifacts/coverage`, the step it exists to serve printed "no xcresult found"
+          # and the assertion had to be read out of the raw log instead. Naming both is the whole
+          # fix; `ls -dt` across them picks whichever run actually failed.
+          # Compile errors first, because an xcresult cannot carry one. A test target that fails to
+          # build produces a bundle with `totalTestCount: 0` and no failures in it — so this step,
+          # written to name the failing assertion, printed a summary saying nothing at all while the
+          # actual errors sat in the build output. Two rounds of this wave were diagnosed by pulling
+          # the raw job log instead, which is the archaeology the step exists to replace.
+          if [ -f .artifacts/unit-tests.log ]; then
+            echo "== compile errors, if any"
+            grep -E '(error|fatal error): ' .artifacts/unit-tests.log | head -40 || echo "   none — the failure is in the results below"
+          fi
+          bundle="$(ls -dt "$DERIVED_DATA"/Logs/Test/*.xcresult .artifacts/coverage/*.xcresult 2>/dev/null | head -1)"
           if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
           echo "== $bundle"
           xcrun xcresulttool get test-results summary --path "$bundle" || true
@@ -465,33 +513,60 @@ jobs:
               walk(root, [])
           ' || true
 
-      # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
+      # The seam nothing else in either job reaches: a real process launch, the discovery file on
+      # disk, a real control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)`
+      # called in-process. AGENTS.md and CONTRIBUTING.md each carried a section explaining why no
+      # gate ran it, and no runner ever had.
       #
-      # AGENTS.md and CONTRIBUTING.md both list it as a gate, and it is the only thing that covers
-      # process launch, discovery-file resolution and real HTTP end to end — so its absence is a real
-      # hole, recorded here so it stays a decision rather than an oversight. Two things block it, and
-      # neither can be fixed inside this file:
+      # What kept it out was never safety, it was that it could not find what the job built. The
+      # script resolves the CLI with `find … -path '*Build/Products*'`, which matches nothing while
+      # DerivedData sits under `$HOME`, and then falls through to `command -v mimic` — an *installed*
+      # build, which would have made a green run say nothing about the working tree. The app is
+      # resolved separately again, by `AppLauncher.resolveExecutable`, from `MIMIC_APP_PATH` then
+      # `/Applications/Mimic.app` then `~/Applications/Mimic.app`, none of which a hosted runner has.
+      # `DERIVED_DATA` at the top of this job answers the first and `MIMIC_APP_PATH` here answers the
+      # second; both point at the Debug products this job produced, which is why this runs before
+      # `Build (Release)` writes a second set beside them.
       #
-      #   - It cannot find what this job built. `MIMIC_BIN` comes from
-      #     `find "$ROOT_DIR" … -path '*Build/Products*'`, which only matches when DerivedData sits
-      #     inside the checkout. No step above passes `-derivedDataPath`, so the products are under
-      #     `~/Library/Developer/Xcode/DerivedData` — the artifact step at the bottom of this job
-      #     reads them from exactly there — the `find` returns nothing, and the script falls through
-      #     to `command -v mimic` and exits 1 before running a single assertion.
-      #   - The app is resolved separately from the CLI. `AppLauncher.resolveExecutable` tries
-      #     `MIMIC_APP_PATH`, `/Applications/Mimic.app` and `~/Applications/Mimic.app`, none of which
-      #     a hosted runner has, so a working step has to plumb in *two* paths, not one.
+      # Still non-gating, and the flag below now has a reason rather than a countdown.
       #
-      # There used to be a third, and it was the one that mattered on a laptop rather than here: the
-      # cleanup trap called `mimic app stop`, which reads the single shared `control.json` and
-      # SIGTERMs whatever pid it names, so the script quit the developer's own instance. That is
-      # fixed — it kills the pid `mimic app start` reported, and `MIMIC_CONTROL_FILE` keeps its
-      # discovery file inside its own temporary directory — which is why the remaining two are
-      # plumbing rather than a hazard.
+      # It passed its first round and was promoted on that evidence; the next round failed, with
+      # every other step in the job green. What failed is the discovery-file assertion: the script
+      # waits two seconds for the instance to advertise itself at `MIMIC_CONTROL_FILE` and the file
+      # was not there. `ControlServer.start` binds the socket *before* it writes that file, so
+      # `mimic app start` can report the instance reachable while the advertisement has not landed —
+      # and when the write fails, it is deliberately non-fatal: the error goes to the application's
+      # own logger, and `AppLauncher.launch` hands the child `FileHandle.nullDevice` for stdout and
+      # stderr on every launch, headless or not, so that logger writes into nothing. So this
+      # assertion can fail with no evidence anywhere of why, which is precisely what makes it unfit
+      # to gate today.
       #
-      # Both are fixable here — export `MIMIC_APP_PATH` and a products directory read out of
-      # `xcodebuild -showBuildSettings` — but not verifiably without a Mac to run them on, and a step
-      # that fails for its own reasons is worse than a missing one: it teaches people to ignore red.
+      # Two candidate causes, and the script now prints which: a sandboxed app cannot write into the
+      # `mktemp -d` directory outside its container, or the override never reached the child and it
+      # advertised at the shared path instead. Fix the cause — most likely by having the app report
+      # an advertise failure the way it now reports an ephemeral store, so the condition is
+      # observable — and then gate. Not before: a gate whose failures cannot be explained is the
+      # "red that means nothing" this repository has spent several waves removing.
+      #
+      # One thing it inherits from a laptop run rather than from this runner: the launched app is
+      # sandboxed (`App/Mimic.entitlements`), and everything this script hands it — the store, the
+      # discovery file — lives in a `mktemp -d` directory outside the app's container. The script's
+      # own failure messages name that as a possible cause, which is what a first red run here would
+      # be read against.
+      - name: CLI end-to-end (launch, discovery, real sockets)
+        continue-on-error: true
+        run: |
+          products="$PWD/$DERIVED_DATA/Build/Products/Debug"
+          # Named rather than searched for, and checked before the script starts, so "the products
+          # are not where this job thinks" cannot arrive later disguised as a failed assertion.
+          if [ ! -x "$products/mimic" ] || [ ! -d "$products/Mimic.app" ]; then
+            echo "::error::Debug products are not in $products — the Mimic scheme builds both Mimic.app and mimic, so this is a -derivedDataPath problem, not a test failure."
+            ls -l "$products" || true
+            exit 1
+          fi
+          export MIMIC_BIN="$products/mimic"
+          export MIMIC_APP_PATH="$products/Mimic.app"
+          ./Scripts/run_cli_e2e.sh
 
       # Run after the tests so a compile-only failure does not hide a test result.
       #
@@ -517,7 +592,8 @@ jobs:
           set -o pipefail
           mkdir -p .artifacts
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            -configuration Release CODE_SIGN_IDENTITY=- build \
+            -configuration Release -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGN_IDENTITY=- build \
             | tee .artifacts/release-build.log
 
       # The baseline the paragraph above needs, and nothing more: it reports, it does not gate.
@@ -567,7 +643,7 @@ jobs:
         with:
           name: xcresult
           path: |
-            ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+            ${{ env.DERIVED_DATA }}/Logs/Test/*.xcresult
             .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore

@@ -118,9 +118,16 @@ final class AppState {
         get { server.genericStartError != nil }
         set { if !newValue { server.genericStartError = nil } }
     }
+    /// The open project. Writing it publishes through `ProjectWorkspace`'s one door.
+    ///
+    /// Every edit the window and the control plane make lands here — ``run(_:)``,
+    /// ``commitImportedCandidates(_:)``, ``serverConfiguration``'s setter and `AppControlHost`'s
+    /// project-scoped arm — and this setter used to assign the workspace's property directly, past
+    /// the supersede ticket a publish owes an open still in flight. See
+    /// ``ProjectWorkspace/openGeneration`` for what that cost.
     var currentProject: MockProject? {
         get { projects.currentProject }
-        set { projects.currentProject = newValue }
+        set { projects.setCurrentProject(newValue, isRestoring: false) }
     }
     var recentProjects: [RecentProjectEntry] { projects.recentProjects }
     var autosaveStatus: AutosaveStatus { projects.autosaveStatus }

@@ -30,6 +30,12 @@ struct CenterPaneView: View {
                 guard let activeID = endpoint.activeScenarioID else { return nil }
                 return endpoint.scenarios.first { $0.id == activeID }
             }()
+            // No `.id(endpointID)` here, and that is a decision rather than an omission. One view
+            // identity across a selection change is what gives the editor the same `@State` boxes on
+            // both sides of the click, which is what
+            // `EndpointEditorView.endpointSelectionChanged()` needs in order to finish an edit that
+            // was still settling when the click landed. Adding an id would hand the new endpoint a
+            // fresh editor and take that flush out of the picture without changing a line of it.
             EndpointEditorView(
                 endpoint: endpoint,
                 activeScenario: activeScenario,

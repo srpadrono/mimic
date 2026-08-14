@@ -391,6 +391,20 @@ struct RequestDetailPage {
     var path: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.path").firstMatch
     }
+
+    /// The path the inspector is currently showing, as one string, for comparing two moments.
+    ///
+    /// Label *and* value, because which of the two a `StaticText` carries its text in depends on
+    /// how SwiftUI realized it — the rule this suite learned from `DSEmptyState`, whose text
+    /// arrives as the value. Returns empty when the element is absent, so a caller polling for a
+    /// change cannot mistake "gone" for "unchanged".
+    func shownPath() -> String {
+        let element = path
+        guard element.exists else { return "" }
+        let value = element.value.map { String(describing: $0) } ?? ""
+        return "\(element.label)|\(value)"
+    }
+
     var status: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.status").firstMatch
     }
@@ -1269,9 +1283,10 @@ final class MimicUITests: XCTestCase {
 
         // ⌘-click adds the second row to the selection instead of replacing it — the row reads
         // `NSEvent.modifierFlags` at click time, and this held-modifier dance is the only way to
-        // exercise that from a test. It is not replaceable with `typeKey("a", .command)`: the
-        // drawer implements no Select All (selection changes only through clicks), so ⌘A selects
-        // nothing and the menu below would name one row for the wrong reason.
+        // exercise that from a test. The drawer does now answer ⌘A while its table holds keyboard
+        // focus, but that is a different path — it never reaches the row's modifier reading at all
+        // — and it takes *every* row the filter is showing, so on a two-row log it would satisfy
+        // the menu's count while saying nothing about the mechanism this test exists for.
         //
         // The menu naming a *count* is the real check: a selection collapsed to one row says
         // "Add to journey" instead, so the assertion cannot pass for the wrong reason.
@@ -1415,6 +1430,83 @@ final class MimicUITests: XCTestCase {
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Scenarios"),
             "Closing request detail should restore the endpoint inspector"
+        )
+
+        workspace.serverToggleButton.click()
+    }
+
+    // MARK: - 24d. Moving Through the Request Log With the Keyboard
+
+    /// The half of keyboard navigation that unit tests cannot reach.
+    ///
+    /// `RequestLogDrawerView.nextSelection(key:…)` is a pure function and is covered thoroughly, but
+    /// every one of those tests calls it directly. None of them can say whether a key press ever
+    /// *arrives* — that depends on the table taking focus, on `.onKeyPress` being attached where the
+    /// press lands, and on nothing upstream claiming the chord first, which is exactly the layer a
+    /// unit test is blind to.
+    ///
+    /// Arrow keys rather than ⌘A on purpose. AppKit offers an enabled menu item's key equivalent to
+    /// the menu before the focused view, and the default Edit menu carries Select All; whether that
+    /// item validates disabled here is a claim about the responder chain that this suite should not
+    /// assert until somebody has watched it. The arrows compete with nothing.
+    @MainActor
+    func testArrowKeysMoveThroughTheRequestLog() async throws {
+        let port = 62097
+
+        launchApp()
+        createProjectViaUI(name: "Keyboard Test", port: port)
+        createEndpointViaUI(name: "Users", path: "/api/users")
+
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(
+            workspace.waitForServerURL(port: port),
+            "Server should report its base URL once running"
+        )
+
+        await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
+        await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
+
+        XCTAssertTrue(
+            requestLogDrawer.waitForRowCount(2, timeout: 15),
+            "Both requests should reach the log"
+        )
+
+        // The click is what hands the table keyboard focus, so it is a precondition of the press
+        // rather than part of what is being tested.
+        let rows = requestLogDrawer.distinctRows(limit: 2)
+        XCTAssertEqual(rows.count, 2, "Both requests should be listed as separate rows")
+        rows[0].click()
+        XCTAssertTrue(
+            requestDetail.waitForPanelTitle("Request"),
+            "Clicking a row should show it in the inspector"
+        )
+        XCTAssertTrue(
+            requestDetail.path.waitForExistence(timeout: 5),
+            "Request detail should name the request it is showing"
+        )
+
+        // What the inspector says *before* the press, so the assertion is that the selection moved
+        // rather than that it landed on a particular path. Which row is second depends on the log's
+        // sort order, and a test that hard-codes one of the two paths passes or fails on that rather
+        // than on the keyboard.
+        let before = requestDetail.shownPath()
+        app.typeKey(.downArrow, modifierFlags: [])
+
+        // Polled by re-querying one identified element, never by walking the tree: an
+        // `app.descendants(matching: .any)` carrying a `CONTAINS` predicate evaluates it against
+        // every element in the window and times out inside XCUITest's own query evaluation, which
+        // is how this test first failed. `waitForExistence` on an element that already exists is
+        // the suite's idiom for spacing out a poll without `sleep`.
+        var after = before
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, after == before {
+            _ = requestDetail.path.waitForExistence(timeout: 0.3)
+            after = requestDetail.shownPath()
+        }
+        XCTAssertNotEqual(
+            after,
+            before,
+            "The down arrow should move the selection to the next row and show it in the inspector"
         )
 
         workspace.serverToggleButton.click()
