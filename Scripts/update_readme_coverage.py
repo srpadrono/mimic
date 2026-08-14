@@ -174,6 +174,30 @@ def format_lines(metrics: CoverageMetrics) -> str:
     return f"{metrics.covered_lines:,}/{metrics.executable_lines:,}"
 
 
+def overall_metrics(
+    app_metrics: CoverageMetrics, module_metrics: list[tuple[str, CoverageMetrics]]
+) -> CoverageMetrics:
+    """Every measured target as one figure, weighted by executable lines.
+
+    This is what the headline badge shows, and the reason is `Mimic.app`, which used to have that
+    job: it is the `@main` shell and measures **60 executable lines**, so it swings on a couple of
+    them and describes almost nothing. The app's actual behaviour lives in `AppFeatures.framework`,
+    16,685 lines of it. A badge that reads `Mimic.app coverage 46.67%` beside a tree measuring 89%
+    is not wrong, it is just answering a question nobody asked.
+
+    Averaging the percentages would be the other mistake — that weights a 60-line target the same as
+    a 16,685-line one. Summing the lines first is the only figure that means "of the code this
+    measures, how much runs".
+    """
+    covered = app_metrics.covered_lines + sum(m.covered_lines for _, m in module_metrics)
+    executable = app_metrics.executable_lines + sum(m.executable_lines for _, m in module_metrics)
+    if executable == 0:
+        raise RuntimeError("the report has no executable lines in it at all")
+    return CoverageMetrics(
+        percent=100.0 * covered / executable, covered_lines=covered, executable_lines=executable
+    )
+
+
 def build_coverage_block(
     app_metrics: CoverageMetrics,
     module_metrics: list[tuple[str, CoverageMetrics]],
@@ -196,15 +220,18 @@ def build_coverage_block(
         lines.append(f"| `{target_name}` | `{format_percent(metrics.percent)}` | `{format_lines(metrics)}` |")
 
     modules_at_or_above_95 = sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
-    total_executable_lines = app_metrics.executable_lines + sum(metrics.executable_lines for _, metrics in module_metrics)
+    overall = overall_metrics(app_metrics, module_metrics)
     lines.extend(
         [
             "",
             "Coverage notes:",
             "",
-            f"- App coverage is currently `{format_percent(app_metrics.percent)}`.",
+            f"- Every target above, weighted by executable lines: `{format_percent(overall.percent)}` "
+            f"(`{format_lines(overall)}`). This is what the headline badge shows.",
             f"- Modules at or above `95%`: `{modules_at_or_above_95}/{len(module_metrics)}`.",
-            f"- Total executable lines tracked in this table: `{total_executable_lines:,}`.",
+            f"- `Mimic.app` is the `@main` shell — `{app_metrics.executable_lines:,}` executable lines "
+            "in all — so read its row as a footnote rather than a summary. The app's behaviour lives "
+            "in `AppFeatures.framework`.",
             "- `Lines` shows covered/executable lines reported by `xcrun xccov`.",
             "- Coverage is gathered with `xcodebuild` and `xcrun xccov` from fresh `.xcresult` bundles.",
             f"- {provenance}",
@@ -266,10 +293,15 @@ def replace_coverage_block(readme: str, new_block: str) -> str:
     return pattern.sub(new_block, readme, count=1)
 
 
-def replace_badges(readme: str, app_percent: float, modules_at_or_above_95: int, module_count: int) -> str:
-    app_badge = (
-        f"[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-"
-        f"{app_percent:.2f}%25-{badge_color(app_percent)})](#coverage)"
+def replace_badges(readme: str, overall_percent: float, modules_at_or_above_95: int, module_count: int) -> str:
+    # `Coverage`, not `App Coverage`: the headline figure is every measured target weighted by
+    # executable lines, because the badge used to read `Mimic.app coverage` off a 60-line `@main`
+    # shell. See `overall_metrics` for the argument. The alt text is part of the contract — the
+    # pattern below is what finds the badge to replace — so changing one means changing both, and
+    # the self-test fixture carries the same spelling for that reason.
+    overall_badge = (
+        f"[![Coverage](https://img.shields.io/badge/coverage-"
+        f"{overall_percent:.2f}%25-{badge_color(overall_percent)})](#coverage)"
     )
     modules_badge = (
         "[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-"
@@ -280,9 +312,9 @@ def replace_badges(readme: str, app_percent: float, modules_at_or_above_95: int,
     # carried no coverage badges at all this function was a guaranteed silent no-op: the full suite
     # ran, the script exited 0, `run_full_test_suite.sh` printed "README coverage section updated."
     # and neither badge had ever existed. `replace_coverage_block` above defends itself; this did not.
-    readme, replaced = re.subn(r"\[!\[App Coverage\]\([^)]+\)\]\(#coverage\)", app_badge, readme, count=1)
+    readme, replaced = re.subn(r"\[!\[Coverage\]\([^)]+\)\]\(#coverage\)", overall_badge, readme, count=1)
     if replaced != 1:
-        raise RuntimeError("README.md is missing the App Coverage badge.")
+        raise RuntimeError("README.md is missing the Coverage badge.")
     readme, replaced = re.subn(r"\[!\[Module Coverage\]\([^)]+\)\]\(#coverage\)", modules_badge, readme, count=1)
     if replaced != 1:
         raise RuntimeError("README.md is missing the Module Coverage badge.")
@@ -350,7 +382,8 @@ def render_readme(
 ) -> str:
     """The whole rewrite as a string function, so `--self-test` can check it without touching disk."""
     modules_at_or_above_95 = sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
-    readme = replace_badges(readme, app_metrics.percent, modules_at_or_above_95, len(module_metrics))
+    overall = overall_metrics(app_metrics, module_metrics)
+    readme = replace_badges(readme, overall.percent, modules_at_or_above_95, len(module_metrics))
     return replace_coverage_block(
         readme,
         build_coverage_block(
@@ -466,7 +499,7 @@ def update_readme_from_json(readme_path: Path, json_path: Path) -> None:
 
 FIXTURE_README = """# Fixture
 
-[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
+[![Coverage](https://img.shields.io/badge/coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
 
 Prose that must survive untouched.
@@ -493,17 +526,27 @@ def self_test() -> int:
         if not condition:
             failures.append(message)
 
-    app = CoverageMetrics(percent=41.5, covered_lines=1_000, executable_lines=2_409)
+    # Deliberately lopsided: a tiny, badly covered app shell beside a large, well covered module,
+    # which is the shape the real tree has. It is what distinguishes the weighted figure the badge
+    # now shows (2,281/3,809 = 59.88%) from the mean of the three percentages (~72%) and from the
+    # app's own 41.50% that the badge used to lead with. All three differ, so a regression to either
+    # of the wrong two fails here.
+    app = CoverageMetrics(percent=41.50, covered_lines=1_000, executable_lines=2_409)
     modules = [
         ("Domain.framework", CoverageMetrics(percent=96.0, covered_lines=960, executable_lines=1_000)),
         ("ControlPlane.framework", CoverageMetrics(percent=80.25, covered_lines=321, executable_lines=400)),
     ]
+    check(
+        abs(overall_metrics(app, modules).percent - 59.88) < 0.01,
+        "the weighted overall figure is not what the fixture's lines add up to",
+    )
 
     rendered = render_readme(
         FIXTURE_README, app, modules, generated_from="From a fixture.", provenance="Fixture note."
     )
     check("not%20measured" not in rendered, "a badge still reads 'not measured' after a rewrite")
-    check("41.50%25" in rendered, "the app badge does not carry the measured percentage")
+    check("badge/coverage-59.88%25" in rendered, "the headline badge does not carry the weighted figure")
+    check("41.50%25" not in rendered, "the headline badge still leads with the app shell's own figure")
     check("1%2F2" in rendered, "the module badge does not carry the at-or-above-95 count")
     check("`Domain.framework` | `96.00%` | `960/1,000`" in rendered, "a module row is missing or misformatted")
     check("Prose that must survive untouched." in rendered, "prose outside the markers was lost")
@@ -532,7 +575,7 @@ def self_test() -> int:
         )
         update_readme_from_json(readme_path, json_path)
         from_json = readme_path.read_text()
-        check("41.50%25" in from_json, "--from-json did not rewrite the app badge")
+        check("badge/coverage-59.88%25" in from_json, "--from-json did not rewrite the headline badge")
         check(CI_PROVENANCE in from_json, "--from-json did not use the CI provenance wording")
 
         json_path.write_text("{\"app\": {}}")

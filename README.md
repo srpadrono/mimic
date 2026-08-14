@@ -11,8 +11,8 @@ failures, and watch live traffic. Then drive all of it from a script.
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
 [![Tests](https://img.shields.io/badge/tests-988%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
-[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
+[![Coverage](https://img.shields.io/badge/coverage-88.97%25-yellow)](#coverage)
+[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-5%2F8-red)](#coverage)
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -326,29 +326,34 @@ structurally: XCUITest, because the step doing the measuring is the one that ski
 the Linux job runs, because gathering coverage needs the Xcode toolchain. On a red run the bundle is
 uploaded as the `xcresult` artifact, which is where per-file detail lives.
 
-**The numbers are also recorded here, on every push to `main`.** They used to exist only in that job
-summary — computed on every run and thrown away with the runner — which is why both badges above
-spent this repository's entire history reading `not measured` while the measurement was already
-happening. The `record-coverage` job closes that: the macOS job hands its figures on as a job
-output, and that job rewrites the two badges and the block below with
-[`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py).
+**The numbers are recorded here too, proposed on every push to `main`.** They used to exist only in
+that job summary — computed on every run and thrown away with the runner — which is why both badges
+above spent this repository's entire history reading `not measured` while the measurement was
+already happening. The `record-coverage` job closes that: the macOS job hands its figures on as a
+job output, and that job rewrites the two badges and the block below with
+[`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py), then opens a pull request
+with the result.
 
 Four things about it are deliberate, and each is the answer to a way this normally goes wrong:
 
-- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS job
-  compiles and runs code out of a pull request; a write token there would widen the blast radius of
-  anything going wrong in it to "can push to `main`". The recording job runs one Python script over
-  one Markdown file.
+- **It is a separate job, and the only one in the workflow that can write.** The macOS job compiles
+  and runs code out of a pull request; a write token there would widen the blast radius of anything
+  going wrong in it to "can push to `main`". The recording job runs one Python script over one
+  Markdown file.
 - **A few hundred bytes cross between them, not the bundle.** The `.xcresult` is hundreds of
   megabytes and stays on the runner that made it.
 - **The generated block carries no timestamp, run number or run URL.** It is a pure function of the
   coverage figures, so an unchanged measurement leaves the file byte-identical and there is nothing
-  to commit — otherwise `main` would collect one commit per push forever. The commit that is made
-  carries `[skip ci]`, or it would trigger the workflow that wrote it.
-- **It records; it never gates.** `main` is a protected branch, and whether its rules let the Actions
-  bot push is a repository setting rather than something a commit can fix. A rejected push warns and
-  prints the diff it wanted to make into the job summary — it never reddens a commit whose tests
-  passed.
+  to propose — otherwise a pull request would open on every push forever. It also means the flow
+  converges: merging one is itself a push to `main`, which measures again and finds nothing left to
+  change, because editing this file cannot change what the tests cover.
+- **It proposes rather than pushes, because `main` is protected.** The first version of this job
+  pushed directly and was refused — *"Changes must be made through a pull request"*, plus two
+  required status checks. That is the protection working, so the job now goes through it like every
+  other change, on a fixed branch that updates in place. One consequence is worth knowing before
+  editing the step: the commit must **not** carry `[skip ci]`. Pushing to `main` needed it, or the
+  commit would trigger the workflow that wrote it; a pull request needs the opposite, since a commit
+  that skips CI produces none of the required checks and could never be merged.
 
 A Mac still writes the same section from a full local suite, out of the per-scheme bundles rather
 than the workspace-wide one, and the generated block says which of the two produced it:
@@ -360,20 +365,44 @@ than the workspace-wide one, and the generated block says which of the two produ
 
 The half of that script needing no Mac — the rewriting, the JSON hand-off and the refusals — is
 covered by `python3 Scripts/update_readme_coverage.py --self-test`, which the Linux job runs beside
-the other checkers. It had no automated test of any kind before it started writing to `main`.
+the other checkers. It had no automated test of any kind before it started writing this file.
 
 **No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
 number is either so low it never fires or red on the run that introduces it. Measuring first, then
 setting the floor against a baseline, is the order.
 
 <!-- coverage:generated:start -->
+This section is auto-generated — do not edit it by hand. It is written by CI on every push to `main`, from the workspace-wide unit run the macOS job measures with `-enableCodeCoverage YES`.
+
+Latest measured line coverage:
+
+| Target | Coverage | Lines |
+| --- | ---: | ---: |
+| `Mimic.app` | `46.67%` | `28/60` |
+| `Domain.framework` | `95.99%` | `2,274/2,369` |
+| `MockServerEngine.framework` | `96.88%` | `341/352` |
+| `Persistence.framework` | `98.12%` | `992/1,011` |
+| `DesignSystem.framework` | `96.34%` | `2,474/2,568` |
+| `SpecImport.framework` | `97.23%` | `1,088/1,119` |
+| `ControlPlane.framework` | `86.36%` | `342/396` |
+| `MimicCLICore.framework` | `86.72%` | `1,260/1,453` |
+| `AppFeatures.framework` | `85.97%` | `14,344/16,685` |
+
+Coverage notes:
+
+- Every target above, weighted by executable lines: `88.97%` (`23,143/26,013`). This is what the headline badge shows.
+- Modules at or above `95%`: `5/8`.
+- `Mimic.app` is the `@main` shell — `60` executable lines in all — so read its row as a footnote rather than a summary. The app's behaviour lives in `AppFeatures.framework`.
+- `Lines` shows covered/executable lines reported by `xcrun xccov`.
+- Coverage is gathered with `xcodebuild` and `xcrun xccov` from fresh `.xcresult` bundles.
+- XCUITest is not in these figures: the step that measures coverage is the one passing `-skip-testing:MimicUITests`, and the Linux job gathers no coverage at all. No floor is enforced against them — this records, it does not gate.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
 `main`, in three jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
 minutes, macOS runs `tuist generate`, the Debug build, the app-level suites — measured, with the
 per-target coverage table printed into the job summary — XCUITest and the Release gate, and a short
-`record-coverage` job writes those figures into this file on pushes to `main`. Both runners
+`record-coverage` job proposes those figures into this file on pushes to `main`. Both runners
 are free on a public repository. (This section used to say Actions could not start
 a job here at all — true while the repository was private and a billing block killed every run in
 about two seconds; making it public resolved it.)

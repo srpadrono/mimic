@@ -97,11 +97,13 @@ xcodebuild -workspace Mimic.xcworkspace -list      # every scheme Tuist actually
 
 CI runs on every pull request and on every push to `main`, in three jobs. Two are split by what
 actually needs a Mac; the third, `record-coverage`, is a short Linux job that runs only on pushes to
-`main` and writes the coverage the macOS job measured into the README's two badges and its
-`coverage:generated` block. It is the only job in the workflow holding `contents: write`, and it
-holds it precisely so that the job compiling code out of a pull request does not — see the comments
-above it and above `Emit coverage figures`. Both runners are free: GitHub does not meter standard
-hosted runners on public repositories, macOS included.
+`main` and opens a pull request recording the coverage the macOS job measured into the README's two
+badges and its `coverage:generated` block. It is the only job in the workflow that can write, and it
+is separate precisely so that the job compiling code out of a pull request cannot — see the comments
+above it and above `Emit coverage figures`. It proposes rather than pushes because `main` is
+protected: pushing directly was tried and refused with `GH006 — Changes must be made through a pull
+request`, so the job now goes through protection like every other change. Both runners are free:
+GitHub does not meter standard hosted runners on public repositories, macOS included.
 
 **Linux** builds through [`Package.swift`](Package.swift) rather than Tuist — the domain rules, mock
 engine, persistence, control plane, spec import and CLI are plain Swift, so most of the suite reports

@@ -577,6 +577,12 @@ jobs:
   # markers — the thing both badges spent this repository's whole history saying `not measured` for
   # while the number was being computed on every run and thrown away with the runner.
   #
+  # It **proposes** that edit as a pull request rather than committing it. The first version of this
+  # job pushed straight to `main` and was refused — `GH006: Protected branch update failed`,
+  # "Changes must be made through a pull request", "2 of 2 required status checks are expected" —
+  # which is the branch protection working, not a fault to route around. The step at the bottom
+  # explains what proposing rather than pushing changes about the commit it makes.
+  #
   # Why this is a separate job on Linux rather than three more lines on the macOS one is argued at
   # `Emit coverage figures` above: `contents: write` must not sit on the job that compiles and runs
   # code out of a pull request. What runs here is one stdlib Python script over one Markdown file.
@@ -593,15 +599,19 @@ jobs:
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
+      # `contents` to push the coverage branch, `pull-requests` to open the request against it.
+      # Both are scoped to this job — the workflow-level default above stays read-only, which is
+      # what the macOS job runs under.
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # `main` rather than the pushed SHA, because the number goes where a reader will look for
-          # it. `fetch-depth: 0` because the push at the end may have to rebase onto a tip that
-          # moved while the macOS job was still running, and a depth-1 clone has nothing to rebase
-          # onto.
+          # `main` rather than the pushed SHA: the coverage branch has to branch from the tip a
+          # reader will merge it into, not from whichever commit was measured. `fetch-depth: 0`
+          # because the branch below is force-pushed, and a push out of a shallow clone is refused
+          # with "shallow update not allowed".
           ref: main
           fetch-depth: 0
 
@@ -624,13 +634,34 @@ jobs:
           printf '%s\n' "$COVERAGE_JSON" > .artifacts/coverage/coverage.json
           echo "state=ready" >> "$GITHUB_OUTPUT"
 
-      # `main` is a protected branch. Whether these rules let this token push is a repository
-      # setting rather than anything a commit can fix, so a rejection must not redden a commit whose
-      # tests all passed: the step warns, and puts the diff it wanted to make into the job summary
-      # where somebody can apply it by hand. The number is never lost, at worst it is not committed.
-      - name: Record it in README.md
+      # `main` is a protected branch — "Changes must be made through a pull request", plus two
+      # required status checks — so this job proposes the update instead of pushing it. That is not
+      # a workaround bolted on after a rejection; it is the same rule every other change here goes
+      # through, and it means recorded figures get reviewed like anything else.
+      #
+      # Three consequences worth knowing before editing this step:
+      #
+      #   - **The commit must NOT carry a skip-CI marker.** A direct push to `main` needed one, or it
+      #     would trigger the workflow that wrote it. A pull request needs the opposite: protection
+      #     requires two status checks, and a commit that skips CI produces none, so the request
+      #     could never become mergeable. Different destination, opposite requirement.
+      #   - **A fixed branch, force-pushed.** One long-lived coverage request that updates in place,
+      #     rather than a new one per push to `main`. Pushing the branch triggers nothing by itself —
+      #     this workflow's `push` trigger is `main`-only — so opening or updating the request is
+      #     what runs the checks.
+      #   - **It converges.** Merging the coverage request is itself a push to `main`, which measures
+      #     again; but editing the README cannot change what the tests cover, so that measurement is
+      #     identical, `git diff --quiet` finds nothing, and no second request is opened.
+      #
+      # Still `continue-on-error`. Opening a pull request from Actions additionally requires
+      # "Allow GitHub Actions to create and approve pull requests" in the repository settings, and a
+      # settings answer must never redden a commit whose tests all passed.
+      - name: Propose the update as a pull request
         if: steps.figures.outputs.state == 'ready'
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: automation/record-coverage
         run: |
           set -euo pipefail
 
@@ -639,43 +670,41 @@ jobs:
             --readme README.md
 
           # The generated block is a pure function of the figures — no timestamp, no run URL — so an
-          # unchanged measurement leaves the file byte-identical and there is nothing to commit.
-          # Without that property `main` would grow one commit per push forever.
+          # unchanged measurement leaves the file byte-identical and there is nothing to propose.
+          # This is what stops a pull request being opened on every push to `main`.
           if git diff --quiet -- README.md; then
-            echo "README.md already records these figures — nothing to commit."
+            echo "README.md already records these figures — nothing to propose."
             exit 0
           fi
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$BRANCH"
           git add README.md
-          # `[skip ci]` is load-bearing: without it this commit triggers the workflow that wrote it.
-          git commit -m 'docs: record measured coverage in the README [skip ci]'
+          git commit -m 'docs: record measured coverage in the README'
+          git push --force origin "$BRANCH"
 
-          if git push origin HEAD:main; then
-            echo "Recorded."
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "Existing coverage pull request updated in place."
             exit 0
           fi
 
-          # A push can also simply lose a race — `main` moved while the macOS job was running. That
-          # is worth exactly one rebase before concluding the branch rules are what rejected it.
-          echo "Push rejected; rebasing onto main and trying once more."
-          if git pull --rebase origin main && git push origin HEAD:main; then
-            echo "Recorded after a rebase."
-            exit 0
-          fi
+          # printf rather than a heredoc: a heredoc body would carry this block's own indentation
+          # into the Markdown, and ten leading spaces is a code fence.
+          printf '%s\n' \
+            'Recorded by the `record-coverage` job, from the coverage the macOS job measured on `main`.' \
+            '' \
+            'This file is generated. The two badges and the `coverage:generated` block are written by' \
+            '`Scripts/update_readme_coverage.py`, and that block is a pure function of the measured' \
+            'figures — so this request exists only because a number moved. Merging it is itself a push' \
+            'to `main`, which measures again and finds nothing left to change.' \
+            '' \
+            '---' \
+            '_Generated by [Claude Code](https://claude.ai/code)_' \
+            > "$RUNNER_TEMP/coverage-pr-body.md"
 
-          echo "::warning::Could not push the coverage update to main — the diff is in the job summary."
-          patch="$(git diff 'HEAD^' HEAD -- README.md || true)"
-          {
-            echo '### Coverage measured, but not recorded'
-            echo
-            echo 'The push to `main` was rejected. If branch protection is what refused it, either'
-            echo 'allow the Actions bot to bypass the rule for this path, or apply the diff below by'
-            echo 'hand. The figures themselves are in the macOS job'"'"'s summary and its job output.'
-            echo
-            echo '```diff'
-            printf '%s\n' "$patch"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title 'docs: record measured coverage in the README' \
+            --body-file "$RUNNER_TEMP/coverage-pr-body.md"
