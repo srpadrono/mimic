@@ -74,8 +74,9 @@ at generation time, not written by anyone here.
 
 This section used to say the per-module schemes "build the frameworks but do not bundle their test
 targets", and that is why `Mimic-Workspace` was presented as the only way to run a unit suite. It
-cannot be right: [`Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) — the sole
-producer of the README's coverage numbers — runs `xcodebuild -scheme Domain test` and six more against exactly
+cannot be right: [`Scripts/run_full_test_suite.sh`](Scripts/run_full_test_suite.sh) — one of the two
+producers of the README's coverage numbers, the other being CI's `record-coverage` job — runs
+`xcodebuild -scheme Domain test` and six more against exactly
 those schemes, and `Scripts/update_readme_coverage.py` then reads the `Domain.xcresult`,
 `ControlPlane.xcresult` … bundles they leave behind. A scheme with nothing testable in it fails
 immediately with *"Scheme X is not currently configured for the test action"* and produces no bundle,
@@ -94,9 +95,13 @@ xcodebuild -workspace Mimic.xcworkspace -list      # every scheme Tuist actually
 
 ### What CI actually covers
 
-CI runs on every pull request and on every push to `main`, in two jobs split by what actually needs a
-Mac. Both are free: GitHub does not meter standard hosted runners on public repositories, macOS
-included.
+CI runs on every pull request and on every push to `main`, in three jobs. Two are split by what
+actually needs a Mac; the third, `record-coverage`, is a short Linux job that runs only on pushes to
+`main` and writes the coverage the macOS job measured into the README's two badges and its
+`coverage:generated` block. It is the only job in the workflow holding `contents: write`, and it
+holds it precisely so that the job compiling code out of a pull request does not — see the comments
+above it and above `Emit coverage figures`. Both runners are free: GitHub does not meter standard
+hosted runners on public repositories, macOS included.
 
 **Linux** builds through [`Package.swift`](Package.swift) rather than Tuist — the domain rules, mock
 engine, persistence, control plane, spec import and CLI are plain Swift, so most of the suite reports
