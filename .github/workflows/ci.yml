@@ -367,6 +367,39 @@ jobs:
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=-
 
+      # The failing assertion, in the job log, where a person can read it. The xcresult holds the
+      # message, the file and the line of every failure — and it ships as a ~280 MB artifact that
+      # needs a Mac and an Xcode to open, which in practice means nobody does: three consecutive red
+      # runs were diagnosed here from the *names* of failing tests alone, because the log's tail
+      # never reaches back to the assertion and the artifact was effectively opaque. `xcresulttool`
+      # exists on this runner, so ask it while we are here. `continue-on-error` on top of
+      # `if: failure()`: a diagnostic that can redden a run it was reading is worse than none.
+      - name: UI failure details
+        if: failure()
+        continue-on-error: true
+        run: |
+          bundle="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult 2>/dev/null | head -1)"
+          if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
+          echo "== $bundle"
+          xcrun xcresulttool get test-results summary --path "$bundle" || true
+          # Every failure with its message, file and line — the part the job log's tail cannot show.
+          xcrun xcresulttool get test-results tests --path "$bundle" \
+            | python3 -c '
+          import json, sys
+          def walk(node, path):
+              name = node.get("name") or node.get("nodeIdentifier") or ""
+              here = path + [name] if name else path
+              if node.get("result") == "Failed" and node.get("nodeType") in ("Test Case", "Repetition"):
+                  print(" / ".join(here), "->", node.get("result"))
+              if node.get("nodeType") == "Failure Message":
+                  print("    ", name)
+              for child in node.get("children", []):
+                  walk(child, here)
+          data = json.load(sys.stdin)
+          for root in data.get("testNodes", []):
+              walk(root, [])
+          ' || true
+
       # Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
       #
       # AGENTS.md and CONTRIBUTING.md both list it as a gate, and it is the only thing that covers
