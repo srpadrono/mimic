@@ -1267,20 +1267,40 @@ final class MimicUITests: XCTestCase {
         let firstRow = rows[0]
         let secondRow = rows[1]
 
-        firstRow.click()
         // ⌘-click adds to the selection instead of replacing it. If the modifier does not reach the
-        // app this reads as a plain click, the selection collapses to one row, and the menu below
-        // says "Add to journey" instead of naming a count — which is what makes this assertion the
+        // app this reads as a plain click, the selection collapses to one row, and the menu says
+        // "Add to journey" instead of naming a count — which is what makes the assertion below the
         // real check.
-        XCUIElement.perform(withKeyModifiers: .command) {
-            secondRow.click()
-        }
-
-        secondRow.rightClick()
-
+        //
+        // The modifier is also a race the runner can lose under first-pass load: two consecutive CI
+        // runs failed this test on its first attempt and passed xcodebuild's own retry with
+        // identical code, and the exit-65-anyway behaviour recorded in ci.yml means that "failed
+        // once, passed the retry" still reddens the job. So the dance gets one bounded second
+        // chance here instead. This absorbs only the lost-modifier case, which the singular menu
+        // item positively identifies — a selection genuinely broken fails both attempts and the
+        // test still fails.
         let captureMenu = app.menuItems["Add 2 requests to journey"]
+        let collapsedMenu = app.menuItems["Add to journey"]
+        var offeredWholeSelection = false
+        for _ in 1...2 {
+            firstRow.click()
+            XCUIElement.perform(withKeyModifiers: .command) {
+                secondRow.click()
+            }
+            secondRow.rightClick()
+            // Polled together — waiting out one item's timeout before looking at the other is the
+            // `a || b` trap rule 9 of the UI Definition of Done names.
+            _ = UITestApp.waitForAny([captureMenu, collapsedMenu], timeout: 5)
+            if captureMenu.exists {
+                offeredWholeSelection = true
+                break
+            }
+            // The menu names a single row: the modifier was dropped. Dismiss and run the dance
+            // again — the next plain click replaces the selection, so the retry starts clean.
+            app.typeKey(.escape, modifierFlags: [])
+        }
         XCTAssertTrue(
-            captureMenu.waitForExistence(timeout: 5),
+            offeredWholeSelection,
             "The context menu should offer to capture the whole selection, not just the clicked row"
         )
         captureMenu.click()
