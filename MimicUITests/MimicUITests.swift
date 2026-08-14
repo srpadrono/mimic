@@ -1267,42 +1267,37 @@ final class MimicUITests: XCTestCase {
         let firstRow = rows[0]
         let secondRow = rows[1]
 
-        // ⌘-click adds to the selection instead of replacing it. If the modifier does not reach the
-        // app this reads as a plain click, the selection collapses to one row, and the menu says
-        // "Add to journey" instead of naming a count — which is what makes the assertion below the
-        // real check.
+        // Select both rows with ⌘A after focusing the list with a click, then open the context menu
+        // on the selection. The menu naming a *count* is the real check: a selection collapsed to
+        // one row says "Add to journey" instead, so the assertion below cannot pass for the wrong
+        // reason.
         //
-        // The modifier is also a race the runner can lose under first-pass load: two consecutive CI
-        // runs failed this test on its first attempt and passed xcodebuild's own retry with
-        // identical code, and the exit-65-anyway behaviour recorded in ci.yml means that "failed
-        // once, passed the retry" still reddens the job. So the dance gets one bounded second
-        // chance here instead. This absorbs only the lost-modifier case, which the singular menu
-        // item positively identifies — a selection genuinely broken fails both attempts and the
-        // test still fails.
+        // This used to be a ⌘-click (`XCUIElement.perform(withKeyModifiers:)` around a click), and
+        // four consecutive CI runs falsified that approach the same way: the test runs ~18th in the
+        // suite, and after seventeen app launches the runner drops the held modifier so reliably
+        // that the selection collapsed on every first-iteration attempt — including two bounded
+        // in-test retries — while the identical dance passed 4/4 whenever xcodebuild's retry ran
+        // this test first in a fresh session. Deterministic by suite position is not a race a retry
+        // absorbs. `typeKey`'s modifier flags ride the keyboard-event path this suite already uses
+        // reliably everywhere (`typeKey("a", .command)` in every sheet), not the held-modifier mouse
+        // synthesis, and ⌘A exercises the same selection→capture path the feature ships.
         let captureMenu = app.menuItems["Add 2 requests to journey"]
         let collapsedMenu = app.menuItems["Add to journey"]
-        var offeredWholeSelection = false
-        for _ in 1...2 {
-            firstRow.click()
-            XCUIElement.perform(withKeyModifiers: .command) {
-                secondRow.click()
-            }
-            secondRow.rightClick()
-            // Polled together — waiting out one item's timeout before looking at the other is the
-            // `a || b` trap rule 9 of the UI Definition of Done names.
-            _ = UITestApp.waitForAny([captureMenu, collapsedMenu], timeout: 5)
-            if captureMenu.exists {
-                offeredWholeSelection = true
-                break
-            }
-            // The menu names a single row: the modifier was dropped. Dismiss and run the dance
-            // again — the next plain click replaces the selection, so the retry starts clean.
-            app.typeKey(.escape, modifierFlags: [])
+        firstRow.click()
+        app.typeKey("a", modifierFlags: .command)
+        secondRow.rightClick()
+        // Polled together — waiting out one item's timeout before looking at the other is the
+        // `a || b` trap rule 9 of the UI Definition of Done names.
+        _ = UITestApp.waitForAny([captureMenu, collapsedMenu], timeout: 5)
+        if !captureMenu.exists {
+            // Name what the runner actually saw, so the next red run's CI failure step prints a
+            // diagnosis instead of a hypothesis: which wrong menu appeared, or none at all.
+            let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
+            XCTFail(
+                "The context menu should offer to capture the whole selection, not just the clicked "
+                    + "row. collapsed=\(collapsedMenu.exists) visibleMenuItems=\(visible)"
+            )
         }
-        XCTAssertTrue(
-            offeredWholeSelection,
-            "The context menu should offer to capture the whole selection, not just the clicked row"
-        )
         captureMenu.click()
 
         let newJourneyItem = app.menuItems["New journey from these 2 requests\u{2026}"]
