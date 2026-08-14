@@ -164,12 +164,28 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   if [ -f "$MIMIC_CONTROL_FILE" ]; then break; fi
   sleep 0.2
 done
-[ -f "$MIMIC_CONTROL_FILE" ] || fail "the instance did not write its discovery file to
+if [ ! -f "$MIMIC_CONTROL_FILE" ]; then
+  # Say WHICH of the two it was, rather than naming both and leaving the reader to find out. The
+  # app cannot tell us itself: `ControlServer.start` binds before it advertises and treats a failed
+  # advertisement as non-fatal, logging it to a logger a headless launch sends to the null device —
+  # so the only evidence available is on this side, and it is the presence or absence of a file at
+  # the shared path. Read-only, and never removed here: if it is there it belongs to somebody else.
+  shared="$HOME/Library/Application Support/devxa.Mimic/control.json"
+  if [ -f "$shared" ]; then
+    diagnosis="It advertised at the SHARED path instead — $shared exists. MIMIC_CONTROL_FILE did not
+reach the launched app, or its write side ignored it. On a developer's machine this run has just
+overwritten the file their own Mimic advertises itself in, which is the accident the override exists
+to prevent."
+  else
+    diagnosis="It advertised NOWHERE — no file at $MIMIC_CONTROL_FILE and none at the shared path
+either. The write threw and was swallowed, which is what a sandboxed app reaching outside its
+container looks like: everything this script hands the instance lives under a mktemp directory that
+is not in the app's container."
+  fi
+  fail "the instance did not write its discovery file to
   $MIMIC_CONTROL_FILE
-so either it wrote to the shared Application Support path instead — in which case this run has
-overwritten the file a developer's own Mimic advertises itself in, and MIMIC_CONTROL_FILE is what
-redirects it — or it could not write there at all, which is what a sandboxed app reaching outside
-its container looks like."
+$diagnosis"
+fi
 
 echo "== scripting the journey from the product goal =="
 "$MIMIC_BIN" project create "CLI e2e" --port "$MOCK_PORT" >/dev/null || fail "project create"

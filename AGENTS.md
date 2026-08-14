@@ -124,8 +124,8 @@ errors helps nobody. The gap is visible on every run instead of silent, and the 
 its own the day `swiftSettings:` lands.
 
 **macOS** (`macos-26`) covers everything that needs Xcode: `tuist generate`, the Debug build, the
-app-level suites, **the XCUITest suite**, the CLI end-to-end check, and the Release gate. The image
-label is load-bearing — macOS 26 and Swift
+app-level suites, **the XCUITest suite**, the CLI end-to-end check — non-gating, for the reason
+below — and the Release gate. The image label is load-bearing — macOS 26 and Swift
 6.2 are the compile floor, not a preference.
 
 Two things about the macOS job are worth knowing before you edit it:
@@ -175,11 +175,16 @@ both exist before the script starts, so "the products are not where this caller 
 later disguised as a failed assertion. `MIMIC_BIN` from the environment now wins over the script's
 own `find`.
 
-**Both callers gate on it.** The macOS step landed non-gating for exactly one round — no machine had
-ever executed this script, so a first red there was as likely to be a timing assumption written on a
-laptop, or the sandbox mismatch that step's own comment names, as anything wrong with the tree. That
-round passed end to end in four seconds and the flag came off; `ci.sh` gated from the start, because
-a laptop failure is one you can read on the spot.
+**`ci.sh` gates on it; the macOS step does not yet.** The first round on a runner passed end to end
+in four seconds, the flag came off on that evidence, and the very next round failed — with every
+other step green. It fails at the discovery-file assertion, and the reason it is not fit to gate is
+what that failure looks like from outside: `ControlServer.start` binds the socket *before* it writes
+the file, so `mimic app start` reports the instance reachable while nothing has been advertised yet,
+and a failed advertisement is deliberately non-fatal — the error goes to the application's own
+logger, which a headless launch points at `FileHandle.nullDevice`. The condition is unobservable by
+construction, so the script now reports which of the two causes it was (advertised at the shared
+path, or advertised nowhere) and the step stays non-gating until the cause is fixed. `ci.sh` gates
+from the start, because a laptop failure is one you can read on the spot.
 
 What it is no longer is dangerous, and that is a recent change worth knowing because the old
 behaviour is what kept it out of the docs' recommended path:

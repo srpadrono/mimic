@@ -115,9 +115,9 @@ from the Debug products it just produced, checking both exist first.
 
 Run on its own after the commands above, it resolves both by searching again — those commands pass no
 `-derivedDataPath` either — so set `MIMIC_BIN` and `MIMIC_APP_PATH` yourself, or the green result is
-about a release you are not working on. The macOS CI job runs it too, and gates on it — it landed
-non-gating for a single round, on the grounds that no machine had ever executed it, and that round
-passed.
+about a release you are not working on. The macOS CI job runs it too, but does not gate on it yet:
+its first round there passed and its second failed at the discovery-file assertion, for a reason the
+app makes invisible — see the step's own comment in `.github/workflows/ci.yml`.
 
 It is safe to run on a machine with Mimic open, which it did not use to be: it stops the instance it
 launched by the pid `mimic app start` reported, and it exports `MIMIC_CONTROL_FILE="$WORK/control.json"`
