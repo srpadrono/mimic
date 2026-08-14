@@ -444,10 +444,12 @@ jobs:
       # second; both point at the Debug products this job produced, which is why this runs before
       # `Build (Release)` writes a second set beside them.
       #
-      # Where it is meant to end up: a gate with no `|| true` and no `continue-on-error`, like every
-      # other step in this job bar the two that say otherwise in their own comments. It is not there
-      # yet — see the flag on the step itself for why a script no machine has ever run does not get
-      # to fail the pipeline on its first outing, and for the one condition that removes it.
+      # No `|| true`, no `continue-on-error`: this is a gate, like every other step in this job bar
+      # the two that say otherwise in their own comments. It landed non-gating for exactly one round
+      # — a script no machine had ever run does not get to fail a pipeline on its first outing —
+      # and that round passed end to end in four seconds, so the flag came off. If it ever goes red
+      # for its own reasons rather than the tree's, write the reason here and leave it red until it
+      # is true again.
       #
       # One thing it inherits from a laptop run rather than from this runner: the launched app is
       # sandboxed (`App/Mimic.entitlements`), and everything this script hands it — the store, the
@@ -455,16 +457,6 @@ jobs:
       # own failure messages name that as a possible cause, which is what a first red run here would
       # be read against.
       - name: CLI end-to-end (launch, discovery, real sockets)
-        # Non-gating for its first rounds, and this comes off as soon as one of them is green.
-        #
-        # No machine has ever executed this script — that is the whole reason it is being wired in —
-        # so its first run is as likely to fail for its own reasons (the sandbox note above, a
-        # timing assumption written on a laptop) as for anything wrong with the tree. Gating on it
-        # immediately would redden the pipeline with a result nobody can yet interpret, which is
-        # exactly the "red that means nothing" this repository spent a wave removing. Non-gating is
-        # not `|| true` hidden in a script: the step still runs, its output is still read, and the
-        # flag sits here in the open with the condition for removing it written next to it.
-        continue-on-error: true
         run: |
           products="$PWD/$DERIVED_DATA/Build/Products/Debug"
           # Named rather than searched for, and checked before the script starts, so "the products
