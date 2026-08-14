@@ -963,6 +963,38 @@ struct RequestLogTableRow: View {
                 .frame(width: LogColumns.time, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
+        .frame(height: 26)
+        .background(rowBackground)
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle()
+                    .fill(DSColors.accent)
+                    .frame(width: 2)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect(.current) }
+        .onHover { isHovered = $0 }
+        // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
+        // was the only interactive row in the window that composed none: a bare `.isButton` over
+        // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
+        // "Unmatched"…) with nothing saying they were one request. The trait comes after the
+        // element is formed, because a trait added to the children is a trait the element has
+        // already passed over — and the row is a tap target rather than a `Button` in the first
+        // place because a button would swallow the modifier chords the selection depends on.
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
+        .accessibilityLabel(Self.spokenLabel(for: log))
+        // The menu attaches after the element is formed, exactly as the scenario row orders it —
+        // and here that ordering is load-bearing, not stylistic. This menu used to sit before the
+        // `.accessibilityElement(children: .ignore)` above, which collapses the accessibility of
+        // everything beneath it: the menu still opened for a pointer, but its items surfaced
+        // through the swallowed subtree and so never existed as elements. VoiceOver lost the menu,
+        // and the UI test that opens it read "no menu appeared" — deterministically, on every run,
+        // which spent five CI rounds masquerading as a flaky modifier. Attached out here, the open
+        // menu's items are ordinary elements again. It also widens the right-click target from the
+        // padded content to the full row frame, matching where the row already takes a left click.
         .contextMenu {
             // Going from "this call is unmocked" to "it is mocked now" should not require retyping
             // the method and path into a sheet.
@@ -1007,29 +1039,6 @@ struct RequestLogTableRow: View {
                 .accessibilityIdentifier("requestLog.addToJourneyMenu.\(log.id.uuidString)")
             }
         }
-        .frame(height: 26)
-        .background(rowBackground)
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Rectangle()
-                    .fill(DSColors.accent)
-                    .frame(width: 2)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect(.current) }
-        .onHover { isHovered = $0 }
-        // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
-        // was the only interactive row in the window that composed none: a bare `.isButton` over
-        // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
-        // "Unmatched"…) with nothing saying they were one request. The trait comes after the
-        // element is formed, because a trait added to the children is a trait the element has
-        // already passed over — and the row is a tap target rather than a `Button` in the first
-        // place because a button would swallow the modifier chords the selection depends on.
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
-        .accessibilityLabel(Self.spokenLabel(for: log))
     }
 
     private var rowBackground: Color {

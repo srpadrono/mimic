@@ -580,6 +580,16 @@ When adding or modifying views or navigation:
    most of the sheet coverage in the suite. Pair the identifier when the container holds *several*
    things worth addressing; leave it alone when it wraps one control and lends it its name.
 
+   **A `.contextMenu` must attach *after* `.accessibilityElement(children: .ignore)`, never beneath
+   it.** The composition collapses the accessibility of everything below it in the chain, and a menu
+   attached down there still opens for the pointer — but its items surface through the swallowed
+   subtree and never exist as elements, so `app.menuItems[…]` matches nothing whatever the menu
+   shows, and VoiceOver loses the menu outright. The request log's row shipped exactly this: five
+   consecutive CI runs failed the capture test as "no menu appeared", it read as a flaky modifier,
+   and the retry iteration resuming *after* the failed test (rather than re-running it) kept the
+   misreading alive for all five. The scenario row's ordering — form the element, then attach the
+   menu — is the pattern; `.contain` sites are unaffected because `.contain` keeps its children.
+
    When an identifier mysteriously stops matching, dump `app.debugDescription` and look at what the
    element is actually called. `MimicUITests/TreeDumpTests.swift` is not kept in the repo — write a
    throwaway test that prints `app.debugDescription` line by line, because the runner is sandboxed and

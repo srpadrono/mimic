@@ -1267,35 +1267,45 @@ final class MimicUITests: XCTestCase {
         let firstRow = rows[0]
         let secondRow = rows[1]
 
-        // Select both rows with ⌘A after focusing the list with a click, then open the context menu
-        // on the selection. The menu naming a *count* is the real check: a selection collapsed to
-        // one row says "Add to journey" instead, so the assertion below cannot pass for the wrong
-        // reason.
+        // ⌘-click adds the second row to the selection instead of replacing it — the row reads
+        // `NSEvent.modifierFlags` at click time, and this held-modifier dance is the only way to
+        // exercise that from a test. It is not replaceable with `typeKey("a", .command)`: the
+        // drawer implements no Select All (selection changes only through clicks), so ⌘A selects
+        // nothing and the menu below would name one row for the wrong reason.
         //
-        // This used to be a ⌘-click (`XCUIElement.perform(withKeyModifiers:)` around a click), and
-        // four consecutive CI runs falsified that approach the same way: the test runs ~18th in the
-        // suite, and after seventeen app launches the runner drops the held modifier so reliably
-        // that the selection collapsed on every first-iteration attempt — including two bounded
-        // in-test retries — while the identical dance passed 4/4 whenever xcodebuild's retry ran
-        // this test first in a fresh session. Deterministic by suite position is not a race a retry
-        // absorbs. `typeKey`'s modifier flags ride the keyboard-event path this suite already uses
-        // reliably everywhere (`typeKey("a", .command)` in every sheet), not the held-modifier mouse
-        // synthesis, and ⌘A exercises the same selection→capture path the feature ships.
+        // The menu naming a *count* is the real check: a selection collapsed to one row says
+        // "Add to journey" instead, so the assertion cannot pass for the wrong reason.
+        //
+        // When this assertion spends several runs failing while the dance looks right, suspect the
+        // *menu's visibility* before the modifier. Five consecutive CI runs failed here after the
+        // row composed itself with `.accessibilityElement(children: .ignore)` — the menu, then
+        // attached *beneath* that modifier, still opened for the pointer, but its items surfaced
+        // through the swallowed subtree and never existed as elements, so `app.menuItems` matched
+        // nothing whatever the selection held. That read as a dropped modifier, and the retry
+        // iteration resumed *after* the failed test rather than re-running it, so "passes on
+        // retry" was a misreading of the resumed suite's log. The row now attaches its menu after
+        // forming the element, and the failure message below prints what the tree actually holds.
         let captureMenu = app.menuItems["Add 2 requests to journey"]
         let collapsedMenu = app.menuItems["Add to journey"]
         firstRow.click()
-        app.typeKey("a", modifierFlags: .command)
+        XCUIElement.perform(withKeyModifiers: .command) {
+            secondRow.click()
+        }
         secondRow.rightClick()
         // Polled together — waiting out one item's timeout before looking at the other is the
         // `a || b` trap rule 9 of the UI Definition of Done names.
         _ = UITestApp.waitForAny([captureMenu, collapsedMenu], timeout: 5)
         if !captureMenu.exists {
-            // Name what the runner actually saw, so the next red run's CI failure step prints a
-            // diagnosis instead of a hypothesis: which wrong menu appeared, or none at all.
+            // Name what the runner actually saw, so a red run's CI failure step prints a diagnosis
+            // instead of a hypothesis: the singular menu means the modifier did not reach the app;
+            // no menu items at all means the menu never opened — or opened with its items invisible
+            // to the tree, which is the swallowed-subtree failure above. (`menus` counts open
+            // AXMenu elements, so "menu open, items missing" and "no menu" read differently here.)
             let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
             XCTFail(
                 "The context menu should offer to capture the whole selection, not just the clicked "
-                    + "row. collapsed=\(collapsedMenu.exists) visibleMenuItems=\(visible)"
+                    + "row. collapsed=\(collapsedMenu.exists) openMenus=\(app.menus.count) "
+                    + "visibleMenuItems=\(visible)"
             )
         }
         captureMenu.click()
