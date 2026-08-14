@@ -326,16 +326,41 @@ structurally: XCUITest, because the step doing the measuring is the one that ski
 the Linux job runs, because gathering coverage needs the Xcode toolchain. On a red run the bundle is
 uploaded as the `xcresult` artifact, which is where per-file detail lives.
 
-**The two badges above still read `not measured`, and that is now a different fact from the one this
-section used to record.** The number exists; nothing publishes it here. This workflow holds
-`contents: read` and writes nothing back to the repository, so both badges are still rewritten only
-by [`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py) — from a Mac, out of the
-per-scheme bundles the full suite produces, and committed by whoever ran it:
+**The numbers are also recorded here, on every push to `main`.** They used to exist only in that job
+summary — computed on every run and thrown away with the runner — which is why both badges above
+spent this repository's entire history reading `not measured` while the measurement was already
+happening. The `record-coverage` job closes that: the macOS job hands its figures on as a job
+output, and that job rewrites the two badges and the block below with
+[`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py).
+
+Four things about it are deliberate, and each is the answer to a way this normally goes wrong:
+
+- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS job
+  compiles and runs code out of a pull request; a write token there would widen the blast radius of
+  anything going wrong in it to "can push to `main`". The recording job runs one Python script over
+  one Markdown file.
+- **A few hundred bytes cross between them, not the bundle.** The `.xcresult` is hundreds of
+  megabytes and stays on the runner that made it.
+- **The generated block carries no timestamp, run number or run URL.** It is a pure function of the
+  coverage figures, so an unchanged measurement leaves the file byte-identical and there is nothing
+  to commit — otherwise `main` would collect one commit per push forever. The commit that is made
+  carries `[skip ci]`, or it would trigger the workflow that wrote it.
+- **It records; it never gates.** `main` is a protected branch, and whether its rules let the Actions
+  bot push is a repository setting rather than something a commit can fix. A rejected push warns and
+  prints the diff it wanted to make into the job summary — it never reddens a commit whose tests
+  passed.
+
+A Mac still writes the same section from a full local suite, out of the per-scheme bundles rather
+than the workspace-wide one, and the generated block says which of the two produced it:
 
 ```bash
 ./Scripts/ci.sh                     # the CI gate locally, and prints the same per-target table
 ./Scripts/run_full_test_suite.sh    # macOS + Xcode; rewrites this section and the two badges
 ```
+
+The half of that script needing no Mac — the rewriting, the JSON hand-off and the refusals — is
+covered by `python3 Scripts/update_readme_coverage.py --self-test`, which the Linux job runs beside
+the other checkers. It had no automated test of any kind before it started writing to `main`.
 
 **No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
 number is either so low it never fires or red on the run that introduces it. Measuring first, then
@@ -345,9 +370,10 @@ setting the floor against a baseline, is the order.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
-`main`, in two jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
+`main`, in three jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
 minutes, macOS runs `tuist generate`, the Debug build, the app-level suites — measured, with the
-per-target coverage table printed into the job summary — XCUITest and the Release gate. Both runners
+per-target coverage table printed into the job summary — XCUITest and the Release gate, and a short
+`record-coverage` job writes those figures into this file on pushes to `main`. Both runners
 are free on a public repository. (This section used to say Actions could not start
 a job here at all — true while the repository was private and a billing block killed every run in
 about two seconds; making it public resolved it.)

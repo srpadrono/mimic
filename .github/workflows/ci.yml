@@ -162,6 +162,23 @@ jobs:
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
 
+      # `Scripts/update_readme_coverage.py` is what writes the README's coverage badges and table,
+      # and until this line it had no automated check of any kind. Half of it needs `xcrun xccov`
+      # and a real `.xcresult`, so only the macOS job can exercise that half — but the half that
+      # matters most to a reader, the one that rewrites README.md, is pure string work and runs
+      # anywhere. `--self-test` drives it against a fixture README: both badges, the generated
+      # block, the JSON round trip, prose outside the markers surviving, and the three refusals
+      # (a partial target list, a malformed payload, a README with no badges).
+      #
+      # It also pins the property the `record-coverage` job depends on — that rewriting with
+      # unchanged figures produces byte-identical output — because the day that stops being true is
+      # the day `main` starts collecting a commit per push.
+      #
+      # Here rather than on macOS for the same reason as the house rules above: it needs nothing a
+      # Mac has, and it is a tenth of a second.
+      - name: Coverage writer self-test
+        run: python3 Scripts/update_readme_coverage.py --self-test
+
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -203,6 +220,12 @@ jobs:
     # The Release build alone is several minutes on a 3-core runner, and the UI suite launches the
     # real app once per test.
     timeout-minutes: 120
+
+    # The measured coverage figures, handed to `record-coverage` below. Empty on every run that is
+    # not a push to `main`, and on any run that failed before the measurement — that job treats an
+    # empty value as "nothing to record" rather than as an error.
+    outputs:
+      coverage: ${{ steps.figures.outputs.json }}
 
     # DerivedData inside the checkout, and **every** xcodebuild step below passes it.
     #
@@ -378,6 +401,48 @@ jobs:
             --result-bundle .artifacts/coverage/UnitTests.xcresult \
             --title 'Code coverage (unit suites, XCUITest excluded)' \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # (c): the same figures again, as a few hundred bytes of JSON handed to the `record-coverage`
+      # job at the bottom of this file, which writes them into README.md.
+      #
+      # A **job output**, not an artifact, and not three more lines on this job. Two constraints
+      # meet here. `contents: write` must not live on this job — it is the one that compiles and
+      # runs code out of a pull request, and a write token here would widen the blast radius of
+      # anything going wrong in that to "can push to `main`". And the `.xcresult` this reads is
+      # several hundred megabytes, so handing the *bundle* to a second job would move all of it
+      # between runners so the other end could re-read nine numbers out of it. An output carries
+      # exactly the nine numbers, costs nothing, and needs no `download-artifact` — which this
+      # workflow has never pinned, and a SHA is not a thing to guess at.
+      #
+      # `continue-on-error`, for the same reason the summary step above carries it and no weaker: a
+      # coverage measurement is not a verdict on a commit, and a step that reddens a run whose tests
+      # all passed teaches people to ignore red. It matters more here than there, because the exact
+      # names `xccov` reports targets under in a *workspace-wide* bundle could not be checked from
+      # where this was written — no Mac, no Xcode — and `--emit-json` deliberately refuses to write
+      # a partial table, all nine targets or none, rather than shrinking the badge's denominator
+      # into a pass.
+      #
+      # That refusal is safe to leave loud-but-not-fatal because its failure announces itself: no
+      # figures means no recording, and the badges in the README go on reading `not measured` until
+      # somebody looks. A silent wrong number is the outcome worth engineering against; a visibly
+      # absent one is not.
+      #
+      # Only on a push to `main`: on a pull request there is nowhere to record the result, and the
+      # numbers describe the merged commit anyway.
+      - name: Emit coverage figures
+        id: figures
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/coverage/UnitTests.xcresult \
+            --emit-json .artifacts/coverage/coverage.json
+          cat .artifacts/coverage/coverage.json
+          {
+            echo 'json<<COVERAGE_JSON_EOF'
+            cat .artifacts/coverage/coverage.json
+            echo 'COVERAGE_JSON_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       # The reason this job exists. XCUITest is the only thing that exercises the real window — the
       # accessibility tree, the panel layout, and every flow a user actually takes.
@@ -582,3 +647,111 @@ jobs:
             .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore
+
+  # The one job in this workflow that writes to the repository. It records the coverage the macOS
+  # job measured into README.md's two badges and the block between its `coverage:generated`
+  # markers — the thing both badges spent this repository's whole history saying `not measured` for
+  # while the number was being computed on every run and thrown away with the runner.
+  #
+  # Why this is a separate job on Linux rather than three more lines on the macOS one is argued at
+  # `Emit coverage figures` above: `contents: write` must not sit on the job that compiles and runs
+  # code out of a pull request. What runs here is one stdlib Python script over one Markdown file.
+  # No build, no test, no repository code executes.
+  #
+  # `always()`, guarded to pushes on `main`. Coverage is measured two steps before XCUITest starts,
+  # and this repository's UI suite is documented as ending red on a test that passed on its retry —
+  # letting that decide whether the number is recorded would mean the README updates only on runs
+  # where a flake happened not to fire. A macOS job that died *before* the measurement leaves the
+  # output empty, which the first step below reports and stops on.
+  record-coverage:
+    name: Record coverage in README
+    needs: macos
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `main` rather than the pushed SHA, because the number goes where a reader will look for
+          # it. `fetch-depth: 0` because the push at the end may have to rebase onto a tip that
+          # moved while the macOS job was still running, and a depth-1 clone has nothing to rebase
+          # onto.
+          ref: main
+          fetch-depth: 0
+
+      # The job output goes through `env:` rather than straight into `run:`. A `${{ }}` interpolated
+      # into a shell line is substituted before the shell ever sees it, so its content is parsed as
+      # script; through the environment it can only ever be data. This particular value is a number
+      # this workflow computed rather than anything a stranger wrote — the habit is the point.
+      - name: Write the figures out
+        id: figures
+        env:
+          COVERAGE_JSON: ${{ needs.macos.outputs.coverage }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COVERAGE_JSON:-}" ]; then
+            echo "No coverage figures in this run: the macOS job did not reach the measurement."
+            echo "state=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p .artifacts/coverage
+          printf '%s\n' "$COVERAGE_JSON" > .artifacts/coverage/coverage.json
+          echo "state=ready" >> "$GITHUB_OUTPUT"
+
+      # `main` is a protected branch. Whether these rules let this token push is a repository
+      # setting rather than anything a commit can fix, so a rejection must not redden a commit whose
+      # tests all passed: the step warns, and puts the diff it wanted to make into the job summary
+      # where somebody can apply it by hand. The number is never lost, at worst it is not committed.
+      - name: Record it in README.md
+        if: steps.figures.outputs.state == 'ready'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          python3 Scripts/update_readme_coverage.py \
+            --from-json .artifacts/coverage/coverage.json \
+            --readme README.md
+
+          # The generated block is a pure function of the figures — no timestamp, no run URL — so an
+          # unchanged measurement leaves the file byte-identical and there is nothing to commit.
+          # Without that property `main` would grow one commit per push forever.
+          if git diff --quiet -- README.md; then
+            echo "README.md already records these figures — nothing to commit."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          # `[skip ci]` is load-bearing: without it this commit triggers the workflow that wrote it.
+          git commit -m 'docs: record measured coverage in the README [skip ci]'
+
+          if git push origin HEAD:main; then
+            echo "Recorded."
+            exit 0
+          fi
+
+          # A push can also simply lose a race — `main` moved while the macOS job was running. That
+          # is worth exactly one rebase before concluding the branch rules are what rejected it.
+          echo "Push rejected; rebasing onto main and trying once more."
+          if git pull --rebase origin main && git push origin HEAD:main; then
+            echo "Recorded after a rebase."
+            exit 0
+          fi
+
+          echo "::warning::Could not push the coverage update to main — the diff is in the job summary."
+          patch="$(git diff 'HEAD^' HEAD -- README.md || true)"
+          {
+            echo '### Coverage measured, but not recorded'
+            echo
+            echo 'The push to `main` was rejected. If branch protection is what refused it, either'
+            echo 'allow the Actions bot to bypass the rule for this path, or apply the diff below by'
+            echo 'hand. The figures themselves are in the macOS job'"'"'s summary and its job output.'
+            echo
+            echo '```diff'
+            printf '%s\n' "$patch"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

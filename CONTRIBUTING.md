@@ -92,8 +92,10 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release \
 `Project.swift` declares exactly one scheme, `Mimic`. Everything else you can pass to `-scheme` —
 `Mimic-Workspace` and one per module — is inferred by Tuist, and the inferred per-module schemes do
 carry their `<Module>Tests` target: `Scripts/run_full_test_suite.sh` runs `xcodebuild -scheme Domain
-test` and six more, and README's coverage section is generated from the `.xcresult` bundles they
-produce. (This file used to claim the opposite, which is why `Mimic-Workspace` was presented as the
+test` and six more, and README's coverage section can be generated from the `.xcresult` bundles they
+produce. (CI writes that same section on every push to `main`, from the one workspace-wide bundle
+its macOS job measures — so running the full suite locally is no longer the only way the badges
+ever move.) (This file used to claim the opposite, which is why `Mimic-Workspace` was presented as the
 only way to run a unit suite. Prefer it because it covers everything in one pass, not because the
 others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
 generated.
