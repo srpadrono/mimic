@@ -13,6 +13,43 @@ enum UITestApp {
 
     static let bundleIdentifier = "devxa.Mimic"
 
+    /// The environment key both halves of the discovery-file contract resolve. Spelled here because
+    /// this target links no `Domain` — the one declaration is
+    /// `ControlEndpointDiscovery.pathEnvironmentKey`.
+    static let controlFileEnvironmentKey = "MIMIC_CONTROL_FILE"
+
+    /// Where an app launched by this run advertises its control plane: a per-run sidecar, never the
+    /// shared `control.json`.
+    ///
+    /// The app starts the control plane on every launch, and on every successful bind it writes the
+    /// advertisement — port, pid, and the `X-Mimic-Token` credential — wherever `MIMIC_CONTROL_FILE`
+    /// points, then removes that file on shutdown. Both halves resolve the override through
+    /// `ControlEndpointDiscovery.overrideURL`, so exporting the variable is the whole isolation.
+    /// Without it, every UI launch overwrote the developer's live advertisement with the test
+    /// instance's token, and every teardown deleted it — leaving a still-running Mimic that no
+    /// `mimic` command could discover until relaunch. That is the `mimic.sqlite` failure class
+    /// applied to credential material, which is why the export lives in the one launch path every
+    /// suite goes through (UI DoD rule 6) rather than in each suite's environment block, where it
+    /// would be one forgotten line away from recurring.
+    ///
+    /// Tilde-relative on purpose: the app is sandboxed, so *it* expands `~` into its container and
+    /// the file lands beside `mimic-uitests.sqlite`, where the app can actually write — the same
+    /// reasoning `UITestSupport.databaseURL` records for the store. The name is the guard, as with
+    /// that store: whatever directory this resolves into, a file not called `control.json` can never
+    /// be the shared advertisement. The runner's pid keeps a file left behind by a crashed run from
+    /// describing this one.
+    static let controlFileOverridePath = "~/Library/Application Support/devxa.Mimic/"
+        + "mimic-uitests-control-\(ProcessInfo.processInfo.processIdentifier).json"
+
+    /// Exports the discovery-file override into `app`'s launch environment, unless the suite has
+    /// already named one — an explicit path is the suite's to keep, the way an explicit
+    /// `MIMIC_DATABASE_PATH` wins over the computed store.
+    @MainActor
+    static func isolateControlPlaneDiscovery(for app: XCUIApplication) {
+        guard app.launchEnvironment[controlFileEnvironmentKey] == nil else { return }
+        app.launchEnvironment[controlFileEnvironmentKey] = controlFileOverridePath
+    }
+
     /// Waits for a condition, polling until it holds or the deadline passes.
     ///
     /// Preferred over a fixed pause, which is wrong in both directions: too short and the test is
@@ -86,6 +123,10 @@ enum UITestApp {
 
     /// Launches `app` and drives it to the foreground until `isReady` holds.
     ///
+    /// Also exports the control-plane discovery override first — the environment binds at process
+    /// spawn, so it must be in place before `launch()`, and it lives here so no suite can launch an
+    /// app that writes the shared `control.json`. See ``controlFileOverridePath``.
+    ///
     /// Returns whether the app became usable, so the caller can assert with its own message.
     @MainActor
     @discardableResult
@@ -94,6 +135,7 @@ enum UITestApp {
         attempts: Int = 5,
         isReady: () -> Bool
     ) -> Bool {
+        isolateControlPlaneDiscovery(for: app)
         app.launch()
         guard app.wait(for: .runningForeground, timeout: 15) else { return false }
 

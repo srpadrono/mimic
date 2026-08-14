@@ -164,6 +164,16 @@ enum TextRenderer {
         Mimic \(state.mode) (api \(state.apiVersion), pid \(state.pid))
         \(renderServer(state.server))
         """
+        // A session on the in-memory fallback has to say so here: the window shows an alert, and a
+        // headless run has no window — this line is the only place an unattended caller can learn
+        // that every write it was told succeeded evaporates at stop. The reason keeps its own
+        // lines, indented the way a server message is; blank lines are dropped, not indented.
+        if let storeFailure = state.storeFailure {
+            text += "\nstore        in memory — nothing will be saved"
+            for line in storeFailure.split(separator: "\n", omittingEmptySubsequences: true) {
+                text += "\n             \(line)"
+            }
+        }
         if let project = state.project {
             text += "\nproject      \(project.name) — \(state.endpointCount) endpoints, \(state.journeyCount) journeys"
         } else {

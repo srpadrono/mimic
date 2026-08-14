@@ -74,6 +74,12 @@ Mimic (app) → AppFeatures → Domain
 mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 ```
 
+The map draws the import graph — who calls whom. The `Mimic` target's dependency list is wider than
+its one drawn edge: `Project.swift` declares every module on the app target directly, because the
+app is the composition root that bundles the frameworks it ships. The code under `App/Sources`
+imports no module of this repository but `AppFeatures` (plus the system frameworks); the extra
+links carry no calls.
+
 - **Domain** — value types + pure rules. Imports Foundation only. No SwiftUI/Vapor/GRDB. Holds:
   - models, `RequestMatcher`/`resolve`, validation
   - `JourneyResolver` / `JourneyRunState` / `MockResolver` — journey resolution as a pure function

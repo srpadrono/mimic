@@ -104,7 +104,17 @@ struct JourneyCommand: AsyncParsableCommand {
                 try Output(options).emit(created)
                 return
             }
-            try Output(options).emit(try await client.send(.journeyActivate(journey: .name(name))))
+            guard let journey = created.result?.journey else {
+                // Unreachable against the production executor, which always returns the created
+                // journey — but a host that ever answered ok without it would otherwise skip the
+                // activation silently at exit 0, and half of `--activate` is the half that matters.
+                throw CLIFailure.commandFailed(.internalFailure("Create returned no journey to activate."))
+            }
+            // By the id the create handed back, never the name: `journeyCreate` appends with no
+            // uniqueness check and name resolution takes the first match, so activating "X" in a
+            // project already holding an "X" would overlay the older journey while reporting this
+            // one. `add-template` below activates the same way.
+            try Output(options).emit(try await client.send(.journeyActivate(journey: .id(journey.id))))
         }
     }
 

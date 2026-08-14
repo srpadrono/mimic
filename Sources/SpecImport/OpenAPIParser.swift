@@ -78,8 +78,14 @@ public enum OpenAPIParser {
                 guard let operation else { continue }
                 guard let method = HTTPMethod(rawValue: methodString) else { continue }
 
-                var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(from: operation, doc: doc)
+                // Content type first, because the response extraction pairs the example it picks
+                // with it — see the examples branch in `extractSwagger2Response`.
                 let contentType = swagger2ContentType(operation: operation, doc: doc)
+                var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(
+                    from: operation,
+                    doc: doc,
+                    preferring: contentType
+                )
 
                 // Fallback: auto-generate body from operation metadata when no schema/examples
                 if exampleBody == nil && contentType == .json {
@@ -139,7 +145,8 @@ public enum OpenAPIParser {
 
     private static func extractSwagger2Response(
         from operation: SwaggerOperation,
-        doc: SwaggerDocument
+        doc: SwaggerDocument,
+        preferring contentType: Scenario.ContentType
     ) -> (statusCode: Int, body: String?, responseDescription: String?) {
         guard let responses = operation.responses else { return (200, nil, nil) }
 
@@ -163,14 +170,20 @@ public enum OpenAPIParser {
 
         guard let response = responses[bestKey ?? "200"] else { return (statusCode, nil, nil) }
 
-        // Check response examples
-        if let examples = response.examples {
-            if let jsonExample = examples["application/json"] {
-                return (statusCode, jsonExample.toJSONString(), response.description)
-            }
-            if let first = examples.first {
-                return (statusCode, first.value.toJSONString(), response.description)
-            }
+        // The examples map is keyed by MIME type, so the body handed back is the one for the content
+        // type the candidate will actually declare. The keys used to be consulted only for an exact
+        // `application/json` hit, so `produces: [text/plain]` beside a JSON example served the JSON
+        // body under a text/plain label — two halves of one response chosen independently. An exact
+        // key wins first, so a map holding both `application/json` and `application/hal+json` under
+        // `produces: [application/json]` serves the body actually named; then the same substring
+        // rule as `produces` itself, sorted so a map with no matching key picks the same fallback on
+        // every import instead of whatever order the hash gave.
+        if let examples = response.examples, !examples.isEmpty {
+            let keys = examples.keys.sorted()
+            let key = keys.first { $0 == contentType.rawValue }
+                ?? keys.first { ImportCandidateBuilder.detectContentType($0) == contentType }
+                ?? keys[0]
+            return (statusCode, examples[key]?.toJSONString(), response.description)
         }
 
         // Check schema example

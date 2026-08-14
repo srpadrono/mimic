@@ -290,17 +290,19 @@ final class AppControlHost: ControlHost {
         case .journeyRestart:
             guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
             guard let journey = appState.activeJourney else { return .failure(.noActiveJourney) }
-            appState.restartActiveJourney()
+            // Awaited, and the *engine's* answer is what is reported — the same repair
+            // `journeyAdvance` below received, arriving here one wave later. This used to dispatch
+            // the restart and fabricate a fresh run from the document: right in effect because a
+            // restart is *supposed* to produce one, but right for the wrong reason — nobody asked
+            // the engine, and the restart itself could land on the pre-edit journey when a config
+            // push was still in flight. The primitive waits for that push chain before restarting.
+            let restarted = await appState.restartActiveJourneyReportingStatus()
             return .success(.init(
                 message: ControlMessages.journeyRestarted(name: journey.name),
-                // Built from the document, and that is a *remaining* gap rather than a decision.
-                // `MockServerRuntime.restartJourney()` dispatches, and the engine hands back the cursor
-                // the restart produced — which nothing here reads. So this reports a fresh run because
-                // a restart is *supposed* to produce one, not because the engine said it did, and the
-                // reply happens to be right today for exactly the reason `journeyActivate`'s was
-                // wrong: nobody asked. `advanceJourneyReportingStatus()` is the shape a fix takes, and
-                // the arm above now uses the equivalent for activation.
-                journeyStatus: JourneyStatus.make(journey: journey, state: nil)
+                // The fallback is the same one `journeyAdvance` and `journeyStatus` use: with no
+                // journey loaded into the engine there is no cursor to report, and the journey as
+                // it stands is the honest answer rather than an omitted field.
+                journeyStatus: restarted ?? JourneyStatus.make(journey: journey, state: nil)
             ))
 
         case .journeyAdvance:
@@ -310,8 +312,8 @@ final class AppControlHost: ControlHost {
             // advance and then read `activeJourneyStatus` — the runtime's mirror of the cursor, which
             // the advance it had just requested had not reached yet. So the reply carried the position
             // from before the command at best, and no position at all on a script's first advance,
-            // which is when nothing has populated the mirror. `journeyRestart` above never had the
-            // problem because it builds its status from the journey rather than reading the mirror.
+            // which is when nothing has populated the mirror. `journeyRestart` above answers through
+            // the same shape now, having spent a wave fabricating its status from the document.
             let advanced = await appState.advanceActiveJourneyReportingStatus()
             return .success(.init(
                 message: "Advanced the journey.",
@@ -621,11 +623,16 @@ final class AppControlHost: ControlHost {
     /// This session's state, in the shape the wire uses.
     ///
     /// Everything below the parameters — the project summary, the endpoint and journey counts — is
-    /// ``HostReport/state(appVersion:mode:pid:server:project:activeJourney:requestLogCount:)``, so
-    /// the derivations live in Domain rather than in this arm. What stays here is what
+    /// ``HostReport/state(appVersion:mode:pid:server:project:activeJourney:requestLogCount:storeFailure:)``,
+    /// so the derivations live in Domain rather than in this arm. What stays here is what
     /// only this host can answer: where its version comes from (`Bundle.main`),
-    /// and that the live cursor is read from the runtime with the not-yet-started
-    /// journey as the fallback.
+    /// that the live cursor is read from the runtime with the not-yet-started
+    /// journey as the fallback, and that the store fact is the session's own.
+    ///
+    /// `storeFailure` is not optional to pass. The in-memory fallback used to be surfaced only by
+    /// the window's alert, so a headless session on a locked store ran fully ephemeral while every
+    /// command exited 0 and `mimic state` looked healthy — and the CLI's primary audience is
+    /// exactly the caller with no window to see the alert.
     private func makeState(_ appState: AppState) -> ControlState {
         HostReport.state(
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
@@ -635,7 +642,8 @@ final class AppControlHost: ControlHost {
             project: appState.currentProject,
             activeJourney: appState.activeJourneyStatus
                 ?? appState.activeJourney.map { JourneyStatus.make(journey: $0, state: nil) },
-            requestLogCount: appState.requestLogs.count
+            requestLogCount: appState.requestLogs.count,
+            storeFailure: appState.storeFailure
         )
     }
 

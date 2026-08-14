@@ -86,9 +86,17 @@ struct RequestBodyView: View {
             // Detached rather than a plain `await`: with approachable concurrency a nonisolated
             // async function stays on the caller's actor, and tokenising 64 KB on the main actor is
             // exactly the hitch this is meant to avoid.
-            rendered = await Task.detached {
+            let result = await Task.detached {
                 Self.render(payload: payload, searchText: searchText)
             }.value
+            // Awaiting a non-throwing detached task swallows the cancellation `.task(id:)` sent
+            // when the id changed, so a slow render of the previous body could come back after the
+            // new one and sit on screen until the id next moved. Land only the render still asked
+            // for — the same guard the detached hops in `SidebarView` and `RequestLogDrawerView`
+            // close with.
+            if !Task.isCancelled {
+                rendered = result
+            }
         }
     }
 

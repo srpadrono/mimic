@@ -23,8 +23,29 @@ final class ProjectWorkspace {
     /// Whether a debounced edit is still waiting to be written. Read by ``flushPendingAutosave()``,
     /// which has to know the difference between "a save is owed" and "the last one already landed".
     private var hasPendingAutosave = false
-    /// Ticket for the newest ``openProject(id:)``, so a load that has been superseded cannot publish.
+    /// Ticket for the newest publish of ``currentProject``, so a load that has been superseded
+    /// cannot publish.
+    ///
+    /// ``openProject(id:)`` raises it when a load is *asked for* — two opens in quick succession
+    /// must settle on the second — and every publish raises it again, through
+    /// ``setCurrentProject(_:isRestoring:)``. It used to be raised only by opens, so create, close,
+    /// delete and import each published without invalidating an open still in flight, and the
+    /// superseded load — widened by its leading await of the whole write chain — could land
+    /// afterwards and put the stale project back over the newer state, after the CLI had already
+    /// been told otherwise.
     private var openGeneration = 0
+    /// Projects whose chained delete has been asked for and has not yet settled. No save of the
+    /// open project may join the chain while its id is here.
+    ///
+    /// ``deleteProject(id:)`` cancels the debounce pending at the moment it is called, but the
+    /// delete itself runs at its turn in the chain, and `currentProject` still names the doomed
+    /// project until that turn comes. An edit arriving in that window passed the debounce's own
+    /// `currentProject?.id` guard and enqueued its save *behind* the delete — in perfect chain
+    /// order, re-inserting the row the delete had just removed. Checked at the three places a save
+    /// of the open project joins the chain: the debounce's claim, the flush, and
+    /// ``saveCurrentProject()``. Struck when the delete settles, on both arms — a refused delete
+    /// leaves a live project whose edits must keep saving.
+    private var pendingDeleteIDs: Set<UUID> = []
     /// The most recent store write, so the next one can wait for it.
     ///
     /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` — the
@@ -180,7 +201,9 @@ final class ProjectWorkspace {
     }
 
     func saveCurrentProject() {
-        guard let project = currentProject else { return }
+        // Not while a chained delete for this project is in flight: the save would join the chain
+        // behind the delete and re-insert the row — see ``pendingDeleteIDs``.
+        guard let project = currentProject, !pendingDeleteIDs.contains(project.id) else { return }
         // Captured by value, because the write lands whenever its turn in the chain comes: what it
         // writes must be what the caller asked to save, not whatever is open by then. As a
         // free-floating task this was one of the five writes outside ``storeWrites`` — a chained
@@ -223,7 +246,10 @@ final class ProjectWorkspace {
                 // is why nobody noticed. It also dropped the journeys entirely.
                 let copy = source.duplicated(name: "\(source.name) (Copy)")
                 try await projectRepository.save(copy)
-                recordRecentProject(id: copy.id, name: copy.name)
+                // The copy takes a list row without becoming the restore target — it was never
+                // opened, and a headless duplicate must not decide which project the next launch
+                // shows.
+                recordRecentProject(id: copy.id, name: copy.name, asLastOpened: false)
             } catch {
                 // A duplicate that fails has to say so. Swallowing it is what let a feature that
                 // could not work on any project with a single endpoint in it ship silently.
@@ -247,7 +273,8 @@ final class ProjectWorkspace {
     ///
     /// It used to only *await* the chain without joining it, on the argument that it is `async` and
     /// its caller awaits it — so anything issued afterwards was already behind it. Its caller is
-    /// `AppState.importProject`, which dispatches into an untracked `Task` and returns immediately,
+    /// `AppState.importProject`, which dispatches into a task of its own — now retained as
+    /// `importTask` and awaited by the shutdown drain — and returns immediately,
     /// so nothing was behind it at all: a `mimic project delete` arriving after `mimic project
     /// import` took `storeWrites` as it was *before* the import, found nothing to wait for, and was
     /// free to reach the store first — deleting nothing, and leaving the import's insert to land
@@ -281,7 +308,9 @@ final class ProjectWorkspace {
                 try await projectRepository.save(document)
                 autosaveStatus = .saved
                 scheduleSavedStatusClear()
-                recordRecentProject(id: document.id, name: document.name)
+                // An inactive import is not an open: the row appears, the restore target stays.
+                // The `--activate` path re-records with the default when `openProject` runs.
+                recordRecentProject(id: document.id, name: document.name, asLastOpened: false)
                 return true
             } catch {
                 autosaveStatus = .failed("Could not import project \"\(document.name)\".")
@@ -306,6 +335,10 @@ final class ProjectWorkspace {
         // its own: a debounced write already claimed before this call sits ahead of the delete and
         // is settled before it runs.
         if currentProject?.id == id { cancelPendingAutosave() }
+        // The cancel covers only the debounce pending *now*; the tombstone covers the rest of the
+        // delete's flight, during which `currentProject` still names this project and an edit's
+        // save would otherwise chain in behind the delete — see ``pendingDeleteIDs``.
+        pendingDeleteIDs.insert(id)
 
         enqueueStoreWrite { [weak self] in
             guard let self else { return }
@@ -316,21 +349,32 @@ final class ProjectWorkspace {
                 // delete the store refused looked exactly like one it accepted — and left a project
                 // in the database with no row in the list to reach it by, which is the stranding
                 // `refreshProjectList` exists to prevent.
+                //
+                // The refusal lifts the tombstone: the project still exists, and its edits must
+                // save again. A tombstone that outlived a failed delete would silently drop every
+                // later save of a live project — the one failure mode this app has no way of
+                // telling you about, reintroduced by its own fix.
+                pendingDeleteIDs.remove(id)
                 autosaveStatus = .failed("Could not delete the project.")
                 return
             }
+            pendingDeleteIDs.remove(id)
             recentProjectsStore.remove(id: id)
             recentProjects = recentProjectsStore.load()
             refreshProjectList()
             if currentProject?.id == id {
-                currentProject = nil
+                // Through ``setCurrentProject(_:isRestoring:)`` for the generation bump: the close
+                // this publish performs must also supersede any open still in flight.
+                setCurrentProject(nil, isRestoring: false)
             }
         }
     }
 
     func closeProject() {
         flushPendingAutosave()
-        currentProject = nil
+        // Through ``setCurrentProject(_:isRestoring:)`` for the generation bump: a close must
+        // supersede an open still in flight, or its load re-populates the window just cleared.
+        setCurrentProject(nil, isRestoring: false)
     }
 
     /// Waits for every store write already asked for — lifecycle writes and autosaves alike.
@@ -359,9 +403,12 @@ final class ProjectWorkspace {
                 return
             }
             // Claimed before the guard below: from here the write belongs to the chain, and a flush
-            // that ran now would only duplicate it.
+            // that ran now would only duplicate it. The tombstone check is the guard's third leg:
+            // `currentProject` still names a project whose delete is mid-chain, so the id
+            // comparison alone let this save enqueue behind the delete and re-insert the row.
             hasPendingAutosave = false
-            guard let project = currentProject, project.id == projectID else { return }
+            guard let project = currentProject, project.id == projectID,
+                  !pendingDeleteIDs.contains(projectID) else { return }
 
             // Only the write joins the chain; the debounce slept outside it, cancellable, so a
             // newer edit could supersede this one without holding any other write up. From here the
@@ -405,7 +452,8 @@ final class ProjectWorkspace {
     /// the app restores on next launch. Losing the edit is the bug being fixed; the list order is not
     /// part of it, and `refreshProjectList` reads names back from the store regardless.
     private func flushPendingAutosave() {
-        guard hasPendingAutosave, let project = currentProject else { return }
+        guard hasPendingAutosave, let project = currentProject,
+              !pendingDeleteIDs.contains(project.id) else { return }
         cancelPendingAutosave()
 
         autosaveStatus = .saving
@@ -449,6 +497,10 @@ final class ProjectWorkspace {
     }
 
     private func setCurrentProject(_ project: MockProject?, isRestoring: Bool) {
+        // Every publish supersedes an open still in flight — see ``openGeneration``. Raised before
+        // the assignment so no observer of the publish can read a generation the stale load still
+        // matches.
+        openGeneration += 1
         if isRestoring {
             isRestoringProject = true
         }
@@ -458,8 +510,8 @@ final class ProjectWorkspace {
         }
     }
 
-    private func recordRecentProject(id: UUID, name: String) {
-        recentProjectsStore.record(id: id, name: name)
+    private func recordRecentProject(id: UUID, name: String, asLastOpened: Bool = true) {
+        recentProjectsStore.record(id: id, name: name, asLastOpened: asLastOpened)
         recentProjects = recentProjectsStore.load()
         refreshProjectList()
     }

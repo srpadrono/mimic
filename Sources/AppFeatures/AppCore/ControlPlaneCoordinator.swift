@@ -34,11 +34,11 @@ enum HeadlessMode {
 
 /// "Has the shutdown write finished?", asked across an isolation boundary.
 ///
-/// One `Bool`, written once by the detached task that performs the save and read by a waiter on the
-/// main actor. It is a hand-rolled flag rather than a `DispatchSemaphore` because both waiters need
-/// to *poll* it — the signal path from an `async` loop that must not block, the Quit path from a
-/// `willTerminate` observer that has no `await` left to it — and one primitive answering both keeps
-/// the two paths honest about waiting for the same thing.
+/// One `Bool`, written once by the task that performs the flush and read by a waiter polling a
+/// deadline. It is a hand-rolled flag rather than a `DispatchSemaphore` because both waiters need
+/// to *poll* it — the draining paths from an `async` loop that must not block, the `willTerminate`
+/// backstop from an observer that has no `await` left to it — and one primitive answering both
+/// keeps the two paths honest about waiting for the same thing.
 ///
 /// `@unchecked Sendable` is the lock's promise: every access to `isFinished` goes through it, and
 /// there is nothing else in here to get wrong. `nonisolated` — the same opt-out `NavigationHistory`
@@ -67,7 +67,7 @@ private nonisolated final class PendingSaveSignal: @unchecked Sendable {
 /// something is a CLI an agent cannot rely on. The port comes from `MIMIC_CONTROL_PORT` when set so a
 /// second instance (or a CI job) can avoid a collision, and the server binds loopback only.
 @MainActor
-final class ControlPlaneCoordinator {
+public final class ControlPlaneCoordinator {
 
     /// One control plane per process.
     ///
@@ -75,7 +75,10 @@ final class ControlPlaneCoordinator {
     /// when the app runs windowless — so `mimic daemon start` produced a live app that no CLI could
     /// reach. A process-level service has to be owned by the process, not by a view that may never
     /// appear.
-    static let shared = ControlPlaneCoordinator()
+    ///
+    /// Public — along with ``handleTerminationRequest(reply:)`` and nothing else — because
+    /// `MimicAppDelegate` lives in the app target and forwards AppKit's quit question here.
+    public static let shared = ControlPlaneCoordinator()
 
     private var server: ControlServer?
     private var host: AppControlHost?
@@ -91,6 +94,13 @@ final class ControlPlaneCoordinator {
 
     /// Set by the first termination signal, read by the second.
     private var isTerminating = false
+
+    /// Set once a draining flush has started, read by the `willTerminate` backstop.
+    ///
+    /// The backstop's bare write exists for a termination nothing drained. Once a drain has begun,
+    /// the final save belongs to the write chain, and a second, unordered copy of it from the
+    /// observer would be exactly the out-of-chain write the drain was built to retire.
+    private var hasBegunDrainingFlush = false
 
     /// How long a shutdown will wait for the store before it gives up and exits anyway.
     ///
@@ -176,10 +186,13 @@ final class ControlPlaneCoordinator {
     /// disk after the process holding it has gone is not, and with `MIMIC_CONTROL_TOKEN` set the token
     /// is stable across runs, so a leftover file really does describe a live credential.
     ///
-    /// Both paths are needed. `willTerminate` covers Quit and a closed last window; it does *not* run
-    /// for `SIGTERM`, which is exactly how `mimic app stop` asks a headless instance to exit.
-    ///
-    /// Both paths also have to write the open project before they go — see `flushPendingSave()`.
+    /// Both paths are needed, and neither is where a quit does its real work any more. Quit is
+    /// answered in `applicationShouldTerminate` — `MimicAppDelegate` routes it through
+    /// ``handleTerminationRequest(reply:)`` *before* AppKit commits to terminating — so by the time
+    /// `willTerminate` fires on an ordinary quit the store is already drained, and the observer
+    /// here is the last chance to drop the file plus a backstop for a termination nothing drained.
+    /// It does *not* run for `SIGTERM`, which is exactly how `mimic app stop` asks a headless
+    /// instance to exit; the dispatch sources below cover that.
     private func installTerminationHandlers() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -268,130 +281,157 @@ final class ControlPlaneCoordinator {
         // The hook is captured before the task so the process still ends if the coordinator is gone
         // by the time the flush returns.
         let exitProcess = self.exitProcess
-        Task { @MainActor [weak self] in
-            await self?.flushPendingSave()
+        let flush = terminationFlush()
+        Task { @MainActor in
+            await flush.value
             exitProcess(0)
         }
     }
 
-    /// Starts the write and hands back the handle that says when it finished, or `nil` when there is
-    /// nothing to write.
+    /// The ⌘Q path: everything ``handleTerminationSignal()`` does except ending the process —
+    /// AppKit does that itself once `reply` lands.
     ///
-    /// The project is read rather than tracked: the coordinator has no business watching edits,
-    /// and the open project *is* what the pending autosave would have written — `scheduleAutosave`
-    /// re-reads `currentProject` when its debounce fires rather than capturing it at schedule time. It
-    /// writes unconditionally because a pending debounce is not visible from outside
-    /// `ProjectWorkspace`: `autosaveStatus` is still `.idle` or `.saved` during those 500 ms, so
-    /// "nothing to do" and "half a second of unwritten edits" look identical from here. The write is
-    /// idempotent, so doing it when it was not needed costs a few milliseconds and nothing else.
+    /// `MimicAppDelegate` calls this from `applicationShouldTerminate` and answers
+    /// `.terminateLater`, and that reply is what makes a *draining* quit possible at all. The old
+    /// ⌘Q path ran from the `willTerminate` observer, after termination was already committed,
+    /// where the only way to wait is to park the main thread — and the write chain is main-actor
+    /// work, so the parked thread was the very thing the drain needed, which is the quit deadlock
+    /// this file shipped once and documents at ``flushPendingSaveBlocking()``. `.terminateLater`
+    /// keeps the runloop alive while the drain runs, so the main actor stays serviced and ⌘Q
+    /// drains exactly as `SIGTERM` always has; the old path's constraint dissolves because nothing
+    /// is parked any more.
     ///
-    /// *When* the project is read depends on the path. The blocking caller reads it here, before the
-    /// task — it gets no later chance, because the main thread it is about to park is where the
-    /// session lives. The draining caller reads it *again after the drain*, inside the task, because
-    /// the writes being drained are allowed to change the answer: quitting just after `mimic project
-    /// delete` used to capture the doomed project here, wait for the delete to land, and then save
-    /// the captured row straight back into the store it had just been deleted from.
-    ///
-    /// `Task.detached` is load-bearing. Nothing in the chain then needs the main actor — the
-    /// repository is nonisolated and GRDB runs the transaction on its own queue — which is what lets
-    /// the blocking waiter below block the main thread without deadlocking against the work it is
-    /// waiting for.
-    /// - Parameter drainingStoreWrites: whether the caller can afford to wait for the in-flight
-    ///   project-lifecycle writes. **Only a caller that leaves the main actor free may pass `true`.**
-    ///
-    /// That parameter exists because passing `true` unconditionally deadlocked every quit, and the
-    /// mechanism is worth writing down because nothing about it is visible at the call site.
-    /// `ProjectWorkspace`'s `createProject`, `duplicateProject` and `deleteProject` answer before the
-    /// store has the change — that is what makes the window feel immediate — as does an import,
-    /// though one step further out: `ProjectWorkspace.importProject` awaits its own write and
-    /// reports whether the store took the document, and it is `AppState.importProject` that
-    /// dispatches it into an untracked `Task` and returns. All four are in the same write chain, and
-    /// `ProjectWorkspace.awaitPendingStoreWrites()` is the drain built so a
-    /// `mimic project delete Foo` still in flight is not lost to the `mimic app stop` behind it.
-    /// But `ProjectWorkspace` is `@MainActor`, so awaiting that method from this detached task is a
-    /// hop *onto* the main actor — and `flushPendingSaveBlocking` is holding the main **thread** in
-    /// `Thread.sleep` at the same time. The hop cannot be serviced, the save below it never runs,
-    /// and the signal never finishes: ⌘Q spent the full two-second deadline and then dropped the
-    /// edit it was there to save. Worse than the defect it was written to fix, green in CI, and — at
-    /// the time — invisible to every test. `ControlPlaneCoordinatorTests` now drives both quit
-    /// paths, and the blocking one is held to the deadline, so a regression into that deadlock fails
-    /// the suite instead of shipping.
-    ///
-    /// The signal path is `async` and suspends on `Task.sleep`, which leaves the main actor free, so
-    /// it drains. ⌘Q cannot, and the honest fix is `applicationShouldTerminate` returning
-    /// `.terminateLater` — that keeps the runloop alive so main-actor work can finish, instead of
-    /// blocking the thread that has to run it. That is a change to the app's termination contract
-    /// and wants a machine that can actually quit the app to verify it; until then this path saves
-    /// the open project, which is what it did before the drain was added, and says what it cannot do.
-    private func startPendingSave(drainingStoreWrites: Bool) -> PendingSaveSignal? {
-        let repository = self.repository
-        let appState = self.appState
-        let project = appState?.currentProject
-        // Read here, on the main actor, where this method already runs — not inside the task below.
-        let workspace = drainingStoreWrites ? appState?.projects : nil
+    /// The discovery file goes first, exactly as on the signal path: it is credential material, and
+    /// a drain that times out must not be able to leave a live token on disk. The flush itself is
+    /// shared with the signal path — one drain per process, whichever door termination came
+    /// through — so a quit landing during a `mimic app stop` waits for the drain already running
+    /// instead of starting a second one over the same chain.
+    public func handleTerminationRequest(reply: @escaping @MainActor @Sendable () -> Void) {
+        removeDiscoveryFile()
+        let flush = terminationFlush()
+        Task { @MainActor in
+            await flush.value
+            reply()
+        }
+    }
 
-        // Nothing owed and nothing in flight: do not make the caller wait on an empty deadline.
-        guard repository != nil, project != nil || workspace != nil else { return nil }
+    /// The one draining flush per process, shared by both termination doors.
+    private var terminationFlushTask: Task<Void, Never>?
+
+    private func terminationFlush() -> Task<Void, Never> {
+        if let terminationFlushTask { return terminationFlushTask }
+        let flush = Task { @MainActor [weak self] in
+            await self?.flushPendingSave()
+        }
+        terminationFlushTask = flush
+        return flush
+    }
+
+    /// Starts the shutdown drain and hands back the handle that says when it finished, or `nil`
+    /// when no session is wired.
+    ///
+    /// The order is the whole of it. First the retained import dispatch, so the one write that
+    /// reaches the chain from a task of its own — `AppState.importProject` — has actually joined
+    /// it; between that method returning and its task's first slice there is a gap in which the
+    /// chain has never heard of the import, and a drain started inside the gap would finish with
+    /// the document unwritten. Then the chain itself, so every lifecycle write already asked for
+    /// has reached the store. Then the final save, and it goes through
+    /// `ProjectWorkspace.saveCurrentProject()` — the chain's own door — with one more drain behind
+    /// it so the caller cannot outrun it.
+    ///
+    /// Saving *after* the drain, through the chain, is what closes the two ways a quit used to
+    /// resurrect deleted data. Capturing before the drain saved the doomed row back after `mimic
+    /// project delete` had removed it — the delete nils `currentProject` on its way through the
+    /// chain, and `saveCurrentProject` reads it after that, finds nothing open, and writes nothing.
+    /// And the bare `repository.save` this replaces was ordered after the drain but *outside* the
+    /// chain, so it could still race any write accepted mid-drain; enqueued, the last write of the
+    /// process is ordered by the same mechanism as every other. It saves whether or not an edit is
+    /// pending, because a pending debounce is not visible from here — `autosaveStatus` is still
+    /// `.idle` or `.saved` during those 500 ms — and the write is idempotent, so doing it when it
+    /// was not needed costs a few milliseconds and nothing else.
+    ///
+    /// This runs on the main actor throughout, and may: both termination doors keep the main
+    /// thread live while they wait — the signal path always suspended, and ⌘Q now waits *before*
+    /// termination behind `.terminateLater` instead of parking the thread inside `willTerminate` —
+    /// so the main-actor hops that deadlocked the old blocking quit are ordinary scheduling here.
+    /// The one gap left open, knowingly: a command accepted *while* this drains lands behind the
+    /// awaits below, and the final save captures whatever it leaves open. That is best-effort by
+    /// design and narrow in practice — the discovery file is gone before the drain starts, so only
+    /// an already-connected client can still be issuing commands.
+    private func startPendingSave() -> PendingSaveSignal? {
+        guard let appState else { return nil }
+        hasBegunDrainingFlush = true
+        let workspace = appState.projects
+        let importDispatch = appState.importTask
 
         let didFinish = PendingSaveSignal()
-        Task.detached(priority: .userInitiated) {
-            var projectToSave = project
-            if let workspace {
-                await workspace.awaitPendingStoreWrites()
-                // Re-read once the chain is drained, because the drained writes change the answer:
-                // a `mimic project delete` still in flight nils the open project on its way through
-                // the chain, and the value captured before the drain is exactly the row that delete
-                // just removed — saving it resurrected the project the caller had deleted. Only
-                // this draining branch may hop to the main actor: the blocking caller never sets
-                // `workspace`, so the quit path that parks the main thread never reaches this line.
-                projectToSave = await MainActor.run { appState?.currentProject }
-            }
-
-            // Then the debounced edit to whatever is open. A store that refuses this has nowhere to
-            // report it — there is no window left to show `autosaveStatus` in, and the caller ends
-            // the process as soon as this returns.
-            if let repository, let projectToSave {
-                try? await repository.save(projectToSave)
-            }
+        Task { @MainActor in
+            if let importDispatch { await importDispatch.value }
+            await workspace.awaitPendingStoreWrites()
+            // A store that refuses the save has nowhere to report it — there is no window left to
+            // show `autosaveStatus` in, and the caller ends the process as soon as this returns.
+            workspace.saveCurrentProject()
+            await workspace.awaitPendingStoreWrites()
             didFinish.markFinished()
         }
         return didFinish
     }
 
-    /// Returns when the store is done or `shutdownFlushTimeoutSeconds` has passed, whichever is first.
+    /// Returns when the drain is done or `shutdownFlushTimeoutSeconds` has passed, whichever is first.
     ///
     /// Polled rather than raced in a task group, for the reason the bound exists at all: a group does
     /// not return until every one of its children has finished, so cancelling the timeout's sibling
     /// would still leave a wedged write holding the quit open. `AppLauncher.waitForReadiness` polls a
-    /// deadline for the same kind of reason.
+    /// deadline for the same kind of reason. The `Task.sleep` suspends rather than blocks, which is
+    /// what leaves the main actor free to run the very writes being drained.
     ///
     /// Internal rather than private so the drain-ordering property is testable — see
     /// `ControlPlaneCoordinatorTests`.
     func flushPendingSave() async {
-        // `true`: this path suspends on `Task.sleep` below rather than blocking, so the main actor
-        // stays free to run the lifecycle writes being drained.
-        guard let didFinish = startPendingSave(drainingStoreWrites: true) else { return }
+        guard let didFinish = startPendingSave() else { return }
         let deadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
         while !didFinish.hasFinished, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(10))
         }
     }
 
-    /// The same flush for the path that has no `await` left in it.
+    /// The last-resort flush, for a termination nothing drained.
     ///
     /// `willTerminate` is posted from inside `NSApplication.terminate`, and the process ends as soon
-    /// as its observers return — there is nowhere to suspend to, so this one blocks the main thread
-    /// for the same bound the signal path suspends for. A quit that takes a few extra milliseconds is
-    /// not a defect; a quit that drops the edit you just made is, and ⌘Q dropped it exactly as
-    /// `SIGTERM` did.
+    /// as its observers return — there is nowhere left to suspend to, so this blocks the main thread
+    /// for the same bound the draining paths suspend for. On an ordinary quit it does nothing:
+    /// `MimicAppDelegate` has already drained the chain before AppKit committed to terminating, and
+    /// the guard below keeps this from following that drain with a second, unordered copy of the
+    /// same save. What remains is the termination that reaches `willTerminate` without passing
+    /// either draining door — nothing in AppKit promises there is none, and losing the debounced
+    /// edit there is the original defect this flush was written for.
     ///
-    /// Internal rather than private so a test can hold the main thread exactly as ⌘Q does and
-    /// assert the save still lands inside the deadline — the deadlock this file documents is
-    /// precisely a change that makes this path need the parked main actor.
+    /// What this path still cannot do is drain. The write chain is main-actor work and the loop
+    /// below parks the main thread, so awaiting the chain from here is the documented quit
+    /// deadlock: the hop cannot be serviced, the save never runs, and the deadline is spent saving
+    /// nothing — which shipped, green in CI, until `.terminateLater` moved the real quit ahead of
+    /// this observer. So it saves the open project bare, off the chain — tolerable only because it
+    /// runs when no drain ever started, so there is nothing in flight to invert against. A drain
+    /// that *timed out* also stands this backstop down, deliberately: the save may be unwritten,
+    /// but a bare copy written after a partial drain is exactly the out-of-chain inversion this
+    /// rewrite retired, and a wedged store is not going to honour a second write inside the same
+    /// deadline anyway.
+    ///
+    /// Internal rather than private so a test can hold the main thread exactly as `willTerminate`
+    /// does and assert both halves: the save lands inside the deadline, and the backstop stands
+    /// down once a drain has run.
     func flushPendingSaveBlocking() {
-        // `false`, and not negotiable: the loop below holds the main thread, so a drain that needs
-        // the main actor could never complete. See `startPendingSave(drainingStoreWrites:)`.
-        guard let didFinish = startPendingSave(drainingStoreWrites: false) else { return }
+        guard !hasBegunDrainingFlush else { return }
+        guard let repository, let project = appState?.currentProject else { return }
+
+        let didFinish = PendingSaveSignal()
+        // `Task.detached` is load-bearing: nothing in the save then needs the main actor — the
+        // repository is nonisolated and GRDB runs the transaction on its own queue — which is what
+        // lets the loop below hold the main thread without deadlocking against the work it waits for.
+        Task.detached(priority: .userInitiated) {
+            try? await repository.save(project)
+            didFinish.markFinished()
+        }
         let deadline = Date().addingTimeInterval(Self.shutdownFlushTimeoutSeconds)
         while !didFinish.hasFinished, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.005)

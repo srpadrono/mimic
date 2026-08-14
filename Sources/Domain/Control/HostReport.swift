@@ -93,6 +93,11 @@ public enum HostReport {
     /// reason this is shared rather than left to each host: they are a function of `project` and
     /// nothing else, and each host was computing all three from its own copy of the same expression.
     /// Everything a host genuinely knows on its own is a parameter.
+    ///
+    /// `storeFailure` defaults to `nil` — absent means the on-disk store — so a fixture with no
+    /// store to degrade keeps answering. A host whose session fell back to memory must pass the
+    /// reason through: this report is the only channel a windowless caller has, and a default that
+    /// read "healthy" over a degraded store is exactly the lie the field exists to end.
     public static func state(
         appVersion: String?,
         mode: String,
@@ -100,7 +105,8 @@ public enum HostReport {
         server: ServerStatusReport,
         project: MockProject?,
         activeJourney: JourneyStatus?,
-        requestLogCount: Int
+        requestLogCount: Int,
+        storeFailure: String? = nil
     ) -> ControlState {
         ControlState(
             appVersion: appVersion,
@@ -111,7 +117,8 @@ public enum HostReport {
             endpointCount: project?.endpoints.count ?? 0,
             journeyCount: project?.journeys.count ?? 0,
             activeJourney: activeJourney,
-            requestLogCount: requestLogCount
+            requestLogCount: requestLogCount,
+            storeFailure: storeFailure
         )
     }
 

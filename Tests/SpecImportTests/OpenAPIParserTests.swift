@@ -913,6 +913,61 @@ struct OpenAPIParserTests {
         #expect(candidate.responseContentType == .json)
     }
 
+    /// The example map is keyed by MIME type, and the two halves of a response used to be chosen
+    /// independently: `produces` decided the content type while the body took the
+    /// `application/json` example on an exact key hit — so a `text/plain` operation offering both
+    /// examples served the JSON body under a plain-text label.
+    @Test("The example served is the one for the content type the operation declares")
+    func swagger2PairsTheExampleWithTheDeclaredContentType() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Test", "version": "1.0" },
+            "paths": {
+                "/api/export": {
+                    "get": {
+                        "produces": ["text/plain"],
+                        "responses": {
+                            "200": {
+                                "description": "Export",
+                                "examples": {
+                                    "application/json": { "rows": 2 },
+                                    "text/plain": "csv,data"
+                                }
+                            }
+                        }
+                    }
+                },
+                "/api/rows": {
+                    "get": {
+                        "produces": ["application/json"],
+                        "responses": {
+                            "200": {
+                                "description": "Rows",
+                                "examples": {
+                                    "application/json": { "rows": 2 },
+                                    "text/plain": "csv,data"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let export = try #require(candidates.first { $0.path == "/api/export" })
+        let rows = try #require(candidates.first { $0.path == "/api/rows" })
+
+        #expect(export.responseContentType == .plainText)
+        #expect(export.responseBody?.contains("csv,data") == true, "a text/plain operation serves its text/plain example")
+        #expect(export.responseBody?.contains("rows") != true, "the JSON example belongs to the content type this operation did not declare")
+
+        // The JSON side of the same map still pairs the other way.
+        #expect(rows.responseContentType == .json)
+        #expect(rows.responseBody?.contains("\"rows\"") == true)
+    }
+
     /// Swagger 2 candidates used to be constructed by hand instead of going through
     /// `ImportCandidateBuilder`, so they carried their own duplicate rule — one that compared route
     /// only, while the shared rule also compares the GraphQL operation. The header policy was skipped

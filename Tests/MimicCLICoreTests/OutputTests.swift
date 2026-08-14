@@ -194,6 +194,37 @@ struct TextRendererTests {
         """)
     }
 
+    @Test("A session on an in-memory store says so, with the reason indented beneath it")
+    func stateNamesTheEphemeralStore() {
+        // The store's own failure text is multi-line with blank lines between paragraphs; the
+        // fixture keeps that shape so the indentation rule is exercised rather than assumed.
+        let state = ControlState(
+            apiVersion: "v1",
+            appVersion: nil,
+            mode: "headless",
+            pid: 7,
+            server: ServerStatusReport(state: "stopped", port: 8080, baseURL: nil, globalDelayMs: 0),
+            project: nil,
+            endpointCount: 0,
+            journeyCount: 0,
+            activeJourney: nil,
+            requestLogCount: 0,
+            storeFailure: "The database is locked.\n\nThis usually means another copy of Mimic is still running."
+        )
+        // The whole block, not a substring: a headless session on a locked store used to render
+        // exactly the healthy five lines, and a `contains` check on those could never see it.
+        #expect(TextRenderer.render(ControlResult(state: state)) == """
+        Mimic headless (api v1, pid 7)
+        server       stopped on port 8080
+        store        in memory — nothing will be saved
+                     The database is locked.
+                     This usually means another copy of Mimic is still running.
+        project      (none open)
+        journey      (none active)
+        request log  0 entries
+        """)
+    }
+
     // MARK: - Journeys
 
     @Test("A journey list row states the step count, the match mode, and the completion rule")

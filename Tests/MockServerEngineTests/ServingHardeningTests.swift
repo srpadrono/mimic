@@ -152,6 +152,21 @@ struct ServingHardeningTests {
         #expect(headers["Content-Type"] == Scenario.ContentType.json.rawValue)
     }
 
+    @Test("A scenario's own Content-Type replaces the logged default whatever its spelling")
+    func logMatchesTheWireOnContentTypeCase() {
+        // The wire is built through `replaceOrAdd`, which keys headers case-insensitively, so a
+        // scenario header spelled `content-type` serves exactly one Content-Type. The log used to
+        // copy scenario headers by exact key over its seeded "Content-Type", recording two
+        // disagreeing values — one of which no client ever received.
+        let headers = Self.logEntry(statusCode: 200, headers: [
+            "content-type": "application/xml",
+        ]).responseHeaders
+
+        #expect(headers.count == 1, "one header on the wire must be one header in the log")
+        #expect(headers["content-type"] == "application/xml")
+        #expect(headers["Content-Type"] == nil, "the replaced spelling must not linger beside the scenario's")
+    }
+
     @Test("Header names and values are held to the RFC 9110 grammar")
     func headerValidation() {
         #expect(EndpointValidator.isValidHeader(name: "X-Request-Id", value: "abc123"))

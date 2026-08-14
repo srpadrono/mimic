@@ -208,10 +208,19 @@ enum VaporConfigurator {
     /// wire while the log listed it among the headers the client received. That is the worst kind of
     /// wrong for this panel: a developer reads the log precisely because they cannot see the wire,
     /// and here it invented a header and hid the fact that Mimic had refused to send one.
+    ///
+    /// Replacement is case-insensitive for the same reason. The wire goes through `replaceOrAdd`,
+    /// which keys headers case-insensitively, so a scenario header spelled `content-type` — the only
+    /// route to serving XML or HTML, since `ContentType` has only JSON and plain text — puts exactly
+    /// one Content-Type on the wire; an exact-string dictionary logged two, disagreeing with each
+    /// other, one of which the client never received.
     static func loggedResponseHeaders(_ resolved: ResolvedResponse) -> [String: String] {
         var headers = ["Content-Type": resolved.contentType.rawValue]
         for (key, value) in resolved.headers {
             guard EndpointValidator.isValidHeader(name: key, value: value) else { continue }
+            if let replaced = headers.keys.first(where: { $0.lowercased() == key.lowercased() }) {
+                headers.removeValue(forKey: replaced)
+            }
             headers[key] = value
         }
         return headers

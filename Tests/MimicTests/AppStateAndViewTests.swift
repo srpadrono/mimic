@@ -1354,7 +1354,9 @@ struct AppStateAndViewTests {
     /// `ProjectWorkspace.storeWrites` exists so a command a script issues *after* another cannot
     /// reach the store first, and an import — the one command that writes a whole document — was
     /// outside it: it awaited the chain without joining it, on the argument that its caller awaits
-    /// the result. `AppState.importProject` does not; it dispatches into an untracked `Task`.
+    /// the result. `AppState.importProject` did not at the time; its dispatch is now retained as
+    /// `importTask` for the shutdown drain, but the write still joins the chain from the task
+    /// rather than the caller — which is the window this test drives.
     ///
     /// So this is the sequence from `storeWrites`' own documentation, with an import in the place of
     /// the create: the delete took the chain as it was before the import, found nothing to wait for,

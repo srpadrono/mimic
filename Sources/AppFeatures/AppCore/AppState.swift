@@ -535,6 +535,12 @@ final class AppState {
         await server.advanceJourneyReportingStatus()
     }
 
+    /// Restarts the active journey and reports the cursor the engine reset it to — the restart-shaped
+    /// sibling of ``advanceActiveJourneyReportingStatus()``, for the same caller and the same reason.
+    func restartActiveJourneyReportingStatus() async -> JourneyStatus? {
+        await server.restartJourneyReportingStatus()
+    }
+
     /// The engine's journey cursor, read once the configuration push this session most recently
     /// dispatched has reached it.
     ///
@@ -566,6 +572,19 @@ final class AppState {
         projects.openProject(id: id)
     }
 
+    /// The in-flight ``importProject(_:activate:)`` dispatch — retained, not fire-and-forget.
+    ///
+    /// `ProjectWorkspace.importProject` joins the write chain synchronously — but only once the
+    /// dispatch task has *run*, and between `importProject` returning and that first slice there
+    /// is a gap in which the chain has never heard of the import. A shutdown drain started inside
+    /// the gap would find nothing to wait for and exit with the document unwritten;
+    /// `ControlPlaneCoordinator.startPendingSave` awaits this handle before it drains, which
+    /// closes the gap without making the import's reply wait. Dispatches chain on their
+    /// predecessor for the same reason the store writes do: two imports back to back must join
+    /// the chain in the order they were asked for. `@ObservationIgnored` because a task handle is
+    /// shutdown bookkeeping, not something a view renders.
+    @ObservationIgnored private(set) var importTask: Task<Void, Never>?
+
     /// Stores an imported document, and opens it when the caller asked for it.
     ///
     /// Activation waits for the write and goes through ``openProject(id:)`` rather than the
@@ -578,7 +597,8 @@ final class AppState {
     /// edit still sitting in the autosave debounce — the contract, and the two ways it used to
     /// break, are written on `ProjectWorkspace.importProject`.
     func importProject(_ document: MockProject, activate: Bool) {
-        Task { @MainActor [weak self] in
+        importTask = Task { @MainActor [previousDispatch = importTask, weak self] in
+            await previousDispatch?.value
             guard let self else { return }
             let stored = await projects.importProject(document)
             guard stored, activate else { return }

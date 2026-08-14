@@ -186,7 +186,9 @@ final class JourneyUITests: XCTestCase {
         ]
         application.launchEnvironment["MIMIC_DEFAULTS_SUITE"] = Self.testSuite
         // Port 0 lets the OS pick, so a test run neither collides with a developer's running instance
-        // nor with a second run on the same machine.
+        // nor with a second run on the same machine. The discovery-file half of that isolation —
+        // MIMIC_CONTROL_FILE — is exported by the launch contract itself, in
+        // `UITestApp.launchAndBringToForeground`, so no suite can launch without it.
         application.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
 
         app = application

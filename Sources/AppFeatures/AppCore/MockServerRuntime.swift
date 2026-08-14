@@ -235,13 +235,15 @@ final class MockServerRuntime {
 
     /// The configuration push most recently dispatched to the engine — the tail of the push chain.
     ///
-    /// Two callers rely on it. ``journeyStatusAfterPendingUpdates()`` awaits it before reading the
-    /// engine's cursor: the push reaches the engine from an unstructured task, so a status read
-    /// issued straight after it is a race the read wins — it hops to the engine actor before the push
-    /// task has even started, and answers about the journey the engine still had. And
-    /// ``updateMocks(endpoints:journey:)`` awaits it from the *next* push's task, which is what makes
-    /// the pushes a chain rather than a race — see the note there. Because each link awaits its
-    /// predecessor, awaiting this one task is awaiting every push dispatched before it.
+    /// Awaited in two roles. Every engine round trip that must see the pushed configuration —
+    /// ``journeyStatusAfterPendingUpdates()``, ``restartJourneyReportingStatus()`` and
+    /// ``advanceJourneyReportingStatus()`` — awaits it before hopping: the push reaches the engine
+    /// from an unstructured task, so a call issued straight after it is a race the call wins — it
+    /// hops to the engine actor before the push task has even started, and acts on the journey the
+    /// engine still had. And ``updateMocks(endpoints:journey:)`` awaits it from the *next* push's
+    /// task, which is what makes the pushes a chain rather than a race — see the note there.
+    /// Because each link awaits its predecessor, awaiting this one task is awaiting every push
+    /// dispatched before it.
     private var pendingMockUpdate: Task<Void, Never>?
 
     /// How many journey activations this session has performed, carried on every configuration push.
@@ -334,12 +336,34 @@ final class MockServerRuntime {
     /// together still race inside the engine — which owns the cursor either way.
     private var journeyStatusTicket = 0
 
-    func restartJourney() {
+    /// Restarts the run and reports the fresh cursor the engine produced.
+    ///
+    /// The primitive, in the same split as ``advanceJourneyReportingStatus()`` and for the same
+    /// caller: a control reply has to carry the cursor the restart actually produced, not one
+    /// fabricated from the document.
+    ///
+    /// The wait is what makes the restart land on the journey the caller means. A restart is a
+    /// mutation of the same cursor the pushes configure, and it used to hop straight to the engine:
+    /// `mimic journey step add` followed by `mimic journey restart` reached the engine in reverse,
+    /// restarting the pre-edit journey with the edit's push landing on top of the fresh run. The
+    /// ticket is taken after the wait, so this write outranks the mirror refresh the push task
+    /// issues on its way out — see ``journeyStatusAfterPendingUpdates()`` for both halves of that
+    /// argument.
+    func restartJourneyReportingStatus() async -> JourneyStatus? {
+        await pendingMockUpdate?.value
         let ticket = nextJourneyStatusTicket()
+        let status = await engine.restartJourney()
+        setJourneyStatus(status, ticket: ticket)
+        return status
+    }
+
+    /// The fire-and-forget form, for the run controls: they have nowhere to report a status to and
+    /// are passed straight to a `Button` as a `() -> Void` action — the split ``advanceJourney()``
+    /// makes, for the same reason.
+    func restartJourney() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let status = await engine.restartJourney()
-            setJourneyStatus(status, ticket: ticket)
+            _ = await restartJourneyReportingStatus()
         }
     }
 
@@ -349,7 +373,13 @@ final class MockServerRuntime {
     /// advance itself. A caller that dispatches the advance and then reads ``journeyStatus`` is
     /// reading the cursor from *before* the command — which is exactly what `mimic journey advance`
     /// used to hand back.
+    ///
+    /// It waits for the push chain the way ``journeyStatusAfterPendingUpdates()`` does, and takes
+    /// its ticket after the wait for the same reason. Unchained, `mimic journey step add` followed
+    /// by `mimic journey advance` hopped to the engine ahead of the edit's push, advanced the
+    /// pre-edit journey, and reported that stale cursor as the answer.
     func advanceJourneyReportingStatus() async -> JourneyStatus? {
+        await pendingMockUpdate?.value
         let ticket = nextJourneyStatusTicket()
         let status = await engine.advanceJourney()
         setJourneyStatus(status, ticket: ticket)

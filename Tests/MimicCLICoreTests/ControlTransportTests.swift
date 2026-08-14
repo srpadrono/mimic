@@ -335,9 +335,11 @@ struct EmittedCommandTests {
 
         let created = await Self.emitted(["journey", "create", "Flow", "--file", file, "--activate"])
         #expect(created.map(\.kind) == [.journeyCreate, .journeyActivate])
-        // Created by the name the argument gave, and activated by that same name — a file's own name
-        // must not silently win.
-        #expect(created[1] == .journeyActivate(journey: .name("Flow")))
+        // By the id the create handed back, not the name the argument gave: `journeyCreate` appends
+        // with no uniqueness check and name resolution takes the first match, so activating by name
+        // in a project already holding a "Flow" would overlay the older journey while the CLI
+        // reported activating the one it just created.
+        #expect(created[1] == .journeyActivate(journey: .id(RecordingTransport.journey.id)))
 
         let templated = await Self.emitted(
             ["journey", "add-template", "session-expiry", "--activate"]

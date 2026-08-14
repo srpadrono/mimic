@@ -304,6 +304,19 @@ public struct ControlState: Codable, Sendable, Equatable {
     public var journeyCount: Int
     public var activeJourney: JourneyStatus?
     public var requestLogCount: Int
+    /// Why this session is running against an in-memory store, and `nil` when the on-disk store
+    /// opened normally.
+    ///
+    /// Non-nil means nothing this instance is told to do survives it stopping: every write is
+    /// accepted, exits 0, and evaporates. The window surfaces the same fact as an alert; this field
+    /// is the only channel a caller with no window — `mimic state` against a headless run, a CI
+    /// harness — has to learn it. Optional on the wire so a payload from an instance that predates
+    /// the field decodes as "on disk" rather than failing, and presence is the signal a script
+    /// branches on.
+    public var storeFailure: String?
+
+    /// Presence read as the fact it encodes — the same shape the store's own `Opened` answers with.
+    public var storeIsEphemeral: Bool { storeFailure != nil }
 
     public init(
         apiVersion: String = ControlAPI.version,
@@ -315,7 +328,8 @@ public struct ControlState: Codable, Sendable, Equatable {
         endpointCount: Int,
         journeyCount: Int,
         activeJourney: JourneyStatus?,
-        requestLogCount: Int
+        requestLogCount: Int,
+        storeFailure: String? = nil
     ) {
         self.apiVersion = apiVersion
         self.appVersion = appVersion
@@ -327,6 +341,7 @@ public struct ControlState: Codable, Sendable, Equatable {
         self.journeyCount = journeyCount
         self.activeJourney = activeJourney
         self.requestLogCount = requestLogCount
+        self.storeFailure = storeFailure
     }
 }
 

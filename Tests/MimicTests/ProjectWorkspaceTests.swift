@@ -524,6 +524,256 @@ struct ProjectWorkspaceTests {
                 "the debounced save re-inserted the row the delete had just removed")
     }
 
+    /// The window the cancel above cannot cover: the cancel takes the debounce pending *at call
+    /// time*, but `currentProject` still names the doomed project until the chained delete nils it.
+    /// An edit arriving in that window passed the debounce's own id guard and enqueued its save
+    /// behind the delete — in perfect chain order, re-inserting the row. The tombstone is what
+    /// drops that save.
+    @Test("An edit arriving while the chained delete is in flight cannot re-insert the row")
+    func editDuringAChainedDeleteCannotResurrectTheRow() async throws {
+        let repository = SlowDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Doomed")
+        await repository.seed(project)
+        service.currentProject = project
+
+        service.deleteProject(id: project.id)
+        // The edit arrives while the delete holds the chain — after the call-time cancel, inside
+        // the window the tombstone exists for. The slow delete (700 ms) outlasts the debounce
+        // (500 ms), so an unguarded claim provably fires mid-delete rather than by scheduler luck.
+        try await waitUntilAsync { await repository.operations.contains("delete.begin") }
+        service.currentProject?.name = "Edited while the delete was in flight"
+        service.scheduleAutosave()
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.contains("delete.end") }
+        // Room for a wrongly enqueued autosave — behind the delete — to land and be seen.
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(await repository.operations.contains("save") == false,
+                "the mid-delete edit enqueued a save of the doomed project behind its own delete")
+        #expect(await repository.stored(project.id) == nil,
+                "the edit's save re-inserted the row the delete had just removed")
+    }
+
+    /// The same window through File ▸ Save: mid-delete, the open project *is* the doomed one, so an
+    /// unguarded `saveCurrentProject` captured it by value and joined the chain behind the delete.
+    @Test("An explicit save issued while the chained delete is in flight is dropped")
+    func explicitSaveDuringAChainedDeleteIsDropped() async throws {
+        let repository = SlowDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Doomed")
+        await repository.seed(project)
+        service.currentProject = project
+
+        service.deleteProject(id: project.id)
+        try await waitUntilAsync { await repository.operations.contains("delete.begin") }
+        service.saveCurrentProject()
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.contains("delete.end") }
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(await repository.operations.contains("save") == false,
+                "the explicit save joined the chain behind the delete")
+        #expect(await repository.stored(project.id) == nil,
+                "the explicit save re-inserted the row the delete had just removed")
+    }
+
+    /// A store that refuses the delete and accepts everything else — the failure arm of the
+    /// tombstone, which ``aRefusedDeleteLiftsTheTombstone()`` drives.
+    private actor RefusingDeleteRepository: ProjectRepository {
+        struct Refused: Error {}
+        private var projects: [UUID: MockProject] = [:]
+
+        func stored(_ id: UUID) -> MockProject? { projects[id] }
+        func seed(_ project: MockProject) { projects[project.id] = project }
+
+        func save(_ project: MockProject) async throws { projects[project.id] = project }
+
+        func load(id: UUID) async throws -> MockProject {
+            guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
+            return project
+        }
+
+        func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+        func delete(id: UUID) async throws { throw Refused() }
+    }
+
+    /// The failure arm the tombstone must not outlive. A refused delete leaves a live project, and
+    /// a tombstone that stayed would drop every one of its autosaves from then on — the silent-loss
+    /// class this type exists to close, reintroduced by its own fix. Passes against the pre-fix
+    /// code too; it pins the fix's own hazard rather than the defect.
+    @Test("A refused delete lifts the tombstone so later edits still save")
+    func aRefusedDeleteLiftsTheTombstone() async throws {
+        let repository = RefusingDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Survivor")
+        await repository.seed(project)
+        service.currentProject = project
+
+        service.deleteProject(id: project.id)
+        try await waitUntil { service.autosaveStatus == .failed("Could not delete the project.") }
+
+        service.currentProject?.name = "Edited after the refused delete"
+        service.scheduleAutosave()
+
+        try await waitUntilAsync {
+            await repository.stored(project.id)?.name == "Edited after the refused delete"
+        }
+    }
+
+    // MARK: - Publishes supersede in-flight opens
+    //
+    // `openGeneration` used to be raised only when a load was asked for, so create, close, delete
+    // and import each published `currentProject` without invalidating an open still in flight —
+    // and the superseded load, widened by its leading await of the whole write chain, landed
+    // afterwards and put the stale project back over the newer state, after the CLI had already
+    // been told otherwise. Each test parks the load, issues one lifecycle command, releases, and
+    // asserts the load did not publish.
+
+    /// A store whose loads park until released, capturing the row at entry.
+    ///
+    /// The fixture for the stale-publish family: an open parked here is "in flight" for exactly as
+    /// long as the test needs to issue the lifecycle command that should supersede it — so
+    /// unguarded code is *forced* to publish the stale project over the newer state rather than
+    /// losing the race by scheduler luck. The row is captured at entry, before the park, so a
+    /// delete landing mid-load still hands the superseded open a project to publish — which is the
+    /// resurrection being asserted against, not a `projectNotFound`.
+    private actor GatedLoadRepository: ProjectRepository {
+        private var projects: [UUID: MockProject] = [:]
+        private var isReleased = false
+        private(set) var enteredLoads = 0
+
+        func seed(_ project: MockProject) { projects[project.id] = project }
+        func release() { isReleased = true }
+
+        func save(_ project: MockProject) async throws { projects[project.id] = project }
+
+        func load(id: UUID) async throws -> MockProject {
+            enteredLoads += 1
+            let captured = projects[id]
+            // Sleeping rather than spinning, so the actor is handed back while the load is parked
+            // and the lifecycle command's own store write can land mid-load.
+            while !isReleased {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            guard let captured else { throw PersistenceError.projectNotFound(id) }
+            return captured
+        }
+
+        func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+        func delete(id: UUID) async throws { projects[id] = nil }
+    }
+
+    /// A workspace over ``GatedLoadRepository`` with one seeded project. The open is issued by each
+    /// test rather than here, because what surrounds it *is* the test: which lifecycle command
+    /// arrives while the load is parked.
+    private func makeGatedLoadContext(
+        projectName: String
+    ) async throws -> (service: ProjectWorkspace, repository: GatedLoadRepository, project: MockProject) {
+        let repository = GatedLoadRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: projectName)
+        await repository.seed(project)
+        return (service, repository, project)
+    }
+
+    @Test("A create supersedes the open still in flight")
+    func createSupersedesAnInFlightOpen() async throws {
+        let (service, repository, old) = try await makeGatedLoadContext(projectName: "Old")
+
+        service.openProject(id: old.id)
+        // Parked inside the load, which is the state the create has to arrive in.
+        try await waitUntilAsync { await repository.enteredLoads == 1 }
+        _ = service.createProject(name: "New")
+        #expect(service.currentProject?.name == "New")
+
+        await repository.release()
+        // Room for the superseded load to land and be seen. This is the one wait here that cannot
+        // be a poll — the condition being asserted is that nothing happens.
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(
+            service.currentProject?.name == "New",
+            "the superseded open published the stale project over the one the user just created"
+        )
+    }
+
+    @Test("A close supersedes the open still in flight")
+    func closeSupersedesAnInFlightOpen() async throws {
+        let (service, repository, old) = try await makeGatedLoadContext(projectName: "Old")
+
+        service.openProject(id: old.id)
+        try await waitUntilAsync { await repository.enteredLoads == 1 }
+        service.closeProject()
+        #expect(service.currentProject == nil)
+
+        await repository.release()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(
+            service.currentProject == nil,
+            "the superseded open re-populated the window the user had just cleared"
+        )
+    }
+
+    @Test("A delete of the open project supersedes its in-flight re-open")
+    func deleteSupersedesAnInFlightOpen() async throws {
+        let (service, repository, doomed) = try await makeGatedLoadContext(projectName: "Doomed")
+        service.currentProject = doomed
+
+        service.openProject(id: doomed.id)
+        try await waitUntilAsync { await repository.enteredLoads == 1 }
+        service.deleteProject(id: doomed.id)
+        try await waitUntil { service.currentProject == nil }
+
+        await repository.release()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(
+            service.currentProject == nil,
+            "the superseded open re-opened the project the delete had just closed"
+        )
+    }
+
+    @Test("An import of the open project supersedes its in-flight re-open")
+    func importSupersedesAnInFlightOpen() async throws {
+        let (service, repository, stored) = try await makeGatedLoadContext(projectName: "Stored")
+        service.currentProject = stored
+
+        service.openProject(id: stored.id)
+        try await waitUntilAsync { await repository.enteredLoads == 1 }
+        var document = stored
+        document.name = "Imported"
+        #expect(await service.importProject(document))
+        #expect(service.currentProject?.name == "Imported")
+
+        await repository.release()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(
+            service.currentProject?.name == "Imported",
+            "the superseded open published the pre-import copy over the accepted document"
+        )
+    }
+
     // MARK: - Importing a document
 
     /// `AppControlHost` used to store an imported document itself, as

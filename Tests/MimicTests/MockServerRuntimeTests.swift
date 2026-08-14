@@ -203,6 +203,9 @@ struct MockServerRuntimeTests {
         private(set) var landedPushes: [[String]] = []
         /// Incremented when a push *enters*, so a test can park the first push deterministically.
         private(set) var enteredPushes = 0
+        /// Pushes and runtime controls in the order they landed — the order the engine would apply
+        /// them in, which is what the chain is answerable for.
+        private(set) var operations: [String] = []
 
         init() {
             (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
@@ -240,6 +243,12 @@ struct MockServerRuntimeTests {
                 }
             }
             landedPushes.append(endpoints.map(\.name))
+            operations.append("push")
+        }
+
+        func restartJourney() async -> JourneyStatus? {
+            operations.append("restart")
+            return nil
         }
     }
 
@@ -270,6 +279,16 @@ struct MockServerRuntimeTests {
         }
 
         func journeyStatus() async -> JourneyStatus? {
+            guard let pushed else { return nil }
+            return JourneyStatus.make(journey: pushed, state: nil)
+        }
+
+        func restartJourney() async -> JourneyStatus? {
+            guard let pushed else { return nil }
+            return JourneyStatus.make(journey: pushed, state: nil)
+        }
+
+        func advanceJourney() async -> JourneyStatus? {
             guard let pushed else { return nil }
             return JourneyStatus.make(journey: pushed, state: nil)
         }
@@ -584,9 +603,10 @@ struct MockServerRuntimeTests {
     /// and the *last* write could be the *oldest* read: the mirror settled on a stale cursor and
     /// stayed there until the next request happened to refresh it.
     ///
-    /// The gate makes that ordering happen on purpose rather than under load. Both tickets are taken
-    /// synchronously on the main actor, in call order, so the refresh is unambiguously the older
-    /// request; the gate then makes it the later *answer*.
+    /// The gate makes that ordering happen on purpose rather than under load. The refresh takes its
+    /// ticket synchronously at dispatch; the restart takes its own inside its wrapper task, after
+    /// its (here empty) chain await — still deterministically the newer ticket, because the parked
+    /// refresh cannot answer until after the restart has taken it and landed.
     @Test("A superseded mirror update cannot overwrite the newer one that already landed")
     func aStaleJourneyStatusIsDropped() async throws {
         let engine = GatedEngine()
@@ -639,6 +659,76 @@ struct MockServerRuntimeTests {
         // …and the mirror the window reads settles on the same answer rather than on the superseded
         // refresh the push task issues on its way out.
         #expect(manager.journeyStatus?.journeyName == "Flow")
+    }
+
+    /// The advance's twin of the test above, with the same deterministic ordering: unchained, the
+    /// advance hopped to the engine actor from the currently running task, so its job was enqueued
+    /// before the push task had even been scheduled — `mimic journey step add` followed by `mimic
+    /// journey advance` advanced the journey from before the edit and reported that stale cursor as
+    /// the answer. `PushRecordingEngine` answers only for a journey it has actually been handed, so
+    /// an advance that overtook the push comes back empty instead of plausible.
+    @Test("The awaited advance waits for the push that preceded it")
+    func awaitedAdvanceWaitsForThePush() async throws {
+        let engine = PushRecordingEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Flow"))
+        let status = await manager.advanceJourneyReportingStatus()
+
+        #expect(
+            status?.journeyName == "Flow",
+            "the advance reached the engine before the push that loaded the journey"
+        )
+        #expect(manager.journeyStatus?.journeyName == "Flow")
+    }
+
+    /// The restart's half of the same contract, and the answer the `journeyRestart` control reply
+    /// needs: the cursor the restart produced, read from the engine that holds the journey the
+    /// caller means — not one fabricated from the document.
+    @Test("The awaited restart waits for the push that preceded it")
+    func awaitedRestartWaitsForThePush() async throws {
+        let engine = PushRecordingEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Flow"))
+        let status = await manager.restartJourneyReportingStatus()
+
+        #expect(
+            status?.journeyName == "Flow",
+            "the restart reached the engine before the push that loaded the journey"
+        )
+        #expect(manager.journeyStatus?.journeyName == "Flow")
+    }
+
+    /// A restart is a mutation of the same cursor the pushes configure, so it must take its turn
+    /// behind them — `mimic journey step add` followed by `mimic journey restart` used to reach the
+    /// engine in reverse, restarting the pre-edit journey with the edit's push landing on top of
+    /// the fresh run.
+    ///
+    /// The gate makes the overtake available on purpose: the push parks inside the engine, the
+    /// restart is issued while it is parked, and unchained it lands immediately — the settle sleep
+    /// is that window, and it is the one wait here that cannot be a poll, because under the chain
+    /// the condition being asserted is that nothing happens. Only then is the push released.
+    @Test("A restart cannot overtake a configuration push still in flight")
+    func aRestartCannotOvertakeAPendingPush() async throws {
+        let engine = GatedPushEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.updateMocks(endpoints: [makeEndpoint(name: "Edited")])
+        // Parked inside the engine, which is what lets the restart be issued mid-flight.
+        try await waitUntilAsync { await engine.enteredPushes == 1 }
+        manager.restartJourney()
+
+        // The overtake window: an unchained restart lands here, while the push is still parked.
+        try await Task.sleep(for: .milliseconds(200))
+
+        await engine.release()
+        try await waitUntilAsync { await engine.operations.count == 2 }
+
+        #expect(
+            await engine.operations == ["push", "restart"],
+            "the restart reached the engine ahead of the push it was meant to follow"
+        )
     }
 
     @Test("Request logs are appended and capped at the maximum")

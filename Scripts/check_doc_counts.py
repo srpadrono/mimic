@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Recounts what the documentation hand-counts, and fails when the tree no longer agrees.
 
-Three numbers in this repository are written by hand into prose and can only be checked by counting
-something else. All three have drifted at least once:
+A handful of numbers in this repository are written by hand into prose and can only be checked by
+counting something else. Most had drifted at least once before this file held them:
 
   - **The test counts.** README.md's Tests badge and its Testing table are hand-maintained, and the
     README says so — along with the fact that they have twice claimed a figure the tree did not
@@ -16,7 +16,11 @@ something else. All three have drifted at least once:
     stated in five places across four documents, and `DomainTests` used to assert it with a literal
     that had to be hand-edited alongside them. That assertion was removed as a hand-maintained
     mirror of a fact the type system already knows; this recomputes it from the enum instead, which
-    is the same removal done in the direction that cannot go stale.
+    is the same removal done in the direction that cannot go stale. The journey library's two
+    counts — templates on the shelf, match modes — are held the same way, recomputed from
+    `JourneyTemplates.all` and `JourneyMatchMode`'s cases: they had never drifted, but nothing was
+    recounting them, and a count nobody recounts is the state the operation count was in the day
+    it went stale.
 
   - **The suites themselves**, which is a count of a different kind: a folder under `Tests/` that no
     build target names is a suite nobody runs. That is not hypothetical — `Project.swift` still
@@ -76,6 +80,10 @@ XCTEST = re.compile(r"^\s*(?:@MainActor\s+)?func test[A-Za-z0-9_]*\s*\(", re.M)
 # built at all.
 COMMAND_KIND = "Sources/Domain/Control/CommandKind.swift"
 MANIFESTS = ["Package.swift", "Project.swift"]
+# The journey library's two other counted claims: the template shelf is the `all` array — the list
+# `mimic journey templates` serves — and the match modes are `JourneyMatchMode`'s cases.
+JOURNEY_TEMPLATES = "Sources/Domain/Journeys/JourneyTemplates.swift"
+JOURNEY_MODEL = "Sources/Domain/Models/Journey.swift"
 # The first path component after `Tests/` in either manifest. Every form the two use takes this
 # shape — `path:` in Package.swift, `buildableFolders:` and `entitlements:` in Project.swift — and
 # each of them is a target naming a directory it owns, which is the fact being looked for.
@@ -96,9 +104,12 @@ DOCS = ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md",
 #     grep -rn --include='*.md' -E '\b47\b|forty-seven' .
 #
 # which is also how two entries turned out not to be sites at all. `docs/CLI.md` states no count —
-# it documents the verbs one at a time — and README's *other* 47 is `| Design system | 47 |`, a test
-# count that today happens to equal the operation count. Those two near-misses are why every pattern
-# below is anchored on the words around the number rather than on the number.
+# it documents the verbs one at a time — and README's *other* 47 was its Design system test-count
+# row, which happened to equal the operation count on the day of that grep and has since moved on.
+# No current value is quoted beside it here: this comment held the row's old number after the row
+# changed, which is the drift the rest of this file exists to catch, caught in the checker itself.
+# Those two near-misses are why every pattern below is anchored on the words around the number
+# rather than on the number.
 #
 # One genuine mention is deliberately absent: AGENTS.md quotes the deleted assertion
 # `CommandKind.allCases.count == 47` while explaining why it was deleted. That literal was correct
@@ -110,6 +121,16 @@ OPERATION_CLAIMS = [
     ("AGENTS.md", "one CLI verb per kind", r"maps onto exactly one `CommandKind` case — (\d+) of them"),
     ("docs/ROADMAP.md", "automation row", r"control API covering (\d+) operations"),
     ("docs/ARCHITECTURE.md", "testing platform", r"testing platform: (\d+) operations"),
+]
+
+# The template and match-mode sites, found the same way — grepping the docs for the number — and
+# anchored on the words around it for the same reason.
+TEMPLATE_CLAIMS = [
+    ("README.md", "template shelf", r"([A-Za-z-]+|\d+) templates cover the flows"),
+    ("docs/ROADMAP.md", "journeys row", r"restart and loop, ([a-z-]+|\d+) templates"),
+]
+MATCH_MODE_CLAIMS = [
+    ("docs/ROADMAP.md", "journeys row", r"sequences, ([a-z-]+|\d+) match modes"),
 ]
 
 # Spelled-out numbers, because AGENTS.md writes the count as "forty-seven" — prose in that position
@@ -131,6 +152,13 @@ NUMBER_WORDS = {value: word for word, value in WORD_NUMBERS.items()}
 # hyphenated spelled-out number — never a bare word, because docs/GRAPHQL.md says "Two operations on
 # the same route are not treated as duplicates" and is not talking about the command surface.
 OPERATIONS_MENTION = re.compile(r"\b(\d+|[a-z]+-[a-z]+)\s+operations\b", re.I)
+
+# The same nets for the other two counts. These accept a bare spelled-out word where the pattern
+# above refuses one, because their genuine sites are bare words ("Nine templates") and the false
+# positives ("journey templates", "built-in templates") are not numbers at all, so `as_number`
+# already drops them.
+TEMPLATES_MENTION = re.compile(r"\b(\d+|[A-Za-z]+(?:-[A-Za-z]+)?)\s+templates\b")
+MATCH_MODES_MENTION = re.compile(r"\b(\d+|[A-Za-z]+(?:-[A-Za-z]+)?)\s+match modes\b")
 
 
 def count(directory, pattern):
@@ -176,6 +204,62 @@ def operation_count():
         problems.append(f"{COMMAND_KIND}: `{line.strip()}` declares more than one case on a line, "
                         "so this check and the awk pipeline in AGENTS.md both undercount — put one "
                         "case per line, or teach both to count differently")
+    return len(cases), problems
+
+
+def template_count():
+    """How many templates `JourneyTemplates.all` exposes.
+
+    Counted from the `all` array rather than from the `Template(` constructors beside it, because
+    the array is what `mimic journey templates` serves: a template defined in the file but left out
+    of `all` is not on the shelf, and the shelf is what the documents count. Line-based like
+    `operation_count`, and with the same distrust of a line that lists two.
+    """
+    lines = (ROOT / JOURNEY_TEMPLATES).read_text().splitlines()
+    start = next((i for i, line in enumerate(lines)
+                  if re.search(r"static let all: \[Template\] = \[", line)), None)
+    if start is None:
+        return 0, [f"{JOURNEY_TEMPLATES}: no `static let all: [Template]` array — the template "
+                   "count cannot be recomputed, so it cannot be checked"]
+
+    entries = []
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("]"):
+            break
+        if stripped and not stripped.startswith("//"):
+            entries.append(stripped)
+
+    problems = []
+    if not entries:
+        problems.append(f"{JOURNEY_TEMPLATES}: the `all` array is empty or unreadable — a wrong "
+                        "number certified as right is worse than no check")
+    for entry in (e for e in entries if "," in e.rstrip(",")):
+        problems.append(f"{JOURNEY_TEMPLATES}: `{entry}` lists more than one template on a line, "
+                        "so this check undercounts — put one per line, or teach it to count "
+                        "differently")
+    return len(entries), problems
+
+
+def match_mode_count():
+    """`JourneyMatchMode`'s cases, counted by the same line rule as `operation_count`."""
+    lines = (ROOT / JOURNEY_MODEL).read_text().splitlines()
+    start = next((i for i, line in enumerate(lines)
+                  if line.startswith("public enum JourneyMatchMode")), None)
+    if start is None:
+        return 0, [f"{JOURNEY_MODEL}: no `public enum JourneyMatchMode` declaration — the "
+                   "match-mode count cannot be recomputed, so it cannot be checked"]
+    end = next(i for i, line in enumerate(lines[start + 1:], start + 1) if line.startswith("}"))
+    cases = [line for line in lines[start:end + 1] if line.startswith("    case ")]
+
+    problems = []
+    if not cases:
+        problems.append(f"{JOURNEY_MODEL}: no `case` lines between `JourneyMatchMode` and its "
+                        "closing brace — the range this counts over has stopped working")
+    for line in (c for c in cases if "," in c):
+        problems.append(f"{JOURNEY_MODEL}: `{line.strip()}` declares more than one case on a line, "
+                        "so this check undercounts — put one case per line, or teach it to count "
+                        "differently")
     return len(cases), problems
 
 
@@ -250,46 +334,48 @@ def as_number(token):
     return int(token) if token.isdigit() else WORD_NUMBERS.get(token.lower())
 
 
-def operation_claims(texts, kinds):
-    """Every stated operation count, in the same (what, stated, expected, note) shape as `claims`.
+def counted_claims(texts, label, table, mention, expected, surface):
+    """Every stated count of one recomputed thing, in the same (what, stated, expected, note) shape
+    as `claims`. Shared by the operation, template and match-mode counts, so a fourth counted claim
+    cannot grow its own slightly different checker.
 
     Two passes over the same documents, because they fail on opposite mistakes. The table catches a
-    known site going stale *or going missing*; the sweep catches a number appearing somewhere the
+    known site going stale *or going missing*; the sweep catches the number appearing somewhere the
     table does not know about. Neither subsumes the other, and a document that quietly stopped
     stating the count would slip past a sweep alone without anything going red.
     """
     # What each table entry matched, so the sweep below can tell a site it already reported from a
-    # new one. Without this, adding a command reports every site twice — once from each pass — which
-    # reads as more places to edit than there are.
+    # new one. Without this, changing the count reports every site twice — once from each pass —
+    # which reads as more places to edit than there are.
     seen = {}
-    for document, what, pattern in OPERATION_CLAIMS:
+    for document, what, pattern in table:
         # Whitespace-normalised, so reflowing a paragraph cannot break a pattern that spans a line
         # end — several of these sentences already wrap mid-claim.
         found = re.search(pattern, re.sub(r"\s+", " ", texts[document]))
         if found is None:
-            yield (f"{document} ({what})", None, kinds, "no longer states the operation count")
+            yield (f"{document} ({what})", None, expected, f"no longer states the {label} count")
             continue
         seen.setdefault(document, []).append(found.group(0))
         stated = as_number(found.group(1))
         if stated is None:
-            yield (f"{document} ({what})", None, kinds,
+            yield (f"{document} ({what})", None, expected,
                    f"states the count as {found.group(1)!r}, which is not a number this check "
                    "can read — write it as digits or as a spelled-out number")
         else:
-            yield (f"{document} ({what})", stated, kinds, None)
+            yield (f"{document} ({what})", stated, expected, None)
 
     for document, text in texts.items():
-        for found in OPERATIONS_MENTION.finditer(text):
+        for found in mention.finditer(text):
             stated = as_number(found.group(1))
             phrase = re.sub(r"\s+", " ", found.group(0))
-            if stated is None or stated == kinds:
+            if stated is None or stated == expected:
                 continue
             if any(phrase in already for already in seen.get(document, [])):
                 continue
             line = text.count("\n", 0, found.start()) + 1
-            yield (f"{document}:{line} ({phrase!r})", stated, kinds,
-                   f"says {stated} operations somewhere this check did not know about — if that is "
-                   f"the command surface it is stale ({kinds} now); if it is not, reword it so the "
+            yield (f"{document}:{line} ({phrase!r})", stated, expected,
+                   f"says {stated} somewhere this check did not know about — if that is "
+                   f"{surface} it is stale ({expected} now); if it is not, reword it so the "
                    "number does not sit directly before the word")
 
 
@@ -301,6 +387,9 @@ def main():
     app = sum(counts[name] for name in APP)
     total = sum(counts.values()) + ui
     kinds, problems = operation_count()
+    templates, template_problems = template_count()
+    modes, mode_problems = match_mode_count()
+    problems += template_problems + mode_problems
     declared = declared_suites()
     texts = {document: (ROOT / document).read_text() for document in DOCS}
 
@@ -310,6 +399,8 @@ def main():
     print(f"  MimicUITests{'':<20} {ui:>4}  (func test)")
     print(f"  portable {portable} · design system {design} · app {app} · UI {ui} · total {total}")
     print(f"  CommandKind cases {kinds} ({NUMBER_WORDS.get(kinds, kinds)}) — the operation count")
+    print(f"  journey templates {templates} ({NUMBER_WORDS.get(templates, templates)}) · "
+          f"match modes {modes} ({NUMBER_WORDS.get(modes, modes)})")
 
     grouped = set(PORTABLE) | set(DESIGN_SYSTEM) | set(APP)
     for name in sorted(set(counts) - grouped):
@@ -340,11 +431,20 @@ def main():
         elif stated != expected:
             problems.append(f"{what}: README says {stated}, the tree says {expected}")
 
-    for what, stated, expected, note in operation_claims(texts, kinds):
-        if note is not None:
-            problems.append(f"{what}: {note}")
-        elif stated != expected:
-            problems.append(f"{what}: says {stated}, `CommandKind` declares {expected}")
+    for label, table, mention, expected, surface, declares in [
+        ("operation", OPERATION_CLAIMS, OPERATIONS_MENTION, kinds,
+         "the command surface", "`CommandKind` declares"),
+        ("template", TEMPLATE_CLAIMS, TEMPLATES_MENTION, templates,
+         "the template shelf", "`JourneyTemplates.all` holds"),
+        ("match-mode", MATCH_MODE_CLAIMS, MATCH_MODES_MENTION, modes,
+         "the match modes", "`JourneyMatchMode` declares"),
+    ]:
+        for what, stated, target, note in counted_claims(texts, label, table, mention,
+                                                         expected, surface):
+            if note is not None:
+                problems.append(f"{what}: {note}")
+            elif stated != target:
+                problems.append(f"{what}: says {stated}, {declares} {target}")
 
     if problems:
         print("\nThe documentation disagrees with the tree:")

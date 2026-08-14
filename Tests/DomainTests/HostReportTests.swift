@@ -141,6 +141,64 @@ struct HostReportTests {
         #expect(state.project == nil)
         #expect(state.endpointCount == 0)
         #expect(state.journeyCount == 0)
+        // Not passed, so absent — and absent means the on-disk store, not "nobody asked".
+        #expect(state.storeFailure == nil)
+        #expect(state.storeIsEphemeral == false)
+    }
+
+    /// The degraded-store fact travels. The in-memory fallback used to be surfaced only by the
+    /// window's alert, so a headless session on a locked store ran fully ephemeral while every
+    /// command exited 0 and `mimic state` looked healthy; this report is the only channel a caller
+    /// with no window has.
+    @Test("State carries the reason the session's store is in memory")
+    func stateCarriesTheStoreFailure() {
+        let state = HostReport.state(
+            appVersion: nil,
+            mode: "headless",
+            pid: 1,
+            server: HostReport.serverStatus(state: .stopped, configuredPort: 8080, globalDelayMs: 0),
+            project: nil,
+            activeJourney: nil,
+            requestLogCount: 0,
+            storeFailure: "The database is locked."
+        )
+
+        #expect(state.storeFailure == "The database is locked.")
+        #expect(state.storeIsEphemeral)
+    }
+
+    /// The field is optional on the wire, asserted through `ControlCoding` — the pair
+    /// `ControlServer` encodes with and `ControlClient` decodes with. A healthy state encodes no
+    /// key at all, so presence is what a script tests; and a payload from an instance that
+    /// predates the field decodes as "on disk" rather than failing the whole state.
+    @Test("The store failure is present exactly when the store is ephemeral")
+    func storeFailureIsOptionalOnTheWire() throws {
+        func state(storeFailure: String?) -> ControlState {
+            HostReport.state(
+                appVersion: nil,
+                mode: "headless",
+                pid: 1,
+                server: HostReport.serverStatus(state: .stopped, configuredPort: 8080, globalDelayMs: 0),
+                project: nil,
+                activeJourney: nil,
+                requestLogCount: 0,
+                storeFailure: storeFailure
+            )
+        }
+
+        let healthy = try ControlCoding.string(ControlResult(state: state(storeFailure: nil)))
+        #expect(healthy.contains("storeFailure") == false)
+
+        let degraded = try ControlCoding.string(ControlResult(state: state(storeFailure: "The database is locked.")))
+        #expect(degraded.contains(#""storeFailure":"The database is locked.""#))
+
+        // The healthy payload is byte-for-byte what an instance without the field answers with,
+        // so decoding it is the backward-compatibility check.
+        let decoded = try ControlCoding.decode(ControlResult.self, from: Data(healthy.utf8))
+        #expect(decoded.state?.storeFailure == nil)
+
+        let roundTripped = try ControlCoding.decode(ControlResult.self, from: Data(degraded.utf8))
+        #expect(roundTripped.state?.storeFailure == "The database is locked.")
     }
 
     // MARK: - Project listing

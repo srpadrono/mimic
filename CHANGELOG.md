@@ -20,9 +20,52 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paths, the override, pid liveness, base-URL and token resolution, and the loopback token-pairing
   rule — with `ControlPlane` keeping only the write side and delegating its path resolution there,
   so the file a run writes and the file a run reads cannot drift apart again.
+- **`mimic state` names an in-memory session.** When the store cannot be opened the app falls back
+  to an ephemeral one, and the only surface that said so was an alert in a window a headless session
+  never shows — so a CI run on a locked store exited 0 on every command while nothing it did would
+  survive the stop. The state now carries the store failure, and the CLI renders a
+  `store  in memory — nothing will be saved` block with the reason beneath it.
 
 ### Fixed
 
+- **⌘Q now drains the write chain before the app commits to terminating.** It could not before:
+  `willTerminate` is posted with nowhere left to suspend to, so the quit path blocked the main
+  thread and a chain drain awaited from there was a hop onto an actor nothing could service — the
+  documented deadlock a first attempt shipped. `applicationShouldTerminate` answering
+  `.terminateLater` keeps the runloop alive while the same drain the `SIGTERM` path uses runs, so a
+  quit behind an acknowledged `mimic project delete` no longer loses the delete or resurrects the
+  row; both doors share one flush, the final save joins the chain instead of bypassing it, and the
+  blocking `willTerminate` write survives only as a backstop for a termination that passed neither
+  door — standing down once a drain has begun, so an ordinary quit cannot write a second, unordered
+  copy of the save.
+- **An edit racing a chained delete can no longer resurrect the deleted project.** The debounced
+  autosave checked only that *a* project was open; an edit arriving while the delete was still in
+  flight enqueued a save of the doomed project in perfect chain order behind it. Deleted ids are
+  tombstoned until the delete settles — lifted again if the store refuses it — and every
+  `currentProject` lifecycle publish (create, close, delete, import) now invalidates an in-flight
+  open, which previously could land its stale load over the newer state.
+- **A duplicate or an inactive import no longer decides which project the next launch opens.** Both
+  recorded their result as the most recently opened project, so a headless `mimic project duplicate`
+  followed by a quit restored the copy instead of the project that was on screen. The recents row
+  and the restore target are recorded separately now; only an actual open moves the target.
+- **`mimic journey restart` reports the cursor the engine produced, and lands on the journey the
+  caller means.** The reply used to be fabricated from the document without asking the engine, and
+  the restart hopped past the config push chain — `mimic journey step add` followed by
+  `mimic journey restart` could restart the pre-edit journey. The restart now awaits the chain and
+  answers with the engine's cursor, as `journey advance` already did.
+- **`mimic journey create X --activate` activates the journey it just created.** Activation resolved
+  by name, names are not unique, and resolution takes the first match — in a project already holding
+  a journey named X, the older one was activated while the create still exited 0.
+- **The request log's `Content-Type` matches the wire when a scenario spells the header in a
+  different case.** The response is assembled case-insensitively but the logged copy was not, so a
+  scenario's `content-type` produced a log entry disagreeing with what was actually served.
+- **A Swagger 2 example body is paired with the content type the import actually chose.** The parser
+  picked `application/json` from the example map while `produces` decided the type independently, so
+  a spec producing another MIME type could import a body labelled with a type it never declared.
+- **UI test runs no longer overwrite — then delete — the developer's live `control.json`.** The
+  launch contract now exports `MIMIC_CONTROL_FILE` to a per-run throwaway sidecar for every suite,
+  so a test run's control-plane advertisement cannot displace the credential file a developer's own
+  instance is discovered through.
 - **Every store write in the app now joins one ordered chain.** The debounced autosave, the explicit
   save and the close/switch flush previously raced the chained lifecycle writes, so an overtaken
   save could re-insert a deleted project; `mimic project duplicate` of the open project omitted the
@@ -30,8 +73,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   next autosave; and quitting just after `mimic project delete` could resurrect the deleted project
   — the shutdown flush captured the project before draining the chain and saved it after. Duplicate
   now reads the session copy when the reference names the open project, import over the open project
-  reconciles the session (the superseded debounce is dropped), the shutdown flush re-reads after
-  draining, and the quit machinery is under automated test for the first time.
+  reconciles the session (the superseded debounce is dropped), the final shutdown save joins the
+  chain itself after draining it, and the quit machinery is under automated test for the first time.
 - **A stale configuration push can no longer overtake a newer one, and a stop during the bind window
   is no longer dropped.** Engine pushes were independent unstructured tasks — whichever landed last
   won, so a deleted endpoint could go on being served until the next edit; they now chain, each
@@ -156,19 +199,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Known issues
 
-- **⌘Q waits for the open project's pending edit, but not for a project-lifecycle write still in
-  flight.** `create`, `duplicate`, `delete` and `import` answer before the store has the change, and
-  only the `SIGTERM` path drains them: it is `async` and suspends, leaving the main actor free to run
-  the very writes it is waiting for, while `willTerminate` is posted from inside
-  `NSApplication.terminate` with nowhere left to suspend to, so it has to block the main thread — and
-  a drain awaited from there is a hop onto an actor nothing can service. Draining from both paths is
-  what a first pass at this did, and it deadlocked every quit against its own flush: the full
-  two-second deadline burned, then the edit dropped, worse than the defect it was fixing and green in
-  CI, because — at the time — nothing in the suite exercised either quit path;
-  `ControlPlaneCoordinatorTests` now drives both, and holds the blocking one to the deadline. The
-  path that cannot drain still says so rather than pretending. The real fix is `applicationShouldTerminate` returning `.terminateLater`,
-  which keeps the runloop alive instead of blocking the thread that has to run the work; it changes
-  the app's termination contract and wants a machine that can actually quit the app to verify it.
+- (The long-standing entry here — ⌘Q draining the open project's edit but not a project-lifecycle
+  write still in flight — moved to **Fixed** above: `applicationShouldTerminate` now answers
+  `.terminateLater` and drains the chain before AppKit commits to terminating.)
 
 ## [0.9.3] — 2026-08-06
 

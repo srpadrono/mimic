@@ -263,6 +263,11 @@ Mimic (app) → AppFeatures → Domain
 mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 ```
 
+The map draws the import graph — who calls whom. The `Mimic` target's dependency list is wider
+than its one drawn edge: `Project.swift` declares every module on the app target directly, because
+the app is the composition root that bundles the frameworks it ships. The code under `App/Sources`
+imports no module of this repository but `AppFeatures`; the extra links carry no calls.
+
 - **Domain** — value types and pure rules (models, `RequestMatcher`, `JourneyResolver`,
   `MockResolver`, validation, and the `ControlCommand` language with its pure executor), plus
   `ControlEndpointDiscovery`, the read half of the discovery-file contract — file I/O and `kill(2)`
@@ -509,6 +514,9 @@ When adding or modifying views or navigation:
 3. **Run the UI test suite** and verify it passes before considering the work complete.
 4. **Keep test-only code out of production sources** — use `MIMIC_DEFAULTS_SUITE` for UserDefaults
    isolation, a **separate store** for persistence isolation, and `#if DEBUG` for launch hooks.
+   The launch contract (`UITestApp.launchAndBringToForeground`) also exports `MIMIC_CONTROL_FILE`
+   to a per-run throwaway sidecar, so no UI run can overwrite — then delete — the developer's
+   shared `control.json` credential file; a suite that names its own override keeps it.
 
    **A UI test run must never open, and never delete, `mimic.sqlite`.** It used to do both: the suite
    launches the real app, the real app opened the real database, and `UITestSupport.resetApp` computed
