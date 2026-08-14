@@ -260,6 +260,12 @@ Scripts/check_house_rules.sh
 # no Swift involved. The README's coverage section still works the other way because populating it
 # needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
 step "Documented counts"
+# The self-test first, exactly as the house-rules step two above does it, and for the same reason: a
+# checker whose comparison has quietly stopped comparing reports "every documented count agrees with
+# the tree" and exits 0, which is the shape of every false gate this repository has shipped. Its
+# fixtures are literal sentences and an invented suite set, so it never asks the functions under test
+# what the right answer is.
+python3 Scripts/check_doc_counts.py --self-test
 python3 Scripts/check_doc_counts.py
 
 # The end-to-end check, which used to be listed here as deliberately *not* run.

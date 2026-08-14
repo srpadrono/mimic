@@ -238,7 +238,11 @@ What enforces the new shape:
   `.accessibilityIdentifier()` + `.accessibilityLabel()`; perpetual animations honor Reduce Motion.
 - Tests: Swift Testing (`@Test`/`#expect`) for units; XCTest + page objects for UI; accessibility-id
   targeting; `-MimicResetForTesting` + `MIMIC_DEFAULTS_SUITE` for isolation. Suites that bind a port
-  (`MockServerEngineTests`, `ControlPlaneTests`) disable the sandbox via their own entitlements.
+  (`MockServerEngineTests`, `ControlPlaneTests`, `MimicTests`) all bind loopback: the first two
+  disable the sandbox via entitlements of their own, while `MimicTests` declares none and takes port
+  `0` for its one socket — `ComposedControlServerTests`, which stands `ControlServer` on
+  `AppControlHost`. `Scripts/check_doc_counts.py` recomputes that list from the tree, because an
+  enumeration presented as complete is the claim this repository keeps getting wrong.
 - Control API: additive changes only within `v1`; bump `ControlAPI.version` for a breaking change to
   the command or response shapes.
 - Build/test commands: see [CONTRIBUTING.md](../CONTRIBUTING.md). All unit suites run via the

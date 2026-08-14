@@ -234,6 +234,56 @@ struct ProjectValidatorTests {
         #expect(plan.response.matchedEndpointID == nil)
     }
 
+    /// The other arm of the same field, and the one this validator used to accept: written as
+    /// `if let activeScenarioID, !contains`, a *missing* id was the passing case. It is not the safe
+    /// half — `RequestMatcher.match` declines the endpoint at the `guard let` one line above the
+    /// lookup that catches a dangling one.
+    @Test("An endpoint carrying scenarios and no activeScenarioID is refused, with the endpoint named")
+    func aMissingActiveScenarioIDIsRefused() throws {
+        let project = MockProject(
+            name: "Checkout",
+            endpoints: [
+                Self.endpoint(scenarios: [Scenario(name: "Default", statusCode: 200)], activeScenarioID: nil)
+            ]
+        )
+
+        let refusal = try Self.refusal(project)
+        #expect(refusal.context.contains("Summary"))
+        #expect(refusal.context.contains("GET /account-summary"))
+        #expect(refusal.reason.contains("activeScenarioID"))
+    }
+
+    /// Why the two are one rule: the endpoint the app would have refused to build answers exactly what
+    /// the dangling one answers, and a caller reading `mimic endpoint list` sees a configured route in
+    /// both cases.
+    @Test("An endpoint with scenarios and no active one silently 404s, exactly as a dangling id does")
+    func anUnsetActiveScenarioServesNothing() {
+        let scenario = Scenario(name: "Default", statusCode: 200, body: "{}")
+        let unset = Self.endpoint(scenarios: [scenario], activeScenarioID: nil)
+
+        let plan = MockResolver.plan(
+            request: IncomingRequest(method: .get, path: "/account-summary"),
+            endpoints: [unset],
+            globalDelayMs: 0
+        )
+        #expect(plan.response.statusCode == 404)
+        #expect(plan.response.matchedEndpointID == nil)
+    }
+
+    /// The case the rule above must not swallow, and the reason it asks about the scenarios rather
+    /// than about the id alone: deleting an endpoint's last scenario leaves `scenarios` empty and
+    /// `activeScenarioID` nil — `scenarioDelete` repoints at `scenarios.first?.id` — so this is a
+    /// document the app itself exports, and refusing it would refuse a round trip.
+    @Test("An endpoint with no scenarios at all is accepted with no active scenario")
+    func anEndpointWithNoScenariosIsAccepted() throws {
+        let project = MockProject(
+            name: "Checkout",
+            endpoints: [Self.endpoint(scenarios: [], activeScenarioID: nil)]
+        )
+
+        try ProjectValidator.validate(project)
+    }
+
     @Test("An activeJourneyID naming no journey the project contains is refused, with the project named")
     func danglingActiveJourneyIDIsRefused() throws {
         var project = MockProject(name: "Checkout", journeys: [Journey(name: "Flow")])

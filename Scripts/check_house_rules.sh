@@ -15,10 +15,11 @@
 # what Debian and Ubuntu install as `awk`, and therefore what that container has — runs it.
 #
 # `--self-test` checks the scanner instead of the tree: every rule plants its own probes in a
-# throwaway file and asserts the scanner reports every one of them. CI runs it beside the real check.
-# It exists because the defect described above `STRIP_COMMENTS` survived review of the script that had
-# it, and a linter with no test for its own scanner is a linter that can report "no violations" for
-# any reason it likes.
+# throwaway file and asserts the scanner reports every one of them, and one case beyond the rules
+# asserts that a tree the scanner cannot reach fails the run rather than matching nothing. CI runs it
+# beside the real check. It exists because the defect described above `STRIP_COMMENTS` survived review
+# of the script that had it, and a linter with no test for its own scanner is a linter that can report
+# "no violations" for any reason it likes.
 #
 # Adding a rule: the prohibition must be decidable by a grep, the tree must already obey it, and it
 # must carry probes — the canonical spelling *and* at least two of the evasions described above
@@ -176,14 +177,41 @@ strip_file() {
 }
 
 # Prints `path:line:text` for every match of $1 in the stripped copies of the .swift files under $2….
+# Returns non-zero, naming the tree, when one of them cannot be read.
+#
+# That return is why the listing is a file rather than the `< <(find …)` process substitution this
+# used to read from. A process substitution's exit status is invisible to `set -euo pipefail`, so with
+# `Sources` renamed in a scratch clone the run put seven `find: 'Sources': No such file or directory`
+# lines on stderr, matched nothing anywhere, and printed "9 house rules checked, no violations." to
+# stdout with exit 0. The trees are named in arrays at the top of this file and they do move — `Tools`
+# was outside every rule's scope until somebody added it — so a rename that misses one here has to be
+# louder than a clean run, not quieter.
 scan() {
     local pattern=$1
     shift
+
+    local tree
+    for tree in "$@"; do
+        if [ ! -d "$tree" ]; then
+            printf 'house rules: "%s" is not a directory, so this rule scanned nothing.\n' "$tree" >&2
+            return 1
+        fi
+    done
+
+    # The other half of the same guarantee, and the reason `pipefail` earns its place in the `set`
+    # line: an unreadable subdirectory lists most of the tree and leaves find non-zero, and a scan
+    # that could not read everything must not be able to report no violations.
+    local listing="$WORK_DIR/scan-listing"
+    if ! find "$@" -type f -name '*.swift' | sort > "$listing"; then
+        printf 'house rules: could not list the .swift files under %s.\n' "$*" >&2
+        return 1
+    fi
+
     local file
     while IFS= read -r file; do
         strip_file "$file"
         grep -nE "$pattern" "$STRIPPED/$file" | sed "s|^|$file:|" || true
-    done < <(find "$@" -type f -name '*.swift' | sort)
+    done < "$listing"
 }
 
 # Checks the scanner rather than the tree, for one rule.
@@ -237,8 +265,15 @@ selftest_rule() {
     done <<< "$probes"
     probes_planted=$((probes_planted + planted))
 
+    # `if !` rather than leaving the status to `set -e`: `scan` runs inside a command substitution, so
+    # its failure reaches this line as an assignment's exit status and in no other form, and a status
+    # nobody reads is the whole shape of the defect the reachability case below covers.
     local hits
-    hits="$(scan "$pattern" "$dir")"
+    if ! hits="$(scan "$pattern" "$dir")"; then
+        selftest_failures=$((selftest_failures + 1))
+        printf '  FAIL %s — the scanner could not read the probe directory it was handed.\n' "${reason%%:*}"
+        return 0
+    fi
     if [ -n "$allow" ]; then
         hits="$(printf '%s\n' "$hits" | grep -vE "$allow" || true)"
     fi
@@ -268,6 +303,28 @@ selftest_rule() {
     printf '       got:      %s\n' "${found:-nothing}"
 }
 
+# Checks that the scanner can *reach* a tree, which no rule's probes can: `selftest_rule` plants them
+# in a directory it has just created, so every case above proves a pattern over a tree that is there
+# by construction and not one of them can observe a tree that is not.
+#
+# The case is the defect itself. With the loop fed from `< <(find …)`, scanning a directory that does
+# not exist printed find's complaint to stderr, produced no hits, and returned 0 — which is how a run
+# with `Sources` missing reported no violations across nine rules. Put the process substitution back
+# and this goes red; that is the only thing it is here to do.
+selftest_missing_tree() {
+    local absent="$WORK_DIR/selftest/tree-that-is-not-there"
+    local output status=0
+    output="$(scan 'anything' "$absent" 2>&1)" || status=$?
+    if (( status != 0 )); then
+        printf '  ok   reachability — a scanned tree that is not there fails the run\n'
+        return 0
+    fi
+    selftest_failures=$((selftest_failures + 1))
+    printf '  FAIL reachability — scanning a directory that does not exist reported success\n'
+    printf '       tree:     %s\n' "$absent"
+    printf '       got:      %s\n' "${output:-nothing}"
+}
+
 violations=0
 rules_checked=0
 selftest_failures=0
@@ -290,8 +347,13 @@ report() {
         return 0
     fi
 
+    # `if !` for the reason given at the same line in `selftest_rule`: the status is the only channel
+    # a failed scan has, and this is the one place a real run reads it.
     local hits
-    hits="$(scan "$pattern" "$@")"
+    if ! hits="$(scan "$pattern" "$@")"; then
+        printf '\nThe rule above ran over no tree at all, so nothing in this run has been checked.\n' >&2
+        exit 1
+    fi
     if [ -n "$allow" ]; then
         hits="$(printf '%s\n' "$hits" | grep -vE "$allow" || true)"
     fi
@@ -520,14 +582,16 @@ report \
     "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
 if (( self_test )); then
+    selftest_missing_tree
+
     if (( selftest_failures > 0 )); then
-        printf '\n%d of %d rule(s) failed their probes — the scanner is broken, not the tree.\n' \
+        printf '\n%d self-test failure(s) across %d rules and the reachability case — the scanner is broken, not the tree.\n' \
             "$selftest_failures" "$rules_checked"
         exit 1
     fi
     printf '%d spellings of %d rules planted and caught — canonical, spaced and module-qualified;\n' \
         "$probes_planted" "$rules_checked"
-    printf 'comments, string literals and multi-line literals told apart.\n'
+    printf 'comments, string literals and multi-line literals told apart; a missing tree fails the run.\n'
     exit 0
 fi
 

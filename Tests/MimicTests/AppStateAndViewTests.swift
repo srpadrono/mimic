@@ -581,18 +581,18 @@ struct AppStateAndViewTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set(["one"], forKey: "recentProjects")
 
-        let dbURL = try makeStubDatabase()
+        let store = try makeStubDatabase()
 
         UITestSupport.resetApp {
             (
                 knownTestSuites: [suiteName],
-                databaseURL: dbURL,
+                databaseURL: store.url,
                 fileManager: .default
             )
         }
 
         #expect(UserDefaults(suiteName: suiteName)?.object(forKey: "recentProjects") == nil)
-        #expect(FileManager.default.fileExists(atPath: dbURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: store.url.path) == false)
 
         let hiddenWindow = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 100, height: 100),
@@ -837,20 +837,52 @@ struct AppStateAndViewTests {
         #expect(appState.serverState == .stopped)
     }
 
-    /// Writes a stand-in store and its sidecars, and returns the main file's URL.
-    private func makeStubDatabase() throws -> URL {
+    /// Writes a stand-in store and its sidecars, and returns both.
+    ///
+    /// The three names are literals here, and must stay literals: a fixture planted through
+    /// `UITestSupport.sidecarURLs(for:)` — the function the reset deletes through — moves wherever
+    /// that function moves. Reverted to the `appendingPathExtension` form it shipped with, it would
+    /// plant `mimic.sqlite.wal`, the reset would delete `mimic.sqlite.wal`, both reset tests would
+    /// stay green, and every real `-wal` beside a real store would go on surviving the reset — which
+    /// is the WAL recovery this whole area exists to stop. `sidecarNamesAreTheOnesSQLiteWrites` holds
+    /// the helper to the same three names from the other side.
+    private func makeStubDatabase() throws -> (url: URL, sidecars: [URL]) {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let dbURL = directory.appendingPathComponent("mimic.sqlite")
         try Data("db".utf8).write(to: dbURL)
-        // The names SQLite actually writes, taken from the same helper the reset deletes through —
-        // planting them by hand is how this test came to assert against `mimic.sqlite.wal`, a file
-        // nothing has ever created, and so passed while the reset left every real sidecar behind.
-        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+        let sidecars = ["mimic.sqlite-wal", "mimic.sqlite-shm", "mimic.sqlite-journal"].map {
+            directory.appendingPathComponent($0)
+        }
+        for sidecar in sidecars {
             try Data("sidecar".utf8).write(to: sidecar)
         }
-        return dbURL
+        return (url: dbURL, sidecars: sidecars)
+    }
+
+    /// The names themselves, pinned. `-wal`, `-shm` and `-journal` are written down in exactly two
+    /// places: `sidecarURLs`, which derives the paths the reset deletes, and `makeStubDatabase`,
+    /// which plants the files the reset tests expect to lose. Nothing held the second to the first
+    /// except that it used to call it.
+    @Test("The sidecars the reset removes are the files SQLite writes beside a store")
+    func sidecarNamesAreTheOnesSQLiteWrites() {
+        let store = URL(fileURLWithPath: "/tmp/mimic-uitests/mimic.sqlite")
+        let sidecars = UITestSupport.sidecarURLs(for: store)
+
+        // The suffix goes on the file name, not on the path extension. `mimic.sqlite.wal` — what
+        // `appendingPathExtension` produces, and what this returned — is a file SQLite has never
+        // written, so the reset removed the store and left the write-ahead log beside it.
+        #expect(
+            sidecars.map(\.lastPathComponent)
+                == ["mimic.sqlite-wal", "mimic.sqlite-shm", "mimic.sqlite-journal"]
+        )
+        #expect(
+            sidecars.allSatisfy {
+                $0.deletingLastPathComponent().path == store.deletingLastPathComponent().path
+            },
+            "a sidecar has to be beside the store, since that is where SQLite recovers it from"
+        )
     }
 
     @Test("The UI test reset clears the throwaway suite and the store it was pointed at")
@@ -859,17 +891,17 @@ struct AppStateAndViewTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set(["one"], forKey: "recentProjects")
 
-        let dbURL = try makeStubDatabase()
+        let store = try makeStubDatabase()
 
         UITestSupport.resetApp(
             knownTestSuites: [suiteName],
-            databaseURL: dbURL,
+            databaseURL: store.url,
             fileManager: .default
         )
 
         #expect(UserDefaults(suiteName: suiteName)?.object(forKey: "recentProjects") == nil)
-        #expect(FileManager.default.fileExists(atPath: dbURL.path) == false)
-        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+        #expect(FileManager.default.fileExists(atPath: store.url.path) == false)
+        for sidecar in store.sidecars {
             #expect(
                 FileManager.default.fileExists(atPath: sidecar.path) == false,
                 "a sidecar SQLite would recover from survived the reset"
@@ -883,12 +915,12 @@ struct AppStateAndViewTests {
         // itself — Application Support, `devxa.Mimic/mimic.sqlite` — and delete it unconditionally at
         // the start of every UI test, which is the developer's own store. Now the harness has to name
         // the file, and naming nothing deletes nothing.
-        let dbURL = try makeStubDatabase()
+        let store = try makeStubDatabase()
 
         UITestSupport.resetApp(knownTestSuites: [], databaseURL: nil, fileManager: .default)
 
-        #expect(FileManager.default.fileExists(atPath: dbURL.path))
-        for sidecar in UITestSupport.sidecarURLs(for: dbURL) {
+        #expect(FileManager.default.fileExists(atPath: store.url.path))
+        for sidecar in store.sidecars {
             #expect(
                 FileManager.default.fileExists(atPath: sidecar.path),
                 "a reset that was given no store deleted a sidecar anyway"

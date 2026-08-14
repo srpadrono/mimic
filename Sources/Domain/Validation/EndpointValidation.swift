@@ -122,9 +122,10 @@ public enum ProjectValidator {
     /// breaks on. Every editing command maintains those references as an invariant — `scenarioDelete`
     /// repoints `activeScenarioID` at the first surviving scenario, `journeyDelete` clears
     /// `activeJourneyID` — so a document that carries a dangling one did not come from this app, which
-    /// is exactly the case an import is. Both failures are silent at serving time: `RequestMatcher`
-    /// skips an endpoint whose `activeScenarioID` resolves to no scenario it owns — a `continue`
-    /// before that endpoint can win — so the route 404s as though it were never configured; and
+    /// is exactly the case an import is. All three failures are silent at serving time: `RequestMatcher`
+    /// skips an endpoint whose `activeScenarioID` resolves to no scenario it owns, and equally one
+    /// that names no scenario at all while carrying some — consecutive `continue`s, both before that
+    /// endpoint can win — so the route 404s as though it were never configured; and
     /// ``MockProject/activeJourney`` reads a dangling `activeJourneyID` as `nil`, so the server runs
     /// with no overlay while the document says a journey is active.
     public static func validate(_ project: MockProject) throws {
@@ -172,6 +173,24 @@ public enum ProjectValidator {
             // Thrown outside the `do` above on purpose: `invalidDocument` is itself a `ValidationError`,
             // so raising it in there would be caught and wrapped in a second one, reporting the endpoint
             // twice in one sentence.
+            //
+            // Both arms are refused, because both reach a `continue` in `RequestMatcher.match` on
+            // consecutive lines: the id that names nothing this endpoint owns, and the absent id
+            // beside scenarios that could have been served. Written as a lone `if let … , !contains`
+            // this check made the second the *accepted* case — an unset id is the identical silent
+            // 404 with one fewer field set, and every command that touches a scenario keeps it pointed
+            // at one (`scenarioCreate` activates the first, `scenarioDelete` repoints at the first
+            // survivor). An endpoint carrying no scenarios is the state `scenarioDelete` leaves behind
+            // when it removes the last one, and it holds `nil` legitimately: there is nothing to point
+            // at, and nothing the matcher could have served either way.
+            if endpoint.activeScenarioID == nil, endpoint.scenarios.isEmpty == false {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "activeScenarioID is missing while this endpoint carries scenarios, so the "
+                        + "endpoint would answer nothing at all."
+                )
+            }
+
             if let activeScenarioID = endpoint.activeScenarioID,
                endpoint.scenarios.contains(where: { $0.id == activeScenarioID }) == false {
                 throw ValidationError.invalidDocument(

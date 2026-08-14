@@ -155,7 +155,12 @@ jobs:
       # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
       # runner compiles, which on a green pipeline is indistinguishable from one that passed.
       - name: Documented counts
-        run: python3 Scripts/check_doc_counts.py
+        # The self-test runs first, as the house-rules step does: it holds the port-binding
+        # comparison to fixtures written in the script, so a checker that has stopped comparing
+        # fails here rather than reporting that every document agrees.
+        run: |
+          python3 Scripts/check_doc_counts.py --self-test
+          python3 Scripts/check_doc_counts.py
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -452,8 +457,10 @@ jobs:
       # was not there. `ControlServer.start` binds the socket *before* it writes that file, so
       # `mimic app start` can report the instance reachable while the advertisement has not landed —
       # and when the write fails, it is deliberately non-fatal: the error goes to the application's
-      # own logger, which a headless launch points at `FileHandle.nullDevice`. So this assertion can
-      # fail with no evidence anywhere of why, which is precisely what makes it unfit to gate today.
+      # own logger, and `AppLauncher.launch` hands the child `FileHandle.nullDevice` for stdout and
+      # stderr on every launch, headless or not, so that logger writes into nothing. So this
+      # assertion can fail with no evidence anywhere of why, which is precisely what makes it unfit
+      # to gate today.
       #
       # Two candidate causes, and the script now prints which: a sandboxed app cannot write into the
       # `mktemp -d` directory outside its container, or the override never reached the child and it

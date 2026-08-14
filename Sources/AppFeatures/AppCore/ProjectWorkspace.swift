@@ -6,7 +6,16 @@ import Persistence
 @Observable
 @MainActor
 final class ProjectWorkspace {
-    var currentProject: MockProject? {
+    /// The open project, or `nil` on the welcome screen.
+    ///
+    /// `private(set)`, because publishing one is not an assignment: it has to supersede an open
+    /// still in flight (``openGeneration``) and it has to refuse a project whose delete has already
+    /// been asked for (``pendingDeleteIDs``). ``setCurrentProject(_:isRestoring:)`` is the one door
+    /// that does both, and this was a bare `var` under a comment on ``openGeneration`` claiming
+    /// every publish went through it — while ``mutateCurrentProject(_:)`` and
+    /// `AppState.currentProject`'s setter, which is every endpoint, scenario and journey edit the
+    /// window or the CLI makes, wrote it directly.
+    private(set) var currentProject: MockProject? {
         didSet {
             onCurrentProjectChanged?(currentProject)
         }
@@ -28,24 +37,49 @@ final class ProjectWorkspace {
     ///
     /// ``openProject(id:)`` raises it when a load is *asked for* — two opens in quick succession
     /// must settle on the second — and every publish raises it again, through
-    /// ``setCurrentProject(_:isRestoring:)``. It used to be raised only by opens, so create, close,
-    /// delete and import each published without invalidating an open still in flight, and the
-    /// superseded load — widened by its leading await of the whole write chain — could land
-    /// afterwards and put the stale project back over the newer state, after the CLI had already
-    /// been told otherwise.
+    /// ``setCurrentProject(_:isRestoring:)``, which `private(set)` on ``currentProject`` makes the
+    /// only way to publish it from outside this file. Inside it the door is still a convention with
+    /// exactly one assignment behind it — `private(set)` closes the property to other files, not to
+    /// this type — so a second `currentProject = …` added here would reopen the hole this comment
+    /// spent a wave describing wrongly. Nothing mechanical catches that; the assignment count is the
+    /// thing to check. It used to be raised only by opens, so create, close, delete and
+    /// import each published without invalidating an open still in flight, and the superseded load —
+    /// widened by its leading await of the whole write chain — could land afterwards and put the
+    /// stale project back over the newer state, after the CLI had already been told otherwise.
+    ///
+    /// The claim then outran the code by one revision. `currentProject` stayed writable, so the two
+    /// doors that carry every *edit* — ``mutateCurrentProject(_:)`` and `AppState.currentProject`'s
+    /// setter — published past the ticket. `mimic project open` answers while its load is in flight,
+    /// so an `endpoint create` behind it edited the project still open, published with no ticket,
+    /// and left the abandoned load free to land on top; the debounce then woke to a project it did
+    /// not recognise and returned having written nothing. Both commands exited 0, nothing was
+    /// reported, and `autosaveStatus` never left `.idle`.
+    ///
+    /// A settled delete raises it whether or not it closed the window, which is the one publish that
+    /// cannot say what it means by publishing — see ``deleteProject(id:)``.
     private var openGeneration = 0
     /// Projects whose chained delete has been asked for and has not yet settled. No save of the
     /// open project may join the chain while its id is here.
     ///
     /// ``deleteProject(id:)`` cancels the debounce pending at the moment it is called, but the
     /// delete itself runs at its turn in the chain, and `currentProject` still names the doomed
-    /// project until that turn comes. An edit arriving in that window passed the debounce's own
-    /// `currentProject?.id` guard and enqueued its save *behind* the delete — in perfect chain
-    /// order, re-inserting the row the delete had just removed. Checked at the three places a save
-    /// of the open project joins the chain: the debounce's claim, the flush, and
-    /// ``saveCurrentProject()``. Struck when the delete settles, on both arms — a refused delete
-    /// leaves a live project whose edits must keep saving.
+    /// project until that turn comes. An edit arriving in that window enqueued its save *behind* the
+    /// delete — in perfect chain order, re-inserting the row the delete had just removed. Checked at
+    /// the three places a save of the open project joins the chain — the debounce's claim, the flush
+    /// and ``saveCurrentProject()`` — and once more in ``setCurrentProject(_:isRestoring:)``, which
+    /// refuses to *open* a doomed project at all: a load parked on the row must not land the window
+    /// on a project whose every save those three are already dropping. Struck when the delete
+    /// settles, on both arms — a refused delete leaves a live project whose edits must keep saving.
     private var pendingDeleteIDs: Set<UUID> = []
+    /// Which project the debounce currently waiting in ``autosaveTask`` would write.
+    ///
+    /// Read only by ``cancelPendingAutosave(forProject:)``, which the delete calls when it settles.
+    /// The autosave captures its project by value, so this is the only remaining way to tell whether
+    /// a timer still counting down belongs to a row that has just been removed.
+    private var pendingAutosaveProjectID: UUID?
+    /// Which project the newest open is loading, so a settled delete can tell whether the load it
+    /// would abandon is the one it just removed the row for. See ``deleteProject(id:)``.
+    private var loadingProjectID: UUID?
     /// The most recent store write, so the next one can wait for it.
     ///
     /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` — the
@@ -149,6 +183,7 @@ final class ProjectWorkspace {
         flushPendingAutosave()
 
         openGeneration += 1
+        loadingProjectID = id
         let generation = openGeneration
         Task { @MainActor [weak self, generation] in
             guard let self else { return }
@@ -159,7 +194,11 @@ final class ProjectWorkspace {
             do {
                 let project = try await projectRepository.load(id: id)
                 guard generation == openGeneration else { return }
-                setCurrentProject(project, isRestoring: true)
+                // The door can still refuse — a delete of this project already in the chain is the
+                // case — and a refused open must not touch recents either. That delete strikes the
+                // entry when it settles, which is after this, so recording here would leave a row
+                // that opens nothing and a `lastOpenedProjectID` naming it.
+                guard setCurrentProject(project, isRestoring: true) else { return }
                 recordRecentProject(id: project.id, name: project.name)
             } catch PersistenceError.projectNotFound {
                 // Not generation-guarded: this entry names a project the store does not have, and
@@ -359,6 +398,10 @@ final class ProjectWorkspace {
                 return
             }
             pendingDeleteIDs.remove(id)
+            // Lifting the tombstone is what makes this necessary: a debounce still counting down
+            // for this project would pass the guard from here on and re-insert the row it just
+            // removed. Scoped by id, so an edit to a different open project survives.
+            cancelPendingAutosave(forProject: id)
             recentProjectsStore.remove(id: id)
             recentProjects = recentProjectsStore.load()
             refreshProjectList()
@@ -366,6 +409,19 @@ final class ProjectWorkspace {
                 // Through ``setCurrentProject(_:isRestoring:)`` for the generation bump: the close
                 // this publish performs must also supersede any open still in flight.
                 setCurrentProject(nil, isRestoring: false)
+            } else {
+                // Nothing to publish, and still a supersede — but only of a load for *this* project.
+                // A load parked on the row this delete just removed captured it before the removal,
+                // so releasing it would open a project the store no longer has, permanently, because
+                // this arm has already run and will not close it. Unconditionally superseding was
+                // too wide: `mimic project delete X` landing while a click on unrelated project Y is
+                // still loading would abandon Y's load and leave the window where it was, with
+                // nothing to retry it. Create, close and import supersede whatever is loading
+                // because each of them *publishes* something newer; a delete of a project nobody is
+                // opening publishes nothing and supersedes nothing.
+                if loadingProjectID == id {
+                    supersedeInFlightOpens()
+                }
             }
         }
     }
@@ -390,11 +446,17 @@ final class ProjectWorkspace {
     func scheduleAutosave() {
         guard !isRestoringProject else { return }
         guard let project = currentProject else { return }
-        let projectID = project.id
 
         autosaveTask?.cancel()
         hasPendingAutosave = true
-        autosaveTask = Task { @MainActor [weak self, projectID] in
+        pendingAutosaveProjectID = project.id
+        // The project is captured *by value*, the way ``saveCurrentProject()`` and
+        // ``flushPendingAutosave()`` capture theirs: what this writes is the document the edit was
+        // made to, not whatever is open by the time the debounce wakes. It used to re-read
+        // `currentProject` and compare ids, so any publish landing inside the 500 ms window turned
+        // the edit into nothing at all — no write, no error, and `autosaveStatus` never leaving
+        // `.idle`.
+        autosaveTask = Task { @MainActor [weak self, project] in
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(500))
@@ -403,12 +465,12 @@ final class ProjectWorkspace {
                 return
             }
             // Claimed before the guard below: from here the write belongs to the chain, and a flush
-            // that ran now would only duplicate it. The tombstone check is the guard's third leg:
-            // `currentProject` still names a project whose delete is mid-chain, so the id
-            // comparison alone let this save enqueue behind the delete and re-insert the row.
+            // that ran now would only duplicate it. The tombstone is what the guard is left doing —
+            // `currentProject` still names a project whose delete is mid-chain until that turn
+            // comes, so without this the save enqueues behind the delete and re-inserts the row.
             hasPendingAutosave = false
-            guard let project = currentProject, project.id == projectID,
-                  !pendingDeleteIDs.contains(projectID) else { return }
+            pendingAutosaveProjectID = nil
+            guard !pendingDeleteIDs.contains(project.id) else { return }
 
             // Only the write joins the chain; the debounce slept outside it, cancellable, so a
             // newer edit could supersede this one without holding any other write up. From here the
@@ -431,15 +493,18 @@ final class ProjectWorkspace {
 
     /// Writes the debounced edit now, instead of losing it.
     ///
-    /// ``scheduleAutosave()`` waits 500ms and then re-reads `currentProject`, guarding that it is
-    /// still the project the edit belonged to. Closing clears that property and opening another
-    /// replaces it, so in both cases the pending task woke up, found the guard false and returned
-    /// having saved nothing: every edit made inside the debounce window was gone, with no error and
-    /// no indicator — the one failure mode this app has no way of telling you about.
+    /// ``scheduleAutosave()`` waits 500ms before writing, and it used to re-read `currentProject`
+    /// when it woke and guard that it was still the project the edit belonged to. Closing clears
+    /// that property and opening another replaces it, so in both cases the pending task woke up,
+    /// found the guard false and returned having saved nothing: every edit made inside the debounce
+    /// window was gone, with no error and no indicator — the one failure mode this app has no way of
+    /// telling you about. Both paths capture the project *by value* now, so neither depends on what
+    /// happens to be open by the time the write lands.
     ///
-    /// The project is captured *by value* here, before the property moves, so the write no longer
-    /// depends on what happens to be open by the time it lands. It cannot be awaited: the callers are
-    /// synchronous because a menu item and a `Button` action are.
+    /// This one still exists for the timing: it writes at the moment the project leaves rather than
+    /// half a second later, so a close followed by a quit, or by a `mimic project delete`, cannot
+    /// overtake it. It cannot be awaited — the callers are synchronous because a menu item and a
+    /// `Button` action are.
     ///
     /// The write joins ``storeWrites`` like every other. As a free-floating task it was one of the
     /// five writes outside the chain: a `mimic project delete` chained right behind a close could
@@ -479,6 +544,22 @@ final class ProjectWorkspace {
         hasPendingAutosave = false
         autosaveTask?.cancel()
         autosaveTask = nil
+        pendingAutosaveProjectID = nil
+    }
+
+    /// Cancels the pending debounce only when it would write `id`.
+    ///
+    /// The delete's own cancel at call time covers the debounce pending *then*, and the tombstone
+    /// covers the delete's flight — but the tombstone is lifted the moment the delete settles, and a
+    /// debounce whose 500 ms timer has not fired yet outlives it. Now that the autosave captures its
+    /// project by value it no longer re-reads `currentProject`, so nothing else would notice that
+    /// the row it is about to write has just been removed: the save would land after the delete, in
+    /// chain order, and put the project back — with `recordRecentProject` restoring it to the list
+    /// as well. Scoped by id because a delete settling must not discard an edit to a *different*
+    /// project that happens to be open.
+    private func cancelPendingAutosave(forProject id: UUID) {
+        guard pendingAutosaveProjectID == id else { return }
+        cancelPendingAutosave()
     }
 
     @discardableResult
@@ -492,15 +573,34 @@ final class ProjectWorkspace {
     func mutateCurrentProject(_ mutation: (inout MockProject) -> Void) -> Bool {
         guard var project = currentProject else { return false }
         mutation(&project)
-        currentProject = project
-        return true
+        // Through the one door: an edit is a publish, and it supersedes an open still in flight for
+        // the same reason a create does. Assigning here was the door the ticket did not cover.
+        return setCurrentProject(project, isRestoring: false)
     }
 
-    private func setCurrentProject(_ project: MockProject?, isRestoring: Bool) {
+    /// The one way to publish ``currentProject``. Answers whether it did.
+    ///
+    /// Three things, not one: refuse a project that is on its way out, supersede whatever is loading,
+    /// then assign. `AppState.currentProject`'s setter and ``mutateCurrentProject(_:)`` come through
+    /// here for the first two — they used to assign directly, which is what made the ticket on
+    /// ``openGeneration`` a promise its own comment could not keep.
+    ///
+    /// `isRestoring` suppresses the autosave a publish would otherwise schedule, for the publishes
+    /// that are not edits: a load landing, a create, an accepted import.
+    @discardableResult
+    func setCurrentProject(_ project: MockProject?, isRestoring: Bool) -> Bool {
+        // A project whose delete is mid-chain must not be *opened*. The row is going away, and every
+        // save of it is already refused — the debounce's claim, the flush and ``saveCurrentProject()``
+        // all check the tombstone — so the window would be left on a project no edit of which could
+        // ever be written. Editing the project already open is not that: the delete's own arm closes
+        // it when it settles, so only a publish that would change which project is open is refused.
+        if let project, pendingDeleteIDs.contains(project.id), currentProject?.id != project.id {
+            return false
+        }
         // Every publish supersedes an open still in flight — see ``openGeneration``. Raised before
         // the assignment so no observer of the publish can read a generation the stale load still
         // matches.
-        openGeneration += 1
+        supersedeInFlightOpens()
         if isRestoring {
             isRestoringProject = true
         }
@@ -508,6 +608,13 @@ final class ProjectWorkspace {
         if isRestoring {
             isRestoringProject = false
         }
+        return true
+    }
+
+    /// Invalidates every open still in flight without publishing anything — the half of a publish a
+    /// settled delete owes even when it has nothing to publish. See ``openGeneration``.
+    private func supersedeInFlightOpens() {
+        openGeneration += 1
     }
 
     private func recordRecentProject(id: UUID, name: String, asLastOpened: Bool = true) {

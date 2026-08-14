@@ -144,14 +144,16 @@ This was not always possible. While the repo was private, every run died in abou
 zero steps executed, on Linux and macOS alike, because of a billing block — which is why the triggers
 used to be commented out and the macOS job disabled. Making the repo public resolved it.
 
-`./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing:
-lockfiles, compiler settings, `swift test`, `tuist install && generate`, the Debug build, every unit
-suite, the Release gate, the UI suite, `check_house_rules.sh --self-test` followed by the real house
-rules scan, `check_doc_counts.py`, and — last, and gating here from the start — the CLI end-to-end
-check. Its own header names the three things it cannot reproduce — `swift test` runs on this
-machine's toolchain rather than in the `swift:6.2` container, the UI suite runs without CI's
-`-retry-tests-on-failure`, and runner setup is absent — so read it rather than treating a green local
-run as a green CI run.
+`./Scripts/ci.sh` runs the same gates locally and is still the fastest way to check before pushing,
+in this order: lockfiles, compiler settings, module edges, `swift test`, `tuist install && generate`,
+the Debug build, every unit suite, the Release gate, the UI suite, `check_house_rules.sh --self-test`
+followed by the real house rules scan, `check_doc_counts.py --self-test` followed by the real count
+check, and — last, and gating here from the start — the CLI end-to-end check. The three manifest checks near the top run before anything
+compiles, `check_module_edges.py` among them, because a drift there makes every step below it test a
+build that does not ship. Its own header names the three things it cannot reproduce — `swift test`
+runs on this machine's toolchain rather than in the `swift:6.2` container, the UI suite runs without
+CI's `-retry-tests-on-failure`, and runner setup is absent — so read it rather than treating a green
+local run as a green CI run.
 
 ### `run_cli_e2e.sh`: what it needs, and what runs it
 
@@ -181,10 +183,13 @@ other step green. It fails at the discovery-file assertion, and the reason it is
 what that failure looks like from outside: `ControlServer.start` binds the socket *before* it writes
 the file, so `mimic app start` reports the instance reachable while nothing has been advertised yet,
 and a failed advertisement is deliberately non-fatal — the error goes to the application's own
-logger, which a headless launch points at `FileHandle.nullDevice`. The condition is unobservable by
-construction, so the script now reports which of the two causes it was (advertised at the shared
-path, or advertised nowhere) and the step stays non-gating until the cause is fixed. `ci.sh` gates
-from the start, because a laptop failure is one you can read on the spot.
+logger, and `AppLauncher.launch` gives the child process `FileHandle.nullDevice` for stdout **and**
+stderr on every launch, headless or not, so that logger writes into nothing. (The redirection is not
+a headless behaviour and never was: a launcher that inherited stdout would interleave the app's
+logging into the JSON an agent is parsing, which is true with a window open too.) The condition is
+unobservable by construction, so the script now reports which of the two causes it was (advertised
+at the shared path, or advertised nowhere) and the step stays non-gating until the cause is fixed.
+`ci.sh` gates from the start, because a laptop failure is one you can read on the spot.
 
 What it is no longer is dangerous, and that is a recent change worth knowing because the old
 behaviour is what kept it out of the docs' recommended path:
@@ -322,8 +327,19 @@ persistence is injected as a port; the engine owns no long-term app state. Full 
 
 Every operation that is a function of the open project — endpoints, scenarios, journeys, project
 metadata — is applied by `ProjectCommandExecutor` in Domain, as
-`(ControlCommand, inout MockProject) -> ControlResult`. The CLI, the HTTP control API, and the app
-window all call it.
+
+```swift
+public static func apply(
+    _ command: ControlCommand,
+    to project: inout MockProject
+) throws -> ProjectCommandOutcome?
+```
+
+The CLI, the HTTP control API, and the app window all call it. That return type is doing two jobs,
+and a shorter spelling of it describes a different function: the Optional is the **decline** signal —
+`nil` means "host-scoped, keep looking", not a failure, which is the partition the rest of this
+document describes — and `ProjectCommandOutcome` pairs the `ControlResult` with `didMutate`, which is
+how a host knows whether to persist and push to the engine rather than doing both after a read.
 
 **When adding an operation, add a `ControlCommand` case and handle it in the executor.** Do not
 implement it a second time in `AppState` or in a CLI command — a rule written twice is a rule that
@@ -533,7 +549,13 @@ set of rules, because they used to follow none and the window read as three unre
 When adding or modifying views or navigation:
 
 1. **Add accessibility identifiers** to all interactive elements and key labels used for assertions.
-2. **Write or update XCUITests** in `MimicUITests/MimicUITests.swift` covering the changed flows.
+2. **Write or update XCUITests** covering the changed flows. `MimicUITests/` is four files, not one,
+   so put the test where its feature already lives: `MimicUITests.swift` (welcome, workspace,
+   endpoint editor, inspector, request log), `JourneyUITests.swift` (the journeys navigator and its
+   sheets), `ControlPlaneIsolationTests.swift` (the discovery file a run must not touch), and
+   `AppLaunchSupport.swift`, which is not a suite at all — it is `UITestApp`, home of the
+   launch-and-activate contract and `waitForAny` that the rules below make mandatory. Page objects
+   sit at the top of the file whose flows use them.
 3. **Run the UI test suite** and verify it passes before considering the work complete.
 4. **Keep test-only code out of production sources** — use `MIMIC_DEFAULTS_SUITE` for UserDefaults
    isolation, a **separate store** for persistence isolation, and `#if DEBUG` for launch hooks.
@@ -663,9 +685,15 @@ When adding or changing an operation:
    see the narrowing, and closing a switch would mean re-listing every case it declines. That list
    written out per switch is exactly what `scope` was introduced to collapse into one place, and no
    count of either side belongs in a document: `scope` is where the partition is decided and the
-   only place it should be read. What each `default:` does instead is **throw and name the command**
-   (`"<kind> is host-scoped but this service does not implement it."`), rather than falling through
-   to `noProjectOpen` and telling a caller to open a project they already have open.
+   only place it should be read. What each `default:` does instead is **name the command and say
+   which switch declined it** — `"<kind> is project-scoped but ProjectCommandExecutor does not apply
+   it."`, `"<kind> is host-scoped but the app's control host does not implement it."`, `"<kind> is
+   not a project-lifecycle command."` — rather than falling through to `noProjectOpen` and telling a
+   caller to open a project they already have open. They do not all do it the same way, and that
+   matters when you go hunting for one: the executor **throws**, being a `throws` function, while
+   both of the host's **return `.failure(…)`**, so one misrouted command surfaces as a thrown
+   `ControlError` on one side of the line and as an `ok: false` response on the other. The code is
+   `internal.failure` either way, which is what the sweeps below assert on.
 
    So the compiler forces you to **classify** a command; tests force you to **implement** it, on
    both sides of the line:
@@ -823,3 +851,21 @@ structured concurrency; all UI updates on `@MainActor`. State that a request mut
 cursor above all — must be read and written inside a single actor hop, never read-then-write.
 
 **Unit tests:** Swift Testing for new units (`async throws`); XCTest only for UI.
+
+**A test may never build its fixture with the function under test.** Write the fixture as literals.
+A fixture derived from the mechanism moves *with* the mechanism, so reverting the mechanism leaves
+the test green over the bug it was written for — the test cannot fail, and its passing is evidence
+about nothing. `makeStubDatabase` in `MimicTests` is the case that cost this repository a wave: it
+planted the WAL sidecars through the same `UITestSupport.sidecarURLs` the reset deletes through, so
+reverting `sidecarURLs` to its old `appendingPathExtension` form moved the fixture and the assertion
+together and the reset test stayed green while every real `-wal` survived the reset. It shipped under
+a comment defending the self-reference, with the causality backwards.
+
+The check is one question, and it is worth asking of every test you write: **if I revert the
+mechanism this test is for, does this test go red?** If the fixture comes from the mechanism, the
+answer is no. Two habits follow — pin the literal values the mechanism is supposed to produce in a
+test of their own (`sidecarNamesAreTheOnesSQLiteWrites`), and, where a checker is a script rather
+than a type, give it a `--self-test` over invented inputs that never asks the functions under test
+what the right answer is (`check_house_rules.sh --self-test`, `check_doc_counts.py --self-test`).
+Negative controls are worth labelling as such in the test's own comment, so a later reader does not
+mistake a test that is green by construction for one that is guarding something.

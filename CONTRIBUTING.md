@@ -168,7 +168,12 @@ is worth a test, it belongs behind a testable boundary (`resolve`, `plan`, `Proj
 
 **Tests:** Swift Testing (`@Test` / `#expect`) for units; XCTest with page objects for UI. Isolate
 with `-MimicResetForTesting` and a per-run `MIMIC_DEFAULTS_SUITE`. Suites that bind a port
-(`MockServerEngineTests`, `ControlPlaneTests`) disable the sandbox through their own entitlements.
+(`MockServerEngineTests`, `ControlPlaneTests`, `MimicTests`) bind loopback only. The first two
+disable the sandbox through entitlements of their own; `MimicTests` declares none, and its one
+socket — `ComposedControlServerTests`, standing `ControlServer` on `AppControlHost` — takes port `0`
+so the OS picks it. `Scripts/check_doc_counts.py` recomputes that list from the tree, because this
+sentence named two of the three for several waves while `ComposedControlServerTests` was already
+there.
 
 **Test-only code is Debug-only.** Launch hooks live behind `#if DEBUG` so they never ship.
 
