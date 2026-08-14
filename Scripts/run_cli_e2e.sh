@@ -10,19 +10,22 @@
 # compute its own target*:
 #
 #   - **It stops the instance it launched, by pid.** The trap used to call `mimic app stop`, which
-#     ignores MIMIC_CONTROL_URL and MIMIC_CONTROL_PORT entirely: `AppCommand.Stop` calls
-#     `ControlEndpointFileReader.discover()`, which reads the one `control.json` under Application
-#     Support and SIGTERMs whatever pid it names. So on a machine with Mimic open, running this
-#     script quit the developer's own instance — and it ran on *every* exit, including the early ones
-#     where this script had launched nothing at all. The pid now comes from what `mimic app start`
-#     printed about the process it just launched, so the trap can only reach this run's own child.
-#   - **It writes its discovery file inside $WORK.** `MIMIC_CONTROL_FILE` is read by
-#     `ControlEndpointFile.writeURL`, so the instance advertises itself there instead of at the
-#     shared Application Support path, and by `searchURLs`, which the override *replaces* rather
-#     than joins — so nothing in this run can fall through to a developer's real instance either.
-#     The check after launch is there because that isolation is the one thing here the script cannot
-#     arrange by itself: the app is what honours the variable, and if the file is missing afterwards
-#     the instance wrote where it always did.
+#     ignores MIMIC_CONTROL_URL and MIMIC_CONTROL_PORT entirely: `AppCommand.Stop` reads a
+#     `control.json` — at the time, always the one under Application Support — and SIGTERMs whatever
+#     pid it names. So on a machine with Mimic open, running this script quit the developer's own
+#     instance — and it ran on *every* exit, including the early ones where this script had launched
+#     nothing at all. The pid now comes from what `mimic app start` printed about the process it just
+#     launched, so the trap can only reach this run's own child.
+#   - **Everything in this run resolves its discovery file inside $WORK.** `MIMIC_CONTROL_FILE` is
+#     honoured by both halves of the contract, which resolve it through one function —
+#     `ControlEndpointDiscovery.overrideURL` in Domain. The app's write side
+#     (`ControlEndpointFile.writeURL` in ControlPlane) advertises there instead of at the shared
+#     Application Support path, and the CLI's reader (`ControlEndpointDiscovery.discover`) searches
+#     a list the override *replaces* rather than joins — so nothing in this run can fall through to
+#     a developer's real instance in either direction. The check after launch is there because the
+#     write half is the one thing here the script cannot observe any other way: the app is what
+#     honours the variable on that side, and if the file is missing afterwards the instance wrote
+#     where it always did.
 #
 # `set -e` was missing too. Every command that can fail is written `… || fail` today, so nothing in
 # the current body depends on it — it is here so the next line added without that suffix cannot pass
@@ -37,24 +40,23 @@ CONTROL_PORT="${MIMIC_E2E_CONTROL_PORT:-18787}"
 MOCK_PORT="${MIMIC_E2E_MOCK_PORT:-18080}"
 
 export MIMIC_DATABASE_PATH="$WORK/mimic.sqlite"
+# The *app's* bind port, not CLI plumbing. `ControlPlaneCoordinator.resolvePort` reads this when the
+# launched instance stands its control server up; without it the instance binds the default 8787,
+# which is exactly the port a developer's own Mimic is holding. The CLI no longer needs it — it
+# finds the port in the discovery file below — but with it exported, `resolveBaseURL` takes the
+# port-env branch to the same destination the file advertises, so the two agree by construction.
 export MIMIC_CONTROL_PORT="$CONTROL_PORT"
-export MIMIC_CONTROL_URL="http://127.0.0.1:$CONTROL_PORT"
+# `MIMIC_CONTROL_URL` is deliberately NOT exported any more. It only ever resolved the CLI's
+# destination, and the CLI now reads `MIMIC_CONTROL_FILE` itself — the same `ControlEndpointDiscovery`
+# reader in Domain the app's write side resolves its path with — so destination *and* credential both
+# come out of the file this run's own instance wrote. This script used to need four variables; the
+# discovery file closed that gap when the reader moved into Domain.
 export MIMIC_CONTROL_FILE="$WORK/control.json"
-# The credential has to be supplied, not discovered, and moving the file is what makes that true.
-#
-# `MIMIC_CONTROL_FILE` is honoured by the *app* — `ControlEndpointFile` in ControlPlane — and not by
-# the CLI, which carries its own reader searching only the two Application Support paths
-# (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing; mirroring it is an open
-# item in AGENTS.md). So the instance advertises itself in $WORK and `mimic` cannot see that file.
-# `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT` do not close the gap: they resolve the *destination*,
-# and `resolveToken` never consults them. Every command would reach the right port with no token and
-# come back 401 — `ControlServer.denial` guards every route — while `mimic app start` still looked
-# fine, because `isReachable` accepts a 401 as proof something answered.
-#
-# Both sides read `MIMIC_CONTROL_TOKEN` first: `ControlServer.init` for the token it demands,
-# `ControlEndpointFileReader.resolveToken` for the one it sends. Setting it here is what makes an
-# isolated run work at all, and it is a fresh value per run rather than a fixed string so a leftover
-# file from a previous run cannot authenticate against this one.
+# Strictly redundant now — the CLI reads the token out of the relocated file — but kept, for two
+# reasons. `ControlServer.init` takes it as the token it demands, so the credential of this run is
+# chosen *by this run* rather than minted by the instance; and it is a fresh value per run rather
+# than a fixed string, so a leftover file from a previous run cannot authenticate against this one.
+# `ControlEndpointDiscovery.resolveToken` reads it first on the sending side, so both halves agree.
 export MIMIC_CONTROL_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
 # Prefer a freshly built CLI; fall back to one on PATH.
@@ -84,7 +86,7 @@ cleanup() {
   if [ -n "$MIMIC_PID" ] && kill -0 "$MIMIC_PID" 2>/dev/null; then
     # SIGTERM rather than SIGKILL, and then wait: the app ignores the default disposition and runs a
     # handler that removes its discovery file and exits, so killing harder would leave the file
-    # behind — the stale-endpoint case `ControlEndpointFile.discover` then has to skip.
+    # behind — the stale-endpoint case `ControlEndpointDiscovery.discover` then has to skip.
     kill "$MIMIC_PID" 2>/dev/null
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       if ! kill -0 "$MIMIC_PID" 2>/dev/null; then break; fi

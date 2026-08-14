@@ -3,168 +3,62 @@ import Testing
 @testable import Domain
 @testable import MimicCLICore
 
-/// How the CLI decides where to send the instance's token.
+/// Where the CLI sends the instance's token, and how it finds the instance at all.
 ///
-/// This file exists because nothing tested it. `ControlEndpointFileReader` is a second copy of the
-/// control plane's reader — it lives here so the CLI can locate an instance without linking Vapor —
-/// and the hardening the twin received never crossed over, so the CLI's discovery branch went on
-/// routing to whatever `baseURL` a file on disk named. `ControlServerTests` asserts that the twin
-/// cannot be redirected, and every one of those assertions ran against code the `mimic` binary does
-/// not call. So every case below names *this* reader, however closely it mirrors that suite: a test
-/// pointed at the wrong copy is worse than no test, because it reports the defect as covered.
+/// The reader itself — search order, the `MIMIC_CONTROL_FILE` override, pid liveness, the tampered
+/// `baseURL`, and the `namesDiscoveredInstance` predicate — is `ControlEndpointDiscovery` in
+/// `Domain`, and its suite lives in `DomainTests`. It used to be a second copy in this module, and
+/// this file's opening warning was about exactly that: assertions pointed at the twin the `mimic`
+/// binary does not call report a defect as covered. What belongs *here* is what only the CLI's own
+/// code can regress — `ControlClient.discover`, the one place the destination and the credential
+/// meet, and the failure rendering the exit-code contract hangs off.
 @Suite("Control client discovery")
 struct ControlClientTests {
 
     // MARK: - Fixtures
 
-    /// A discovery file written the way a real instance writes one: JSON on disk, decoded through
-    /// the same path the CLI uses. Constructing an `Endpoint` in memory would skip the decode, and
-    /// the decode is where a hostile value gets in.
-    private func writeDiscoveryFile(
-        in directory: URL,
-        port: Int,
-        pid: Int,
-        baseURL: String,
-        token: String = "not-a-real-token"
-    ) throws -> URL {
+    /// A discovered instance, in the shape `ControlEndpointDiscovery.discover` hands back: the
+    /// public initialiser derives `baseURL` from the port, exactly as a genuine advertisement
+    /// carries it.
+    private func discovered(port: Int = 8787, token: String? = "not-a-real-token") -> ControlEndpoint {
+        ControlEndpoint(port: port, pid: 1, mode: "app", token: token)
+    }
+
+    // MARK: - An isolated run
+
+    /// The CLI resolves the discovery file through `ControlEndpointDiscovery`, so `MIMIC_CONTROL_FILE`
+    /// reaches it by construction — and this is the case that regresses if the CLI ever grows a
+    /// reader of its own again. The old copy searched only the two Application Support paths, so an
+    /// isolated run's `mimic` found no file (or, worse, a developer's real one), sent no token, and
+    /// was refused by every route while `mimic app start` still looked fine.
+    @Test("Discovery reads the file MIMIC_CONTROL_FILE names — destination and credential together")
+    func discoveryHonoursTheRelocatedFile() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mimic-relocated-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent(ControlEndpointFileReader.fileName)
+
+        let url = directory.appendingPathComponent(ControlEndpointDiscovery.fileName)
+        // Written as JSON and decoded by the reader, so the endpoint arrives the way a real one
+        // does. The pid is this process, so the liveness check is the real one.
         let json = """
         {
           "apiVersion": "\(ControlAPI.version)",
-          "port": \(port),
-          "pid": \(pid),
+          "port": 18787,
+          "pid": \(ProcessInfo.processInfo.processIdentifier),
           "mode": "headless",
-          "baseURL": "\(baseURL)",
-          "token": "\(token)"
+          "baseURL": "http://127.0.0.1:18787",
+          "token": "isolated-run-token"
         }
         """
         try Data(json.utf8).write(to: url)
-        return url
-    }
 
-    private func temporaryDirectory(_ label: String) -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("mimic-\(label)-\(UUID().uuidString)", isDirectory: true)
-    }
-
-    // MARK: - Where the token is allowed to go
-
-    /// The defect this file was opened for. Anything that can write the discovery file could name any
-    /// host it liked in `baseURL`, and the resolver handed that string straight to `URL(string:)` —
-    /// so the next `mimic` command put `X-Mimic-Token` in a header addressed to whatever the file
-    /// chose, with `port` and `pid` sitting beside it still looking local.
-    @Test("A tampered baseURL in a discovery file cannot redirect the token off loopback")
-    func tamperedBaseURLCannotRedirect() throws {
-        let directory = temporaryDirectory("tampered")
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        // The current process, so the liveness check is the real one and the file is not skipped for
-        // an unrelated reason.
-        let url = try writeDiscoveryFile(
-            in: directory,
-            port: 8787,
-            pid: Int(ProcessInfo.processInfo.processIdentifier),
-            baseURL: "http://evil.example:80"
+        let client = try ControlClient.discover(
+            environment: [ControlEndpointDiscovery.pathEnvironmentKey: url.path],
+            timeout: 1
         )
-
-        let discovered = try #require(ControlEndpointFileReader.discover(searchURLs: [url]))
-        // The field still decodes as written — the fix is not that the value is scrubbed, it is that
-        // nothing routes on it.
-        #expect(discovered.baseURL == "http://evil.example:80")
-
-        let resolved = try #require(ControlEndpointFileReader.resolveBaseURL(
-            explicit: nil,
-            environment: [:],
-            discovered: discovered
-        ))
-        #expect(resolved.absoluteString == "http://127.0.0.1:8787")
-    }
-
-    /// A host that is loopback-shaped but not loopback is the same attack with better manners:
-    /// `127.0.0.1.evil.example` reads as local at a glance and resolves to whatever its owner wants.
-    @Test("A loopback-looking hostname in the file is ignored just as completely")
-    func loopbackShapedHostIsIgnored() throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "headless",
-            baseURL: "http://127.0.0.1.evil.example:8787",
-            token: "not-a-real-token"
-        )
-
-        let resolved = try #require(ControlEndpointFileReader.resolveBaseURL(
-            explicit: nil,
-            environment: [:],
-            discovered: discovered
-        ))
-        #expect(resolved.absoluteString == "http://127.0.0.1:8787")
-    }
-
-    // MARK: - Resolution order
-
-    /// Always pass `environment:` explicitly. Both resolvers default it to the real process
-    /// environment, so a test that omits it passes or fails depending on whether the developer
-    /// running it happens to have `MIMIC_CONTROL_URL` exported.
-    @Test("An explicit URL beats the environment, which beats the discovery file")
-    func resolutionOrder() {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 1111,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://evil.example",
-            token: "not-a-real-token"
-        )
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            explicit: "http://127.0.0.1:3333",
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:3333")
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:2222")
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            environment: [ControlAPI.portEnvironmentKey: "4444"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:4444")
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            environment: [:],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:1111")
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(environment: [:], discovered: nil) == nil)
-    }
-
-    /// `export MIMIC_CONTROL_URL=` in a shell profile sets the variable to the empty string rather
-    /// than unsetting it, and a caller in that shell must still find the running instance instead of
-    /// being told nothing is there.
-    @Test("An exported-but-empty override falls through instead of resolving to nothing")
-    func emptyOverridesAreSkipped() {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 1111,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:1111",
-            token: "not-a-real-token"
-        )
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            environment: [ControlAPI.urlEnvironmentKey: ""],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:1111")
-
-        #expect(ControlEndpointFileReader.resolveBaseURL(
-            environment: [ControlAPI.portEnvironmentKey: "not-a-number"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:1111")
+        #expect(client.baseURL.absoluteString == "http://127.0.0.1:18787")
+        #expect(client.token == "isolated-run-token")
     }
 
     @Test("An explicit --url is what the client ends up talking to")
@@ -180,82 +74,6 @@ struct ControlClientTests {
         #expect(client.baseURL.absoluteString == "http://127.0.0.1:9911")
     }
 
-    // MARK: - Liveness
-
-    @Test("A discovery file left by a crashed instance is skipped rather than dialled")
-    func staleFileIsSkipped() throws {
-        let directory = temporaryDirectory("stale")
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let url = try writeDiscoveryFile(in: directory, port: 8787, pid: 999_999, baseURL: "http://127.0.0.1:8787")
-
-        #expect(ControlEndpointFileReader.discover(searchURLs: [url], isProcessAlive: { _ in false }) == nil)
-        #expect(ControlEndpointFileReader.discover(searchURLs: [url], isProcessAlive: { _ in true }) != nil)
-    }
-
-    @Test("The current process reads as alive; pid 0 and a negative pid never do")
-    func livenessCheck() {
-        #expect(ControlEndpointFileReader.isProcessAlive(Int(ProcessInfo.processInfo.processIdentifier)))
-        #expect(ControlEndpointFileReader.isProcessAlive(0) == false)
-        #expect(ControlEndpointFileReader.isProcessAlive(-1) == false)
-    }
-
-    @Test("A file that is not a discovery file is stepped over, not fatal")
-    func unreadableFileIsSkipped() throws {
-        let directory = temporaryDirectory("garbage")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let garbage = directory.appendingPathComponent("control.json")
-        try Data("not json".utf8).write(to: garbage)
-        let good = try writeDiscoveryFile(
-            in: directory.appendingPathComponent("second", isDirectory: true),
-            port: 8787,
-            pid: Int(ProcessInfo.processInfo.processIdentifier),
-            baseURL: "http://127.0.0.1:8787"
-        )
-
-        #expect(ControlEndpointFileReader.discover(searchURLs: [garbage]) == nil)
-        #expect(ControlEndpointFileReader.discover(searchURLs: [garbage, good])?.port == 8787)
-    }
-
-    @Test("The sandboxed container is searched before the plain Application Support path")
-    func searchOrderPrefersTheAppContainer() {
-        let urls = ControlEndpointFileReader.searchURLs(homeDirectory: URL(fileURLWithPath: "/Users/test"))
-        #expect(urls.count == 2)
-        #expect(urls[0].path.contains("Library/Containers/devxa.Mimic"))
-        #expect(urls[1].path.contains("Library/Application Support/devxa.Mimic"))
-        #expect(urls.allSatisfy { $0.lastPathComponent == ControlEndpointFileReader.fileName })
-    }
-
-    // MARK: - Tokens
-
-    /// The environment wins so a caller who reached the instance through `MIMIC_CONTROL_URL` — a
-    /// forwarded port, a container — can supply the matching token the same way.
-    @Test("The environment's token beats the file's, and an empty one is not a token")
-    func tokenResolution() {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "from-the-file"
-        )
-
-        #expect(ControlEndpointFileReader.resolveToken(
-            environment: [ControlAPI.tokenEnvironmentKey: "from-the-environment"],
-            discovered: discovered
-        ) == "from-the-environment")
-
-        #expect(ControlEndpointFileReader.resolveToken(environment: [:], discovered: discovered) == "from-the-file")
-        #expect(ControlEndpointFileReader.resolveToken(
-            environment: [ControlAPI.tokenEnvironmentKey: ""],
-            discovered: discovered
-        ) == "from-the-file")
-        #expect(ControlEndpointFileReader.resolveToken(environment: [:], discovered: nil) == nil)
-    }
-
     // MARK: - The destination and the credential, decided together
 
     /// The defect the two resolvers had between them.
@@ -269,7 +87,9 @@ struct ControlClientTests {
     /// `baseURL` a discovery file names, for exactly this reason.
     ///
     /// `ControlClient.discover` is where the two meet, so that is what is driven: a hostile `--url`
-    /// with a real local discovery file supplied alongside it.
+    /// with a real local discovery file supplied alongside it. The predicate itself —
+    /// `namesDiscoveredInstance`, both halves required — has its own cases in
+    /// `ControlEndpointDiscoveryTests`; what is pinned here is that this client consults it.
     @Test(
         "A --url that is not the discovered instance carries no token",
         arguments: [
@@ -288,20 +108,11 @@ struct ControlClientTests {
         ]
     )
     func aForeignURLCarriesNoToken(explicitURL: String) throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "not-a-real-token"
-        )
-
         let client = try ControlClient.discover(
             explicitURL: explicitURL,
             environment: [:],
             timeout: 1,
-            discovered: discovered
+            discovered: discovered()
         )
         #expect(client.token == nil, "\(explicitURL) was handed the local instance's token")
     }
@@ -313,20 +124,11 @@ struct ControlClientTests {
         arguments: ["http://127.0.0.1:8787", "http://localhost:8787"]
     )
     func theDiscoveredInstanceCarriesItsToken(explicitURL: String) throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "not-a-real-token"
-        )
-
         let client = try ControlClient.discover(
             explicitURL: explicitURL,
             environment: [:],
             timeout: 1,
-            discovered: discovered
+            discovered: discovered()
         )
         #expect(client.token == "not-a-real-token")
     }
@@ -335,16 +137,7 @@ struct ControlClientTests {
     /// discovered instance, so it carries the discovered token.
     @Test("Discovery with no explicit URL carries the discovered token")
     func discoveryCarriesItsOwnToken() throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "not-a-real-token"
-        )
-
-        let client = try ControlClient.discover(environment: [:], timeout: 1, discovered: discovered)
+        let client = try ControlClient.discover(environment: [:], timeout: 1, discovered: discovered())
         #expect(client.baseURL.absoluteString == "http://127.0.0.1:8787")
         #expect(client.token == "not-a-real-token")
     }
@@ -354,64 +147,13 @@ struct ControlClientTests {
     /// caller naming a credential rather than this CLI guessing one.
     @Test("An explicitly supplied token goes wherever the caller points")
     func anExplicitTokenIsNotSecondGuessed() throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "from-the-file"
-        )
-
         let client = try ControlClient.discover(
             explicitURL: "http://forwarded.example:8787",
             environment: [ControlAPI.tokenEnvironmentKey: "from-the-environment"],
             timeout: 1,
-            discovered: discovered
+            discovered: discovered(token: "from-the-file")
         )
         #expect(client.token == "from-the-environment")
-    }
-
-    /// The predicate itself, since it is what both halves above turn on. Both conditions have to
-    /// hold — a loopback host *and* the port the file advertised — and a file that was never read
-    /// names no instance at all.
-    @Test("Naming the discovered instance means loopback host and advertised port, together")
-    func namesDiscoveredInstanceRequiresBoth() throws {
-        let discovered = ControlEndpointFileReader.Endpoint(
-            apiVersion: ControlAPI.version,
-            port: 8787,
-            pid: 1,
-            mode: "app",
-            baseURL: "http://127.0.0.1:8787",
-            token: "not-a-real-token"
-        )
-        func url(_ text: String) throws -> URL { try #require(URL(string: text)) }
-
-        #expect(ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8787"), discovered))
-        #expect(ControlEndpointFileReader.namesDiscoveredInstance(try url("http://LOCALHOST:8787"), discovered))
-        // Written with brackets, because that is the only legal spelling of an IPv6 literal in a URL.
-        // `URL.host` hands back `::1` on some platforms and `[::1]` on others, which is why the
-        // reader's set holds both and why this case is worth having rather than assuming.
-        let ipv6 = try #require(
-            URL(string: "http://[::1]:8787"),
-            "this platform's URL parser rejected an IPv6 literal"
-        )
-        #expect(ControlEndpointFileReader.namesDiscoveredInstance(ipv6, discovered))
-
-        // Right host, wrong port.
-        #expect(
-            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8788"), discovered)
-                == false
-        )
-        // Right port, wrong host.
-        #expect(
-            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://example.test:8787"), discovered)
-                == false
-        )
-        // Nothing was discovered, so nothing is named.
-        #expect(
-            ControlEndpointFileReader.namesDiscoveredInstance(try url("http://127.0.0.1:8787"), nil) == false
-        )
     }
 
     // MARK: - What a refusal costs

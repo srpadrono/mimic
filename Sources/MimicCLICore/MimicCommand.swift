@@ -202,7 +202,7 @@ struct AppCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            guard let endpoint = ControlEndpointFileReader.discover() else {
+            guard let endpoint = ControlEndpointDiscovery.discover() else {
                 throw CLIFailure.noInstance
             }
             // A pid in a file is not evidence — see `AppLauncher.confirmRunningInstance`. Nothing is

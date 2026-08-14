@@ -59,7 +59,8 @@ struct ImportFeatureRenderingTests {
         isSelected: Bool = true,
         isDuplicate: Bool = false,
         bodySizeBytes: Int = 128,
-        bodySizeExceedsLimit: Bool = false
+        bodySizeExceedsLimit: Bool = false,
+        bodyIsBinary: Bool = false
     ) -> ImportCandidate {
         ImportCandidate(
             id: UUID(),
@@ -70,10 +71,11 @@ struct ImportFeatureRenderingTests {
             suggestedGroupTag: "Users",
             statusCode: 200,
             responseHeaders: ["Content-Type": "application/json"],
-            responseBody: bodySizeExceedsLimit ? nil : #"{"ok":true}"#,
+            responseBody: bodySizeExceedsLimit || bodyIsBinary ? nil : #"{"ok":true}"#,
             responseContentType: .json,
             bodySizeBytes: bodySizeBytes,
             bodySizeExceedsLimit: bodySizeExceedsLimit,
+            bodyIsBinary: bodyIsBinary,
             isDuplicate: isDuplicate
         )
     }
@@ -427,8 +429,9 @@ struct ImportFeatureRenderingTests {
             ) { _ in }
         )
 
-        // One row per branch of `ImportCandidateRow.flag`: a duplicate, an oversized body, and the
-        // ordinary row whose `else` draws `Color.clear` to hold the 92pt column open.
+        // One row per branch of `ImportCandidateRow.flag`: a duplicate, a binary body, an oversized
+        // body, and the ordinary row whose `else` draws `Color.clear` to hold the 92pt column open.
+        // The binary row also exercises the `import.binaryBodyWarning` footer beside the size one.
         render(
             ImportReviewHarness(
                 candidates: [
@@ -440,6 +443,7 @@ struct ImportFeatureRenderingTests {
                         bodySizeBytes: 1_200_000,
                         bodySizeExceedsLimit: true
                     ),
+                    makeCandidate(method: .get, path: "/api/v1/logo.png", bodyIsBinary: true),
                 ],
                 onImport: {}
             )

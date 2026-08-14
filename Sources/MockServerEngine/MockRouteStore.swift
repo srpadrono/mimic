@@ -47,9 +47,12 @@ actor MockRouteStore {
     /// would have to be remembered across that gap and cleared on the far side, while a count is
     /// simply read by whatever push happens to go out next and stays correct if several do.
     ///
-    /// Compared with `>` against a high-water mark rather than with `!=`, because pushes reach this
-    /// actor from unstructured tasks and can land out of order: a late push carrying an older epoch
-    /// must not rewind a run a newer one has already started.
+    /// Compared with `>` against a high-water mark rather than with `!=`, because this actor cannot
+    /// assume its callers serialize. `MockServerRuntime.updateMocks` chains its pushes, so the
+    /// production sequence arrives in dispatch order — but that is the caller's discipline, not this
+    /// API's contract: `updateConfiguration` is public, and a push reaching this actor from an
+    /// unstructured task can still land after a newer one. A late push carrying an older epoch must
+    /// not rewind a run a newer one has already started, and must not lower the mark.
     ///
     /// `activationEpoch: nil` means the caller did not say, and is treated as a re-push — which is
     /// what the three-argument overload on `MockServerEngine` passes.

@@ -346,19 +346,10 @@ struct ScenarioRow: View {
             // Coloured text, and a fill only once the code is one you would want to stop on. This
             // list is a column of scenarios, and most of them answer 200: filling every row put a
             // block of green down the panel that carried no information, because nothing in it was
-            // any louder than anything else. Same rule, and the same `>= 400` seam, as the traffic
-            // list in `EndpointTrafficList`.
-            Text("\(scenario.statusCode)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.httpStatusColor(for: scenario.statusCode))
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background {
-                    if scenario.statusCode >= 400 {
-                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                            .fill(DSColors.httpStatusColor(for: scenario.statusCode).opacity(0.12))
-                    }
-                }
+            // any louder than anything else. `DSStatusPill` carries that `>= 400` seam for every
+            // panel at once — this row used to hand-draw it, and was the one site paying the fill's
+            // horizontal inset on unfilled codes too.
+            DSStatusPill(statusCode: scenario.statusCode)
 
             if isActive {
                 Text("Active")

@@ -9,16 +9,42 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`MIMIC_CONTROL_FILE` relocates the control plane's discovery file**, so a CI job or an end-to-end
   script can stand an instance up without writing over — or being discovered through — a developer's
-  own `control.json`. The app honours it on both sides: it writes there and searches *only* there,
-  because the override replaces the default search list rather than joining the front of it, and the
-  parent directory is created `0700` on that path too. `mimic` does not read it yet — it links no
-  `ControlPlane` and carries its own copy of the discovery reader — so an isolated run also needs
-  `MIMIC_CONTROL_PORT` (or `MIMIC_CONTROL_URL`) for the destination **and `MIMIC_CONTROL_TOKEN` for
-  the credential**. The port variables carry a destination and no token, and every route — `/health`
-  included — answers `401` without one.
+  own `control.json`. Honoured by both sides: the instance writes there, `mimic` searches *only*
+  there — the override replaces the default search list rather than joining the front of it — and
+  the parent directory is created `0700` on that path too. An isolated run needs only this and
+  `MIMIC_DATABASE_PATH`; the destination and the `X-Mimic-Token` credential both come out of the
+  relocated file. (While this entry sat unreleased the CLI briefly did *not* read the variable — it
+  carried its own copy of the discovery reader, so a run that moved the file also had to export a
+  destination and `MIMIC_CONTROL_TOKEN` by hand or be answered `401` on every route.) The discovery
+  reader is now implemented once, as `ControlEndpointDiscovery` in the `Domain` module — search
+  paths, the override, pid liveness, base-URL and token resolution, and the loopback token-pairing
+  rule — with `ControlPlane` keeping only the write side and delegating its path resolution there,
+  so the file a run writes and the file a run reads cannot drift apart again.
 
 ### Fixed
 
+- **Every store write in the app now joins one ordered chain.** The debounced autosave, the explicit
+  save and the close/switch flush previously raced the chained lifecycle writes, so an overtaken
+  save could re-insert a deleted project; `mimic project duplicate` of the open project omitted the
+  last half-second of edits; importing over the open project was overwritten by the stale session's
+  next autosave; and quitting just after `mimic project delete` could resurrect the deleted project
+  — the shutdown flush captured the project before draining the chain and saved it after. Duplicate
+  now reads the session copy when the reference names the open project, import over the open project
+  reconciles the session (the superseded debounce is dropped), the shutdown flush re-reads after
+  draining, and the quit machinery is under automated test for the first time.
+- **A stale configuration push can no longer overtake a newer one, and a stop during the bind window
+  is no longer dropped.** Engine pushes were independent unstructured tasks — whichever landed last
+  won, so a deleted endpoint could go on being served until the next edit; they now chain, each
+  awaiting its predecessor. And `stopServer()` acted only on `.running`, so `mimic server stop`
+  inside the window where the bind had not resolved reported a stop that never happened; a
+  mid-start stop is now remembered and applied when the bind completes.
+- **HAR import no longer imports a binary body as its base64 spelling.** A base64 body whose decoded
+  bytes are not valid UTF-8 — every image, font and gzipped asset in a real capture — fell through
+  to the literal base64 string as the mock's body, pre-selected and unflagged; the decode was also
+  strict, so newline-wrapped base64 (which real exporters write at MIME column widths) took the
+  same path even when the body underneath was text. Wrapped base64 now decodes; a body that cannot
+  be text imports without one and the candidate is flagged in the review sheet. Text bodies are
+  still reproduced verbatim.
 - **Duplicating a project created nothing, unless the project was empty.** `endpoint.id`,
   `scenario.id`, `journey.id` and `journeyStep.id` are each a `PRIMARY KEY` on their own table —
   unique across the database, not scoped to a project — and both hosts built the copy by wrapping a
@@ -138,8 +164,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a drain awaited from there is a hop onto an actor nothing can service. Draining from both paths is
   what a first pass at this did, and it deadlocked every quit against its own flush: the full
   two-second deadline burned, then the edit dropped, worse than the defect it was fixing and green in
-  CI, because nothing in the suite exercises either quit path. The path that cannot drain now says so
-  rather than pretending. The real fix is `applicationShouldTerminate` returning `.terminateLater`,
+  CI, because — at the time — nothing in the suite exercised either quit path;
+  `ControlPlaneCoordinatorTests` now drives both, and holds the blocking one to the deadline. The
+  path that cannot drain still says so rather than pretending. The real fix is `applicationShouldTerminate` returning `.terminateLater`,
   which keeps the runloop alive instead of blocking the thread that has to run the work; it changes
   the app's termination contract and wants a machine that can actually quit the app to verify it.
 

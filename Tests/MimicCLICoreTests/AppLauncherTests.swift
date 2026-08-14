@@ -18,15 +18,8 @@ import Testing
 /// Port 8911 rather than the default 8787 on purpose: `StubInstance` below reports 8787 as *its*
 /// base URL, so a refusal naming 8911 is a refusal that read the port out of the file rather than
 /// out of the transport it happened to be handed.
-private func discoveredEndpoint(pid: Int, port: Int = 8911) -> ControlEndpointFileReader.Endpoint {
-    ControlEndpointFileReader.Endpoint(
-        apiVersion: ControlAPI.version,
-        port: port,
-        pid: pid,
-        mode: "headless",
-        baseURL: "http://127.0.0.1:\(port)",
-        token: "not-a-real-token"
-    )
+private func discoveredEndpoint(pid: Int, port: Int = 8911) -> ControlEndpoint {
+    ControlEndpoint(port: port, pid: pid, mode: "headless", token: "not-a-real-token")
 }
 
 /// What an instance answers `.state` with. Only `pid` is under test here; the rest is present
@@ -124,7 +117,7 @@ private final class RecordedSignals: @unchecked Sendable {
 ///
 /// `mimic app stop` reads a pid out of `control.json` and signals it, and that file outlives the
 /// process that wrote it. The liveness check cannot settle whether it is stale:
-/// `ControlEndpointFileReader.isProcessAlive` returns `true` on `EPERM`, which means "a process with
+/// `ControlEndpointDiscovery.isProcessAlive` returns `true` on `EPERM`, which means "a process with
 /// that id exists and is *not* yours", so a file left by a crashed instance naming a pid the kernel
 /// has since recycled reads as live. `AppLauncher.confirmRunningInstance` is what stands between
 /// that file and `kill(2)` — and nothing in `Tests/` exercised it. What the `App launching` suite in
@@ -270,8 +263,9 @@ struct InstanceConfirmationTests {
     /// `SIGTERM` and not `SIGKILL` is a published guarantee, not an implementation detail: docs/CLI.md
     /// says pending saves flush, and they only do because the app gets a signal it can handle.
     ///
-    /// The pid is the implausible one `ControlClientTests` already writes for a process that is not
-    /// there, and that is deliberate: this is the only case in the file that asks for a delivery, so
+    /// The pid is the implausible one `ControlEndpointDiscoveryTests` already writes for a process
+    /// that is not there, and that is deliberate: this is the only case in the file that asks for a
+    /// delivery, so
     /// if the override ever stopped being consulted the fallback must not be able to find anything.
     /// A pid nothing owns makes `terminate` throw — this test red, nothing on the machine touched.
     @Test("A confirmed pid is sent SIGTERM, and nothing else is")
@@ -291,7 +285,7 @@ struct InstanceConfirmationTests {
     /// The half it could not assert is this one — that the delivery never happened — because the
     /// delivery *was* `kill(2)`, so a guard that had stopped firing would have been reported by the
     /// signal rather than by the assertion. A non-positive pid is not a process id, which is why
-    /// `ControlEndpointFileReader.isProcessAlive` refuses one too.
+    /// `ControlEndpointDiscovery.isProcessAlive` refuses one too.
     @Test("A pid that is not a pid is refused before anything is signalled", arguments: [0, -1, -5])
     func anInvalidPidIsNeverSignalled(pid: Int) {
         let signals = RecordedSignals()
@@ -308,26 +302,26 @@ struct InstanceConfirmationTests {
     // MARK: Before there is a pid at all
 
     /// The stop path's first two refusals are not `confirmRunningInstance`'s. They happen a line
-    /// earlier, in `AppCommand.Stop`'s `guard let endpoint = ControlEndpointFileReader.discover()`: a
+    /// earlier, in `AppCommand.Stop`'s `guard let endpoint = ControlEndpointDiscovery.discover()`: a
     /// file that is not there and a file whose process is gone both leave that `guard` with nothing,
     /// so there is no pid to confirm and none to signal, and the run stops at `noInstance` — exit 3.
     ///
     /// Asserted on the reader rather than from argv because `Stop` calls `discover()` with no
-    /// arguments and there is no injection point on that call. `MIMIC_CONTROL_FILE` relocates the
-    /// *control plane's* discovery file and `MimicCLICore`'s copy of this reader does not honour it
-    /// (AGENTS.md records that as an open item), so driving these two from argv would mean writing a
-    /// fixture into the path a real instance uses, or moving `HOME` out from under a suite that runs
-    /// in parallel. `ControlClientTests.staleFileIsSkipped` covers the same reader call as *discovery*
-    /// behaviour; what is named here is its consequence for `mimic app stop`.
+    /// arguments, so it reads the *process* environment — honouring `MIMIC_CONTROL_FILE` now that
+    /// the reader is `Domain`'s — and driving these two from argv would mean mutating that
+    /// environment under a suite that runs in parallel, or writing a fixture into the path a real
+    /// instance uses. `ControlEndpointDiscoveryTests.staleFileIsSkipped` in `DomainTests` covers the
+    /// same reader call as *discovery* behaviour; what is named here is its consequence for
+    /// `mimic app stop`.
     @Test("A missing file and a stale file both leave the stop path with no pid at all")
     func nothingToSignalIsNotSomethingToSignal() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("mimic-stop-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent(ControlEndpointFileReader.fileName)
+        let url = directory.appendingPathComponent(ControlEndpointDiscovery.fileName)
 
-        #expect(ControlEndpointFileReader.discover(searchURLs: [url]) == nil, "no file, no pid")
+        #expect(ControlEndpointDiscovery.discover(searchURLs: [url]) == nil, "no file, no pid")
 
         // Written as JSON and decoded by the reader, so the pid arrives the way a real one does.
         let json = """
@@ -344,10 +338,10 @@ struct InstanceConfirmationTests {
 
         // The liveness check is injected because a test cannot name a pid it can guarantee is dead:
         // the kernel is free to hand 4242 to something between the file being written and read.
-        let dead = ControlEndpointFileReader.discover(searchURLs: [url], isProcessAlive: { _ in false })
+        let dead = ControlEndpointDiscovery.discover(searchURLs: [url], isProcessAlive: { _ in false })
         #expect(dead == nil, "a file whose process is gone still handed the stop path a pid")
 
-        let alive = ControlEndpointFileReader.discover(searchURLs: [url], isProcessAlive: { _ in true })
+        let alive = ControlEndpointDiscovery.discover(searchURLs: [url], isProcessAlive: { _ in true })
         #expect(alive?.pid == 4242, "the file has to be readable, or the case above proves nothing")
 
         #expect(CLIFailure.noInstance.exitCode == 3)

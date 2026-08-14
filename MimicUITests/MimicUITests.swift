@@ -307,10 +307,13 @@ struct RequestLogDrawerPage {
     /// Button, identifier: 'requestLog-110693C9…', label: 'Unmatched'
     /// ```
     ///
-    /// Clicking any one of them selects its row, which is why `firstLogRow` works. Reaching for two
-    /// *different* rows must go through ``distinctRows(limit:)`` — `element(boundBy: 0)` and
-    /// `element(boundBy: 1)` land in the same row, and a ⌘-click on the second then toggles the
-    /// first back off, which reads as a selection that refuses to grow.
+    /// One composed element per logged row. `RequestLogDrawerView` collapses each row with
+    /// `.accessibilityElement(children: .ignore)` and a composed spoken label ("GET /api/orders,
+    /// status 200"), so a row is a single element carrying the `requestLog-<uuid>` identifier —
+    /// which may realize as a Button, hence `.any` rather than a cell query. This used to say the
+    /// opposite ("several per row … six elements for every logged request"), from before the rows
+    /// composed their labels; ``distinctRows(limit:)``'s dedupe is a no-op now and kept only as
+    /// safety against the realization changing again.
     var allRowCells: XCUIElementQuery {
         app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-"))
@@ -331,9 +334,10 @@ struct RequestLogDrawerPage {
 
     /// Waits for the log to hold at least `count` distinct rows.
     ///
-    /// Counts rows rather than elements — the cell fan-out above means a single request already
-    /// satisfies `allRowCells.count >= 2`, so waiting on that would return before the second request
-    /// had arrived and the test would race the server.
+    /// Counts distinct identifiers rather than raw elements. With the rows composed into one element
+    /// each the two counts agree today, but this helper predates that — rows used to fan out into
+    /// several elements, and a single request satisfied `allRowCells.count >= 2` — and counting
+    /// distinct ids is the version that stays correct whichever way the realization goes.
     func waitForRowCount(_ count: Int, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

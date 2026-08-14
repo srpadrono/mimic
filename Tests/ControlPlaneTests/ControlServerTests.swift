@@ -679,91 +679,25 @@ actor LoopbackTestHost: ControlHost {
     }
 }
 
-@Suite("Endpoint discovery")
+
+/// The **write half** of the discovery-file contract: publication, mode discipline, and the
+/// writer's half of the `MIMIC_CONTROL_FILE` override.
+///
+/// The read half — search order, override-replaces-the-list, tilde expansion, the tampered
+/// `baseURL`, pid liveness, and the token-pairing rules — lives in `Domain` as
+/// `ControlEndpointDiscovery`, and its suite is `ControlEndpointDiscoveryTests` in `DomainTests`.
+/// This module used to carry a reader of its own and a suite asserting it, and every one of those
+/// assertions ran against code no production binary called; what stays here is what only the writer
+/// can regress. Where a case below needs to *read* a file back, it reads it through the Domain
+/// reader, because that is the one reader that exists — the cross-check that writer and reader mean
+/// the same bytes and the same path.
+@Suite("Endpoint discovery file — the write side")
 struct ControlEndpointFileTests {
 
-    @Test("An explicit URL beats the environment, which beats a discovery file")
-    func resolutionOrder() throws {
-        let discovered = ControlEndpoint(port: 1111, pid: 1, mode: "app")
-
-        #expect(ControlEndpointFile.resolveBaseURL(
-            explicit: "http://127.0.0.1:3333",
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:3333")
-
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [ControlAPI.urlEnvironmentKey: "http://127.0.0.1:2222"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:2222")
-
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [ControlAPI.portEnvironmentKey: "4444"],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:4444")
-
-        #expect(ControlEndpointFile.resolveBaseURL(
-            environment: [:],
-            discovered: discovered
-        )?.absoluteString == "http://127.0.0.1:1111")
-
-        #expect(ControlEndpointFile.resolveBaseURL(environment: [:], discovered: nil) == nil)
-    }
-
-    /// `environment:` is passed explicitly, and every case below does the same. It defaults to the
-    /// real process environment, so a developer who happens to have `MIMIC_CONTROL_FILE` exported —
-    /// which `Scripts/run_cli_e2e.sh` sets, and a shell keeps — would otherwise get one path back here
-    /// and a red suite that has nothing to do with the code.
-    @Test("The sandboxed container is searched before the plain Application Support path")
-    func searchOrderPrefersTheAppContainer() {
-        let urls = ControlEndpointFile.searchURLs(
-            homeDirectory: URL(fileURLWithPath: "/Users/test"),
-            environment: [:]
-        )
-        #expect(urls.count == 2)
-        #expect(urls[0].path.contains("Library/Containers/devxa.Mimic"))
-        #expect(urls[1].path.contains("Library/Application Support/devxa.Mimic"))
-        #expect(urls.allSatisfy { $0.lastPathComponent == "control.json" })
-    }
-
-    // MARK: - MIMIC_CONTROL_FILE
-
-    /// The override exists because the default path is *computed*, so two launches of the app bundle
-    /// resolve to the same file: an end-to-end script's instance overwrites the developer's
-    /// advertisement and removes it on the way out, leaving a running Mimic no `mimic` command can
-    /// find. `Scripts/run_cli_e2e.sh` sets it for exactly that reason and asserts the file appears.
-    ///
-    /// It **replaces** the search list rather than joining the front of it, and that is the assertion
-    /// that matters most: prepending would let a run whose own instance has not advertised yet fall
-    /// through to the developer's real file and drive that instance instead — a failure that looks
-    /// exactly like a passing test.
-    @Test("The override replaces the search list rather than being tried first")
-    func overrideReplacesTheSearchList() {
-        let override = "/tmp/mimic-e2e/control.json"
-        let urls = ControlEndpointFile.searchURLs(
-            homeDirectory: URL(fileURLWithPath: "/Users/test"),
-            environment: [ControlEndpointFile.pathEnvironmentKey: override]
-        )
-
-        #expect(urls.map(\.path) == [override])
-        #expect(urls.contains { $0.path.contains("Library/Application Support/devxa.Mimic") } == false)
-    }
-
-    /// An exported-but-unassigned variable — `MIMIC_CONTROL_FILE="$WORK/control.json"` in a script
-    /// where `WORK` was never set — must read as "not overridden" rather than as a path nobody chose.
-    /// `DatabaseFactory.resolveDatabaseURL` treats an empty `MIMIC_DATABASE_PATH` the same way.
-    @Test("An empty override falls back to the real search list")
-    func emptyOverrideIsIgnored() {
-        let urls = ControlEndpointFile.searchURLs(
-            homeDirectory: URL(fileURLWithPath: "/Users/test"),
-            environment: [ControlEndpointFile.pathEnvironmentKey: ""]
-        )
-        #expect(urls.count == 2)
-    }
-
-    /// The reader and the writer have to mean the same file, which is the whole point of threading one
-    /// environment through both: a process that advertises at the override and then computes the
-    /// *default* path on the way out would delete the developer's advertisement and leave its own.
+    /// The reader and the writer have to mean the same file, which is the whole point of resolving
+    /// the override in one place (`ControlEndpointDiscovery.overrideURL`): a process that advertises
+    /// at the override and then computes the *default* path on the way out would delete the
+    /// developer's advertisement and leave its own.
     @Test("Writing, discovering and removing all follow the override together")
     func overrideIsHonouredByWriteDiscoverAndRemove() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -774,7 +708,7 @@ struct ControlEndpointFileTests {
         // that names the override names a path inside a directory it has just `mktemp -d`-ed and then
         // a subdirectory that does not exist yet.
         let target = directory.appendingPathComponent("nested").appendingPathComponent("control.json")
-        let environment = [ControlEndpointFile.pathEnvironmentKey: target.path]
+        let environment = [ControlEndpointDiscovery.pathEnvironmentKey: target.path]
 
         let resolved = try ControlEndpointFile.writeURL(environment: environment)
         #expect(resolved.path == target.path)
@@ -795,28 +729,15 @@ struct ControlEndpointFileTests {
         )
         #expect(mode.int16Value & 0o777 == 0o600, "mode was \(String(mode.int16Value, radix: 8))")
 
-        let discovered = try #require(ControlEndpointFile.discover(environment: environment))
+        let discovered = try #require(ControlEndpointDiscovery.discover(environment: environment))
         #expect(discovered == endpoint)
 
         ControlEndpointFile.remove(environment: environment)
         #expect(FileManager.default.fileExists(atPath: target.path) == false)
-        #expect(ControlEndpointFile.discover(environment: environment) == nil)
+        #expect(ControlEndpointDiscovery.discover(environment: environment) == nil)
     }
 
-    /// A tilde is what a person types when they name a path in a shell profile, and `URL(fileURLWithPath:)`
-    /// does not expand it — a literal `~` directory would be created in the working directory instead.
-    @Test("A tilde in the override is expanded")
-    func overrideExpandsTilde() {
-        let urls = ControlEndpointFile.searchURLs(
-            environment: [ControlEndpointFile.pathEnvironmentKey: "~/mimic/control.json"]
-        )
-        #expect(urls.count == 1)
-        #expect(urls[0].path.hasPrefix("/"))
-        #expect(urls[0].path.contains("~") == false)
-        #expect(urls[0].lastPathComponent == "control.json")
-    }
-
-    @Test("A discovery file round-trips and carries a usable base URL")
+    @Test("A discovery file round-trips through the Domain reader and carries a usable base URL")
     func fileRoundTrip() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("mimic-discovery-\(UUID().uuidString)", isDirectory: true)
@@ -831,12 +752,12 @@ struct ControlEndpointFileTests {
         )
         try ControlEndpointFile.write(endpoint, to: url)
 
-        let discovered = try #require(ControlEndpointFile.discover(searchURLs: [url]))
+        let discovered = try #require(ControlEndpointDiscovery.discover(searchURLs: [url]))
         #expect(discovered == endpoint)
         #expect(discovered.baseURL == "http://127.0.0.1:8787")
 
         ControlEndpointFile.remove(at: url)
-        #expect(ControlEndpointFile.discover(searchURLs: [url]) == nil)
+        #expect(ControlEndpointDiscovery.discover(searchURLs: [url]) == nil)
     }
 
     /// The file carries the instance's token, so its mode *is* the access control — and until this
@@ -1026,52 +947,5 @@ struct ControlEndpointFileTests {
             .components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")
-    }
-
-    /// A discovery file is a file on disk, and `baseURL` is a field in it. Trusting that field sends
-    /// the caller's `X-Mimic-Token` wherever the file says — so the host is derived, not read.
-    @Test("A tampered baseURL cannot redirect the CLI off the loopback")
-    func baseURLIsDerivedFromThePort() throws {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("mimic-tamper-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let url = directory.appendingPathComponent("control.json")
-        var endpoint = ControlEndpoint(
-            port: 8787,
-            pid: Int(ProcessInfo.processInfo.processIdentifier),
-            mode: "headless"
-        )
-        endpoint.baseURL = "http://evil.example:80"
-        try ControlEndpointFile.write(endpoint, to: url)
-
-        let discovered = try #require(ControlEndpointFile.discover(searchURLs: [url]))
-        let resolved = try #require(
-            ControlEndpointFile.resolveBaseURL(explicit: nil, environment: [:], discovered: discovered)
-        )
-        #expect(resolved.absoluteString == "http://127.0.0.1:8787")
-    }
-
-    @Test("A file left by a crashed instance is skipped instead of hanging the CLI")
-    func staleFileIsIgnored() throws {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("mimic-stale-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let url = directory.appendingPathComponent("control.json")
-        // A pid that is not running.
-        try ControlEndpointFile.write(ControlEndpoint(port: 8787, pid: 999_999, mode: "headless"), to: url)
-
-        #expect(ControlEndpointFile.discover(searchURLs: [url], isProcessAlive: { _ in false }) == nil)
-        #expect(ControlEndpointFile.discover(searchURLs: [url], isProcessAlive: { _ in true }) != nil)
-    }
-
-    @Test("The current process reads as alive, and pid 0 never does")
-    func livenessCheck() {
-        #expect(ControlEndpointFile.isProcessAlive(Int(ProcessInfo.processInfo.processIdentifier)))
-        #expect(ControlEndpointFile.isProcessAlive(0) == false)
-        #expect(ControlEndpointFile.isProcessAlive(-1) == false)
     }
 }

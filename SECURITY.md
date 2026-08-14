@@ -108,8 +108,10 @@ redacts with. It was not always: the importer carried its own narrower copy nami
 an imported `X-API-Key` was redacted out of a log the developer had already seen and copied into a
 mock that might be committed to a repository. The narrower list guarded the riskier path.
 
-**Response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands with the
-real token in it.
+**Text response bodies are imported verbatim.** A capture of an OAuth exchange therefore lands
+with the real token in it. (A binary body — an image, a font, a compressed payload — cannot be
+carried by a text mock body at all: the candidate imports without one and the review sheet flags
+it.)
 
 There used to be a redaction pass over imported bodies, and it was removed because it broke more than
 it protected. The key match was a substring, so `author`, `keywords`, `shipping`, `shopping`,

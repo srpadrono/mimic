@@ -573,6 +573,10 @@ final class AppState {
     /// only send `ProjectWorkspace.openProject` down its missing-project path and strike the entry
     /// from recents — and switching projects has to stop the server the same way every other switch
     /// does.
+    ///
+    /// A document whose id names the *open* project replaces the session copy too, superseding any
+    /// edit still sitting in the autosave debounce — the contract, and the two ways it used to
+    /// break, are written on `ProjectWorkspace.importProject`.
     func importProject(_ document: MockProject, activate: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }

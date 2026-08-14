@@ -7,6 +7,10 @@ enum ImportCandidateBuilder {
     /// - Parameter documentBasePath: The prefix the source document declares for every route in it,
     ///   exactly as written — Swagger 2's `basePath`, or the first entry of OpenAPI 3's `servers`.
     ///   `nil` for a HAR, whose entries carry whole URLs and no document-level prefix.
+    /// - Parameter binaryBodySizeBytes: The byte count of a captured body that was bytes rather
+    ///   than text, or `nil` when the body — if there is one — is text. Non-nil means the parser
+    ///   could not produce a `String` for the body at all, so the caller passes
+    ///   `responseBody: nil` beside it and the candidate arrives flagged ``ImportCandidate/bodyIsBinary``.
     /// - Parameter ledger: Every route this import has already accounted for. Passed `inout` because
     ///   a candidate claims its own route as it is built — see ``ImportRouteLedger``.
     static func makeCandidate(
@@ -18,6 +22,7 @@ enum ImportCandidateBuilder {
         statusCode: Int,
         responseHeaders: [String: String],
         responseBody: String?,
+        binaryBodySizeBytes: Int? = nil,
         responseContentType: Scenario.ContentType,
         graphqlOperation: String? = nil,
         ledger: inout ImportRouteLedger
@@ -26,7 +31,9 @@ enum ImportCandidateBuilder {
         // wrong to replay no matter which format it was read from, and one chokepoint means a future
         // importer cannot forget.
         let replayableHeaders = ImportHeaderPolicy.replayable(responseHeaders)
-        let bodySize = responseBody?.utf8.count ?? 0
+        // A binary body has no `String` form, so its size arrives separately — the review sheet
+        // still shows what the capture carried, even though no body can be imported from it.
+        let bodySize = binaryBodySizeBytes ?? responseBody?.utf8.count ?? 0
 
         // The route as Mimic will match it, and the route as the *document* wrote it. See
         // ``ImportPath``: the first carries the document's prefix, the second does not, because a
@@ -66,6 +73,7 @@ enum ImportCandidateBuilder {
             graphqlOperation: graphqlOperation,
             bodySizeBytes: bodySize,
             bodySizeExceedsLimit: bodySize > bodySizeLimit,
+            bodyIsBinary: binaryBodySizeBytes != nil,
             isDuplicate: isDuplicate
         )
     }

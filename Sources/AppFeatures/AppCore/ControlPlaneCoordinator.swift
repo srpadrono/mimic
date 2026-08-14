@@ -108,6 +108,16 @@ final class ControlPlaneCoordinator {
     private(set) var boundPort: Int?
     private(set) var startupError: String?
 
+    /// The two irreversible things a termination path does, injectable because the path is not
+    /// testable otherwise: exercising it for real means exiting the test runner and deleting the
+    /// developer's live discovery file, which is how this machinery shipped data loss twice with
+    /// zero automated coverage. Production never assigns these — the defaults *are* the production
+    /// behaviour, and `exitProcess`'s default never returns, which is what lets
+    /// `handleTerminationSignal` keep its "always ends" promise. A test's replacement returns, and
+    /// every call site is written to tolerate that.
+    var exitProcess: @MainActor @Sendable (Int32) -> Void = { exit($0) }
+    var removeDiscoveryFile: @MainActor @Sendable () -> Void = { ControlEndpointFile.remove() }
+
     func start(appState: AppState, repository: any ProjectRepository) {
         guard server == nil else { return }
 
@@ -117,8 +127,7 @@ final class ControlPlaneCoordinator {
         self.server = server
         // Held for the shutdown flush below, which needs to know what to write and where — and has to
         // know it before the signal arrives, because there is no time to go looking afterwards.
-        self.appState = appState
-        self.repository = repository
+        prepareShutdownFlush(appState: appState, repository: repository)
 
         // Before the port is bound, and deliberately outside the `Task` below.
         //
@@ -149,6 +158,16 @@ final class ControlPlaneCoordinator {
         }
     }
 
+    /// Wires the session and store the shutdown flush reads, and nothing else.
+    ///
+    /// Split from `start(appState:repository:)` so a test can drive the flush paths without binding
+    /// a control server or installing signal handlers — the seam the twice-shipped quit data loss
+    /// never had. `start` routes through it, so the two cannot wire different things.
+    func prepareShutdownFlush(appState: AppState, repository: any ProjectRepository) {
+        self.appState = appState
+        self.repository = repository
+    }
+
     /// Removes the discovery file when the process goes away.
     ///
     /// The file advertises a port *and* this instance's token, and it used to outlive the process that
@@ -170,8 +189,15 @@ final class ControlPlaneCoordinator {
             // The queue is `.main`, so this block runs on the main actor; the compiler cannot see
             // that through Foundation's `@Sendable` observer block.
             MainActor.assumeIsolated {
-                ControlEndpointFile.remove()
-                self?.flushPendingSaveBlocking()
+                guard let self else {
+                    // A deallocated coordinator has no hooks to read; in production this type is a
+                    // process-lifetime singleton, so this arm is about never leaving a token on
+                    // disk, not about testability.
+                    ControlEndpointFile.remove()
+                    return
+                }
+                self.removeDiscoveryFile()
+                self.flushPendingSaveBlocking()
             }
         }
 
@@ -215,39 +241,56 @@ final class ControlPlaneCoordinator {
     /// The file goes first, before the wait. It is credential material, this handler is the only
     /// thing that can end the process now that the default disposition is ignored, and a flush that
     /// times out must not be able to leave a live token on disk.
-    private func handleTerminationSignal() {
-        ControlEndpointFile.remove()
+    ///
+    /// Internal rather than private, and ending in the `exitProcess` hook rather than a bare `exit`:
+    /// this is the path `mimic app stop` takes, it had shipped data loss with zero automated
+    /// coverage, and a test can only drive it if calling it does not end the test runner.
+    func handleTerminationSignal() {
+        removeDiscoveryFile()
 
         guard !isTerminating else {
             // Asked twice. Someone who signals again is telling us they are done waiting, and the
-            // one promise this path has to keep is that it always ends.
-            exit(0)
+            // one promise this path has to keep is that it always ends — the production hook is
+            // `exit(0)` and never returns.
+            exitProcess(0)
+            return
         }
         isTerminating = true
 
         // Suspends rather than blocks, so the main queue keeps draining while the store works — this
-        // path, unlike the `willTerminate` observer, still has somewhere to suspend to. `exit`, not
-        // `NSApp.terminate`: ignoring the signal above means this is now the *only* thing that can end
-        // the process, so it has to be something that cannot be deferred or cancelled, and AppKit
-        // termination is both. Routing through it left the app alive through a SIGTERM whenever
-        // something was mid-flight (an edit waiting on autosave, an open sheet), which is worse than
-        // the crude exit it replaced.
+        // path, unlike the `willTerminate` observer, still has somewhere to suspend to. `exit` (the
+        // hook's production value), not `NSApp.terminate`: ignoring the signal above means this is
+        // now the *only* thing that can end the process, so it has to be something that cannot be
+        // deferred or cancelled, and AppKit termination is both. Routing through it left the app
+        // alive through a SIGTERM whenever something was mid-flight (an edit waiting on autosave, an
+        // open sheet), which is worse than the crude exit it replaced.
+        //
+        // The hook is captured before the task so the process still ends if the coordinator is gone
+        // by the time the flush returns.
+        let exitProcess = self.exitProcess
         Task { @MainActor [weak self] in
             await self?.flushPendingSave()
-            exit(0)
+            exitProcess(0)
         }
     }
 
     /// Starts the write and hands back the handle that says when it finished, or `nil` when there is
     /// nothing to write.
     ///
-    /// The project is read here rather than tracked: the coordinator has no business watching edits,
+    /// The project is read rather than tracked: the coordinator has no business watching edits,
     /// and the open project *is* what the pending autosave would have written — `scheduleAutosave`
     /// re-reads `currentProject` when its debounce fires rather than capturing it at schedule time. It
     /// writes unconditionally because a pending debounce is not visible from outside
     /// `ProjectWorkspace`: `autosaveStatus` is still `.idle` or `.saved` during those 500 ms, so
     /// "nothing to do" and "half a second of unwritten edits" look identical from here. The write is
     /// idempotent, so doing it when it was not needed costs a few milliseconds and nothing else.
+    ///
+    /// *When* the project is read depends on the path. The blocking caller reads it here, before the
+    /// task — it gets no later chance, because the main thread it is about to park is where the
+    /// session lives. The draining caller reads it *again after the drain*, inside the task, because
+    /// the writes being drained are allowed to change the answer: quitting just after `mimic project
+    /// delete` used to capture the doomed project here, wait for the delete to land, and then save
+    /// the captured row straight back into the store it had just been deleted from.
     ///
     /// `Task.detached` is load-bearing. Nothing in the chain then needs the main actor — the
     /// repository is nonisolated and GRDB runs the transaction on its own queue — which is what lets
@@ -269,8 +312,10 @@ final class ControlPlaneCoordinator {
     /// hop *onto* the main actor — and `flushPendingSaveBlocking` is holding the main **thread** in
     /// `Thread.sleep` at the same time. The hop cannot be serviced, the save below it never runs,
     /// and the signal never finishes: ⌘Q spent the full two-second deadline and then dropped the
-    /// edit it was there to save. Worse than the defect it was written to fix, green in CI, and
-    /// invisible to every test because nothing exercises either quit path.
+    /// edit it was there to save. Worse than the defect it was written to fix, green in CI, and — at
+    /// the time — invisible to every test. `ControlPlaneCoordinatorTests` now drives both quit
+    /// paths, and the blocking one is held to the deadline, so a regression into that deadlock fails
+    /// the suite instead of shipping.
     ///
     /// The signal path is `async` and suspends on `Task.sleep`, which leaves the main actor free, so
     /// it drains. ⌘Q cannot, and the honest fix is `applicationShouldTerminate` returning
@@ -280,6 +325,7 @@ final class ControlPlaneCoordinator {
     /// the open project, which is what it did before the drain was added, and says what it cannot do.
     private func startPendingSave(drainingStoreWrites: Bool) -> PendingSaveSignal? {
         let repository = self.repository
+        let appState = self.appState
         let project = appState?.currentProject
         // Read here, on the main actor, where this method already runs — not inside the task below.
         let workspace = drainingStoreWrites ? appState?.projects : nil
@@ -289,13 +335,23 @@ final class ControlPlaneCoordinator {
 
         let didFinish = PendingSaveSignal()
         Task.detached(priority: .userInitiated) {
-            await workspace?.awaitPendingStoreWrites()
+            var projectToSave = project
+            if let workspace {
+                await workspace.awaitPendingStoreWrites()
+                // Re-read once the chain is drained, because the drained writes change the answer:
+                // a `mimic project delete` still in flight nils the open project on its way through
+                // the chain, and the value captured before the drain is exactly the row that delete
+                // just removed — saving it resurrected the project the caller had deleted. Only
+                // this draining branch may hop to the main actor: the blocking caller never sets
+                // `workspace`, so the quit path that parks the main thread never reaches this line.
+                projectToSave = await MainActor.run { appState?.currentProject }
+            }
 
             // Then the debounced edit to whatever is open. A store that refuses this has nowhere to
             // report it — there is no window left to show `autosaveStatus` in, and the caller ends
             // the process as soon as this returns.
-            if let repository, let project {
-                try? await repository.save(project)
+            if let repository, let projectToSave {
+                try? await repository.save(projectToSave)
             }
             didFinish.markFinished()
         }
@@ -308,7 +364,10 @@ final class ControlPlaneCoordinator {
     /// not return until every one of its children has finished, so cancelling the timeout's sibling
     /// would still leave a wedged write holding the quit open. `AppLauncher.waitForReadiness` polls a
     /// deadline for the same kind of reason.
-    private func flushPendingSave() async {
+    ///
+    /// Internal rather than private so the drain-ordering property is testable — see
+    /// `ControlPlaneCoordinatorTests`.
+    func flushPendingSave() async {
         // `true`: this path suspends on `Task.sleep` below rather than blocking, so the main actor
         // stays free to run the lifecycle writes being drained.
         guard let didFinish = startPendingSave(drainingStoreWrites: true) else { return }
@@ -325,7 +384,11 @@ final class ControlPlaneCoordinator {
     /// for the same bound the signal path suspends for. A quit that takes a few extra milliseconds is
     /// not a defect; a quit that drops the edit you just made is, and ⌘Q dropped it exactly as
     /// `SIGTERM` did.
-    private func flushPendingSaveBlocking() {
+    ///
+    /// Internal rather than private so a test can hold the main thread exactly as ⌘Q does and
+    /// assert the save still lands inside the deadline — the deadlock this file documents is
+    /// precisely a change that makes this path need the parked main actor.
+    func flushPendingSaveBlocking() {
         // `false`, and not negotiable: the loop below holds the main thread, so a drain that needs
         // the main actor could never complete. See `startPendingSave(drainingStoreWrites:)`.
         guard let didFinish = startPendingSave(drainingStoreWrites: false) else { return }

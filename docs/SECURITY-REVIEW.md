@@ -178,7 +178,7 @@ caught `refresh_token`, but it also caught `author`, `keywords`, `shipping`, `sh
 Widening it to non-string values added a second defect: the replacement was quoted, so
 `"sessionCount": 42` imported as `"sessionCount": "[REDACTED]"` and changed the JSON type.
 
-The whole pass is gone. Imported bodies are now reproduced verbatim, credential headers are still
+The whole pass is gone. Imported **text** bodies are now reproduced verbatim, credential headers are still
 dropped, and the import review sheet carries the responsibility. This finding is accepted rather than
 fixed: see the revised section in `SECURITY.md`.
 

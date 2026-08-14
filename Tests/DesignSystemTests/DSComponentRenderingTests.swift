@@ -178,6 +178,11 @@ struct DSComponentRenderingTests {
                     DSStatusBadge(state: .idle, identifier: "idle")
                     DSStatusBadge(state: .running, identifier: "running")
                     DSStatusBadge(state: .error, identifier: "error")
+                    DSStatusPill(statusCode: 200)
+                    DSStatusPill(statusCode: 500)
+                    DSStatusPill(statusCode: nil)
+                    DSStatusPill(statusCode: 404, detail: "\u{00D7}3")
+                    DSStatusPill(failureLabel: "timeout 30000ms")
                     DSTextField("Project name", text: .constant("Mimic"), identifier: "project")
                     DSTextField(
                         "Port",

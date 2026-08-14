@@ -218,9 +218,16 @@ struct HostCommandSweepTests {
         }
     }
 
-    /// The same sweep once a project is open, because "no project is open" is a legitimate answer and
-    /// a command that only ever produced it would pass the sweep above without ever reaching its own
-    /// arm.
+    /// The same sweep once a project is open, because "no project is open" is a legitimate answer
+    /// with nothing open and a routing failure with something open: a command that only ever
+    /// produced it would pass the sweep above without ever reaching its own arm.
+    ///
+    /// So this sweep refuses `project.noneOpen` as well as the unimplemented-arm code. No host-scoped
+    /// arm may answer it here, and none legitimately does — checked against the switch before the
+    /// assertion was added: the arms that guard on `currentProject` (`serverStart`, the four journey
+    /// runtime arms, `projectExport` with no reference) all pass that guard with the seed open, and
+    /// the ones that need more than an open project refuse with their own codes (`journey.noneActive`,
+    /// `project.notFound`) rather than borrowing this one.
     ///
     /// Nothing is skipped — including `serverStart`, which the parity suite this replaced had to
     /// leave out because its second host held a real engine that would have bound a real port. Here
@@ -234,6 +241,11 @@ struct HostCommandSweepTests {
             #expect(
                 response.error?.code != Self.unimplementedCommandCode,
                 "\(kind.rawValue): the host has no arm for it — \(response.error?.message ?? "")"
+            )
+            #expect(
+                response.error?.code != ControlError.noProjectOpen.code,
+                "\(kind.rawValue): answered \"no project open\" with one open — "
+                    + "the routing failure this sweep exists to catch"
             )
         }
     }

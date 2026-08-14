@@ -134,8 +134,20 @@ final class MockServerRuntime {
             guard let self else { return }
             do {
                 try await engine.start(configuration: configuration)
+                if stopRequestedMidStart {
+                    // The stop that arrived mid-bind wins: stop the engine the bind just produced
+                    // instead of publishing it. Same defensive fallback as ``stopServer()``.
+                    stopRequestedMidStart = false
+                    serverState = .stopping
+                    do {
+                        try await engine.stop()
+                    } catch {}
+                    serverState = .stopped
+                    return
+                }
                 serverState = .running(port: configuration.port)
             } catch let error as MockServerError {
+                if consumeStopRequestedMidStartAfterFailedBind() { return }
                 // The engine's own sentence goes into the state, so `mimic server status` reads the
                 // engine's diagnosis rather than a paraphrase; the `--port` hint lives on
                 // `startFailure`'s code and message, which is the half a script branches on.
@@ -149,6 +161,7 @@ final class MockServerRuntime {
                     genericStartError = message
                 }
             } catch {
+                if consumeStopRequestedMidStartAfterFailedBind() { return }
                 let message = error.localizedDescription
                 serverState = .error(message)
                 startFailure = ControlError.serverStartFailed(message)
@@ -157,20 +170,29 @@ final class MockServerRuntime {
         }
     }
 
-    /// Stops the engine — from `.running`, and from nowhere else.
+    /// Stops the engine — from `.running` immediately, and from `.starting` by remembering the stop
+    /// until the bind resolves.
     ///
-    /// The same contract as ``startServer()``, and the one that shipped a defect. `.starting` is the
-    /// state *every* stop issued straight after a start arrives in, because `startServer()` publishes
-    /// `.starting` and returns before the engine has bound; this method drops that stop, and
-    /// `AppControlHost`'s `.serverStop` arm answered "Stopping the server." regardless. `mimic server
-    /// start` followed by `mimic server stop` therefore reported a stop that never happened and left
-    /// the server up.
+    /// `.starting` is the state *every* stop issued straight after a start arrives in, because
+    /// ``startServer()`` publishes `.starting` and returns before the engine has bound. This method
+    /// used to `guard case .running` and drop that stop on the floor — the in-flight start then
+    /// published `.running` afterwards, so `AppState.stopServerForProjectChange`, whose own guard
+    /// passes while `.starting`, let the old project's server survive into the new project. The bind
+    /// itself still cannot be cancelled — `engine.start` is not cancellation-aware, and abandoning
+    /// the task would leak a bound listener — so the stop is recorded in ``stopRequestedMidStart``
+    /// and the start task applies it the moment the bind resolves, publishing `.stopped` rather than
+    /// `.running`.
     ///
-    /// The contract here is unchanged — the window's button cannot reach the drop, and cancelling a
-    /// bind that has not completed is not something this can do. What changed is the host: it reads
-    /// ``serverState`` first and refuses a stop mid-transition with `server.busy` rather than
-    /// claiming one it did not make. Any other caller that reports back owes the same check.
+    /// From `.stopped`, `.stopping` and `.error` a stop is still dropped: there is nothing running,
+    /// or a stop is already in flight. And `AppControlHost` keeps its own, stricter policy — it
+    /// refuses a stop while `.starting` or `.stopping` with `server.busy` before ever calling this,
+    /// because a CLI caller can be told to poll; the deferral here is for the window-side callers
+    /// that cannot be answered, project switching above all.
     func stopServer() {
+        if serverState == .starting {
+            stopRequestedMidStart = true
+            return
+        }
         guard case .running = serverState else { return }
         serverState = .stopping
 
@@ -185,18 +207,41 @@ final class MockServerRuntime {
         }
     }
 
+    /// A stop that arrived while the engine was binding, waiting for the bind to resolve.
+    ///
+    /// Set only by ``stopServer()`` in `.starting`, and consumed by the start task on every one of
+    /// its completion paths — a successful bind stops the engine it just started instead of
+    /// publishing `.running`; a failed one goes through
+    /// ``consumeStopRequestedMidStartAfterFailedBind()``.
+    private var stopRequestedMidStart = false
+
+    /// The failed-bind half of the mid-start stop. Nothing bound, so `.stopped` is the honest state,
+    /// and the failure is deliberately not recorded: ``startFailure`` is never set without the state
+    /// becoming `.error` in the same hop, and an alert for an attempt the caller has already
+    /// withdrawn would land in whatever project is open *now* — the exact leak
+    /// `AppState.stopServerForProjectChange` exists to prevent.
+    private func consumeStopRequestedMidStartAfterFailedBind() -> Bool {
+        guard stopRequestedMidStart else { return false }
+        stopRequestedMidStart = false
+        serverState = .stopped
+        return true
+    }
+
     func retryStartOnNextPort(from conflictingPort: Int) {
         serverConfiguration.port = conflictingPort + 1
         portConflictAlert = nil
         startServer()
     }
 
-    /// The configuration push most recently dispatched to the engine.
+    /// The configuration push most recently dispatched to the engine — the tail of the push chain.
     ///
-    /// Kept so a caller that has to *report* the engine's cursor can wait for the push it just caused
-    /// to land. The push reaches the engine from an unstructured task, so a status read issued
-    /// straight after it is a race the read wins: it hops to the engine actor before the push task has
-    /// even started, and answers about the journey the engine still had.
+    /// Two callers rely on it. ``journeyStatusAfterPendingUpdates()`` awaits it before reading the
+    /// engine's cursor: the push reaches the engine from an unstructured task, so a status read
+    /// issued straight after it is a race the read wins — it hops to the engine actor before the push
+    /// task has even started, and answers about the journey the engine still had. And
+    /// ``updateMocks(endpoints:journey:)`` awaits it from the *next* push's task, which is what makes
+    /// the pushes a chain rather than a race — see the note there. Because each link awaits its
+    /// predecessor, awaiting this one task is awaiting every push dispatched before it.
     private var pendingMockUpdate: Task<Void, Never>?
 
     /// How many journey activations this session has performed, carried on every configuration push.
@@ -223,10 +268,34 @@ final class MockServerRuntime {
         journeyActivationEpoch += 1
     }
 
+    /// Pushes the live configuration to the engine, in dispatch order.
+    ///
+    /// Each push leaves from an unstructured task — this method is synchronous and is called from
+    /// `currentProject`'s `didSet` — and the tasks used to be independent, with no ordering between
+    /// them. `MockRouteStore.update` assigns endpoints, delay and journey to whichever push lands
+    /// *last* (only the activation epoch is guarded engine-side, by the high-water `>`), so a push
+    /// overtaken in flight overwrote the configuration a newer one had already delivered: the engine
+    /// went on serving endpoints the document no longer contained until the next edit pushed again.
+    /// Each task now awaits its predecessor before touching the engine — the `storeWrites` shape
+    /// `ProjectWorkspace` uses for the same class of defect.
+    ///
+    /// Chained rather than versioned, because ordering here is a property of *dispatch*, not of the
+    /// payload: every push funnels through this one main-actor method, so "the order the pushes were
+    /// asked for" is well-defined on this side and the chain preserves all of it in one line. A
+    /// generation number would have to be threaded through the protocol, the engine and the store to
+    /// let the store *discard* what the chain simply never sends out of order. The activation epoch
+    /// stays as it is: it answers a question ordering cannot — whether an argument-for-argument
+    /// identical push is an activation or a re-push — and its `>` guard keeps the engine correct for
+    /// callers that do not serialize; see
+    /// `MockRouteStore.update(endpoints:globalDelayMs:journey:activationEpoch:)`.
     func updateMocks(endpoints: [Endpoint], journey: Journey? = nil) {
         let globalDelayMs = serverConfiguration.globalDelayMs
         let activationEpoch = journeyActivationEpoch
+        let predecessor = pendingMockUpdate
         pendingMockUpdate = Task { @MainActor [weak self] in
+            // The chain: this push must not reach the engine before the one dispatched ahead of it
+            // has landed.
+            await predecessor?.value
             guard let self else { return }
             await engine.updateConfiguration(
                 endpoints: endpoints,
@@ -317,7 +386,9 @@ final class MockServerRuntime {
     /// waiting for that task this would reach the engine actor first and report the *previous*
     /// journey. The ticket is taken after the wait, so this write outranks the mirror refresh the push
     /// task issues on its way out — the two read the same engine either way, so it orders them rather
-    /// than choosing between them.
+    /// than choosing between them. And because each push awaits its predecessor, awaiting the most
+    /// recently dispatched one is awaiting the whole chain — the escalation an `await` performs
+    /// cannot lift the newest push past an older sibling still in flight.
     func journeyStatusAfterPendingUpdates() async -> JourneyStatus? {
         await pendingMockUpdate?.value
         let ticket = nextJourneyStatusTicket()

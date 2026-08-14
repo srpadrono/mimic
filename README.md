@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-946%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-966%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
 [![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
@@ -149,8 +149,8 @@ bodies, formatted and searchable — so checking what a mock returned doesn't me
 ```bash
 export MIMIC_DATABASE_PATH="$PWD/.mimic-ci/store.sqlite"   # isolated store
 export MIMIC_CONTROL_FILE="$PWD/.mimic-ci/control.json"    # isolated discovery file
-export MIMIC_CONTROL_PORT=18787                            # …and the port to reach it on
-export MIMIC_CONTROL_TOKEN="$(uuidgen)"                    # …and the credential, since the file moved
+export MIMIC_CONTROL_PORT=18787                            # …the port this instance binds (off a dev's 8787)
+export MIMIC_CONTROL_TOKEN="$(uuidgen)"                    # …fresh credential per run
 
 mimic daemon start                          # headless: the app, windowless
 mimic project import fixtures/checkout.json # a `mimic project export` document, not an OpenAPI spec
@@ -162,12 +162,13 @@ mimic reset --scope all                     # rewind the journey, clear the log
 mimic journey status | jq -e '.journeyStatus.isComplete'
 ```
 
-`MIMIC_CONTROL_FILE` keeps a CI run out of a developer's `control.json` — the app writes and searches
-there instead of in Application Support. The port is exported alongside it because the CLI does not
-read that variable yet (it carries its own copy of the discovery reader), and `MIMIC_CONTROL_PORT`
-wins before discovery is consulted. `MIMIC_CONTROL_TOKEN` has to be set too: moving the file means
-`mimic` cannot read the token out of it, and the port variables carry a destination rather than a
-credential. → [docs/CLI.md](docs/CLI.md#environment).
+`MIMIC_CONTROL_FILE` keeps a CI run out of a developer's `control.json` — the instance writes there
+and `mimic` searches *only* there, through the one discovery reader (`ControlEndpointDiscovery` in
+`Domain`), so the destination and the token both come out of the relocated file. `MIMIC_CONTROL_PORT`
+is exported for the instance's own bind, keeping the run off the default 8787 a developer's Mimic may
+hold, and a fresh `MIMIC_CONTROL_TOKEN` per run means a leftover file from an earlier run cannot
+authenticate against this one; neither is needed for discovery any more.
+→ [docs/CLI.md](docs/CLI.md#environment).
 
 The CLI is a thin client over a loopback HTTP API, so a non-Swift agent can skip it entirely. Every
 request carries the instance's token, which it mints at startup and writes to its discovery file.
@@ -249,20 +250,20 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-946 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
+966 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
 once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
 for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
 | Domain, persistence, engine, control plane, import, CLI | 621 | Linux or macOS — `swift test` |
-| Design system | 54 | macOS — needs SwiftUI |
-| App and coordination | 232 | macOS — hosted by the app |
+| Design system | 61 | macOS — needs SwiftUI |
+| App and coordination | 245 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 39 | macOS, interactive session |
 
-The portable 621 break down as Domain 211, SpecImport 124, MimicCLICore 121, MockServerEngine 69,
-Persistence 67, ControlPlane 29. The app's 232 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 92, `MimicTests` 103, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
+The portable 621 break down as Domain 225, SpecImport 127, MimicCLICore 112, MockServerEngine 69,
+Persistence 67, ControlPlane 21. The app's 245 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 93, `MimicTests` 115, `JourneyFeatureTests` 14, `ImportFeatureTests` 13,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 4.
 
 `JourneyFeatureTests` is new, and it closes something this section used to state as a decision:

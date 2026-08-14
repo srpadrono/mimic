@@ -134,18 +134,24 @@ private nonisolated func grey(_ delta: Double, below surface: RGBA) -> RGBA {
 /// The tests under that mark close it, and they are driven from the token functions —
 /// `httpStatusColor(for:)` and `methodColor(for:)` — rather than from the call sites that compose
 /// them, because a list of call sites copied into a test is the same blind spot moved up one level.
-/// The surfaces are enumerated the same way: `pillSurfaces(in:)` includes the `band` and the
-/// `rowStripe`, which is where a token-only reading is most optimistic.
+/// The surfaces are enumerated the same way: `pillSurfaces(in:)` is the one bed list both sweeps
+/// share, and it includes the `band`, the `rowStripe`, and the hover and selection washes — the
+/// places a token-only reading is most optimistic.
 ///
-/// **Measuring a composite is not the same as measuring the *easiest* bed of it, and this suite spent
-/// a wave doing the second while claiming the first.** Three of the readings under that mark were
-/// taken on the kindest surface the thing in question ever lands on, and all three hid a live AA
+/// **Measuring a composite is not the same as measuring the *easiest* bed of it, and this suite has
+/// twice done the second while claiming the first.** Four of the readings under that mark were
+/// taken on the kindest surfaces the thing in question ever lands on, and all four hid a live AA
 /// failure:
 ///
 /// - The method badge was measured on a bare panel, where it read 4.50–4.54 in light. The window also
 ///   draws badges on a zebra stripe, on a hover wash and on a selected row — 3.97 on the last of
 ///   those — and the four dark hues that already failed on the *panel* were recorded and left. They
-///   are fixed now, and `badgeSurfaces(in:)` is the list, not `pillSurfaces(in:)`.
+///   are fixed now.
+/// - The status pill then repeated the badge's mistake with the badge's fix in plain sight: its
+///   sweep ran the five palette surfaces while the badge sweep beside it ran seven, and on the two
+///   washes it skipped — beds `RequestLogTableRow` demonstrably puts filled pills on — the
+///   first-generation text tokens read 4.14–4.48. The text variants moved a second time for it,
+///   and the two bed lists are now one list, so the sweeps cannot diverge a third time.
 /// - The syntax palette was measured on `tertiary`, on the strength of a comment saying `DSJSONEditor`
 ///   and `DSCodeBlock` fill with it. Neither draws `DSColors.Syntax` on `tertiary` — see
 ///   `syntaxColoursOnTheWellTheyAreDrawnIn` — and the surface `RequestBodyView` really paints,
@@ -347,13 +353,18 @@ struct DSContrastTests {
     /// ceiling is arithmetic: a stronger stripe spends the margin `warning` and `success` have left on
     /// a panel. Every step of that argument checks out except two of its figures.
     ///
-    /// **The ceiling moved, and both halves are asserted below.** A status code on a striped row is
-    /// `warningText` or `successText` now, not `warning` or `success` — those clear AA on a stripe at
-    /// 5.47 and 5.53 where the old pair cleared by a hundredth, so the plain word stopped being what
-    /// the stripe was rationed for. What replaces it is the *filled* pill, which pays the stripe's
-    /// depth twice: at this depth the three read 4.65, 4.68 and 4.64, and at AppKit's ΔL\* 3.5 they
-    /// fall to 4.34, 4.36 and 4.33 while the plain words are still above 5. The old readings are kept
-    /// alongside because the old tokens did not move; only what draws a status code did.
+    /// **The ceiling has changed hands twice, and both generations are asserted below.** A status
+    /// code on a striped row is `warningText` or `successText` now, not `warning` or `success`, so
+    /// the plain status word stopped being what the stripe was rationed for. For one wave the
+    /// binding constraint was the *filled* pill, which pays the stripe's depth twice — the
+    /// first-generation text tokens read 4.64–4.68 filled at this depth and fell under 4.5 by
+    /// ΔL\* 1.8. Then those tokens moved again to survive a selected row (see `warningText`'s own
+    /// comment), and the filled pill stopped binding anything here: the current values read
+    /// 5.10–5.15 filled on the stripe and clear even AppKit's ΔL\* 3.5 at 4.76–4.82. What the
+    /// ceiling falls back to is the token that set it first — the base amber is still a plain word
+    /// on these rows (the import review's "Body dropped" flag), it clears the stripe by 0.02, and
+    /// it crosses under AA at ΔL\* 0.9. The base readings are kept alongside because those tokens
+    /// never moved; only what draws a status code did, twice.
     ///
     /// **Finding 1 — "ΔL\* 0.70 in light mode and 1.40 in dark".** Light is 0.70. Dark is **1.83**.
     /// 1.40 is what the *light* stripe measures against `dominant` (1.39), so it reads like the wrong
@@ -410,12 +421,13 @@ struct DSContrastTests {
         #expect(amberOnDeepRow < 4.5)
         #expect(greenOnDeepRow < 4.5)
 
-        // What the ceiling protects *now*. A status code on a striped row is a text variant, and
-        // those have room: plain, they clear AA on a stripe by a point.
+        // The pill tokens, second generation, on the stripe. These stopped being the binding
+        // constraint when they moved to survive a selected row: filled, they now clear the stripe
+        // by better than half a point.
         let statusText: [(Color, Double, Double)] = [
-            (DSColors.warningText, 5.47, 4.65),
-            (DSColors.successText, 5.53, 4.68),
-            (DSColors.destructiveText, 5.67, 4.64)
+            (DSColors.warningText, 6.12, 5.15),
+            (DSColors.successText, 6.08, 5.10),
+            (DSColors.destructiveText, 6.32, 5.14)
         ]
         for (token, plain, filled) in statusText {
             let bare = try contrast(token, on: lightStripe, in: .light)
@@ -426,14 +438,15 @@ struct DSContrastTests {
             #expect(pill >= 4.5)
         }
 
-        // So the binding constraint moved from the plain word to the *filled* pill, which pays the
-        // stripe's depth twice — once in the surface and once in the 12% wash of its own label
-        // colour. At AppKit's depth the words are still fine and the pills are not, which is why the
-        // zebra has headroom now but still cannot go that deep.
+        // At AppKit's depth the filled pills now clear too — for one wave they were the wall here
+        // (4.33–4.36 with the first-generation tokens), and the selected-row correction bought the
+        // stripe this margin as a side effect. What still fails at that depth is the base amber and
+        // green, asserted above at 4.20 and 4.22: the plain word is the ceiling again, crossing
+        // under AA at dL* 0.9 against the stripe's current 0.7.
         let atAppKitDepth: [(Color, Double, Double)] = [
-            (DSColors.warningText, 5.08, 4.34),
-            (DSColors.successText, 5.14, 4.36),
-            (DSColors.destructiveText, 5.27, 4.33)
+            (DSColors.warningText, 5.68, 4.82),
+            (DSColors.successText, 5.64, 4.76),
+            (DSColors.destructiveText, 5.86, 4.79)
         ]
         for (token, plain, filled) in atAppKitDepth {
             let bare = try contrast(token, on: deepRow, in: .light)
@@ -441,8 +454,16 @@ struct DSContrastTests {
             #expect(isClose(bare, plain, within: ratioTolerance))
             #expect(isClose(pill, filled, within: ratioTolerance))
             #expect(bare >= 4.5)
-            #expect(pill < 4.5)
+            #expect(pill >= 4.5)
         }
+
+        // The crossing itself, so "dL* 0.9" above is a measured fact rather than a transcribed one:
+        // one perceptual step below the current stripe the base amber still clears, and at the next
+        // it does not.
+        let amberAtCrossing = try contrast(DSColors.warning, on: grey(0.9, below: lightPanel), in: .light)
+        let amberPastCrossing = try contrast(DSColors.warning, on: grey(1.0, below: lightPanel), in: .light)
+        #expect(amberAtCrossing >= 4.5)
+        #expect(amberPastCrossing < 4.5)
     }
 
     // MARK: - The accent as a word
@@ -667,37 +688,63 @@ struct DSContrastTests {
 
     // MARK: - The composite the window actually draws
 
-    /// Every surface a status pill lands on, resolved and flattened.
+    /// Every surface a status pill or a method badge lands on, resolved and flattened.
     ///
-    /// Five, because that is what the window has: a panel, the editor canvas, a sheet, a
-    /// ``DSColors/band`` and a ``DSColors/rowStripe``. The last two are the ones a token-only suite
-    /// forgets — and they are not hypothetical. The request detail's identity row takes `band` and
-    /// carries a status pill on it, and three of the four lists that alternate rows draw a pill on
-    /// those rows (the request log, the endpoint traffic list and the import review; the fourth is
-    /// the request detail's header tables, which have no pill). Both are composited onto
-    /// ``DSColors/secondary``, which is the surface each is drawn over everywhere a pill appears.
+    /// Seven, because that is what the window has: a panel, the editor canvas, a sheet, a
+    /// ``DSColors/band``, a ``DSColors/rowStripe``, and the two accent washes a pointer or a
+    /// selection paints. The band and the stripe are the beds a token-only suite forgets — the
+    /// request detail's identity row takes `band` and carries a status pill on it, and three of the
+    /// four lists that alternate rows draw a pill on those rows (the request log, the endpoint
+    /// traffic list and the import review; the fourth is the request detail's header tables, which
+    /// have no pill). The washes are the beds *this list* forgot, for one wave: this function held
+    /// five entries while `RequestLogTableRow.rowBackground` painted its selected row
+    /// ``DSColors/accentSubtle`` and its hovered row `accentSubtle` at 60% — with a status pill in
+    /// the row — so the pill sweep was measuring every bed except the two hardest. On them the
+    /// first-generation text tokens read 4.14–4.48 filled, all under the floor the sweep was
+    /// holding them to on the other five. The same two washes are reached three more ways with a
+    /// method badge aboard: the import review's hover, and the `dsHoverHighlight` the sidebar and
+    /// the journey step row both take. Everything here is composited onto ``DSColors/secondary``,
+    /// which is the surface each composite is drawn over everywhere it appears.
+    ///
+    /// One bed is deliberately absent and named in `methodColor(for:)`: the sidebar is a
+    /// `List(selection:)` at `.listStyle(.sidebar)`, so AppKit paints its selected row with
+    /// `NSColor.selectedContentBackgroundColor` — a colour that follows the user's accent
+    /// preference, and therefore a number about the machine running the test rather than about
+    /// this palette. And one is deliberately not invented: a wash over ``DSColors/surfaceElevated``
+    /// would read under 4.5 in dark for several hues, but the one place a washed row sits inside a
+    /// sheet — the import review's hover — is drawn on the *system sheet material*, which is white
+    /// in light and near `#1E1E1E` in dark (the measurement `accentTextClearsAAInDark` records),
+    /// and on that material every pill and badge composite clears 4.5 with over half a point to
+    /// spare. This suite's rule is to enumerate the beds from the code that draws them; a
+    /// `surfaceElevated`-composited wash is a bed no screen shows.
     private func pillSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
         let panel = try resolve(DSColors.secondary, in: appearance)
         let canvas = try resolve(DSColors.dominant, in: appearance)
         let sheet = try resolve(DSColors.surfaceElevated, in: appearance)
         let band = try resolve(DSColors.band, over: DSColors.secondary, in: appearance)
         let stripe = try resolve(DSColors.rowStripe, over: DSColors.secondary, in: appearance)
+        let hovered = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)
+            .composited(over: panel)
+        let selected = try resolve(DSColors.accentSubtle, in: appearance).composited(over: panel)
         return [
             ("panel", panel),
             ("canvas", canvas),
             ("sheet", sheet),
             ("band on a panel", band),
-            ("striped row on a panel", stripe)
+            ("striped row on a panel", stripe),
+            ("hovered row on a panel", hovered),
+            ("selected row on a panel", selected)
         ]
     }
 
     /// A label read against a fill that is *a wash of the label's own colour* — the whole defect in
     /// one function.
     ///
-    /// Every status pill in the window is written `foregroundStyle(colour)` over
-    /// `fill(colour.opacity(0.12))`, so the background is a function of the foreground and the ratio
+    /// Every status pill in the window draws `foregroundStyle(colour)` over
+    /// `fill(colour.opacity(0.12))` — spelled at six call sites when this was written, spelled once
+    /// now, in `DSStatusPill` — so the background is a function of the foreground and the ratio
     /// is not the one the token was chosen for. Nothing above this line could see that: the surfaces
-    /// are palette tokens, the wash is a literal at the call site, and the two never met in a
+    /// are palette tokens, the wash is a literal in the component, and the two never met in a
     /// measurement. `DSMethodBadge` does the same at 16%, which is what `alpha` is for.
     private func selfTintedReading(
         _ token: Color,
@@ -717,18 +764,42 @@ struct DSContrastTests {
     /// `warning` and `destructive` to 4.5:1 against the *panel*, where they read 4.62, 4.60 and 4.95,
     /// while the window drew them at 3.94, 3.96 and 4.07.
     ///
-    /// Driven from `httpStatusColor(for:)` rather than from the nine places in `AppFeatures` that
-    /// draw a colour on a 12% wash of itself, because a hand-copied list of call sites is the same
-    /// blind spot one level up: it goes stale the moment somebody adds a tenth. The codes are the
-    /// classes HTTP has, and the function is the only thing between them and a colour.
+    /// Driven from `httpStatusColor(for:)` rather than from the call sites, because a hand-copied
+    /// list of call sites is the same blind spot one level up: it goes stale the moment somebody
+    /// adds another. (When this test was written there were nine hand-drawn 12%-self-wash sites in
+    /// `AppFeatures`; the status pills among them are one `DSStatusPill` now, which leaves the
+    /// import review's duplicate flag and the drawer's unmatched-filter well drawing the composite
+    /// by hand — both in `warningText`/404 amber, both covered by the sweep's 4xx arm.) The codes
+    /// are the classes HTTP has, and the function is the only thing between them and a colour.
     ///
     /// 3xx is absent on purpose and has its own test below — it is the one class whose colour does
     /// not clear this bar when it is filled, and the reason is a rule about call sites rather than a
-    /// missing token.
+    /// missing token. The 12% here is `DSStatusPill.fillOpacity` — the component is now the one
+    /// place that composite is written, and this sweep is measuring what it draws.
+    ///
+    /// **This sweep has already passed once while the window failed, and the bed list was how.** It
+    /// ran over five surfaces while `RequestLogTableRow.rowBackground` put filled pills on a hovered
+    /// and a selected row, where the tokens of the day read 4.14–4.48 — the same kindest-bed mistake
+    /// the method badges made, recorded at length on `pillSurfaces(in:)`. Three guards below keep it
+    /// from happening the same way twice: the two washes are pinned *into the bed list by name*, so
+    /// trimming `pillSurfaces` back to five fails here rather than passing vacuously; the worst
+    /// reading of the 98 is pinned, so a token change that spends the margin fails here instead of
+    /// shipping; and the palette this one replaced is put back and shown failing on the bed that
+    /// broke it.
     @Test("A status pill's text clears AA on the tint of itself the pill fills with")
     func statusPillTextClearsAAOnItsOwnFill() throws {
+        var worst = Double.greatestFiniteMagnitude
+
         for appearance in Appearance.allCases {
-            for surface in try pillSurfaces(in: appearance) {
+            let surfaces = try pillSurfaces(in: appearance)
+
+            // The two washes stay enumerated, by name. Everything else this test does is a loop
+            // over `pillSurfaces`, and a loop over a list proves nothing about the list.
+            let names = surfaces.map { $0.name }
+            #expect(names.contains("hovered row on a panel"))
+            #expect(names.contains("selected row on a panel"))
+
+            for surface in surfaces {
                 for code in [200, 204, 400, 404, 429, 500, 503] {
                     let reading = try selfTintedReading(
                         DSColors.httpStatusColor(for: code),
@@ -739,16 +810,49 @@ struct DSContrastTests {
                         reading >= 4.5,
                         "\(code) on its own 12% fill, \(surface.name), \(appearance): \(reading)"
                     )
+                    worst = min(worst, reading)
                 }
             }
         }
+        // The light green on a selected row — the floor itself plus the margin the 0.93 scale
+        // bought, nothing more. (98 readings: seven codes over seven beds in two appearances.)
+        #expect(isClose(worst, 4.55, within: ratioTolerance))
+
+        // **The tokens this generation replaced, put back and measured on the bed that broke
+        // them** — the exact move the badge sweep makes, for the same reason: "every reading
+        // clears 4.5" is the shape that passes vacuously if the surface list is wrong. These are
+        // the first-generation text variants — the values that cleared the five-bed sweep — and
+        // every one of them fails on the selected row.
+        let replaced: [(name: String, hue: NSColor, reading: Double)] = [
+            ("successText", NSColor(srgbRed: 0.041, green: 0.433, blue: 0.166, alpha: 1.0), 4.17),
+            ("warningText", NSColor(srgbRed: 0.534, green: 0.331, blue: 0.0, alpha: 1.0), 4.14),
+            ("destructiveText", NSColor(srgbRed: 0.725, green: 0.090, blue: 0.072, alpha: 1.0), 4.15)
+        ]
+        let lightPanel = try resolve(DSColors.secondary, in: .light)
+        let lightSelected = try resolve(DSColors.accentSubtle, in: .light).composited(over: lightPanel)
+        for entry in replaced {
+            let reading = try selfTintedReading(Color(nsColor: entry.hue), on: lightSelected, in: .light)
+            #expect(isClose(reading, entry.reading, within: ratioTolerance))
+            #expect(reading < 4.5, "\(entry.name) first generation, light selected: \(reading)")
+        }
+        // And the dark salmon's first correction, which cleared every bed but this one — here it
+        // missed by 0.02.
+        let darkPanel = try resolve(DSColors.secondary, in: .dark)
+        let darkSelected = try resolve(DSColors.accentSubtle, in: .dark).composited(over: darkPanel)
+        let firstDarkRed = try selfTintedReading(
+            Color(nsColor: NSColor(srgbRed: 1.0, green: 0.552, blue: 0.525, alpha: 1.0)),
+            on: darkSelected,
+            in: .dark
+        )
+        #expect(isClose(firstDarkRed, 4.48, within: ratioTolerance))
+        #expect(firstDarkRed < 4.5)
     }
 
     /// Why ``DSColors/successText``, ``DSColors/warningText`` and ``DSColors/destructiveText`` exist,
     /// stated as the readings that forced them.
     ///
     /// These four are what `httpStatusColor(for:)` used to return, and all four fail the test above
-    /// on the easiest of its five surfaces. Asserted as measured values rather than only as "under
+    /// on the easiest of its seven surfaces. Asserted as measured values rather than only as "under
     /// 4.5" so that the day one of the base tokens moves, this fails and somebody re-derives it —
     /// which is the only way a number in this file has ever been re-derived.
     ///
@@ -786,16 +890,16 @@ struct DSContrastTests {
     ///
     /// AGENTS.md already says a redirect gets no fill: "**A filled colour swatch is for something
     /// that needs attention.** Status codes in the traffic list are coloured text; only 4xx and 5xx
-    /// get a fill." Read as text, which is what a 3xx is, `accentText` clears AA on all five surfaces
-    /// in both appearances — where ``DSColors/accent``, the fill blue this function used to return,
-    /// never did at all: **3.20:1** on a light panel.
+    /// get a fill." Read as text, which is what a 3xx is, `accentText` clears AA on all seven
+    /// surfaces in both appearances — where ``DSColors/accent``, the fill blue this function used to
+    /// return, never did at all: **3.20:1** on a light panel.
     ///
     /// Filled, it reads **4.48** on a panel and **4.35** on a band, up from 2.80 and 2.72 but still
     /// short. That is recorded here rather than fixed with a fourth blue, because nothing draws the
-    /// composite: the two call sites that used to fill every code — `EndpointTrafficList.statusChip`
-    /// and `RequestDetailInspector.statusPill` — are gated on `code >= 400`, so a filled 3xx is
-    /// unreachable in the window. The style rule turns out to be a contrast rule, and this is the
-    /// measurement that says so.
+    /// composite: the `code >= 400` gate lives in `DSStatusPill` — the one place a pill is drawn
+    /// since the six hand-drawn copies were consolidated — so a filled 3xx is unreachable in the
+    /// window. The style rule turns out to be a contrast rule, and this is the measurement that
+    /// says so.
     ///
     /// So this test guards a composite the window does not currently render, deliberately. It is the
     /// thing that would make re-filling a 3xx a visible mistake rather than a silent one — the two
@@ -841,44 +945,6 @@ struct DSContrastTests {
         #expect(filledOnBand < 4.5)
     }
 
-    /// Every bed a `DSMethodBadge` lands on, resolved and flattened.
-    ///
-    /// `grep -rn 'DSMethodBadge(' Sources` finds six call sites: the sidebar, the request log row, the
-    /// journey step row, the import review row, the endpoint editor and the request detail. The four
-    /// that are *rows* all wash themselves under the pointer, and none of them does it on a bare panel.
-    /// `pillSurfaces` and its five are the start of the list; the two added below are those washes.
-    ///
-    /// **`accentSubtle` at full strength is reached four ways, not one.** It is the request log's
-    /// selected row (`RequestLogDrawerView.rowBackground`), the import review's hover
-    /// (`ImportReviewList`), and the `dsHoverHighlight` the sidebar and the journey step row both take.
-    /// `accentSubtle.opacity(0.6)` is the request log's own hover. They are the worst beds in the
-    /// window in *both* appearances, because an accent wash carries a light surface down and a dark one
-    /// up, so a hue tuned against either mode's bare panel loses on it.
-    ///
-    /// One bed is missing on purpose and is named in `methodColor(for:)`: the sidebar is a
-    /// `List(selection:)` at `.listStyle(.sidebar)`, so AppKit paints its selected row with
-    /// `NSColor.selectedContentBackgroundColor` — a colour that follows the user's accent preference,
-    /// and therefore a number about the machine running the test rather than about this palette.
-    /// The two washes are composited over the panel alone, and that is a boundary to know about
-    /// rather than an oversight: every hoverable or selectable row that carries a badge is drawn on
-    /// a `secondary` panel today — the sidebar, the traffic list, the request log. A wash over a
-    /// *sheet* would be a harder bed in dark mode (`surfaceElevated` is lighter than `secondary`
-    /// there, and the accent washes over it read under 4.5), but nothing in the window paints that
-    /// combination, and this suite's rule is to enumerate the beds from the code that draws them —
-    /// inventing one would flag a failure no screen can show. If a badge-bearing list ever lands on
-    /// a sheet, add `sheet`-composited washes here and expect the dark readings to force a token
-    /// change.
-    private func badgeSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
-        let panel = try resolve(DSColors.secondary, in: appearance)
-        let hovered = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)
-            .composited(over: panel)
-        let selected = try resolve(DSColors.accentSubtle, in: appearance).composited(over: panel)
-        var surfaces = try pillSurfaces(in: appearance)
-        surfaces.append((name: "hovered row on a panel", colour: hovered))
-        surfaces.append((name: "selected row on a panel", colour: selected))
-        return surfaces
-    }
-
     /// `DSMethodBadge` has the same shape as a status pill — `methodColor(for:)` as the label over a
     /// **16%** wash of itself — and this suite used to measure it on one surface and pin what it found.
     ///
@@ -891,17 +957,19 @@ struct DSContrastTests {
     /// and eleven of them under the floor.
     ///
     /// The hues moved. What is asserted now is the property rather than the record — every method, on
-    /// every bed in `badgeSurfaces(in:)`, in both appearances, clears 4.5 — plus the worst of those 98
+    /// every bed in `pillSurfaces(in:)`, in both appearances, clears 4.5 — plus the worst of those 98
     /// readings, so that a future hue change that spends the margin fails here instead of shipping.
     /// (98 is seven method names over seven beds in two appearances; `HEAD` and `OPTIONS` share a hue,
-    /// so 84 of them are distinct, which is the count `methodColor(for:)`'s own comment quotes.)
+    /// so 84 of them are distinct, which is the count `methodColor(for:)`'s own comment quotes.
+    /// `pillSurfaces` carried five beds when the badge sweep was written and grew its own two washes
+    /// here first; the pill sweep caught up a wave later, which is when the two lists became one.)
     @Test("A method badge clears AA on every bed the window puts one on")
     func methodBadgeClearsAAOnEveryBedItLandsOn() throws {
         let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
         var worst = Double.greatestFiniteMagnitude
 
         for appearance in Appearance.allCases {
-            for surface in try badgeSurfaces(in: appearance) {
+            for surface in try pillSurfaces(in: appearance) {
                 for method in methods {
                     let reading = try selfTintedReading(
                         DSColors.methodColor(for: method),
@@ -974,8 +1042,9 @@ struct DSContrastTests {
     /// It fills with `state.color.opacity(0.16)` exactly as the method badge does, and it is safe for
     /// the reason the badge and the status pill were not — the word on it is `labelPrimary`, not the
     /// fill's own hue, so the tint moves the background *away* from the ink instead of toward it. That
-    /// is the whole difference, stated where it can fail: worst reading 11.50 in light and 7.97 in
-    /// dark, against the 3.41 the badge's worst hue measured before it was corrected.
+    /// is the whole difference, stated where it can fail: worst reading 10.60 in light and 7.89 in
+    /// dark (the selected row, both times — the beds the pill sweep gained), against the 3.41 the
+    /// badge's worst hue measured before it was corrected.
     ///
     /// Only `.error` fills — the quiet states draw on the bare surface — so `destructive` is the only
     /// hue this composite ever takes.

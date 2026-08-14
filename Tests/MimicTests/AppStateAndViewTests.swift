@@ -261,8 +261,9 @@ struct AppStateAndViewTests {
         appState.saveCurrentProject()
         // Each of the four waits below names the condition the next step actually depends on, rather
         // than sleeping for a round number that happens to be longer than the work usually takes.
-        // `duplicateProject` reads the source back out of the store, so the store has to be current
-        // before it runs — which is what the first `700` was really for, and what it did not check.
+        // (The duplicate itself no longer needs this wait — the source is the open project, so
+        // `ProjectWorkspace.duplicateProject` copies the session rather than re-reading the store —
+        // but the save's landing is still the fact this test is checking here.)
         try await waitUntil {
             (try? await appState.repository.load(id: originalProjectID))?.endpoints.isEmpty == false
         }
@@ -1378,6 +1379,52 @@ struct AppStateAndViewTests {
             await repository.stored(document.id) == nil,
             "the delete removed nothing and the import put the project back behind it"
         )
+    }
+
+    /// Importing a document whose id names the **open** project replaces it — session copy included,
+    /// which is the half that was missing. `ProjectWorkspace.importProject` stored the document and
+    /// left the session's stale copy in place, so:
+    ///
+    /// - on the `--no-activate` path, the pending 500 ms autosave of the unreconciled session fired
+    ///   after the import's write and overwrote the document the store had just accepted;
+    /// - on the default activate path, `openProject`'s leading `flushPendingAutosave` captured the
+    ///   stale session copy and dispatched exactly that save over the just-imported row.
+    ///
+    /// Both paths ended with the store holding the pre-import project while `mimic project import`
+    /// had exited 0 — the CLI.md promise "re-importing the same document updates the project in
+    /// place" made false by the session it did not update. The session is reconciled now and the
+    /// superseded debounce dropped, so the sleep past the debounce window below must change nothing.
+    @Test(
+        "Importing over the open project supersedes the session's stale edit",
+        arguments: [false, true]
+    )
+    func importOverTheOpenProjectWins(activate: Bool) async throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Original", port: 8080)
+        let id = try #require(appState.currentProject?.id)
+        await appState.projects.awaitPendingStoreWrites()
+
+        // An edit still sitting in the debounce when the import arrives. The import supersedes it.
+        appState.currentProject?.name = "Stale session edit"
+        appState.scheduleAutosave()
+
+        var document = try #require(appState.currentProject)
+        document.name = "Imported over the open project"
+        appState.importProject(document, activate: activate)
+
+        // The import's write is chained; see it land, then wait out the debounce window in which
+        // the stale session used to overwrite it.
+        try await waitUntil {
+            (try? await appState.repository.load(id: id))?.name == "Imported over the open project"
+        }
+        try await Task.sleep(for: .milliseconds(700))
+
+        let stored = try await appState.repository.load(id: id)
+        #expect(
+            stored.name == "Imported over the open project",
+            "the unreconciled session's autosave overwrote the imported document"
+        )
+        #expect(appState.currentProject?.name == "Imported over the open project")
     }
 
     // MARK: - An open the store refuses

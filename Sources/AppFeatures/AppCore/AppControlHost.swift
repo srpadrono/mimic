@@ -208,9 +208,11 @@ final class AppControlHost: ControlHost {
             // while a start is mid-`await` would otherwise tell the engine to stop a server the start
             // has not asked for yet.
             guard !isChangingServerState else { return .failure(.serverBusy) }
-            // The reply is decided by the state the stop is applied to, because
-            // `MockServerRuntime.stopServer()` acts only on `.running` and drops the command
-            // silently everywhere else. This arm used to answer "Stopping the server." regardless,
+            // The reply is decided by the state the stop is applied to: `MockServerRuntime.stopServer()`
+            // applies a `.running` stop immediately, defers a `.starting` stop until the bind
+            // resolves, and drops it from `.stopped`, `.stopping` and `.error`. This arm still
+            // refuses `.starting`/`.stopping` below rather than deferring on the caller's behalf,
+            // because a CLI caller can be told to poll. It used to answer "Stopping the server." regardless,
             // so `mimic server start` followed by `mimic server stop` — the two arriving well inside
             // the window where the engine has not bound yet and the state is `.starting` — reported a
             // stop that never happened and left the server up. The guard above does not cover that

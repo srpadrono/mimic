@@ -1019,10 +1019,17 @@ struct RequestLogTableRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect(.current) }
         .onHover { isHovered = $0 }
-        // The row is a tap target rather than a `Button`, because a button would swallow the
-        // modifier chords the selection depends on. VoiceOver still has to read it as one.
+        // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
+        // was the only interactive row in the window that composed none: a bare `.isButton` over
+        // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
+        // "Unmatched"…) with nothing saying they were one request. The trait comes after the
+        // element is formed, because a trait added to the children is a trait the element has
+        // already passed over — and the row is a tap target rather than a `Button` in the first
+        // place because a button would swallow the modifier chords the selection depends on.
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
+        .accessibilityLabel(Self.spokenLabel(for: log))
     }
 
     private var rowBackground: Color {
@@ -1064,22 +1071,26 @@ struct RequestLogTableRow: View {
         }
     }
 
-    @ViewBuilder
+    /// `DSStatusPill` carries the whole convention — the `>= 400` fill gate, the text-variant
+    /// colours, and the failure arm. The last one is why this is a component and not a pattern:
+    /// this row used to spell a failed request `log.responseStatusCode ?? 0` and drew a bare grey
+    /// `0` with no fill — a status no server ever sent, styled as ordinary — while
+    /// `EndpointTrafficRow` rendered the same log as a filled destructive em dash. The em dash is
+    /// the defended treatment, and the row now inherits it instead of re-deciding it.
     private var statusPill: some View {
-        let code = log.responseStatusCode ?? 0
-        let color = DSColors.httpStatusColor(for: code)
-        // Filled only when it is a failure. Every row has a status, so filling all of them made a
-        // column of swatches in which nothing stood out — which is the opposite of what colour on a
-        // status code is for. The traffic list in the inspector follows the same rule.
-        let isFailure = code >= 400
-        Text("\(code)")
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(color)
-            .padding(.horizontal, isFailure ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                    .fill(isFailure ? color.opacity(0.12) : Color.clear)
-            }
+        DSStatusPill(statusCode: log.responseStatusCode)
+    }
+
+    /// What VoiceOver reads for the row — same composition as `EndpointTrafficRow.spokenLabel`,
+    /// which is this row one panel over. `static` so `WorkspaceFeatureTests` can hold the three
+    /// arms without hosting a window.
+    nonisolated static func spokenLabel(for log: RequestLog) -> String {
+        if let code = log.responseStatusCode {
+            return "\(log.method.rawValue) \(log.path), status \(code)"
+        }
+        if let failureLabel = log.failureLabel {
+            return "\(log.method.rawValue) \(log.path), failed: \(failureLabel)"
+        }
+        return "\(log.method.rawValue) \(log.path), no response"
     }
 }

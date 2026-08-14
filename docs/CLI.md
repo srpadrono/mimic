@@ -120,25 +120,27 @@ credential rather than the CLI guessing one; it is taken first and this check ne
 | `MIMIC_CONTROL_PORT` | Control port on loopback. Default `8787`. |
 | `MIMIC_CONTROL_TOKEN` | Control API token. Normally unnecessary — the CLI reads it from the running instance's `control.json`. Set it on *both* sides when the caller cannot reach that file (a container, a forwarded port). |
 | `MIMIC_DATABASE_PATH` | Where the project store lives. Point at a scratch file for a fully isolated run. |
-| `MIMIC_CONTROL_FILE` | Where the **app** writes and looks for its discovery file. Read by `Mimic.app`, not yet by `mimic` — see below. |
+| `MIMIC_CONTROL_FILE` | Where the discovery file lives. Honoured by both sides — the instance writes there, `mimic` searches only there — see below. |
 | `MIMIC_HEADLESS` | Set by `--headless`; runs the app without a window. |
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
 `MIMIC_DATABASE_PATH` is the one to reach for in CI: it gives a job its own store, open project
 included, that can be deleted between runs.
 
-`MIMIC_CONTROL_FILE` is the other half of that isolation, and it is asymmetric today. The **app**
-honours it on both sides — it writes its `control.json` there and searches only there, because the
-override *replaces* the default search list rather than joining the front of it, so an isolated run
-cannot fall through to a developer's real instance. The **CLI** does not: `mimic` links no
-`ControlPlane` and carries its own copy of the discovery reader, which still looks only in the two
-Application Support paths. So an isolated run must set `MIMIC_CONTROL_URL` or `MIMIC_CONTROL_PORT`
-for the destination **and `MIMIC_CONTROL_TOKEN` for the credential**. The second half is easy to
-miss: those two variables win before discovery is consulted, but discovery is also where the token
-comes from, and `resolveToken` does not read either of them — so a run that sets only the destination
-reaches the right port with no `X-Mimic-Token` and is refused by every route. `mimic app start` still
-succeeds in that state, because `isReachable` accepts a 401 as proof something answered.
-`Scripts/run_cli_e2e.sh` sets all four. Mirroring the override into the CLI's reader is an open item.
+`MIMIC_CONTROL_FILE` is the other half of that isolation, and both sides honour it. The instance
+writes its `control.json` there, and `mimic` searches only there, because the override *replaces*
+the default search list rather than joining the front of it — so an isolated run cannot fall through
+to a developer's real instance in either direction. The path is resolved by one implementation,
+`ControlEndpointDiscovery` in the `Domain` module, shared by the app's write side and the CLI's
+reader, so the file a run writes and the file a run reads cannot drift apart. An isolated run
+therefore needs only `MIMIC_DATABASE_PATH` and `MIMIC_CONTROL_FILE`: the destination *and* the
+credential both come out of the relocated file. It used to need four variables — the CLI carried a
+second copy of the discovery reader that ignored the override, so a run that moved the file had to
+name the destination by hand and, easy to miss, `MIMIC_CONTROL_TOKEN` too, or every route answered
+`401` while `mimic app start` still looked fine. `Scripts/run_cli_e2e.sh` still exports two more for
+reasons that are not discovery: `MIMIC_CONTROL_PORT` is the *instance's* bind port, kept off the
+default 8787 a developer's own Mimic may hold, and a fresh `MIMIC_CONTROL_TOKEN` per run means a
+leftover file from an earlier run cannot authenticate against this one.
 
 The parent directory is created `0700` and the file itself is written `0600` wherever it lands: it
 carries the instance's token, and an isolated run is not a less sensitive one.

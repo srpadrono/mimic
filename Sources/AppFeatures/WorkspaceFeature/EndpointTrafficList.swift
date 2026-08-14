@@ -173,9 +173,11 @@ struct EndpointTrafficList: View {
         .padding(.vertical, DSSpacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         // No `DSBarHeight` rung, and it should not be given one. This block is one line when an
-        // endpoint has answered a single class of response and two when the status chips appear, so it
-        // measures 26 or 45 — either side of every rung, and the taller number is the one that carries
-        // the distribution. A fixed height would have to clip one of the two states.
+        // endpoint has answered a single class of response and two when the status chips appear —
+        // it measured 26 or 45 when the chips were 10pt `caption`, and the second line is a point
+        // or so taller now that they are `DSStatusPill`'s 11pt `codeSmall`. Either state sits off
+        // every rung, and the taller one is the one that carries the distribution; a fixed height
+        // would have to clip one of the two.
         //
         // It does take the band, though. It was the only bar in the window with no background at all,
         // which left it on the inspector's system material while every other strip stated a surface —
@@ -190,34 +192,23 @@ struct EndpointTrafficList: View {
         }
     }
 
-    /// Only a 4xx or 5xx is filled, which is the house rule (`AGENTS.md`: "a filled colour swatch is
-    /// for something that needs attention … a column of filled pills is a wall of colour that says
-    /// nothing, because everything in it is shouting equally") and matches `pill(text:color:isFilled:)`
-    /// twenty lines below — the two spellings sat in this one file disagreeing.
+    /// `DSStatusPill` carries the fill gate — only a 4xx or 5xx is filled, which is the house rule
+    /// (`AGENTS.md`: "a filled colour swatch is for something that needs attention … a column of
+    /// filled pills is a wall of colour that says nothing, because everything in it is shouting
+    /// equally"). This chip and the row pill below used to be two hand-drawn spellings of the same
+    /// convention, sitting in this one file disagreeing until the gate was copied between them.
     ///
-    /// It is also the reading. A fill is a 12% tint of the label's own colour, so it moves the
+    /// The gate is also the reading. A fill is a 12% tint of the label's own colour, so it moves the
     /// surface toward the ink and costs the label 13–18% of its contrast ratio. The three text
     /// tokens `httpStatusColor(for:)` returns absorb that; ``DSColors/accentText`` — the 3xx — does
     /// not, reading 4.48:1 on a panel and 4.35 on the `band` this header is, against a 4.5 floor. No
     /// blue fixes it, because the fill is derived from the label. Not filling a redirect is what
     /// fixes it, and a redirect is not something to stop on.
+    ///
+    /// The `HStack` carries `DSSpacing.xs` of its own, so an unfilled chip — whose pill pays no
+    /// horizontal inset — still clears its neighbour.
     private func statusChip(code: Int, count: Int) -> some View {
-        let color = DSColors.httpStatusColor(for: code)
-        let isFilled = code >= 400
-
-        return Text(verbatim: "\(code) \u{00D7}\(count)")
-            .font(DSTypography.caption)
-            .foregroundStyle(color)
-            // Horizontal inset belongs to the fill, as in `pill` below; the `HStack` carries
-            // `DSSpacing.xs` of its own, so an unfilled chip still clears its neighbour.
-            .padding(.horizontal, isFilled ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                if isFilled {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                }
-            }
+        DSStatusPill(statusCode: code, detail: "\u{00D7}\(count)")
             .accessibilityIdentifier("endpointTraffic.status.\(code)")
             .accessibilityLabel("\(count) \(count == 1 ? "response" : "responses") with status \(code)")
     }
@@ -297,45 +288,17 @@ private struct EndpointTrafficRow: View {
         return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
     }
 
-    /// The status the server returned, or an em dash when the connection was failed rather than
-    /// answered.
-    ///
-    /// `RequestLogTableRow` renders a missing code as `0`, which it can afford because it also shows
-    /// an outcome column. This row has no such column, and a `0` pill would read as a status the
-    /// server actually sent.
+    /// The status the server returned, or — for a request that was failed rather than answered —
+    /// `DSStatusPill`'s filled destructive em dash. That arm was defended in this row while
+    /// `RequestLogTableRow` still drew the same log as a bare grey `0`; the component now carries
+    /// it, so the two panels cannot disagree about it again.
     ///
     /// Only failures wear the filled pill. Every row in this panel is a request to the *same*
     /// endpoint, so a filled swatch on each one stacked into a column of colour that said nothing —
     /// and the 500 you were looking for sat in it at the same volume as forty 200s. The colour still
     /// carries the class of the code, it just stops shouting it.
-    @ViewBuilder
     private var statusPill: some View {
-        if let code = log.responseStatusCode {
-            pill(text: "\(code)", color: DSColors.httpStatusColor(for: code), isFilled: code >= 400)
-        } else {
-            // No code at all is a failure by definition, so it keeps the fill — and because `pill`
-            // draws that fill as a 12% tint of this very colour, it takes `destructiveText` for the
-            // same reason `httpStatusColor(for:)` returns the text variants. The base red reads
-            // 4.07:1 on a panel here, under the 4.5 the palette holds itself to.
-            pill(text: "\u{2014}", color: DSColors.destructiveText, isFilled: true)
-        }
-    }
-
-    private func pill(text: String, color: Color, isFilled: Bool) -> some View {
-        Text(text)
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(color)
-            // Horizontal inset belongs to the fill: without one, the bare code sits flush with the
-            // path below it instead of 4pt to its right. The vertical inset is paid on both so a row
-            // does not change height with its status code.
-            .padding(.horizontal, isFilled ? DSSpacing.xs : 0)
-            .padding(.vertical, 1)
-            .background {
-                if isFilled {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(color.opacity(0.12))
-                }
-            }
+        DSStatusPill(statusCode: log.responseStatusCode)
     }
 
     /// What VoiceOver reads for the row. Named `spokenLabel` rather than `accessibilityLabel` so it

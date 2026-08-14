@@ -115,23 +115,12 @@ struct JourneyStepRow: View {
     private var outcomeLabel: some View {
         switch step.outcome {
         case let .respond(response):
-            // Coloured text, and a fill once the code is one you would stop on — the same `>= 400`
-            // seam the request log and the endpoint traffic list use. The old note here argued
-            // against "a badge that is always on", which is right, but that is exactly what the
-            // conditional prevents: withholding the fill at 500 too meant a failing step was the one
-            // row in the app where a failure did *not* announce itself.
-            Text("\(response.statusCode)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.httpStatusColor(for: response.statusCode))
-                .lineLimit(1)
-                .padding(.horizontal, response.statusCode >= 400 ? DSSpacing.xs : 0)
-                .padding(.vertical, 1)
-                .background {
-                    if response.statusCode >= 400 {
-                        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                            .fill(DSColors.httpStatusColor(for: response.statusCode).opacity(0.12))
-                    }
-                }
+            // Coloured text, and a fill once the code is one you would stop on — `DSStatusPill`
+            // carries that `>= 400` seam for the request log and the endpoint traffic list too. The
+            // old note here argued against "a badge that is always on", which is right, but that is
+            // exactly what the component's gate prevents: withholding the fill at 500 too meant a
+            // failing step was the one row in the app where a failure did *not* announce itself.
+            DSStatusPill(statusCode: response.statusCode)
                 // The one `.fixedSize()` left in this row, and the only one that is bounded:
                 // `EndpointValidator.serveableStatusCodes` runs 200–599, so this is three
                 // monospaced digits — 20.4pt — whatever the step does. It cannot be the thing that

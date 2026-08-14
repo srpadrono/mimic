@@ -74,7 +74,7 @@ public enum AppLauncher {
     ///
     /// `mimic app stop` read a pid out of `control.json` and handed it straight to `kill(2)`. Two
     /// facts make that unsafe together: the file outlives a crash, and the liveness check that is
-    /// meant to catch a stale one — ``ControlEndpointFileReader/isProcessAlive(_:)`` — returns `true`
+    /// meant to catch a stale one — `ControlEndpointDiscovery.isProcessAlive(_:)` — returns `true`
     /// on `EPERM`, which means "a process with that id exists and is *not* yours". So a file left by
     /// an instance that died, naming a pid the kernel has since recycled, reads as live and collects
     /// a `SIGTERM` meant for Mimic. Whoever owns that pid now finds out when their editor closes.
@@ -99,14 +99,14 @@ public enum AppLauncher {
     /// if it is there at all, a stale file refuses the connection immediately, and the only case that
     /// waits out the clock is a wedged instance — which is the case this is about to refuse anyway.
     public static func confirmRunningInstance(
-        _ endpoint: ControlEndpointFileReader.Endpoint,
+        _ endpoint: ControlEndpoint,
         timeout: TimeInterval = 5
     ) async throws {
         // The file's own port, and deliberately not `MIMIC_CONTROL_URL`: the pid about to be
         // signalled is the one *this file* names, so the instance that has to confirm it is the one
         // this file advertises. An environment pointing somewhere else describes a different Mimic,
         // whose pid means nothing here.
-        guard let baseURL = ControlEndpointFileReader.resolveBaseURL(
+        guard let baseURL = ControlEndpointDiscovery.resolveBaseURL(
             explicit: nil,
             environment: [:],
             discovered: endpoint
@@ -157,7 +157,7 @@ public enum AppLauncher {
     /// One shape for every refusal, so the part that tells the caller what to do next cannot be the
     /// part that gets left out of one of them.
     private static func refusal(
-        _ endpoint: ControlEndpointFileReader.Endpoint,
+        _ endpoint: ControlEndpoint,
         because reason: String
     ) -> String {
         """

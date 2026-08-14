@@ -127,9 +127,10 @@ struct MockServerEngineTests {
     /// Whether a push is an activation is compared against a **high-water mark**, not for equality
     /// and not for difference, and both halves of that matter.
     ///
-    /// Pushes reach the engine from unstructured tasks — `MockServerRuntime.updateMocks` starts a
-    /// fresh `Task` for each one and keeps no ordering between them — so a push can land after a
-    /// newer one. A straggler carrying an epoch that a newer push already superseded must not rewind
+    /// The engine's API makes no ordering promise: `MockServerRuntime.updateMocks` chains its pushes
+    /// so the production sequence arrives in dispatch order, but nothing holds a direct caller to
+    /// that discipline, so the store guards its own door against a push landing after a newer one.
+    /// A straggler carrying an epoch that a newer push already superseded must not rewind
     /// the run that newer push started, and it must not lower the mark either, or the epoch still in
     /// force would look like a fresh activation the next time an ordinary edit re-sends the project.
     ///

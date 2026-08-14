@@ -140,17 +140,20 @@ struct MockServerRuntimeTests {
     /// An engine whose `start` does not return until it is released.
     ///
     /// The interval between `MockServerRuntime.startServer()` publishing `.starting` and the engine
-    /// binding is the whole subject of ``configuringDuringABindCannotChangeThePublishedPort``, and
-    /// without a gate its width is the scheduler's business rather than the test's. Sleeping rather
-    /// than spinning, so the actor is handed back on every suspension and `startConfigurations` stays
-    /// readable while a start is parked here — the same shape ``GatedEngine`` above uses to park a
-    /// journey-status read.
+    /// binding is the whole subject of ``configuringDuringABindCannotChangeThePublishedPort`` and of
+    /// the two bind-window stop tests, and without a gate its width is the scheduler's business
+    /// rather than the test's. Sleeping rather than spinning, so the actor is handed back on every
+    /// suspension and `startConfigurations` stays readable while a start is parked here — the same
+    /// shape ``GatedEngine`` above uses to park a journey-status read. `startError` is thrown *after*
+    /// the gate, so a test can park the bind, act inside the window, and only then have it fail.
     actor GatedStartEngine: MockServerEngineProtocol {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
 
         private(set) var startConfigurations: [ServerConfiguration] = []
+        private(set) var stopCallCount = 0
         private var isHoldingStart = true
+        private var startError: Error?
 
         init() {
             (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
@@ -162,15 +165,82 @@ struct MockServerRuntimeTests {
 
         func release() { isHoldingStart = false }
 
+        func setStartError(_ error: Error?) {
+            startError = error
+        }
+
         func start(configuration: ServerConfiguration) async throws {
             startConfigurations.append(configuration)
             while isHoldingStart {
                 try? await Task.sleep(for: .milliseconds(5))
             }
+            if let startError {
+                throw startError
+            }
         }
 
-        func stop() async throws {}
+        func stop() async throws {
+            stopCallCount += 1
+        }
+
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+    }
+
+    /// An engine whose *first* configuration push does not land until it is released.
+    ///
+    /// The fixture for the push chain: it lets the push dispatched first come back last, which is
+    /// the ordering `updateMocks` used to allow — each push left from an independent task with no
+    /// ordering between them, and `MockRouteStore.update` assigns endpoints, delay and journey to
+    /// whichever push lands *last*. Implements the four-argument `updateConfiguration` so it
+    /// witnesses exactly what the runtime sends rather than the protocol extension's forwarding.
+    actor GatedPushEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+
+        private var isReleased = false
+        /// Endpoint names per push, appended when the push *lands* — completion order, which is the
+        /// order the engine's store would apply the payloads in.
+        private(set) var landedPushes: [[String]] = []
+        /// Incremented when a push *enters*, so a test can park the first push deterministically.
+        private(set) var enteredPushes = 0
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit {
+            logContinuation.finish()
+        }
+
+        func release() { isReleased = true }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {
+            await record(endpoints: endpoints)
+        }
+
+        func updateConfiguration(
+            endpoints: [Endpoint],
+            globalDelayMs: Int,
+            journey: Journey?,
+            activationEpoch: Int
+        ) async {
+            await record(endpoints: endpoints)
+        }
+
+        private func record(endpoints: [Endpoint]) async {
+            enteredPushes += 1
+            if enteredPushes == 1 {
+                // Sleeping rather than spinning, so the actor is handed back while the first push
+                // is parked — which is exactly what lets an unchained second push overtake it.
+                while !isReleased {
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+            }
+            landedPushes.append(endpoints.map(\.name))
+        }
     }
 
     /// An engine that reports a journey cursor only for a journey it has actually been handed.
@@ -382,6 +452,61 @@ struct MockServerRuntimeTests {
         #expect(await engine.stopCallCount == 1)
     }
 
+    /// The bind window is the state *every* stop issued straight after a start arrives in:
+    /// `startServer()` publishes `.starting` and returns before the engine has bound. `stopServer()`
+    /// used to `guard case .running` and drop that stop on the floor, and the in-flight start then
+    /// published `.running` — which is how `AppState.stopServerForProjectChange`, whose own guard
+    /// passes while `.starting`, let the old project's server survive into the new project.
+    ///
+    /// The gate is what makes the window a certainty rather than a coincidence: the stop provably
+    /// arrives while the bind is parked, and only then is the bind released.
+    @Test("A stop issued during the bind window stops the server once the bind completes")
+    func aStopDuringTheBindWindowIsApplied() async throws {
+        let engine = GatedStartEngine()
+        let manager = MockServerRuntime(engine: engine)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+
+        manager.startServer()
+        // Parked inside `engine.start`, which is the state the stop has to arrive in.
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+        #expect(manager.serverState == .starting)
+
+        manager.stopServer()
+        await engine.release()
+
+        try await waitUntil { manager.serverState == .stopped }
+        #expect(
+            await engine.stopCallCount == 1,
+            "the engine itself must be stopped, not just the published state"
+        )
+    }
+
+    /// The failing-bind half of the rule above. A stop remembered during the bind window must leave
+    /// `.stopped` when the bind then fails — nothing bound, so there is nothing to stop — and none of
+    /// the failure surfaces: the caller withdrew the start, and an alert for it would land in
+    /// whatever project is open by the time the bind resolves, which is the exact leak
+    /// `stopServerForProjectChange` stops the server to prevent.
+    @Test("A stop issued during a bind that then fails leaves stopped, not the failure")
+    func aStopDuringAFailingBindWinsOverTheFailure() async throws {
+        let engine = GatedStartEngine()
+        await engine.setStartError(MockServerError.portInUse(port: 8080))
+        let manager = MockServerRuntime(engine: engine)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+
+        manager.startServer()
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+        #expect(manager.serverState == .starting)
+
+        manager.stopServer()
+        await engine.release()
+
+        try await waitUntil { manager.serverState == .stopped }
+        #expect(manager.startFailure == nil)
+        #expect(manager.portConflictAlert == nil)
+        #expect(manager.genericStartError == nil)
+        #expect(await engine.stopCallCount == 0, "nothing bound, so there is nothing to stop")
+    }
+
     @Test("Retry start increments port clears alert and restarts")
     func retryStartUsesNextPort() async throws {
         let engine = FakeEngine()
@@ -414,6 +539,43 @@ struct MockServerRuntimeTests {
         let updatedEndpoints = await engine.updatedEndpoints
         #expect(updatedEndpoints.count == 1)
         #expect(updatedEndpoints.first?.map(\.name) == ["Users", "Posts"])
+    }
+
+    /// The push chain: a configuration push dispatched *first* cannot land *last*.
+    ///
+    /// `updateMocks` dispatches each push from a task, and the tasks used to be independent — no
+    /// ordering between them — while `MockRouteStore.update` assigns endpoints, delay and journey to
+    /// whichever push lands last; only the activation epoch is guarded engine-side. So a push
+    /// overtaken in flight overwrote the configuration a newer one had already delivered, and the
+    /// engine went on serving endpoints the document no longer contained until the next edit pushed
+    /// again. Each push now awaits its predecessor before touching the engine.
+    ///
+    /// The gate makes the overtake available on purpose: the first push parks inside the engine, the
+    /// second is dispatched while it is parked, and unchained it lands immediately — the settle sleep
+    /// is that window, and it is the one wait here that cannot be a poll, because under the chain the
+    /// condition being asserted is that nothing happens. Only then is the first push released.
+    /// Chained, the engine's final word is the newer configuration; unchained, the parked stale push
+    /// overwrites it on release and the landing order below comes back reversed.
+    @Test("A stale configuration push cannot overwrite a newer one")
+    func aStalePushCannotOvertakeANewerOne() async throws {
+        let engine = GatedPushEngine()
+        let manager = MockServerRuntime(engine: engine)
+
+        manager.updateMocks(endpoints: [makeEndpoint(name: "Old")])
+        // Parked inside the engine, which is what lets the second push be dispatched mid-flight.
+        try await waitUntilAsync { await engine.enteredPushes == 1 }
+        manager.updateMocks(endpoints: [makeEndpoint(name: "New")])
+
+        // The overtake window: an unchained second push lands here, while the first is still parked.
+        try await Task.sleep(for: .milliseconds(200))
+
+        await engine.release()
+        try await waitUntilAsync { await engine.landedPushes.count == 2 }
+
+        #expect(
+            await engine.landedPushes == [["Old"], ["New"]],
+            "the stale push landed after the newer one and overwrote the engine's configuration"
+        )
     }
 
     /// Every mirror update reaches the engine across an `await`, and each used to do so from an

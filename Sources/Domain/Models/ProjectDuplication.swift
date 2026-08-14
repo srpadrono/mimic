@@ -13,10 +13,10 @@ import Foundation
 /// wrote collided with the original, GRDB's default conflict policy aborted, and the whole
 /// `dbQueue.write` rolled back. Duplicating a project created nothing.
 ///
-/// It failed silently in both directions, which is why it survived. The window swallows the throw
-/// (`ProjectWorkspace.duplicateProject`'s `catch` treats it as non-critical), and the window's control
-/// host answers `mimic project duplicate` with a success envelope *before* the store is touched, so
-/// the CLI exits 0. Only a project with no endpoints and no journeys ever worked — which is exactly
+/// It failed silently in both directions, which is why it survived. The window swallowed the throw
+/// (`ProjectWorkspace.duplicateProject`'s `catch` treated it as non-critical; it reports on
+/// `autosaveStatus` now), and the window's control host answers `mimic project duplicate` with a
+/// success envelope *before* the store is touched, so the CLI exits 0. Only a project with no endpoints and no journeys ever worked — which is exactly
 /// what both tests of it construct.
 ///
 /// The rule this needed already existed twenty lines from where it was needed: the duplication

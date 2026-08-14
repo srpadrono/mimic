@@ -25,26 +25,36 @@ final class ProjectWorkspace {
     private var hasPendingAutosave = false
     /// Ticket for the newest ``openProject(id:)``, so a load that has been superseded cannot publish.
     private var openGeneration = 0
-    /// The most recent project-lifecycle write, so the next one can wait for it.
+    /// The most recent store write, so the next one can wait for it.
     ///
-    /// Create, duplicate and delete each answer before their write lands — the window needs the
-    /// project on screen now, not a spinner — and each used to be an independent unstructured `Task`
-    /// with no order between them. A script drives these back to back: `mimic project create Foo`
-    /// followed immediately by `mimic project delete Foo` is two commands well inside one database
-    /// round trip, and the delete could reach the store first, remove nothing, and then have the
-    /// create's insert land *after* it and put the project back. `mimic project duplicate Foo` in the
-    /// same position reported "not found" for a project the caller had just been told was created.
+    /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` — the
+    /// lifecycle writes (create, duplicate, delete, import) and the content writes (the debounced
+    /// autosave once its debounce fires, ``saveCurrentProject()``, the flush on close and switch)
+    /// alike. One discipline rather than a membership list, because the list is how the chain kept
+    /// leaking: it started as "create, duplicate, delete", each later member was argued in
+    /// separately, and five write paths were still outside it — so a flush racing a chained delete
+    /// could land after it and re-insert the deleted row, and a debounced autosave already in
+    /// flight could be overtaken the same way.
+    ///
+    /// Why ordering matters at all: create, duplicate and delete answer before their write lands —
+    /// the window needs the project on screen now, not a spinner — and each used to be an
+    /// independent unstructured `Task` with no order between them. A script drives these back to
+    /// back: `mimic project create Foo` followed immediately by `mimic project delete Foo` is two
+    /// commands well inside one database round trip, and the delete could reach the store first,
+    /// remove nothing, and then have the create's insert land *after* it and put the project back.
+    /// `mimic project duplicate Foo` in the same position reported "not found" for a project the
+    /// caller had just been told was created.
     ///
     /// A host that saves before it answers never has this problem — the price is that every caller
     /// waits out the write. Chaining the tasks gives the window the same guarantee without making it
     /// wait: the writes reach the store in the order they were asked for, whatever order the
     /// callers' replies arrive in.
     ///
-    /// ``importProject(_:)`` is in the chain too, and is the only member that does *not* answer
-    /// early — it awaits its own write to report whether the store took the document. Being `async`
-    /// is not what puts a write in order with the others, which is the mistake it used to embody:
-    /// its caller dispatches it into an untracked `Task`, so awaiting the chain without joining it
-    /// ordered the import behind everything before it and nothing behind the import.
+    /// Two deliberate asymmetries. ``importProject(_:)`` manages its chain link by hand, because it
+    /// is the one member that answers with its own write's result — see the comment inside it. And
+    /// the autosave's 500 ms debounce sleeps *outside* the chain, in the cancellable `autosaveTask`;
+    /// only the write it then claims is enqueued. A sleep inside the chain would hold every later
+    /// write behind a timer that exists only to coalesce edits.
     private var storeWrites: Task<Void, Never>?
 
     init(
@@ -57,6 +67,21 @@ final class ProjectWorkspace {
         // a moment later, which is what actually decides the list.
         recentProjects = recentProjectsStore.load()
         refreshProjectList()
+    }
+
+    /// The one door to the store: appends `operation` behind every write already asked for.
+    ///
+    /// The chain is a `Task<Void, Never>` because nothing awaiting it wants an answer — a member
+    /// that needs its write's own result (``importProject(_:)``) wraps its own task and joins with a
+    /// wrapper instead. Do not write `Task { try await projectRepository.save(…) }` anywhere in this
+    /// type: a write outside this door is a write with no order against the others, which is the
+    /// whole class of defect ``storeWrites`` exists to close.
+    private func enqueueStoreWrite(_ operation: @escaping @MainActor @Sendable () async -> Void) {
+        let previousWrites = storeWrites
+        storeWrites = Task { @MainActor in
+            await previousWrites?.value
+            await operation()
+        }
     }
 
     @discardableResult
@@ -72,9 +97,7 @@ final class ProjectWorkspace {
         setCurrentProject(project, isRestoring: true)
 
         autosaveStatus = .saving
-        let previousWrites = storeWrites
-        storeWrites = Task { @MainActor [weak self] in
-            await previousWrites?.value
+        enqueueStoreWrite { [weak self] in
             guard let self else { return }
             do {
                 try await projectRepository.save(project)
@@ -108,6 +131,10 @@ final class ProjectWorkspace {
         let generation = openGeneration
         Task { @MainActor [weak self, generation] in
             guard let self else { return }
+            // Reads behind writes: the flush this method just enqueued — and any lifecycle write
+            // still in flight — must reach the store before the row is read back, or reopening the
+            // project you just edited hands you the copy from before the flush.
+            await storeWrites?.value
             do {
                 let project = try await projectRepository.load(id: id)
                 guard generation == openGeneration else { return }
@@ -154,7 +181,12 @@ final class ProjectWorkspace {
 
     func saveCurrentProject() {
         guard let project = currentProject else { return }
-        Task { @MainActor [weak self] in
+        // Captured by value, because the write lands whenever its turn in the chain comes: what it
+        // writes must be what the caller asked to save, not whatever is open by then. As a
+        // free-floating task this was one of the five writes outside ``storeWrites`` — a chained
+        // delete issued right after it could reach the store first and have this save re-insert the
+        // row it had just removed.
+        enqueueStoreWrite { [weak self] in
             guard let self else { return }
             do {
                 autosaveStatus = .saving
@@ -168,12 +200,23 @@ final class ProjectWorkspace {
     }
 
     func duplicateProject(id: UUID) {
-        let previousWrites = storeWrites
-        storeWrites = Task { @MainActor [weak self] in
-            await previousWrites?.value
+        // Session wins for the open project — the same rule `AppControlHost.projectExport` applies,
+        // and for the same reason: an edit made a moment ago is still sitting in the 500 ms autosave
+        // debounce, so the stored row is the one that can be behind. Loading the source from the
+        // store here meant `mimic project duplicate` of the open project silently omitted the last
+        // half-second of edits and exited 0. Captured by value now, at the moment the command
+        // arrived, so the copy is of the project as it was asked for — not as it happens to look
+        // when the chain gets to it. Anything not open exists only in the store.
+        let openSource = currentProject?.id == id ? currentProject : nil
+        enqueueStoreWrite { [weak self] in
             guard let self else { return }
             do {
-                let source = try await projectRepository.load(id: id)
+                let source: MockProject
+                if let openSource {
+                    source = openSource
+                } else {
+                    source = try await projectRepository.load(id: id)
+                }
                 // `duplicated(name:)`, not a `MockProject` built around `source.endpoints`. Child ids
                 // are primary keys across the whole database, so reusing them made every duplicate of
                 // a non-empty project collide on insert and roll the write back — and this `catch`
@@ -211,6 +254,23 @@ final class ProjectWorkspace {
     /// afterwards and put the project back. That is the inversion the chain exists to prevent, and
     /// it was open on the one command that writes a whole document.
     func importProject(_ document: MockProject) async -> Bool {
+        // A document whose id names the **open** project replaces it, session copy included. That is
+        // the contract `mimic project import` already promises — "re-importing the same document
+        // updates the project in place" — and the session is part of the project's state: left
+        // unreconciled, the next debounced autosave of the stale copy overwrote the document the
+        // store had just accepted, and on the activate path `openProject`'s own leading flush
+        // dispatched exactly that stale save. The pending debounce is *dropped*, not flushed — its
+        // edits are from before the import, and the import supersedes them by definition.
+        //
+        // Reconciled before the write rather than after it lands, so an edit arriving in the gap
+        // schedules its autosave against the imported document rather than the superseded one. If
+        // the store then refuses the write, the session keeps the document and `autosaveStatus`
+        // carries the refusal — the same optimistic contract every other mutation here has.
+        if currentProject?.id == document.id {
+            cancelPendingAutosave()
+            setCurrentProject(document, isRestoring: true)
+        }
+
         let previousWrites = storeWrites
         let write: Task<Bool, Never> = Task { @MainActor [weak self] in
             await previousWrites?.value
@@ -238,14 +298,16 @@ final class ProjectWorkspace {
     }
 
     func deleteProject(id: UUID) {
-        // A debounced write for the project being removed has to go with it. It fires 500ms after the
-        // last edit and re-reads `currentProject`, so a delete landing inside that window would be
-        // followed by a save that puts the row straight back.
+        // A debounced write for the project being removed has to go with it. The debounce fires
+        // 500ms after the last edit, re-reads `currentProject` — still this project until the
+        // chained task below nils it — and enqueues its save behind everything already asked for,
+        // this delete included. Without the cancel, the save would land *after* the delete, in
+        // perfect chain order, and put the row straight back. The chain covers the other window on
+        // its own: a debounced write already claimed before this call sits ahead of the delete and
+        // is settled before it runs.
         if currentProject?.id == id { cancelPendingAutosave() }
 
-        let previousWrites = storeWrites
-        storeWrites = Task { @MainActor [weak self] in
-            await previousWrites?.value
+        enqueueStoreWrite { [weak self] in
             guard let self else { return }
             do {
                 try await projectRepository.delete(id: id)
@@ -271,11 +333,12 @@ final class ProjectWorkspace {
         currentProject = nil
     }
 
-    /// Waits for every project-lifecycle write already asked for.
+    /// Waits for every store write already asked for — lifecycle writes and autosaves alike.
     ///
     /// `AppControlHost` calls this before it resolves a project reference against the store, so a
     /// reference to something a previous command created resolves to the row rather than to nothing.
-    /// See ``storeWrites`` for the sequence that makes this necessary.
+    /// `ControlPlaneCoordinator`'s draining shutdown path calls it so a quit cannot outrun a write
+    /// still in flight. See ``storeWrites`` for the discipline that makes one await sufficient.
     func awaitPendingStoreWrites() async {
         await storeWrites?.value
     }
@@ -291,20 +354,30 @@ final class ProjectWorkspace {
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(500))
-                // Claimed before the guard below: from here the write belongs to this task, and a
-                // flush that ran now would only duplicate it.
-                hasPendingAutosave = false
-                guard let project = currentProject, project.id == projectID else { return }
-
-                autosaveStatus = .saving
-                try await projectRepository.save(project)
-                autosaveStatus = .saved
-                scheduleSavedStatusClear()
-                recordRecentProject(id: project.id, name: project.name)
-            } catch is CancellationError {
-                // Superseded by a newer change.
             } catch {
-                autosaveStatus = .failed(error.localizedDescription)
+                // Superseded by a newer change, or taken over by the flush.
+                return
+            }
+            // Claimed before the guard below: from here the write belongs to the chain, and a flush
+            // that ran now would only duplicate it.
+            hasPendingAutosave = false
+            guard let project = currentProject, project.id == projectID else { return }
+
+            // Only the write joins the chain; the debounce slept outside it, cancellable, so a
+            // newer edit could supersede this one without holding any other write up. From here the
+            // save is ordered against every lifecycle write — as a free-floating task it could land
+            // on the far side of a delete issued after it and re-insert the deleted row.
+            enqueueStoreWrite { [weak self] in
+                guard let self else { return }
+                do {
+                    autosaveStatus = .saving
+                    try await projectRepository.save(project)
+                    autosaveStatus = .saved
+                    scheduleSavedStatusClear()
+                    recordRecentProject(id: project.id, name: project.name)
+                } catch {
+                    autosaveStatus = .failed(error.localizedDescription)
+                }
             }
         }
     }
@@ -321,6 +394,11 @@ final class ProjectWorkspace {
     /// depends on what happens to be open by the time it lands. It cannot be awaited: the callers are
     /// synchronous because a menu item and a `Button` action are.
     ///
+    /// The write joins ``storeWrites`` like every other. As a free-floating task it was one of the
+    /// five writes outside the chain: a `mimic project delete` chained right behind a close could
+    /// reach the store first, and this save — dispatched earlier, landing later — re-inserted the
+    /// row the delete had just removed.
+    ///
     /// Unlike the debounced path this one does **not** touch recents. `record` makes its project the
     /// most-recently-opened one and writes `lastOpenedProjectID`, and this runs a moment before the
     /// *next* project is opened — so recording here would race the incoming open over which project
@@ -331,7 +409,7 @@ final class ProjectWorkspace {
         cancelPendingAutosave()
 
         autosaveStatus = .saving
-        Task { @MainActor [weak self] in
+        enqueueStoreWrite { [weak self] in
             guard let self else { return }
             do {
                 try await projectRepository.save(project)
@@ -346,7 +424,9 @@ final class ProjectWorkspace {
     /// Forgets the debounced edit — the timer and the flag together.
     ///
     /// Called by ``flushPendingAutosave()`` once it has taken the write over, and by
-    /// ``deleteProject(id:)``, which is the one case where performing the write would be wrong.
+    /// ``deleteProject(id:)`` and ``importProject(_:)`` — the two cases where performing the write
+    /// would be wrong: the row is going away, or the pending edit is superseded by the imported
+    /// document.
     private func cancelPendingAutosave() {
         hasPendingAutosave = false
         autosaveTask?.cancel()

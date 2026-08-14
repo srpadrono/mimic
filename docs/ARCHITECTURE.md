@@ -79,6 +79,9 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   - `JourneyResolver` / `JourneyRunState` / `MockResolver` — journey resolution as a pure function
   - `ControlCommand` / `ProjectCommandExecutor` — the command language and its pure interpreter
   - `CommandCatalog` — runtime self-description; `JourneyTemplates` — the built-in journey library
+  - `ControlEndpointDiscovery` — the read half of the control-plane discovery-file contract (file
+    I/O and `kill(2)` liveness — the one deliberately impure corner, shared by the CLI and the
+    control plane so the contract exists once)
 - **MockServerEngine** — `MockServerEngine` actor owns the Vapor app + a `MockRouteStore` snapshot of
   the live configuration *and the journey cursor*; serves requests by asking Domain to `plan`, applies
   the delay or the transport failure, and yields one `RequestLog` per request to a single `logStream`.
@@ -96,9 +99,10 @@ mimic (CLI) → MimicCLICore → Domain (+ ArgumentParser)
   rebuilds through `MockProject`'s memberwise initialiser, which stamps `currentSchemaVersion`, and
   changing that needs a `schemaVersion:` parameter in Domain. On the `load` path that is a real
   forward migration rather than a relabelling — nothing from ahead of this build gets past the guard,
-  and a row from behind it genuinely is the current shape once loaded. And it does not fix the
-  window's reaction: `ProjectWorkspace.openProject(id:)` treats *any* load failure as "the store does
-  not have it", so a newer-schema project drops out of recents silently instead of explaining itself.
+  and a row from behind it genuinely is the current shape once loaded. The window's reaction is
+  fixed separately: `ProjectWorkspace.openProject(id:)` strikes the recents entry only for
+  `PersistenceError.projectNotFound` and reports every other load failure — a newer-schema document
+  included — on `autosaveStatus`, keeping the entry and `lastOpenedProjectID`.
 - **ControlPlane** — `ControlServer` (a loopback-only Vapor app), `ControlEndpointFile` (the `0600`
   discovery file), and `ControlHost`, the protocol the server serves so the HTTP layer does not know
   who is answering. In production the answerer is always the app's `AppControlHost`. The module

