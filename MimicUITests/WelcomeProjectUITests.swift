@@ -737,14 +737,14 @@ final class WelcomeProjectUITests: MimicUITestCase {
     /// `NewProjectSheet` is derived from `form.portString`, and a SwiftUI `TextField` over a `String`
     /// updates that on every keystroke — so nothing has to be blurred or submitted first.
     @MainActor
+    /// Shares `XCUIApplication.validationNote(startingWith:)` rather than keeping a local copy.
+    ///
+    /// The copy this replaces ran its predicate over `descendants(matching: .any)`, and CI failed it
+    /// twice with "Failed to get matching snapshots: Timed out while evaluating UI query" — not a
+    /// missing element but a query the runner gave up on. The shared helper asks `staticTexts` and
+    /// then `otherElements`, which is where a `DSTextField` validation row actually realizes.
     private var portValidationMessage: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(NSPredicate(
-                format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
-                "Port must be",
-                "Port must be"
-            ))
-            .firstMatch
+        app.validationNote(startingWith: "Port must be")
     }
 
     /// The recents list itself, matched across element types.

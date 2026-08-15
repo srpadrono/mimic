@@ -315,8 +315,14 @@ struct WorkspaceView: View {
 
         }
         // Port conflict alert
+        // `String(...)` around the port, not the bare `Int`. This first argument is a
+        // `LocalizedStringKey`, so an interpolated integer is formatted for the current locale and
+        // picks up a grouping separator: the alert read "Port 21,311 already in use". A port is an
+        // identifier, not a quantity — there is no such port as 21,311, and the number a user would
+        // have to retype is not the one the window showed them. Interpolating a `String` gives the
+        // key a piece of text to place rather than a number to format.
         .alert(
-            "Port \(appState.portConflictAlert?.conflictingPort ?? 0) already in use",
+            "Port \(String(appState.portConflictAlert?.conflictingPort ?? 0)) already in use",
             isPresented: $appState.isShowingPortConflict,
             presenting: appState.portConflictAlert
         ) { alertData in
@@ -326,11 +332,11 @@ struct WorkspaceView: View {
             // then goes green or red on the fixture's port rather than on the button. The identifier
             // is the stable handle. The label stays the visible words so VoiceOver still says which
             // port is being offered.
-            Button("Try port \(alertData.suggestedPort)") {
+            Button("Try port \(String(alertData.suggestedPort))") {
                 appState.retryStartOnNextPort(from: alertData.conflictingPort)
             }
             .accessibilityIdentifier("portConflict.tryPortButton")
-            .accessibilityLabel("Try port \(alertData.suggestedPort)")
+            .accessibilityLabel("Try port \(String(alertData.suggestedPort))")
 
             Button("Keep server stopped", role: .cancel) {
                 appState.portConflictAlert = nil
@@ -338,7 +344,7 @@ struct WorkspaceView: View {
             .accessibilityIdentifier("portConflict.keepStoppedButton")
             .accessibilityLabel("Keep server stopped")
         } message: { alertData in
-            Text("Another process is using port \(alertData.conflictingPort). Try port \(alertData.suggestedPort) instead?")
+            Text("Another process is using port \(String(alertData.conflictingPort)). Try port \(String(alertData.suggestedPort)) instead?")
                 // Named, not matched as a substring. The body interpolates two ports, so the only
                 // query that could reach it without an identifier is a `CONTAINS` predicate over the
                 // window's static texts — which is both expensive and satisfied by any other text

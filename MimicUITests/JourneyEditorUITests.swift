@@ -745,11 +745,15 @@ final class JourneyEditorUITests: MimicUITestCase {
             journeys.autoAdvanceToggle.waitForExistence(timeout: 5),
             "Auto-advance should be offered"
         )
-        XCTAssertEqual(journeys.autoAdvanceToggle.value as? Int, 0, "Auto-advance should start off")
+        // On by default — `Journey.init` declares `autoAdvance: Bool = true`, so a new journey walks
+        // itself forward as its steps are matched. This asserted 0 on the assumption that a checkbox
+        // starts clear; CI read 1, and the model is right. Toggling it *off* is the state worth
+        // proving anyway: it is the one a user chooses deliberately.
+        XCTAssertEqual(journeys.autoAdvanceToggle.value as? Int, 1, "Auto-advance should start on")
         journeys.autoAdvanceToggle.click()
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 1 },
-            "Clicking auto-advance should turn it on"
+            UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 0 },
+            "Clicking auto-advance should turn it off"
         )
 
         // Away…
@@ -793,8 +797,8 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The unscripted-request behaviour should have been written to the journey"
         )
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 1 },
-            "Auto-advance should still be on after the selection moved away and returned"
+            UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 0 },
+            "Auto-advance should still be off after the selection moved away and returned"
         )
     }
 
