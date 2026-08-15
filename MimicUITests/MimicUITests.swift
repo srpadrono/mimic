@@ -51,8 +51,25 @@ struct WelcomePage {
         )
     }
 
+    /// Matched by the row's spoken label, not by `recentProject-<name>`.
+    ///
+    /// That identifier is set on `RecentProjectRow`, and it is not in the tree: the `List` above it
+    /// carries `welcome.recents.list`, and while the paired `.contain` keeps each row as its own
+    /// element with its own **label and value**, it does not keep its own **identifier** — the
+    /// distinction `references/accessibility-tree.md` was written about. Dropping the list's
+    /// identifier is not an option either, because focusing the list for the arrow-key tests needs it.
+    ///
+    /// This mattered beyond a failed lookup. A negative assertion on the old query —
+    /// `waitForNonExistence` — passed whether or not the row had gone, because the query could never
+    /// match anything. One test was proving nothing for exactly that reason.
+    ///
+    /// The comma is load-bearing twice: it keeps "Twin" from matching "Twin (Copy)", and it keeps the
+    /// match off the row's bare name `Text`, whose label is the name alone and which has no children
+    /// for a scoped `staticTexts` query to find.
     func recentProjectRow(named name: String) -> XCUIElement {
-        app.otherElements["recentProject-\(name)"]
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "\(name), last opened"))
+            .firstMatch
     }
 
     func recentProjectText(named name: String) -> XCUIElement {
@@ -82,9 +99,22 @@ struct NewProjectSheetPage {
     var portField: XCUIElement { app.textFields["serverPortField"] }
     var createButton: XCUIElement { app.buttons["createProjectButton"] }
     var cancelButton: XCUIElement { app.buttons["cancelCreateButton"] }
+    /// Matched by the sentence, not by `ds.textfield.newProject.port.error`.
+    ///
+    /// That identifier is built by `DSTextField.validationRow` and is never in the tree at this call
+    /// site, or any other: `NewProjectSheet` names the whole `DSTextField` `serverPortField`, and that
+    /// propagation is the point — it is why `app.textFields["serverPortField"]` matches the input at
+    /// all. It reaches the validation row too and overwrites the row's own name. The row does set
+    /// `.accessibilityElement()` and `.accessibilityLabel(message)`, so the message itself survives,
+    /// and the message is what a test wants to assert anyway.
+    ///
+    /// Making the identifier reachable would mean moving the caller's name onto the inner `TextField`,
+    /// which would break `app.textFields["serverPortField"]` and most of this suite's sheet coverage.
+    /// That is a trade, not an oversight — hence matching by label rather than "fixing" the field.
     var portValidationError: XCUIElement {
         app.descendants(matching: .any)
-            .matching(identifier: "ds.textfield.newProject.port.error")
+            .matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                                  "Port must be", "Port must be"))
             .firstMatch
     }
 }
@@ -223,12 +253,17 @@ struct NewEndpointSheetPage {
     var cancelButton: XCUIElement { app.buttons["newEndpoint.cancelButton"] }
     /// The path field's inline validation message.
     ///
-    /// Not `newEndpoint.pathError` — that identifier has never existed. `DSTextField` builds its own
-    /// from the identifier it is handed, so the error surfaces as `ds.textfield.<id>.error`. Nothing
-    /// asserted on this property, which is why the mismatch went unnoticed.
+    /// Matched by the sentence. Two identifiers have now been wrong here, for different reasons.
+    ///
+    /// `newEndpoint.pathError` never existed at all. Its replacement,
+    /// `ds.textfield.newEndpoint.path.error`, is the name `DSTextField.validationRow` really builds —
+    /// and it is still not in the tree, because `NewEndpointSheet` stamps its own identifier on the
+    /// whole field and that overwrites the row beneath it. CI proved it: the corrected identifier
+    /// found nothing either. What survives is the row's `.accessibilityLabel(message)`, so match that.
     var pathError: XCUIElement {
         app.descendants(matching: .any)
-            .matching(identifier: "ds.textfield.newEndpoint.path.error")
+            .matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                                  "Path must", "Path must"))
             .firstMatch
     }
 }

@@ -32,6 +32,16 @@ import XCTest
 /// and the arrow keys both need it, and clicking a row is not an option — that opens the project. If
 /// these tests ever fail together with "the recents list never took keyboard focus", that assumption
 /// is what broke, and the fix is a production one: the list needs a focus surface a test can drive.
+///
+/// **A recents row is addressed by its label, never by `recentProject-<name>`.** The identifier is set
+/// on the row and does not reach the tree: the `List` above it is tagged `welcome.recents.list`, and a
+/// container's identifier is stamped over its descendants'. Pairing it with
+/// `.accessibilityElement(children: .contain)` keeps each child as an element with its own *label and
+/// value* — which is not the same as its own identifier, and is exactly the distinction the
+/// `mimic-ui-tests` skill's `references/accessibility-tree.md` says has now cost this suite twice.
+/// ``recentsRow(named:)`` is the query that works, and the journeys navigator — `journeys.list` over
+/// rows tagged `journeys.row.<uuid>` — is the same shape, which is why
+/// `JourneyNavigatorPage.journeyRow(named:)` has always matched by label too.
 final class WelcomeProjectUITests: MimicUITestCase {
 
     // MARK: - Welcome window chrome
@@ -122,14 +132,15 @@ final class WelcomeProjectUITests: MimicUITestCase {
         closeProjectViaMenu()
         XCTAssertTrue(welcome.assertVisible())
 
-        let row = welcome.recentProjectRow(named: "Recency Row")
+        let row = recentsRow(named: "Recency Row")
         XCTAssertTrue(
             row.waitForExistence(timeout: 5),
-            "The row should keep its own recentProject-<name> identifier inside the named list"
+            "The row should be addressable by the label it reads out, \"Recency Row, last opened …\""
         )
 
-        // The row pairs its identifier with `.contain` precisely so the name and the times inside it
-        // stay addressable, so both are asserted through the row rather than app-wide.
+        // `.contain` keeps the name and the times inside the row as elements of their own, so both are
+        // asserted through the row rather than app-wide. It is only the row's *identifier* that the
+        // list's identifier overrides — see `recentsRow(named:)`.
         XCTAssertTrue(
             rowText(in: row, beginningWith: "Last opened").exists,
             "The row should state when the project was last opened"
@@ -227,8 +238,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         beginDeleting("Fallback Older")
         deleteConfirmation.deleteButton.click()
 
+        // Through `recentsRow`, not `welcome.recentProjectRow`: that one queries
+        // `recentProject-Fallback Older`, which is never in the tree at all, so waiting for it to
+        // *not* exist returned true whether or not anything was deleted. A negative assertion on a
+        // query that cannot match is green by construction and evidence about nothing.
         XCTAssertTrue(
-            welcome.recentProjectRow(named: "Fallback Older").waitForNonExistence(timeout: 5),
+            recentsRow(named: "Fallback Older").waitForNonExistence(timeout: 5),
             "The deleted project should leave the recents list"
         )
         XCTAssertFalse(
@@ -438,9 +453,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
     /// PROJDUP-04 — duplicating the same project twice leaves two copies, not one.
     ///
-    /// There is no name uniquing, so both are called "Twin (Copy)" and the list has to be counted
-    /// rather than searched. The header's count is asserted alongside it, because two rows with one
-    /// identifier and a store holding two projects are different claims.
+    /// `ProjectWorkspace.duplicateProject` names the copy `"\(source.name) (Copy)"` and nothing
+    /// uniques it, so duplicating "Twin" twice leaves *two* rows both reading "Twin (Copy)" — the
+    /// second is not "Twin (Copy) (Copy)" (that is what duplicating the copy would give) and not
+    /// "Twin (Copy 2)". Both are listed because recents are keyed by project id, so the list has to be
+    /// counted rather than searched. The header's count is asserted alongside it, because two rows
+    /// carrying one name and a store holding two projects are different claims.
     @MainActor
     func testDuplicatingTwiceProducesTwoCopies() throws {
         launchApp()
@@ -451,16 +469,21 @@ final class WelcomeProjectUITests: MimicUITestCase {
         XCTAssertTrue(welcome.assertVisible())
 
         duplicateProjectFromRecents(named: "Twin")
-        XCTAssertNotNil(
-            welcome.findRecentProject(named: "Twin (Copy)"),
+        XCTAssertTrue(
+            recentsRow(named: "Twin (Copy)").waitForExistence(timeout: 5),
             "The first duplicate should appear in recents"
         )
 
         duplicateProjectFromRecents(named: "Twin")
 
-        // `otherElements`, not `descendants(matching: .any)`: a row's children can report the row's
-        // identifier when SwiftUI flattens the subtree, and counting those would inflate the answer.
-        let copies = app.otherElements.matching(identifier: "recentProject-Twin (Copy)")
+        // Counted as the name `Text` inside each row rather than as the rows themselves. Neither
+        // identifier form can do this job — `recentProject-Twin (Copy)` never reaches the tree — and
+        // counting elements that match the row's *label* would be counting whatever wrapping a `List`
+        // row arrives in as well as the row, which can repeat that label. A leaf static text is one
+        // element per row, and the match is exact so "Twin" cannot answer for "Twin (Copy)".
+        let copies = app.staticTexts.matching(
+            NSPredicate(format: "value == %@ OR label == %@", "Twin (Copy)", "Twin (Copy)")
+        )
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { copies.count == 2 },
             "Duplicating twice should leave two copies in the list, found \(copies.count)"
@@ -564,12 +587,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         replacePortField(with: "70000")
 
         XCTAssertTrue(
-            newProjectSheet.portValidationError.waitForExistence(timeout: 3),
+            portValidationMessage.waitForExistence(timeout: 3),
             "An out-of-range port should be explained under the field"
         )
         XCTAssertTrue(
-            newProjectSheet.portValidationError.label.contains("between 1 and 65535"),
-            "The message should state the range, got '\(newProjectSheet.portValidationError.label)'"
+            shownText(of: portValidationMessage).contains("between 1 and 65535"),
+            "The message should state the range, got '\(shownText(of: portValidationMessage))'"
         )
         XCTAssertFalse(newProjectSheet.createButton.isEnabled, "An out-of-range port should refuse Create")
 
@@ -577,7 +600,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         clearPortField()
 
         XCTAssertTrue(
-            newProjectSheet.portValidationError.waitForNonExistence(timeout: 3),
+            portValidationMessage.waitForNonExistence(timeout: 3),
             "An empty port field should be silent rather than accusing"
         )
         XCTAssertFalse(
@@ -588,7 +611,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         replacePortField(with: "abc")
 
         XCTAssertTrue(
-            newProjectSheet.portValidationError.waitForExistence(timeout: 3),
+            portValidationMessage.waitForExistence(timeout: 3),
             "A non-numeric port should be refused the same way an out-of-range one is"
         )
         XCTAssertFalse(newProjectSheet.createButton.isEnabled, "A non-numeric port should refuse Create")
@@ -664,6 +687,66 @@ final class WelcomeProjectUITests: MimicUITestCase {
         XCTAssertTrue(welcome.assertVisible(), "Closing \(name) should return to the welcome window")
     }
 
+    /// A recents row, matched by the label it reads out rather than by its identifier.
+    ///
+    /// `recentProject-<name>` is set on the row and never reaches the tree: `welcome.recents.list` is
+    /// stamped over every descendant of the list, and pairing that identifier with
+    /// `.accessibilityElement(children: .contain)` does not stop it — `.contain` keeps each child as
+    /// an element with its own *label and value*, which is a different thing. So the rule from the
+    /// `mimic-ui-tests` skill applies: target a leaf inside a named container by label.
+    ///
+    /// The prefix is the row's own `accessibilityLabel`, `"<name>, last opened <when>"`, and it
+    /// includes the comma and the phrase on purpose. `"Twin"` alone is a prefix of `"Twin (Copy)"`
+    /// and would match a project's own duplicate; it is also the exact text of the name `Text` inside
+    /// the row, so a bare-name match could return a leaf where the row was wanted and every
+    /// `row.staticTexts` query beneath it would find nothing.
+    ///
+    /// `label` only, matching `JourneyNavigatorPage.journeyRow(named:)` — the label is set explicitly
+    /// on the row, so it cannot arrive as a value.
+    @MainActor
+    private func recentsRow(named name: String) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "\(name), last opened"))
+            .firstMatch
+    }
+
+    /// The `Text` that draws a recent project's name, matched exactly.
+    ///
+    /// Exact rather than `CONTAINS`, which is what makes it safe once a copy exists: "Twin" must not
+    /// answer for "Twin (Copy)".
+    @MainActor
+    private func recentProjectNameText(_ name: String) -> XCUIElement {
+        app.staticTexts
+            .matching(NSPredicate(format: "value == %@ OR label == %@", name, name))
+            .firstMatch
+    }
+
+    /// The inline validation message under the new-project sheet's port field.
+    ///
+    /// By the sentence it reads out, not by `ds.textfield.newProject.port.error`, which is not in the
+    /// tree — and the spelling is not the problem. `NewProjectSheet` stamps `serverPortField` on the
+    /// whole `DSTextField`, and that is the *point*: the wrapper lends its name to the single input
+    /// inside it, which is why `app.textFields["serverPortField"]` matches at all. The same
+    /// propagation reaches the validation row, so whatever identifier `DSTextField` builds for it is
+    /// overwritten. What survives is the row's `.accessibilityElement()` + `.accessibilityLabel(message)`.
+    ///
+    /// `NewProjectSheetPage.portValidationError` and `NewEndpointSheetPage.pathError` both still ask
+    /// for the identifier; both live in `MimicUITests.swift`, so this file cannot fix them.
+    ///
+    /// The message tracks the field's binding, not its commit: `portValidationMessage` in
+    /// `NewProjectSheet` is derived from `form.portString`, and a SwiftUI `TextField` over a `String`
+    /// updates that on every keystroke — so nothing has to be blurred or submitted first.
+    @MainActor
+    private var portValidationMessage: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                "Port must be",
+                "Port must be"
+            ))
+            .firstMatch
+    }
+
     /// The recents list itself, matched across element types.
     ///
     /// A SwiftUI `List` realizes as a table, an outline or a plain group depending on how AppKit
@@ -718,16 +801,22 @@ final class WelcomeProjectUITests: MimicUITestCase {
         )
     }
 
-    /// Right-clicks a recent project by its exact row identifier and chooses Duplicate.
+    /// Right-clicks a recent project by its exact name and chooses Duplicate.
     ///
-    /// By identifier rather than through `findRecentProject`, whose text fallback matches on
-    /// `CONTAINS`: once a copy exists, "Twin" is a substring of "Twin (Copy)" and the fallback would
-    /// happily duplicate the copy instead of the original.
+    /// Neither form `findRecentProject` tries will do here. The identifier it asks for first is not in
+    /// the tree at all (see ``recentsRow(named:)``), and its text fallback matches on `CONTAINS`: once
+    /// a copy exists, "Twin" is a substring of "Twin (Copy)" and the fallback would happily duplicate
+    /// the copy instead of the original. The name `Text` matched *exactly* is unambiguous, and it is
+    /// the element the fallback right-clicks on every other recents test in this file, so the context
+    /// menu is known to open from it.
     @MainActor
     private func duplicateProjectFromRecents(named name: String) {
-        let row = welcome.recentProjectRow(named: name)
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name) should have a row of its own in recents")
-        row.rightClick()
+        let nameText = recentProjectNameText(name)
+        XCTAssertTrue(
+            nameText.waitForExistence(timeout: 5),
+            "\(name) should have a row of its own in recents"
+        )
+        nameText.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
         XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3), "The context menu should offer Duplicate")
