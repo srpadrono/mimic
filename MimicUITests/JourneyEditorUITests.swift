@@ -99,8 +99,24 @@ extension JourneysNavigatorPage {
     ///
     /// "Add step\u{2026}", with the ellipsis, which is what separates it from the header's button:
     /// that one carries an explicit `.accessibilityLabel("Add step")` with no ellipsis, so the two
-    /// controls that open the identical sheet have two distinct spoken names.
-    var stepsEmptyStateAddButton: XCUIElement { app.buttons["Add step\u{2026}"].firstMatch }
+    /// controls that open the identical sheet have two distinct spoken names. It is matched by that
+    /// label rather than by an identifier because `DSEmptyState` stamps `ds.empty.journeyEditor.steps`
+    /// over the `ds.button.empty.journeyEditor.steps.cta` its `DSButton` sets — rule 8, and neither
+    /// spelling is dependable.
+    ///
+    /// **Scoped to the empty state**, which is the part that was missing. `app.buttons[…].firstMatch`
+    /// searches the whole window and takes the first element in tree order, and a container comes
+    /// before the leaves it lends its name to: the query resolved to a wrapper whose frame is the
+    /// whole block, so the synthesized click landed in the middle of the message text, reported no
+    /// error, and opened nothing — the failure read "The step sheet should open". `descendants`
+    /// starts *below* the element it is asked of, so this resolves to the button or to nothing.
+    var stepsEmptyStateAddButton: XCUIElement {
+        let scoped = stepsEmptyState.descendants(matching: .button)
+            .matching(NSPredicate(format: "label == %@", "Add step\u{2026}"))
+            .firstMatch
+        if scoped.exists { return scoped }
+        return app.buttons["Add step\u{2026}"].firstMatch
+    }
 
     /// The centre pane when the journeys navigator has nothing selected.
     var noJourneySelectionEmptyState: XCUIElement {
@@ -464,16 +480,50 @@ final class JourneyEditorUITests: MimicUITestCase {
         field.typeText(text)
     }
 
+    /// One option of an open pop-up menu — the *picker's* option, never the menu bar's.
+    ///
+    /// `app.menuItems[title]` reaches every menu the app owns, and the menu bar's menus are in the
+    /// tree whether or not they are open. "Restart" is the on-completion picker's second option and
+    /// it is also the title of the Apple menu's `_restartNowRequested:` item, so the bare query
+    /// resolved to a system item sitting in a closed menu and the click failed with "Not hittable"
+    /// while the picker's own option was two elements away.
+    ///
+    /// An open pop-up's menu hangs off the pop-up button, so the scoped query cannot reach the menu
+    /// bar at all. The fallback keeps a picker that realizes some other way working, and it takes the
+    /// first *hittable* match — which an item in an unopened menu can never be.
+    @MainActor
+    private func openMenuItem(titled option: String, in picker: XCUIElement) -> XCUIElement? {
+        let scoped = picker.descendants(matching: .menuItem)
+            .matching(NSPredicate(format: "label == %@", option))
+            .firstMatch
+        if scoped.exists { return scoped }
+
+        let loose = app.menuItems.matching(NSPredicate(format: "label == %@", option))
+        for index in 0..<loose.count {
+            let candidate = loose.element(boundBy: index)
+            if candidate.exists, candidate.isHittable { return candidate }
+        }
+        return nil
+    }
+
     /// Opens a pop-up picker and chooses one of its options.
     ///
-    /// A SwiftUI `Picker` realizes as a pop-up button, so `app.menuItems` matches nothing until the
-    /// menu is open — the same reason `MimicUITestCase.selectMethod` clicks before it queries.
+    /// A SwiftUI `Picker` realizes as a pop-up button, so the menu has to be opened before its items
+    /// can be clicked — the same reason `MimicUITestCase.selectMethod` clicks before it queries.
     @MainActor
     private func choose(_ option: String, in picker: XCUIElement, _ what: String) {
         XCTAssertTrue(picker.waitForExistence(timeout: 5), "\(what) should be on screen")
         picker.click()
-        let item = app.menuItems[option].firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "\(what) should offer \"\(option)\"")
+
+        var item: XCUIElement?
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                item = self.openMenuItem(titled: option, in: picker)
+                return item != nil
+            },
+            "\(what) should offer \"\(option)\""
+        )
+        guard let item else { return }
         item.click()
     }
 
@@ -686,6 +736,13 @@ final class JourneyEditorUITests: MimicUITestCase {
         XCTAssertTrue(
             journeys.stepsEmptyStateAddButton.waitForExistence(timeout: 5),
             "The steps empty state should offer to add the first step"
+        )
+        // Asserted before the click, so a call to action that is on screen but not reachable — drawn
+        // under the request log drawer when the step area is squeezed, which is the other way this
+        // step has failed — reports itself rather than arriving as "the step sheet should open".
+        XCTAssertTrue(
+            journeys.stepsEmptyStateAddButton.isHittable,
+            "The empty state's call to action should be reachable by the pointer"
         )
         journeys.stepsEmptyStateAddButton.click()
 
@@ -1334,18 +1391,36 @@ final class JourneyEditorUITests: MimicUITestCase {
             "Deleting a journey should ask before it takes the steps with it"
         )
         let confirmation = alert.exists ? alert : dialog
+
+        // The title is a `String` in `.alert(_:isPresented:)`, so it carries no identifier and it is
+        // not even reliably an element: AppKit may realize it as the alert's `messageText`, in which
+        // case it arrives as the sheet's own `label` rather than as a static text inside it. And a
+        // static text that *is* there keeps its string in `value` as often as in `label`. All three
+        // are accepted — the assertion is that the journey is named somewhere in the confirmation,
+        // which is the point of the step. `WelcomeProjectUITests` matches the project alert the same
+        // way, and matching on `label` alone is what failed here.
+        let titleInDialog = confirmation.staticTexts
+            .matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", name, name))
+            .firstMatch
         XCTAssertTrue(
-            confirmation.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS %@", name))
-                .firstMatch
-                .waitForExistence(timeout: 3),
+            UITestApp.waitUntil(timeout: 3) {
+                titleInDialog.exists || confirmation.label.contains(name)
+            },
             "The confirmation should name the journey it is about to delete"
         )
+
+        // The message is the informative text, read the same way and for the same reason.
+        let messageInDialog = confirmation.staticTexts
+            .matching(NSPredicate(
+                format: "value CONTAINS %@ OR label CONTAINS %@",
+                "all of its steps",
+                "all of its steps"
+            ))
+            .firstMatch
         XCTAssertTrue(
-            confirmation.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS %@", "all of its steps"))
-                .firstMatch
-                .exists,
+            UITestApp.waitUntil(timeout: 3) {
+                messageInDialog.exists || confirmation.label.contains("all of its steps")
+            },
             "The confirmation should warn that the steps go with the journey"
         )
 

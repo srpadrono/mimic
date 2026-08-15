@@ -112,19 +112,24 @@ class MimicUITestCase: XCTestCase {
         )
     }
 
-    /// Launches without asserting the welcome window appeared.
-    ///
-    /// For the suites whose whole subject is a launch that does *not* reach a usable welcome window —
-    /// the store-failure alert comes up over it, and asserting the window first would fail the test
+    /// Launches for a suite whose subject is a launch that does *not* reach a usable welcome window —
+    /// the store-failure alert comes up over it, so asserting the window first would fail the test
     /// before it reached the thing it is testing.
+    ///
+    /// `isReady` is the caller's own readiness condition, usually "the alert is up". It goes through
+    /// `UITestApp.launchAndBringToForeground` like every other launch, because the first version of
+    /// this method open-coded `launch()` plus one activation and dropped the five-attempt retry with
+    /// it — reintroducing, in the one suite that cannot fall back on the welcome assertion, exactly
+    /// the "launched but not frontmost" failure that rule 6 of the UI Definition of Done exists to
+    /// prevent. A launch helper that skips the retry is not a variant of the contract; it is the bug
+    /// the contract was written about.
+    ///
+    /// Returns whether `isReady` ever held, so the caller can assert with its own message.
     @MainActor
-    func launchAppExpectingFailureAlert() {
+    @discardableResult
+    func launchApp(waitingFor isReady: () -> Bool) -> Bool {
         prepareApp()
-        UITestApp.isolateControlPlaneDiscovery(for: app)
-        app.launch()
-        _ = app.wait(for: .runningForeground, timeout: 15)
-        UITestApp.activateLaunchedApp()
-        app.activate()
+        return UITestApp.launchAndBringToForeground(app, isReady: isReady)
     }
 
     // MARK: - State builders

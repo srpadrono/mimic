@@ -361,11 +361,23 @@ struct RequestLogDrawerPage {
     }
 
     /// One element per logged row, in the order the table draws them.
+    ///
+    /// Resolved through `allElementsBoundByIndex`, which takes ONE snapshot, rather than reading
+    /// `allRowCells.count` and then indexing back into the query. That older shape asked the app two
+    /// separate questions, and anything that rebuilds the table between them — a filter change, a
+    /// sort, traffic still arriving — leaves the second one indexing rows the first one counted and
+    /// the runner raises "Failed to get matching snapshot". It is not hypothetical: it is how
+    /// `testFilteringTheRequestLogByTextAndMethod` died on CI, inside this helper rather than on any
+    /// assertion of its own, which is the worst way for a shared query to fail because the message
+    /// names neither the filter nor the row.
+    ///
+    /// Each row is still guarded with `exists` before its identifier is read, so a row that goes
+    /// away mid-walk truncates the list instead of taking the test down with it.
     func distinctRows(limit: Int) -> [XCUIElement] {
         var seen: Set<String> = []
         var rows: [XCUIElement] = []
-        for index in 0..<allRowCells.count {
-            let cell = allRowCells.element(boundBy: index)
+        for cell in allRowCells.allElementsBoundByIndex {
+            guard cell.exists else { break }
             guard seen.insert(cell.identifier).inserted else { continue }
             rows.append(cell)
             if rows.count == limit { break }

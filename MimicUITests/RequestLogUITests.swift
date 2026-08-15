@@ -75,6 +75,25 @@ final class RequestLogUITests: MimicUITestCase {
         return "\(element.label)|\(value)"
     }
 
+    /// Everything an element **and everything inside it** says.
+    ///
+    /// A control that is one view in the source is not always one element in the tree: a wrapper can
+    /// take the identifier while the words stay on the `Text` beneath it, and then the handle a test
+    /// holds reads as empty while the string it is asserting on is one level down. The traffic
+    /// header's status chip is the case that proved it — `endpointTraffic.status.200` resolved, and
+    /// its `label` was "". Reading the subtree is what makes an assertion about what a control says
+    /// independent of how SwiftUI split it up.
+    @MainActor
+    private func speech(of element: XCUIElement) -> String {
+        guard element.exists else { return "" }
+        var parts = [text(of: element)]
+        let inner = element.descendants(matching: .any)
+        for index in 0..<inner.count {
+            parts.append(text(of: inner.element(boundBy: index)))
+        }
+        return parts.joined(separator: " ")
+    }
+
     /// Polls until `condition` holds, spaced by the accessibility queries the condition itself
     /// performs. Never `sleep()` — see rule 9 of the UI Definition of Done.
     @MainActor
@@ -160,6 +179,54 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - Rows
 
+    /// How many rows the log is showing, counted **without resolving any of them**.
+    ///
+    /// This is the whole fix for `testFilteringTheRequestLogByTextAndMethod`, which did not fail an
+    /// assertion at all — it died inside `RequestLogDrawerPage.distinctRows(limit:)` with "Failed to
+    /// get matching snapshot: No matches found for … requestLog-". That helper takes the query's
+    /// `count` from one snapshot and then reads `identifier` off each match, which is a second query;
+    /// every filter in this test rebuilds the table, so the second query can find nothing where the
+    /// first found rows, and a vanished element is a hard error rather than a smaller number. The
+    /// wait loops below poll continuously, so they sat directly in that window.
+    ///
+    /// `count` never resolves an element, so a rebuild between two polls is just a different number.
+    /// One element per row is safe to rely on: `RequestLogTableRow` composes with
+    /// `.accessibilityElement(children: .ignore)` before it sets `requestLog-<uuid>`, so the row's six
+    /// cells exist only inside its spoken label. The context-menu items are `requestLog.` with a dot
+    /// and are not matched by this prefix.
+    @MainActor
+    private func visibleRowCount() -> Int {
+        elements(identifierPrefix: "requestLog-").count
+    }
+
+    /// The rows themselves, for the assertions that need to read a label rather than count.
+    ///
+    /// Only ever called once a wait on ``visibleRowCount()`` has settled, and each row is checked for
+    /// existence before it is read, so this resolves a stable table rather than one mid-rebuild.
+    @MainActor
+    private func visibleRows(limit: Int) -> [XCUIElement] {
+        let query = elements(identifierPrefix: "requestLog-")
+        var rows: [XCUIElement] = []
+        var seen: Set<String> = []
+        for index in 0..<query.count {
+            let row = query.element(boundBy: index)
+            guard row.exists, seen.insert(row.identifier).inserted else { continue }
+            rows.append(row)
+            if rows.count == limit { break }
+        }
+        return rows
+    }
+
+    /// Waits for `count` requests to have reached the log.
+    ///
+    /// The local counterpart of `RequestLogDrawerPage.waitForRowCount(_:timeout:)`, which resolves
+    /// every row on every poll for the reason above.
+    @MainActor
+    @discardableResult
+    private func waitForRowsToArrive(_ count: Int, timeout: TimeInterval = 15) -> Bool {
+        poll(timeout: timeout) { self.visibleRowCount() >= count }
+    }
+
     /// One logged row, re-addressed by identifier so it stays the same row across a re-sort.
     @MainActor
     private func logRow(_ identifier: String) -> XCUIElement {
@@ -174,12 +241,12 @@ final class RequestLogUITests: MimicUITestCase {
     /// the whole window.
     @MainActor
     private func rowIdentifier(forPath path: String, limit: Int = 8) -> String? {
-        requestLogDrawer.distinctRows(limit: limit).first { $0.label.contains(path) }?.identifier
+        visibleRows(limit: limit).first { $0.label.contains(path) }?.identifier
     }
 
     @MainActor
     private func rowLabel(forPath path: String, limit: Int = 8) -> String {
-        requestLogDrawer.distinctRows(limit: limit).first { $0.label.contains(path) }?.label ?? ""
+        visibleRows(limit: limit).first { $0.label.contains(path) }?.label ?? ""
     }
 
     /// Waits for the log to be showing exactly `count` rows — the observable half of every filter
@@ -187,14 +254,12 @@ final class RequestLogUITests: MimicUITestCase {
     @MainActor
     @discardableResult
     private func waitForVisibleRowCount(_ count: Int, timeout: TimeInterval = 8) -> Bool {
-        poll(timeout: timeout) {
-            self.requestLogDrawer.distinctRows(limit: count + 3).count == count
-        }
+        poll(timeout: timeout) { self.visibleRowCount() == count }
     }
 
     @MainActor
     private func firstRowLabel() -> String {
-        requestLogDrawer.distinctRows(limit: 1).first?.label ?? ""
+        visibleRows(limit: 1).first?.label ?? ""
     }
 
     // MARK: - Sorting
@@ -274,7 +339,7 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/alpha", method: "GET", body: nil)
 
         XCTAssertTrue(
-            requestLogDrawer.waitForRowCount(3, timeout: 15),
+            waitForRowsToArrive(3, timeout: 15),
             "All three requests should reach the log"
         )
 
@@ -351,7 +416,7 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
 
         XCTAssertTrue(
-            requestLogDrawer.waitForRowCount(3, timeout: 15),
+            waitForRowsToArrive(3, timeout: 15),
             "All three requests should reach the log"
         )
         XCTAssertTrue(
@@ -438,7 +503,7 @@ final class RequestLogUITests: MimicUITestCase {
         createEndpointViaUI(name: "Users", path: "/api/users")
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(1, timeout: 15), "The matched request should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(1, timeout: 15), "The matched request should reach the log")
 
         // Nothing to filter to and not already filtering: the control is disabled, and it says so
         // rather than sitting there looking pressable.
@@ -451,7 +516,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertFalse(unmatchedToggle.isEnabled, "The unmatched filter should be inert while nothing is unmatched")
 
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(2, timeout: 15), "The unmatched request should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "The unmatched request should reach the log")
 
         XCTAssertTrue(
             poll { self.unmatchedToggle.label == "Show only unmatched requests, 1 so far" },
@@ -481,12 +546,38 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(clearLogButton.waitForExistence(timeout: 5), "The header should offer a clear button")
         clearLogButton.click()
 
+        // Two assertions, in this order, because they fail for different reasons: the rows going is
+        // the clear having happened at all, and the empty state is what the panel does about it.
+        XCTAssertTrue(waitForVisibleRowCount(0), "The trash button should empty the log")
+
+        // `RequestLogDrawerView` checks `requestLogs.isEmpty` before it checks the filter, so a
+        // cleared log shows "No requests yet" even with the unmatched filter still on. The heading is
+        // a `DSEmptyState` leaf, so it is reached the way this file reaches the "No matching requests"
+        // one: the plain label first, then the identifiers the component builds — the container's and
+        // the heading's — polled together rather than waited out in turn. `emptyHeading` alone is a
+        // label match on a leaf whose string arrives in `value` as readily as in `label`, which is why
+        // it went unfound here while the same query answers on a log that was never written to.
         XCTAssertTrue(
-            requestLogDrawer.emptyHeading.waitForExistence(timeout: 5),
+            UITestApp.waitForAny(
+                [
+                    requestLogDrawer.emptyHeading,
+                    element(identifiedBy: "ds.empty.drawer.requests.heading"),
+                    element(identifiedBy: "ds.empty.drawer.requests"),
+                ],
+                timeout: 5
+            ),
             "Clearing the log should restore the 'No requests yet' empty state"
         )
-        XCTAssertFalse(requestLogDrawer.noMatchesHeading.exists, "An empty log is not a filtered-out log")
-        XCTAssertEqual(requestLogDrawer.distinctRows(limit: 3).count, 0, "No rows should survive the clear")
+
+        // The negative is checked on the identifier prefix rather than on the heading's label: a
+        // label query that cannot resolve the element would pass this assertion by not finding
+        // something that is on screen.
+        XCTAssertEqual(
+            elements(identifierPrefix: "ds.empty.drawer.noMatches").count,
+            0,
+            "An empty log is not a filtered-out log"
+        )
+        XCTAssertEqual(visibleRowCount(), 0, "No rows should survive the clear")
     }
 
     // MARK: - LOGVIEW rows and REQDET summary/headers
@@ -505,7 +596,7 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/users", method: "POST", body: payload)
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
 
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(2, timeout: 15), "Both requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
         XCTAssertTrue(
             headerCount("2 requests").waitForExistence(timeout: 5),
             "The drawer header should count the requests it is showing"
@@ -641,7 +732,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         await sendRequest(port: port, path: "/api/users", method: "POST", body: payload)
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(2, timeout: 15), "Both requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
 
         let matchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/users"), "The matched row should be addressable")
         let unmatchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/orders"), "The unmatched row should be addressable")
@@ -758,7 +849,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(2, timeout: 15), "Both requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
 
         let matchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/users"), "The matched row should be addressable")
         let unmatchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/orders"), "The unmatched row should be addressable")
@@ -809,9 +900,9 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/items", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(3, timeout: 15), "All three requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(3, timeout: 15), "All three requests should reach the log")
 
-        let rows = requestLogDrawer.distinctRows(limit: 3)
+        let rows = visibleRows(limit: 3)
         XCTAssertEqual(rows.count, 3, "Three requests should be listed as three rows")
         let identifiers = rows.map(\.identifier)
 
@@ -902,9 +993,9 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/one", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/two", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/three", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(3, timeout: 15), "All three requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(3, timeout: 15), "All three requests should reach the log")
 
-        let rows = requestLogDrawer.distinctRows(limit: 3)
+        let rows = visibleRows(limit: 3)
         XCTAssertEqual(rows.count, 3, "Three requests should be listed as three rows")
         let identifiers = rows.map(\.identifier)
         let labels = rows.map(\.label)
@@ -1034,7 +1125,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
-        XCTAssertTrue(requestLogDrawer.waitForRowCount(2, timeout: 15), "Both requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
 
         // The summary line, which is the panel's own header rather than a row.
         let summary = element(identifiedBy: "endpointTraffic.summary")
@@ -1045,11 +1136,24 @@ final class RequestLogUITests: MimicUITestCase {
         )
 
         // The distribution chip: one per status code seen, with how often.
+        //
+        // Read as a subtree, not as one element's label. `DSStatusPill` sets no accessibility of its
+        // own — identifiers and labels are the call site's — and `EndpointTrafficList` gives this one
+        // both an identifier and an `.accessibilityLabel("2 responses with status 200")`; what
+        // arrives is an element carrying the identifier with an **empty** label, so the strict
+        // `chip.label ==` read this replaces asserted against "". The words are in the subtree, in
+        // one of the two spellings the chip legitimately has: the spoken label, or the pill's own
+        // "200 ×2". Either states the same fact — this code, this many — so both are accepted, and
+        // the assertion still fails on a chip that names the code without the count.
         let statusChip = element(identifiedBy: "endpointTraffic.status.200")
         XCTAssertTrue(statusChip.waitForExistence(timeout: 5), "The status mix should include the 200s")
         XCTAssertTrue(
-            poll { statusChip.label == "2 responses with status 200" },
-            "The chip should say how many responses carried the code — it read \(statusChip.label)"
+            poll {
+                let spoken = self.speech(of: statusChip)
+                return spoken.contains("200")
+                    && (spoken.contains("2 responses") || spoken.contains("\u{00D7}2"))
+            },
+            "The chip should say how many responses carried the code — it read \(speech(of: statusChip))"
         )
 
         // The badge rides the tab as a dot, so the count exists only in the tab's value.

@@ -16,14 +16,28 @@ import XCTest
 /// ``configureLaunchEnvironment(_:)`` and the settable properties above it — set them before
 /// `launchApp()`, never inside a test body after the process is up.
 ///
-/// *A port conflict is produced by the runner, not by a second Mimic.* ``holdPort(_:)`` binds
-/// `127.0.0.1:<port>` in this process and does **not** set `SO_REUSEADDR`, which matters: the engine
-/// binds exactly `127.0.0.1` (`MockServerEngine.start`), so an exact-address duplicate is refused
-/// with `EADDRINUSE` and `VaporConfigurator.mapStartError` turns that into
+/// *A port conflict is produced by the runner, not by a second Mimic.* ``holdPort(from:keepingSuccessorFree:)``
+/// binds `127.0.0.1:<port>` in this process and does **not** set `SO_REUSEADDR`, which matters: the
+/// engine binds exactly `127.0.0.1` (`MockServerEngine.start`), so an exact-address duplicate is
+/// refused with `EADDRINUSE` and `VaporConfigurator.mapStartError` turns that into
 /// `MockServerError.portInUse`. A wildcard listener with `SO_REUSEADDR` on both sides is precisely
 /// the pair BSD *allows* to coexist, which would make the conflict fail to happen. The descriptor is
 /// closed in `tearDownWithError`, because a listener leaked out of one test breaks every later test
 /// that tries to bind a port.
+///
+/// **A third rule was learned from the first CI run, and it is about what a query may assume.** Nine
+/// of these twelve tests failed on a handle that does not exist in the tree — an alert message
+/// addressed by the identifier its `Text` was given, a `DSTextField` validation note addressed by
+/// the identifier `DSTextField` builds for it, a warning row whose identifier resolves to the *icon*
+/// beside the sentence. Every one is the accessibility-tree rule the UI skill states: a container's
+/// `.accessibilityIdentifier` overrides its descendants'. `NewProjectSheet` stamps `serverPortField`
+/// on the whole `DSTextField` — which is how `app.textFields["serverPortField"]` finds the input —
+/// and that same stamp lands on the validation note underneath it, so
+/// `ds.textfield.newProject.port.error` is a name nothing in the window answers to. What survives
+/// the flattening is the element's **label**, which for all three of these is the sentence the user
+/// reads. So the queries here address a failure surface by what it *says*, falling back to the
+/// identifier rather than the other way round; the assertions are stronger for it, because a note
+/// found by its words has already proved it carries them.
 final class ErrorAlertUITests: MimicUITestCase {
 
     // MARK: - Launch configuration
@@ -42,6 +56,14 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     /// A listening socket held open in the runner, so the app's bind fails. `-1` when none is held.
     private var heldSocket: Int32 = -1
+
+    /// Why no candidate port could be held, syscall and `errno` named — empty when one was.
+    ///
+    /// The first CI run failed three of these tests on `XCTAssertTrue(holdPort(…))` and the log said
+    /// only "The runner should be able to hold port 62311". A boolean fixture that cannot say what
+    /// the kernel told it is a fixture that has to be re-run to be diagnosed, which on a hosted
+    /// runner means a round trip per guess.
+    private var portHoldDiagnosis = ""
 
     @MainActor
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
@@ -67,30 +89,31 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// The alert that says the session is ephemeral, the sentence explaining why, the dismissal, and
     /// that the ephemeral session is still a usable one.
     ///
-    /// Launched through ``MimicUITestCase/launchAppExpectingFailureAlert()`` rather than the usual
-    /// path: the alert comes up *over* the welcome window, and asserting the window first would fail
-    /// the test before it reached the thing it is testing.
+    /// Launched through ``launchUntilStoreFailureAlert()`` rather than the usual path: the alert comes
+    /// up *over* the welcome window, so the window cannot be the readiness condition — the alert is.
     @MainActor
     func testStoreFailureAlertExplainsTheEphemeralSessionAndDismisses() throws {
         databasePathOverride = "/dev/null/mimic.sqlite"
-        launchAppExpectingFailureAlert()
 
-        // ERRSTORE-01 / ERRSTORE-02. The message is `ProjectStore.open`'s prose, so the identifier is
-        // the only stable handle on it — the sentence is one somebody will reword.
+        // ERRSTORE-01 / ERRSTORE-02. Matched on the alert's *title*, which is a `String` the window
+        // owns rather than a sentence a validator produced, and on the body's own words after it.
+        // `storeFailure.message` is still tried first — see ``alertText(messageIdentifier:)`` for why
+        // it may not be in the tree at all.
         XCTAssertTrue(
-            storeFailureMessage.waitForExistence(timeout: 20),
-            "A store that cannot be opened should raise the \"Your work will not be saved\" alert"
+            launchUntilStoreFailureAlert(),
+            "A store that cannot be opened should raise the \"Your work will not be saved\" alert — "
+                + "the window reads: " + alertText(messageIdentifier: "storeFailure.message")
         )
         XCTAssertTrue(
-            waitForText(storeFailureMessage, containing: "in memory"),
+            waitForAlert(messageIdentifier: "storeFailure.message", saying: "in memory", timeout: 5),
             "The alert should say the session is running in memory — read: "
-                + combinedText(of: storeFailureMessage)
+                + alertText(messageIdentifier: "storeFailure.message")
         )
 
         // ERRSTORE-03.
         alertButton(identifier: "storeFailure.continueButton", label: "Continue anyway").click()
         XCTAssertTrue(
-            storeFailureMessage.waitForNonExistence(timeout: 5),
+            waitForAlertToClear(messageIdentifier: "storeFailure.message", saying: "will not be saved"),
             "\"Continue anyway\" should dismiss the alert"
         )
 
@@ -111,10 +134,10 @@ final class ErrorAlertUITests: MimicUITestCase {
     @MainActor
     func testRelaunchWithAReachableStoreShowsNoStoreFailureAlert() throws {
         databasePathOverride = "/dev/null/mimic.sqlite"
-        launchAppExpectingFailureAlert()
         XCTAssertTrue(
-            storeFailureMessage.waitForExistence(timeout: 20),
-            "The unopenable store should raise the alert on the first launch"
+            launchUntilStoreFailureAlert(),
+            "The unopenable store should raise the alert on the first launch — the window reads: "
+                + alertText(messageIdentifier: "storeFailure.message")
         )
 
         app.terminate()
@@ -128,7 +151,11 @@ final class ErrorAlertUITests: MimicUITestCase {
             "The app should relaunch onto a usable welcome window"
         )
         XCTAssertFalse(
-            storeFailureMessage.waitForExistence(timeout: 3),
+            waitForAlert(
+                messageIdentifier: "storeFailure.message",
+                saying: "will not be saved",
+                timeout: 3
+            ),
             "A store that opens normally must not report a failure"
         )
     }
@@ -140,9 +167,16 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// **A lone space does not reach the executor**, which is worth stating because it looks like the
     /// obvious trigger: `EndpointEditorView.headersDictionary(from:)` trims each name and drops the
     /// ones that trim to nothing, so `" "` produces the same empty dictionary the scenario already
-    /// holds, `headersAreDirty` answers `false`, and no command is ever issued. A name with an
-    /// *interior* space survives the trim, is dirty, and is refused by `EndpointValidator` — which is
-    /// the refusal this alert exists to report.
+    /// holds, `headersAreDirty` answers `false`, and no command is ever issued.
+    ///
+    /// **A colon, one keystroke, is the trigger this uses**, and the choice is about determinism
+    /// rather than about taste. `":"` is not a `tchar` (RFC 9110 §5.6.2), so the *first* character
+    /// typed is already refused — with a name like `"X Bad"` the debounce commits the honest prefix
+    /// `"X"` first, which is a perfectly valid header, and the refusal then arrives on some later
+    /// keystroke with the remaining ones landing on an alert that is already up. One character means
+    /// one settle, one command, one alert, and nothing typed into it afterwards. It is also the
+    /// vector `EndpointValidator.validateHeader` names: a colon in a name ends the name, and
+    /// everything after it is read by the client as a further header.
     @MainActor
     func testRefusedHeaderNameRaisesTheCommandErrorAlert() throws {
         launchApp()
@@ -153,33 +187,39 @@ final class ErrorAlertUITests: MimicUITestCase {
         let key = endpointEditor.headerKeyField(at: 0)
         XCTAssertTrue(key.waitForExistence(timeout: 5), "Adding a header should give the row a name field")
         key.click()
-        key.typeText("X Bad")
+        key.typeText(":")
 
         // The 300ms settle, then `applyScenarioSpec` → `validateHeaders` → `lastCommandError`.
         XCTAssertTrue(
-            commandErrorMessage.waitForExistence(timeout: 10),
-            "A header name that is not a token should raise \"Couldn't apply that change\""
+            waitForAlert(
+                messageIdentifier: "commandError.message",
+                saying: "Couldn't apply that change",
+                timeout: 10
+            ),
+            "A header name that is not a token should raise \"Couldn't apply that change\" — "
+                + "the window reads: " + alertText(messageIdentifier: "commandError.message")
         )
         XCTAssertTrue(
-            waitForText(commandErrorMessage, containing: "header name"),
-            "The alert should name the refusal — read: " + combinedText(of: commandErrorMessage)
+            waitForAlert(messageIdentifier: "commandError.message", saying: "header name", timeout: 5),
+            "The alert should name the refusal — read: "
+                + alertText(messageIdentifier: "commandError.message")
         )
 
         alertButton(identifier: "commandError.okButton", label: "OK").click()
         XCTAssertTrue(
-            commandErrorMessage.waitForNonExistence(timeout: 5),
+            waitForAlertToClear(
+                messageIdentifier: "commandError.message",
+                saying: "Couldn't apply that change"
+            ),
             "OK should clear the refusal"
         )
         // The refused text stays in the field: the change was not made, and the editor does not
-        // silently rewrite what you typed. Asserted as a prefix rather than as the whole string
-        // because the alert can rise on a prefix of what is being typed — "X B" is already not a
-        // token — and the keystrokes after it then land on the alert. Either way the field must
-        // still hold the name the executor refused; an editor that reverted to the model would show
-        // an empty field here.
-        let shownName = (key.value as? String) ?? ""
-        XCTAssertTrue(
-            shownName.hasPrefix("X "),
-            "The editor should still show the text the executor refused — read: \(shownName)"
+        // silently rewrite what you typed. An editor that reverted to the model would show an empty
+        // field here — which is exactly the silent-revert this alert was added to end.
+        XCTAssertEqual(
+            (key.value as? String) ?? "",
+            ":",
+            "The editor should still show the text the executor refused"
         )
     }
 
@@ -188,18 +228,32 @@ final class ErrorAlertUITests: MimicUITestCase {
     ///
     /// `AppState.retryStartOnNextPort` runs `.serverConfigure(port: 65536)` *before* it starts, and
     /// bails when the command declines — so the only evidence the user gets is this alert.
+    ///
+    /// **65535 is the one port in this file that cannot be swapped for a quieter one**, and it is
+    /// worth saying why rather than leaving the next reader to wonder. `PortConflictAlertData`
+    /// computes `conflictingPort + 1` with nothing clamping it, so 65535 is the *only* conflict that
+    /// reaches the refusal — and `conflictingPort` comes from the engine's own `EADDRINUSE`, so
+    /// there is no way to reach it but to genuinely hold 65535. It is also the top of the ephemeral
+    /// range and therefore the likeliest port on the machine to be transiently busy, which is a real
+    /// weakness of the fixture with no alternative available: what it gets instead is a failure that
+    /// prints the `errno`, so a busy machine is distinguishable from a runner that cannot listen at
+    /// all. See the report for the production change — clamping the offer — that would remove the
+    /// need for this fixture altogether.
     @MainActor
     func testAcceptingTheNextPortAbove65535ReportsTheRefusal() throws {
-        let port = 65535
-        XCTAssertTrue(holdPort(UInt16(port)), "The runner should be able to hold port \(port)")
+        let port = try XCTUnwrap(
+            holdPort(from: [65535]),
+            "The runner should be able to hold port 65535 — \(portHoldDiagnosis)"
+        )
 
         launchApp()
         createProjectViaUI(name: "Last Port", port: port)
         workspace.serverToggleButton.click()
 
         XCTAssertTrue(
-            portConflictMessage.waitForExistence(timeout: 20),
-            "Starting on a port the runner holds should report the conflict"
+            waitForAlert(messageIdentifier: "portConflict.message", saying: "already in use", timeout: 20),
+            "Starting on a port the runner holds should report the conflict — the window reads: "
+                + alertText(messageIdentifier: "portConflict.message")
         )
         alertButton(
             identifier: "portConflict.tryPortButton",
@@ -207,17 +261,19 @@ final class ErrorAlertUITests: MimicUITestCase {
         ).click()
 
         XCTAssertTrue(
-            commandErrorMessage.waitForExistence(timeout: 10),
-            "Port 65536 is out of range, and the refusal must be reported rather than swallowed"
-        )
-        XCTAssertTrue(
-            waitForText(commandErrorMessage, containing: "65536"),
-            "The refusal should name the port it rejected — read: "
-                + combinedText(of: commandErrorMessage)
+            waitForAlert(messageIdentifier: "commandError.message", saying: "65536", timeout: 10),
+            "Port 65536 is out of range, and the refusal must be reported rather than swallowed — "
+                + "the window reads: " + alertText(messageIdentifier: "commandError.message")
         )
 
         alertButton(identifier: "commandError.okButton", label: "OK").click()
-        XCTAssertTrue(commandErrorMessage.waitForNonExistence(timeout: 5), "OK should clear the refusal")
+        XCTAssertTrue(
+            waitForAlertToClear(
+                messageIdentifier: "commandError.message",
+                saying: "Couldn't apply that change"
+            ),
+            "OK should clear the refusal"
+        )
         XCTAssertFalse(
             waitForServerToReportAURL(timeout: 2),
             "A refused configuration must not leave a server running on a port the project does not hold"
@@ -233,20 +289,19 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// project by `.serverConfigure` before the runtime is told, so reopening has to find it.
     @MainActor
     func testPortConflictOffersTheNextPortAndStoresIt() throws {
-        let port = 62311
-        XCTAssertTrue(holdPort(UInt16(port)), "The runner should be able to hold port \(port)")
+        let port = try XCTUnwrap(
+            holdPort(from: Self.conflictPorts, keepingSuccessorFree: true),
+            "The runner should be able to hold one of \(Self.conflictPorts) — \(portHoldDiagnosis)"
+        )
 
         launchApp()
         createProjectViaUI(name: "Port Conflict", port: port)
         workspace.serverToggleButton.click()
 
         XCTAssertTrue(
-            portConflictMessage.waitForExistence(timeout: 20),
-            "A port another process holds should raise the conflict alert"
-        )
-        XCTAssertTrue(
-            waitForText(portConflictMessage, containing: "\(port)"),
-            "The alert should name the port in conflict — read: " + combinedText(of: portConflictMessage)
+            waitForAlert(messageIdentifier: "portConflict.message", saying: "\(port)", timeout: 20),
+            "A port another process holds should raise the conflict alert naming that port — "
+                + "the window reads: " + alertText(messageIdentifier: "portConflict.message")
         )
 
         alertButton(identifier: "portConflict.tryPortButton", label: "Try port \(port + 1)").click()
@@ -281,21 +336,24 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// ERRPORT-04 — "Keep server stopped" clears the alert and starts nothing.
     @MainActor
     func testPortConflictKeepingTheServerStopped() throws {
-        let port = 62313
-        XCTAssertTrue(holdPort(UInt16(port)), "The runner should be able to hold port \(port)")
+        let port = try XCTUnwrap(
+            holdPort(from: Self.keepStoppedPorts),
+            "The runner should be able to hold one of \(Self.keepStoppedPorts) — \(portHoldDiagnosis)"
+        )
 
         launchApp()
         createProjectViaUI(name: "Keep Stopped", port: port)
         workspace.serverToggleButton.click()
 
         XCTAssertTrue(
-            portConflictMessage.waitForExistence(timeout: 20),
-            "A port another process holds should raise the conflict alert"
+            waitForAlert(messageIdentifier: "portConflict.message", saying: "already in use", timeout: 20),
+            "A port another process holds should raise the conflict alert — the window reads: "
+                + alertText(messageIdentifier: "portConflict.message")
         )
         alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep server stopped").click()
 
         XCTAssertTrue(
-            portConflictMessage.waitForNonExistence(timeout: 5),
+            waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "already in use"),
             "Declining the suggestion should dismiss the alert"
         )
         XCTAssertTrue(serverURLWell.waitForExistence(timeout: 5), "The status well should still be there")
@@ -320,19 +378,21 @@ final class ErrorAlertUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
 
         XCTAssertTrue(
-            serverErrorMessage.waitForExistence(timeout: 20),
-            "A bind the OS refuses should raise the generic \"Server error\" alert"
+            waitForAlert(messageIdentifier: "serverError.message", saying: "Server error", timeout: 20),
+            "A bind the OS refuses should raise the generic \"Server error\" alert — the window reads: "
+                + alertText(messageIdentifier: "serverError.message")
         )
         // The message is whatever the runtime threw, so there is no literal to match on — only that
-        // the alert carries the engine's sentence rather than an empty body.
+        // the alert says something beyond its own title. An empty body is the failure worth catching
+        // here: `genericStartError` carrying "" would render an alert that reports nothing.
         XCTAssertFalse(
-            combinedText(of: serverErrorMessage).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            "The alert should carry the engine's own diagnosis"
+            alertBody(messageIdentifier: "serverError.message", title: "Server error").isEmpty,
+            "The alert should carry the engine's own diagnosis, not just its title"
         )
 
         alertButton(identifier: "serverError.okButton", label: "OK").click()
         XCTAssertTrue(
-            serverErrorMessage.waitForNonExistence(timeout: 5),
+            waitForAlertToClear(messageIdentifier: "serverError.message", saying: "Server error"),
             "OK should dismiss the server error"
         )
 
@@ -392,14 +452,14 @@ final class ErrorAlertUITests: MimicUITestCase {
         newProjectSheet.nameField.typeText("Port Note")
         replaceText(in: newProjectSheet.portField, with: "99999")
 
+        // Not `newProjectSheet.portValidationError`: that page object queries
+        // `ds.textfield.newProject.port.error`, and `NewProjectSheet` stamps `serverPortField` on the
+        // whole `DSTextField`, so the note reports the wrapper's name and the built one is in no
+        // tree. Matching the rule's own words is the handle that survives — and it asserts the
+        // content in the same breath, so there is no second assertion to forget.
         XCTAssertTrue(
-            newProjectSheet.portValidationError.waitForExistence(timeout: 5),
-            "A port above 65535 should be explained under the field"
-        )
-        XCTAssertTrue(
-            waitForText(newProjectSheet.portValidationError, containing: "65535"),
-            "The note should state the rule — read: "
-                + combinedText(of: newProjectSheet.portValidationError)
+            UITestApp.waitForAny(validationNotes(saying: "between 1 and 65535"), timeout: 5),
+            "A port above 65535 should be explained under the field, stating the rule"
         )
         XCTAssertFalse(
             newProjectSheet.createButton.isEnabled,
@@ -410,7 +470,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         // silent on an empty field, and the button stays disabled without a complaint.
         replaceText(in: newProjectSheet.portField, with: "")
         XCTAssertTrue(
-            newProjectSheet.portValidationError.waitForNonExistence(timeout: 5),
+            waitForNoValidationNote(saying: "between 1 and 65535"),
             "An empty port field should say nothing at all"
         )
 
@@ -429,13 +489,14 @@ final class ErrorAlertUITests: MimicUITestCase {
         newEndpointSheet.nameField.typeText("Users")
         replaceText(in: newEndpointSheet.pathField, with: "api/users")
 
+        // `newEndpointSheet.pathError` documents that `newEndpoint.pathError` never existed and names
+        // `ds.textfield.newEndpoint.path.error` as the real identifier. That is half a correction:
+        // the sheet stamps `newEndpoint.pathField` on the whole `DSTextField`, which is what makes
+        // `app.textFields["newEndpoint.pathField"]` resolve, and the same stamp lands on the note. So
+        // neither identifier reaches the tree, and the note is matched by its sentence.
         XCTAssertTrue(
-            newEndpointSheet.pathError.waitForExistence(timeout: 5),
-            "A path without a leading slash should be explained under the field"
-        )
-        XCTAssertTrue(
-            waitForText(newEndpointSheet.pathError, containing: "must start"),
-            "The note should state the rule — read: " + combinedText(of: newEndpointSheet.pathError)
+            UITestApp.waitForAny(validationNotes(saying: "must start with"), timeout: 5),
+            "A path without a leading slash should be explained under the field, stating the rule"
         )
         XCTAssertFalse(
             newEndpointSheet.createButton.isEnabled,
@@ -510,21 +571,23 @@ final class ErrorAlertUITests: MimicUITestCase {
         createProjectViaUI(name: "JSON Warning")
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        let editor = jsonBodyEditor
-        XCTAssertTrue(editor.waitForExistence(timeout: 10), "The response body editor should be present")
-        editor.click()
+        XCTAssertTrue(
+            clickJSONBodyEditor(),
+            "The response body editor should be reachable to type into"
+        )
         // Letters only, deliberately: the code editor matches brackets and quotes, and a trigger that
         // depends on whether it auto-closes one is a trigger that will break on a dependency bump.
         app.typeText("not json")
 
         XCTAssertTrue(
-            jsonValidationWarning.waitForExistence(timeout: 10),
-            "A malformed body should raise the \"Not valid JSON\" warning"
+            UITestApp.waitUntil(timeout: 10) {
+                self.jsonWarningText().localizedCaseInsensitiveContains("not valid JSON")
+            },
+            "A malformed body should raise the \"Not valid JSON\" warning — read: " + jsonWarningText()
         )
         XCTAssertTrue(
-            waitForText(jsonValidationWarning, containing: "still saved"),
-            "The warning must say the body is kept, not rejected — read: "
-                + combinedText(of: jsonValidationWarning)
+            jsonWarningText().localizedCaseInsensitiveContains("still saved"),
+            "The warning must say the body is kept, not rejected — read: " + jsonWarningText()
         )
     }
 
@@ -694,7 +757,10 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// `sendRequest` records: what the log shows has to be what the engine actually recorded.
     @MainActor
     func testRequestLogReportsAFilterThatMatchesNothing() async throws {
-        let port = 62314
+        // Below the ephemeral range, for the reason ``holdPort(from:keepingSuccessorFree:)`` records:
+        // this one is bound by the *app*, but a port the kernel may already have handed to an
+        // outbound socket is no better a choice there.
+        let port = 21314
 
         launchApp()
         createProjectViaUI(name: "Log Filter", port: port)
@@ -712,8 +778,14 @@ final class ErrorAlertUITests: MimicUITestCase {
             "The request should reach the log"
         )
 
-        let filter = requestLogDrawer.filterField
-        XCTAssertTrue(filter.waitForExistence(timeout: 5), "A non-empty log should offer a filter")
+        XCTAssertTrue(
+            UITestApp.waitForAny(filterFieldHandles, timeout: 5),
+            "A non-empty log should offer a filter"
+        )
+        let filter = try XCTUnwrap(
+            filterFieldHandles.first(where: { $0.exists }),
+            "A non-empty log should offer a filter"
+        )
         filter.click()
         filter.typeText("no-such-route")
 
@@ -727,14 +799,104 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     // MARK: - Alert elements
 
-    /// Alert bodies are matched by identifier and never by their words: two of the four interpolate a
-    /// port or carry a validator's sentence, so the only content-based query that could reach them is
-    /// a `CONTAINS` predicate over the window's static texts — expensive, and satisfied by anything
-    /// else on screen that happens to mention the same thing.
-    @MainActor private var storeFailureMessage: XCUIElement { element(identifier: "storeFailure.message") }
-    @MainActor private var commandErrorMessage: XCUIElement { element(identifier: "commandError.message") }
-    @MainActor private var portConflictMessage: XCUIElement { element(identifier: "portConflict.message") }
-    @MainActor private var serverErrorMessage: XCUIElement { element(identifier: "serverError.message") }
+    /// Everything the alert on screen is saying, as one string.
+    ///
+    /// This file used to address the four alert bodies by identifier alone —
+    /// `storeFailure.message`, `commandError.message`, `portConflict.message`,
+    /// `serverError.message` — on the grounds that the words are interpolated or come from a
+    /// validator and so cannot be matched on. The grounds are sound and the conclusion was wrong:
+    /// **none of those identifiers is known to reach the tree.** A SwiftUI `.alert` realizes as an
+    /// AppKit alert whose body is a `StaticText` the framework builds, and `WelcomeProjectUITests`
+    /// already hedges its one alert-message query with "SwiftUI may still flatten it into an
+    /// `NSAlert`'s informative text and drop the identifier on the way". No test in this repository
+    /// has ever proved one of them lands, and four of the failures in this suite's first CI run are
+    /// consistent with none of them doing so.
+    ///
+    /// So the identifier is tried *and* the alert container is read, together — the sheet or dialog
+    /// AppKit realized the alert as, its own label, and every static text inside it. That subtree is
+    /// half a dozen elements, so reading all of it costs nothing like a `CONTAINS` predicate over
+    /// the window; and a caller asking "does the alert say X" gets an answer that does not depend on
+    /// which of the two handles SwiftUI happened to leave behind.
+    @MainActor
+    private func alertText(messageIdentifier: String) -> String {
+        var parts: [String] = []
+
+        let named = element(identifier: messageIdentifier)
+        if named.exists {
+            parts.append(named.label)
+            if let value = named.value { parts.append(String(describing: value)) }
+        }
+
+        for container in [app.sheets.firstMatch, app.dialogs.firstMatch] where container.exists {
+            parts.append(container.label)
+            for text in container.staticTexts.allElementsBoundByIndex {
+                parts.append(text.label)
+                if let value = text.value { parts.append(String(describing: value)) }
+            }
+        }
+
+        return parts.joined(separator: " | ")
+    }
+
+    /// What the alert says beyond its own title.
+    ///
+    /// For the one alert whose body has no literal to match on: `genericStartError` is whatever the
+    /// runtime threw, and the failure worth catching is an alert that renders a title over nothing.
+    @MainActor
+    private func alertBody(messageIdentifier: String, title: String) -> String {
+        alertText(messageIdentifier: messageIdentifier)
+            .replacingOccurrences(of: title, with: "")
+            .replacingOccurrences(of: "|", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Polls until the alert on screen says `fragment`.
+    @MainActor
+    @discardableResult
+    private func waitForAlert(
+        messageIdentifier: String,
+        saying fragment: String,
+        timeout: TimeInterval = 20
+    ) -> Bool {
+        UITestApp.waitUntil(timeout: timeout) {
+            self.alertText(messageIdentifier: messageIdentifier)
+                .localizedCaseInsensitiveContains(fragment)
+        }
+    }
+
+    /// Polls until nothing on screen is saying `fragment` any more.
+    @MainActor
+    @discardableResult
+    private func waitForAlertToClear(
+        messageIdentifier: String,
+        saying fragment: String,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        UITestApp.waitUntil(timeout: timeout) {
+            !self.alertText(messageIdentifier: messageIdentifier)
+                .localizedCaseInsensitiveContains(fragment)
+        }
+    }
+
+    /// Launches with an unopenable store and keeps activating until the alert is on screen.
+    ///
+    /// The welcome-window assertion cannot be the readiness condition here — the alert comes up over
+    /// it — but the activation *retry* around that assertion must not go with it: rule 6 of the UI
+    /// Definition of Done is that a launch without the retry can leave a window the accessibility
+    /// layer never sees, and a window nothing can see has no alert in it either. So this passes the
+    /// alert itself as the condition to `launchApp(waitingFor:)`, which is `UITestApp
+    /// .launchAndBringToForeground` with its five attempts intact.
+    @MainActor
+    @discardableResult
+    private func launchUntilStoreFailureAlert() -> Bool {
+        launchApp(waitingFor: { self.storeFailureAlertIsUp() })
+    }
+
+    @MainActor
+    private func storeFailureAlertIsUp() -> Bool {
+        alertText(messageIdentifier: "storeFailure.message")
+            .localizedCaseInsensitiveContains("will not be saved")
+    }
 
     /// An alert's button, by identifier where it lands and by its visible words where it does not.
     ///
@@ -755,8 +917,41 @@ final class ErrorAlertUITests: MimicUITestCase {
     @MainActor private var serverURLWell: XCUIElement { element(identifier: "serverStatusWell.url") }
     @MainActor private var statusCodeNote: XCUIElement { element(identifier: "endpointEditor.statusCode.error") }
     @MainActor private var delayNote: XCUIElement { element(identifier: "endpointEditor.delay.error") }
-    @MainActor private var jsonValidationWarning: XCUIElement {
-        element(identifier: "ds.jsoneditor.editor.body.error")
+
+    /// What `DSJSONEditor`'s warning row says.
+    ///
+    /// Scoped to `staticTexts`, and that is the whole correction. The row is an `HStack` of an
+    /// `exclamationmark.triangle.fill` and the sentence, with the identifier on the stack, so *both*
+    /// children carry `ds.jsoneditor.editor.body.error` — and a type-agnostic `firstMatch` over it
+    /// resolves to the icon, whose label is the single word "Warning". `EndpointEditorUITests` failed
+    /// its own version of this assertion reading exactly `Warning|`, which is that icon and nothing
+    /// else. The sentence is the `StaticText` beside it, and the words are polled as a second handle
+    /// in case the identifier does not propagate at all.
+    @MainActor
+    private func jsonWarningText() -> String {
+        let byWords = NSPredicate(
+            format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@", "valid JSON", "valid JSON"
+        )
+        let byIdentifier = app.staticTexts
+            .matching(identifier: "ds.jsoneditor.editor.body.error")
+            .allElementsBoundByIndex
+        let sentences = app.staticTexts.matching(byWords).allElementsBoundByIndex
+        return (byIdentifier + sentences).map { combinedText(of: $0) }.joined(separator: " | ")
+    }
+
+    /// The drawer's text filter, by identifier and by label together.
+    ///
+    /// `drawer.filterField` is a plain `TextField` in a `DSPanelHeader`'s trailing slot, and the
+    /// header stamps `ds.panelheader.requestLog` over its leaves — so whether the identifier lands is
+    /// a SwiftUI detail, and the label is what survives either way. `RequestLogUITests.filterField`
+    /// resolves the same control the same way, and its filter test got past this point in the run
+    /// that failed here.
+    @MainActor private var filterFieldHandles: [XCUIElement] {
+        [
+            app.descendants(matching: .textField)
+                .matching(identifier: "drawer.filterField").firstMatch,
+            app.textFields["Filter request log"].firstMatch,
+        ]
     }
 
     /// The `.failed` arm of the autosave indicator. There is no `autosaveStatusIndicator` to query —
@@ -780,13 +975,50 @@ final class ErrorAlertUITests: MimicUITestCase {
         return app.buttons["Add header"].firstMatch
     }
 
-    /// The response-body code editor. `CodeEditor` is an `NSViewRepresentable`, so whether the
-    /// wrapper's identifier reaches the tree depends on how AppKit realizes it; the text view is the
-    /// fallback, and the editor is the only one in this window.
-    @MainActor private var jsonBodyEditor: XCUIElement {
-        let byIdentifier = element(identifier: "ds.jsoneditor.editor.body")
-        if byIdentifier.exists { return byIdentifier }
-        return app.textViews.firstMatch
+    /// Puts the caret in the response-body code editor, answering whether it managed to.
+    ///
+    /// The identifier is not the problem here — CI reported `Unable to find hit point for ScrollView,
+    /// {{333.0, 467.0}, {320.0, 240.0}}, identifier: 'ds.jsoneditor.editor.body'`, so the element was
+    /// found and simply had nowhere clickable. The body editor is the last card in a scrolling editor
+    /// form and the request log takes the bottom of the window, so on a hosted runner's window it can
+    /// sit under the drawer or below the fold. Three moves, cheapest first: click it where it is,
+    /// give the centre pane the drawer's height, then scroll the pane until the editor surfaces.
+    ///
+    /// `false` rather than a click into nothing, so the test fails saying the editor could not be
+    /// reached instead of saying the warning never appeared — which would be a true sentence about
+    /// the wrong thing.
+    @MainActor
+    private func clickJSONBodyEditor() -> Bool {
+        let editor = element(identifier: "ds.jsoneditor.editor.body")
+        guard editor.waitForExistence(timeout: 10) else { return false }
+
+        // `CodeEditor` is an `NSViewRepresentable`: the identifier lands on the scroll view, and the
+        // text view inside it is a second, sometimes better-behaved, target.
+        if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
+
+        let drawerToggle = workspace.toggleDrawerButton
+        if clickIfHittable(drawerToggle) {
+            UITestApp.waitUntil(timeout: 3) {
+                editor.isHittable || self.app.textViews.firstMatch.isHittable
+            }
+            if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
+        }
+
+        let pane = app.otherElements["centerPane"]
+        guard pane.exists, pane.isHittable else { return false }
+        for _ in 0..<8 {
+            pane.scroll(byDeltaX: 0, deltaY: -80)
+            if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
+        }
+        return false
+    }
+
+    /// Clicks an element only when it is there to be clicked, so a probe cannot fail the test.
+    @MainActor
+    private func clickIfHittable(_ element: XCUIElement) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        element.click()
+        return true
     }
 
     /// A segment of the step sheet's outcome picker. A `.segmented` picker realizes as a radio group
@@ -807,11 +1039,17 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     /// Matches an identifier across element types.
     ///
-    /// Type-agnostic on purpose: a validation note is an `.accessibilityElement()` over an icon and a
-    /// sentence, an alert message is a `Text`, and an overview row is a combined element — three
+    /// Type-agnostic on purpose: a status-code note is an `.accessibilityElement()` over an icon and
+    /// a sentence, an empty state is a container, and an overview row is a combined element — three
     /// different realizations of "the thing carrying this name". Identifier matching is also the
     /// cheap kind; a `CONTAINS` predicate over `descendants(matching: .any)` evaluates against every
     /// element in the window and has timed this suite out inside XCUITest's own query engine.
+    ///
+    /// It answers a question about a *name*, and a name is exactly what a flattening container takes
+    /// away — so it is the wrong tool for anything inside one. `alertText(messageIdentifier:)` and
+    /// `validationNotes(saying:)` exist because four alerts and two `DSTextField` notes are inside
+    /// one; this is still right for the elements that carry their own identifier, and every remaining
+    /// caller is one of those.
     @MainActor
     private func element(identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
@@ -872,6 +1110,44 @@ final class ErrorAlertUITests: MimicUITestCase {
         }
     }
 
+    /// A `DSTextField`'s inline validation note, matched by the words it shows.
+    ///
+    /// **Not by `ds.textfield.<id>.error`.** `DSTextField` builds that name and hangs it on the note,
+    /// but every caller stamps its own identifier on the whole field — `NewProjectSheet` tags it
+    /// `serverPortField`, which is what makes `app.textFields["serverPortField"]` resolve, and
+    /// `DSTextField`'s own comment records that pairing it with `.accessibilityElement(children:)`
+    /// would break that lookup. A container's identifier overrides its descendants', so the note ends
+    /// up reporting the wrapper's name and the built one exists nowhere. Three suites failed on it in
+    /// the same CI run — here, `WelcomeProjectUITests` and `EndpointEditorUITests` — which is what
+    /// one shared cause looks like.
+    ///
+    /// What the note keeps is its **label**: `validationRow` is an `.accessibilityElement()` with
+    /// `.accessibilityLabel(message)`, and a flattened child keeps its own label and value even when
+    /// it loses its identifier. Which element *type* that lands as is not something to guess at — an
+    /// `.accessibilityElement()` over an icon and a sentence can realize as a static text, a group or
+    /// a plain element — so the three are polled together rather than chained. Typed queries, not a
+    /// predicate over `descendants(matching: .any)`, which scans the window and has timed this suite
+    /// out inside the query engine.
+    @MainActor
+    private func validationNotes(saying fragment: String) -> [XCUIElement] {
+        let predicate = NSPredicate(
+            format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@", fragment, fragment
+        )
+        return [
+            app.staticTexts.matching(predicate).firstMatch,
+            app.groups.matching(predicate).firstMatch,
+            app.otherElements.matching(predicate).firstMatch,
+        ]
+    }
+
+    /// Polls until no validation note is saying `fragment` — the negative of ``validationNotes(saying:)``.
+    @MainActor
+    private func waitForNoValidationNote(saying fragment: String, timeout: TimeInterval = 5) -> Bool {
+        UITestApp.waitUntil(timeout: timeout) {
+            self.validationNotes(saying: fragment).allSatisfy { !$0.exists }
+        }
+    }
+
     /// Waits for a `DSEmptyState`, polling every form it can arrive in.
     ///
     /// The component pairs its container identifier with `.contain`, and that keeps a child as its
@@ -913,21 +1189,96 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     // MARK: - Holding a port in the runner
 
-    /// Binds and listens on `127.0.0.1:port` in this process, so the app's bind of the same address
-    /// fails with `EADDRINUSE`.
+    /// Candidates for the conflict the app is meant to hit, and for the "keep stopped" variant.
+    ///
+    /// **Both lists sit below 49152, and that is the fix for the first CI run.** This suite asked for
+    /// 62311, 62313 and 65535 and could hold none of them; `WorkspaceShellUITests` asked for 62116,
+    /// through an entirely different mechanism — an `NWListener` rather than a raw socket — and could
+    /// not hold that either. Two unrelated implementations failing the same way is evidence about the
+    /// ports, not about either implementation. All four sit inside macOS's ephemeral range
+    /// (`net.inet.ip.portrange` — 49152 through 65535), which is where the kernel draws source ports
+    /// for *outbound* sockets; this process opens plenty of loopback connections of its own, and a
+    /// listener bind of a port an ephemeral socket already holds is refused with `EADDRINUSE` that no
+    /// amount of `SO_REUSEADDR` would talk it out of — and `SO_REUSEADDR` is deliberately not set
+    /// here, for the reason ``bindListener(on:)`` gives. Ports below 49152 are never handed out that
+    /// way.
+    ///
+    /// That is the best explanation the evidence supports and it is not proof: nothing in the run
+    /// recorded the `errno`. It does now — ``portHoldDiagnosis`` carries it — so if the next run
+    /// fails here it will say whether the kernel is reporting a busy port or refusing to let this
+    /// process listen at all, which are two different bugs with two different fixes.
+    ///
+    /// Several candidates rather than one so that a machine which genuinely has the first busy moves
+    /// on rather than failing a test about alerts.
+    private static let conflictPorts = [21311, 21411, 21511, 21611]
+    private static let keepStoppedPorts = [21313, 21413, 21513, 21613]
+
+    /// Binds and listens on `127.0.0.1` at the first candidate the kernel allows, and answers which.
+    ///
+    /// `keepingSuccessorFree` is for the test that accepts the alert's offer: the alert proposes
+    /// `port + 1` and the app then has to be able to bind it, so the successor is probed and released
+    /// before the candidate is accepted. A candidate whose successor is busy is skipped rather than
+    /// held, because holding it would make the *app's* retry fail and the test would report a missing
+    /// server URL instead of a busy machine.
+    ///
+    /// Returns `nil` when no candidate could be held; ``portHoldDiagnosis`` then names each candidate
+    /// with the syscall and `errno` that refused it.
+    private func holdPort(from candidates: [Int], keepingSuccessorFree: Bool = false) -> Int? {
+        releaseHeldPort()
+        var reasons: [String] = []
+
+        for candidate in candidates {
+            guard candidate > 0, candidate <= 65535 else {
+                reasons.append("\(candidate): not a TCP port")
+                continue
+            }
+            guard !(keepingSuccessorFree && candidate == 65535) else {
+                reasons.append("\(candidate): there is no port above it for the alert to offer")
+                continue
+            }
+
+            switch bindListener(on: UInt16(candidate)) {
+            case let .failure(reason):
+                reasons.append("\(candidate): \(reason)")
+            case let .success(descriptor):
+                if keepingSuccessorFree {
+                    switch bindListener(on: UInt16(candidate + 1)) {
+                    case let .success(probe):
+                        Darwin.close(probe)
+                    case let .failure(reason):
+                        Darwin.close(descriptor)
+                        reasons.append("\(candidate + 1) (the port the alert will offer): \(reason)")
+                        continue
+                    }
+                }
+                heldSocket = descriptor
+                portHoldDiagnosis = ""
+                return candidate
+            }
+        }
+
+        portHoldDiagnosis = reasons.joined(separator: "; ")
+        return nil
+    }
+
+    private enum BindOutcome {
+        case success(Int32)
+        case failure(String)
+    }
+
+    /// One `socket`/`bind`/`listen`, with the reason it stopped where it stopped.
     ///
     /// **No `SO_REUSEADDR`, deliberately.** The engine binds exactly `127.0.0.1`, and BSD refuses a
     /// second listener on an identical address whatever the option says — but a *wildcard* listener
     /// with `SO_REUSEADDR` on both sides is the pair BSD permits, which would silently let the start
-    /// succeed and turn every assertion below into a timeout with a misleading message.
+    /// succeed and turn every assertion in the port tests into a timeout with a misleading message.
     ///
-    /// Answers whether the port was taken, so a test fails saying "the runner could not hold the
-    /// port" rather than "no conflict alert appeared".
-    private func holdPort(_ port: UInt16) -> Bool {
-        releaseHeldPort()
-
+    /// A raw socket rather than `Network`'s `NWListener`, which is what `WorkspaceShellUITests` uses:
+    /// there is no queue, no state handler and no semaphore here, so "the listener never became
+    /// ready" is not a failure this can have. Either the three calls return or they say why.
+    private func bindListener(on port: UInt16) -> BindOutcome {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { return false }
+        guard descriptor >= 0 else { return .failure("socket() refused — \(errnoText())") }
 
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -941,18 +1292,33 @@ final class ErrorAlertUITests: MimicUITestCase {
                 Darwin.bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bound == 0, Darwin.listen(descriptor, 1) == 0 else {
+        guard bound == 0 else {
+            let reason = "bind() refused — \(errnoText())"
             Darwin.close(descriptor)
-            return false
+            return .failure(reason)
         }
-
-        heldSocket = descriptor
-        return true
+        guard Darwin.listen(descriptor, 1) == 0 else {
+            let reason = "listen() refused — \(errnoText())"
+            Darwin.close(descriptor)
+            return .failure(reason)
+        }
+        return .success(descriptor)
     }
 
-    /// Closes the held listener. Called from `tearDownWithError` as well as from ``holdPort(_:)``: a
-    /// descriptor leaked out of one test would make every later test that binds a port fail for a
-    /// reason nothing in that test explains.
+    /// The last error the kernel set, by number and by name.
+    ///
+    /// Read immediately after the failing call and never across another one — `errno` is clobbered by
+    /// the next syscall, `Darwin.close` included, which is why every caller above builds this string
+    /// before it closes anything.
+    private func errnoText() -> String {
+        let code = errno
+        guard let reason = strerror(code) else { return "errno \(code)" }
+        return "errno \(code) (\(String(cString: reason)))"
+    }
+
+    /// Closes the held listener. Called from `tearDownWithError` as well as from
+    /// ``holdPort(from:keepingSuccessorFree:)``: a descriptor leaked out of one test would make every
+    /// later test that binds a port fail for a reason nothing in that test explains.
     private func releaseHeldPort() {
         guard heldSocket >= 0 else { return }
         Darwin.close(heldSocket)
