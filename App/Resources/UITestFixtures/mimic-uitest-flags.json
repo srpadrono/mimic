@@ -1,0 +1,32 @@
+{
+  "log": {
+    "version": "1.2",
+    "entries": [
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/photos/thumbnail" },
+        "response": {
+          "status": 200,
+          "content": {
+            "mimeType": "image/jpeg",
+            "encoding": "base64",
+            "text": "/9j/4A=="
+          }
+        }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/reports/full" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "MIMIC_UITEST_BODY_PADDING" }
+        }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/health" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"ok\":true}" }
+        }
+      }
+    ]
+  }
+}

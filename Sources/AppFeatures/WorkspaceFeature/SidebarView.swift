@@ -184,6 +184,11 @@ struct SidebarView: View {
                                 // of width to draw nothing. Xcode sets its navigator group counts as
                                 // plain secondary text, which is what this is now.
                         }
+                        // Paired the way `EndpointSidebarRow` pairs its own, and for the reason CI
+                        // found: without it AppKit's outline header row swallows the name, so
+                        // `sidebar.group.<name>` was never in the tree and no test could tell that
+                        // tagging an endpoint had grouped it.
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("sidebar.group.\(section.name)")
                     }
                 }
@@ -197,13 +202,20 @@ struct SidebarView: View {
                                 .contextMenu { endpointContextMenu(endpoint) }
                         }
                     } else {
-                        Section("Ungrouped") {
+                        // The header spelled out rather than `Section("Ungrouped")`, which builds
+                        // exactly this `Text` and gives it nowhere to hang an identifier. The name
+                        // matches the grouped headers above — `sidebar.group.<name>` — because to a
+                        // test this is the same kind of thing: the heading over a run of rows.
+                        Section {
                             ForEach(ungroupedEndpoints) { endpoint in
                                 EndpointSidebarRow(endpoint: endpoint)
                                     .tag(endpoint.id)
                                     .badge("")
                                     .contextMenu { endpointContextMenu(endpoint) }
                             }
+                        } header: {
+                            Text("Ungrouped")
+                                .accessibilityIdentifier("sidebar.group.ungrouped")
                         }
                     }
                 }
@@ -219,12 +231,14 @@ struct SidebarView: View {
         } label: {
             Label("Duplicate", systemImage: "doc.on.doc")
         }
+        .accessibilityIdentifier("sidebar.contextMenu.duplicate")
         Divider()
         Button(role: .destructive) {
             deleteTarget = Self.deleteTarget(for: endpoint)
         } label: {
             Label("Delete endpoint\u{2026}", systemImage: "trash")
         }
+        .accessibilityIdentifier("sidebar.contextMenu.delete")
     }
 
     private func sectionBinding(for name: String) -> Binding<Bool> {

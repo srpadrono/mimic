@@ -51,8 +51,25 @@ struct WelcomePage {
         )
     }
 
+    /// Matched by the row's spoken label, not by `recentProject-<name>`.
+    ///
+    /// That identifier is set on `RecentProjectRow`, and it is not in the tree: the `List` above it
+    /// carries `welcome.recents.list`, and while the paired `.contain` keeps each row as its own
+    /// element with its own **label and value**, it does not keep its own **identifier** — the
+    /// distinction `references/accessibility-tree.md` was written about. Dropping the list's
+    /// identifier is not an option either, because focusing the list for the arrow-key tests needs it.
+    ///
+    /// This mattered beyond a failed lookup. A negative assertion on the old query —
+    /// `waitForNonExistence` — passed whether or not the row had gone, because the query could never
+    /// match anything. One test was proving nothing for exactly that reason.
+    ///
+    /// The comma is load-bearing twice: it keeps "Twin" from matching "Twin (Copy)", and it keeps the
+    /// match off the row's bare name `Text`, whose label is the name alone and which has no children
+    /// for a scoped `staticTexts` query to find.
     func recentProjectRow(named name: String) -> XCUIElement {
-        app.otherElements["recentProject-\(name)"]
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "\(name), last opened"))
+            .firstMatch
     }
 
     func recentProjectText(named name: String) -> XCUIElement {
@@ -82,10 +99,20 @@ struct NewProjectSheetPage {
     var portField: XCUIElement { app.textFields["serverPortField"] }
     var createButton: XCUIElement { app.buttons["createProjectButton"] }
     var cancelButton: XCUIElement { app.buttons["cancelCreateButton"] }
+    /// Matched by the sentence, not by `ds.textfield.newProject.port.error`.
+    ///
+    /// That identifier is built by `DSTextField.validationRow` and is never in the tree at this call
+    /// site, or any other: `NewProjectSheet` names the whole `DSTextField` `serverPortField`, and that
+    /// propagation is the point — it is why `app.textFields["serverPortField"]` matches the input at
+    /// all. It reaches the validation row too and overwrites the row's own name. The row does set
+    /// `.accessibilityElement()` and `.accessibilityLabel(message)`, so the message itself survives,
+    /// and the message is what a test wants to assert anyway.
+    ///
+    /// Making the identifier reachable would mean moving the caller's name onto the inner `TextField`,
+    /// which would break `app.textFields["serverPortField"]` and most of this suite's sheet coverage.
+    /// That is a trade, not an oversight — hence matching by label rather than "fixing" the field.
     var portValidationError: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(identifier: "ds.textfield.newProject.port.error")
-            .firstMatch
+        app.validationNote(startingWith: "Port must be")
     }
 }
 
@@ -150,9 +177,14 @@ struct WorkspacePage {
     var toggleDrawerButton: XCUIElement { app.toolbars.buttons["toggleDrawerButton"].firstMatch }
 
     // Autosave
-    var autosaveIndicator: XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "autosaveStatusIndicator").firstMatch
-    }
+    //
+    // There is no `autosaveStatusIndicator`. A property of that name used to sit here, querying an
+    // identifier that exists nowhere in `Sources` and that no test ever referenced — a dead query,
+    // not a missing identifier. The temptation it created was to name the reserved toolbar slot in
+    // `WorkspaceView` to make it resolve, which would have been two bugs: a container's identifier
+    // overrides its descendants', so the three real names below would have stopped landing, and the
+    // slot renders `EmptyView` while idle, so the element would not exist for most of a run. The
+    // addressable surface is the state-specific identifiers, one per arm.
     var autosaveSavedIndicator: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "autosaveStatus.saved").firstMatch
     }
@@ -218,13 +250,15 @@ struct NewEndpointSheetPage {
     var cancelButton: XCUIElement { app.buttons["newEndpoint.cancelButton"] }
     /// The path field's inline validation message.
     ///
-    /// Not `newEndpoint.pathError` — that identifier has never existed. `DSTextField` builds its own
-    /// from the identifier it is handed, so the error surfaces as `ds.textfield.<id>.error`. Nothing
-    /// asserted on this property, which is why the mismatch went unnoticed.
+    /// Matched by the sentence. Two identifiers have now been wrong here, for different reasons.
+    ///
+    /// `newEndpoint.pathError` never existed at all. Its replacement,
+    /// `ds.textfield.newEndpoint.path.error`, is the name `DSTextField.validationRow` really builds —
+    /// and it is still not in the tree, because `NewEndpointSheet` stamps its own identifier on the
+    /// whole field and that overwrites the row beneath it. CI proved it: the corrected identifier
+    /// found nothing either. What survives is the row's `.accessibilityLabel(message)`, so match that.
     var pathError: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(identifier: "ds.textfield.newEndpoint.path.error")
-            .firstMatch
+        app.validationNote(startingWith: "Path must")
     }
 }
 
@@ -321,11 +355,23 @@ struct RequestLogDrawerPage {
     }
 
     /// One element per logged row, in the order the table draws them.
+    ///
+    /// Resolved through `allElementsBoundByIndex`, which takes ONE snapshot, rather than reading
+    /// `allRowCells.count` and then indexing back into the query. That older shape asked the app two
+    /// separate questions, and anything that rebuilds the table between them — a filter change, a
+    /// sort, traffic still arriving — leaves the second one indexing rows the first one counted and
+    /// the runner raises "Failed to get matching snapshot". It is not hypothetical: it is how
+    /// `testFilteringTheRequestLogByTextAndMethod` died on CI, inside this helper rather than on any
+    /// assertion of its own, which is the worst way for a shared query to fail because the message
+    /// names neither the filter nor the row.
+    ///
+    /// Each row is still guarded with `exists` before its identifier is read, so a row that goes
+    /// away mid-walk truncates the list instead of taking the test down with it.
     func distinctRows(limit: Int) -> [XCUIElement] {
         var seen: Set<String> = []
         var rows: [XCUIElement] = []
-        for index in 0..<allRowCells.count {
-            let cell = allRowCells.element(boundBy: index)
+        for cell in allRowCells.allElementsBoundByIndex {
+            guard cell.exists else { break }
             guard seen.insert(cell.identifier).inserted else { continue }
             rows.append(cell)
             if rows.count == limit { break }
@@ -478,9 +524,14 @@ struct InspectorPage {
         let row = scenarioRow(named: name)
         guard row.waitForExistence(timeout: 5) else { return false }
 
+        // Compared exactly, not with `contains`. `ScenarioRow` sets its value to "active" or
+        // "inactive" and appends ", active" to the spoken label only when the scenario is active —
+        // and "inactive" contains "active", so the `contains` pair this replaces returned true for
+        // every row it was ever handed. Both call sites assert `XCTAssertTrue`, so the helper could
+        // not fail and its two tests were green by construction rather than by evidence.
         let value = (row.value as? String) ?? ""
-        return row.label.localizedCaseInsensitiveContains("active")
-            || value.localizedCaseInsensitiveContains("active")
+        return value.caseInsensitiveCompare("active") == .orderedSame
+            || row.label.hasSuffix(", active")
     }
 }
 
@@ -1795,6 +1846,30 @@ final class MimicUITests: XCTestCase {
             _ = workspace.autosaveSavedIndicator.waitForExistence(timeout: 4)
             _ = workspace.autosaveSavingIndicator.waitForNonExistence(timeout: 4)
         }
+    }
+}
+
+// MARK: - Validation notes
+
+@MainActor
+extension XCUIApplication {
+    /// A `DSTextField`'s inline validation note, found by the words it says.
+    ///
+    /// The note's own identifier — `ds.textfield.<id>.error` — is in no tree: every caller stamps an
+    /// identifier on the whole `DSTextField`, and that propagation is the point, since it is what
+    /// makes `app.textFields["serverPortField"]` resolve. It reaches the note too and overwrites it.
+    /// `DSTextField.validationRow` does set `.accessibilityElement()` and `.accessibilityLabel`, so
+    /// the sentence survives.
+    ///
+    /// Scoped to two element types rather than `descendants(matching: .any)`. A predicate over every
+    /// descendant of the whole app is expensive enough that the runner gives up on it: CI failed this
+    /// with "Failed to get matching snapshots: Timed out while evaluating UI query", which is not a
+    /// missing element but a query that never finished. The note realizes as a static text or, when
+    /// AppKit groups it, as a plain element — so ask those two and no more.
+    func validationNote(startingWith prefix: String) -> XCUIElement {
+        let matcher = NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", prefix, prefix)
+        let text = staticTexts.matching(matcher).firstMatch
+        return text.exists ? text : otherElements.matching(matcher).firstMatch
     }
 }
 

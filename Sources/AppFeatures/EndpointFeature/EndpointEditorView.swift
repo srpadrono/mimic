@@ -276,12 +276,14 @@ struct EndpointEditorView: View {
             } label: {
                 Label("Duplicate", systemImage: "doc.on.doc")
             }
+            .accessibilityIdentifier("endpointEditor.moreMenu.duplicate")
             Divider()
             Button(role: .destructive) {
                 showDeleteConfirmation = true
             } label: {
                 Label("Delete endpoint\u{2026}", systemImage: "trash")
             }
+            .accessibilityIdentifier("endpointEditor.moreMenu.delete")
         }
         .alert(
             "Delete endpoint?",
@@ -382,6 +384,11 @@ struct EndpointEditorView: View {
                     Text("No custom headers")
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.labelSecondary)
+                        // On the `Text`, not on the `HStack` around it. The glyph beside it is
+                        // `.accessibilityHidden`, so there is exactly one element here worth
+                        // naming, and naming the wrapper instead risks the identifier landing on a
+                        // group that a `staticTexts` query never reaches.
+                        .accessibilityIdentifier("endpointEditor.headers.empty")
                 }
                 .padding(.horizontal, DSSpacing.sm)
                 .frame(maxWidth: .infinity, minHeight: EditorField.height, alignment: .leading)
@@ -558,13 +565,23 @@ struct EndpointEditorView: View {
                 .frame(width: EditorRowMetrics.numericFieldWidth, alignment: .leading)
                 .accessibilityIdentifier("endpointEditor.globalDelay")
                 .accessibilityLabel("Global delay in milliseconds")
+                // The number, said as the row's value. An explicit `.accessibilityLabel` *replaces*
+                // what a `Text` would otherwise expose, so naming this row took its digits out of
+                // the accessibility tree entirely: VoiceOver announced "Global delay in
+                // milliseconds" with nothing under it, and a test could read the label back but
+                // never the value it labels. Found by the UI sweep, which could assert the row
+                // exists and not what it says.
+                .accessibilityValue("\(globalDelayMs)")
 
             unitLabel("ms")
         }
 
         // Non-breaking spaces inside the command: wrapped at 420pt the sentence broke it across two
         // lines as "configure --" / "delay", which is not a thing anyone can copy.
-        note("Project-wide, and added on top of this endpoint's own delay. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.")
+        note(
+            "Project-wide, and added on top of this endpoint's own delay. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.",
+            identifier: "endpointEditor.globalDelay.note"
+        )
     }
 
     // MARK: - Row furniture
@@ -639,8 +656,12 @@ struct EndpointEditorView: View {
 
     /// Prose explaining the row above it, starting at the value seam so it reads as part of that row
     /// rather than as a footnote to the section.
+    ///
+    /// The identifier is a parameter, the way ``validationNote(_:identifier:)`` above takes one: this
+    /// sentence is the only thing telling you the number above it is the project's rather than this
+    /// endpoint's, so a test asserts the note is there without pinning the prose word for word.
     @ViewBuilder
-    private func note(_ message: String) -> some View {
+    private func note(_ message: String, identifier: String) -> some View {
         Text(message)
             .font(DSTypography.caption)
             // `labelSecondary`, not `labelTertiary`: 36% is the alpha for a timestamp you glance at,
@@ -650,6 +671,7 @@ struct EndpointEditorView: View {
             .padding(.leading, EditorRowMetrics.valueInset)
             .padding(.trailing, DSSpacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier(identifier)
     }
 
     // MARK: - Card wrapper

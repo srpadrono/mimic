@@ -292,6 +292,20 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 
         guard !hasRestoredPosition else { return }
 
+        // A pane that came up collapsed has nothing to restore, and asking anyway *re-opens* it.
+        // A collapsed pane measures zero, so it can never match `want` and the latch below never
+        // catches; `setPosition(_:ofDividerAt:)` is precisely how AppKit un-collapses a pane. So a
+        // project reopened with its request log hidden showed the log anyway — `WorkspaceView.init`
+        // read `isRequestLogVisible: false` correctly, `viewDidLoad` collapsed the item correctly,
+        // and then this method undid both a layout pass later.
+        //
+        // Deliberately does *not* latch `hasRestoredPosition`. Latching here would trade one bug for
+        // a smaller one: the pane would come up hidden, and then open at AppKit's idea of a size
+        // rather than the height the user left it at. Returning without latching keeps the saved
+        // thickness waiting, so it is applied on the layout pass after the user asks for the panel
+        // back — and the latch below still fires then, so this never fights a subsequent drag.
+        guard !secondaryItem.isCollapsed else { return }
+
         // What the request becomes once both panes' floors are honoured. Asking for anything outside
         // this is silently clamped by AppKit, and a clamped no-op is indistinguishable from a divider
         // that refuses to move — which is how this was misread once already.

@@ -1,0 +1,32 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Mimic UI test API", "version": "1.0.0" },
+  "servers": [ { "url": "https://api.example.com/v2" } ],
+  "paths": {
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "responses": {
+          "200": {
+            "description": "Every order",
+            "content": {
+              "application/json": { "example": { "orders": [] } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "Create an order",
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/orders/{orderId}": {
+      "get": {
+        "operationId": "getOrder",
+        "summary": "Get one order",
+        "responses": { "200": { "description": "One order" } }
+      }
+    }
+  }
+}

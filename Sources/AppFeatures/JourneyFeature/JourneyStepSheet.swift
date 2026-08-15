@@ -74,6 +74,9 @@ struct JourneyStepSheet: View {
             Text(step == nil ? "Add step" : "Edit step")
                 .font(DSTypography.title)
                 .foregroundStyle(DSColors.labelPrimary)
+                // One name for both wordings, the way `stepSheet.saveButton` already covers "Add
+                // step" and "Save step": which of the two is showing is what the label says.
+                .accessibilityIdentifier("stepSheet.title")
 
             Form {
                 Section {
@@ -153,6 +156,7 @@ struct JourneyStepSheet: View {
                             .font(DSTypography.caption)
                             .foregroundStyle(DSColors.labelSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("stepSheet.dropHint")
 
                     case .timeout:
                         TextField("Hold for (ms)", text: $holdMs)
@@ -167,6 +171,7 @@ struct JourneyStepSheet: View {
                             .font(DSTypography.caption)
                             .foregroundStyle(DSColors.labelSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("stepSheet.timeoutHint")
                     }
                 }
 
@@ -246,6 +251,11 @@ struct JourneyStepSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("stepSheet.validationMessage")
                 .accessibilityLabel(validation.message)
+                // Six different rules refuse through this one view, so the identifier alone says
+                // only "something was rejected". The value carries *which* — the same string the
+                // label reads — so a test can assert the sheet refused for the reason it meant to
+                // test rather than for whichever complaint happened to fire first.
+                .accessibilityValue(validation.message)
         }
     }
 

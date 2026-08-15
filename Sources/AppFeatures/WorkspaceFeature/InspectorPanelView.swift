@@ -378,9 +378,11 @@ struct ScenarioRow: View {
         .accessibilityAddTraits(rowTraits)
         .contextMenu {
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
+                .accessibilityIdentifier("inspector.scenario.contextMenu.duplicate")
             Divider()
             Button(role: .destructive, action: onDelete) { Label("Delete scenario", systemImage: "trash") }
                 .disabled(isOnlyScenario)
+                .accessibilityIdentifier("inspector.scenario.contextMenu.delete")
         }
         .accessibilityIdentifier("inspector.scenario.\(scenario.name)")
         .accessibilityLabel(Self.spokenLabel(scenario: scenario, isActive: isActive))

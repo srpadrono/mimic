@@ -1,0 +1,18 @@
+{
+  "log": {
+    "version": "1.2",
+    "entries": [
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/good" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"ok\":true}" }
+        }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/cancelled" },
+        "response": { "status": 0 }
+      }
+    ]
+  }
+}

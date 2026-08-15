@@ -42,6 +42,7 @@ struct RequestBodyView: View {
                         // gets — without it the view looks broken. `DSContrastTests` asserts that
                         // `labelTertiary` clears AA on no surface in this app, in either appearance.
                         .foregroundStyle(DSColors.labelSecondary)
+                        .accessibilityIdentifier("requestLog.body.\(identifier).unformatted")
                 }
 
                 // The count lives here rather than next to the search field because only this view

@@ -1,0 +1,36 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": { "name": "Mimic UI tests", "version": "1.0" },
+    "entries": [
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/orders" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"orders\":[]}" }
+        }
+      },
+      {
+        "request": { "method": "POST", "url": "https://api.example.com/api/orders" },
+        "response": {
+          "status": 201,
+          "content": { "mimeType": "application/json", "text": "{\"id\":42}" }
+        }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/customers" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"customers\":[]}" }
+        }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/orders" },
+        "response": {
+          "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"orders\":[7]}" }
+        }
+      }
+    ]
+  }
+}

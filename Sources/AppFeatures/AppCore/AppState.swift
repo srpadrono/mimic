@@ -218,11 +218,21 @@ final class AppState {
     private static func openStore() -> ProjectStore.Opened {
         #if DEBUG
         if let testDatabaseURL = UITestSupport.databaseURL() {
-            return ProjectStore.open(makeOnDisk: {
+            let opened = ProjectStore.open(makeOnDisk: {
                 try DatabaseFactory.makeAppDatabaseQueue(
                     environment: [DatabaseFactory.databasePathEnvironmentKey: testDatabaseURL.path]
                 )
             })
+            // A run that asked for `MIMIC_FAIL_PROJECT_WRITES=1` gets a store whose writes throw, so
+            // the autosave indicator's `.failed` arm becomes reachable — see
+            // `UITestSupport.projectRepositoryFailingWritesIfRequested`, which is what decides.
+            // Applied *around* the opened store rather than instead of it: the session still opens
+            // the run's own database, still reads from it, and still reports a real open failure
+            // through `Opened.failure`. Only the writes are refused.
+            return ProjectStore.Opened(
+                repository: UITestSupport.projectRepositoryFailingWritesIfRequested(opened.repository),
+                failure: opened.failure
+            )
         }
         #endif
         return ProjectStore.open()

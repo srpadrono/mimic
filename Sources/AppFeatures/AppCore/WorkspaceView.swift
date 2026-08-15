@@ -32,6 +32,11 @@ struct WorkspaceView: View {
     @State private var isNavigatingHistory = false
     @State private var showHARImport = false
     @State private var showOpenAPIImport = false
+    #if DEBUG
+    /// The result of parsing a UI test's injected file — see ``presentInjectedImportIfNeeded()``.
+    /// Non-nil *is* "the injected import sheet is up", the way `pendingCapture` works.
+    @State private var injectedImport: InjectedImport?
+    #endif
     /// The two journey sheets, both of which used to be reachable only from the journeys window.
     @State private var showJourneyTemplatePicker = false
     @State private var showNewJourneySheet = false
@@ -246,6 +251,18 @@ struct WorkspaceView: View {
                     // The autosave indicator is empty while idle, so it must not be allowed to
                     // change the toolbar's layout when it flickers into view for two seconds. A
                     // reserved slot keeps its neighbours still.
+                    //
+                    // The slot is deliberately unnamed, and must stay that way. `MimicUITests`
+                    // carries a page-object property querying `"autosaveStatusIndicator"`, which
+                    // exists nowhere in `Sources` and is referenced by no test — a dead query, not a
+                    // missing identifier. Naming this container to satisfy it would do two kinds of
+                    // damage: a container's identifier overrides its descendants' (see
+                    // mimic-ui-tests, references/accessibility-tree.md), so the three identifiers
+                    // `AutosaveStatusIndicator` sets — `autosaveStatus.saving`, `.saved`, `.failed`,
+                    // the two the suite actually queries — would stop landing; and the reserved slot
+                    // renders `EmptyView` while idle, so an element named here would be a handle on
+                    // a status that is, most of the time, no status at all. The state-specific
+                    // identifiers are the addressable surface.
                     ToolbarItem(placement: .primaryAction) {
                         AutosaveStatusIndicator(status: appState.autosaveStatus)
                             .frame(minWidth: 54, alignment: .trailing)
@@ -257,7 +274,19 @@ struct WorkspaceView: View {
                         Button {
                             showDrawer.toggle()
                         } label: {
-                            Label("Toggle request log", systemImage: "rectangle.bottomhalf.inset.filled")
+                            // The title carries the direction, not just the `.accessibilityLabel`
+                            // below. A `Button` whose label is a `Label`, placed directly in a
+                            // `ToolbarItemGroup`, publishes the `Label`'s own title and the
+                            // accessibility label set outside it does not win — CI read "Toggle
+                            // request log" through both states. So VoiceOver announced the same
+                            // words whether the panel was open or shut, on the one control whose
+                            // whole meaning is which way it goes. `ServerToggleButton` keeps its
+                            // flipping title because it is a custom view rather than a bare
+                            // `Label`, which is the shape that works here.
+                            Label(
+                                showDrawer ? "Hide request log" : "Show request log",
+                                systemImage: "rectangle.bottomhalf.inset.filled"
+                            )
                         }
                         .keyboardShortcut("l", modifiers: [.command, .option])
                         // The shortcut is named here because it is named nowhere else: these two
@@ -270,7 +299,11 @@ struct WorkspaceView: View {
                         Button {
                             withAnimation(DSAnimation.drawerToggle) { showInspector.toggle() }
                         } label: {
-                            Label("Toggle inspector", systemImage: "sidebar.right")
+                            // Directional for the reason the drawer toggle above records.
+                            Label(
+                                showInspector ? "Hide inspector" : "Show inspector",
+                                systemImage: "sidebar.right"
+                            )
                         }
                         .keyboardShortcut("i", modifiers: [.command, .option])
                         .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
@@ -282,19 +315,41 @@ struct WorkspaceView: View {
 
         }
         // Port conflict alert
+        // `String(...)` around the port, not the bare `Int`. This first argument is a
+        // `LocalizedStringKey`, so an interpolated integer is formatted for the current locale and
+        // picks up a grouping separator: the alert read "Port 21,311 already in use". A port is an
+        // identifier, not a quantity — there is no such port as 21,311, and the number a user would
+        // have to retype is not the one the window showed them. Interpolating a `String` gives the
+        // key a piece of text to place rather than a number to format.
         .alert(
-            "Port \(appState.portConflictAlert?.conflictingPort ?? 0) already in use",
+            "Port \(String(appState.portConflictAlert?.conflictingPort ?? 0)) already in use",
             isPresented: $appState.isShowingPortConflict,
             presenting: appState.portConflictAlert
         ) { alertData in
-            Button("Try port \(alertData.suggestedPort)") {
+            // The title interpolates the suggested port, so it is the one control in this window a
+            // test cannot address by its words: matching the label means hard-coding the result of
+            // the `conflictingPort + 1` arithmetic `PortConflictAlertData` performs, and the test
+            // then goes green or red on the fixture's port rather than on the button. The identifier
+            // is the stable handle. The label stays the visible words so VoiceOver still says which
+            // port is being offered.
+            Button("Try port \(String(alertData.suggestedPort))") {
                 appState.retryStartOnNextPort(from: alertData.conflictingPort)
             }
+            .accessibilityIdentifier("portConflict.tryPortButton")
+            .accessibilityLabel("Try port \(String(alertData.suggestedPort))")
+
             Button("Keep server stopped", role: .cancel) {
                 appState.portConflictAlert = nil
             }
+            .accessibilityIdentifier("portConflict.keepStoppedButton")
+            .accessibilityLabel("Keep server stopped")
         } message: { alertData in
-            Text("Another process is using port \(alertData.conflictingPort). Try port \(alertData.suggestedPort) instead?")
+            Text("Another process is using port \(String(alertData.conflictingPort)). Try port \(String(alertData.suggestedPort)) instead?")
+                // Named, not matched as a substring. The body interpolates two ports, so the only
+                // query that could reach it without an identifier is a `CONTAINS` predicate over the
+                // window's static texts — which is both expensive and satisfied by any other text
+                // that happens to mention a port.
+                .accessibilityIdentifier("portConflict.message")
         }
         // New endpoint sheet
         .sheet(isPresented: $appState.showNewEndpointSheet) {
@@ -310,9 +365,17 @@ struct WorkspaceView: View {
             isPresented: $appState.isShowingGenericStartError,
             presenting: appState.genericStartError
         ) { _ in
+            // Distinct from `commandError.okButton` in `ContentView`, which is also called "OK" and
+            // is also presented over this window. Two dismiss buttons with one name is a query that
+            // matches whichever alert AppKit listed first, so a test could confirm a server error by
+            // dismissing a validation refusal.
             Button("OK") { appState.genericStartError = nil }
+                .accessibilityIdentifier("serverError.okButton")
+                .accessibilityLabel("OK")
         } message: { error in
             Text(error)
+                // The message is whatever the runtime threw, so there is no literal to match on.
+                .accessibilityIdentifier("serverError.message")
         }
         // HAR import sheet
         .sheet(isPresented: $showHARImport) {
@@ -392,6 +455,25 @@ struct WorkspaceView: View {
             navigatorTab = requested
             appState.navigatorRequest = nil
         }
+        // Last in the chain, like the only other postfix `#if` in this app (`MimicScene`), and for
+        // the same reason: everything inside it has to vanish in Release, and a conditional block at
+        // the end of a modifier chain is the shape that is unambiguously allowed to.
+        #if DEBUG
+        // The same sheet the Import menu presents, on a file a UI test named instead of one an
+        // `NSOpenPanel` returned. Separate from the two presentations above rather than folded into
+        // them, so nothing about the shipping import path changes to accommodate a test.
+        .sheet(item: $injectedImport) { injected in
+            ImportView(
+                kind: injected.kind,
+                existingEndpoints: currentEndpoints,
+                initialCandidates: injected.state.candidates,
+                initialParseError: injected.state.parseError,
+                initialIsParsing: injected.state.isParsing,
+                onCommitImport: appState.commitImportedCandidates
+            )
+        }
+        .task { await presentInjectedImportIfNeeded() }
+        #endif
     }
 
     // MARK: - Breadcrumb
@@ -759,4 +841,104 @@ struct WorkspaceView: View {
     private var currentEndpoints: [Endpoint] {
         appState.currentProject?.endpoints ?? []
     }
+
+    #if DEBUG
+
+    // MARK: - Injected spec import (UI tests only)
+
+    /// A parsed injection, and the sheet's presentation state in one value — non-nil *is* "show it",
+    /// which is how `pendingCapture` presents the capture sheet a few modifiers above.
+    private struct InjectedImport: Identifiable {
+        let id = UUID()
+        let kind: ImportKind
+        let state: ImportWorkflowState
+    }
+
+    /// Parses the file `MIMIC_IMPORT_FILE` names and opens the import review sheet on the result.
+    ///
+    /// Spec import is the one workflow with no `ControlCommand` behind it, so a script cannot set it
+    /// up — and its only entry point is `NSOpenPanel`, which XCUITest cannot drive at all. The review
+    /// screen, the candidate list, the select-all pair, the per-route toggles and the commit were
+    /// therefore unreachable to the suite: about fifty steps of UI with no way in. This is the way
+    /// in, and it bypasses **only** the panel.
+    ///
+    /// Everything after the file name is production code. `ImportWorkflow.parseFile` is the same
+    /// method `chooseFile` calls once the panel has returned a URL — it was already injectable, which
+    /// is why nothing in `ImportFeature` had to change — so the real `HARParser`/`OpenAPIParser` runs
+    /// over the real bytes, the sheet lists the candidates that parse produced, and confirming it
+    /// calls `AppState.commitImportedCandidates` exactly as the menu path does. Handing the sheet a
+    /// list of candidates built here instead would be a fixture made from the mechanism under test:
+    /// it would stay green with both parsers deleted.
+    ///
+    /// The parse is awaited before the sheet is presented rather than driven from inside it, because
+    /// `ImportWorkflowScreen` captures its state at `init`. A superseded parse cannot arise — there
+    /// is exactly one injection per launch, and the guard below keeps `.task` re-running from
+    /// starting a second.
+    ///
+    /// The name is resolved to a resource in the app's **own bundle**;
+    /// ``UITestSupport/importFileEnvironmentKey`` records why — two CI rounds in which the runner and
+    /// the app could not be made to name one directory between them.
+    private func presentInjectedImportIfNeeded() async {
+        guard injectedImport == nil, let injection = UITestSupport.importInjection() else { return }
+
+        let kind = injection.kind
+        let workflow = ImportWorkflow(kind: kind)
+        workflow.parseFile(
+            at: injection.url,
+            existingEndpoints: currentEndpoints,
+            // The read is still a real read of a real file, on the same detached hop the panel path
+            // uses; `importFixtureData` only expands the padding token, and only when this run asked
+            // for it. Capturing the count rather than the injection keeps the closure over a plain
+            // `Int?`, which is `Sendable` without anything having to be declared so.
+            loadData: { [paddingByteCount = injection.paddingByteCount] url in
+                try UITestSupport.importFixtureData(at: url, paddingByteCount: paddingByteCount)
+            },
+            parse: { data, endpoints in
+                try await kind.parse(data: data, existingEndpoints: endpoints)
+            }
+        )
+        // Bound rather than optional-chained: `await workflow.parseTask?.value` is an expression of
+        // type `()?`, which the compiler reports as an unused result.
+        if let parseTask = workflow.parseTask {
+            await parseTask.value
+        }
+
+        // The app's own answer to "was the file there", computed only when something failed, and
+        // carried out through the sheet's error text — the one channel of the app's that reaches the
+        // runner. The app's stdout does not: an entire round of CI diagnostics printed from the
+        // runner never appeared in the xcodebuild log either, so anything a later diagnosis needs has
+        // to arrive in the accessibility tree or in an assertion message.
+        //
+        // This is what makes the two error-state tests mean something. `readableParseError` appends
+        // its format guidance to *any* error, a file that could not be opened included, so "Parse
+        // error" over "Mimic reads HAR 1.2" is exactly what a missing fixture produces too — and on
+        // the first CI round those two tests were the only ones that passed, green over the bug the
+        // other eight were failing on. `SpecImportUITests.assertFixtureWasReadable` requires the
+        // "bytes read" half of this line before it will believe an error is about the bytes.
+        var readReport = "not checked"
+        if workflow.parseError != nil {
+            do {
+                let bytes = try Data(contentsOf: injection.url).count
+                readReport = "\(bytes) bytes read"
+            } catch {
+                readReport = "unreadable: \(error)"
+            }
+        }
+
+        // Whatever the parse produced, including a failure: the error state is a review-screen arm
+        // too, and it is the one an injected fixture is most likely to land on.
+        injectedImport = InjectedImport(
+            kind: kind,
+            state: ImportWorkflowState(
+                candidates: workflow.candidates,
+                parseError: workflow.parseError.map { failure in
+                    // Appended rather than substituted, so the format guidance the two error-state
+                    // tests match on is still in front of it.
+                    "\(failure)\n\nInjected fixture: \(injection.url.path) — \(readReport)"
+                },
+                isParsing: false
+            )
+        )
+    }
+    #endif
 }

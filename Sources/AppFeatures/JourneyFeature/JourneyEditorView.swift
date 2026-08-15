@@ -320,6 +320,7 @@ struct JourneyEditorView: View {
                         } label: {
                             Label("Edit step\u{2026}", systemImage: "pencil")
                         }
+                        .accessibilityIdentifier("journeyEditor.step.contextMenu.edit")
 
                         if index > 0 {
                             Button {
@@ -327,6 +328,7 @@ struct JourneyEditorView: View {
                             } label: {
                                 Label("Move up", systemImage: "arrow.up")
                             }
+                            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveUp")
                         }
                         if index < journey.steps.count - 1 {
                             Button {
@@ -334,6 +336,7 @@ struct JourneyEditorView: View {
                             } label: {
                                 Label("Move down", systemImage: "arrow.down")
                             }
+                            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveDown")
                         }
 
                         Divider()
@@ -343,6 +346,7 @@ struct JourneyEditorView: View {
                         } label: {
                             Label("Remove step", systemImage: "trash")
                         }
+                        .accessibilityIdentifier("journeyEditor.step.contextMenu.remove")
                     }
                 }
                 .onMove { source, destination in

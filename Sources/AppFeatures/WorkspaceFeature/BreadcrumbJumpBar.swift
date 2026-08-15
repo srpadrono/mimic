@@ -155,10 +155,16 @@ struct BreadcrumbJumpBar: View {
                 .frame(height: DSStroke.hairline)
         }
         .clipped()
-        .accessibilityIdentifier("breadcrumb")
-        // Mandatory partner to the identifier above: naming a container otherwise renames every
-        // element inside it, and `breadcrumb.crumb.*` would vanish from the accessibility tree.
+        // The container is declared *before* it is named, and the order is the whole of the rule:
+        // an `.accessibilityIdentifier` applied to a view that is not yet an accessibility element
+        // propagates to everything inside it, so naming the bar first handed "breadcrumb" to every
+        // crumb and both arrows and left nothing under `breadcrumb.*` in the tree at all. This bar
+        // shipped in that order under a comment claiming the pairing kept the crumbs addressable;
+        // it did not, and eight tests in `WorkspaceShellUITests` failed on the locator rather than
+        // on the bar. `sidebar`, `centerPane`, `inspector` and `drawer` in `WorkspaceView` have
+        // always had it this way round, which is why those four keep their descendants' names.
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("breadcrumb")
     }
 }
 

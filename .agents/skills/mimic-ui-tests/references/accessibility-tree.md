@@ -47,3 +47,41 @@ When an identifier mysteriously stops matching, dump `app.debugDescription` and 
 element is actually called. `MimicUITests/TreeDumpTests.swift` is not kept in the repo — write a
 throwaway test that prints `app.debugDescription` line by line, because the runner is sandboxed and
 cannot write the dump to a file.
+
+**And `print()` is not that channel.** A `print` from the runner does not reach the xcodebuild log —
+a whole round of injected-import diagnostics was written, shipped to CI, and simply never appeared.
+What does come back is the text of an assertion message and an `XCTAttachment`. Put the evidence in
+the `XCTAssert…` message, where the "Test failure details" step will read it out.
+
+## A menu item is matched by its `title`, not its `label`
+
+An open pop-up's menu does **not** hang off the pop-up button, and its items carry no label at all.
+Dumped from a failure message:
+
+```
+Not hittable: MenuItem, {{6.0, 224.0}, {251.0, 24.0}}, identifier: '_restartNowRequested:', title: 'Restart'
+```
+
+XCUITest prints `label:` when there is one, and there is none — so a
+`matching(NSPredicate(format: "label == %@", …))` over menu items matches **nothing in this app**,
+and a query scoped to the button's descendants matches nothing either. `app.menuItems["POST"]` keeps
+working because the subscript matches identifier *or* title. Match on `title`, or use the subscript.
+
+The menu bar's own items are the trap in the other direction: the Apple menu contains a "Restart",
+so a bare title match can resolve to a system item in a menu that is not even open. A closed menu's
+items are not hittable and an open pop-up's are, so hittability is the discriminator **here** — see
+the next rule for why that is the only place to trust it.
+
+## `isHittable` is not a reachability gate
+
+Three suites reached for `XCUIElement.isHittable` to prove an element was on screen before clicking
+it, and it is not sound in this window. `endpointEditor.groupTagField` reports `isHittable == false`
+while a test in another suite clicks that same field, types into it, and watches the jump bar grow a
+crumb — passing, in the same CI run in which two tests declared the field "not reachable". SwiftUI
+wells report false for controls the window drives perfectly well, so a gate on it fails a working
+control and measures nothing.
+
+Use a **behavioural read-back** instead: click, type, then assert the field holds what you typed, or
+that the sheet opened, or that the crumb appeared. That catches what the gate was reaching for — a
+click landing on whatever happens to be at that point when the card is below the fold — and it
+catches it at the click rather than three assertions later as "the value never committed".

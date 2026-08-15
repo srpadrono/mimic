@@ -55,7 +55,12 @@ struct ContentView: View {
                 .accessibilityIdentifier("storeFailure.continueButton")
                 .accessibilityLabel("Continue anyway")
         } message: { reason in
+            // The reason is `ProjectStore`'s prose about why the store would not open, so a test can
+            // only reach it as a substring of the window's static texts. Named, like the button
+            // above it, so asserting *which* failure was reported does not mean matching on a
+            // sentence somebody will reword.
             Text(reason)
+                .accessibilityIdentifier("storeFailure.message")
         }
         // Every rule the window breaks is refused by `ProjectCommandExecutor`, and until this alert
         // existed the refusal went nowhere: `AppState.run` set `lastCommandError` and nothing in the
@@ -73,7 +78,10 @@ struct ContentView: View {
                 .accessibilityIdentifier("commandError.okButton")
                 .accessibilityLabel("OK")
         } message: { message in
+            // The refusal itself — a validator's sentence, which is the thing worth asserting when a
+            // change is silently not made. Named for the same reason the store-failure message is.
             Text(message)
+                .accessibilityIdentifier("commandError.message")
         }
     }
 }
