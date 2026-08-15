@@ -853,8 +853,9 @@ struct WorkspaceView: View {
     /// is exactly one injection per launch, and the guard below keeps `.task` re-running from
     /// starting a second.
     ///
-    /// The path must be tilde-relative; ``UITestSupport/importFileEnvironmentKey`` records why, and
-    /// an absolute one outside the container is refused by the sandbox rather than merely missing.
+    /// The file name is resolved inside the app's own Application Support directory;
+    /// ``UITestSupport/importFileEnvironmentKey`` records why it is a name and not a path, and what
+    /// went wrong the one time it was a path.
     private func presentInjectedImportIfNeeded() async {
         guard injectedImport == nil, let injection = UITestSupport.importInjection() else { return }
 
@@ -880,7 +881,16 @@ struct WorkspaceView: View {
             kind: kind,
             state: ImportWorkflowState(
                 candidates: workflow.candidates,
-                parseError: workflow.parseError,
+                parseError: workflow.parseError.map { failure in
+                    // The path this side actually opened, carried into the one place the runner can
+                    // read it from: the sheet's own error text, which lands in the accessibility
+                    // tree. Every test in `SpecImportUITests` failed on a read the app and the
+                    // runner disagreed about, and there was no way to see *which* file the app had
+                    // tried — the app's stdout is not the runner's, and Foundation's message names
+                    // the file without its directory. Appended rather than substituted, so the
+                    // format guidance the two error-state tests match on is still in front of it.
+                    "\(failure)\n\nInjected fixture: \(injection.url.path)"
+                },
                 isParsing: false
             )
         )

@@ -267,18 +267,38 @@ enum UITestSupport {
 
     /// The file the import flow should open, in place of the `NSOpenPanel` it normally runs.
     ///
-    /// **Tilde-relative, and it has to be.** The app ships with `app-sandbox` and
-    /// `files.user-selected.read-write` and nothing else, so the only paths it may read are the ones
-    /// a user picked in a panel — and a UI test cannot drive a panel, which is the whole reason this
-    /// hook exists. An absolute `/tmp/fixture.har` is therefore *denied*, not missing, and the
-    /// failure surfaces as a parse error about a file the tester can see with their own eyes. A path
-    /// beginning `~/` is expanded by the sandboxed app into its own container, where it can read
-    /// without an entitlement: write the fixture to
-    /// `~/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/…` from the
-    /// runner and name it `~/Library/Application Support/devxa.Mimic/…` here. That is the same
-    /// reasoning ``databaseURL(environment:)`` records for the run's store and
-    /// `UITestApp.controlFileOverridePath` records for the discovery file; do not "simplify" it into
-    /// a temporary directory, because the simplification cannot work.
+    /// **A bare file name.** It is resolved inside ``importFixtureDirectory()`` — the app's own
+    /// `Application Support/devxa.Mimic`, the directory `mimic-uitests.sqlite` sits in. A value with
+    /// a `/` in it is still taken as a path and tilde-expanded, so an absolute path keeps working;
+    /// the suite does not use that form, and the paragraph below is why.
+    ///
+    /// The app ships with `app-sandbox` and `files.user-selected.read-write` and nothing else, so
+    /// the only *absolute* paths it may read are ones a user picked in a panel — and a UI test
+    /// cannot drive a panel, which is the whole reason this hook exists. `/tmp/fixture.har` is
+    /// therefore denied rather than missing. This key used to close that gap with a tilde: the
+    /// sandboxed app expands `~` into its container, where it reads without an entitlement, so the
+    /// unsandboxed runner wrote to
+    /// `~/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/…` and named
+    /// it `~/Library/Application Support/devxa.Mimic/…` here.
+    ///
+    /// **On its first CI run every one of the eight tests that needed the review screen failed on
+    /// that arrangement, and the two that needed only *a* parse error passed.** Those two passed
+    /// *vacuously*: ``ImportWorkflow.readableParseError(_:kind:)`` appends its format guidance to
+    /// any error, a file the app could not open included, so "Parse error" plus "Mimic reads
+    /// HAR 1.2" is exactly what a missing file produces too. What their passing does prove is that
+    /// everything except the read works — the `.task` runs, this key is read, the sheet presents,
+    /// the error arm renders. The read was failing because the two halves were naming different
+    /// files: one side computes a path from `homeDirectoryForCurrentUser` and spells a container
+    /// out, the other asks `expandingTildeInPath`, and those are two answers to "where is home"
+    /// that the sandbox is free to disagree about — with no way to tell from the outside which of
+    /// them was wrong.
+    ///
+    /// The name form does not re-decide that question, it removes it. The app resolves the fixture
+    /// into a directory it already demonstrably reads and writes, because its store is in there;
+    /// the runner finds that same directory by looking for the store the app just wrote, rather
+    /// than asserting where a container has to be. Neither side expands a tilde. Do not "simplify"
+    /// this back into a path — and do not point it at a temporary directory, because that
+    /// simplification is the one the sandbox actually refuses.
     static let importFileEnvironmentKey = "MIMIC_IMPORT_FILE"
 
     /// Which importer the file is for: `har` or `openapi`, case-insensitively. Anything else — and a
@@ -306,13 +326,43 @@ enum UITestSupport {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> ImportInjection? {
         guard isRunningUITests(environment: environment),
-              let path = environment[importFileEnvironmentKey], !path.isEmpty,
-              let kind = importKind(named: environment[importKindEnvironmentKey])
+              let value = environment[importFileEnvironmentKey], !value.isEmpty,
+              let kind = importKind(named: environment[importKindEnvironmentKey]),
+              let url = importFixtureURL(for: value)
         else { return nil }
-        return ImportInjection(
-            url: URL(fileURLWithPath: (path as NSString).expandingTildeInPath),
-            kind: kind
-        )
+        return ImportInjection(url: url, kind: kind)
+    }
+
+    /// Where a bare ``importFileEnvironmentKey`` name is looked for: the app's own
+    /// `Application Support/devxa.Mimic`, computed exactly as ``databaseURL(environment:)`` computes
+    /// the run's store when the harness names none.
+    ///
+    /// That shared derivation is the point. Whatever this expression resolves to — a container under
+    /// the sandbox, a real home without one — is the directory the app opens
+    /// `mimic-uitests.sqlite` in, so a test outside the sandbox can *find* it by looking for that
+    /// file rather than reconstructing it from a rule about where containers live. The two halves
+    /// then cannot name different directories, which is the failure recorded on
+    /// ``importFileEnvironmentKey``.
+    ///
+    /// `environment: [:]`, so this is the directory the store *falls back* to and not wherever
+    /// `MIMIC_DATABASE_PATH` may point instead. A run that overrides its store path still keeps its
+    /// fixtures here — and a suite that overrides it can no longer find this directory by the store,
+    /// which is worth knowing before adding one to the import suite.
+    static func importFixtureDirectory() -> URL? {
+        try? DatabaseFactory.resolveDatabaseURL(environment: [:]).deletingLastPathComponent()
+    }
+
+    /// The file `value` names: a path when it contains a `/`, otherwise a name inside
+    /// ``importFixtureDirectory()``.
+    ///
+    /// The path arm is kept so an absolute or tilde-relative value behaves as it always did — it is
+    /// how somebody would point the hook at a file by hand — and it is deliberately *not* what the
+    /// suite uses.
+    static func importFixtureURL(for value: String) -> URL? {
+        guard !value.contains("/") else {
+            return URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
+        }
+        return importFixtureDirectory()?.appendingPathComponent(value)
     }
 
     static func importKind(named name: String?) -> ImportKind? {
