@@ -21,6 +21,16 @@ import XCTest
 /// buttons; two "Add scenario" buttons once the sheet is up) the query names the identifier it must
 /// *not* have, so the two stay distinguishable instead of collapsing into a `firstMatch` coin toss.
 ///
+/// The first CI run of this file taught the same lesson in two more places, and both fixes are
+/// generalizations rather than one-offs. A **row of elements sharing one identifier** — the
+/// `DSTextField` validation row under a wrapper that lends its name to everything below it, the
+/// `DSJSONEditor` warning whose glyph and sentence both wear `ds.jsoneditor.<id>.error` — is read by
+/// *content*, never by `firstMatch`, which resolves to whichever of them the tree lists first (a
+/// glyph, whose AppKit label is the one word "Warning"). And a **`List` section header** does not
+/// keep the identifier its `HStack` was given the way `EndpointSidebarRow` keeps its own, because
+/// the row declares an accessibility element and the header does not — so the sidebar's group
+/// sections are found by identifier *or* by the header's text, polled together.
+///
 /// **What is deliberately not here.** `editor.noActiveScenario` (EPEDIT-02) is unreachable from the
 /// window: creating an endpoint always mints a Default scenario, and the scenario list refuses to
 /// delete the last one — so no sequence of clicks produces an endpoint with a nil
@@ -51,6 +61,55 @@ final class EndpointEditorUITests: MimicUITestCase {
     @MainActor
     private func anyElement(identified identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    /// The longest thing said by any element carrying `identifier`, ignoring text fields.
+    ///
+    /// **For the rows where several elements share one name**, which is most of the ones this suite
+    /// asserts text about: a container's `.accessibilityIdentifier` propagates to its descendants, so
+    /// a `DSTextField` wrapped in a caller's identifier lends that name to its label, its input *and*
+    /// its validation row, and a `DSJSONEditor` warning lends it to a glyph and a sentence. A
+    /// `firstMatch` over those picks whichever the tree lists first, which is how CI came to report a
+    /// JSON warning reading `Warning|` — the label AppKit gives `exclamationmark.triangle.fill`.
+    ///
+    /// Longest rather than "the one that says what I expect": a query written around the expected
+    /// sentence would make the caller's assertion a restatement of the query, green whatever the app
+    /// says. Length separates a message from a glyph's one word and from a field's one-word label
+    /// without knowing either. The text field is skipped by type because its value is what somebody
+    /// typed, which can be longer than both and is not what any of these callers are asking about.
+    @MainActor
+    private func longestText(identified identifier: String) -> String {
+        let query = app.descendants(matching: .any).matching(identifier: identifier)
+        var longest = ""
+        for index in 0..<query.count {
+            let element = query.element(boundBy: index)
+            guard element.elementType != .textField else { continue }
+            let text = shownText(of: element)
+            if text.count > longest.count { longest = text }
+        }
+        return longest
+    }
+
+    // MARK: - DSTextField validation messages
+
+    /// What the new-endpoint sheet's path field is complaining about, or `""` when it is not.
+    ///
+    /// **Not `ds.textfield.newEndpoint.path.error`, which is what `NewEndpointSheetPage.pathError`
+    /// asks for and why three suites failed on the same wall at once.** `DSTextField` does compose
+    /// that name for its validation row — but `NewEndpointSheet` then stamps
+    /// `.accessibilityIdentifier("newEndpoint.pathField")` on the whole field, and a container's
+    /// identifier overrides its descendants'. That propagation is the *point* of the wrapper: it is
+    /// what makes `app.textFields["newEndpoint.pathField"]` resolve the input at all, which is the
+    /// exception `DSTextField`'s own note asks callers to preserve. Its cost is that the field's
+    /// label, its input and its validation row all report the wrapper's name, and no
+    /// `ds.textfield.…` name reaches the tree. `NewProjectSheet` wraps `newProject.port` in
+    /// `serverPortField` exactly the same way, so the port message is reached the same way.
+    ///
+    /// The three are then told apart by what they carry rather than by their names — see
+    /// ``longestText(identified:)``.
+    @MainActor
+    private func pathValidationMessage() -> String {
+        longestText(identified: "newEndpoint.pathField")
     }
 
     // MARK: - Editor scrolling
@@ -220,9 +279,83 @@ final class EndpointEditorUITests: MimicUITestCase {
         ).firstMatch.exists
     }
 
+    /// The navigator column itself, as something to scope a query to.
+    ///
+    /// Addressed by identifier across element types rather than as `app.otherElements["sidebar"]`:
+    /// `WorkspaceView` pairs the name with `.accessibilityElement(children: .contain)`, and a
+    /// container declared that way can realize as a group or as an `AXUnknown`. `WorkspacePage`
+    /// spells one of the two and has never had a caller, so nothing has ever confirmed which.
+    @MainActor
+    private var sidebarElement: XCUIElement { anyElement(identified: "sidebar") }
+
     @MainActor
     private func groupSectionHeader(named identifierSuffix: String) -> XCUIElement {
         anyElement(identified: "sidebar.group.\(identifierSuffix)")
+    }
+
+    /// A group header found by the text it shows, scoped to the sidebar.
+    ///
+    /// Scoped, because the same word is on screen twice while this is being asserted: the editor's
+    /// group tag field holds it, and the jump bar grows a group crumb for it. An unscoped query
+    /// would be answered by either and would say nothing about the sidebar.
+    @MainActor
+    private func groupSectionHeader(showing text: String) -> XCUIElement {
+        sidebarElement.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", text, text))
+            .firstMatch
+    }
+
+    /// Waits for a sidebar group section, by identifier **or** by the header's own text.
+    ///
+    /// `SidebarView` sets `sidebar.group.<name>` on the header, and CI could not find it for a
+    /// section the model must have had — the two endpoints were both in the sidebar and one of them
+    /// carried the tag. A `List` section header is a bare `HStack` inside a `Section`: unlike
+    /// `EndpointSidebarRow`, which declares `.accessibilityElement(children: .contain)` and keeps
+    /// `endpoint-<uuid>` all the way into the tree, it declares nothing, so AppKit's outline header
+    /// row is free to swallow the modifier. The text is the header's own `Text(section.name)`.
+    ///
+    /// Both are polled together rather than waited on in turn — rule 9 of `mimic-ui-tests`.
+    @MainActor
+    private func waitForGroupSection(
+        named name: String,
+        showing text: String,
+        timeout: TimeInterval = 8
+    ) -> Bool {
+        UITestApp.waitForAny(
+            [groupSectionHeader(named: name), groupSectionHeader(showing: text)],
+            timeout: timeout
+        )
+    }
+
+    /// Whichever of the two the tree actually has, for a caller that needs to click it. Resolve it
+    /// *after* ``waitForGroupSection(named:showing:timeout:)`` has said the section is up.
+    @MainActor
+    private func groupSectionHeader(named name: String, showing text: String) -> XCUIElement {
+        let byIdentifier = groupSectionHeader(named: name)
+        return byIdentifier.exists ? byIdentifier : groupSectionHeader(showing: text)
+    }
+
+    /// Toggles a group section the way the window offers to, and stops as soon as it has moved.
+    ///
+    /// The header row is tried first. If the row is not itself the affordance, the disclosure
+    /// control is — a sidebar `Section(isExpanded:)` draws one in its header, AppKit names it "Hide"
+    /// while the section is open and "Show" while it is closed, and neither the chevron nor that
+    /// button carries an identifier, so it is reached by label. The second click is guarded on the
+    /// section not having moved yet, so a header that *is* the affordance cannot be toggled twice.
+    ///
+    /// If neither toggles it, nothing here hides that: the caller's own assertion fails and names
+    /// the production fix.
+    @MainActor
+    private func toggleGroupSection(_ header: XCUIElement, until witness: XCUIElement, exists expected: Bool) {
+        guard header.exists else { return }
+        if header.isHittable { header.click() }
+        if UITestApp.waitUntil(timeout: 2, { witness.exists == expected }) { return }
+
+        header.hover()
+        let disclosure = sidebarElement.buttons.matching(
+            NSPredicate(format: "label == %@ OR label == %@", "Hide", "Show")
+        ).firstMatch
+        if disclosure.exists, disclosure.isHittable { disclosure.click() }
     }
 
     // MARK: - Editor element resolution
@@ -295,6 +428,18 @@ final class EndpointEditorUITests: MimicUITestCase {
             if container.elementType == .textView { return container }
         }
         return app.textViews.firstMatch
+    }
+
+    /// What the JSON editor's warning row is saying, or `""` while it is not showing one.
+    ///
+    /// `DSJSONEditor` puts `ds.jsoneditor.<id>.error` on the `HStack` and — unlike `DSTextField`'s
+    /// validation row and `EndpointEditorView`'s own `validationNote`, which both compose themselves
+    /// with `.accessibilityElement()` — never collapses it, so the glyph and the sentence arrive as
+    /// two elements wearing the same name. The first of them is the glyph: CI read this row as
+    /// `Warning|`, which is `exclamationmark.triangle.fill`'s label and no value at all.
+    @MainActor
+    private func bodyWarningText() -> String {
+        longestText(identified: "ds.jsoneditor.editor.body.error")
     }
 
     @MainActor
@@ -421,7 +566,10 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// EPCREATE-05, EPCREATE-06, EPCREATE-10.
     ///
     /// `NewEndpointSheetPage.pathError` has existed unused since the page object was written, and its
-    /// own doc admits the identifier it originally carried never existed. This is its first caller.
+    /// own doc admits the identifier it originally carried never existed. Its replacement —
+    /// `ds.textfield.newEndpoint.path.error` — does not reach the tree either, for the reason
+    /// ``pathValidationMessage()`` records, which is what the first CI run of this test found. The
+    /// page object is left alone here; correcting it belongs with the page objects.
     @MainActor
     func testNewEndpointSheetRejectsAPathWithoutALeadingSlash() throws {
         launchApp()
@@ -444,19 +592,28 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
         newEndpointSheet.pathField.typeText("api/users")
 
-        XCTAssertTrue(newEndpointSheet.pathError.waitForExistence(timeout: 5),
-                      "A path with no leading slash should show its inline validation message")
-        let pathMessage = shownText(of: newEndpointSheet.pathError)
-        XCTAssertTrue(pathMessage.contains("must start with"),
-                      "The message should say what is wrong — it says \(pathMessage)")
+        // Raised on every keystroke by `NewEndpointSheet`'s `.onChange(of: path)` — there is nothing
+        // to submit and nothing to blur first — and read through `pathValidationMessage`, not
+        // through `NewEndpointSheetPage.pathError`, which cannot match. See that property's note.
+        let statesTheRule = UITestApp.waitUntil(timeout: 5) {
+            self.pathValidationMessage().contains("must start with")
+        }
+        let pathMessage = pathValidationMessage()
+        XCTAssertTrue(statesTheRule,
+                      "A path with no leading slash should show an inline message saying what is "
+                          + "wrong — the field reads \(pathMessage)")
         XCTAssertFalse(newEndpointSheet.createButton.isEnabled,
                        "'Add endpoint' should be disabled while the path is invalid")
 
         newEndpointSheet.pathField.click()
         newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
         newEndpointSheet.pathField.typeText("/api/users")
-        XCTAssertTrue(newEndpointSheet.pathError.waitForNonExistence(timeout: 3),
-                      "Fixing the path should clear the message")
+        let cleared = UITestApp.waitUntil(timeout: 3) {
+            self.pathValidationMessage().contains("must start with") == false
+        }
+        let remainingMessage = pathValidationMessage()
+        XCTAssertTrue(cleared,
+                      "Fixing the path should clear the message — it still reads \(remainingMessage)")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 3) { self.newEndpointSheet.createButton.isEnabled },
             "'Add endpoint' should re-enable for a valid path"
@@ -731,8 +888,12 @@ final class EndpointEditorUITests: MimicUITestCase {
         let warning = anyElement(identified: "ds.jsoneditor.editor.body.error")
         XCTAssertTrue(warning.waitForExistence(timeout: 6),
                       "A malformed body should raise the JSON warning after the validation settle")
-        let warningText = shownText(of: warning)
-        XCTAssertTrue(warningText.contains("still saved"),
+        // Read from the row rather than from its first element — see `bodyWarningText()`. The row's
+        // glyph is listed first and carries the whole of AppKit's "Warning", which is what the
+        // original form of this assertion was comparing against.
+        let saysItIsKept = UITestApp.waitUntil(timeout: 5) { self.bodyWarningText().contains("still saved") }
+        let warningText = bodyWarningText()
+        XCTAssertTrue(saysItIsKept,
                       "The warning should say the body is saved and served as written — it reads \(warningText)")
 
         XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
@@ -814,15 +975,26 @@ final class EndpointEditorUITests: MimicUITestCase {
         let groupTag = endpointEditor.groupTagField
         XCTAssertTrue(groupTag.waitForExistence(timeout: 5),
                       "The Settings section should show the group tag field")
-        revealInEditor(groupTag)
+        // Asserted rather than discarded: an element that is in the tree but under the fold still
+        // answers `waitForExistence`, and the click below would then land on whatever is at that
+        // point on screen — which reads as "the tag did not commit" three assertions later.
+        XCTAssertTrue(revealInEditor(groupTag),
+                      "The Settings card's group tag field should be reachable in the editor pane")
         groupTag.click()
         groupTag.typeKey("a", modifierFlags: .command)
         groupTag.typeText("Ops")
         app.typeKey(.tab, modifierFlags: [])
 
-        XCTAssertTrue(groupSectionHeader(named: "Ops").waitForExistence(timeout: 8),
-                      "Tagging an endpoint should give the sidebar a named group section")
-        XCTAssertTrue(groupSectionHeader(named: "ungrouped").waitForExistence(timeout: 5),
+        let grouped = waitForGroupSection(named: "Ops", showing: "Ops")
+        // Named in the message because the two failures look identical from the outside: a section
+        // that never appeared, and a sidebar this query could not scope itself to.
+        let sidebarPresence = sidebarElement.exists ? "is present" : "is not in the tree at all"
+        XCTAssertTrue(
+            grouped,
+            "Tagging an endpoint should give the sidebar a named group section — the sidebar element "
+                + sidebarPresence
+        )
+        XCTAssertTrue(waitForGroupSection(named: "ungrouped", showing: "Ungrouped", timeout: 5),
                       "The untagged endpoint should sit under an 'Ungrouped' section beside it")
         XCTAssertTrue(waitForSidebarRowCount(2),
                       "Grouping rearranges the rows, it does not remove any")
@@ -837,9 +1009,11 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// would be about nothing.
     ///
     /// The disclosure control itself carries no identifier — it is SwiftUI's own
-    /// `Section(isExpanded:)` affordance — so the header row is the click target. If clicking the
-    /// header ever stops toggling the section, the failure message below is the fix: the disclosure
-    /// needs a name of its own in `SidebarView`.
+    /// `Section(isExpanded:)` affordance — so the section is toggled through
+    /// ``toggleGroupSection(_:until:exists:)``, which tries the header row and then the Hide/Show
+    /// control AppKit draws in it. If neither moves the section, the failure message below is the
+    /// fix: the disclosure needs a name of its own in `SidebarView`, and that is a production
+    /// change, not something a test should be reaching around.
     @MainActor
     func testCollapsingAGroupSectionHidesItsEndpoints() throws {
         launchApp()
@@ -850,15 +1024,16 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         let groupTag = endpointEditor.groupTagField
         XCTAssertTrue(groupTag.waitForExistence(timeout: 5))
-        revealInEditor(groupTag)
+        XCTAssertTrue(revealInEditor(groupTag),
+                      "The Settings card's group tag field should be reachable in the editor pane")
         groupTag.click()
         groupTag.typeKey("a", modifierFlags: .command)
         groupTag.typeText("Ops")
         app.typeKey(.tab, modifierFlags: [])
 
-        let header = groupSectionHeader(named: "Ops")
-        XCTAssertTrue(header.waitForExistence(timeout: 8),
+        XCTAssertTrue(waitForGroupSection(named: "Ops", showing: "Ops"),
                       "The tagged endpoint should be under a group header")
+        let header = groupSectionHeader(named: "Ops", showing: "Ops")
 
         // With /api/health in the editor, /api/users can only be the sidebar's row.
         let usersRow = workspace.endpointPathText("/api/users")
@@ -875,18 +1050,18 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(healthPath.waitForExistence(timeout: 5),
                       "The grouped endpoint should be listed under its section")
 
-        header.click()
+        toggleGroupSection(header, until: healthPath, exists: false)
         let collapsed = UITestApp.waitUntil(timeout: 5) { healthPath.exists == false }
         XCTAssertTrue(
             collapsed,
-            "Clicking the group header should collapse the section and hide its endpoints. If this "
-                + "fails, the header is not the disclosure affordance — SidebarView's "
+            "Collapsing the group section should hide its endpoints. If this fails, neither the "
+                + "header row nor AppKit's own Hide/Show control toggled it — SidebarView's "
                 + "Section(isExpanded:) needs an identified control of its own to click."
         )
 
-        header.click()
+        toggleGroupSection(header, until: healthPath, exists: true)
         XCTAssertTrue(healthPath.waitForExistence(timeout: 5),
-                      "Clicking the header again should expand the section and bring its endpoints back")
+                      "Expanding the section again should bring its endpoints back")
     }
 
     // MARK: - 12. Per-endpoint delay
@@ -954,6 +1129,16 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// The row is deliberately *not* a disabled text field — a greyed-out well in a row of live ones
     /// reads as a control that failed — so "there is no field here" is part of what is being
     /// asserted, and the note beside it is the only thing explaining why.
+    ///
+    /// **The number itself is not asserted, and that is a production gap rather than a choice.**
+    /// `EndpointEditorView` builds the row as `Text("\(globalDelayMs)")` *and* gives it
+    /// `.accessibilityLabel("Global delay in milliseconds")` — and an explicit label *replaces* what
+    /// a `Text` exposes rather than adding to it. CI read this element as label `""`, value `"Global
+    /// delay in milliseconds"`: the digits are nowhere in the tree, and VoiceOver announces the row
+    /// as a label with no value under it, which is the same defect heard rather than queried. The
+    /// fix is one modifier on that `Text` — `.accessibilityValue("\(globalDelayMs)")` — after which
+    /// this test should assert the row reads `0` for a fresh project. Asserting it before then would
+    /// only be asserting the label back to itself.
     @MainActor
     func testGlobalDelayRowIsReadOnlyAndExplainsItself() throws {
         launchApp()
@@ -964,8 +1149,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(globalDelayValue.waitForExistence(timeout: 5),
                       "The Settings section should show the project-wide delay")
         let globalDelayText = shownText(of: globalDelayValue)
-        XCTAssertTrue(globalDelayText.contains("0"),
-                      "A fresh project has no global delay — the row reads \(globalDelayText)")
+        XCTAssertTrue(globalDelayText.contains("Global delay"),
+                      "The row should say which delay it is showing — it reads \(globalDelayText)")
         XCTAssertFalse(app.textFields["endpointEditor.globalDelay"].exists,
                        "The global delay is shown, not edited — it must not be a text field")
 

@@ -565,6 +565,13 @@ struct EndpointEditorView: View {
                 .frame(width: EditorRowMetrics.numericFieldWidth, alignment: .leading)
                 .accessibilityIdentifier("endpointEditor.globalDelay")
                 .accessibilityLabel("Global delay in milliseconds")
+                // The number, said as the row's value. An explicit `.accessibilityLabel` *replaces*
+                // what a `Text` would otherwise expose, so naming this row took its digits out of
+                // the accessibility tree entirely: VoiceOver announced "Global delay in
+                // milliseconds" with nothing under it, and a test could read the label back but
+                // never the value it labels. Found by the UI sweep, which could assert the row
+                // exists and not what it says.
+                .accessibilityValue("\(globalDelayMs)")
 
             unitLabel("ms")
         }
