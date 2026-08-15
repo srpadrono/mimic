@@ -150,9 +150,14 @@ struct WorkspacePage {
     var toggleDrawerButton: XCUIElement { app.toolbars.buttons["toggleDrawerButton"].firstMatch }
 
     // Autosave
-    var autosaveIndicator: XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "autosaveStatusIndicator").firstMatch
-    }
+    //
+    // There is no `autosaveStatusIndicator`. A property of that name used to sit here, querying an
+    // identifier that exists nowhere in `Sources` and that no test ever referenced — a dead query,
+    // not a missing identifier. The temptation it created was to name the reserved toolbar slot in
+    // `WorkspaceView` to make it resolve, which would have been two bugs: a container's identifier
+    // overrides its descendants', so the three real names below would have stopped landing, and the
+    // slot renders `EmptyView` while idle, so the element would not exist for most of a run. The
+    // addressable surface is the state-specific identifiers, one per arm.
     var autosaveSavedIndicator: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "autosaveStatus.saved").firstMatch
     }

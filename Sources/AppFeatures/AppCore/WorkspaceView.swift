@@ -32,6 +32,11 @@ struct WorkspaceView: View {
     @State private var isNavigatingHistory = false
     @State private var showHARImport = false
     @State private var showOpenAPIImport = false
+    #if DEBUG
+    /// The result of parsing a UI test's injected file — see ``presentInjectedImportIfNeeded()``.
+    /// Non-nil *is* "the injected import sheet is up", the way `pendingCapture` works.
+    @State private var injectedImport: InjectedImport?
+    #endif
     /// The two journey sheets, both of which used to be reachable only from the journeys window.
     @State private var showJourneyTemplatePicker = false
     @State private var showNewJourneySheet = false
@@ -246,6 +251,18 @@ struct WorkspaceView: View {
                     // The autosave indicator is empty while idle, so it must not be allowed to
                     // change the toolbar's layout when it flickers into view for two seconds. A
                     // reserved slot keeps its neighbours still.
+                    //
+                    // The slot is deliberately unnamed, and must stay that way. `MimicUITests`
+                    // carries a page-object property querying `"autosaveStatusIndicator"`, which
+                    // exists nowhere in `Sources` and is referenced by no test — a dead query, not a
+                    // missing identifier. Naming this container to satisfy it would do two kinds of
+                    // damage: a container's identifier overrides its descendants' (see
+                    // mimic-ui-tests, references/accessibility-tree.md), so the three identifiers
+                    // `AutosaveStatusIndicator` sets — `autosaveStatus.saving`, `.saved`, `.failed`,
+                    // the two the suite actually queries — would stop landing; and the reserved slot
+                    // renders `EmptyView` while idle, so an element named here would be a handle on
+                    // a status that is, most of the time, no status at all. The state-specific
+                    // identifiers are the addressable surface.
                     ToolbarItem(placement: .primaryAction) {
                         AutosaveStatusIndicator(status: appState.autosaveStatus)
                             .frame(minWidth: 54, alignment: .trailing)
@@ -287,14 +304,30 @@ struct WorkspaceView: View {
             isPresented: $appState.isShowingPortConflict,
             presenting: appState.portConflictAlert
         ) { alertData in
+            // The title interpolates the suggested port, so it is the one control in this window a
+            // test cannot address by its words: matching the label means hard-coding the result of
+            // the `conflictingPort + 1` arithmetic `PortConflictAlertData` performs, and the test
+            // then goes green or red on the fixture's port rather than on the button. The identifier
+            // is the stable handle. The label stays the visible words so VoiceOver still says which
+            // port is being offered.
             Button("Try port \(alertData.suggestedPort)") {
                 appState.retryStartOnNextPort(from: alertData.conflictingPort)
             }
+            .accessibilityIdentifier("portConflict.tryPortButton")
+            .accessibilityLabel("Try port \(alertData.suggestedPort)")
+
             Button("Keep server stopped", role: .cancel) {
                 appState.portConflictAlert = nil
             }
+            .accessibilityIdentifier("portConflict.keepStoppedButton")
+            .accessibilityLabel("Keep server stopped")
         } message: { alertData in
             Text("Another process is using port \(alertData.conflictingPort). Try port \(alertData.suggestedPort) instead?")
+                // Named, not matched as a substring. The body interpolates two ports, so the only
+                // query that could reach it without an identifier is a `CONTAINS` predicate over the
+                // window's static texts — which is both expensive and satisfied by any other text
+                // that happens to mention a port.
+                .accessibilityIdentifier("portConflict.message")
         }
         // New endpoint sheet
         .sheet(isPresented: $appState.showNewEndpointSheet) {
@@ -310,9 +343,17 @@ struct WorkspaceView: View {
             isPresented: $appState.isShowingGenericStartError,
             presenting: appState.genericStartError
         ) { _ in
+            // Distinct from `commandError.okButton` in `ContentView`, which is also called "OK" and
+            // is also presented over this window. Two dismiss buttons with one name is a query that
+            // matches whichever alert AppKit listed first, so a test could confirm a server error by
+            // dismissing a validation refusal.
             Button("OK") { appState.genericStartError = nil }
+                .accessibilityIdentifier("serverError.okButton")
+                .accessibilityLabel("OK")
         } message: { error in
             Text(error)
+                // The message is whatever the runtime threw, so there is no literal to match on.
+                .accessibilityIdentifier("serverError.message")
         }
         // HAR import sheet
         .sheet(isPresented: $showHARImport) {
@@ -392,6 +433,25 @@ struct WorkspaceView: View {
             navigatorTab = requested
             appState.navigatorRequest = nil
         }
+        // Last in the chain, like the only other postfix `#if` in this app (`MimicScene`), and for
+        // the same reason: everything inside it has to vanish in Release, and a conditional block at
+        // the end of a modifier chain is the shape that is unambiguously allowed to.
+        #if DEBUG
+        // The same sheet the Import menu presents, on a file a UI test named instead of one an
+        // `NSOpenPanel` returned. Separate from the two presentations above rather than folded into
+        // them, so nothing about the shipping import path changes to accommodate a test.
+        .sheet(item: $injectedImport) { injected in
+            ImportView(
+                kind: injected.kind,
+                existingEndpoints: currentEndpoints,
+                initialCandidates: injected.state.candidates,
+                initialParseError: injected.state.parseError,
+                initialIsParsing: injected.state.isParsing,
+                onCommitImport: appState.commitImportedCandidates
+            )
+        }
+        .task { await presentInjectedImportIfNeeded() }
+        #endif
     }
 
     // MARK: - Breadcrumb
@@ -759,4 +819,71 @@ struct WorkspaceView: View {
     private var currentEndpoints: [Endpoint] {
         appState.currentProject?.endpoints ?? []
     }
+
+    #if DEBUG
+
+    // MARK: - Injected spec import (UI tests only)
+
+    /// A parsed injection, and the sheet's presentation state in one value — non-nil *is* "show it",
+    /// which is how `pendingCapture` presents the capture sheet a few modifiers above.
+    private struct InjectedImport: Identifiable {
+        let id = UUID()
+        let kind: ImportKind
+        let state: ImportWorkflowState
+    }
+
+    /// Parses the file `MIMIC_IMPORT_FILE` names and opens the import review sheet on the result.
+    ///
+    /// Spec import is the one workflow with no `ControlCommand` behind it, so a script cannot set it
+    /// up — and its only entry point is `NSOpenPanel`, which XCUITest cannot drive at all. The review
+    /// screen, the candidate list, the select-all pair, the per-route toggles and the commit were
+    /// therefore unreachable to the suite: about fifty steps of UI with no way in. This is the way
+    /// in, and it bypasses **only** the panel.
+    ///
+    /// Everything after the file name is production code. `ImportWorkflow.parseFile` is the same
+    /// method `chooseFile` calls once the panel has returned a URL — it was already injectable, which
+    /// is why nothing in `ImportFeature` had to change — so the real `HARParser`/`OpenAPIParser` runs
+    /// over the real bytes, the sheet lists the candidates that parse produced, and confirming it
+    /// calls `AppState.commitImportedCandidates` exactly as the menu path does. Handing the sheet a
+    /// list of candidates built here instead would be a fixture made from the mechanism under test:
+    /// it would stay green with both parsers deleted.
+    ///
+    /// The parse is awaited before the sheet is presented rather than driven from inside it, because
+    /// `ImportWorkflowScreen` captures its state at `init`. A superseded parse cannot arise — there
+    /// is exactly one injection per launch, and the guard below keeps `.task` re-running from
+    /// starting a second.
+    ///
+    /// The path must be tilde-relative; ``UITestSupport/importFileEnvironmentKey`` records why, and
+    /// an absolute one outside the container is refused by the sandbox rather than merely missing.
+    private func presentInjectedImportIfNeeded() async {
+        guard injectedImport == nil, let injection = UITestSupport.importInjection() else { return }
+
+        let kind = injection.kind
+        let workflow = ImportWorkflow(kind: kind)
+        workflow.parseFile(
+            at: injection.url,
+            existingEndpoints: currentEndpoints,
+            loadData: { try Data(contentsOf: $0) },
+            parse: { data, endpoints in
+                try await kind.parse(data: data, existingEndpoints: endpoints)
+            }
+        )
+        // Bound rather than optional-chained: `await workflow.parseTask?.value` is an expression of
+        // type `()?`, which the compiler reports as an unused result.
+        if let parseTask = workflow.parseTask {
+            await parseTask.value
+        }
+
+        // Whatever the parse produced, including a failure: the error state is a review-screen arm
+        // too, and it is the one an injected fixture is most likely to land on.
+        injectedImport = InjectedImport(
+            kind: kind,
+            state: ImportWorkflowState(
+                candidates: workflow.candidates,
+                parseError: workflow.parseError,
+                isParsing: false
+            )
+        )
+    }
+    #endif
 }

@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Domain
 import Foundation
 import Persistence
 
@@ -226,6 +227,100 @@ enum UITestSupport {
         let directory = databaseURL.deletingLastPathComponent()
         return ["-wal", "-shm", "-journal"].map {
             directory.appendingPathComponent(databaseURL.lastPathComponent + $0)
+        }
+    }
+
+    // MARK: - Forcing an autosave failure
+
+    /// Set to `1` to make every project write fail for the run.
+    ///
+    /// This exists because `AutosaveStatusIndicator`'s `.failed` arm was unreachable. It is set from
+    /// a thrown repository error and nothing else, and every store the app can open is a GRDB queue
+    /// that succeeds — the on-disk one and the in-memory fallback both — so the one arm that tells a
+    /// user their work is *not* being saved could not be produced by any sequence of clicks, and the
+    /// suite could not assert on it.
+    static let failProjectWritesEnvironmentKey = "MIMIC_FAIL_PROJECT_WRITES"
+
+    /// Wraps `repository` in ``WriteFailingProjectRepository`` when this run asked for it, and hands
+    /// back the real store otherwise.
+    ///
+    /// Two gates, both required, and neither is padding. ``isRunningUITests(environment:arguments:)``
+    /// is the same gate the store isolation stands on: a plain environment variable must not be able
+    /// to turn a developer's session into one that silently discards every save, which is the
+    /// `mimic.sqlite` failure class wearing a different hat — the damage would look exactly like
+    /// "my edits keep disappearing". The value must be the literal `1`, not merely present, so that
+    /// exporting the key empty to turn the hook *off* does what it reads like.
+    ///
+    /// Do not widen either gate, and do not let this decide for itself which store to decorate: it
+    /// takes the repository it is given.
+    static func projectRepositoryFailingWritesIfRequested(
+        _ repository: any ProjectRepository,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> any ProjectRepository {
+        guard isRunningUITests(environment: environment),
+              environment[failProjectWritesEnvironmentKey] == "1"
+        else { return repository }
+        return WriteFailingProjectRepository(base: repository)
+    }
+
+    // MARK: - Injecting a spec import
+
+    /// The file the import flow should open, in place of the `NSOpenPanel` it normally runs.
+    ///
+    /// **Tilde-relative, and it has to be.** The app ships with `app-sandbox` and
+    /// `files.user-selected.read-write` and nothing else, so the only paths it may read are the ones
+    /// a user picked in a panel — and a UI test cannot drive a panel, which is the whole reason this
+    /// hook exists. An absolute `/tmp/fixture.har` is therefore *denied*, not missing, and the
+    /// failure surfaces as a parse error about a file the tester can see with their own eyes. A path
+    /// beginning `~/` is expanded by the sandboxed app into its own container, where it can read
+    /// without an entitlement: write the fixture to
+    /// `~/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/…` from the
+    /// runner and name it `~/Library/Application Support/devxa.Mimic/…` here. That is the same
+    /// reasoning ``databaseURL(environment:)`` records for the run's store and
+    /// `UITestApp.controlFileOverridePath` records for the discovery file; do not "simplify" it into
+    /// a temporary directory, because the simplification cannot work.
+    static let importFileEnvironmentKey = "MIMIC_IMPORT_FILE"
+
+    /// Which importer the file is for: `har` or `openapi`, case-insensitively. Anything else — and a
+    /// missing value — means no injection, because guessing from the extension would silently run
+    /// the HAR parser over a spec and report its error as the spec's.
+    static let importKindEnvironmentKey = "MIMIC_IMPORT_KIND"
+
+    /// A file a UI test asked the import flow to parse, with the importer to parse it with.
+    struct ImportInjection {
+        let url: URL
+        let kind: ImportKind
+    }
+
+    /// What this run wants imported, or `nil` when it wants nothing — which is every run that is not
+    /// a UI test, because the gate is ``isRunningUITests(environment:arguments:)`` before it is
+    /// anything else.
+    ///
+    /// Only the *panel* is bypassed. The caller hands the URL to
+    /// `ImportWorkflow.parseFile(at:existingEndpoints:loadData:parse:)`, so the real parser runs over
+    /// the real bytes, the review sheet lists the real candidates, and the commit is
+    /// `AppState.commitImportedCandidates` as it always was. Injecting candidates instead of a file
+    /// would be a test that builds its fixture with the mechanism under test, and it would go green
+    /// over a parser that had stopped working.
+    static func importInjection(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ImportInjection? {
+        guard isRunningUITests(environment: environment),
+              let path = environment[importFileEnvironmentKey], !path.isEmpty,
+              let kind = importKind(named: environment[importKindEnvironmentKey])
+        else { return nil }
+        return ImportInjection(
+            url: URL(fileURLWithPath: (path as NSString).expandingTildeInPath),
+            kind: kind
+        )
+    }
+
+    static func importKind(named name: String?) -> ImportKind? {
+        guard let name = name?.lowercased() else { return nil }
+        switch name {
+        case "har": return .har
+        case "openapi": return .openAPI
+        default: return nil
         }
     }
 }
