@@ -24,12 +24,12 @@
 #     `automationmodetool enable-automationmode-without-authentication`, which is what lets XCUITest
 #     drive another app with nobody at the keyboard.
 #
-#   - **The UI suite runs here in one pass, and on CI in four shards on four machines.** This laptop
+#   - **The UI suite runs here in one pass, and on CI in three shards on three machines.** This laptop
 #     is one machine, and the reason CI shards at all is that these suites cannot share one: they
 #     share `mimic-uitests.sqlite`, the `com.devxa.Mimic.UITests` defaults domain, and — being a real
 #     macOS app rather than a simulator — one window server and one frontmost application. So the
 #     serial run below is not a slower version of what CI does, it is the only version available
-#     locally, and it takes about eighty minutes against CI's twenty-nine. Two consequences worth
+#     locally, and it takes about eighty minutes against CI's thirty. Two consequences worth
 #     knowing. Running the whole target in one pass means a suite that no CI shard names still passes
 #     here — which is why `Scripts/check_ui_shards.py` runs below, as the only thing that can see
 #     that gap from a laptop. And a shard-ordering effect, if one ever appears, cannot reproduce
@@ -291,11 +291,11 @@ step "Skill layout"
 python3 Scripts/check_skills.py
 
 # The fourth, and it guards the workflow rather than a document. CI shards the XCUITest suite across
-# four macOS runners by naming test classes — each shard passes its own list of
+# three macOS runners by naming test classes — each shard passes its own list of
 # `-only-testing:MimicUITests/<Class>` flags — because the suites share one store, one defaults
 # domain and one window server, so parallel workers on a single machine would destroy each other's
 # state. That split is a hand-maintained list, and the way it fails is silent: a class no shard names
-# never runs, and all four shards go green having each run exactly what they were asked for.
+# never runs, and every shard goes green having each run exactly what it was asked for.
 #
 # It matters more here than most of these checks, because this script's own `UI tests` step above
 # runs the whole target in one pass. A suite added today passes locally and is invisible on CI, which

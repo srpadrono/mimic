@@ -7,9 +7,9 @@ description: >-
 # Why this is an action rather than seven steps pasted into each job.
 #
 # `.github/workflows/ci.yml` used to have exactly one macOS job, so its setup was written once. The
-# UI suite is now sharded across four runners and the non-UI work runs beside them, which makes five
+# UI suite is now sharded across three runners and the non-UI work runs beside them, which makes four
 # macOS jobs — and every one of them needs the same seven steps, carrying the same ~90 lines of
-# comment explaining *why* each is there. Five copies of a comment is five copies that drift, and
+# comment explaining *why* each is there. Four copies of a comment is four copies that drift, and
 # this repository has already paid for that: `Scripts/check_lockfiles.py` exists partly because the
 # workflow and `Scripts/ci.sh` each held a pasted copy of the same check under a comment claiming
 # they were character-for-character identical, and they were not. AGENTS.md states the rule in one

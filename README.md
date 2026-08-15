@@ -323,7 +323,7 @@ this is actually exercised" is a link away rather than a script somebody has to 
 Where to look: any run of [`.github/workflows/ci.yml`](.github/workflows/ci.yml), under the
 **Build, unit suites, Release, CLI e2e (macOS)** job's summary. Two things sit outside that
 measurement, both structurally: XCUITest, because the step doing the measuring is the one that skips
-it — the UI suite runs in four sharded jobs beside this one — and everything the Linux job runs,
+it — the UI suite runs in three sharded jobs beside this one — and everything the Linux job runs,
 because gathering coverage needs the Xcode toolchain. On a red run the bundle is uploaded as the
 `xcresult-unit` artifact, which is where per-file detail lives.
 
@@ -371,22 +371,26 @@ setting the floor against a baseline, is the order.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
-`main`, in eight jobs across five definitions, and finishes in about **29 minutes**. Linux builds
+`main`, in seven jobs across five definitions, and finishes in about **30 minutes**. Linux builds
 `Package.swift`, runs the portable suites and every gate that needs no toolchain, in a couple of
 minutes. On macOS, `Build, unit suites, Release, CLI e2e` runs `tuist generate`, the Debug build, the
 app-level suites — measured, with the per-target coverage table printed into the job summary — the
-CLI end-to-end check and the Release gate, while **the XCUITest suite runs beside it in four shards
-on four runners**, rolled up into one `UI suite` status check. A short `record-coverage` job writes
+CLI end-to-end check and the Release gate, while **the XCUITest suite runs beside it in three shards
+on three runners**, rolled up into one `UI suite` status check. A short `record-coverage` job writes
 the coverage figures into this file on pushes to `main`.
 
 The suite is sharded across machines rather than parallelised on one because every UI test shares a
-store, a defaults domain, a window server and a frontmost application; four is the shard count
-because GitHub caps concurrent macOS jobs at five and the non-UI job takes the fifth slot. That split
-is a hand-maintained list of test classes, so
-[`Scripts/check_ui_shards.py`](Scripts/check_ui_shards.py) fails the Linux job if any class is run by
-no shard or by two — a class nobody runs would otherwise leave all four shards green. The workflow's
-own header argues all of it, including why each shard builds for itself instead of downloading one
-shared build. It used to be a single 96-minute job with XCUITest as four fifths of it.
+store, a defaults domain, a window server and a frontmost application; three is the shard count
+because the non-UI job takes one macOS slot and **four is how many concurrent macOS jobs this
+repository has actually been given**. GitHub documents five, and the first sharded run asked for
+five: run #89 started four jobs together and left the fifth queued for 19m26 — the length of a whole
+shard — which turned a predicted 29-minute run into a measured 43-minute one. Three shards of 51, 53
+and 54 tests fit the observed cap with nothing waiting. That split is a hand-maintained list of test
+classes, so [`Scripts/check_ui_shards.py`](Scripts/check_ui_shards.py) fails the Linux job if any
+class is run by no shard or by two — a class nobody runs would otherwise leave every shard green. The
+workflow's own header argues all of it, including why each shard builds for itself instead of
+downloading one shared build. It used to be a single 96-minute job with XCUITest as four fifths of
+it.
 
 Both runners are free on a public repository. (This section used to say Actions could not start
 a job here at all — true while the repository was private and a billing block killed every run in

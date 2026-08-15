@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Fails when a UI test class is not run by any CI shard, or is run by more than one.
 
-`.github/workflows/ci.yml` shards the XCUITest suite across four macOS runners, and it does so by
+`.github/workflows/ci.yml` shards the XCUITest suite across three macOS runners, and it does so by
 naming test classes: each shard passes a list of `-only-testing:MimicUITests/<Class>` flags and runs
 exactly those. That is the only workable split — the suites share one store, one defaults domain and
 one window server, so `-parallel-testing-enabled` on a single machine is not available here, and the
 workflow's header argues that at length.
 
+Nothing below hard-codes that three. The shard list, the shard count and the per-shard totals are all
+derived from the workflow text, which is what let the split go from four shards to three — after run
+#89 measured the concurrent-macOS-job cap at four rather than the documented five — with this file's
+logic untouched and only this paragraph and the one above it edited.
+
 It also introduces a failure mode the single job did not have, and it is the worst kind: **a UI test
 class that no shard names simply never runs, and every shard is green.** Add `SettingsUITests.swift`
-tomorrow, write twenty tests in it, push, and four green checks report that the window is covered.
+tomorrow, write twenty tests in it, push, and three green checks report that the window is covered.
 Nothing in `xcodebuild` can notice — a shard asked for the classes it was given and got them — and
 nothing in the workflow can either, because the workflow is the thing that is wrong.
 
