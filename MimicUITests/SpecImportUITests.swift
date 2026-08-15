@@ -193,18 +193,60 @@ struct ImportSheetPage {
 
     /// Whatever the error state is currently saying, for a diagnostic rather than an assertion.
     ///
-    /// Both identifiers in one predicate because `DSEmptyState` flattens: the message may reach the
-    /// tree under its own `ds.empty.<prefix>.error.message`, or folded into the container's value as
-    /// `ds.empty.<prefix>.error`. Label *and* value for the reason ``staticText(reading:)`` gives.
-    /// `nil` when there is no error state up, which is itself the answer to "did the parse fail".
+    /// Both identifiers, because `DSEmptyState` may flatten: the message reaches the tree under its
+    /// own `ds.empty.<prefix>.error.message`, or — if the container's name is stamped over its
+    /// descendants — under `ds.empty.<prefix>.error`, the same handle the container itself wears.
+    /// Label *and* value for the reason ``staticText(reading:)`` gives. `nil` when there is no error
+    /// state up, which is itself the answer to "did the parse fail".
+    ///
+    /// **Every element wearing either handle, and the *texts* first — not `firstMatch` over `.any`.**
+    /// That was this property's shape for one CI round and it read back the single word
+    /// "Parse error" while the error state was up: `.any` is answered in tree order, so the first
+    /// match is whichever of the container or the heading the tree lists first, and neither of those
+    /// carries the sentence. The read report `WorkspaceView.presentInjectedImportIfNeeded()` appends
+    /// is in the *message*, so `assertFixtureWasReadable(_:)` could never see it and both error-state
+    /// tests failed saying the fixture had not been read — of a fixture the app had plainly read and
+    /// failed to parse, which is exactly what those two tests are for.
+    ///
+    /// So: `staticTexts` (the sentence is a `Text` under either realization), every match rather than
+    /// the first, joined. The container is the fallback for the shape where the message is folded
+    /// into it and no static text wears the name at all.
     var parseErrorText: String? {
-        let element = app.descendants(matching: .any).matching(
-            NSPredicate(
-                format: "identifier == %@ OR identifier == %@",
-                "ds.empty.\(statePrefix).error.message", "ds.empty.\(statePrefix).error"
-            )
-        ).firstMatch
-        guard element.exists else { return nil }
+        let byIdentifier = NSPredicate(
+            format: "identifier == %@ OR identifier == %@",
+            "ds.empty.\(statePrefix).error.message", "ds.empty.\(statePrefix).error"
+        )
+
+        var sawErrorState = false
+        var parts: [String] = []
+
+        let texts = app.staticTexts.matching(byIdentifier)
+        // Guarded on `firstMatch` because `count` on a query with no matches raises rather than
+        // answering zero — the rule `ErrorAlertUITests.jsonWarningText()` was corrected by.
+        if texts.firstMatch.exists {
+            sawErrorState = true
+            for match in texts.allElementsBoundByIndex {
+                let text = shownText(of: match)
+                if !text.isEmpty, !parts.contains(text) { parts.append(text) }
+            }
+        }
+
+        if parts.isEmpty {
+            let container = app.descendants(matching: .any).matching(byIdentifier).firstMatch
+            if container.exists {
+                sawErrorState = true
+                let text = shownText(of: container)
+                if !text.isEmpty { parts.append(text) }
+            }
+        }
+
+        guard sawErrorState else { return nil }
+        return parts.joined(separator: " | ")
+    }
+
+    /// An element's words, wherever it keeps them. Value first — `DSEmptyState`'s text arrives there
+    /// under some realizations and in the label under others.
+    private func shownText(of element: XCUIElement) -> String {
         let value = element.value.map { String(describing: $0) } ?? ""
         return value.isEmpty ? element.label : value
     }
@@ -900,6 +942,14 @@ final class SpecImportUITests: MimicUITestCase {
     /// If the suffix is ever *truncated* out of the accessibility value rather than absent, this
     /// fails too — and it prints the entire error text, so the next reader can see that is what
     /// happened rather than guessing at it.
+    ///
+    /// **Two handles on the same sentence, polled together.** The identifier route is the one that
+    /// says *which* element carries the report, and it is the one that went wrong: for a round it
+    /// resolved to the error state's heading and read "Parse error", so this failed over an app that
+    /// had read the file and said so. The words are the second handle — a static text containing
+    /// "bytes read" is the app's report wherever `DSEmptyState` put it, and only the app can produce
+    /// it, so the control is exactly as strong either way. Both are asked on every poll rather than
+    /// in turn, for the reason `UITestApp.waitForAny` exists.
     @MainActor
     private func assertFixtureWasReadable(
         _ sheet: ImportSheetPage,
@@ -909,7 +959,8 @@ final class SpecImportUITests: MimicUITestCase {
         var reported: String?
         let confirmed = UITestApp.waitUntil(timeout: Self.parseTimeout) {
             reported = sheet.parseErrorText
-            return reported?.contains(Self.readReportMarker) == true
+            if reported?.contains(Self.readReportMarker) == true { return true }
+            return sheet.errorMessage(containing: Self.readReportMarker).exists
         }
         if confirmed { return }
         XCTFail(

@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 import XCTest
@@ -571,26 +572,31 @@ final class ErrorAlertUITests: MimicUITestCase {
         createProjectViaUI(name: "JSON Warning")
         createEndpointViaUI(name: "Users", path: "/api/users")
 
+        // Before the body can be reached at all: the log takes the bottom of the window and the body
+        // card is the last one in the form, so on a runner's window the editor sits under the drawer.
+        hideRequestLogDrawer()
+
+        // Letters only, deliberately. The paste inserts verbatim, so bracket completion cannot reach
+        // this payload — but "not json" is invalid under any editor's behaviour, which keeps the
+        // trigger for the warning independent of what a source-editor dependency does next.
         XCTAssertTrue(
-            clickJSONBodyEditor(),
-            "The response body editor should be reachable to type into"
+            setResponseBody("not json"),
+            "The response body editor should be reachable and should hold what was put in it — it "
+                + "holds: " + bodyText()
         )
-        // Letters only, deliberately: the code editor matches brackets and quotes, and a trigger that
-        // depends on whether it auto-closes one is a trigger that will break on a dependency bump.
-        app.typeText("not json")
 
         // The editor's own contents go into the message beside the warning row. The warning is a
         // function of what the editor holds, so "no warning" has two causes — the row never rendered
         // because the text never arrived, or it rendered and says nothing the tree can read — and a
         // message quoting only the row cannot separate them. `CodeEditor` is an
         // `NSViewRepresentable` around an `NSTextView`, which publishes its string as the element's
-        // value, so this reads back the eight characters that were typed if they landed at all.
+        // value, so this reads back the eight characters that were pasted if they landed at all.
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) {
                 self.jsonWarningText().localizedCaseInsensitiveContains("not valid JSON")
             },
             "A malformed body should raise the \"Not valid JSON\" warning — read: " + jsonWarningText()
-                + " — and the body editor holds: " + combinedText(of: app.textViews.firstMatch)
+                + " — and the body editor holds: " + bodyText()
         )
         XCTAssertTrue(
             jsonWarningText().localizedCaseInsensitiveContains("still saved"),
@@ -1000,42 +1006,97 @@ final class ErrorAlertUITests: MimicUITestCase {
         return app.buttons["Add header"].firstMatch
     }
 
-    /// Puts the caret in the response-body code editor, answering whether it managed to.
+    /// The response body's **text view**, not the scroll view wearing the identifier.
     ///
-    /// The identifier is not the problem here — CI reported `Unable to find hit point for ScrollView,
-    /// {{333.0, 467.0}, {320.0, 240.0}}, identifier: 'ds.jsoneditor.editor.body'`, so the element was
-    /// found and simply had nowhere clickable. The body editor is the last card in a scrolling editor
-    /// form and the request log takes the bottom of the window, so on a hosted runner's window it can
-    /// sit under the drawer or below the fold. Three moves, cheapest first: click it where it is,
-    /// give the centre pane the drawer's height, then scroll the pane until the editor surfaces.
-    ///
-    /// `false` rather than a click into nothing, so the test fails saying the editor could not be
-    /// reached instead of saying the warning never appeared — which would be a true sentence about
-    /// the wrong thing.
+    /// `DSJSONEditor` puts `ds.jsoneditor.editor.body` on a `CodeEditor`, which is an
+    /// `NSViewRepresentable` wrapping a scroll view around an `NSTextView`, so the name lands on the
+    /// wrapper and the typed content is one level down. Clicking the wrapper is what this file did
+    /// for a round: it reported success and the keystrokes went nowhere, because the caret was never
+    /// in a text view. `EndpointEditorUITests.bodyTextView()` resolves the same control the same way,
+    /// and its JSON tests pass.
     @MainActor
-    private func clickJSONBodyEditor() -> Bool {
-        let editor = element(identifier: "ds.jsoneditor.editor.body")
+    private func bodyTextView() -> XCUIElement {
+        let container = element(identifier: "ds.jsoneditor.editor.body")
+        if container.exists {
+            let inner = container.descendants(matching: .textView).firstMatch
+            if inner.exists { return inner }
+            if container.elementType == .textView { return container }
+        }
+        return app.textViews.firstMatch
+    }
+
+    /// What the body editor holds. `NSTextView` publishes its string as the element's value.
+    @MainActor
+    private func bodyText() -> String { combinedText(of: bodyTextView()) }
+
+    /// Gives the editor the request log's height back.
+    ///
+    /// The body editor is the last card in a scrolling form and the log occupies the bottom of the
+    /// window, so on a hosted runner the card sits under the drawer — which is how CI came to report
+    /// `Unable to find hit point for ScrollView, {{333.0, 467.0}, {320.0, 240.0}}, identifier:
+    /// 'ds.jsoneditor.editor.body'`. One toolbar click is cheaper and steadier than scrolling, and
+    /// `EndpointEditorUITests` and `JourneyEditorUITests` both open with it. Guarded on the drawer
+    /// being up, so this cannot hide a log a later assertion needs and cannot toggle it back on.
+    @MainActor
+    private func hideRequestLogDrawer() {
+        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
+        guard workspace.drawerEmptyHeading.exists else { return }
+        workspace.toggleDrawerButton.click()
+        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+    }
+
+    /// The editor form's scroller, for the case where hiding the drawer is not enough.
+    @MainActor
+    private var editorScrollView: XCUIElement {
+        let editor = element(identifier: "endpointEditor")
+        if editor.exists {
+            let inner = editor.descendants(matching: .scrollView).firstMatch
+            if inner.exists { return inner }
+        }
+        return app.scrollViews.firstMatch
+    }
+
+    /// Scrolls until `element` can actually be clicked. Both directions, because
+    /// `scroll(byDeltaX:deltaY:)`'s sign convention is a wheel gesture's rather than a content
+    /// offset's, and getting it backwards would silently scroll away from the target.
+    @MainActor
+    private func revealInEditor(_ element: XCUIElement) -> Bool {
+        if element.isHittable { return true }
+        let scroller = editorScrollView
+        guard scroller.exists else { return element.isHittable }
+        for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0] {
+            scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
+            if element.isHittable { return true }
+        }
+        return element.isHittable
+    }
+
+    /// Puts `text` in the response body by **pasting** it, and answers whether it landed there.
+    ///
+    /// Pasted rather than typed, which is `EndpointEditorUITests.setResponseBody`'s rule and worth
+    /// keeping even for a payload with no brackets in it: `CodeEditor` is a source editor and may
+    /// complete a character as it arrives, and ⌘V inserts verbatim. It is a real user action, not a
+    /// back door — the app keeps the standard Edit menu, so the key equivalent reaches the text
+    /// view's `paste:` the way a person's would.
+    ///
+    /// The return value is the text having *arrived*, read back out of the editor. A click that
+    /// lands on the wrapper, or on the drawer covering it, is then a failure that says the editor
+    /// could not be reached rather than one that says the warning never appeared — which would be a
+    /// true sentence about the wrong thing.
+    @MainActor
+    private func setResponseBody(_ text: String) -> Bool {
+        let editor = bodyTextView()
         guard editor.waitForExistence(timeout: 10) else { return false }
+        guard revealInEditor(editor) else { return false }
+        guard clickIfHittable(editor) else { return false }
 
-        // `CodeEditor` is an `NSViewRepresentable`: the identifier lands on the scroll view, and the
-        // text view inside it is a second, sometimes better-behaved, target.
-        if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
+        editor.typeKey("a", modifierFlags: .command)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        _ = pasteboard.setString(text, forType: .string)
+        app.typeKey("v", modifierFlags: .command)
 
-        let drawerToggle = workspace.toggleDrawerButton
-        if clickIfHittable(drawerToggle) {
-            UITestApp.waitUntil(timeout: 3) {
-                editor.isHittable || self.app.textViews.firstMatch.isHittable
-            }
-            if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
-        }
-
-        let pane = app.otherElements["centerPane"]
-        guard pane.exists, pane.isHittable else { return false }
-        for _ in 0..<8 {
-            pane.scroll(byDeltaX: 0, deltaY: -80)
-            if clickIfHittable(editor) || clickIfHittable(app.textViews.firstMatch) { return true }
-        }
-        return false
+        return UITestApp.waitUntil(timeout: 5) { self.bodyText().contains(text) }
     }
 
     /// Clicks an element only when it is there to be clicked, so a probe cannot fail the test.
