@@ -274,7 +274,19 @@ struct WorkspaceView: View {
                         Button {
                             showDrawer.toggle()
                         } label: {
-                            Label("Toggle request log", systemImage: "rectangle.bottomhalf.inset.filled")
+                            // The title carries the direction, not just the `.accessibilityLabel`
+                            // below. A `Button` whose label is a `Label`, placed directly in a
+                            // `ToolbarItemGroup`, publishes the `Label`'s own title and the
+                            // accessibility label set outside it does not win — CI read "Toggle
+                            // request log" through both states. So VoiceOver announced the same
+                            // words whether the panel was open or shut, on the one control whose
+                            // whole meaning is which way it goes. `ServerToggleButton` keeps its
+                            // flipping title because it is a custom view rather than a bare
+                            // `Label`, which is the shape that works here.
+                            Label(
+                                showDrawer ? "Hide request log" : "Show request log",
+                                systemImage: "rectangle.bottomhalf.inset.filled"
+                            )
                         }
                         .keyboardShortcut("l", modifiers: [.command, .option])
                         // The shortcut is named here because it is named nowhere else: these two
@@ -287,7 +299,11 @@ struct WorkspaceView: View {
                         Button {
                             withAnimation(DSAnimation.drawerToggle) { showInspector.toggle() }
                         } label: {
-                            Label("Toggle inspector", systemImage: "sidebar.right")
+                            // Directional for the reason the drawer toggle above records.
+                            Label(
+                                showInspector ? "Hide inspector" : "Show inspector",
+                                systemImage: "sidebar.right"
+                            )
                         }
                         .keyboardShortcut("i", modifiers: [.command, .option])
                         .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
