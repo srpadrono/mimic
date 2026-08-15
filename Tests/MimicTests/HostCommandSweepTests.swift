@@ -18,7 +18,7 @@ import Persistence
 /// regression fails against a recorded value instead of against a second copy that might have
 /// drifted the same way.
 ///
-/// The sweeps are the part the Definition of Done leans on (AGENTS.md, "CLI and Control Plane"):
+/// The sweeps are the part the Definition of Done leans on (skill `mimic-control-surface`):
 /// `sample(for:)` is a switch over `CommandKind` with no `default`, so a new command stops this file
 /// compiling until a payload exists, and the sweeps then fail until the host and the executor answer
 /// it. Neither dispatch switch is compile-enforced — both end in a `default:` that throws — so these

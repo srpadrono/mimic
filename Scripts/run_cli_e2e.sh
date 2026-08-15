@@ -6,7 +6,7 @@
 # Exercises the seams a unit test cannot: process launch, discovery, HTTP, and real sockets.
 #
 # Everything this run touches is meant to be disposable, and two of those things were not. Both are
-# the rule AGENTS.md draws around the UI suite's database — *a convenience must never be able to
+# the rule the skill mimic-ui-tests draws around the UI suite's database — *a convenience must never be able to
 # compute its own target*:
 #
 #   - **It stops the instance it launched, by pid.** The trap used to call `mimic app stop`, which

@@ -1,11 +1,19 @@
 #!/bin/bash
-# Mechanical enforcement for the handful of AGENTS.md rules that nothing else checks.
+# Mechanical enforcement for the handful of house rules that nothing else checks.
 #
-# Most of that document is judgement and cannot be automated. A few of its rules are not judgement at
+# Most of that guidance is judgement and cannot be automated. A few of its rules are not judgement at
 # all: they are absolute prohibitions on a literal string, every one of them has been broken at least
 # once, and each was found by a human reading a diff. A rule kept only by review is a rule that comes
 # back — so the ones that a grep can decide are decided here, and the ones that need an opinion stay
 # where they are.
+#
+# Each message below cites where its rule is *explained*, and those citations are load-bearing: a
+# developer meeting one of these for the first time needs the failure that motivated it, not the
+# prohibition alone. AGENTS.md was reduced to a router when its depth moved into `.agents/skills/`,
+# so most of these now name a skill, and the rest name AGENTS.md itself, which keeps the
+# "Non-negotiable patterns" section. No count is written here on purpose — a tally beside a list the
+# reader can see is the hand-maintained mirror this repository keeps deleting. When a rule's prose
+# moves, move the citation with it.
 #
 # bash, not zsh like the other scripts in this directory: the Linux CI job runs inside the `swift:6.2`
 # container, which ships bash and no zsh at all, and this check is meant to run there before anything
@@ -70,7 +78,7 @@ UI_TESTS=(MimicUITests)
 # Blanks `//` comments before any rule looks at a file, without ever cutting inside a string literal.
 #
 # The stripping is not tidiness, it is the difference between this script working and not. Every rule
-# below is *quoted* wherever it is explained: AGENTS.md rule 9 is spelled out verbatim in three doc
+# below is *quoted* wherever it is explained: the waitForAny rule is spelled out verbatim in three doc
 # comments across MimicUITests, and `PanelLayoutStore` spends a paragraph on why it does not use
 # `@AppStorage`. A naive grep reports each of those explanations as an instance of the thing it warns
 # about — the check would open red on a tree that obeys it perfectly, which is the one failure mode
@@ -373,7 +381,7 @@ report() {
 if (( self_test )); then
     printf 'Self-testing the house-rule scanner…\n'
 else
-    printf 'Checking AGENTS.md house rules…\n'
+    printf 'Checking house rules…\n'
 fi
 
 # Swift is not a literal-string language, and every rule below used to be written as though it were.
@@ -399,7 +407,7 @@ WS='[[:space:]]*'
 DOT='[[:space:]]*\.[[:space:]]*'
 
 report \
-    'AGENTS.md "Visual standard": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodBadge, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
+    'Skill mimic-window-design "Visual standard": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodBadge, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
     "${DOT}textCase${WS}\(" \
     '' \
     'Text("Response headers").textCase(.uppercase)
@@ -413,7 +421,7 @@ report \
 # occurs in any scanned tree at all, only a doc comment in `PanelLayoutStore` naming it to explain why
 # it is not used — while leaving it out would be betting the rule on a guess about the grammar.
 report \
-    'AGENTS.md "Panel chrome": @AppStorage binds to UserDefaults.standard, so a test run overwrites the developer'"'"'s real window arrangement — inject UserDefaults the way PanelLayoutStore does.' \
+    'Skill mimic-window-design, references/panel-chrome.md: @AppStorage binds to UserDefaults.standard, so a test run overwrites the developer'"'"'s real window arrangement — inject UserDefaults the way PanelLayoutStore does.' \
     "@${WS}([A-Za-z_][A-Za-z0-9_]*${DOT})?AppStorage" \
     '' \
     '@AppStorage("inspectorWidth") var inspectorWidth = 280.0
@@ -474,7 +482,7 @@ report \
     let alert = SwiftUI . Alert (title: Text("Delete endpoint?"))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
-# The one AGENTS.md bullet that publishes the command it wants run — "`grep -rn
+# The one house-rule bullet that publishes the command it wants run — "`grep -rn
 # '\.font(\.system(size: [0-9]' Sources` prints exactly those two; a third means somebody hand-wrote
 # a rung" — and until this rule nothing ran it. `DSGlyph`'s own doc comment ends on the same
 # sentence, calling that grep "the whole check". A check that exists only as a string in two files
@@ -495,7 +503,7 @@ report \
 # nothing left to catch, since a bare `size: 7` is already a bare literal and the exemptions name
 # only 26 and 14.
 report \
-    'AGENTS.md "Visual standard": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
+    'Skill mimic-window-design "Visual standard": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
     "${DOT}font${WS}\([^)]*${DOT}system${WS}\(${WS}size:${WS}[0-9]" \
     'WelcomeWindow\.swift:[0-9]+:.*\.font\(\.system\(size: (26, weight: \.regular|14)\)\)' \
     'Image(systemName: "gear").font(.system(size: 7))
@@ -524,7 +532,7 @@ report \
 # should have to come back through here when that line is respaced; this one names a *value*, and a
 # reformat of `ControlServer.swift` turning the tree red would teach only that the check is noise.
 report \
-    'AGENTS.md "CLI and Control Plane" rule 10: never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
+    'Skill mimic-control-surface, references/loopback-security.md: never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
     "hostname${WS}[=(]${WS}\"" \
     'hostname[[:space:]]*[=(][[:space:]]*"127\.0\.0\.1"' \
     'application.http.server.configuration.hostname = "0.0.0.0"
@@ -542,7 +550,7 @@ report \
 # every occurrence in this suite has been written on one line, and a pattern that cannot produce a
 # false positive is worth more here than one that catches every phrasing.
 report \
-    'AGENTS.md "UI Changes" rule 9: this waits out the first element'"'"'s entire timeout before it ever looks at the second, so a short-lived one appears and vanishes unseen — use UITestApp.waitForAny([a, b], timeout:).' \
+    'Skill mimic-ui-tests, rule 9: this waits out the first element'"'"'s entire timeout before it ever looks at the second, so a short-lived one appears and vanishes unseen — use UITestApp.waitForAny([a, b], timeout:).' \
     "waitForExistence${WS}\(.*\)${WS}\|\|.*waitForExistence${WS}\(" \
     '' \
     'XCTAssertTrue(saving.waitForExistence(timeout: 2) || saved.waitForExistence(timeout: 2))
@@ -597,7 +605,7 @@ fi
 
 if (( violations > 0 )); then
     printf '\n%d house-rule violation(s) across %d rules checked.\n' "$violations" "$rules_checked"
-    printf 'Each line cites the rule; AGENTS.md carries the failure that motivated it.\n'
+    printf 'Each line cites where the rule is explained, and that page carries the failure that motivated it.\n'
     exit 1
 fi
 

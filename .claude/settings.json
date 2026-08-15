@@ -1,5 +1,38 @@
 {
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 Scripts/check_doc_counts.py:*)",
+      "Bash(python3 Scripts/check_module_edges.py:*)",
+      "Bash(python3 Scripts/check_compiler_settings.py:*)",
+      "Bash(python3 Scripts/check_lockfiles.py:*)",
+      "Bash(python3 Scripts/check_skills.py:*)",
+      "Bash(./Scripts/check_house_rules.sh:*)",
+      "Bash(./Scripts/ci.sh:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(tuist generate:*)",
+      "Bash(tuist install:*)",
+      "Bash(tuist version:*)",
+      "Bash(mise install:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)"
+    ]
   }
 }

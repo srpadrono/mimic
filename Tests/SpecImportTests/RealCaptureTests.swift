@@ -189,7 +189,8 @@ struct RealCaptureTests {
         // start one — and that is the property every earlier base64 fixture lacked: each encoded
         // UTF-8 JSON, so the decode-to-text step always succeeded and the fall-through that
         // imported the literal base64 spelling as the body was unreachable from tests while being
-        // routine in use. AGENTS.md names this exact tell: a fixture whose every instance agrees
+        // routine in use. The skill mimic-build-and-test (references/real-inputs.md) names this
+        // exact tell: a fixture whose every instance agrees
         // on something the format does not require.
         let pngHeader = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
         let gzipMagic = Data([0x1F, 0x8B, 0x08, 0x00])

@@ -24,7 +24,8 @@ public enum HostReport {
     /// The address a caller points a client at while the mock server is bound.
     ///
     /// Loopback is not a default here, it is the contract — the mock server binds `127.0.0.1` and the
-    /// control plane refuses to widen (see AGENTS.md). Built in one place because it used to be
+    /// control plane refuses to widen (skill `mimic-control-surface`,
+    /// `references/loopback-security.md`). Built in one place because it used to be
     /// built in three, across the two hosts the tree then carried, and the copies had drifted.
     public static func loopbackBaseURL(port: Int) -> String {
         "http://127.0.0.1:\(port)"

@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # First, and before anything is installed, because it is the cheapest thing in the workflow: a
-      # few greps over the Swift sources, no toolchain, under a second. It decides the AGENTS.md rules
+      # few greps over the Swift sources, no toolchain, under a second. It decides the house rules
       # that are literal enough for a grep to settle — casing, `@AppStorage`, `asyncAfter`, the
       # deprecated `Alert()`, and the two XCUITest waiting rules. Each had been broken at least once
       # and caught only by somebody happening to read the diff, which is not a mechanism.
@@ -149,7 +149,7 @@ jobs:
       # into the table, and is exactly how the newest one was found.
       #
       # Two more hand-maintained facts are settled the same way. The **operation count** is recomputed
-      # from `CommandKind` and checked against the five places four documents state it — the number
+      # from `CommandKind` and checked against every place a document states it — the number
       # `DomainTests` used to assert with a literal that had to be edited alongside them. And a
       # **folder under `Tests/` that neither manifest declares** fails here: `Package.swift` names the
       # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
@@ -161,6 +161,19 @@ jobs:
         run: |
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
+
+      # AGENTS.md is a router now: it keeps what is true on every task and sends the rest to a skill
+      # under `.agents/skills/`, which is why it is 241 lines rather than the 807 it reached. That
+      # bought three promises, and all three fail silently. `.claude/skills/` mirrors the skills by
+      # symlink so Claude Code and every other agent read one copy — add a skill to only one side and
+      # it is invisible to half of them, with nothing going red. Each `SKILL.md`'s front matter has to
+      # name its own directory, because an agent matches the front matter while the tooling finds the
+      # file by path. And the routing table has to cover every skill and point only at real ones: a
+      # row naming a skill that does not exist sends an agent nowhere, a skill missing from the table
+      # is one it never thinks to load. Directory listings and a little text — no toolchain, which is
+      # why it sits in the Linux job with the other cheap gates.
+      - name: Skill layout
+        run: python3 Scripts/check_skills.py
 
       # `Scripts/update_readme_coverage.py` is what writes the README's coverage badges and table,
       # and until this line it had no automated check of any kind. Half of it needs `xcrun xccov`

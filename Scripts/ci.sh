@@ -11,7 +11,7 @@
 #     come from `Glibc` rather than `Darwin`, and some C types are wider — the differences
 #     `Tests/MockServerEngineTests/PlatformSockets.swift` exists to hold. A green run here is not
 #     evidence the Linux job will be green, and structurally cannot be. To check that, run what
-#     AGENTS.md prescribes:
+#     the skill mimic-build-and-test prescribes (references/cli-e2e.md):
 #
 #         docker run --rm -v "$PWD":/src -w /src swift:6.2 swift test
 #
@@ -267,6 +267,17 @@ step "Documented counts"
 # what the right answer is.
 python3 Scripts/check_doc_counts.py --self-test
 python3 Scripts/check_doc_counts.py
+
+# The third document check, and the newest. AGENTS.md was reduced to a router when it passed 800
+# lines — it keeps what is true on every task and sends the rest to a skill under `.agents/skills/` —
+# which traded one large file for three promises: that `.claude/skills/` mirrors the skills by
+# symlink, that each `SKILL.md`'s front matter names its own directory, and that the routing table
+# covers every skill and points only at real ones. Each one fails silently. A skill missing from the
+# mirror is invisible to Claude Code while remaining perfectly present to everything else; a skill
+# missing from the table is one no agent thinks to load. Nothing goes red, the rule is simply never
+# read, which is the same failure mode as a house rule kept only by review.
+step "Skill layout"
+python3 Scripts/check_skills.py
 
 # The end-to-end check, which used to be listed here as deliberately *not* run.
 #

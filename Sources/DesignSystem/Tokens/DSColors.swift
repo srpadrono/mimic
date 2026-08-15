@@ -577,8 +577,9 @@ public nonisolated enum DSColors {
     /// **3xx is ``accentText``, which is the one arm still short of the floor when it is filled.**
     /// The redirect blue was ``accent`` — the fill blue, the exact colour `accentText` was introduced
     /// to replace as a word, and the only arm that failed AA even *unfilled*, at 3.20 on a light
-    /// panel. `accentText` takes that to 5.35, which is the reading that matters, because AGENTS.md's
-    /// rule is that "only 4xx and 5xx get a fill" — a redirect is not something to stop on. Under a
+    /// panel. `accentText` takes that to 5.35, which is the reading that matters, because the visual
+    /// standard's rule (skill `mimic-window-design`) is that "only 4xx and 5xx get a fill" — a
+    /// redirect is not something to stop on. Under a
     /// 12% tint of itself it reads 4.48 on a panel and 4.35 on a ``band``, so that style rule is also
     /// a contrast rule.
     ///

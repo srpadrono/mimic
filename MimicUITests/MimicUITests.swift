@@ -17,7 +17,8 @@ struct WelcomePage {
     private var noRecentProjectsLabelByLabel: XCUIElement { app.staticTexts["No projects yet"].firstMatch }
 
     /// All three of these poll their candidates together rather than chaining
-    /// `a.waitForExistence(t) || b.waitForExistence(t)`, which is the form AGENTS.md rule 9 forbids.
+    /// `a.waitForExistence(t) || b.waitForExistence(t)`, which is the form rule 9 of the skill
+    /// `mimic-ui-tests` forbids.
     ///
     /// It matters most here, because `assertVisible` is the readiness closure every test's launch
     /// runs — up to five times, once per activation attempt. Chained, its three candidates each

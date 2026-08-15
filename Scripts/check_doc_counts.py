@@ -13,7 +13,7 @@ counting something else. Most had drifted at least once before this file held th
     somebody remembers to.
 
   - **The operation count** — how many `CommandKind` cases the CLI and the control API expose. It is
-    stated in five places across four documents, and `DomainTests` used to assert it with a literal
+    stated in five places across five documents, and `DomainTests` used to assert it with a literal
     that had to be hand-edited alongside them. That assertion was removed as a hand-maintained
     mirror of a fact the type system already knows; this recomputes it from the enum instead, which
     is the same removal done in the direction that cannot go stale. The journey library's two
@@ -120,13 +120,20 @@ PORT_SUITE_SITES = [
     ("docs/ARCHITECTURE.md", "conventions list"),
 ]
 
-# The documents this script reads. `.agents/skills/` is vendored from elsewhere and is not ours to
-# hold to this repo's numbers. CHANGELOG.md is left out for a different and more important reason:
-# a changelog records what was true at a release, so a checker that dragged it forward with the tree
-# would be demanding that shipped history be rewritten every time a command is added.
+# The documents this script reads. `.agents/skills/` holds two kinds of thing and the distinction is
+# what decides membership here: the repo-specific `mimic-*` skills were carved out of AGENTS.md and
+# state this repo's numbers, so they are ours to hold to them; the rest — `swiftui-pro`,
+# `swift-testing-pro`, `swift-concurrency-pro`, `using-tuist-generated-projects` and the vendored
+# `improve-codebase-architecture` — are general Swift guidance that never mentions a Mimic count.
+# Only the skill files actually carrying a claim are listed, for the same reason the list below is
+# anchored on words rather than digits: a file with no claim in it costs a read and proves nothing.
+# CHANGELOG.md is left out for a different and more important reason: a changelog records what was
+# true at a release, so a checker that dragged it forward with the tree would be demanding that
+# shipped history be rewritten every time a command is added.
 DOCS = ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md",
         "docs/ARCHITECTURE.md", "docs/CLI.md", "docs/GRAPHQL.md", "docs/JOURNEYS.md",
-        "docs/ROADMAP.md", "docs/SECURITY-REVIEW.md"]
+        "docs/ROADMAP.md", "docs/SECURITY-REVIEW.md",
+        ".agents/skills/mimic-control-surface/SKILL.md"]
 
 # Every place the operation count is written down, as (document, what it is, regex with one
 # capturing group). The list came out of grepping the docs for the number rather than from anyone's
@@ -149,7 +156,12 @@ DOCS = ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md",
 OPERATION_CLAIMS = [
     ("README.md", "control API expose", r"control API expose (\d+) operations"),
     ("AGENTS.md", "CommandCatalog surface", r"expose the ([a-z]+(?:-[a-z]+)?) operations in `CommandCatalog`"),
-    ("AGENTS.md", "one CLI verb per kind", r"maps onto exactly one `CommandKind` case — (\d+) of them"),
+    # Step 7 of the CLI Definition of Done, which moved out of AGENTS.md when that file was reduced
+    # to a router over `.agents/skills/`. The claim travelled with the prose that makes it; this
+    # entry follows it rather than the other way round, because a checker that pinned documentation
+    # in place would be deciding where the documentation lives.
+    (".agents/skills/mimic-control-surface/SKILL.md", "one CLI verb per kind",
+     r"maps onto exactly one `CommandKind` case — (\d+) of them"),
     ("docs/ROADMAP.md", "automation row", r"control API covering (\d+) operations"),
     ("docs/ARCHITECTURE.md", "testing platform", r"testing platform: (\d+) operations"),
 ]
