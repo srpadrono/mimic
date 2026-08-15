@@ -265,51 +265,80 @@ enum UITestSupport {
 
     // MARK: - Injecting a spec import
 
-    /// The file the import flow should open, in place of the `NSOpenPanel` it normally runs.
+    /// The fixture the import flow should open, in place of the `NSOpenPanel` it normally runs.
     ///
-    /// **A bare file name.** It is resolved inside ``importFixtureDirectory()`` — the app's own
-    /// `Application Support/devxa.Mimic`, the directory `mimic-uitests.sqlite` sits in. A value with
-    /// a `/` in it is still taken as a path and tilde-expanded, so an absolute path keeps working;
-    /// the suite does not use that form, and the paragraph below is why.
+    /// **A resource name inside the app's own bundle** — `mimic-uitest-review.json` and the six
+    /// others in `App/Resources/UITestFixtures/`, resolved by ``importFixtureURL(for:)`` through
+    /// `Bundle.main`. A value containing a `/` is still taken as a path and tilde-expanded, so
+    /// pointing the hook at a file by hand keeps working; the suite does not use that form, and the
+    /// history below is why.
     ///
-    /// The app ships with `app-sandbox` and `files.user-selected.read-write` and nothing else, so
-    /// the only *absolute* paths it may read are ones a user picked in a panel — and a UI test
-    /// cannot drive a panel, which is the whole reason this hook exists. `/tmp/fixture.har` is
-    /// therefore denied rather than missing. This key used to close that gap with a tilde: the
-    /// sandboxed app expands `~` into its container, where it reads without an entitlement, so the
-    /// unsandboxed runner wrote to
-    /// `~/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/…` and named
-    /// it `~/Library/Application Support/devxa.Mimic/…` here.
+    /// **No path is negotiated between the runner and the app any more, because two rounds of CI
+    /// proved that negotiation cannot be made to work here.** The app ships with `app-sandbox` and
+    /// `files.user-selected.read-write` and nothing else, so the only *absolute* paths it may read
+    /// are ones a user picked in a panel — and a UI test cannot drive a panel, which is the whole
+    /// reason this hook exists. `/tmp/fixture.har` is denied rather than missing.
     ///
-    /// **On its first CI run every one of the eight tests that needed the review screen failed on
-    /// that arrangement, and the two that needed only *a* parse error passed.** Those two passed
-    /// *vacuously*: ``ImportWorkflow.readableParseError(_:kind:)`` appends its format guidance to
-    /// any error, a file the app could not open included, so "Parse error" plus "Mimic reads
-    /// HAR 1.2" is exactly what a missing file produces too. What their passing does prove is that
-    /// everything except the read works — the `.task` runs, this key is read, the sheet presents,
-    /// the error arm renders. The read was failing because the two halves were naming different
-    /// files: one side computes a path from `homeDirectoryForCurrentUser` and spells a container
-    /// out, the other asks `expandingTildeInPath`, and those are two answers to "where is home"
-    /// that the sandbox is free to disagree about — with no way to tell from the outside which of
-    /// them was wrong.
+    /// Two arrangements were tried, and both failed on the same seam:
     ///
-    /// The name form does not re-decide that question, it removes it. The app resolves the fixture
-    /// into a directory it already demonstrably reads and writes, because its store is in there;
-    /// the runner finds that same directory by looking for the store the app just wrote, rather
-    /// than asserting where a container has to be. Neither side expands a tilde. Do not "simplify"
-    /// this back into a path — and do not point it at a temporary directory, because that
-    /// simplification is the one the sandbox actually refuses.
+    /// 1. **The runner wrote to a container path it spelled out, and named it here with a `~`** the
+    ///    sandboxed app expanded for itself. All eight tests that need the review screen failed on a
+    ///    file the app could not open; the two that need only *a* parse error passed *vacuously*,
+    ///    because ``ImportWorkflow.readableParseError(_:kind:)`` appends its format guidance to any
+    ///    error, a failed read included.
+    /// 2. **The runner probed for the app's own Application Support** by looking for the
+    ///    `mimic-uitests.sqlite` the app had just opened, so that neither side had to assert where a
+    ///    container lives. **The probe found no store in either candidate directory** — not in
+    ///    `~/Library/Containers/devxa.Mimic/Data/…` and not in `~/Library/Application Support/…` —
+    ///    while the app itself was demonstrably running against a working store. Whatever the reason
+    ///    (a container the runner is not permitted to look inside is the likeliest), the two
+    ///    processes could not be made to agree on one directory, and the runner had no way to tell
+    ///    "wrong path" from "denied".
+    ///
+    /// So the fixture moved to where the app can always read it and the runner never has to look:
+    /// **inside the app bundle**. `Bundle.main` needs no entitlement, no container, and no home
+    /// directory. Do not "simplify" this back to a path the runner writes — that is arrangement 1
+    /// and 2 again, and it has now cost two red rounds.
+    ///
+    /// The cost, stated plainly rather than hidden: the fixture bytes live in
+    /// `App/Resources/UITestFixtures/`, which is a `buildableFolders` entry on the `Mimic` target, so
+    /// **they are copied into the Release bundle too** — about 4 KB of JSON. Only the bytes ship; all
+    /// of this code is behind `#if DEBUG`. Excluding them from Release needs a configuration-scoped
+    /// build phase, which is a `Project.swift` change nobody has needed badly enough yet.
+    /// `SpecImportUITests` keeps every fixture's expected rows — and the literal bytes themselves —
+    /// beside its assertions, and fails if the shipped resource has drifted from them.
     static let importFileEnvironmentKey = "MIMIC_IMPORT_FILE"
 
     /// Which importer the file is for: `har` or `openapi`, case-insensitively. Anything else — and a
     /// missing value — means no injection, because guessing from the extension would silently run
-    /// the HAR parser over a spec and report its error as the spec's.
+    /// the HAR parser over a spec and report its error as the spec's. Every bundled fixture is named
+    /// `.json` whatever it holds, so the extension is not a hint anybody could take.
     static let importKindEnvironmentKey = "MIMIC_IMPORT_KIND"
 
-    /// A file a UI test asked the import flow to parse, with the importer to parse it with.
+    /// How many bytes of padding to substitute for ``importPaddingToken`` in the loaded fixture.
+    ///
+    /// One fixture needs a response body a byte over the importer's 1 MB limit, and a megabyte of
+    /// `x` is not a thing to commit to a repository or ship in an app bundle. The bundled file
+    /// carries the token instead, and the *count* comes from the test as a literal — so the fixture
+    /// is still the suite's, and it does not move when `ImportCandidateBuilder.bodySizeLimit` moves.
+    /// Unset, or unparseable, means the bytes are used exactly as they are on disk.
+    static let importPaddingEnvironmentKey = "MIMIC_IMPORT_PADDING"
+
+    /// The string ``importPaddingEnvironmentKey`` replaces. Spelled the same in
+    /// `App/Resources/UITestFixtures/mimic-uitest-flags.json` and in `SpecImportFixtures`.
+    ///
+    /// `nonisolated`, like ``importFixtureData(at:paddingByteCount:)`` and for the same reason: this
+    /// module compiles `MainActor`-by-default, and both are read from the detached read
+    /// `ImportWorkflow.parseFile` performs. Same opt-out `SidebarQuery.anyMethodScopeID` takes.
+    nonisolated static let importPaddingToken = "MIMIC_UITEST_BODY_PADDING"
+
+    /// A fixture a UI test asked the import flow to parse, with the importer to parse it with.
     struct ImportInjection {
         let url: URL
         let kind: ImportKind
+        /// Bytes of padding to substitute for ``UITestSupport/importPaddingToken``, or `nil` for
+        /// none. Read by the `loadData` the caller hands to `ImportWorkflow.parseFile`.
+        let paddingByteCount: Int?
     }
 
     /// What this run wants imported, or `nil` when it wants nothing — which is every run that is not
@@ -330,39 +359,78 @@ enum UITestSupport {
               let kind = importKind(named: environment[importKindEnvironmentKey]),
               let url = importFixtureURL(for: value)
         else { return nil }
-        return ImportInjection(url: url, kind: kind)
+        return ImportInjection(
+            url: url,
+            kind: kind,
+            paddingByteCount: importPaddingByteCount(environment: environment)
+        )
     }
 
-    /// Where a bare ``importFileEnvironmentKey`` name is looked for: the app's own
-    /// `Application Support/devxa.Mimic`, computed exactly as ``databaseURL(environment:)`` computes
-    /// the run's store when the harness names none.
+    /// The bundled fixture `value` names — or, when it contains a `/`, the path it spells.
     ///
-    /// That shared derivation is the point. Whatever this expression resolves to — a container under
-    /// the sandbox, a real home without one — is the directory the app opens
-    /// `mimic-uitests.sqlite` in, so a test outside the sandbox can *find* it by looking for that
-    /// file rather than reconstructing it from a rule about where containers live. The two halves
-    /// then cannot name different directories, which is the failure recorded on
-    /// ``importFileEnvironmentKey``.
-    ///
-    /// `environment: [:]`, so this is the directory the store *falls back* to and not wherever
-    /// `MIMIC_DATABASE_PATH` may point instead. A run that overrides its store path still keeps its
-    /// fixtures here — and a suite that overrides it can no longer find this directory by the store,
-    /// which is worth knowing before adding one to the import suite.
-    static func importFixtureDirectory() -> URL? {
-        try? DatabaseFactory.resolveDatabaseURL(environment: [:]).deletingLastPathComponent()
-    }
-
-    /// The file `value` names: a path when it contains a `/`, otherwise a name inside
-    /// ``importFixtureDirectory()``.
-    ///
-    /// The path arm is kept so an absolute or tilde-relative value behaves as it always did — it is
-    /// how somebody would point the hook at a file by hand — and it is deliberately *not* what the
-    /// suite uses.
+    /// Three lookups, and the last one is the diagnostic rather than a hope. The subdirectory form
+    /// is tried first because that is where the files live in the source tree; the flat form is
+    /// tried next because a buildable folder's subdirectory may be flattened into `Resources/` when
+    /// the bundle is assembled, and which of the two Xcode does is not worth a test run to find out.
+    /// When neither finds it, this returns the path the resource *should* have had rather than
+    /// `nil`: `nil` means no injection at all, so the sheet would never open and the failure would
+    /// read as "the hook did not run", while a URL that is not there fails the read with the path in
+    /// the message — which is what `WorkspaceView.presentInjectedImportIfNeeded()` carries out to the
+    /// runner through the sheet's error text.
     static func importFixtureURL(for value: String) -> URL? {
         guard !value.contains("/") else {
             return URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
         }
-        return importFixtureDirectory()?.appendingPathComponent(value)
+        if let inSubdirectory = Bundle.main.url(
+            forResource: value,
+            withExtension: nil,
+            subdirectory: importFixtureSubdirectory
+        ) {
+            return inSubdirectory
+        }
+        if let flattened = Bundle.main.url(forResource: value, withExtension: nil) {
+            return flattened
+        }
+        return Bundle.main.resourceURL?
+            .appendingPathComponent(importFixtureSubdirectory, isDirectory: true)
+            .appendingPathComponent(value)
+    }
+
+    /// The folder the fixtures sit in under `App/Resources`, and the first place they are looked for
+    /// in the built bundle.
+    static let importFixtureSubdirectory = "UITestFixtures"
+
+    /// The fixture's bytes, with ``importPaddingToken`` expanded when this run asked for padding.
+    ///
+    /// Handed to `ImportWorkflow.parseFile` as its `loadData`, so the substitution happens on the
+    /// same detached read the real flow uses and every byte the parser sees still came from the
+    /// file plus a count the *test* chose. A fixture with no token in it is returned unchanged: the
+    /// row assertions that wanted a padded body then fail, which is the right way round — a silent
+    /// pass is what a test must never be able to reach.
+    ///
+    /// `nonisolated` because that read happens on a detached task: this module is
+    /// `MainActor`-by-default, and a `MainActor` function cannot be called from the `@Sendable`
+    /// `loadData` closure `ImportWorkflow.parseFile` runs off the main actor. Everything it touches
+    /// is a value type, so the opt-out costs nothing.
+    nonisolated static func importFixtureData(at url: URL, paddingByteCount: Int?) throws -> Data {
+        let data = try Data(contentsOf: url)
+        guard let paddingByteCount, paddingByteCount > 0,
+              let text = String(data: data, encoding: .utf8),
+              text.contains(importPaddingToken)
+        else { return data }
+        return Data(
+            text.replacingOccurrences(
+                of: importPaddingToken,
+                with: String(repeating: "x", count: paddingByteCount)
+            ).utf8
+        )
+    }
+
+    static func importPaddingByteCount(environment: [String: String]) -> Int? {
+        guard let value = environment[importPaddingEnvironmentKey], let count = Int(value) else {
+            return nil
+        }
+        return count
     }
 
     static func importKind(named name: String?) -> ImportKind? {

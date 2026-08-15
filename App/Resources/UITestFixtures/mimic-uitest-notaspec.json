@@ -1,0 +1,4 @@
+{
+  "name": "definitely not an OpenAPI document",
+  "endpoints": ["/orders", "/customers"]
+}

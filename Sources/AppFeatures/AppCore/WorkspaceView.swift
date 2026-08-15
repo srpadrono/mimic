@@ -869,9 +869,9 @@ struct WorkspaceView: View {
     /// is exactly one injection per launch, and the guard below keeps `.task` re-running from
     /// starting a second.
     ///
-    /// The file name is resolved inside the app's own Application Support directory;
-    /// ``UITestSupport/importFileEnvironmentKey`` records why it is a name and not a path, and what
-    /// went wrong the one time it was a path.
+    /// The name is resolved to a resource in the app's **own bundle**;
+    /// ``UITestSupport/importFileEnvironmentKey`` records why — two CI rounds in which the runner and
+    /// the app could not be made to name one directory between them.
     private func presentInjectedImportIfNeeded() async {
         guard injectedImport == nil, let injection = UITestSupport.importInjection() else { return }
 
@@ -880,7 +880,13 @@ struct WorkspaceView: View {
         workflow.parseFile(
             at: injection.url,
             existingEndpoints: currentEndpoints,
-            loadData: { try Data(contentsOf: $0) },
+            // The read is still a real read of a real file, on the same detached hop the panel path
+            // uses; `importFixtureData` only expands the padding token, and only when this run asked
+            // for it. Capturing the count rather than the injection keeps the closure over a plain
+            // `Int?`, which is `Sendable` without anything having to be declared so.
+            loadData: { [paddingByteCount = injection.paddingByteCount] url in
+                try UITestSupport.importFixtureData(at: url, paddingByteCount: paddingByteCount)
+            },
             parse: { data, endpoints in
                 try await kind.parse(data: data, existingEndpoints: endpoints)
             }
@@ -891,6 +897,28 @@ struct WorkspaceView: View {
             await parseTask.value
         }
 
+        // The app's own answer to "was the file there", computed only when something failed, and
+        // carried out through the sheet's error text — the one channel of the app's that reaches the
+        // runner. The app's stdout does not: an entire round of CI diagnostics printed from the
+        // runner never appeared in the xcodebuild log either, so anything a later diagnosis needs has
+        // to arrive in the accessibility tree or in an assertion message.
+        //
+        // This is what makes the two error-state tests mean something. `readableParseError` appends
+        // its format guidance to *any* error, a file that could not be opened included, so "Parse
+        // error" over "Mimic reads HAR 1.2" is exactly what a missing fixture produces too — and on
+        // the first CI round those two tests were the only ones that passed, green over the bug the
+        // other eight were failing on. `SpecImportUITests.assertFixtureWasReadable` requires the
+        // "bytes read" half of this line before it will believe an error is about the bytes.
+        var readReport = "not checked"
+        if workflow.parseError != nil {
+            do {
+                let bytes = try Data(contentsOf: injection.url).count
+                readReport = "\(bytes) bytes read"
+            } catch {
+                readReport = "unreadable: \(error)"
+            }
+        }
+
         // Whatever the parse produced, including a failure: the error state is a review-screen arm
         // too, and it is the one an injected fixture is most likely to land on.
         injectedImport = InjectedImport(
@@ -898,14 +926,9 @@ struct WorkspaceView: View {
             state: ImportWorkflowState(
                 candidates: workflow.candidates,
                 parseError: workflow.parseError.map { failure in
-                    // The path this side actually opened, carried into the one place the runner can
-                    // read it from: the sheet's own error text, which lands in the accessibility
-                    // tree. Every test in `SpecImportUITests` failed on a read the app and the
-                    // runner disagreed about, and there was no way to see *which* file the app had
-                    // tried — the app's stdout is not the runner's, and Foundation's message names
-                    // the file without its directory. Appended rather than substituted, so the
-                    // format guidance the two error-state tests match on is still in front of it.
-                    "\(failure)\n\nInjected fixture: \(injection.url.path)"
+                    // Appended rather than substituted, so the format guidance the two error-state
+                    // tests match on is still in front of it.
+                    "\(failure)\n\nInjected fixture: \(injection.url.path) — \(readReport)"
                 },
                 isParsing: false
             )

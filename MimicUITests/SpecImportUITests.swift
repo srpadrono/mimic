@@ -246,6 +246,23 @@ struct ImportSheetPage {
 
 // MARK: - Fixtures
 
+/// A fixture: the resource the app parses, and the literal this file says that resource holds.
+///
+/// Both halves, because the bytes now live in two places and only one of them is this file. The app
+/// reads `App/Resources/UITestFixtures/<resourceName>` out of its own bundle — see
+/// `UITestSupport.importFileEnvironmentKey` for why nothing is handed across the filesystem any
+/// more — while ``SpecImportFixtures`` keeps the literal that resource is supposed to hold, next to
+/// the table of rows it is supposed to produce. ``SpecImportUITests/assertBundledFixtureMatchesLiteral(_:)``
+/// compares them on every launch, so a resource edited without its table goes red here rather than
+/// somewhere confusing three assertions later.
+struct SpecImportFixture {
+    /// The file name under `App/Resources/UITestFixtures/`, which is also the whole of what the app
+    /// is told: `MIMIC_IMPORT_FILE` carries a resource name, never a path.
+    let resourceName: String
+    /// What that resource holds, as a literal this file owns.
+    let bytes: String
+}
+
 /// Every byte the importer is pointed at in this suite, written out as a literal.
 ///
 /// Deliberately *not* borrowed from `Tests/SpecImportTests` or built by calling anything in
@@ -362,6 +379,16 @@ enum SpecImportFixtures {
     /// module, and a fixture that asked the mechanism what "too large" means would move with it.
     /// 1_048_577 bytes renders as "1.0 MB" through `ImportCandidate.bodySizeLabel`.
     static let oversizedBodyByteCount = 1_048_577
+
+    /// What stands in for that megabyte inside the bundled resource, expanded by the app when
+    /// `MIMIC_IMPORT_PADDING` names a count — `UITestSupport.importPaddingToken`, spelled here
+    /// because this target links no `AppFeatures`.
+    ///
+    /// A megabyte of `x` is not a thing to commit to a repository, and it is emphatically not a
+    /// thing to ship inside an app bundle. The count still comes from this file, as a literal, so
+    /// the fixture remains the suite's: expanding a token by a number the *test* chose is not the
+    /// same as asking `SpecImport` what "too large" means.
+    static let paddingToken = "MIMIC_UITEST_BODY_PADDING"
 
     /// Two GraphQL calls down one route. They share `POST /graphql`, so without the operation name
     /// the second would be a duplicate of the first and the review would be two identical rows.
@@ -496,6 +523,54 @@ enum SpecImportFixtures {
       "endpoints": ["/orders", "/customers"]
     }
     """
+
+    // MARK: The bundled resources
+
+    /// Each literal above, paired with the resource that has to hold it.
+    ///
+    /// Every name ends in `.json` whatever the file holds — a HAR *is* JSON, a truncated HAR is not
+    /// but the extension is not a claim about that. Two reasons, both deliberate: `.json` is a type
+    /// Xcode copies into `Contents/Resources` from a buildable folder without anyone having to say
+    /// so, and the importer is chosen by `MIMIC_IMPORT_KIND` rather than by extension, so an
+    /// extension nobody can take as a hint is the safer one to write.
+
+    static let review = SpecImportFixture(
+        resourceName: "mimic-uitest-review.json",
+        bytes: reviewHAR
+    )
+
+    /// The one fixture whose bundled bytes are not the parsed bytes: the app expands
+    /// ``paddingToken`` to ``oversizedBodyByteCount`` bytes as it reads. The literal here is the
+    /// *file*, token and all, which is what the drift check compares against.
+    static let flags = SpecImportFixture(
+        resourceName: "mimic-uitest-flags.json",
+        bytes: flagsHAR(oversizedBody: paddingToken)
+    )
+
+    static let graphQL = SpecImportFixture(
+        resourceName: "mimic-uitest-graphql.json",
+        bytes: graphQLHAR
+    )
+
+    static let refused = SpecImportFixture(
+        resourceName: "mimic-uitest-refused.json",
+        bytes: refusedHAR
+    )
+
+    static let malformed = SpecImportFixture(
+        resourceName: "mimic-uitest-broken.json",
+        bytes: malformedHAR
+    )
+
+    static let openAPI = SpecImportFixture(
+        resourceName: "mimic-uitest-openapi.json",
+        bytes: openAPISpec
+    )
+
+    static let notASpecDocument = SpecImportFixture(
+        resourceName: "mimic-uitest-notaspec.json",
+        bytes: notASpec
+    )
 }
 
 // MARK: - Tests
@@ -515,6 +590,11 @@ enum SpecImportFixtures {
 /// instead would be a fixture built from the mechanism under test, and it would stay green with both
 /// parsers deleted.
 ///
+/// One fixture's bytes are not quite the file's: the app expands `SpecImportFixtures.paddingToken`
+/// to a count this file names, because the body that has to exceed the importer's 1 MB limit is a
+/// megabyte of `x` and that does not belong in a repository or in a shipped bundle. The count is a
+/// literal here, not a number read from `SpecImport`, so the fixture is still the suite's.
+///
 /// **Two steps this suite deliberately does not claim.**
 ///
 /// - *IMPREV-13*, the commit button's label tracking the selection. `ImportReviewList` builds the
@@ -528,94 +608,72 @@ enum SpecImportFixtures {
 ///   run. The affordance's presence and enabled state are asserted instead, and the click is left
 ///   uncovered rather than faked.
 ///
-/// **What the first CI run taught, because the shape of it will recur.** All eight tests that need
-/// the review screen failed on the same line, and the two that need only *a* parse error passed. The
-/// split is the diagnosis: the sheet was presenting, so `.task`, `UITestSupport.importInjection()`
-/// and the `#if DEBUG` presentation were all working — the parse was failing, on every fixture,
-/// including five structurally valid ones that `HARModels`' almost-entirely-optional decoder cannot
-/// reject. That leaves the file read, and the two passes were
-/// `ImportWorkflow.readableParseError` appending its format guidance to a "no such file" exactly as
-/// it does to a decode failure. The seam had the runner spelling out a container path and the app
-/// expanding a `~`, two answers to "where is home" that a sandbox is free to disagree about, with
-/// nothing on either side able to report which one was wrong.
+/// **What two red CI rounds taught, because the shape of it will recur.**
 ///
-/// Both halves of that are fixed rather than worked around: the app resolves a bare name inside its
-/// own Application Support directory, this suite finds that directory by looking for the store the
-/// app just opened in it, and a failed wait dumps both sides' view of the filesystem to stdout —
-/// `printImportDiagnostics`. If it ever fails again, the log says which file the app opened and
-/// whether it was there.
+/// *Round one.* All eight tests that need the review screen failed on the same line, and the two
+/// that need only *a* parse error passed. The split was the diagnosis: the sheet was presenting, so
+/// `.task`, `UITestSupport.importInjection()` and the `#if DEBUG` presentation were all working —
+/// the parse was failing, on every fixture, including five structurally valid ones that `HARModels`'
+/// almost-entirely-optional decoder cannot reject. That leaves the file read, and the two passes
+/// were `ImportWorkflow.readableParseError` appending its format guidance to a "no such file"
+/// exactly as it does to a decode failure. The runner spelled out a container path and the app
+/// expanded a `~`: two answers to "where is home" that a sandbox is free to disagree about.
+///
+/// *Round two* replaced the guess with an observation. The runner wrote the fixture into whichever
+/// directory held `mimic-uitests.sqlite`, the store the app had just opened, so neither side had to
+/// assert where a container lives. **The probe found no store in either candidate directory** — and
+/// the app was plainly running against a working store, because it created projects and saved them.
+/// Whatever denies the runner that look (a container it is not permitted to read is the likeliest;
+/// the same runner cannot `bind(2)` either), the conclusion is the same and it is not about paths:
+/// *these two processes cannot rendezvous on the filesystem at all.*
+///
+/// So round three stops trying. The fixtures are **resources in the app's own bundle**, listed in
+/// ``SpecImportFixtures`` and shipped from `App/Resources/UITestFixtures/`; `MIMIC_IMPORT_FILE`
+/// carries a resource name and the app resolves it through `Bundle.main`. Nothing is written, no
+/// directory is probed, no tilde is expanded, and the sandbox has no opinion about an app reading
+/// its own bundle. Two things guard the cost of that move:
+///
+/// - ``assertBundledFixtureMatchesLiteral(_:)`` compares the shipped resource against the literal in
+///   this file whenever the runner can read the built app, so the suite still owns the bytes its row
+///   tables describe.
+/// - ``assertFixtureWasReadable(_:)`` takes the app's own word for it. `WorkspaceView`
+///   `.presentInjectedImportIfNeeded()` appends "*N* bytes read" or "unreadable: …" to the sheet's
+///   error text, and the two error-state tests require the former before they will believe a parse
+///   error is about the bytes.
+///
+/// **Diagnostics go in the assertion message, never to stdout.** Round two printed a full dump of
+/// both sides on every failure and *not one line of it reached the xcodebuild log* — the app's
+/// stdout is not the runner's, and the runner's is not the log's. `importDiagnostics` is folded into
+/// the `XCTFail` message instead, which the log does carry.
 final class SpecImportUITests: MimicUITestCase {
 
     // MARK: - The launch hook
 
-    /// The file the import flow should open instead of running its panel, as a bare name the app
-    /// resolves inside its own Application Support directory.
+    /// The resource the import flow should open instead of running its panel: a name inside the
+    /// app's **own bundle**, never a path.
     ///
     /// Spelled here because this target links no `AppFeatures`; the one declaration is
-    /// `UITestSupport.importFileEnvironmentKey`, which is also where the name-not-a-path contract
-    /// and the failure behind it are written down. Same reasoning as
+    /// `UITestSupport.importFileEnvironmentKey`, which is also where the bundle contract and the two
+    /// rounds of filesystem failure behind it are written down. Same reasoning as
     /// `UITestApp.controlFileEnvironmentKey`.
     private static let importFileEnvironmentKey = "MIMIC_IMPORT_FILE"
 
     /// `har` or `openapi` — `UITestSupport.importKindEnvironmentKey`. A missing or unrecognised value
-    /// means no injection at all, rather than a guess from the file extension.
+    /// means no injection at all, rather than a guess from the file extension. Every fixture is
+    /// named `.json`, so there is no extension to guess from either.
     private static let importKindEnvironmentKey = "MIMIC_IMPORT_KIND"
 
-    /// The store the app opens at launch, spelled here because this target links no `AppFeatures`;
-    /// the one declaration is the fallback inside `UITestSupport.databaseURL(environment:)`.
-    ///
-    /// It is the landmark this suite navigates by. `UITestSupport.importFixtureDirectory()` resolves
-    /// an injected fixture into the same directory this file lands in, so *finding* this file is
-    /// finding the directory the app will look in — no assumption about containers required.
-    private static let runStoreName = "mimic-uitests.sqlite"
+    /// How many bytes of `x` the app substitutes for `SpecImportFixtures.paddingToken` while it reads
+    /// — `UITestSupport.importPaddingEnvironmentKey`. Only the flags fixture sets it.
+    private static let importPaddingEnvironmentKey = "MIMIC_IMPORT_PADDING"
 
-    /// The directories that could be the app's `Application Support/devxa.Mimic`, most likely first.
-    ///
-    /// Two, because the app is sandboxed (`App/Mimic.entitlements` sets `app-sandbox`, and CI signs
-    /// ad-hoc with `CODE_SIGN_IDENTITY=-`, which still applies entitlements) and the runner is not —
-    /// `MimicUITests` sets `ENABLE_HARDENED_RUNTIME: NO` and carries no entitlements file, so
-    /// `homeDirectoryForCurrentUser` is the real home. A sandboxed app's Application Support is
-    /// inside its container; an unsandboxed one's is under the real home.
-    ///
-    /// **These are candidates to probe, not a path to assert.** The previous version of this suite
-    /// spelled the container out as fact and paired it with a `~/…` the app expanded for itself, and
-    /// all eight review-screen tests failed on a file the app could not open. Deciding between them
-    /// by looking — ``resolveAppSupportDirectory()`` — is the fix; keeping both listed is what makes
-    /// the fallback in ``launchWithInjectedImport(fixtureNamed:kind:contents:projectName:)``
-    /// possible when the probe finds nothing.
-    private static var candidateSupportDirectories: [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let sandboxed = home
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Containers", isDirectory: true)
-            .appendingPathComponent("devxa.Mimic", isDirectory: true)
-            .appendingPathComponent("Data", isDirectory: true)
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("devxa.Mimic", isDirectory: true)
-        let unsandboxed = home
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("devxa.Mimic", isDirectory: true)
-        return [sandboxed, unsandboxed]
-    }
-
-    /// The fixture's file name for this test, carrying the runner's pid so a file left behind by a
-    /// crashed run can never describe this one — the guard `UITestApp.controlFileOverridePath` uses.
-    /// This is also the whole of what the app is told: see `UITestSupport.importFileEnvironmentKey`.
-    private var fixtureFileName: String?
-    /// What `configureLaunchEnvironment` exports. Set *before* `launchApp()`, always.
-    private var injectedImportPath: String?
+    /// What `configureLaunchEnvironment` exports. Set *before* `launchApp()`, always: the environment
+    /// binds at process spawn, and a key set from a test body reaches nothing.
+    private var injectedFixture: SpecImportFixture?
     private var injectedImportKind: String?
-    /// Every copy of the fixture this test wrote, as the runner can see it, so teardown removes all
-    /// of them. A list rather than one URL because the fallback below writes more than one.
-    private var fixtureURLs: [URL] = []
-    /// The directory the probe settled on, or `nil` when it found nothing — reported by the
-    /// diagnostic rather than silently retried.
-    private var resolvedSupportDirectory: URL?
+    private var injectedPaddingByteCount: Int?
 
-    /// Exports the two keys. Called once, before `launch()` — the environment binds at process spawn
-    /// and a key set from a test body reaches nothing.
+    /// Exports the three keys. Called once, before `launch()`.
     @MainActor
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
         // Port 0 lets the OS pick the control plane's port, the way every suite added since the base
@@ -623,23 +681,23 @@ final class SpecImportUITests: MimicUITestCase {
         // second run on the same machine. The discovery-file half of that isolation is exported by
         // the launch contract itself.
         app.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
-        if let injectedImportPath {
-            app.launchEnvironment[Self.importFileEnvironmentKey] = injectedImportPath
+        if let injectedFixture {
+            app.launchEnvironment[Self.importFileEnvironmentKey] = injectedFixture.resourceName
         }
         if let injectedImportKind {
             app.launchEnvironment[Self.importKindEnvironmentKey] = injectedImportKind
         }
+        if let injectedPaddingByteCount {
+            app.launchEnvironment[Self.importPaddingEnvironmentKey] = String(injectedPaddingByteCount)
+        }
     }
 
     override func tearDownWithError() throws {
-        for url in fixtureURLs {
-            try? FileManager.default.removeItem(at: url)
-        }
-        fixtureURLs = []
-        resolvedSupportDirectory = nil
-        fixtureFileName = nil
-        injectedImportPath = nil
+        // Nothing to delete any more: this suite writes no files at all. That is the whole point of
+        // the bundle route, and the absence of a cleanup path is worth noticing rather than filling.
+        injectedFixture = nil
         injectedImportKind = nil
+        injectedPaddingByteCount = nil
         try super.tearDownWithError()
     }
 
@@ -647,86 +705,111 @@ final class SpecImportUITests: MimicUITestCase {
 
     /// Launches with an injected import and drives the app to the workspace, where the sheet opens.
     ///
-    /// The order matters three times over now.
+    /// The order matters twice, and it used to matter three times.
     ///
-    /// The environment is decided *before* `launchApp()`, because the process reads it once at
-    /// spawn — and what it carries is only the fixture's **name**, which is known then. Where that
-    /// name resolves is the app's business and no longer this suite's guess.
+    /// The environment is decided *before* `launchApp()`, because the process reads it once at spawn.
+    /// What it carries is a resource name, which is known then and needs nothing to exist anywhere:
+    /// the bytes shipped inside the app. The step this helper used to have between the launch and the
+    /// project — probe for the app's Application Support, write the fixture into it — is gone, and
+    /// the round-two note on this class is why it is not coming back.
     ///
-    /// The directory is resolved *after* the launch, because the answer is a thing the app does:
-    /// `AppState.openStore` opens the run's store from `AppState.init`, so by the time the welcome
-    /// window is up, `mimic-uitests.sqlite` exists in the directory the app resolves its own
-    /// Application Support to — which is exactly the directory
-    /// `UITestSupport.importFixtureDirectory()` derives the fixture path from.
-    ///
-    /// The bytes are written after that and before `createProjectViaUI`, because `WorkspaceView` is
-    /// the only view carrying `.presentInjectedImportIfNeeded()` and it does not exist until a
-    /// project is open (`ContentView` branches on `currentProject`). Nothing reads the file before
-    /// then.
+    /// The project is created last, because `WorkspaceView` is the only view carrying
+    /// `.presentInjectedImportIfNeeded()` and it does not exist until a project is open
+    /// (`ContentView` branches on `currentProject`). Nothing reads the fixture before then.
     @MainActor
     private func launchWithInjectedImport(
-        fixtureNamed name: String,
+        fixture: SpecImportFixture,
         kind: String,
-        contents: String,
-        projectName: String
-    ) throws {
-        let unique = "mimic-uitests-import-\(ProcessInfo.processInfo.processIdentifier)-\(name)"
-        fixtureFileName = unique
-        injectedImportPath = unique
+        projectName: String,
+        paddingByteCount: Int? = nil
+    ) {
+        injectedFixture = fixture
         injectedImportKind = kind
+        injectedPaddingByteCount = paddingByteCount
 
         launchApp()
-
-        resolvedSupportDirectory = resolveAppSupportDirectory()
-        for directory in writeDestinations() {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent(unique)
-            try Data(contents.utf8).write(to: url, options: .atomic)
-            fixtureURLs.append(url)
-        }
-
+        assertBundledFixtureMatchesLiteral(fixture)
         createProjectViaUI(name: projectName)
     }
 
-    /// The app's own `Application Support/devxa.Mimic`, established by finding the store it opened.
+    // MARK: - The shipped resource, against the literal beside the assertions
+
+    /// `Contents/Resources` of the `Mimic.app` this run is driving, or `nil` when the runner cannot
+    /// find it.
     ///
-    /// Polled rather than read once: the launch contract returns when the welcome window is up, and
-    /// the store is opened on the way there, but the two are not ordered against each other.
+    /// Walked up from the test bundle rather than asked of LaunchServices. The runner and the app are
+    /// built side by side into `Build/Products/<Configuration>/`, whereas
+    /// `NSWorkspace.urlForApplication(withBundleIdentifier:)` answers with whichever copy is
+    /// *registered* — on a developer's machine plausibly one in `/Applications` that this run is not
+    /// driving, which would make the check below a report about the wrong bundle.
     ///
-    /// This is an observation, not a derivation. The store is written by `Persistence` through
-    /// `FileManager.url(for: .applicationSupportDirectory…)`, and the fixture is read by the import
-    /// hook through the same expression — so the file's presence answers "which directory does the
-    /// app resolve that to" for this process, on this machine, in this run. Nothing here asks the
-    /// import seam where it looks; that would be a fixture built from the mechanism under test, and
-    /// it would agree with a broken seam.
-    @MainActor
-    private func resolveAppSupportDirectory() -> URL? {
-        var found: URL?
-        _ = UITestApp.waitUntil(timeout: 15) {
-            found = Self.candidateSupportDirectories.first { candidate in
-                FileManager.default.fileExists(
-                    atPath: candidate.appendingPathComponent(Self.runStoreName).path
-                )
+    /// Read-only, and nothing the app depends on: the app finds its own resources through
+    /// `Bundle.main`. This is the runner looking over its shoulder, and the only thing it is allowed
+    /// to conclude is "these bytes differ".
+    private static var appResourcesDirectory: URL? {
+        var directory = Bundle(for: SpecImportUITests.self).bundleURL
+        for _ in 0..<6 {
+            directory = directory.deletingLastPathComponent()
+            let bundle = directory.appendingPathComponent("Mimic.app", isDirectory: true)
+            if FileManager.default.fileExists(atPath: bundle.path) {
+                return bundle
+                    .appendingPathComponent("Contents", isDirectory: true)
+                    .appendingPathComponent("Resources", isDirectory: true)
             }
-            return found != nil
         }
-        return found
+        return nil
     }
 
-    /// Where to write the fixture: the one directory the probe proved, or — when it proved none —
-    /// every candidate that already exists.
+    /// The fixture as it shipped, read out of the built app — `nil` when the runner cannot see it.
     ///
-    /// The fallback is not hedging an assertion, it is refusing to fail eight tests over a probe.
-    /// A fixture in a directory the app does not read is inert, and a spare copy of a few kilobytes
-    /// under a pid-stamped name that teardown removes costs nothing. It only writes into directories
-    /// that are *already* there, so it cannot fabricate a container that the sandbox would then own
-    /// differently; if none exist, the first candidate is created and the diagnostic says so.
-    private func writeDestinations() -> [URL] {
-        if let resolvedSupportDirectory { return [resolvedSupportDirectory] }
-        let existing = Self.candidateSupportDirectories.filter {
-            FileManager.default.fileExists(atPath: $0.path)
+    /// Both spellings, for the reason `UITestSupport.importFixtureURL(for:)` tries both: whether a
+    /// buildable folder's subdirectory survives into `Contents/Resources` as a folder, or is
+    /// flattened into it, is a packaging detail neither side should have to be right about.
+    private static func bundledFixtureBytes(named name: String) -> String? {
+        guard let resources = appResourcesDirectory else { return nil }
+        let candidates = [
+            resources
+                .appendingPathComponent("UITestFixtures", isDirectory: true)
+                .appendingPathComponent(name),
+            resources.appendingPathComponent(name),
+        ]
+        for url in candidates {
+            if let data = try? Data(contentsOf: url) {
+                return String(decoding: data, as: UTF8.self)
+            }
         }
-        return existing.isEmpty ? Array(Self.candidateSupportDirectories.prefix(1)) : existing
+        return nil
+    }
+
+    /// Fails when the shipped resource is not the literal this file says it is.
+    ///
+    /// This is what keeps the bytes the suite's own now that they live in the app bundle. The row
+    /// tables in ``SpecImportFixtures`` describe a particular document — a body's byte count, a
+    /// suggested name, a duplicate — and a resource edited without them would otherwise surface as
+    /// three confusing row failures rather than as the drift it is.
+    ///
+    /// **Silent when it cannot read the app, and that is a scope rather than a hedge.** A runner that
+    /// cannot find `Mimic.app` has said nothing about the fixture: the app reads its own bundle
+    /// either way, and failing here would be this suite re-inventing the cross-process filesystem
+    /// dependency that the bundle route exists to remove. When it *can* read, a mismatch is red.
+    ///
+    /// Trailing whitespace is trimmed on both sides. A Swift multi-line literal carries no final
+    /// newline and a file on disk usually does; that difference is not drift.
+    @MainActor
+    private func assertBundledFixtureMatchesLiteral(
+        _ fixture: SpecImportFixture,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let shipped = Self.bundledFixtureBytes(named: fixture.resourceName) else { return }
+        XCTAssertEqual(
+            shipped.trimmingCharacters(in: .whitespacesAndNewlines),
+            fixture.bytes.trimmingCharacters(in: .whitespacesAndNewlines),
+            "\(fixture.resourceName) in the built app is not the literal SpecImportFixtures holds. "
+                + "Whichever half moved, the expected rows in this file describe the other one.",
+            file: file,
+            line: line
+        )
     }
 
     // MARK: - Assertions
@@ -735,11 +818,22 @@ final class SpecImportUITests: MimicUITestCase {
     /// presentation. Generous, and paid only when something is wrong.
     private static let parseTimeout: TimeInterval = 30
 
-    /// Waits for the review screen, and prints everything it can see before failing.
+    /// The words `WorkspaceView.presentInjectedImportIfNeeded()` appends to the sheet's error text
+    /// once it has re-read the injected fixture: "… — 1097 bytes read". The other spelling is
+    /// "unreadable: …", which is the case ``assertFixtureWasReadable(_:)`` exists to catch.
+    private static let readReportMarker = "bytes read"
+
+    /// Waits for the review screen, and folds everything it can see into the failure message.
     ///
     /// Every test in this suite goes through here, because every test's first claim is the same one
-    /// and it is the one that has already failed eight times over with nothing to read but its own
-    /// message. `continueAfterFailure` is `false`, so the dump has to happen *before* `XCTFail`.
+    /// and it has now failed eighteen times over with nothing to read but its own message.
+    ///
+    /// **In the message, not on stdout.** The previous round printed a full dump of both sides on
+    /// every failure and not one line of it reached the xcodebuild log — the app's stdout is not the
+    /// runner's, and the runner's is not the log's. An `XCTAttachment` would land in a ~280 MB
+    /// xcresult that needs a Mac and an Xcode to open, and the CI job's own comment records three
+    /// consecutive red runs diagnosed from failing *test names* alone because nobody opened one. A
+    /// `XCTFail` message is the one channel that has been observed to arrive.
     @MainActor
     private func assertReviewList(
         _ sheet: ImportSheetPage,
@@ -748,63 +842,39 @@ final class SpecImportUITests: MimicUITestCase {
         line: UInt = #line
     ) {
         if sheet.waitForReviewList(timeout: Self.parseTimeout) { return }
-        printImportDiagnostics(sheet)
-        XCTFail(message, file: file, line: line)
+        XCTFail("\(message)\n\(importDiagnostics(sheet))", file: file, line: line)
     }
 
-    /// Everything a person diagnosing this from the CI log needs, on stdout.
+    /// Both sides of the injection, in one string a log can carry.
     ///
-    /// stdout and not an `XCTAttachment`: the attachment lands in a ~280 MB xcresult that needs a Mac
-    /// and an Xcode to open, and the CI job's own comment records three consecutive red runs
-    /// diagnosed from failing *test names* alone because nobody opened one. The log is where the
-    /// diagnosis actually happens.
+    /// The runner's half says what it exported and whether the resource it named is in the built app
+    /// at all; the app's half — carried out through the sheet's error text by
+    /// `WorkspaceView.presentInjectedImportIfNeeded()` — says which file it opened, how many bytes it
+    /// got, and what the parser made of them. "unreadable" against a path inside `Mimic.app` would
+    /// mean the resource did not ship; a decode error against a byte count means the bytes shipped
+    /// and are wrong; no error state at all with no candidate list means the sheet never opened, so
+    /// the hook did not run.
     ///
-    /// The two halves are here together on purpose, because the failure they exist to tell apart is
-    /// a disagreement between them: the runner's side says where the bytes were put, and the app's
-    /// side — carried out through the sheet's error text by
-    /// `WorkspaceView.presentInjectedImportIfNeeded()` — says which file it tried to open and what
-    /// the filesystem said about it. "No such file" against a path that differs from the one below
-    /// is a resolution bug; "you don't have permission" against a path that matches is the sandbox
-    /// refusing the read, which is the case that makes this seam unworkable rather than broken.
+    /// `app.debugDescription` is deliberately not here. It runs to thousands of lines, and this
+    /// string has to survive a trip through `xcresulttool` into a job log to be worth anything.
     @MainActor
-    private func printImportDiagnostics(_ sheet: ImportSheetPage) {
-        var lines = ["=== SpecImport injection diagnostics ==="]
-        lines.append("runner home:        \(FileManager.default.homeDirectoryForCurrentUser.path)")
-        lines.append("MIMIC_IMPORT_FILE:  \(app.launchEnvironment[Self.importFileEnvironmentKey] ?? "<unset>")")
-        lines.append("MIMIC_IMPORT_KIND:  \(app.launchEnvironment[Self.importKindEnvironmentKey] ?? "<unset>")")
-        lines.append("probe resolved to:  \(resolvedSupportDirectory?.path ?? "<nothing — no store found in any candidate>")")
-
-        for candidate in Self.candidateSupportDirectories {
-            let store = candidate.appendingPathComponent(Self.runStoreName)
-            lines.append(
-                "candidate:          \(candidate.path)"
-                    + " dir=\(FileManager.default.fileExists(atPath: candidate.path))"
-                    + " store=\(FileManager.default.fileExists(atPath: store.path))"
-            )
+    private func importDiagnostics(_ sheet: ImportSheetPage) -> String {
+        var lines = ["--- injected import diagnostics ---"]
+        lines.append("exported name:     \(app.launchEnvironment[Self.importFileEnvironmentKey] ?? "<unset>")")
+        lines.append("exported kind:     \(app.launchEnvironment[Self.importKindEnvironmentKey] ?? "<unset>")")
+        lines.append("exported padding:  \(app.launchEnvironment[Self.importPaddingEnvironmentKey] ?? "<unset>")")
+        lines.append("app resources:     \(Self.appResourcesDirectory?.path ?? "<not found from the runner>")")
+        if let name = injectedFixture?.resourceName {
+            let shipped = Self.bundledFixtureBytes(named: name).map { "\($0.utf8.count) bytes" }
+            lines.append("shipped resource:  \(name) — \(shipped ?? "not readable from the runner")")
         }
-
-        for url in fixtureURLs {
-            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let bytes = (attributes?[.size] as? Int).map { "\($0)" } ?? "-"
-            lines.append(
-                "wrote fixture:      \(url.path)"
-                    + " exists=\(FileManager.default.fileExists(atPath: url.path)) bytes=\(bytes)"
-            )
-        }
-        if fixtureURLs.isEmpty {
-            lines.append("wrote fixture:      <none — the write never ran>")
-        }
-
         lines.append("sheet root (\(sheet.rootIdentifier)): \(sheet.root.exists)")
-        lines.append("sheet title:        \(sheet.title.exists)")
-        lines.append("parse error state:  \(sheet.errorHeading.exists)")
-        lines.append("candidate list:     \(sheet.candidateList.exists)")
-        lines.append("review header:      \(sheet.reviewHeader.exists)")
-        lines.append("parse error text:   \(sheet.parseErrorText ?? "<no error state on screen>")")
-        lines.append("--- app.debugDescription ---")
-        lines.append(app.debugDescription)
-
-        print(lines.joined(separator: "\n"))
+        lines.append("sheet title:       \(sheet.title.exists)")
+        lines.append("parse error state: \(sheet.errorHeading.exists)")
+        lines.append("candidate list:    \(sheet.candidateList.exists)")
+        lines.append("review header:     \(sheet.reviewHeader.exists)")
+        lines.append("parse error text:  \(sheet.parseErrorText ?? "<no error state on screen>")")
+        return lines.joined(separator: "\n")
     }
 
     /// The error-state tests' negative control, and they turned out to need one badly.
@@ -817,29 +887,36 @@ final class SpecImportUITests: MimicUITestCase {
     /// the other eight were failing on, and their passing was evidence about nothing.
     ///
     /// This is what makes them mean something. A parse error is only *about the bytes* if the bytes
-    /// were reachable: the fixture has to exist in the directory the app resolves for itself, which
-    /// is the one holding the store it opened at launch. An unresolved probe puts this suite on the
-    /// fallback in ``writeDestinations()``, where a copy in the wrong directory reproduces the
-    /// vacuous pass exactly — so it fails here rather than quietly.
+    /// were reachable, and **the app is the only witness to that** — the runner cannot stat a file
+    /// inside the app's bundle on the app's behalf, and the two rounds of trying to reach agreement
+    /// about a path are what put this suite here in the first place. So the app says it out loud:
+    /// `WorkspaceView.presentInjectedImportIfNeeded()` re-reads the injected fixture whenever a parse
+    /// failed and appends "*N* bytes read" — or "unreadable: …" — to the error text the sheet shows.
+    /// This waits for the former.
+    ///
+    /// A missing file cannot produce "bytes read", which is the whole property: the vacuous pass this
+    /// control exists to prevent now needs the app to lie about a read it performed.
+    ///
+    /// If the suffix is ever *truncated* out of the accessibility value rather than absent, this
+    /// fails too — and it prints the entire error text, so the next reader can see that is what
+    /// happened rather than guessing at it.
     @MainActor
     private func assertFixtureWasReadable(
+        _ sheet: ImportSheetPage,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        guard let directory = resolvedSupportDirectory, let fixtureFileName else {
-            XCTFail(
-                "The app's Application Support directory was never established, so a parse error "
-                    + "here cannot be told apart from a file the app could not open",
-                file: file,
-                line: line
-            )
-            return
+        var reported: String?
+        let confirmed = UITestApp.waitUntil(timeout: Self.parseTimeout) {
+            reported = sheet.parseErrorText
+            return reported?.contains(Self.readReportMarker) == true
         }
-        let url = directory.appendingPathComponent(fixtureFileName)
-        XCTAssertTrue(
-            FileManager.default.fileExists(atPath: url.path),
-            "The fixture must exist where the app resolves it — otherwise this test is asserting a "
-                + "read failure wearing a parse error's message. Looked for \(url.path)",
+        if confirmed { return }
+        XCTFail(
+            "The app never reported reading the injected fixture, so a parse error here cannot be "
+                + "told apart from a file it could not open. The sheet says: "
+                + (reported ?? "<no error state on screen>")
+                + "\n\(importDiagnostics(sheet))",
             file: file,
             line: line
         )
@@ -976,10 +1053,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPHAR-03, IMPHAR-10, IMPREV-01, IMPREV-03, IMPREV-05, IMPREV-15, IMPREV-16.
     @MainActor
     func testHARReviewListsEveryParsedCandidate() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "review.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.review,
             kind: "har",
-            contents: SpecImportFixtures.reviewHAR,
             projectName: "HAR review"
         )
 
@@ -1040,10 +1116,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPREV-05, IMPREV-06, IMPREV-07, IMPREV-09, IMPREV-10, IMPREV-11, IMPREV-12, IMPREV-14.
     @MainActor
     func testReviewSelectionControlsDriveTheSelection() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "review.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.review,
             kind: "har",
-            contents: SpecImportFixtures.reviewHAR,
             projectName: "HAR selection"
         )
 
@@ -1094,10 +1169,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPHAR-10 through to the end of the flow, IMPREV-23 and IMPREV-25.
     @MainActor
     func testCommittingTheReviewCreatesTheEndpoints() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "review.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.review,
             kind: "har",
-            contents: SpecImportFixtures.reviewHAR,
             projectName: "HAR commit"
         )
 
@@ -1128,10 +1202,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPREV-24 and, again from the keyboard, IMPREV-25.
     @MainActor
     func testReturnKeyCommitsTheReview() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "review.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.review,
             kind: "har",
-            contents: SpecImportFixtures.reviewHAR,
             projectName: "HAR return"
         )
 
@@ -1156,15 +1229,14 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPREV-17, IMPREV-18, IMPREV-19, IMPREV-20.
     @MainActor
     func testBinaryAndOversizedBodiesAreFlagged() throws {
-        let oversized = String(
-            repeating: "x",
-            count: SpecImportFixtures.oversizedBodyByteCount
-        )
-        try launchWithInjectedImport(
-            fixtureNamed: "flags.har",
+        // The megabyte is not in the resource — the app expands `SpecImportFixtures.paddingToken`
+        // to exactly this many bytes as it reads. The count is still a literal this file owns, so
+        // the fixture does not move when `ImportCandidateBuilder.bodySizeLimit` does.
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.flags,
             kind: "har",
-            contents: SpecImportFixtures.flagsHAR(oversizedBody: oversized),
-            projectName: "HAR flags"
+            projectName: "HAR flags",
+            paddingByteCount: SpecImportFixtures.oversizedBodyByteCount
         )
 
         let sheet = ImportSheetPage.har(app)
@@ -1202,10 +1274,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPREV-04.
     @MainActor
     func testGraphQLCandidatesShowTheirOperationNames() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "graphql.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.graphQL,
             kind: "har",
-            contents: SpecImportFixtures.graphQLHAR,
             projectName: "HAR GraphQL"
         )
 
@@ -1228,10 +1299,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPREV-26.
     @MainActor
     func testRefusedCandidateIsReportedAndTheRestStillLand() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "refused.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.refused,
             kind: "har",
-            contents: SpecImportFixtures.refusedHAR,
             projectName: "HAR refusal"
         )
 
@@ -1275,10 +1345,9 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPAPI-03, IMPAPI-09, IMPREV-01, IMPREV-23, IMPREV-25.
     @MainActor
     func testOpenAPISpecListsEveryOperationAndCommits() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "spec.json",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.openAPI,
             kind: "openapi",
-            contents: SpecImportFixtures.openAPISpec,
             projectName: "Spec import"
         )
 
@@ -1324,18 +1393,18 @@ final class SpecImportUITests: MimicUITestCase {
     /// not performed — see the note on this class.
     @MainActor
     func testMalformedHARShowsParseErrorAndOffersRetry() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "broken.har",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.malformed,
             kind: "har",
-            contents: SpecImportFixtures.malformedHAR,
             projectName: "HAR error"
         )
 
         let sheet = ImportSheetPage.har(app)
 
-        // Before anything about the message: the file has to have been *there*, or the error state
-        // below is a missing file rather than malformed bytes. See `assertFixtureWasReadable`.
-        assertFixtureWasReadable()
+        // Before anything about the message: the app has to have *read* the file, or the error
+        // state below is a missing resource rather than malformed bytes. See
+        // `assertFixtureWasReadable`.
+        assertFixtureWasReadable(sheet)
 
         // IMPERR-01 — the error state, not the empty state and not a review list.
         assertExists(sheet.errorHeading, "The \"Parse error\" heading", timeout: Self.parseTimeout)
@@ -1376,17 +1445,16 @@ final class SpecImportUITests: MimicUITestCase {
     /// Covers IMPERR-01 and IMPERR-02 for the OpenAPI flow.
     @MainActor
     func testUnrecognisedSpecShowsTheOpenAPIFormatGuidance() throws {
-        try launchWithInjectedImport(
-            fixtureNamed: "notaspec.json",
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.notASpecDocument,
             kind: "openapi",
-            contents: SpecImportFixtures.notASpec,
             projectName: "Spec error"
         )
 
         let sheet = ImportSheetPage.openAPI(app)
 
         // The same negative control as the HAR error test, and for the same reason.
-        assertFixtureWasReadable()
+        assertFixtureWasReadable(sheet)
 
         assertExists(sheet.errorHeading, "The \"Parse error\" heading", timeout: Self.parseTimeout)
         assertAbsent(sheet.candidateList, "The candidate list")
