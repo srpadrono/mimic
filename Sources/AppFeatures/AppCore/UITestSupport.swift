@@ -168,8 +168,10 @@ enum UITestSupport {
     ///
     /// Two changes make that impossible rather than unlikely:
     ///
-    /// - **The only file this can delete is the one ``databaseURL(environment:)`` names, and that is
-    ///   `nil` outside a UI test run.** The gate is ``isRunningUITests(environment:arguments:)`` —
+    /// - **The only files this can delete are the one ``databaseURL(environment:)`` names and
+    ///   SQLite's sidecars beside it, and that name is `nil` outside a UI test run.** The sidecars
+    ///   are ``sidecarURLs(for:)``, derived from the same name rather than searched for. The gate is
+    ///   ``isRunningUITests(environment:arguments:)`` —
     ///   `-MimicResetForTesting`, or `MIMIC_DEFAULTS_SUITE` — and nothing else. Inside a run the file
     ///   is the path the harness put in `MIMIC_DATABASE_PATH`, or, when it set none,
     ///   `mimic-uitests.sqlite` computed beside the real store. `AppState.openStore` opens that same
@@ -198,8 +200,33 @@ enum UITestSupport {
 
         guard let databaseURL else { return }
         try? fileManager.removeItem(at: databaseURL)
-        try? fileManager.removeItem(at: databaseURL.appendingPathExtension("wal"))
-        try? fileManager.removeItem(at: databaseURL.appendingPathExtension("shm"))
+        for sidecar in sidecarURLs(for: databaseURL) {
+            try? fileManager.removeItem(at: sidecar)
+        }
+    }
+
+    /// The files SQLite keeps beside a store: `<name>-wal`, `<name>-shm`, `<name>-journal`.
+    ///
+    /// The suffix goes on the *file name*; it is not a path extension. This was
+    /// `databaseURL.appendingPathExtension("wal")`, which names `mimic-uitests.sqlite.wal` — a file
+    /// SQLite has never written — so the reset removed the store and left every sidecar it was
+    /// written to remove sitting next to it. That is not inert: a journal or a write-ahead log
+    /// outliving its database is recovered from at the next open, so pages the previous run committed
+    /// can reappear in a store the run asked to be empty, and the failure looks like a test asserting
+    /// against another test's fixtures.
+    ///
+    /// All three names, rather than the one the current configuration produces: `DatabaseFactory`
+    /// sets no `journalMode`, so a `DatabaseQueue` writes `-journal`, and a configuration that later
+    /// asks for WAL writes `-wal` and `-shm` instead. A reset that has to be revisited when a
+    /// persistence setting changes is a reset that will not be.
+    ///
+    /// Derived from `databaseURL` alone, which is `nil` outside a UI test run — this never computes a
+    /// path of its own, for the reason ``resetApp(knownTestSuites:databaseURL:fileManager:)`` gives.
+    static func sidecarURLs(for databaseURL: URL) -> [URL] {
+        let directory = databaseURL.deletingLastPathComponent()
+        return ["-wal", "-shm", "-journal"].map {
+            directory.appendingPathComponent(databaseURL.lastPathComponent + $0)
+        }
     }
 }
 #endif

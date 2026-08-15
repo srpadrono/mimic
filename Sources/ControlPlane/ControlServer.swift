@@ -214,7 +214,7 @@ public actor ControlServer {
                 return await Self.encode(host.execute(command))
             } catch {
                 return Self.encode(.failure(ControlError(
-                    code: "request.undecodable",
+                    code: .undecodableRequest,
                     message: "Could not decode the command: \(error). "
                         + "Call GET \(ControlAPI.pathPrefix)/commands for the accepted shapes."
                 )))
@@ -301,29 +301,53 @@ public actor ControlServer {
         headers.add(name: "Content-Type", value: "application/json")
 
         guard let data = try? ControlCoding.encoder(pretty: true).encode(response) else {
+            // Written out by hand because the encoder is the thing that just failed. The code is
+            // still read from the vocabulary rather than typed again here, so a caller branching on
+            // `internal.encoding` is branching on the same string every other code comes from.
+            let code = ControlErrorCode.encodingFailure.rawValue
             return Response(
                 status: .internalServerError,
                 headers: headers,
-                body: .init(string: #"{"ok":false,"error":{"code":"internal.encoding","message":"Could not encode the response."}}"#)
+                body: .init(
+                    string: #"{"ok":false,"error":{"code":"\#(code)","message":"Could not encode the response."}}"#
+                )
             )
         }
         return Response(status: status, headers: headers, body: .init(data: data))
     }
 
+    /// Maps a failure onto the status a `curl --fail` caller sees.
+    ///
+    /// Over ``ControlErrorCode`` rather than over strings, and that is the point rather than a
+    /// tidy-up: this switch used to hold its own copies of eight of Domain's code literals, so
+    /// renaming one there left this arm matching a string nothing produces any more and the code fell
+    /// through to `500` — the one answer indistinguishable from Mimic having broken. Both ends now
+    /// read the same `rawValue`.
     static func httpStatus(for response: ControlResponse) -> HTTPResponseStatus {
         guard let code = response.error?.code else { return .ok }
-        if code.hasSuffix(".notFound") { return .notFound }
-        switch code {
-        case "request.unauthorized":
+        guard let declared = ControlErrorCode(rawValue: code) else {
+            // A code from outside Domain's vocabulary. `ControlError` takes an arbitrary string —
+            // `ControlClient` builds `http.502` that way — so the suffix rule stays, as the one thing
+            // that keeps a `<subject>.notFound` spelled somewhere else answering `404` and not `500`.
+            return code.hasSuffix(".notFound") ? .notFound : .internalServerError
+        }
+        // No `default`, deliberately: a code added to `ControlErrorCode` fails this build until
+        // somebody has said what a script should see for it. The switch it replaces could not do
+        // that — every unhandled string was already spelled `internalServerError`.
+        switch declared {
+        case .unauthorized:
             return .unauthorized
-        case "request.forbiddenOrigin":
+        case .forbiddenOrigin:
             return .forbidden
-        case "request.invalid", "request.undecodable":
+        case .invalidRequest, .undecodableRequest:
             return .badRequest
-        case "project.noneOpen", "journey.noneActive", "server.portInUse", "server.busy":
+        case .projectNotFound, .endpointNotFound, .scenarioNotFound, .journeyNotFound,
+             .journeyStepNotFound, .journeyTemplateNotFound:
+            return .notFound
+        case .noProjectOpen, .noActiveJourney, .serverPortInUse, .serverBusy:
             // The request was well formed but the instance is not in a state to satisfy it.
             return .conflict
-        default:
+        case .serverStartFailed, .persistenceFailure, .internalFailure, .encodingFailure:
             return .internalServerError
         }
     }

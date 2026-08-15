@@ -17,11 +17,11 @@ set of rules, because they used to follow none and the window read as three unre
   audit does not re-flag it.
 - **A control's height comes from `DSControlHeight` and a line weight from `DSStroke`**, for the same
   reason and after the same failure. The rule above about controls sharing a row was being kept by
-  hand: `DSButtonSize`, `DSTextField`, `DSFilterField`, `DSStatusBadge`, `RequestLogDrawerView`'s
-  `HeaderControl` and `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
+  hand: `DSButtonSize`, `DSTextField`, `DSFilterField`, `RequestLogDrawerView`'s `HeaderControl` and
+  `EndpointEditorView`'s `EditorField` each declared the same 20/22/28 ladder and
   the same 3pt inset privately — two of them across a module boundary, one with a comment promising
   it matched `DSFilterField` "so a panel that later adopts that component does not change shape on
-  the way in". Six copies, and nothing checked that the promise held. The line weights were worse:
+  the way in". Five copies, and nothing checked that the promise held. The line weights were worse:
   twenty-three bare literals — eleven strokes, eight more hand-drawing the closing rule
   `DSDivider` exists to draw, three private constants, and `DSDividerStyle` itself.
   **Every geometry ladder in `DesignSystem` is now pinned by value, not by ordering**, across three

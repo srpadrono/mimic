@@ -133,7 +133,7 @@ struct ProjectWorkspaceTests {
             service.currentProject != nil
         }
 
-        service.currentProject?.name = "Autosave API Updated"
+        _ = service.mutateCurrentProject { $0.name = "Autosave API Updated" }
         service.scheduleAutosave()
 
         try await waitUntil {
@@ -158,7 +158,7 @@ struct ProjectWorkspaceTests {
         }
 
         service.isRestoringProject = true
-        service.currentProject?.name = "Ignored Rename"
+        _ = service.mutateCurrentProject { $0.name = "Ignored Rename" }
         service.scheduleAutosave()
         try await Task.sleep(for: .milliseconds(600))
 
@@ -265,10 +265,12 @@ struct ProjectWorkspaceTests {
 
     /// The failure this app had no way of telling you about.
     ///
-    /// `scheduleAutosave` waits 500 ms and then re-reads `currentProject`, guarding that it is still
-    /// the project the edit belonged to. Closing clears that property, so the pending task woke up,
-    /// found the guard false, and returned having written nothing — no error, no indicator, and an
-    /// edit that simply was not there when you reopened the project.
+    /// `scheduleAutosave` waits 500 ms before it writes, and it used to re-read `currentProject` when
+    /// it woke, guarding that it was still the project the edit belonged to. Closing clears that
+    /// property, so the pending task found the guard false and returned having written nothing — no
+    /// error, no indicator, and an edit that simply was not there when you reopened the project. The
+    /// flush is still what writes it here; the debounce captures by value now as its second line of
+    /// defence.
     ///
     /// The close deliberately happens *inside* the debounce window, because outside it there is
     /// nothing to lose.
@@ -281,7 +283,7 @@ struct ProjectWorkspaceTests {
         try await waitUntil { service.recentProjects.count == 1 }
         let id = try #require(service.currentProject?.id)
 
-        service.currentProject?.name = "Edited inside the debounce"
+        _ = service.mutateCurrentProject { $0.name = "Edited inside the debounce" }
         service.scheduleAutosave()
         service.closeProject()
 
@@ -312,7 +314,7 @@ struct ProjectWorkspaceTests {
         service.openProject(id: firstID)
         try await waitUntil { service.currentProject?.id == firstID }
 
-        service.currentProject?.name = "Edited before switching away"
+        _ = service.mutateCurrentProject { $0.name = "Edited before switching away" }
         service.scheduleAutosave()
         service.openProject(id: secondID)
 
@@ -379,8 +381,9 @@ struct ProjectWorkspaceTests {
     }
 
     /// A workspace over ``GatedRepository`` holding one seeded, open project — the fixture the three
-    /// overtake tests share. Seeded by direct assignment rather than `createProject`, so the gated
-    /// first save is the save under test and not the create's.
+    /// overtake tests share. Published through ``ProjectWorkspace/setCurrentProject(_:isRestoring:)``
+    /// — the one door there is — rather than by `createProject`, so the gated first save is the save
+    /// under test and not the create's.
     private func makeGatedContext(
         projectName: String
     ) async throws -> (service: ProjectWorkspace, repository: GatedRepository, project: MockProject) {
@@ -392,7 +395,7 @@ struct ProjectWorkspaceTests {
         )
         let project = MockProject(name: projectName)
         await repository.seed(project)
-        service.currentProject = project
+        service.setCurrentProject(project, isRestoring: false)
         return (service, repository, project)
     }
 
@@ -404,9 +407,7 @@ struct ProjectWorkspaceTests {
     func closeFlushCannotBeOvertakenByAChainedDelete() async throws {
         let (service, repository, seeded) = try await makeGatedContext(projectName: "Closing")
 
-        var edited = seeded
-        edited.name = "Edited before closing"
-        service.currentProject = edited
+        _ = service.mutateCurrentProject { $0.name = "Edited before closing" }
         service.scheduleAutosave()
         service.closeProject()
         service.deleteProject(id: seeded.id)
@@ -508,7 +509,7 @@ struct ProjectWorkspaceTests {
         )
         let project = MockProject(name: "Doomed")
         await repository.seed(project)
-        service.currentProject = project
+        service.setCurrentProject(project, isRestoring: false)
 
         service.scheduleAutosave()
         service.deleteProject(id: project.id)
@@ -539,14 +540,14 @@ struct ProjectWorkspaceTests {
         )
         let project = MockProject(name: "Doomed")
         await repository.seed(project)
-        service.currentProject = project
+        service.setCurrentProject(project, isRestoring: false)
 
         service.deleteProject(id: project.id)
         // The edit arrives while the delete holds the chain — after the call-time cancel, inside
         // the window the tombstone exists for. The slow delete (700 ms) outlasts the debounce
         // (500 ms), so an unguarded claim provably fires mid-delete rather than by scheduler luck.
         try await waitUntilAsync { await repository.operations.contains("delete.begin") }
-        service.currentProject?.name = "Edited while the delete was in flight"
+        _ = service.mutateCurrentProject { $0.name = "Edited while the delete was in flight" }
         service.scheduleAutosave()
 
         try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.contains("delete.end") }
@@ -571,7 +572,7 @@ struct ProjectWorkspaceTests {
         )
         let project = MockProject(name: "Doomed")
         await repository.seed(project)
-        service.currentProject = project
+        service.setCurrentProject(project, isRestoring: false)
 
         service.deleteProject(id: project.id)
         try await waitUntilAsync { await repository.operations.contains("delete.begin") }
@@ -584,6 +585,43 @@ struct ProjectWorkspaceTests {
                 "the explicit save joined the chain behind the delete")
         #expect(await repository.stored(project.id) == nil,
                 "the explicit save re-inserted the row the delete had just removed")
+    }
+
+    /// The window the tombstone alone does not cover, and the one this wave's own fix opened.
+    ///
+    /// Capturing the project by value is what stopped the debounce dropping an edit made while a
+    /// project was opening — but it also stopped it noticing that the row had since been deleted,
+    /// because it no longer re-reads `currentProject`. The tombstone is lifted the instant the
+    /// delete settles, so a 500 ms timer scheduled before the delete and firing after it passed
+    /// every remaining guard and re-inserted the row — and `recordRecentProject` put it back in the
+    /// list as the restore target. The delete now cancels a pending debounce that names it, at
+    /// settle time rather than only at call time.
+    @Test("A debounce scheduled before a delete cannot outlive it and re-insert the row")
+    func aDebounceCannotOutliveTheDeleteThatRemovedItsProject() async throws {
+        let repository = SlowDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Doomed")
+        await repository.seed(project)
+        service.setCurrentProject(project, isRestoring: false)
+
+        // The edit comes first, so its 500 ms debounce is already counting down; the delete then
+        // takes its turn in the chain. `SlowDeleteRepository` holds the delete open long enough for
+        // the timer to be the thing that fires last.
+        service.scheduleAutosave()
+        service.deleteProject(id: project.id)
+
+        try await waitUntilAsync(timeout: .seconds(5)) { await repository.operations.contains("delete.end") }
+        // Past the debounce's own deadline, so a timer that survived the delete has fired by now.
+        try await Task.sleep(for: .milliseconds(700))
+
+        #expect(await repository.stored(project.id) == nil,
+                "a debounce that outlived the delete re-inserted the row it had removed")
+        #expect(service.recentProjects.contains { $0.id == project.id } == false,
+                "the resurrected save also put the deleted project back in the recents list")
     }
 
     /// A store that refuses the delete and accepts everything else — the failure arm of the
@@ -621,12 +659,12 @@ struct ProjectWorkspaceTests {
         )
         let project = MockProject(name: "Survivor")
         await repository.seed(project)
-        service.currentProject = project
+        service.setCurrentProject(project, isRestoring: false)
 
         service.deleteProject(id: project.id)
         try await waitUntil { service.autosaveStatus == .failed("Could not delete the project.") }
 
-        service.currentProject?.name = "Edited after the refused delete"
+        _ = service.mutateCurrentProject { $0.name = "Edited after the refused delete" }
         service.scheduleAutosave()
 
         try await waitUntilAsync {
@@ -642,6 +680,10 @@ struct ProjectWorkspaceTests {
     // afterwards and put the stale project back over the newer state, after the CLI had already
     // been told otherwise. Each test parks the load, issues one lifecycle command, releases, and
     // asserts the load did not publish.
+    //
+    // The four here are the lifecycle publishes. The two doors that carry an *edit* — an endpoint,
+    // scenario or journey command through `AppState`, and a settled delete of a project that is not
+    // the open one — are the same defect one layer down, and are covered in `RaceGuardTests`.
 
     /// A store whose loads park until released, capturing the row at entry.
     ///
@@ -737,7 +779,7 @@ struct ProjectWorkspaceTests {
     @Test("A delete of the open project supersedes its in-flight re-open")
     func deleteSupersedesAnInFlightOpen() async throws {
         let (service, repository, doomed) = try await makeGatedLoadContext(projectName: "Doomed")
-        service.currentProject = doomed
+        service.setCurrentProject(doomed, isRestoring: false)
 
         service.openProject(id: doomed.id)
         try await waitUntilAsync { await repository.enteredLoads == 1 }
@@ -756,7 +798,7 @@ struct ProjectWorkspaceTests {
     @Test("An import of the open project supersedes its in-flight re-open")
     func importSupersedesAnInFlightOpen() async throws {
         let (service, repository, stored) = try await makeGatedLoadContext(projectName: "Stored")
-        service.currentProject = stored
+        service.setCurrentProject(stored, isRestoring: false)
 
         service.openProject(id: stored.id)
         try await waitUntilAsync { await repository.enteredLoads == 1 }

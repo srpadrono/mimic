@@ -14,6 +14,17 @@ private enum LogColumns {
     // path is flexible — takes remaining space
 }
 
+/// One traffic row's geometry.
+///
+/// 26 is `DSControlHeight.denseRow`, a rung of its own rather than one of `row` (20) or `field`
+/// (22): neither of those holds a `compact` method badge above a line of `codeSmall`. A dense table
+/// row is a fourth thing, and `ImportReviewList`'s candidate row stands on the same rung — through
+/// the token now, where the two used to be a pair of literals coupled by a sentence in each file
+/// naming the other.
+private enum LogRow {
+    static let height = DSControlHeight.denseRow
+}
+
 enum SortField: String {
     case method, path, endpoint, scenario, status, timestamp
 }
@@ -39,15 +50,17 @@ private enum HeaderControl {
 }
 
 private extension View {
-    /// Wraps a header control in the panel's shared well: same height, radius, hairline and padding
-    /// as every sibling, so the row reads as one set of controls instead of four strangers.
+    /// Wraps a header control in the panel's shared well: same height, radius and padding as every
+    /// sibling, so the row reads as one set of controls instead of four strangers.
     ///
-    /// `fill` and `stroke` are the only things a caller gets to vary, because they are the only
-    /// things that carry state — the unmatched filter goes amber when it is on. Geometry is not
-    /// negotiable.
+    /// A caller varies the line only where the line carries state — the unmatched filter goes amber
+    /// when it is on, and a field being typed into wears `DSStroke.focusRing`, which is a point
+    /// heavier than a hairline for exactly that reason (`DSStroke` names the two separately because
+    /// one is a boundary and the other is a state). Height, radius and padding are not negotiable.
     func headerControlWell(
         fill: Color,
         stroke: Color,
+        strokeWidth: CGFloat = HeaderControl.borderWidth,
         minWidth: CGFloat? = nil,
         idealWidth: CGFloat? = nil
     ) -> some View {
@@ -61,7 +74,7 @@ private extension View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: HeaderControl.cornerRadius)
-                    .stroke(stroke, lineWidth: HeaderControl.borderWidth)
+                    .stroke(stroke, lineWidth: strokeWidth)
             }
     }
 }
@@ -274,6 +287,17 @@ struct RequestLogDrawerView: View {
     /// Where a ⇧-click measures its range from: the last row clicked without ⇧. Held here rather than
     /// derived from the selection, because a set has no notion of which end the user started at.
     @State private var selectionAnchorID: UUID?
+    /// Whether the filter field has the keyboard, so the well can draw a ring around it. Separate
+    /// from the table's focus below: the two are different targets and only one of them can be the
+    /// one you are typing into.
+    @FocusState private var filterFieldIsFocused: Bool
+    /// Whether the table holds keyboard focus, which is what the arrow keys, Return, Escape and ⌘A
+    /// below are conditional on.
+    ///
+    /// The table is one focus target rather than one per row, the way an AppKit table is: focus
+    /// lands on the list and the keys move within it. A thousand focusable rows would put a
+    /// thousand stops in the window's key-view loop.
+    @FocusState private var tableHasKeyboardFocus: Bool
 
     public init(
         requestLogs: [RequestLog],
@@ -420,18 +444,29 @@ struct RequestLogDrawerView: View {
                         TextField("Filter", text: $filterText)
                             .textFieldStyle(.plain)
                             .font(DSTypography.codeSmall)
+                            .focused($filterFieldIsFocused)
                             .accessibilityIdentifier("drawer.filterField")
                             .accessibilityLabel("Filter request log")
                     }
                     // Range rather than a fixed 150pt: a filter field is the one control in this row
                     // whose useful width depends on the window, and 150 was simultaneously too wide
                     // for a narrow drawer and too narrow to read a path in a wide one.
+                    //
+                    // The focused line is `DSFilterField`'s exactly — `borderFocused` at
+                    // `DSStroke.focusRing` — because `.textFieldStyle(.plain)` throws AppKit's own
+                    // ring away, and a control that looks identical whether or not it has the
+                    // keyboard is the hover defect applied to Full Keyboard Access. This field is
+                    // one of the two hand-rolled ones that component's own note names; it keeps its
+                    // shape here rather than adopting the component, because the component is a
+                    // capsule with a scope pill and this row is four rectangular wells.
                     .headerControlWell(
                         fill: DSColors.tertiary,
-                        stroke: DSColors.border,
+                        stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
+                        strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
                         minWidth: 120,
                         idealWidth: 160
                     )
+                    .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
 
                     DSPanelHeaderButton(
                         systemImage: "trash",
@@ -508,37 +543,95 @@ struct RequestLogDrawerView: View {
         )
         let displayOrder = sortedAndFilteredLogs.map(\.id)
 
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(sortedAndFilteredLogs.enumerated()), id: \.element.id) { index, log in
-                    RequestLogTableRow(
-                        log: log,
-                        rowIndex: index,
-                        isSelected: selectedLogIDs.contains(log.id),
-                        onCreateEndpoint: onCreateEndpoint,
-                        journeys: journeys,
-                        selection: selection,
-                        onAddToJourney: onAddToJourney,
-                        onAddToNewJourney: onAddToNewJourney,
-                        endpointName: resolveEndpointName(log.matchedEndpointID),
-                        scenarioName: resolveScenarioName(endpointID: log.matchedEndpointID, scenarioID: log.matchedScenarioID),
-                        onSelect: { modifier in
-                            withAnimation(.easeOut(duration: DSAnimation.fast)) {
-                                let change = Self.nextSelection(
-                                    current: selectedLogIDs,
-                                    anchor: selectionAnchorID,
-                                    tapped: log.id,
-                                    modifier: modifier,
-                                    displayOrder: displayOrder
-                                )
-                                selectedLogIDs = change.selection
-                                selectionAnchorID = change.anchor
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(sortedAndFilteredLogs.enumerated()), id: \.element.id) { index, log in
+                        RequestLogTableRow(
+                            log: log,
+                            rowIndex: index,
+                            isSelected: selectedLogIDs.contains(log.id),
+                            onCreateEndpoint: onCreateEndpoint,
+                            journeys: journeys,
+                            selection: selection,
+                            onAddToJourney: onAddToJourney,
+                            onAddToNewJourney: onAddToNewJourney,
+                            endpointName: resolveEndpointName(log.matchedEndpointID),
+                            scenarioName: resolveScenarioName(endpointID: log.matchedEndpointID, scenarioID: log.matchedScenarioID),
+                            onSelect: { modifier in
+                                // The pointer hands the table its focus, so the arrows carry on from
+                                // the row that was just clicked rather than from wherever they were
+                                // left. `WelcomeWindow`'s recents list keeps the same contract in the
+                                // other direction.
+                                tableHasKeyboardFocus = true
+                                withAnimation(.easeOut(duration: DSAnimation.fast)) {
+                                    let change = Self.nextSelection(
+                                        current: selectedLogIDs,
+                                        anchor: selectionAnchorID,
+                                        tapped: log.id,
+                                        modifier: modifier,
+                                        displayOrder: displayOrder
+                                    )
+                                    selectedLogIDs = change.selection
+                                    selectionAnchorID = change.anchor
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
+            // Selection here was reachable only by pointer — and this is the app's one multi-select
+            // surface, the one a journey is captured from, so capturing a flow was a pointer-only
+            // workflow end to end. `.focusable()` is what lets a `ScrollView` of tap targets take a
+            // key press at all; a `List` would have brought the arrows with it, and this panel is
+            // deliberately not one (six columns at a fixed row height).
+            .focusable()
+            .focused($tableHasKeyboardFocus)
+            // `.repeat` as well as `.down`: macOS delivers a held key as one press and then a run of
+            // repeats, so without it holding ↓ moves the selection exactly one row and then stops —
+            // which reads as the key having been dropped. `.up` is deliberately absent; taking it
+            // would run every press twice.
+            .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape, "a"], phases: [.down, .repeat]) { press in
+                handleKeyPress(press, displayOrder: displayOrder, proxy: proxy)
+            }
         }
+    }
+
+    /// Arrow keys, Return, Escape and ⌘A, while the table holds focus.
+    ///
+    /// The whole decision is in ``nextSelection(key:extending:current:anchor:displayOrder:)``, which
+    /// is pure; this reads the press, writes the two pieces of state and scrolls the row it moved to
+    /// into view. A press the table declines comes back `.ignored`, which leaves the event to
+    /// whatever is behind it — the scroll view's own paging, in the case of an arrow at the end of
+    /// the list.
+    private func handleKeyPress(
+        _ press: KeyPress,
+        displayOrder: [UUID],
+        proxy: ScrollViewProxy
+    ) -> KeyPress.Result {
+        guard let key = Self.selectionKey(key: press.key, modifiers: press.modifiers),
+              let result = Self.nextSelection(
+                  key: key,
+                  extending: press.modifiers.contains(.shift),
+                  current: selectedLogIDs,
+                  anchor: selectionAnchorID,
+                  displayOrder: displayOrder
+              )
+        else { return .ignored }
+
+        withAnimation(.easeOut(duration: DSAnimation.fast)) {
+            selectedLogIDs = result.change.selection
+            selectionAnchorID = result.change.anchor
+        }
+
+        // Unanimated on purpose: the row has to be on screen by the time the next key press is
+        // handled, and a keyboard user holding ↓ generates them faster than a scroll animation
+        // settles.
+        if let reveal = result.reveal {
+            proxy.scrollTo(reveal)
+        }
+
+        return .handled
     }
 
     // MARK: - Sorting & Filtering
@@ -709,6 +802,150 @@ struct RequestLogDrawerView: View {
             return SelectionChange(
                 selection: current.union(displayOrder[min(start, end)...max(start, end)]),
                 anchor: anchor
+            )
+        }
+    }
+
+    /// What a key press means for the selection, in the table's own language.
+    enum SelectionKey: Equatable {
+        /// ↑ — move to the row above the top of the selection.
+        case moveUp
+        /// ↓ — move to the row below the bottom of it.
+        case moveDown
+        /// Return — collapse the selection onto one row, which is what shows a request in the
+        /// inspector.
+        case activate
+        /// ⌘A — take every row the filter is currently showing.
+        case selectAll
+        /// Escape — select nothing.
+        case clear
+    }
+
+    /// Which key the table handles, or `nil` for one it leaves alone.
+    ///
+    /// Takes the key and the modifiers rather than the `KeyPress` so the mapping is testable without
+    /// a window: `KeyPress` is a value SwiftUI hands out and not one a test can build.
+    ///
+    /// ⌘A is matched here rather than declared as a menu command because a menu lives on a `Scene`
+    /// and this is a panel. AppKit offers an enabled key equivalent its menu item first and only
+    /// then the focused view, so the reach of this arm is exactly "no menu item claimed ⌘A" — which
+    /// is the state of this app's menu bar. A menu item is what would make it *discoverable*, and
+    /// that belongs in `MimicScene` beside the other commands.
+    static func selectionKey(key: KeyEquivalent, modifiers: EventModifiers) -> SelectionKey? {
+        // Statements rather than a switch *expression* returning an Optional by implicit member.
+        // Both spell the same mapping, but nothing else in this repository takes that shape, and a
+        // construct with no precedent here is one nobody has watched this toolchain compile — not
+        // worth a forty-minute round trip to find out, when the statement form is free.
+        switch key {
+        case .upArrow: return .moveUp
+        case .downArrow: return .moveDown
+        case .return: return .activate
+        case .escape: return .clear
+        case "a" where modifiers.contains(.command): return .selectAll
+        default: return nil
+        }
+    }
+
+    /// The selection a key press produces, and the row the table should reveal with it.
+    struct KeyboardSelection: Equatable {
+        var change: SelectionChange
+        /// The row the press moved to, which the table scrolls into view. `nil` for a press that
+        /// changes the selection without moving — ⌘A and Escape — because scrolling on those would
+        /// move the list under someone who did not ask it to.
+        var reveal: UUID?
+    }
+
+    /// How a key press changes the selection.
+    ///
+    /// `nil` means the table does not act on the press, so the caller can hand the event back rather
+    /// than swallowing it: an arrow at the end of the list, Return on a row that is already alone in
+    /// the selection, Escape with nothing selected.
+    ///
+    /// Pure and static for the reason the click path above is: the interesting cases are all at the
+    /// edges, and they are cheaper to pin here than to drive through a window.
+    ///
+    /// **An arrow moves from the edge of the selection it is pushing against** — ↓ from the last
+    /// selected row, ↑ from the first — rather than from a separate keyboard cursor. For the single
+    /// selection an arrow key usually starts from, the two are the same row. For a multi-row one,
+    /// this is what makes ⇧↓ ⇧↓ grow the range a row at a time instead of re-measuring from the
+    /// anchor and adding the same row twice. The range only grows: shrinking it is a click or a
+    /// ⌘-click, which is where the anchor is set.
+    static func nextSelection(
+        key: SelectionKey,
+        extending: Bool,
+        current: Set<UUID>,
+        anchor: UUID?,
+        displayOrder: [UUID]
+    ) -> KeyboardSelection? {
+        guard displayOrder.isEmpty == false else { return nil }
+
+        switch key {
+        case .selectAll:
+            // Membership, not size. A count comparison declines a legitimate press whenever the
+            // selection happens to be the same size as what is shown — select two rows, then narrow
+            // the filter to two *different* ones, and ⌘A did nothing with nothing to say why.
+            guard current != Set(displayOrder) else { return nil }
+            return KeyboardSelection(
+                change: SelectionChange(selection: Set(displayOrder), anchor: displayOrder.last),
+                reveal: nil
+            )
+
+        case .clear:
+            guard current.isEmpty == false else { return nil }
+            return KeyboardSelection(change: SelectionChange(selection: [], anchor: nil), reveal: nil)
+
+        case .activate:
+            // Return collapses a multi-row selection onto one row, because the inspector shows a
+            // request only when exactly one is selected — so this is the keyboard's "open it".
+            // Never the reverse: a row already alone in the selection is open, and clearing it here
+            // would make Return a dismiss key on the one press a reader would expect to confirm.
+            guard let target = displayOrder.last(where: current.contains), current != [target] else {
+                return nil
+            }
+            return KeyboardSelection(
+                change: SelectionChange(selection: [target], anchor: target),
+                reveal: target
+            )
+
+        case .moveUp, .moveDown:
+            let forward = key == .moveDown
+            let edge = forward
+                ? displayOrder.last(where: current.contains)
+                : displayOrder.first(where: current.contains)
+
+            guard let edge, let index = displayOrder.firstIndex(of: edge) else {
+                // Nothing selected: an arrow starts at the near end of the list, as an AppKit table
+                // does, rather than doing nothing until something has been clicked.
+                guard let start = forward ? displayOrder.first : displayOrder.last else { return nil }
+                return KeyboardSelection(
+                    change: SelectionChange(selection: [start], anchor: start),
+                    reveal: start
+                )
+            }
+
+            let targetIndex = forward ? index + 1 : index - 1
+            guard displayOrder.indices.contains(targetIndex) else { return nil }
+            let target = displayOrder[targetIndex]
+
+            guard extending else {
+                return KeyboardSelection(
+                    change: SelectionChange(selection: [target], anchor: target),
+                    reveal: target
+                )
+            }
+
+            // The anchor survives a ⇧-arrow so a run of them measures from one end, and falls back
+            // to the edge it just grew from when the selection no longer contains it — the same
+            // staleness the ⇧-click arm guards against, and for the same reason: this selection can
+            // be set from outside the table.
+            var extended = current
+            extended.insert(target)
+            return KeyboardSelection(
+                change: SelectionChange(
+                    selection: extended,
+                    anchor: anchor.flatMap { extended.contains($0) ? $0 : nil } ?? edge
+                ),
+                reveal: target
             )
         }
     }
@@ -940,9 +1177,13 @@ struct RequestLogTableRow: View {
             // Endpoint — or, when none matched, what did answer. A bare em dash here used to mean
             // both "unconfigured" and "a journey answered", which is exactly the distinction someone
             // debugging a missing mock needs.
+            //
+            // No per-cell `.accessibilityIdentifier` on this cell or the scenario one: the row
+            // composes with `.accessibilityElement(children: .ignore)`, which swallows its children
+            // whole, so an identifier down here names an element nothing can ever find. What those
+            // two cells say is in `spokenLabel` instead, where a reader can hear it.
             endpointCell
                 .frame(width: LogColumns.endpoint, alignment: .leading)
-                .accessibilityIdentifier("requestLog.endpointName.\(log.id.uuidString)")
 
             // Scenario
             Text(scenarioName ?? "\u{2014}")
@@ -950,7 +1191,6 @@ struct RequestLogTableRow: View {
                 .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
                 .lineLimit(1)
                 .frame(width: LogColumns.scenario, alignment: .leading)
-                .accessibilityIdentifier("requestLog.scenarioName.\(log.id.uuidString)")
 
             // Status code pill
             statusPill
@@ -963,7 +1203,7 @@ struct RequestLogTableRow: View {
                 .frame(width: LogColumns.time, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
-        .frame(height: 26)
+        .frame(height: LogRow.height)
         .background(rowBackground)
         .overlay(alignment: .leading) {
             if isSelected {
@@ -978,14 +1218,21 @@ struct RequestLogTableRow: View {
         // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
         // was the only interactive row in the window that composed none: a bare `.isButton` over
         // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
-        // "Unmatched"…) with nothing saying they were one request. The trait comes after the
+        // "Unmatched"…) with nothing saying they were one request. The traits come after the
         // element is formed, because a trait added to the children is a trait the element has
         // already passed over — and the row is a tap target rather than a `Button` in the first
         // place because a button would swallow the modifier chords the selection depends on.
         .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(rowTraits)
         .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
-        .accessibilityLabel(Self.spokenLabel(for: log))
+        .accessibilityLabel(
+            Self.spokenLabel(
+                for: log,
+                endpointName: endpointName,
+                scenarioName: scenarioName,
+                isSelected: isSelected
+            )
+        )
         // The menu attaches after the element is formed, exactly as the scenario row orders it —
         // and here that ordering is load-bearing, not stylistic. This menu used to sit before the
         // `.accessibilityElement(children: .ignore)` above, which collapses the accessibility of
@@ -1041,6 +1288,22 @@ struct RequestLogTableRow: View {
         }
     }
 
+    /// `.isButton` always, and `.isSelected` while the row is in the selection.
+    ///
+    /// Both halves of the selection are needed and they answer different questions. The trait is the
+    /// programmatic fact — what Accessibility Inspector reads and what an XCUITest can assert — and
+    /// the wording in ``spokenLabel(for:endpointName:scenarioName:isSelected:)`` is what is actually
+    /// *said*, because this table is a `LazyVStack` of tap targets rather than an AppKit table and
+    /// there is no row container above it to announce a selection on the row's behalf.
+    ///
+    /// It matters more here than anywhere else in the window: this is the app's only multi-select
+    /// surface, and the selection is precisely what a capture-to-journey acts on. Without it the
+    /// accent stripe down the row's leading edge is the *only* statement that a row is in the set,
+    /// which is no statement at all to somebody who is being read the panel.
+    var rowTraits: AccessibilityTraits {
+        isSelected ? [.isButton, .isSelected] : .isButton
+    }
+
     private var rowBackground: Color {
         if isSelected { return DSColors.accentSubtle }
         if isHovered { return DSColors.accentSubtle.opacity(0.6) }
@@ -1090,16 +1353,55 @@ struct RequestLogTableRow: View {
         DSStatusPill(statusCode: log.responseStatusCode)
     }
 
-    /// What VoiceOver reads for the row — same composition as `EndpointTrafficRow.spokenLabel`,
-    /// which is this row one panel over. `static` so `WorkspaceFeatureTests` can hold the three
-    /// arms without hosting a window.
-    nonisolated static func spokenLabel(for log: RequestLog) -> String {
+    /// What VoiceOver reads for the row: the request, what came back, what answered it, and whether
+    /// it is in the selection. `static` so `WorkspaceFeatureTests` can hold every arm without
+    /// hosting a window.
+    ///
+    /// It opens on `EndpointTrafficRow.spokenLabel`'s composition — method, path, then the status or
+    /// the failure — so the same request is announced the same way in both panels. It then says what
+    /// that panel has no room to: this table's endpoint and scenario columns, whose distinction is
+    /// the one the panel exists for. A row reading nothing after the status is a row where an em
+    /// dash meaning *"nothing is configured for this call"* and one meaning *"a journey answered
+    /// it"* are the same silence.
+    ///
+    /// The unnamed arms follow `endpointCell` exactly, including the last of them: an `.endpoint`
+    /// outcome with no name is an endpoint that answered and has since been renamed or deleted, the
+    /// cell draws an em dash, and there is no name left to speak.
+    nonisolated static func spokenLabel(
+        for log: RequestLog,
+        endpointName: String?,
+        scenarioName: String?,
+        isSelected: Bool
+    ) -> String {
+        var label = "\(log.method.rawValue) \(log.path)"
+
         if let code = log.responseStatusCode {
-            return "\(log.method.rawValue) \(log.path), status \(code)"
+            label += ", status \(code)"
+        } else if let failureLabel = log.failureLabel {
+            label += ", failed: \(failureLabel)"
+        } else {
+            label += ", no response"
         }
-        if let failureLabel = log.failureLabel {
-            return "\(log.method.rawValue) \(log.path), failed: \(failureLabel)"
+
+        if let endpointName {
+            label += ", endpoint \(endpointName)"
+        } else {
+            switch log.outcome {
+            case .unmatched: label += ", unmatched"
+            case .blockedByJourney: label += ", blocked by journey"
+            case .journey: label += ", answered by journey"
+            case .endpoint: break
+            }
         }
-        return "\(log.method.rawValue) \(log.path), no response"
+
+        if let scenarioName {
+            label += ", scenario \(scenarioName)"
+        }
+
+        if isSelected {
+            label += ", selected"
+        }
+
+        return label
     }
 }

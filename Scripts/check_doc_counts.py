@@ -13,7 +13,7 @@ counting something else. Most had drifted at least once before this file held th
     somebody remembers to.
 
   - **The operation count** — how many `CommandKind` cases the CLI and the control API expose. It is
-    stated in five places across four documents, and `DomainTests` used to assert it with a literal
+    stated in five places across five documents, and `DomainTests` used to assert it with a literal
     that had to be hand-edited alongside them. That assertion was removed as a hand-maintained
     mirror of a fact the type system already knows; this recomputes it from the enum instead, which
     is the same removal done in the direction that cannot go stale. The journey library's two
@@ -27,6 +27,14 @@ counting something else. Most had drifted at least once before this file held th
     carries the comment recording the mirror image of it, a `buildableFolders` line naming
     `Tests/JourneyFeatureTests` from the first commit with no directory behind it, which Tuist
     tolerated silently while the manifest read as though the journey UI had tests.
+
+  - **The suites that bind a port**, which is a list rather than a number and is the shape of claim
+    this repository keeps getting wrong. CONTRIBUTING.md and docs/ARCHITECTURE.md both name them in
+    a parenthesis, and both named two for several waves while `MimicTests` was standing a real
+    `ControlServer` up in `ComposedControlServerTests` — an enumeration presented as complete, gone
+    stale in the direction nobody notices, since the sentence still reads fine. It is recomputed
+    here from whatever in `Sources/` actually opens a listening socket, rather than from a list kept
+    beside the prose.
 
 It counts tests the way the README says it counts them: `@Test` declarations under `Tests/` and
 `func test…` methods under `MimicUITests/`. A parameterized case runs many times and is one
@@ -43,14 +51,18 @@ docstring is the same hand-maintained mirror the rest of this file exists to rem
     newly added suite looks like before anybody has written it into the table;
   - a suite folder that exists on disk and that neither manifest declares — or that a manifest
     declares and that does not exist;
+  - a suite that binds a port and is missing from a document's list of the suites that bind a port,
+    or named there without binding one;
   - `CommandKind` written in a shape that makes the count itself unreliable, because certifying a
     wrong number as right is worse than not checking.
 
 It never edits a document. It prints the true numbers, in the shape the documents state them, so
 whoever owns those files can paste them in.
 
-Stdlib only, no arguments. Paths resolve from this file's location, so it answers the same from
-anywhere.
+Stdlib only. Paths resolve from this file's location, so it answers the same from anywhere.
+`--self-test` is the one argument: it runs the port-binding comparison against fixtures written
+inside this file and exits non-zero if any of them comes out wrong, which is how you check that the
+comparison can still fail. Nothing in CI passes that flag today.
 """
 
 import pathlib
@@ -80,6 +92,9 @@ XCTEST = re.compile(r"^\s*(?:@MainActor\s+)?func test[A-Za-z0-9_]*\s*\(", re.M)
 # built at all.
 COMMAND_KIND = "Sources/Domain/Control/CommandKind.swift"
 MANIFESTS = ["Package.swift", "Project.swift"]
+# Where the port-binding check looks for a listener: production code only, so a test's own stub
+# cannot nominate itself as a server type.
+SOURCES = "Sources"
 # The journey library's two other counted claims: the template shelf is the `all` array — the list
 # `mimic journey templates` serves — and the match modes are `JourneyMatchMode`'s cases.
 JOURNEY_TEMPLATES = "Sources/Domain/Journeys/JourneyTemplates.swift"
@@ -88,6 +103,22 @@ JOURNEY_MODEL = "Sources/Domain/Models/Journey.swift"
 # shape — `path:` in Package.swift, `buildableFolders:` and `entitlements:` in Project.swift — and
 # each of them is a target naming a directory it owns, which is the fact being looked for.
 DECLARED_SUITE = re.compile(r'"Tests/([A-Za-z0-9_]+)')
+
+# How a listening socket is opened anywhere in this tree: Vapor's `server.start(address:)`, which
+# `MockServerEngine` and `ControlServer` each call once, both on `127.0.0.1`. Looking for the call
+# rather than for a list of type names is what makes a *new* server type count without anybody
+# adding it here — the failure this check exists to prevent, one level up.
+BIND_CALL = re.compile(r"\bserver\.start\(address:")
+# The declaration a bind sits inside. Both are top-level `public actor X {`; the pattern accepts the
+# other declaration kinds so a type that changes shape is still found rather than silently dropped.
+TYPE_DECLARATION = re.compile(r"^public (?:actor|struct|enum|(?:final )?class) ([A-Za-z0-9_]+)")
+# The sentence both documents use, deliberately identical in shape so one pattern reads both. The
+# names inside are backticked suite folders; the check compares that set, not its order.
+PORT_SUITE_SENTENCE = re.compile(r"Suites that bind a port\s*\(([^)]*)\)")
+PORT_SUITE_SITES = [
+    ("CONTRIBUTING.md", "tests paragraph"),
+    ("docs/ARCHITECTURE.md", "conventions list"),
+]
 
 # The documents this script reads. `.agents/skills/` holds two kinds of thing and the distinction is
 # what decides membership here: the repo-specific `mimic-*` skills were carved out of AGENTS.md and
@@ -290,6 +321,86 @@ def declared_suites():
     return found
 
 
+def binding_types():
+    """Every type in `Sources/` that opens a listening socket, with anything that makes the answer
+    untrustworthy.
+
+    Found rather than listed. A type binds a port when its body calls Vapor's
+    `server.start(address:)` — the one route to a socket in this tree — and the type is the nearest
+    top-level declaration above that call, which is how both of the current two are written
+    (`public actor MockServerEngine`, `public actor ControlServer`). A list of names here would be
+    one more hand-maintained mirror of the kind this file exists to remove, and would go stale
+    exactly when a new server type appeared — the moment the documents need checking most.
+
+    An empty result is a problem rather than an answer: it means the call has changed shape, and
+    "no suite binds a port" would then agree with any sentence at all.
+    """
+    types, problems = set(), []
+    for file in sorted((ROOT / SOURCES).rglob("*.swift")):
+        enclosing = None
+        for line in file.read_text().splitlines():
+            declared = TYPE_DECLARATION.match(line)
+            if declared:
+                enclosing = declared.group(1)
+            elif BIND_CALL.search(line):
+                if enclosing is None:
+                    problems.append(f"{file.relative_to(ROOT)}: a `server.start(address:)` call sits "
+                                    "above any top-level type declaration, so the type that binds "
+                                    "cannot be named — the suites-that-bind-a-port check would "
+                                    "silently miss whatever constructs it")
+                else:
+                    types.add(enclosing)
+    if not types:
+        problems.append(f"{SOURCES}/: no `server.start(address:)` call anywhere — nothing in this "
+                        "tree appears to bind a port, which is either false or a sign the call has "
+                        "changed shape; either way the documented list cannot be checked")
+    return types, problems
+
+
+def port_binding_suites(types):
+    """Suite folders under `Tests/` that construct one of those types.
+
+    Constructing the listener is the fact, not calling `start` on it: `MockServerEngineTests` binds
+    through `MockServerEngine()` and `ComposedControlServerTests` through `ControlServer(host:…)`,
+    and a suite that builds one has taken on the entitlement question whether or not the binding
+    line is in the same file. The word boundary is what keeps a stub named `StubControlServer(`
+    from counting.
+    """
+    constructors = {name: re.compile(rf"\b{re.escape(name)}\(") for name in types}
+    found = set()
+    for directory in sorted((ROOT / "Tests").iterdir()):
+        if not directory.is_dir():
+            continue
+        for file in directory.rglob("*.swift"):
+            text = file.read_text()
+            if any(pattern.search(text) for pattern in constructors.values()):
+                found.add(directory.name)
+                break
+    return found
+
+
+def port_binding_claims(texts, suites):
+    """Each document's list of the suites that bind a port, against the tree's answer.
+
+    Reported as prose rather than through `counted_claims`, because what goes wrong here is a
+    missing *name*, not a wrong number, and naming it is the whole of the fix.
+    """
+    for document, what in PORT_SUITE_SITES:
+        found = PORT_SUITE_SENTENCE.search(re.sub(r"\s+", " ", texts[document]))
+        if found is None:
+            yield (f"{document} ({what}): no longer says \"Suites that bind a port (…)\" — a "
+                   "document that has stopped naming them is exactly as stale as one naming the "
+                   "wrong set, and this check cannot see it go wrong from here")
+            continue
+        stated = set(re.findall(r"`([A-Za-z0-9_]+)`", found.group(1)))
+        for name in sorted(suites - stated):
+            yield (f"{document} ({what}): Tests/{name} binds a port and is not in the list — add "
+                   "it, and say what it does about the sandbox")
+        for name in sorted(stated - suites):
+            yield (f"{document} ({what}): names Tests/{name}, which constructs nothing that binds "
+                   "a port — remove it, or the reader is being pointed at the wrong suite")
+
+
 def claims(readme, counts, ui, portable, design, app, total):
     """Every number README.md states, paired with what the tree says it should be.
 
@@ -391,7 +502,52 @@ def counted_claims(texts, label, table, mention, expected, surface):
                    "number does not sit directly before the word")
 
 
+def self_test():
+    """Drives `port_binding_claims` over fixtures written here, and fails if one comes out wrong.
+
+    Every input is a literal — the sentences below, and a suite set of invented names. Neither
+    comes from `binding_types` or `port_binding_suites`, and that is the whole point: a check fed by
+    the function it is checking passes just as happily after that function is reverted, which is a
+    mistake this repository has shipped. Invented names rather than the real three so a fixture
+    cannot quietly start agreeing with the tree instead of with what is written here.
+    """
+    tree = {"AlphaTests", "BetaTests"}
+    cases = [
+        ("names both", "Suites that bind a port (`AlphaTests`, `BetaTests`) bind loopback only.", 0),
+        ("order does not matter",
+         "Suites that bind a port (`BetaTests`, `AlphaTests`) bind loopback only.", 0),
+        ("one missing", "Suites that bind a port (`AlphaTests`) bind loopback only.", 1),
+        ("both missing", "Suites that bind a port () bind loopback only.", 2),
+        ("one too many",
+         "Suites that bind a port (`AlphaTests`, `BetaTests`, `GammaTests`) bind loopback only.", 1),
+        ("wrapped across a line end",
+         "Suites that bind a port\n(`AlphaTests`, `BetaTests`) bind loopback only.", 0),
+        ("sentence gone", "Tests: Swift Testing for units.", 1),
+    ]
+
+    failures = []
+    for what, sentence, expected in cases:
+        texts = {document: sentence for document, _ in PORT_SUITE_SITES}
+        # One fixture stands in for both documents, so every case is reported once per site.
+        found = len(list(port_binding_claims(texts, tree))) // len(PORT_SUITE_SITES)
+        print(f"  {what:<28} {found} problem(s), expected {expected}")
+        if found != expected:
+            failures.append(f"{what}: reported {found} problem(s), expected {expected}")
+
+    if failures:
+        print("\nThe port-binding check is not behaving as written:")
+        for line in failures:
+            print(f"  {line}")
+        sys.exit("\nA checker that cannot fail is not a check.")
+    print("\nThe port-binding check reports what these fixtures expect.")
+
+
 def main():
+    if "--self-test" in sys.argv[1:]:
+        print("Port-binding comparison, against fixtures in this file:")
+        self_test()
+        return
+
     counts = suite_counts()
     ui = count("MimicUITests", XCTEST)
     portable = sum(counts[name] for name in PORTABLE)
@@ -401,7 +557,9 @@ def main():
     kinds, problems = operation_count()
     templates, template_problems = template_count()
     modes, mode_problems = match_mode_count()
-    problems += template_problems + mode_problems
+    listeners, listener_problems = binding_types()
+    problems += template_problems + mode_problems + listener_problems
+    binding = port_binding_suites(listeners)
     declared = declared_suites()
     texts = {document: (ROOT / document).read_text() for document in DOCS}
 
@@ -413,6 +571,8 @@ def main():
     print(f"  CommandKind cases {kinds} ({NUMBER_WORDS.get(kinds, kinds)}) — the operation count")
     print(f"  journey templates {templates} ({NUMBER_WORDS.get(templates, templates)}) · "
           f"match modes {modes} ({NUMBER_WORDS.get(modes, modes)})")
+    print(f"  binds a port: {', '.join(sorted(binding)) or '(none)'} "
+          f"— via {', '.join(sorted(listeners)) or '(no listener type found)'}")
 
     grouped = set(PORTABLE) | set(DESIGN_SYSTEM) | set(APP)
     for name in sorted(set(counts) - grouped):
@@ -435,6 +595,8 @@ def main():
         problems.append(f"Tests/{name} is named by {' and '.join(sorted(declared[name]))} and does "
                         "not exist on disk — a manifest naming a directory that is not there reads "
                         "as coverage that was never written")
+
+    problems += list(port_binding_claims(texts, binding))
 
     for what, stated, expected, note in claims(texts["README.md"], counts,
                                                ui, portable, design, app, total):

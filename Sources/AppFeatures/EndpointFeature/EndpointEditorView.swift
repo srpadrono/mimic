@@ -108,9 +108,9 @@ struct EndpointEditorView: View {
     @State private var delayError: String?
     @State private var isJSONValid = true
     @State private var showDeleteConfirmation = false
-    @State private var statusCommitTask: Task<Void, Never>?
-    @State private var bodyCommitTask: Task<Void, Never>?
-    @State private var headerCommitTask: Task<Void, Never>?
+    /// The edits that have been typed and not yet written — one object rather than three more
+    /// `@State` values, for the reason in `EndpointEditorPendingEdits`' own note.
+    @State private var pendingEdits: EndpointEditorPendingEdits
     /// Focus for the two fields that commit on blur rather than on every keystroke. A delay of "5"
     /// is a valid prefix of "500", so debouncing these would write a value nobody asked for.
     @FocusState private var isGroupTagFocused: Bool
@@ -139,7 +139,8 @@ struct EndpointEditorView: View {
         initialResponseBody: String,
         initialDelayString: String,
         initialGroupTag: String,
-        initialHeaders: [(String, String)]
+        initialHeaders: [(String, String)],
+        pendingEdits: EndpointEditorPendingEdits? = nil
     ) {
         self.endpoint = endpoint
         self.activeScenario = activeScenario
@@ -150,6 +151,10 @@ struct EndpointEditorView: View {
         _delayString = State(initialValue: initialDelayString)
         _groupTag = State(initialValue: initialGroupTag)
         _headers = State(initialValue: initialHeaders.map { HeaderEntry(key: $0.0, value: $0.1) })
+        // Passed in only where two view values have to share one store, which is what SwiftUI does
+        // for real: the editor carries no `.id(…)`, so the endpoint you click arrives as a new view
+        // value over the boxes the old one was using.
+        _pendingEdits = State(initialValue: pendingEdits ?? EndpointEditorPendingEdits())
     }
 
     var body: some View {
@@ -185,7 +190,7 @@ struct EndpointEditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DSColors.dominant)
         .onAppear { syncFromModel() }
-        .onChange(of: endpoint.id) { syncFromModel() }
+        .onChange(of: endpoint.id) { endpointSelectionChanged() }
         .onChange(of: endpoint.activeScenarioID) { syncFromModel() }
         .onChange(of: statusCodeString) { debounceStatusCode() }
         .accessibilityIdentifier("endpointEditor")
@@ -679,20 +684,53 @@ struct EndpointEditorView: View {
 
     // MARK: - Sync & Commit
 
+    /// What "settled" means for the three debounced fields. `debounceStatusCode` carries the
+    /// reasoning; the number lives here so the three cannot come apart by a keystroke.
+    private static let settling: Duration = .milliseconds(300)
+
+    /// What `.onChange(of: endpoint.id)` runs when the sidebar selection moves.
+    ///
+    /// The flush comes first, and it belongs here rather than inside `syncFromModel`.
+    ///
+    /// First, because the sync *is* what loses the edit: every assignment it makes trips an
+    /// `onChange`, and each handler opens by dropping the timer holding the value still being typed.
+    /// The `…IsDirty` guards below stop a sync from *scheduling* a write, which is a different half
+    /// of the problem and the only half they were ever able to see.
+    ///
+    /// Second, because `syncFromModel`'s other two callers must not flush. `onAppear` has nothing to
+    /// finish, and a change of *active scenario* has nowhere correct to put it:
+    /// `EndpointEditorActions.onUpdateScenario` addresses the active scenario of an endpoint rather
+    /// than a scenario by name, so once a different scenario is active the pending text would land on
+    /// one nobody typed it into. Dropping it there is the lesser of two bad answers and is what
+    /// already happens; see the seam note on `commit(body:)`.
+    ///
+    /// The scenario modifier usually fires on a selection change too, since a different endpoint
+    /// owns different scenarios — though not always: two endpoints that carry no scenarios at all
+    /// both hold a `nil` active id, and that state is legal (`ProjectValidator` refuses a missing id
+    /// only *beside* scenarios). Either way this modifier is the one that matters, and either order
+    /// is fine: an `onChange` action runs on the update *after* the assignment that triggered it, so
+    /// a sync the scenario modifier performs cannot have cancelled anything by the time this one
+    /// flushes.
+    func endpointSelectionChanged() {
+        pendingEdits.flush()
+        syncFromModel()
+    }
+
     /// Fills the fields from whatever the model currently holds.
     ///
     /// Every assignment here trips the `.onChange` handlers above, which cannot tell a character a
     /// person typed from one this method just wrote — so merely *selecting* an endpoint used to
-    /// schedule a write of the data it had that moment finished reading. Harmless when nothing else
-    /// happens, and a lost update when two endpoints are clicked inside the 300ms window: the write
-    /// scheduled for the first endpoint lands on the second.
+    /// schedule a write of the data it had that moment finished reading. The three `…IsDirty` guards
+    /// close that: a field filled from the model matches the model, so nothing is scheduled. A flag
+    /// raised around this method would not work, because SwiftUI runs an `onChange` action on the
+    /// *next* update, by which time a flag lowered on the way out of here has been lowered for some
+    /// time.
     ///
-    /// The suppression is in the three `debounce…` methods, each of which now asks whether the field
-    /// actually differs from the model before it schedules anything — see `statusCodeIsDirty`,
-    /// `headersAreDirty` and `bodyIsDirty`. A flag raised around this method would not work: SwiftUI
-    /// runs an `onChange` action on the *next* update, by which time a flag lowered on the way out of
-    /// here has been lowered for some time. Comparing against the model needs no flag, has no window
-    /// in which it is wrong, and is the guard `debounceStatusCode` was already carrying alone.
+    /// What those guards do not close — and what this note used to claim they did — is the opposite
+    /// direction. A handler *cancels* before it reaches its guard, so an edit that was still settling
+    /// when the fields changed underneath it was dropped by the sync that replaced it, and since
+    /// every keystroke restarts the timer, continuous typing lost the whole edit rather than its
+    /// tail. `endpointSelectionChanged()` finishes those edits before this method runs at all.
     private func syncFromModel() {
         guard let synced = Self.syncedValues(endpoint: endpoint, activeScenario: activeScenario) else { return }
         statusCodeString = synced.statusCodeString
@@ -708,11 +746,24 @@ struct EndpointEditorView: View {
     /// Writes the status code if it is one the server can serve, and says why not if it is not.
     ///
     /// Both callers reach here only once the value has settled — the debounce below, and Return,
-    /// which is a person saying "I have finished typing" in as many words.
+    /// which is a person saying "I have finished typing" in as many words. Dropping the timer first
+    /// is what stops the same value being written again 300ms later.
     func commitStatusCode() {
-        statusCommitTask?.cancel()
-        guard let code = Self.statusCodeValue(from: statusCodeString) else {
-            statusCodeError = Self.statusCodeValidationMessage(for: statusCodeString)
+        pendingEdits.cancel(.statusCode)
+        commit(statusCode: statusCodeString)
+    }
+
+    /// The write itself, taking the text rather than reading the field.
+    ///
+    /// A pending value is taken when it is typed, not read when it lands. `statusCodeString` is a
+    /// `@State` box the endpoint that replaces this one writes through, so a pending write that read
+    /// the field would say something different depending on whether the sync had happened yet — and
+    /// the whole business of this file is that it is about to. `actions` needs no such care: `self`
+    /// is a struct, so the copy a pending closure captured still addresses the endpoint the text was
+    /// typed into.
+    private func commit(statusCode text: String) {
+        guard let code = Self.statusCodeValue(from: text) else {
+            statusCodeError = Self.statusCodeValidationMessage(for: text)
             return
         }
         statusCodeError = nil
@@ -731,8 +782,8 @@ struct EndpointEditorView: View {
     /// waits for is the moment the value stops being a prefix and starts being an answer, so the
     /// message rides the timer that is already there: no second timer, and no state that says
     /// "typing" separately from "committing".
-    private func debounceStatusCode() {
-        statusCommitTask?.cancel()
+    func debounceStatusCode() {
+        pendingEdits.cancel(.statusCode)
 
         // Raised only at a settle point, but kept current on every keystroke once it is up: a
         // message that is already on screen has to track the field under it, and it comes down the
@@ -746,42 +797,63 @@ struct EndpointEditorView: View {
         let pendingStatusCode = statusCodeString
         guard Self.statusCodeIsDirty(pendingStatusCode, against: activeScenario) else { return }
 
-        statusCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            guard pendingStatusCode == statusCodeString else { return }
-            commitStatusCode()
+        // The text goes in by value and `self` goes in as a struct copy, which together are what
+        // make a flush land where it should: the copy keeps the `actions` this view was built with,
+        // so the write still addresses the endpoint the text was typed into once the selection has
+        // moved. Only the `@State` boxes are shared with the view value that replaces it.
+        pendingEdits.schedule(.statusCode, after: Self.settling) {
+            commit(statusCode: pendingStatusCode)
         }
     }
 
+    /// See `commitStatusCode()` for why the timer is dropped first.
     func commitHeaders() {
-        let dict = Self.headersDictionary(from: headers.map { ($0.key, $0.value) })
-        actions.onUpdateScenario(nil, dict, nil)
+        pendingEdits.cancel(.headers)
+        commit(headers: headers.map { ($0.key, $0.value) })
     }
 
-    private func debounceHeaders() {
-        headerCommitTask?.cancel()
-        guard Self.headersAreDirty(headers.map { ($0.key, $0.value) }, against: activeScenario) else { return }
+    private func commit(headers entries: [(String, String)]) {
+        actions.onUpdateScenario(nil, Self.headersDictionary(from: entries), nil)
+    }
 
-        headerCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            commitHeaders()
+    func debounceHeaders() {
+        pendingEdits.cancel(.headers)
+
+        let pendingHeaders = headers.map { ($0.key, $0.value) }
+        guard Self.headersAreDirty(pendingHeaders, against: activeScenario) else { return }
+
+        // See `debounceStatusCode` for why the rows and the actions are both taken now.
+        pendingEdits.schedule(.headers, after: Self.settling) {
+            commit(headers: pendingHeaders)
         }
     }
 
+    /// See `commitStatusCode()` for why the timer is dropped first.
     func commitBody() {
-        actions.onUpdateScenario(nil, nil, Self.bodyValue(from: responseBody))
+        pendingEdits.cancel(.body)
+        commit(body: responseBody)
     }
 
-    private func debounceBody() {
-        bodyCommitTask?.cancel()
-        guard Self.bodyIsDirty(responseBody, against: activeScenario) else { return }
+    /// The one write that is still addressed loosely, and the seam worth knowing about.
+    ///
+    /// `onUpdateScenario` names an endpoint and lets `AppState` resolve "whichever scenario is
+    /// active", which is why a pending edit survives a change of *selection* — neither endpoint's
+    /// active scenario moves — and cannot survive a change of *active scenario*. Making it survive
+    /// that too means the actions carrying a scenario id, which is a change to `CenterPaneView`'s
+    /// closures and to `AppState.updateActiveScenario`.
+    private func commit(body text: String) {
+        actions.onUpdateScenario(nil, nil, Self.bodyValue(from: text))
+    }
 
-        bodyCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            commitBody()
+    func debounceBody() {
+        pendingEdits.cancel(.body)
+
+        let pendingBody = responseBody
+        guard Self.bodyIsDirty(pendingBody, against: activeScenario) else { return }
+
+        // See `debounceStatusCode` for why the text and the actions are both taken now.
+        pendingEdits.schedule(.body, after: Self.settling) {
+            commit(body: pendingBody)
         }
     }
 
@@ -900,6 +972,80 @@ struct EndpointEditorView: View {
 }
 
 // MARK: - Supporting Types
+
+/// The edits the editor has scheduled and not yet written, one slot per debounced field.
+///
+/// A reference type, and it is `@State`'s semantics that force it. The editor carries no `.id(…)` —
+/// see `CenterPaneView` — so clicking a second endpoint hands the *same* `@State` boxes to a new
+/// view value. A pending write therefore has to be reachable from a struct that no longer knows the
+/// endpoint it was typed into, which three more `@State` values cannot do: whatever the old view
+/// wrote into them, the new view reads. One object behind them can be handed over intact.
+///
+/// The write is a closure rather than a value, because writing it is the whole point of holding it:
+/// each one closes over the view value that scheduled it, so it addresses the endpoint whose fields
+/// were on screen at the time. `.onChange(of: endpoint.id)` runs the closure from the *new* body —
+/// Apple documents that, and it is why the modifier has a two-value form — so a flush that read
+/// `actions` off the view at that moment would move the old endpoint's text onto the new one, which
+/// is worse than losing it.
+@MainActor
+final class EndpointEditorPendingEdits {
+    /// The three fields that commit on a timer. Delay and group tag commit on blur rather than on a
+    /// timer, so they hold no pending value in this store.
+    ///
+    /// `nonisolated` because `AppFeatures` compiles under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+    /// and this enum is nested in a `@MainActor` type: without it, `CaseIterable`'s `allCases` is a
+    /// main-actor-isolated static, which is a conformance this repository has already been bitten by
+    /// twice. Nothing here is isolated — the only reader is `flush()`, which is on the main actor
+    /// anyway — so it costs nothing.
+    nonisolated enum Field: Hashable, CaseIterable {
+        case statusCode
+        case headers
+        case body
+    }
+
+    private var writes: [Field: () -> Void] = [:]
+    private var timers: [Field: Task<Void, Never>] = [:]
+
+    /// Holds `write` for `settling` and then makes it, unless the field is rescheduled, cancelled or
+    /// flushed first. Every keystroke reschedules, so a field carries at most one edit — which is
+    /// also why an edit lost this way was the whole of the typing rather than its tail.
+    ///
+    /// The timer holds this object rather than referring to it weakly, which is deliberate on both
+    /// counts. The cycle it makes is bounded — the task resumes 300ms later at the latest, and both
+    /// exits below drop the handle that closed it — and a `weak` capture would mean an edit typed
+    /// just before the editor went away silently going away with it, which is the defect this type
+    /// exists to end rather than a variant of it worth keeping.
+    func schedule(_ field: Field, after settling: Duration, write: @escaping () -> Void) {
+        cancel(field)
+        writes[field] = write
+        timers[field] = Task { @MainActor in
+            try? await Task.sleep(for: settling)
+            guard !Task.isCancelled else { return }
+            self.fire(field)
+        }
+    }
+
+    /// Drops what `field` was going to write, without writing it. Every reschedule opens with this,
+    /// and so does every commit that writes immediately.
+    func cancel(_ field: Field) {
+        timers.removeValue(forKey: field)?.cancel()
+        writes.removeValue(forKey: field)
+    }
+
+    /// Makes every write still outstanding, and stops the timers that were going to make them later.
+    func flush() {
+        for field in Field.allCases {
+            fire(field)
+        }
+    }
+
+    /// Taken out of the slot before it is made, so a write that reaches back in here — through the
+    /// model change it causes, and the `onChange` that follows — cannot find itself still pending.
+    private func fire(_ field: Field) {
+        timers.removeValue(forKey: field)?.cancel()
+        writes.removeValue(forKey: field)?()
+    }
+}
 
 private struct HeaderEntry: Identifiable, Equatable {
     let id = UUID()

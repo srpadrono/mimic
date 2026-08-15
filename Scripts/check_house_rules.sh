@@ -10,8 +10,10 @@
 # Each message below cites where its rule is *explained*, and those citations are load-bearing: a
 # developer meeting one of these for the first time needs the failure that motivated it, not the
 # prohibition alone. AGENTS.md was reduced to a router when its depth moved into `.agents/skills/`,
-# so four of the seven now point at a skill and three still point at AGENTS.md itself, which keeps
-# the "Non-negotiable patterns" section. When a rule's prose moves, move the citation with it.
+# so most of these now name a skill, and the rest name AGENTS.md itself, which keeps the
+# "Non-negotiable patterns" section. No count is written here on purpose — a tally beside a list the
+# reader can see is the hand-maintained mirror this repository keeps deleting. When a rule's prose
+# moves, move the citation with it.
 #
 # bash, not zsh like the other scripts in this directory: the Linux CI job runs inside the `swift:6.2`
 # container, which ships bash and no zsh at all, and this check is meant to run there before anything
@@ -21,10 +23,11 @@
 # what Debian and Ubuntu install as `awk`, and therefore what that container has — runs it.
 #
 # `--self-test` checks the scanner instead of the tree: every rule plants its own probes in a
-# throwaway file and asserts the scanner reports every one of them. CI runs it beside the real check.
-# It exists because the defect described above `STRIP_COMMENTS` survived review of the script that had
-# it, and a linter with no test for its own scanner is a linter that can report "no violations" for
-# any reason it likes.
+# throwaway file and asserts the scanner reports every one of them, and one case beyond the rules
+# asserts that a tree the scanner cannot reach fails the run rather than matching nothing. CI runs it
+# beside the real check. It exists because the defect described above `STRIP_COMMENTS` survived review
+# of the script that had it, and a linter with no test for its own scanner is a linter that can report
+# "no violations" for any reason it likes.
 #
 # Adding a rule: the prohibition must be decidable by a grep, the tree must already obey it, and it
 # must carry probes — the canonical spelling *and* at least two of the evasions described above
@@ -153,9 +156,11 @@ BEGIN { ml = 0; mlterm = "" }
 '
 
 # A stripped mirror of the tree, filled in as the rules ask for files and reused after that, so the
-# six rules cost one pass of the lexer rather than six. Lazily rather than up front on purpose: a
-# mirror built by a separate `prepare` step is a mirror a seventh rule can be pointed past — it would
-# grep a file that was never stripped, find nothing, and report the rule as clean.
+# rules cost one pass of the lexer between them rather than one each. Lazily rather than up front on
+# purpose: a mirror built by a separate `prepare` step is a mirror the next rule can be pointed
+# past — it would grep a file that was never stripped, find nothing, and report the rule as clean.
+# The count is not written down anywhere here for the same reason; `rules_checked` counts the
+# `report` calls, and a number in a comment is a number that goes stale the next time one is added.
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mimic-house-rules.XXXXXX")"
 # One EXIT trap covers every way this script ends, which is worth having checked rather than assumed
 # now that `--self-test` plants probe files here. A clean run, a rule firing (`exit 1`) and the
@@ -180,14 +185,41 @@ strip_file() {
 }
 
 # Prints `path:line:text` for every match of $1 in the stripped copies of the .swift files under $2….
+# Returns non-zero, naming the tree, when one of them cannot be read.
+#
+# That return is why the listing is a file rather than the `< <(find …)` process substitution this
+# used to read from. A process substitution's exit status is invisible to `set -euo pipefail`, so with
+# `Sources` renamed in a scratch clone the run put seven `find: 'Sources': No such file or directory`
+# lines on stderr, matched nothing anywhere, and printed "9 house rules checked, no violations." to
+# stdout with exit 0. The trees are named in arrays at the top of this file and they do move — `Tools`
+# was outside every rule's scope until somebody added it — so a rename that misses one here has to be
+# louder than a clean run, not quieter.
 scan() {
     local pattern=$1
     shift
+
+    local tree
+    for tree in "$@"; do
+        if [ ! -d "$tree" ]; then
+            printf 'house rules: "%s" is not a directory, so this rule scanned nothing.\n' "$tree" >&2
+            return 1
+        fi
+    done
+
+    # The other half of the same guarantee, and the reason `pipefail` earns its place in the `set`
+    # line: an unreadable subdirectory lists most of the tree and leaves find non-zero, and a scan
+    # that could not read everything must not be able to report no violations.
+    local listing="$WORK_DIR/scan-listing"
+    if ! find "$@" -type f -name '*.swift' | sort > "$listing"; then
+        printf 'house rules: could not list the .swift files under %s.\n' "$*" >&2
+        return 1
+    fi
+
     local file
     while IFS= read -r file; do
         strip_file "$file"
         grep -nE "$pattern" "$STRIPPED/$file" | sed "s|^|$file:|" || true
-    done < <(find "$@" -type f -name '*.swift' | sort)
+    done < "$listing"
 }
 
 # Checks the scanner rather than the tree, for one rule.
@@ -241,8 +273,15 @@ selftest_rule() {
     done <<< "$probes"
     probes_planted=$((probes_planted + planted))
 
+    # `if !` rather than leaving the status to `set -e`: `scan` runs inside a command substitution, so
+    # its failure reaches this line as an assignment's exit status and in no other form, and a status
+    # nobody reads is the whole shape of the defect the reachability case below covers.
     local hits
-    hits="$(scan "$pattern" "$dir")"
+    if ! hits="$(scan "$pattern" "$dir")"; then
+        selftest_failures=$((selftest_failures + 1))
+        printf '  FAIL %s — the scanner could not read the probe directory it was handed.\n' "${reason%%:*}"
+        return 0
+    fi
     if [ -n "$allow" ]; then
         hits="$(printf '%s\n' "$hits" | grep -vE "$allow" || true)"
     fi
@@ -272,6 +311,28 @@ selftest_rule() {
     printf '       got:      %s\n' "${found:-nothing}"
 }
 
+# Checks that the scanner can *reach* a tree, which no rule's probes can: `selftest_rule` plants them
+# in a directory it has just created, so every case above proves a pattern over a tree that is there
+# by construction and not one of them can observe a tree that is not.
+#
+# The case is the defect itself. With the loop fed from `< <(find …)`, scanning a directory that does
+# not exist printed find's complaint to stderr, produced no hits, and returned 0 — which is how a run
+# with `Sources` missing reported no violations across nine rules. Put the process substitution back
+# and this goes red; that is the only thing it is here to do.
+selftest_missing_tree() {
+    local absent="$WORK_DIR/selftest/tree-that-is-not-there"
+    local output status=0
+    output="$(scan 'anything' "$absent" 2>&1)" || status=$?
+    if (( status != 0 )); then
+        printf '  ok   reachability — a scanned tree that is not there fails the run\n'
+        return 0
+    fi
+    selftest_failures=$((selftest_failures + 1))
+    printf '  FAIL reachability — scanning a directory that does not exist reported success\n'
+    printf '       tree:     %s\n' "$absent"
+    printf '       got:      %s\n' "${output:-nothing}"
+}
+
 violations=0
 rules_checked=0
 selftest_failures=0
@@ -294,8 +355,13 @@ report() {
         return 0
     fi
 
+    # `if !` for the reason given at the same line in `selftest_rule`: the status is the only channel
+    # a failed scan has, and this is the one place a real run reads it.
     local hits
-    hits="$(scan "$pattern" "$@")"
+    if ! hits="$(scan "$pattern" "$@")"; then
+        printf '\nThe rule above ran over no tree at all, so nothing in this run has been checked.\n' >&2
+        exit 1
+    fi
     if [ -n "$allow" ]; then
         hits="$(printf '%s\n' "$hits" | grep -vE "$allow" || true)"
     fi
@@ -363,6 +429,26 @@ report \
     @SwiftUI . AppStorage("inspectorWidth") var inspectorWidth = 280.0' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
+# The other half of the same family, and the reason it is a rule rather than a preference: SwiftUI's
+# pre-`@Observable` wrappers are not interchangeable with it. A view holding an `@Observable` model in
+# `@StateObject` does not compile (the wrapper requires `ObservableObject`), and the conversion that
+# makes it compile — conforming the model to `ObservableObject` and publishing its fields — reverts
+# the property-level invalidation `@Observable` exists to give, so one view re-rendering on every
+# field is the *quiet* outcome. `@EnvironmentObject` is in the list because a rule that names two of
+# three spellings is a rule people route around without meaning to; the modern spelling of that one
+# is `@Environment(Model.self)`, which this cannot match — the `Object` is required.
+#
+# No occurrence of any of the three exists in any scanned tree, so this starts green and stays cheap.
+report \
+    'AGENTS.md "Non-negotiable patterns": @Observable for new code — @StateObject/@ObservedObject/@EnvironmentObject need ObservableObject, and going back to it trades property-level invalidation for a view that re-renders on every published field.' \
+    "@${WS}([A-Za-z_][A-Za-z0-9_]*${DOT})?(StateObject|ObservedObject|EnvironmentObject)" \
+    '' \
+    '@StateObject private var workspace = ProjectWorkspace()
+    @ObservedObject var workspace: ProjectWorkspace
+    @SwiftUI.EnvironmentObject var workspace: ProjectWorkspace
+    @SwiftUI . StateObject private var workspace = ProjectWorkspace()' \
+    "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
+
 # Unanchored on the left on purpose, which is what makes the module-qualified spelling free: the
 # `Dispatch.` in `Dispatch.DispatchQueue.main.asyncAfter` sits outside the match rather than in front
 # of it. Still no trailing `\(` — a bare reference to the method is as much a violation as a call, and
@@ -426,6 +512,35 @@ report \
     Image(systemName: "gear").font(SwiftUI.Font.system(size: 7))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
+# The rule the comment above `STRIP_COMMENTS` predicted this file would grow into — "a house rule can
+# legitimately be about a literal", and this is the literal it named.
+#
+# Production sources only, and that scope is the rule rather than an economy: `ControlServerTests`
+# lists `0.0.0.0` and `192.168.1.10:8787` among the `Host` values the server must refuse, in a string
+# literal the comment stripper deliberately keeps. Pointing this at `Tests/` would report the test
+# that proves the rule as a breach of it.
+#
+# Written as "the bind address must be 127.0.0.1" rather than as a list of forbidden addresses, which
+# is why the allow-list carries the permitted value instead of an exemption. A ban on `0.0.0.0` alone
+# would be walked past by `"::"`, by `"localhost"` — which resolves to whatever the resolver says,
+# including an address the app under test can route to — and above all by
+# `hostname = "\(configuredHost)"`, the shape widening actually takes: nobody types `0.0.0.0`, they
+# make it configurable. Anything that is not the literal loopback address is reported, including an
+# interpolation, and the four call sites in `Sources` are all the exact string.
+#
+# Whitespace-tolerant on both sides, unlike the two exemptions above it. Those name one line each and
+# should have to come back through here when that line is respaced; this one names a *value*, and a
+# reformat of `ControlServer.swift` turning the tree red would teach only that the check is noise.
+report \
+    'Skill mimic-control-surface, references/loopback-security.md: never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
+    "hostname${WS}[=(]${WS}\"" \
+    'hostname[[:space:]]*[=(][[:space:]]*"127\.0\.0\.1"' \
+    'application.http.server.configuration.hostname = "0.0.0.0"
+    try await application.server.start(address: .hostname ("0.0.0.0", port: port))
+    application.http.server.configuration . hostname = "::"
+    application.http.server.configuration.hostname = "\(configuredHost)"' \
+    "${PRODUCTION_SOURCES[@]}"
+
 # UI tests only, and this one genuinely is: `waitForExistence` is an XCUIElement method, and no target
 # under `Tests/` so much as imports XCTest (`grep -rln 'import XCTest' Tests` returns nothing — they
 # are Swift Testing suites throughout). Widening it would add a tree the pattern cannot occur in.
@@ -475,14 +590,16 @@ report \
     "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
 if (( self_test )); then
+    selftest_missing_tree
+
     if (( selftest_failures > 0 )); then
-        printf '\n%d of %d rule(s) failed their probes — the scanner is broken, not the tree.\n' \
+        printf '\n%d self-test failure(s) across %d rules and the reachability case — the scanner is broken, not the tree.\n' \
             "$selftest_failures" "$rules_checked"
         exit 1
     fi
     printf '%d spellings of %d rules planted and caught — canonical, spaced and module-qualified;\n' \
         "$probes_planted" "$rules_checked"
-    printf 'comments, string literals and multi-line literals told apart.\n'
+    printf 'comments, string literals and multi-line literals told apart; a missing tree fails the run.\n'
     exit 0
 fi
 

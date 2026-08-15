@@ -8,7 +8,13 @@ description: Mimic's Definition of Done for view and navigation changes, and the
 When adding or modifying views or navigation:
 
 1. **Add accessibility identifiers** to all interactive elements and key labels used for assertions.
-2. **Write or update XCUITests** in `MimicUITests/MimicUITests.swift` covering the changed flows.
+2. **Write or update XCUITests** covering the changed flows. `MimicUITests/` is four files, not one,
+   so put the test where its feature already lives: `MimicUITests.swift` (welcome, workspace,
+   endpoint editor, inspector, request log), `JourneyUITests.swift` (the journeys navigator and its
+   sheets), `ControlPlaneIsolationTests.swift` (the discovery file a run must not touch), and
+   `AppLaunchSupport.swift`, which is not a suite at all — it is `UITestApp`, home of the
+   launch-and-activate contract and `waitForAny` that the rules below make mandatory. Page objects
+   sit at the top of the file whose flows use them.
 3. **Run the UI test suite** and verify it passes before considering the work complete.
 4. **Keep test-only code out of production sources** — use `MIMIC_DEFAULTS_SUITE` for UserDefaults
    isolation, a **separate store** for persistence isolation, and `#if DEBUG` for launch hooks.

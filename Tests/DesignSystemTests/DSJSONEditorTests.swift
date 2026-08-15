@@ -201,34 +201,18 @@ struct DSColorsTests {
     }
 }
 
-// MARK: - DSServerState tests
+// MARK: - Removed: `DSServerStateTests`
 
-@Suite("DSServerState")
-struct DSServerStateTests {
-
-    @Test("Labels are correct")
-    func labels() {
-        #expect(DSServerState.idle.label == "Idle")
-        #expect(DSServerState.running.label == "Running")
-        #expect(DSServerState.stopped.label == "Stopped")
-        #expect(DSServerState.error.label == "Error")
-    }
-
-    @Test("Idle and stopped share the same color")
-    func idleAndStoppedSameColor() {
-        #expect(DSServerState.idle.color == DSServerState.stopped.color)
-    }
-
-    @Test("Running color is green")
-    func runningIsGreen() {
-        #expect(DSServerState.running.color == DSColors.serverRunning)
-    }
-
-    @Test("Error color is red")
-    func errorIsRed() {
-        #expect(DSServerState.error.color == DSColors.serverError)
-    }
-}
+// Four cases over `DSServerState`: its four labels, and the colour each state mapped to.
+//
+// The type is gone, and the suite is the reason it is worth saying why here rather than only in
+// `DSColors`. `DSServerState`'s only consumer was `DSStatusBadge`, which nothing in the window
+// drew — so a green suite over it was evidence about code the user never ran, which is the shape of
+// failure this repository has already paid for once at module scale. Three of the four cases also
+// restated a switch arm as an equality against the very token that arm returns.
+//
+// `DSColors` carries the note on what bringing the type back would have to answer first: five
+// states rather than four, since the server this app runs can be starting and stopping.
 
 // MARK: - Removed: `DSPanelHeaderTests`
 //
@@ -255,4 +239,5 @@ struct DSServerStateTests {
 //   token. That is `headerRenders`'s intent — both shapes survive layout — plus the cross-panel
 //   alignment neither case here checked.
 //
-// Nothing is left to move, which is why this file now ends at `DSServerStateTests`.
+// Nothing is left to move, which is why this file now ends at `DSColorsTests` and two notes about
+// what used to follow it.

@@ -48,6 +48,6 @@ Load the one that matches what you are doing — they are independent.
 | File | Read it when |
 |------|--------------|
 | [`references/ci.md`](references/ci.md) | Editing the workflow, adding a gate, or explaining why a job is red |
-| [`references/cli-e2e.md`](references/cli-e2e.md) | Running `run_cli_e2e.sh`, or touching discovery-file/Linux-portability code |
+| [`references/cli-e2e.md`](references/cli-e2e.md) | Running `run_cli_e2e.sh` — `ci.sh` gates on it and the macOS job runs it non-gating — or touching discovery-file/Linux-portability code |
 | [`references/actor-isolation.md`](references/actor-isolation.md) | Changing `SWIFT_DEFAULT_ACTOR_ISOLATION`, adding a target, or reading a concurrency error that only appears in Xcode |
 | [`references/real-inputs.md`](references/real-inputs.md) | Adding a feature that parses external input (HAR, OpenAPI, Swagger, live traffic) |

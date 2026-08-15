@@ -105,9 +105,9 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release COD
 
 After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && tuist generate`.
 
-**Which scheme runs what, what each CI job covers, and why no gate runs `run_cli_e2e.sh`** are in
-the **mimic-build-and-test** skill. Read it before editing a workflow or concluding a scheme cannot
-test.
+**Which scheme runs what, what each CI job covers, and what `run_cli_e2e.sh` needs before it can
+find the CLI a gate just built** are in the **mimic-build-and-test** skill. Read it before editing a
+workflow or concluding a scheme cannot test.
 
 ## Project Configuration
 
@@ -171,8 +171,19 @@ persistence is injected as a port; the engine owns no long-term app state. Full 
 
 Every operation that is a function of the open project — endpoints, scenarios, journeys, project
 metadata — is applied by `ProjectCommandExecutor` in Domain, as
-`(ControlCommand, inout MockProject) -> ControlResult`. The CLI, the HTTP control API, and the app
-window all call it.
+
+```swift
+public static func apply(
+    _ command: ControlCommand,
+    to project: inout MockProject
+) throws -> ProjectCommandOutcome?
+```
+
+The CLI, the HTTP control API, and the app window all call it. That return type is doing two jobs,
+and a shorter spelling of it describes a different function: the Optional is the **decline** signal —
+`nil` means "host-scoped, keep looking", not a failure, which is the partition the rest of this
+document describes — and `ProjectCommandOutcome` pairs the `ControlResult` with `didMutate`, which is
+how a host knows whether to persist and push to the engine rather than doing both after a read.
 
 **When adding an operation, add a `ControlCommand` case and handle it in the executor.** Do not
 implement it a second time in `AppState` or in a CLI command — a rule written twice is a rule that
@@ -228,6 +239,24 @@ structured concurrency; all UI updates on `@MainActor`. State that a request mut
 cursor above all — must be read and written inside a single actor hop, never read-then-write.
 
 **Unit tests:** Swift Testing for new units (`async throws`); XCTest only for UI.
+
+**A test may never build its fixture with the function under test.** Write the fixture as literals.
+A fixture derived from the mechanism moves *with* the mechanism, so reverting the mechanism leaves
+the test green over the bug it was written for — the test cannot fail, and its passing is evidence
+about nothing. `makeStubDatabase` in `MimicTests` is the case that cost this repository a wave: it
+planted the WAL sidecars through the same `UITestSupport.sidecarURLs` the reset deletes through, so
+reverting `sidecarURLs` to its old `appendingPathExtension` form moved the fixture and the assertion
+together and the reset test stayed green while every real `-wal` survived the reset. It shipped under
+a comment defending the self-reference, with the causality backwards.
+
+The check is one question, and it is worth asking of every test you write: **if I revert the
+mechanism this test is for, does this test go red?** If the fixture comes from the mechanism, the
+answer is no. Two habits follow — pin the literal values the mechanism is supposed to produce in a
+test of their own (`sidecarNamesAreTheOnesSQLiteWrites`), and, where a checker is a script rather
+than a type, give it a `--self-test` over invented inputs that never asks the functions under test
+what the right answer is (`check_house_rules.sh --self-test`, `check_doc_counts.py --self-test`).
+Negative controls are worth labelling as such in the test's own comment, so a later reader does not
+mistake a test that is green by construction for one that is guarding something.
 
 **Visual:** sentence case inside the window, Title Case in the menu bar; every interactive control
 answers the pointer; sizes come from the `DS*` ladders, never from a literal. The reasoning, the

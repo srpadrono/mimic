@@ -69,7 +69,7 @@ docker run --rm -v "$PWD":/src -w /src swift:6.2 \
 ## Test gates
 
 ```bash
-# Everything, in one go — build, all suites, Release gate, UI tests
+# Everything, in one go — build, all suites, Release gate, UI tests, CLI end-to-end
 ./Scripts/ci.sh
 
 # Every unit suite in one pass, through the aggregate scheme
@@ -100,18 +100,26 @@ only way to run a unit suite. Prefer it because it covers everything in one pass
 others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
 generated.
 
-**The CLI end-to-end check is not part of `./Scripts/ci.sh`, on purpose.**
+**The CLI end-to-end check is part of `./Scripts/ci.sh` now, as its last step.** It can still be run
+on its own:
 
 ```bash
 ./Scripts/run_cli_e2e.sh   # launches Mimic headless against a throwaway store
 ```
 
-It covers a seam nothing else does — process launch, discovery, real sockets — and it exercises
-whatever `mimic` and `Mimic.app` it can *find*, which by default is the installed build rather than
-the one you just compiled: neither `./Scripts/ci.sh` nor the commands above pass `-derivedDataPath`,
-so the products land outside the checkout while the script looks for `*Build/Products*` inside it and
-then falls back to `PATH`. Point `MIMIC_APP_PATH` at your build and put the matching `mimic` on
-`PATH`, or the green result is about a release you are not working on.
+It covers a seam nothing else does — process launch, discovery, real sockets. What kept it out of the
+gates was that it exercised whatever `mimic` and `Mimic.app` it could *find*, which by default is the
+installed build rather than the one you just compiled: no `xcodebuild` step passed
+`-derivedDataPath`, so the products landed outside the checkout while the script looks for
+`*Build/Products*` inside it, and it fell back to `PATH`. `./Scripts/ci.sh` builds into
+`.artifacts/DerivedData` inside the checkout and hands the script `MIMIC_BIN` and `MIMIC_APP_PATH`
+from the Debug products it just produced, checking both exist first.
+
+Run on its own after the commands above, it resolves both by searching again — those commands pass no
+`-derivedDataPath` either — so set `MIMIC_BIN` and `MIMIC_APP_PATH` yourself, or the green result is
+about a release you are not working on. The macOS CI job runs it too, but does not gate on it yet:
+its first round there passed and its second failed at the discovery-file assertion, for a reason the
+app makes invisible — see the step's own comment in `.github/workflows/ci.yml`.
 
 It is safe to run on a machine with Mimic open, which it did not use to be: it stops the instance it
 launched by the pid `mimic app start` reported, and it exports `MIMIC_CONTROL_FILE="$WORK/control.json"`
@@ -162,7 +170,12 @@ is worth a test, it belongs behind a testable boundary (`resolve`, `plan`, `Proj
 
 **Tests:** Swift Testing (`@Test` / `#expect`) for units; XCTest with page objects for UI. Isolate
 with `-MimicResetForTesting` and a per-run `MIMIC_DEFAULTS_SUITE`. Suites that bind a port
-(`MockServerEngineTests`, `ControlPlaneTests`) disable the sandbox through their own entitlements.
+(`MockServerEngineTests`, `ControlPlaneTests`, `MimicTests`) bind loopback only. The first two
+disable the sandbox through entitlements of their own; `MimicTests` declares none, and its one
+socket — `ComposedControlServerTests`, standing `ControlServer` on `AppControlHost` — takes port `0`
+so the OS picks it. `Scripts/check_doc_counts.py` recomputes that list from the tree, because this
+sentence named two of the three for several waves while `ComposedControlServerTests` was already
+there.
 
 **Test-only code is Debug-only.** Launch hooks live behind `#if DEBUG` so they never ship.
 

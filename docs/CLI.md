@@ -27,16 +27,33 @@ and inside `mimic app start`, the app-not-found failure and the app-never-answer
 condition that was being reported under two different codes. The contract stays at four values, so no
 existing branch has to learn a new one.
 
-Every response uses one envelope, so a caller branches on a single boolean and never has to guess
-whether the payload is an error:
+**On success, stdout carries the result and nothing else** — no envelope to unwrap, so a script
+reads the field it wants directly:
 
-```json
-{ "ok": true,  "result": { "journeyStatus": { … } } }
-{ "ok": false, "error":  { "code": "journey.notFound", "message": "…" } }
+```bash
+mimic journey status | jq -e '.journeyStatus.isComplete'
 ```
 
+```json
+{ "journeyStatus": { "journeyName": "Session expiry", "isComplete": false, "totalSteps": 3, … } }
+```
+
+**On failure, stdout is empty.** The diagnosis goes to stderr as one plain line — `journey.notFound:
+No journey matches name "Session expiry".` — and the exit code above says which kind of failure it
+was. There is no `ok: false` object to test: **branch on the exit code**, and read stderr for the
+sentence.
+
+The `{"ok": …}` envelope is the *HTTP* wire shape rather than the CLI's. `POST /v1/command` answers
+`{"ok": true, "result": {…}}` or `{"ok": false, "error": {…}}`, and `mimic` is the thing that
+unwraps it: it prints `result` on success, and turns `ok: false` into exit `4` with `code: message`
+on stderr. A verb that issues two calls — `journey create --activate`, `journey import --activate` —
+checks the first for `ok` before anything is printed, so a failed one leaves stdout empty rather than
+half-written. An agent talking to the API directly does branch on that boolean — see
+[Talking to the API directly](#talking-to-the-api-directly).
+
 Error codes are stable dotted `subject.reason` strings (`project.noneOpen`, `endpoint.notFound`,
-`server.portInUse`), so a script matches on them without parsing English.
+`server.portInUse`), so a script matches on them without parsing English: as `error.code` on the
+wire, and at the head of the stderr line from the CLI.
 
 JSON keys are sorted and slashes are not escaped, so repeated calls diff cleanly. Add `--pretty` for
 indented output and `--format text` for a human-readable rendering that carries the same information.
@@ -367,9 +384,19 @@ Commands encode as a single-key object named after the operation, with labelled 
                                 "failure": { "timeout": { "holdMs": 5000 } } } } }
 ```
 
+**This is where the envelope lives.** Every route answers in one of two shapes — `health` and a
+refusal included — so a caller branches on a single boolean and never has to guess whether the
+payload is an error:
+
+```json
+{ "ok": true,  "result": { "journeyStatus": { … } } }
+{ "ok": false, "error":  { "code": "journey.notFound", "message": "…" } }
+```
+
 Error codes also map onto HTTP statuses (`401` missing or wrong token, `403` browser-shaped request,
 `404` not found, `400` bad request, `409` precondition not met), so `curl --fail` behaves sensibly
-without parsing JSON.
+without parsing JSON. The refusal still arrives as an envelope with the code in it, which names the
+problem far better than the status number does.
 
 The control API binds `127.0.0.1` only, never the interface the app under test can route to, and
 requires a per-instance token on every route. Loopback alone is not the boundary — a web page can

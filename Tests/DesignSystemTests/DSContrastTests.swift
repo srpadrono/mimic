@@ -361,10 +361,11 @@ struct DSContrastTests {
     /// ΔL\* 1.8. Then those tokens moved again to survive a selected row (see `warningText`'s own
     /// comment), and the filled pill stopped binding anything here: the current values read
     /// 5.10–5.15 filled on the stripe and clear even AppKit's ΔL\* 3.5 at 4.76–4.82. What the
-    /// ceiling falls back to is the token that set it first — the base amber is still a plain word
-    /// on these rows (the import review's "Body dropped" flag), it clears the stripe by 0.02, and
-    /// it crosses under AA at ΔL\* 0.9. The base readings are kept alongside because those tokens
-    /// never moved; only what draws a status code did, twice.
+    /// ceiling falls back to is the token that set it first — the base amber clears the stripe by
+    /// 0.02 and crosses under AA at ΔL\* 0.9. No row draws it on a stripe today; the import
+    /// review's row flags, the last that did, are `warningText` now, so the wall is held against
+    /// the token's contract rather than against a word on screen. The base readings are kept
+    /// alongside because those tokens never moved; only what draws a status code did, twice.
     ///
     /// **Finding 1 — "ΔL\* 0.70 in light mode and 1.40 in dark".** Light is 0.70. Dark is **1.83**.
     /// 1.40 is what the *light* stripe measures against `dominant` (1.39), so it reads like the wrong
@@ -702,9 +703,10 @@ struct DSContrastTests {
     /// the row — so the pill sweep was measuring every bed except the two hardest. On them the
     /// first-generation text tokens read 4.14–4.48 filled, all under the floor the sweep was
     /// holding them to on the other five. The same two washes are reached three more ways with a
-    /// method badge aboard: the import review's hover, and the `dsHoverHighlight` the sidebar and
-    /// the journey step row both take. Everything here is composited onto ``DSColors/secondary``,
-    /// which is the surface each composite is drawn over everywhere it appears.
+    /// method badge aboard: the import review's hover, which takes the 60% one, and the
+    /// `dsHoverHighlight` the sidebar and the journey step row both take at full strength. Everything
+    /// here is composited onto ``DSColors/secondary``, which is the surface each composite is drawn
+    /// over everywhere it appears.
     ///
     /// One bed is deliberately absent and named in `methodColor(for:)`: the sidebar is a
     /// `List(selection:)` at `.listStyle(.sidebar)`, so AppKit paints its selected row with
@@ -1037,28 +1039,144 @@ struct DSContrastTests {
         #expect(isClose(put.blue, number.blue, within: componentTolerance))
     }
 
-    /// A self-tinted composite the window draws, and the one that was fine all along:
-    /// `DSStatusBadge`'s error capsule.
+    // MARK: - Removed: `errorCapsuleLabelClearsAA`
+
+    // It measured `labelPrimary` on a 16% tint of `destructive` — `DSStatusBadge`'s error capsule —
+    // and recorded that the composite was safe for the reason the method badge and the status pill
+    // were not: the word on it was not its fill's own hue, so the tint moved the background away
+    // from the ink rather than toward it.
+    //
+    // The badge is gone; nothing in the window drew it. This suite's rule is to enumerate the beds
+    // from the code that draws them, and a reading of a composite no screen shows is the same claim
+    // about nothing that the four `DSServerState` cases were. The argument it recorded survives in
+    // the pill and badge sweeps, which are about the case where the ink *is* the fill's hue and is
+    // therefore the case that can fail.
+
+    // MARK: - The bed a sheet's own list is drawn on
+
+    /// Every surface a row of a sheet's own list lands on, resolved and flattened.
     ///
-    /// It fills with `state.color.opacity(0.16)` exactly as the method badge does, and it is safe for
-    /// the reason the badge and the status pill were not — the word on it is `labelPrimary`, not the
-    /// fill's own hue, so the tint moves the background *away* from the ink instead of toward it. That
-    /// is the whole difference, stated where it can fail: worst reading 10.60 in light and 7.89 in
-    /// dark (the selected row, both times — the beds the pill sweep gained), against the 3.41 the
-    /// badge's worst hue measured before it was corrected.
+    /// `ImportReviewList` is the one list this app draws inside a sheet, and it stripes and washes
+    /// its rows the way the request log does: nothing on an even row, ``DSColors/rowStripe`` on an
+    /// odd one, and an accent wash under the pointer. What differs is what sits *under* all of them.
     ///
-    /// Only `.error` fills — the quiet states draw on the bare surface — so `destructive` is the only
-    /// hue this composite ever takes.
-    @Test("The error capsule is safe because its label is not its fill's own colour")
-    func errorCapsuleLabelClearsAA() throws {
+    /// It is not ``DSColors/surfaceElevated``. `pillSurfaces(in:)` says so in its own note and
+    /// declines to invent a wash over that token for exactly this row; a SwiftUI sheet on macOS is
+    /// drawn on the system's material — white in light, near `#1E1E1E` in dark, which is the
+    /// background `accentTextClearsAAInDark` had to reach for to explain the accent comment's dark
+    /// trio — and `surfaceElevated` appears nowhere in `AppFeatures`. The dark material is therefore
+    /// a model rather than a token, which is why the readings taken on it below are held to the
+    /// floor rather than pinned to a hundredth.
+    ///
+    /// **Both accent washes are here, and the pair is the point.** 60% of ``DSColors/accentSubtle``
+    /// is what the request log paints under the pointer and full strength is what it reserves for a
+    /// selected row, so a list that answers hover with the full wash puts its text on the harder of
+    /// the two beds. Carrying both means the readings do not have to be re-derived when a list moves
+    /// between them, and means the worst bed a sheet can paint is always in the sweep.
+    private func sheetSurfaces(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
+        let material: RGBA
+        switch appearance {
+        case .light: material = try resolve(Color.white, in: .light)
+        case .dark: material = RGBA(red: 30.0 / 255, green: 30.0 / 255, blue: 30.0 / 255, alpha: 1)
+        }
+        let stripe = try resolve(DSColors.rowStripe, in: appearance).composited(over: material)
+        let hovered = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)
+            .composited(over: material)
+        let selected = try resolve(DSColors.accentSubtle, in: appearance).composited(over: material)
+        return [
+            ("sheet material", material),
+            ("striped row on a sheet", stripe),
+            ("hovered row on a sheet", hovered),
+            ("selection wash on a sheet", selected)
+        ]
+    }
+
+    /// **A token that clears AA on a panel can still fail on a sheet, and this is where that is
+    /// asked. It is also the measurement that moved the import review's row off the base amber.**
+    ///
+    /// Three things on a candidate row were the base amber as plain words: the "Binary body" and
+    /// "Body dropped" flags, and the size label of a response too large to bring in. The duplicate
+    /// flag beside them was already `warningText` on a 12% tint of itself, for a reason its call site
+    /// gave in numbers — "the base amber reads 3.96:1 on a panel and 4.11 on the elevated surface
+    /// this sheet is". Both reproduce, and both are readings of the *filled* composite. The plain
+    /// words were a different question, and this is where it was put.
+    ///
+    /// The answer is why all four take `warningText` now. On the material the sheet actually paints
+    /// the plain base amber does clear — but the worst of the four beds is a row washed at selection
+    /// strength, at **4.52**: 0.02 above the floor, and the smallest margin anything in this file
+    /// passes on. Against the `surfaceElevated` token the same reading is **4.17**, and 4.43 even at
+    /// the gentler hover strength the row settled on, so both fail. What decides that row is the
+    /// choice of *surface* rather than the choice of token — and the readability of a flag should not
+    /// turn on which material a sheet turns out to have. All three are pinned, so painting this sheet
+    /// with the palette's sheet token has to fail here rather than be discovered on screen.
+    ///
+    /// The base amber is still swept as a plain word rather than dropped from the sweep, because it
+    /// is still the token any plain word on a plain surface takes and a sheet is where it comes
+    /// closest to failing as one.
+    ///
+    /// The filled arm is swept beside it because it is what decides the *token*. `warning`
+    /// self-tinted reads 4.46, 4.26, 4.10 and 3.89 across the four beds and misses on every one;
+    /// `warningText` clears them all with better than half a point. That is the finding the status
+    /// pill's sweep made, restated on beds `pillSurfaces(in:)` does not carry.
+    @Test("The amber on a sheet's own rows clears AA plain, and only warningText clears it filled")
+    func amberOnASheetsOwnRows() throws {
         for appearance in Appearance.allCases {
-            for surface in try pillSurfaces(in: appearance) {
-                let capsule = try resolve(DSColors.destructive.opacity(0.16), in: appearance)
-                    .composited(over: surface.colour)
-                let reading = try contrast(DSColors.labelPrimary, on: capsule, in: appearance)
-                #expect(reading >= 7.0, "error capsule, \(surface.name), \(appearance): \(reading)")
+            for bed in try sheetSurfaces(in: appearance) {
+                let plain = try contrast(DSColors.warning, on: bed.colour, in: appearance)
+                let word = try contrast(DSColors.warningText, on: bed.colour, in: appearance)
+                let filled = try selfTintedReading(DSColors.warningText, on: bed.colour, in: appearance)
+                #expect(plain >= 4.5, "plain warning, \(bed.name), \(appearance): \(plain)")
+                #expect(word >= 4.5, "plain warningText, \(bed.name), \(appearance): \(word)")
+                #expect(filled >= 4.5, "filled warningText, \(bed.name), \(appearance): \(filled)")
             }
         }
+
+        // Light, where the amber has the furthest to go, pinned bed by bed in `sheetSurfaces` order.
+        // The filled `warning` column is the one that fails, and it is here rather than in a comment
+        // because it is the argument for the token the duplicate flag uses.
+        let readings: [(bed: String, plain: Double, word: Double, filledBase: Double, filledText: Double)] = [
+            ("sheet material", 5.24, 7.09, 4.46, 5.91),
+            ("striped row on a sheet", 4.98, 6.74, 4.26, 5.65),
+            ("hovered row on a sheet", 4.79, 6.49, 4.10, 5.44),
+            ("selection wash on a sheet", 4.52, 6.13, 3.89, 5.16)
+        ]
+        for (index, bed) in try sheetSurfaces(in: .light).enumerated() {
+            let expected = readings[index]
+            #expect(bed.name == expected.bed)
+            let plain = try contrast(DSColors.warning, on: bed.colour, in: .light)
+            let word = try contrast(DSColors.warningText, on: bed.colour, in: .light)
+            let filledBase = try selfTintedReading(DSColors.warning, on: bed.colour, in: .light)
+            let filledText = try selfTintedReading(DSColors.warningText, on: bed.colour, in: .light)
+            #expect(isClose(plain, expected.plain, within: ratioTolerance), "\(bed.name): \(plain)")
+            #expect(isClose(word, expected.word, within: ratioTolerance), "\(bed.name): \(word)")
+            #expect(isClose(filledBase, expected.filledBase, within: ratioTolerance), "\(bed.name): \(filledBase)")
+            #expect(isClose(filledText, expected.filledText, within: ratioTolerance), "\(bed.name): \(filledText)")
+            #expect(filledBase < 4.5, "\(bed.name): base amber survives its own tint at \(filledBase)")
+        }
+
+        // The two figures `ImportReviewList` quotes for the duplicate pill: the filled composite on a
+        // panel and on the `surfaceElevated` token.
+        let panel = try resolve(DSColors.secondary, in: .light)
+        let sheetToken = try resolve(DSColors.surfaceElevated, in: .light)
+        let filledOnPanel = try selfTintedReading(DSColors.warning, on: panel, in: .light)
+        let filledOnToken = try selfTintedReading(DSColors.warning, on: sheetToken, in: .light)
+        #expect(isClose(filledOnPanel, 3.96, within: ratioTolerance))
+        #expect(isClose(filledOnToken, 4.11, within: ratioTolerance))
+
+        // And the readings that say which surface this row is on, which is the distinction the whole
+        // test turns on: the *plain* amber on a washed row over that same token fails at either
+        // strength, where over the system material it clears at both. This pair is what moved the
+        // row's three plain words onto `warningText` — a flag whose readability depends on which
+        // material a sheet turns out to have is a flag drawn in the wrong ink — and it is kept so
+        // that painting the sheet with the palette's sheet token still has to fail here.
+        let washedToken = try resolve(DSColors.accentSubtle, over: DSColors.surfaceElevated, in: .light)
+        let hoveredToken = try resolve(DSColors.accentSubtle.opacity(0.6), over: DSColors.surfaceElevated, in: .light)
+        let plainOnWashedToken = try contrast(DSColors.warning, on: washedToken, in: .light)
+        let plainOnHoveredToken = try contrast(DSColors.warning, on: hoveredToken, in: .light)
+        #expect(isClose(plainOnWashedToken, 4.17, within: ratioTolerance))
+        #expect(isClose(plainOnHoveredToken, 4.43, within: ratioTolerance))
+        #expect(plainOnWashedToken < 4.5)
+        #expect(plainOnHoveredToken < 4.5)
     }
 
     // MARK: - DSButton

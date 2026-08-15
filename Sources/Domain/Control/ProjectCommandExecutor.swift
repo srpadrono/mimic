@@ -182,7 +182,7 @@ public enum ProjectCommandExecutor {
         case let .journeyAddTemplate(templateID, name):
             guard let template = JourneyTemplates.template(id: templateID) else {
                 throw ControlError(
-                    code: "journeyTemplate.notFound",
+                    code: .journeyTemplateNotFound,
                     message: "No journey template with id \"\(templateID)\". "
                         + "Available: \(JourneyTemplates.all.map(\.id).joined(separator: ", "))."
                 )

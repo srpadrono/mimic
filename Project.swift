@@ -342,6 +342,12 @@ let project = Project(
             dependencies: [
                 .target(name: "Mimic"),
                 .target(name: "AppFeatures"),
+                // Declared for `ComposedControlServerTests`, which stands the shipped pairing up —
+                // `ControlServer` on `AppControlHost` — over a loopback socket. The module is
+                // reachable through the two edges above whether or not it is named here; naming it
+                // is what stops that from being an implicit transitive import, which
+                // SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY exists to refuse.
+                .target(name: "ControlPlane"),
             ]
         ),
     ]

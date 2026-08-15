@@ -1,14 +1,38 @@
-# `run_cli_e2e.sh`: what it needs, and why no gate runs it
+# `run_cli_e2e.sh`: what it needs, and what runs it
 
-It covers a seam nothing else does — process launch, discovery file, real sockets — and `ci.sh`
-still does not run it. That is deliberate and the reason is written into both `ci.sh` and
-`.github/workflows/ci.yml`: **it cannot find the CLI those gates just built.** No `xcodebuild` step
-in either passes `-derivedDataPath`, so the products land in DerivedData outside the checkout while
-the script looks for `*Build/Products*` *inside* it, then falls back to whatever `mimic` is on
-`PATH` — an installed build, not this one. `AppLauncher.resolveExecutable` picks the *app* the same
-way, independently (`MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`), so
-wiring it up means exporting two paths, both pointing at what the run just built. A green e2e against
-an installed build says nothing about the working tree.
+It covers a seam nothing else reaches — a real process launch, the discovery file on disk, a real
+control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)` called in
+process — and both `ci.sh` and the macOS job now run it. `ci.sh` runs it last; the macOS job runs it
+after the UI suite and before `Build (Release)`, so the Debug products it drives are the only ones
+in that directory.
+
+What kept it out was never safety, it was that **it could not find the CLI those gates had just
+built.** No `xcodebuild` step in either passed `-derivedDataPath`, so the products landed in
+DerivedData outside the checkout while the script looks for `*Build/Products*` *inside* it, and it
+fell through to whatever `mimic` was on `PATH` — an installed build, about which a green run says
+nothing. `AppLauncher.resolveExecutable` picks the *app* the same way and independently
+(`MIMIC_APP_PATH`, `/Applications/Mimic.app`, `~/Applications/Mimic.app`), so wiring it up meant
+naming two paths, not one. Both callers now hold one `DERIVED_DATA` — `.artifacts/DerivedData`,
+inside the checkout — and pass it to **every** `xcodebuild` step, because those builds are shared and
+pointing one of them somewhere new makes the rest re-resolve and rebuild into the old location. Each
+then exports `MIMIC_BIN` and `MIMIC_APP_PATH` at `$DERIVED_DATA/Build/Products/Debug`, and checks
+both exist before the script starts, so "the products are not where this caller thinks" cannot arrive
+later disguised as a failed assertion. `MIMIC_BIN` from the environment now wins over the script's
+own `find`.
+
+**`ci.sh` gates on it; the macOS step does not yet.** The first round on a runner passed end to end
+in four seconds, the flag came off on that evidence, and the very next round failed — with every
+other step green. It fails at the discovery-file assertion, and the reason it is not fit to gate is
+what that failure looks like from outside: `ControlServer.start` binds the socket *before* it writes
+the file, so `mimic app start` reports the instance reachable while nothing has been advertised yet,
+and a failed advertisement is deliberately non-fatal — the error goes to the application's own
+logger, and `AppLauncher.launch` gives the child process `FileHandle.nullDevice` for stdout **and**
+stderr on every launch, headless or not, so that logger writes into nothing. (The redirection is not
+a headless behaviour and never was: a launcher that inherited stdout would interleave the app's
+logging into the JSON an agent is parsing, which is true with a window open too.) The condition is
+unobservable by construction, so the script now reports which of the two causes it was (advertised
+at the shared path, or advertised nowhere) and the step stays non-gating until the cause is fixed.
+`ci.sh` gates from the start, because a laptop failure is one you can read on the spot.
 
 What it is no longer is dangerous, and that is a recent change worth knowing because the old
 behaviour is what kept it out of the docs' recommended path:

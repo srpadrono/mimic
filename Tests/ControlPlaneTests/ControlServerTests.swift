@@ -168,6 +168,59 @@ struct ControlServerTests {
         }
     }
 
+    /// The rest of the mapping, over the wire.
+    ///
+    /// `errorsMapToStatuses` above pins one code per class, which left the arms that hold *several*
+    /// codes each covered by whichever one it happened to name. That mattered while
+    /// `ControlServer.httpStatus` switched over string literals it kept its own copies of: five of
+    /// the six `*.notFound` codes reached `404` only through a suffix rule nothing exercised, and the
+    /// `409` arm listed four codes with one of them asserted. The switch is over ``ControlErrorCode``
+    /// now, so a rename cannot break the mapping — but a *reclassification* still can, and that is
+    /// what this holds.
+    ///
+    /// Every code here is read back from the enum rather than typed as a literal, for the same
+    /// reason the server stopped typing them.
+    @Test("Each family of error code answers with its own status")
+    func errorFamiliesMapToStatuses() async throws {
+        try await Self.withServer { baseURL, _ in
+            // A precondition the host reports rather than the executor, and the second member of the
+            // 409 arm.
+            let noJourney = try await Self.post(.journeyStatus, baseURL: baseURL)
+            #expect(noJourney.status == 409)
+            #expect(noJourney.response.error?.code == ControlErrorCode.noActiveJourney.rawValue)
+
+            _ = try await Self.post(.projectCreate(name: "Checkout", port: nil), baseURL: baseURL)
+            _ = try await Self.post(
+                .endpointCreate(name: nil, method: .get, path: "/login", spec: nil),
+                baseURL: baseURL
+            )
+            _ = try await Self.post(.journeyCreate(name: "Retry", spec: nil), baseURL: baseURL)
+
+            // One command per subject in the not-found family. Each resolves its parent successfully
+            // first, so a 404 here is about the leaf named in the code.
+            let missing: [(ControlErrorCode, ControlCommand)] = [
+                (.endpointNotFound, .endpointGet(endpoint: .route(.get, "/nope"))),
+                (.scenarioNotFound, .scenarioDelete(endpoint: .route(.get, "/login"), scenario: .name("nope"))),
+                (.journeyNotFound, .journeyGet(journey: .name("nope"))),
+                (.journeyStepNotFound, .journeyStepRemove(journey: .name("Retry"), step: .index(9))),
+                (.journeyTemplateNotFound, .journeyAddTemplate(templateID: "no-such-template", name: nil)),
+            ]
+
+            for (code, command) in missing {
+                let reply = try await Self.post(command, baseURL: baseURL)
+                #expect(reply.status == 404, "\(code.rawValue) answered \(reply.status)")
+                #expect(reply.response.error?.code == code.rawValue)
+            }
+
+            // And the fallback: a failure Mimic itself owns is a 500, so a script can tell "you asked
+            // for something impossible" from "this instance is broken". The fixture declining a
+            // host command it does not implement is the reachable case of that here.
+            let unimplemented = try await Self.post(.serverStart(port: nil), baseURL: baseURL)
+            #expect(unimplemented.status == 500)
+            #expect(unimplemented.response.error?.code == ControlErrorCode.internalFailure.rawValue)
+        }
+    }
+
     // MARK: - Lifecycle reentrancy
 
     /// `stop()` clears `app` and *then* awaits the shutdown, and an actor admits another call at that

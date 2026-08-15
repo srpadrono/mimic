@@ -204,6 +204,106 @@ struct ControlErrorCodeTests {
         #expect(project.activeJourneyID == before.activeJourneyID, "duplicating does not activate")
     }
 
+    // MARK: - The vocabulary itself
+
+    /// `ControlErrorCode`'s raw values are the wire contract, pinned by value rather than by
+    /// construction.
+    ///
+    /// Nothing else can pin them. The enum is what `ControlServer.httpStatus` switches over, so the
+    /// status mapping now follows a rename automatically — which is the whole reason the codes became
+    /// a type — and that is exactly what makes a rename invisible to every other test in the
+    /// repository: rename `project.noneOpen` and the producers, the mapping and every `#expect` that
+    /// reads the code back off a response all move together, while a caller's `if code ==
+    /// "project.noneOpen"` in a shell script silently stops matching.
+    ///
+    /// So these are spelled out. Changing one should mean editing this list, which is the cost a
+    /// published contract is supposed to have. `docs/CLI.md` names the same strings.
+    @Test("The published codes are exactly these strings")
+    func codesAreTheirPublishedSpellings() {
+        // Keyed by case and checked against `allCases`, rather than a list of `#expect`s and a count:
+        // a count is a hand-edited mirror of something the type already knows, and the failure it
+        // produces names a number instead of the case somebody forgot.
+        let published: [ControlErrorCode: String] = [
+            .noProjectOpen: "project.noneOpen",
+            .projectNotFound: "project.notFound",
+            .endpointNotFound: "endpoint.notFound",
+            .scenarioNotFound: "scenario.notFound",
+            .journeyNotFound: "journey.notFound",
+            .journeyStepNotFound: "journeyStep.notFound",
+            .journeyTemplateNotFound: "journeyTemplate.notFound",
+            .noActiveJourney: "journey.noneActive",
+            .serverBusy: "server.busy",
+            .serverPortInUse: "server.portInUse",
+            .serverStartFailed: "server.startFailed",
+            .invalidRequest: "request.invalid",
+            .undecodableRequest: "request.undecodable",
+            .unauthorized: "request.unauthorized",
+            .forbiddenOrigin: "request.forbiddenOrigin",
+            .persistenceFailure: "persistence.failure",
+            .internalFailure: "internal.failure",
+            .encodingFailure: "internal.encoding",
+        ]
+
+        for code in ControlErrorCode.allCases {
+            guard let expected = published[code] else {
+                Issue.record("\(code) has no published spelling here, so its wire string is unpinned")
+                continue
+            }
+            #expect(code.rawValue == expected)
+        }
+    }
+
+    /// Every failure this module can produce, driven through `ControlErrorCode(rawValue:)`.
+    ///
+    /// This is the half `ControlServer` depends on: its `switch` answers `500` for any code it does
+    /// not recognise, and "does not recognise" now means "is not a declared case". A factory that
+    /// spells its code by hand — the shape all of these had — would map to `500` the moment its
+    /// string and the enum's disagreed, so the assertion is not that the strings are pretty but that
+    /// nothing here builds a code the server has never heard of.
+    @Test("Every failure Domain produces carries a code from the declared vocabulary")
+    func everyProducedCodeIsDeclared() throws {
+        struct Underlying: Error, LocalizedError {
+            var errorDescription: String? { "the store would not open" }
+        }
+
+        var produced: [ControlError] = [
+            .noProjectOpen,
+            .projectNotFound(.name("nope")),
+            .endpointNotFound(.route(.get, "/nope")),
+            .scenarioNotFound(.name("nope")),
+            .journeyNotFound(.name("nope")),
+            .journeyStepNotFound(.index(9)),
+            .noActiveJourney,
+            .serverBusy,
+            .serverPortInUse(port: 8080),
+            .serverStartFailed("the engine declined"),
+            .persistenceFailure(Underlying()),
+            .invalid("no"),
+            .emptyProjectName,
+            .projectReferenceRequired,
+            .unauthorized,
+            .forbiddenOrigin,
+            .validation(Underlying()),
+            .internalFailure("no arm for this command"),
+        ]
+
+        // The one code produced by the executor rather than by a factory, so it is reached the way a
+        // caller reaches it.
+        if let templateFailure = Self.failure(
+            .journeyAddTemplate(templateID: "no-such-template", name: nil),
+            on: Self.project
+        ) {
+            produced.append(templateFailure)
+        }
+
+        for error in produced {
+            #expect(
+                ControlErrorCode(rawValue: error.code) != nil,
+                "\(error.code) is not a declared ControlErrorCode, so ControlServer answers 500 for it"
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     /// Applies `command` and returns the `ControlError` it threw, recording an issue if it did not

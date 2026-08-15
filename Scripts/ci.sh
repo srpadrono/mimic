@@ -64,6 +64,17 @@ step() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 # the script on the spot.
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mimic-ci.XXXXXX")"
 
+# The same path the macOS job sets, and every xcodebuild below passes it for the same reason: the
+# end-to-end step at the bottom resolves the binary it drives with
+# `find "$ROOT_DIR" … -path '*Build/Products*'`, which matches nothing while the products sit in
+# `~/Library/Developer/Xcode/DerivedData`. Held in one variable rather than repeated four times.
+#
+# It costs a full rebuild the first time and nothing after that — `.artifacts/` survives between runs
+# — and it stops this script and Xcode.app invalidating each other's incremental state, since the two
+# no longer share a build directory. `.gitignore` already covers `.artifacts/` and any directory named
+# `DerivedData`.
+DERIVED_DATA=".artifacts/DerivedData"
+
 run_step() {
     local step_name=$1 filter=$2
     shift 2
@@ -155,6 +166,7 @@ step "Build (Debug)"
 run_step build-debug "error:|warning:|BUILD" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
   -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath "$DERIVED_DATA" \
   CODE_SIGN_IDENTITY=- build
 
 # Coverage rides along with the unit suites, with the same two flags and the same bundle path the
@@ -168,6 +180,7 @@ mkdir -p .artifacts/coverage
 run_step test-units "error:|✘|Test run with|TEST (SUCCEEDED|FAILED)" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
   test -destination 'platform=macOS' -skip-testing:MimicUITests \
+  -derivedDataPath "$DERIVED_DATA" \
   -enableCodeCoverage YES \
   -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
   CODE_SIGN_IDENTITY=-
@@ -186,7 +199,8 @@ python3 Scripts/update_readme_coverage.py \
 step "Release build gate"
 run_step build-release "error:|BUILD" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-  -configuration Release CODE_SIGN_IDENTITY=- build
+  -configuration Release -derivedDataPath "$DERIVED_DATA" \
+  CODE_SIGN_IDENTITY=- build
 
 # UI tests do run in CI now. The macOS job pre-authorises UI automation with
 # `automationmodetool enable-automationmode-without-authentication`, which is the piece that used to
@@ -199,6 +213,7 @@ step "UI tests"
 run_step test-ui "error:|Test Case|TEST (SUCCEEDED|FAILED)" \
   xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
   test -destination 'platform=macOS' -only-testing:MimicUITests \
+  -derivedDataPath "$DERIVED_DATA" \
   CODE_SIGN_IDENTITY=-
 
 # Last locally, first in CI — deliberately different, because the two runs answer different questions.
@@ -233,7 +248,7 @@ Scripts/check_house_rules.sh
 # declarations per folder and fails if any number README states has drifted, printing the true ones.
 #
 # It settles the operation count the same way, from `CommandKind` rather than from anybody's memory
-# of everywhere it is written down; and it fails on a folder under `Tests/` that neither
+# of the five places it is written down; and it fails on a folder under `Tests/` that neither
 # manifest declares, because a suite no build target names is a suite nobody runs and it looks
 # exactly like one that does.
 #
@@ -245,6 +260,12 @@ Scripts/check_house_rules.sh
 # no Swift involved. The README's coverage section still works the other way because populating it
 # needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
 step "Documented counts"
+# The self-test first, exactly as the house-rules step two above does it, and for the same reason: a
+# checker whose comparison has quietly stopped comparing reports "every documented count agrees with
+# the tree" and exits 0, which is the shape of every false gate this repository has shipped. Its
+# fixtures are literal sentences and an invented suite set, so it never asks the functions under test
+# what the right answer is.
+python3 Scripts/check_doc_counts.py --self-test
 python3 Scripts/check_doc_counts.py
 
 # The third document check, and the newest. AGENTS.md was reduced to a router when it passed 800
@@ -258,29 +279,30 @@ python3 Scripts/check_doc_counts.py
 step "Skill layout"
 python3 Scripts/check_skills.py
 
-# Deliberately NOT run here: ./Scripts/run_cli_e2e.sh
+# The end-to-end check, which used to be listed here as deliberately *not* run.
 #
-# CONTRIBUTING.md lists it beside these gates, and it covers a seam nothing else does — process
-# launch, discovery, real sockets. What used to keep it out was that its cleanup trap called
-# `mimic app stop`, which reads the shared `control.json` and SIGTERMs whatever pid it names: on a
-# machine with Mimic open, running it quit the developer's own instance. That is fixed — it now kills
-# the pid `mimic app start` reported and writes its discovery file inside its own temporary directory
-# via MIMIC_CONTROL_FILE — so what is left is not a safety problem but a plumbing one, in two parts:
+# What kept it out was plumbing rather than safety: it resolves the CLI with
+# `find "$ROOT_DIR" … -path '*Build/Products*'` and the app through
+# `AppLauncher.resolveExecutable` (`MIMIC_APP_PATH`, `/Applications/Mimic.app`,
+# `~/Applications/Mimic.app`), so with no `-derivedDataPath` anywhere it found neither and fell back
+# to whatever `mimic` was on PATH — an installed build, about which a green run says nothing.
+# `DERIVED_DATA` above answers both, and both are named here so this run drives what this run built.
 #
-#   - **It cannot find a CLI this script built.** No xcodebuild step here passes `-derivedDataPath`,
-#     so the products land in the user's DerivedData, outside the checkout, while the script looks for
-#     `find "$ROOT_DIR" … -path '*Build/Products*'`. The only thing that writes that shape inside the
-#     tree is `Scripts/package_release.sh`, under `.artifacts/build/DerivedData`. Failing that, the
-#     script falls back to whatever `mimic` is on PATH — which is an *installed* build, not this one.
-#   - **The app is resolved separately from the CLI.** `AppLauncher.resolveExecutable` tries
-#     `MIMIC_APP_PATH`, `/Applications/Mimic.app`, then `~/Applications/Mimic.app`. Wiring this up
-#     means exporting two paths, not one, and both have to point at what this run just built rather
-#     than at whatever is installed — otherwise a green e2e says nothing about the working tree.
-#
-# So run it knowingly, when you have touched the CLI, the control plane or the launcher:
-#
-#   ./Scripts/run_cli_e2e.sh
-#
-# The matching note is in .github/workflows/ci.yml, where the same two paths are the blocker.
+# It is the only thing in this script that exercises process launch, the discovery file and real
+# sockets, and it is safe to run beside a developer's own Mimic: it signals only the pid
+# `mimic app start` reported, and `MIMIC_CONTROL_FILE` keeps its discovery file inside its own
+# temporary directory rather than overwriting the shared one.
+step "CLI end-to-end (launch, discovery, real sockets)"
+PRODUCTS="$ROOT_DIR/$DERIVED_DATA/Build/Products/Debug"
+if [[ ! -x "$PRODUCTS/mimic" || ! -d "$PRODUCTS/Mimic.app" ]]; then
+    printf '\n\033[1;31mDebug products are not in %s.\033[0m\n' "$PRODUCTS"
+    printf 'The Mimic scheme builds Mimic.app and mimic together, so this is a -derivedDataPath problem rather than a failure of the check.\n'
+    exit 1
+fi
+# Through `run_step` like every other step, so its output lands in "$LOG_DIR" with the rest and the
+# closing "Full output" line points at something. A step that writes its log nowhere is a step whose
+# failure you have to reproduce before you can read it.
+run_step cli-e2e 'error|fail|== ' \
+    env MIMIC_BIN="$PRODUCTS/mimic" MIMIC_APP_PATH="$PRODUCTS/Mimic.app" Scripts/run_cli_e2e.sh
 
 printf '\n\033[1mLocal CI finished — everything green.\033[0m\nFull output: %s\n' "$LOG_DIR"

@@ -39,9 +39,15 @@ When adding or changing an operation:
    see the narrowing, and closing a switch would mean re-listing every case it declines. That list
    written out per switch is exactly what `scope` was introduced to collapse into one place, and no
    count of either side belongs in a document: `scope` is where the partition is decided and the
-   only place it should be read. What each `default:` does instead is **throw and name the command**
-   (`"<kind> is host-scoped but this service does not implement it."`), rather than falling through
-   to `noProjectOpen` and telling a caller to open a project they already have open.
+   only place it should be read. What each `default:` does instead is **name the command and say
+   which switch declined it** — `"<kind> is project-scoped but ProjectCommandExecutor does not apply
+   it."`, `"<kind> is host-scoped but the app's control host does not implement it."`, `"<kind> is
+   not a project-lifecycle command."` — rather than falling through to `noProjectOpen` and telling a
+   caller to open a project they already have open. They do not all do it the same way, and that
+   matters when you go hunting for one: the executor **throws**, being a `throws` function, while
+   both of the host's **return `.failure(…)`**, so one misrouted command surfaces as a thrown
+   `ControlError` on one side of the line and as an `ok: false` response on the other. The code is
+   `internal.failure` either way, which is what the sweeps below assert on.
 
    So the compiler forces you to **classify** a command; tests force you to **implement** it, on
    both sides of the line:
