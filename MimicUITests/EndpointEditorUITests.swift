@@ -168,6 +168,47 @@ final class EndpointEditorUITests: MimicUITestCase {
         _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
     }
 
+    /// Where an element is and whether the pointer can get to it, for a failure message.
+    @MainActor
+    private func describe(_ element: XCUIElement) -> String {
+        guard element.exists else { return "<not in the tree>" }
+        return "[value \(shownText(of: element)) frame \(element.frame) hittable \(element.isHittable)]"
+    }
+
+    /// Types into one of the editor's fields and proves the text landed *in that field*.
+    ///
+    /// **Not `XCTAssertTrue(revealInEditor(field))`, which is how this suite spent a CI round.**
+    /// `isHittable` is false for these wells even when the window types into them perfectly well:
+    /// `WorkspaceShellUITests.testGroupCrumbJumpsToAnotherGroup` clicks
+    /// `endpointEditor.groupTagField`, types a tag, and watches the jump bar grow the crumb — and it
+    /// passed in the same CI run in which the two tests below failed on that identical field being
+    /// "reachable". A gate a working control cannot pass is not measuring reachability.
+    ///
+    /// What that gate was written to catch is real, and this catches it directly. An element scrolled
+    /// out of the clip view still answers `waitForExistence`, and `click()` on macOS lands on
+    /// whatever is at the point rather than refusing — so the way to know the field was reached is to
+    /// read it back. A click that went anywhere else fails here, naming what the field holds and
+    /// where it is, instead of surfacing three assertions later as "the tag never committed".
+    ///
+    /// `revealInEditor` still runs first: scrolling a below-the-fold card into view is worth doing,
+    /// it is just not worth *asserting*.
+    @MainActor
+    private func typeIntoEditorField(_ field: XCUIElement, _ text: String, _ what: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "\(what) should be in the editor")
+        revealInEditor(field)
+
+        field.click()
+        field.typeKey("a", modifierFlags: .command)
+        field.typeText(text)
+
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) { (field.value as? String) == text },
+            "\(what) should hold \"\(text)\" after it was typed there — the field reads "
+                + "\(describe(field)). A click that lands outside the field is how this reads when "
+                + "the Settings card is below the fold in a narrow window."
+        )
+    }
+
     // MARK: - Sidebar element resolution
 
     /// The sidebar's endpoint rows, one element per row.
@@ -975,14 +1016,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         let groupTag = endpointEditor.groupTagField
         XCTAssertTrue(groupTag.waitForExistence(timeout: 5),
                       "The Settings section should show the group tag field")
-        // Asserted rather than discarded: an element that is in the tree but under the fold still
-        // answers `waitForExistence`, and the click below would then land on whatever is at that
-        // point on screen — which reads as "the tag did not commit" three assertions later.
-        XCTAssertTrue(revealInEditor(groupTag),
-                      "The Settings card's group tag field should be reachable in the editor pane")
-        groupTag.click()
-        groupTag.typeKey("a", modifierFlags: .command)
-        groupTag.typeText("Ops")
+        // Read back rather than gated on `isHittable` — see `typeIntoEditorField`. The tag has to be
+        // in the field before Tab can commit it, and a click that landed elsewhere reads as "the tag
+        // did not commit" three assertions later if nothing checks here.
+        typeIntoEditorField(groupTag, "Ops", "The Settings card's group tag field")
         app.typeKey(.tab, modifierFlags: [])
 
         let grouped = waitForGroupSection(named: "Ops", showing: "Ops")
@@ -1023,12 +1060,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         let groupTag = endpointEditor.groupTagField
-        XCTAssertTrue(groupTag.waitForExistence(timeout: 5))
-        XCTAssertTrue(revealInEditor(groupTag),
-                      "The Settings card's group tag field should be reachable in the editor pane")
-        groupTag.click()
-        groupTag.typeKey("a", modifierFlags: .command)
-        groupTag.typeText("Ops")
+        typeIntoEditorField(groupTag, "Ops", "The Settings card's group tag field")
         app.typeKey(.tab, modifierFlags: [])
 
         XCTAssertTrue(waitForGroupSection(named: "Ops", showing: "Ops"),

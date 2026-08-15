@@ -480,25 +480,70 @@ final class JourneyEditorUITests: MimicUITestCase {
         field.typeText(text)
     }
 
+    /// Where an element is and whether the pointer can get to it, as one string for a failure
+    /// message. Never an assertion of its own — see the note at the click in
+    /// ``testStepsEmptyStateAddsTheFirstStep()``.
+    @MainActor
+    private func describe(_ element: XCUIElement) -> String {
+        guard element.exists else { return "<not in the tree>" }
+        return "[\(element.identifier.isEmpty ? element.label : element.identifier) "
+            + "frame \(element.frame) hittable \(element.isHittable)]"
+    }
+
+    /// Gives the centre pane the request log's height back.
+    ///
+    /// The same one-click move `EndpointEditorUITests` makes before it reaches for the editor's
+    /// fourth card, for the same reason: the drawer takes 220pt off the bottom of the window and the
+    /// pane above it is where everything this suite clicks lives. Guarded on the drawer actually
+    /// being up, so a caller cannot toggle it *open* and make its own pane shorter.
+    @MainActor
+    private func hideRequestLogDrawer() {
+        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
+        guard workspace.drawerEmptyHeading.exists else { return }
+        workspace.toggleDrawerButton.click()
+        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+    }
+
+    /// A menu item matched the way AppKit actually names one: by **title**.
+    ///
+    /// `label` is not it. CI printed the element this suite kept catching —
+    /// `MenuItem, {{6.0, 224.0}, {251.0, 24.0}}, identifier: '_restartNowRequested:', title:
+    /// 'Restart'` — and an XCUITest element description prints `label:` when there is one. There was
+    /// none. So `matching(NSPredicate(format: "label == %@", …))` matches *no* menu item in this
+    /// app, which is why the scoped query "found nothing" and the loose one found nothing either,
+    /// and why `app.menuItems["POST"]` — a subscript, which matches identifier *or* title — has kept
+    /// working in `MimicUITestCase.selectMethod` the whole time. All three attributes are asked for
+    /// here so neither spelling can be the one that decides.
+    private func menuItemTitled(_ option: String) -> NSPredicate {
+        NSPredicate(
+            format: "identifier == %@ OR title == %@ OR label == %@",
+            option, option, option
+        )
+    }
+
     /// One option of an open pop-up menu — the *picker's* option, never the menu bar's.
     ///
-    /// `app.menuItems[title]` reaches every menu the app owns, and the menu bar's menus are in the
-    /// tree whether or not they are open. "Restart" is the on-completion picker's second option and
-    /// it is also the title of the Apple menu's `_restartNowRequested:` item, so the bare query
-    /// resolved to a system item sitting in a closed menu and the click failed with "Not hittable"
-    /// while the picker's own option was two elements away.
+    /// **Where an open pop-up's menu really lives: app-wide, beside the menu bar's, not under the
+    /// pop-up button.** Scoping the query to `picker.descendants` was a guess and it was wrong; the
+    /// scoped branch is kept only because a match under the button cannot possibly be a menu-bar
+    /// item, and it costs one query when it misses.
     ///
-    /// An open pop-up's menu hangs off the pop-up button, so the scoped query cannot reach the menu
-    /// bar at all. The fallback keeps a picker that realizes some other way working, and it takes the
-    /// first *hittable* match — which an item in an unopened menu can never be.
+    /// Which makes disambiguation the whole job, because the menu bar's items are in the tree
+    /// whether or not their menu is open. "Restart" is the on-completion picker's second option and
+    /// also the title of the Apple menu's `_restartNowRequested:` item. **Hittability is what
+    /// separates them**, and it is evidence rather than theory in both directions: that Apple item
+    /// failed a click with "Not hittable" while its menu was closed, and `selectMethod` clicks the
+    /// method pop-up's own items successfully on every run of the request-log suite. A non-hittable
+    /// homonym is therefore never returned — clicking the Apple menu's Restart is not a failure a
+    /// suite recovers from.
     @MainActor
     private func openMenuItem(titled option: String, in picker: XCUIElement) -> XCUIElement? {
         let scoped = picker.descendants(matching: .menuItem)
-            .matching(NSPredicate(format: "label == %@", option))
+            .matching(menuItemTitled(option))
             .firstMatch
-        if scoped.exists { return scoped }
+        if scoped.exists, scoped.isHittable { return scoped }
 
-        let loose = app.menuItems.matching(NSPredicate(format: "label == %@", option))
+        let loose = app.menuItems.matching(menuItemTitled(option))
         for index in 0..<loose.count {
             let candidate = loose.element(boundBy: index)
             if candidate.exists, candidate.isHittable { return candidate }
@@ -506,25 +551,75 @@ final class JourneyEditorUITests: MimicUITestCase {
         return nil
     }
 
-    /// Opens a pop-up picker and chooses one of its options.
+    /// What the tree says about the menus on screen, for a failure that has to name what it saw.
+    ///
+    /// Bounded: the menu bar alone contributes a few hundred items, and every attribute read is a
+    /// query. Only the hittable ones are described, because those are the open menu's — the same
+    /// discriminator ``openMenuItem(titled:in:)`` selects on, so a failure shows exactly the set
+    /// that was searched.
+    @MainActor
+    private func openMenuDescription() -> String {
+        let items = app.menuItems
+        let total = items.count
+        var described: [String] = []
+        for index in 0..<min(total, 60) where described.count < 12 {
+            let item = items.element(boundBy: index)
+            guard item.exists, item.isHittable else { continue }
+            described.append("\"\(item.title)\"/\"\(item.label)\"")
+        }
+        let list = described.isEmpty ? "none of them hittable" : described.joined(separator: ", ")
+        return "\(app.menus.count) menus and \(total) menu items in the tree; open ones: \(list)"
+    }
+
+    /// The characters that pick `option` out of an open menu by typing.
+    ///
+    /// The first word only. An open `NSMenu` matches what has been typed against item titles as a
+    /// prefix, and a **space activates whatever is highlighted** — so typing "Strict sequence" whole
+    /// would commit on the space and type "sequence" into whatever is behind the menu. Every option
+    /// this suite picks is uniquely identified by its first word within its own menu ("Ordered" /
+    /// "Strict", "Stop" / "Restart", "Fall" / "404", and the HTTP methods, where "PO" already
+    /// separates POST from PUT and PATCH).
+    private func typeSelectPrefix(of option: String) -> String {
+        guard let firstWord = option.split(separator: " ").first else { return option }
+        return String(firstWord)
+    }
+
+    /// Opens a pop-up picker, chooses one of its options, and proves the choice took.
     ///
     /// A SwiftUI `Picker` realizes as a pop-up button, so the menu has to be opened before its items
     /// can be clicked — the same reason `MimicUITestCase.selectMethod` clicks before it queries.
+    ///
+    /// The assertion is on the **picker's own value afterwards**, not on having found something to
+    /// click. That is the fact each caller is here for — the journey remembers the choice — and it
+    /// holds however the option was reached, which is what lets the keyboard stand in when the tree
+    /// will not name the menu: an open menu selects by typed prefix and commits on Return, no
+    /// element lookup involved. Typing is safe in both places this is called from because neither
+    /// has a default button armed: the step sheet's save stays disabled until a path is typed, and
+    /// the behaviour band is in the main window, which has none.
     @MainActor
     private func choose(_ option: String, in picker: XCUIElement, _ what: String) {
         XCTAssertTrue(picker.waitForExistence(timeout: 5), "\(what) should be on screen")
+        guard !spokenText(of: picker).contains(option) else { return }
+
         picker.click()
 
         var item: XCUIElement?
+        _ = UITestApp.waitUntil(timeout: 5) {
+            item = self.openMenuItem(titled: option, in: picker)
+            return item != nil
+        }
+        if let item {
+            item.click()
+        } else {
+            app.typeText(typeSelectPrefix(of: option))
+            app.typeKey(XCUIKeyboardKey.return, modifierFlags: [])
+        }
+
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) {
-                item = self.openMenuItem(titled: option, in: picker)
-                return item != nil
-            },
-            "\(what) should offer \"\(option)\""
+            waitForSpokenText(of: picker, toContain: option, timeout: 5),
+            "\(what) should offer \"\(option)\" and be set to it — the picker reads "
+                + "\"\(spokenText(of: picker))\", and \(openMenuDescription())"
         )
-        guard let item else { return }
-        item.click()
     }
 
     /// Picks one segment of the step sheet's outcome control.
@@ -713,6 +808,21 @@ final class JourneyEditorUITests: MimicUITestCase {
         showJourneysNavigator()
         createEmptyJourney(named: "Hand written flow")
 
+        // The drawer's height, given back before anything below is reached for.
+        //
+        // `JourneyEditorView` lets the step area — and only the step area — compress to nothing, so
+        // everything above it keeps its space and the empty state takes what is left. On a CI-sized
+        // window with the request log open, what is left is less than the ~187pt a `DSEmptyState`
+        // draws, and a `VStack` given less than it needs centres the overflow: the call to action,
+        // which is the last thing in that stack, is drawn below the pane. That is both ways this
+        // step has failed — first as "the step sheet should open", a click that landed on the
+        // message text, then as a call to action that was in the tree and not hittable.
+        //
+        // There is nothing to scroll here: the empty state is not in a scroll view. The drawer is
+        // the only room available, and taking it is what `EndpointEditorUITests` does for the same
+        // class of failure in the editor's fourth card.
+        hideRequestLogDrawer()
+
         XCTAssertTrue(
             journeys.stepsEmptyState.waitForExistence(timeout: 10),
             "A new journey should explain that it has no steps yet"
@@ -737,16 +847,25 @@ final class JourneyEditorUITests: MimicUITestCase {
             journeys.stepsEmptyStateAddButton.waitForExistence(timeout: 5),
             "The steps empty state should offer to add the first step"
         )
-        // Asserted before the click, so a call to action that is on screen but not reachable — drawn
-        // under the request log drawer when the step area is squeezed, which is the other way this
-        // step has failed — reports itself rather than arriving as "the step sheet should open".
-        XCTAssertTrue(
-            journeys.stepsEmptyStateAddButton.isHittable,
-            "The empty state's call to action should be reachable by the pointer"
-        )
         journeys.stepsEmptyStateAddButton.click()
 
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "The step sheet should open")
+        // The assertion is that clicking it opens the sheet, and the geometry rides along in the
+        // message rather than in an assertion of its own.
+        //
+        // `isHittable` was that assertion last round and it is not a property this window's controls
+        // dependably carry: `WorkspaceShellUITests.testGroupCrumbJumpsToAnotherGroup` clicks the
+        // endpoint editor's group tag field, types into it and watches the jump bar answer, in the
+        // same CI run in which `EndpointEditorUITests` reported that identical field "not reachable
+        // in the editor pane". A gate that a working control fails is not a gate. What it was
+        // written to catch — a click that lands on something else — is caught here directly, by the
+        // sheet that does not open, with the frames printed beside it so the next reader can tell a
+        // squeezed pane from a mis-targeted query.
+        XCTAssertTrue(
+            stepSheet.pathField.waitForExistence(timeout: 5),
+            "The step sheet should open when the empty state's call to action is clicked — "
+                + "the call to action is \(describe(journeys.stepsEmptyStateAddButton)) "
+                + "inside \(describe(journeys.stepsEmptyState))"
+        )
         assertSpeaks(stepSheet.title, contains: "Add step", "The sheet should be headed for adding")
 
         stepSheet.pathField.click()
