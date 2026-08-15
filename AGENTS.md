@@ -811,8 +811,8 @@ When adding or changing an operation:
 
 ## Skill Integration — Mandatory
 
-**Five** skills are vendored into this repository, in `.agents/skills/`; `.claude/skills/` holds
-symlinks to the same five, so Claude Code and other agents read one copy. Load and follow the
+**Eight** skills are vendored into this repository, in `.agents/skills/`; `.claude/skills/` holds
+symlinks to the same eight, so Claude Code and other agents read one copy. Load and follow the
 relevant skill when working in its domain.
 
 | Skill | Vendored? | Trigger | Governs |
@@ -822,6 +822,9 @@ relevant skill when working in its domain.
 | **swift-concurrency-pro** | yes | Any async/await, actor, Task, Sendable code | Actor isolation, structured concurrency, cancellation, MainActor |
 | **using-tuist-generated-projects** | yes | Any Tuist/`xcodebuild`/config work | Buildable folders, target tagging, build configs, workspace workflows |
 | **improve-codebase-architecture** | yes | Deepening a module, moving a boundary | Testability, module depth, consolidating shallow glue |
+| **codebase-design** | yes | Designing an interface, placing a seam | The deep-module vocabulary the three skills above and below share |
+| **domain-modeling** | yes | Naming a concept, writing an ADR | `CONTEXT.md` glossary upkeep, ADR capture |
+| **grilling** | yes | Stress-testing a plan or decision | The interview loop `improve-codebase-architecture` runs once you pick a candidate |
 | **xcuitest-pro** | **no** | Any XCUITest code | Page object pattern, accessibility-first targeting, deterministic launch contracts, no `sleep()` |
 
 `xcuitest-pro` is **not in this repository** — `find . -iname '*xcuitest*'` returns nothing, and the
@@ -832,13 +835,33 @@ Done" above, which is where the repo's actual, hard-won contract lives — the a
 flattening, the launch/activation retry, and the `waitForAny` rule are all things a generic skill
 would not tell you.
 
-`improve-codebase-architecture` is vendored from `mattpocock/skills` and pinned in
-[`skills-lock.json`](skills-lock.json); the other four are local.
+Four of them — `improve-codebase-architecture`, `codebase-design`, `domain-modeling` and
+`grilling` — are vendored from `mattpocock/skills` and pinned in
+[`skills-lock.json`](skills-lock.json); the other four are local. The lockfile states the command
+that computes its hashes, so any pin there can be re-derived in one line. The previous pin could
+not: it carried a hash from external tooling that is not in this repository and that none of the
+obvious schemes reproduced.
+
+The last three arrived as dependencies rather than as separate choices.
+`improve-codebase-architecture` delegates to all three by name — `codebase-design` for the
+vocabulary it insists on using exactly (**module**, **interface**, **depth**, **seam**, **adapter**,
+**leverage**, **locality**), `grilling` for the interview it runs once you pick a candidate, and
+`domain-modeling` for the glossary and ADR upkeep it does inline. Vendoring the entry point without
+them leaves it referring to skills nobody here has.
+
+**Two things it expects that this repository does not have**, and neither is an oversight to
+correct in passing: a `CONTEXT.md` domain glossary, and an `docs/adr/` directory. The skill reads
+both for grounding and creates `CONTEXT.md` lazily if a session produces a term worth recording.
+Until one does, the architecture vocabulary is grounded in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and this file instead. The skill also carries
+`disable-model-invocation: true`, so it runs only when invoked by name — it will not trigger itself
+off a passing mention of architecture.
 
 How to load: read the skill's `SKILL.md` (lightweight index), then pull what it points at — the three
-`*-pro` skills carry a `references/` directory, `improve-codebase-architecture` a single
-`REFERENCE.md`, and `using-tuist-generated-projects` nothing but its `SKILL.md`. Multiple skills can
-apply at once.
+`*-pro` skills carry a `references/` directory, `improve-codebase-architecture` an
+`HTML-REPORT.md`, `codebase-design` a `DEEPENING.md` and a `DESIGN-IT-TWICE.md`, and
+`using-tuist-generated-projects`, `domain-modeling` and `grilling` nothing but their `SKILL.md`.
+Multiple skills can apply at once.
 
 ### Non-negotiable patterns
 

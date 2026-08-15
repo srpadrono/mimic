@@ -1,10 +1,46 @@
 {
   "version": 1,
+  "hashCommand": "cd .agents/skills/<name> && find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum",
+  "hashCommandNote": "The previous lockfile carried a computedHash produced by external tooling that is not present in this repository and could not be reproduced from the vendored files. The scheme is now stated above so any hash here can be re-derived in one command.",
   "skills": {
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
       "sourceType": "github",
-      "computedHash": "76d07c4c0bebc162cc76ca7494bfe7a90e279f35832f7ce6dfc4ce16518fd560"
+      "sourcePath": "skills/engineering/improve-codebase-architecture",
+      "sourceRef": "main",
+      "retrieved": "2026-08-15",
+      "files": ["SKILL.md", "HTML-REPORT.md"],
+      "computedHash": "6a3c1222480e9c25272d64356238ee5034d0b75739c1c5abd33d7c0b882cd78d"
+    },
+    "codebase-design": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourcePath": "skills/engineering/codebase-design",
+      "sourceRef": "main",
+      "retrieved": "2026-08-15",
+      "files": ["SKILL.md", "DEEPENING.md", "DESIGN-IT-TWICE.md"],
+      "requiredBy": "improve-codebase-architecture",
+      "computedHash": "2cdd80a526c3d57fe1e3db04fba0cf893ee5a18e083e349449dfae3e4c8dd0bf"
+    },
+    "domain-modeling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourcePath": "skills/engineering/domain-modeling",
+      "sourceRef": "main",
+      "retrieved": "2026-08-15",
+      "files": ["SKILL.md"],
+      "requiredBy": "improve-codebase-architecture",
+      "computedHash": "babcc123a0fd7ba5f68fd67edc1e9ff869310ad48511e5a28eccb7266ea06dbf"
+    },
+    "grilling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourcePath": "skills/productivity/grilling",
+      "sourceRef": "main",
+      "retrieved": "2026-08-15",
+      "files": ["SKILL.md"],
+      "requiredBy": "improve-codebase-architecture",
+      "computedHash": "97455c92a6be2487cfd748932db35de6f310dac3b3781e6787daa89720d155db"
     }
   }
 }
