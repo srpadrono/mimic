@@ -3,7 +3,7 @@
 #
 # Exists so the gate is reproducible on a laptop — useful before pushing, and essential while the
 # hosted runners are unavailable. It used to open by claiming it "runs exactly what CI runs", which
-# was false in a way that mattered, so here is the precise version. Three differences, none of them
+# was false in a way that mattered, so here is the precise version. Four differences, none of them
 # fixable from inside this file:
 #
 #   - **`swift test` runs on this machine, not in the `swift:6.2` container.** Same sources, a
@@ -23,6 +23,17 @@
 #   - **Runner setup is absent**, because it is not a gate: the SwiftPM and Tuist caches, and
 #     `automationmodetool enable-automationmode-without-authentication`, which is what lets XCUITest
 #     drive another app with nobody at the keyboard.
+#
+#   - **The UI suite runs here in one pass, and on CI in four shards on four machines.** This laptop
+#     is one machine, and the reason CI shards at all is that these suites cannot share one: they
+#     share `mimic-uitests.sqlite`, the `com.devxa.Mimic.UITests` defaults domain, and — being a real
+#     macOS app rather than a simulator — one window server and one frontmost application. So the
+#     serial run below is not a slower version of what CI does, it is the only version available
+#     locally, and it takes about eighty minutes against CI's twenty-nine. Two consequences worth
+#     knowing. Running the whole target in one pass means a suite that no CI shard names still passes
+#     here — which is why `Scripts/check_ui_shards.py` runs below, as the only thing that can see
+#     that gap from a laptop. And a shard-ordering effect, if one ever appears, cannot reproduce
+#     here at all.
 #
 # Everything else is the same command with the same flags, ad-hoc signing included. The three
 # manifest checks are the same *program*, not a copy of it: `Scripts/check_lockfiles.py`,
@@ -278,6 +289,20 @@ python3 Scripts/check_doc_counts.py
 # read, which is the same failure mode as a house rule kept only by review.
 step "Skill layout"
 python3 Scripts/check_skills.py
+
+# The fourth, and it guards the workflow rather than a document. CI shards the XCUITest suite across
+# four macOS runners by naming test classes — each shard passes its own list of
+# `-only-testing:MimicUITests/<Class>` flags — because the suites share one store, one defaults
+# domain and one window server, so parallel workers on a single machine would destroy each other's
+# state. That split is a hand-maintained list, and the way it fails is silent: a class no shard names
+# never runs, and all four shards go green having each run exactly what they were asked for.
+#
+# It matters more here than most of these checks, because this script's own `UI tests` step above
+# runs the whole target in one pass. A suite added today passes locally and is invisible on CI, which
+# is the one direction a local gate cannot warn about by simply being run.
+step "UI shards cover every UI test class"
+python3 Scripts/check_ui_shards.py --self-test
+python3 Scripts/check_ui_shards.py
 
 # The end-to-end check, which used to be listed here as deliberately *not* run.
 #

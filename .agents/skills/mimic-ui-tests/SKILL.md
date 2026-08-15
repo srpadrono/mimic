@@ -96,3 +96,27 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic test \
 If the runner reports `Timed out while enabling automation mode` with zero tests executed, that is
 the SIP-protected `automationmode-writer` service, not your suite — see the `mimic-build-and-test`
 skill's `references/ci.md` for what CI does about it.
+
+That one command runs the whole target. **CI does not** — it shards the suite across four macOS
+runners, because these tests cannot share a machine: they share `mimic-uitests.sqlite`, the
+`com.devxa.Mimic.UITests` defaults domain, and — this being a real macOS app rather than a simulator
+— one window server and one frontmost application. Each shard names the classes it runs with
+`-only-testing:MimicUITests/<Class>`.
+
+So **a new test class is not run by CI until it is added to a shard.** Nothing about that fails
+loudly on its own: the four shards each run exactly what they were asked for and all four go green.
+`Scripts/check_ui_shards.py` is what closes it, in the Linux CI job and in `Scripts/ci.sh` — a class
+in no shard, a class in two, or a shard naming a class that has been renamed all fail there. When it
+does, add the class to the lightest shard's `only:` list in the `macos-ui` matrix in
+`.github/workflows/ci.yml` and run the checker again; it prints the four totals so you can see where
+the new suite belongs.
+
+Two smaller consequences of the split, worth knowing before you write a test that trips over one:
+
+- **A test may not depend on another suite having run.** It never could — each test wipes the
+  defaults domain in `setUpWithError` and each launch resets the store — but now the other suite may
+  be on a different machine entirely, so a cross-suite assumption fails as "works locally, red on
+  CI".
+- **Ports and the discovery file are already shard-safe** and need nothing from you: the suites use
+  disjoint port ranges and `MIMIC_CONTROL_FILE` is suffixed with the runner's pid. Keep both
+  properties when you add a suite that binds a socket.

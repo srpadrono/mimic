@@ -321,10 +321,11 @@ writes its result bundle to a named path; the `Coverage report` step reads that 
 this is actually exercised" is a link away rather than a script somebody has to remember to run.
 
 Where to look: any run of [`.github/workflows/ci.yml`](.github/workflows/ci.yml), under the
-**Build and test (macOS)** job's summary. Two things sit outside that measurement, both
-structurally: XCUITest, because the step doing the measuring is the one that skips it, and everything
-the Linux job runs, because gathering coverage needs the Xcode toolchain. On a red run the bundle is
-uploaded as the `xcresult` artifact, which is where per-file detail lives.
+**Build, unit suites, Release, CLI e2e (macOS)** job's summary. Two things sit outside that
+measurement, both structurally: XCUITest, because the step doing the measuring is the one that skips
+it — the UI suite runs in four sharded jobs beside this one — and everything the Linux job runs,
+because gathering coverage needs the Xcode toolchain. On a red run the bundle is uploaded as the
+`xcresult-unit` artifact, which is where per-file detail lives.
 
 **The numbers are also recorded here, on every push to `main`.** They used to exist only in that job
 summary — computed on every run and thrown away with the runner — which is why both badges above
@@ -335,10 +336,10 @@ output, and that job rewrites the two badges and the block below with
 
 Four things about it are deliberate, and each is the answer to a way this normally goes wrong:
 
-- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS job
-  compiles and runs code out of a pull request; a write token there would widen the blast radius of
-  anything going wrong in it to "can push to `main`". The recording job runs one Python script over
-  one Markdown file.
+- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS
+  jobs compile and run code out of a pull request; a write token there would widen the blast radius
+  of anything going wrong in one to "can push to `main`". The recording job runs one Python script
+  over one Markdown file.
 - **A few hundred bytes cross between them, not the bundle.** The `.xcresult` is hundreds of
   megabytes and stays on the runner that made it.
 - **The generated block carries no timestamp, run number or run URL.** It is a pure function of the
@@ -370,11 +371,24 @@ setting the floor against a baseline, is the order.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
-`main`, in three jobs: Linux builds `Package.swift` and runs the portable suites in a couple of
-minutes, macOS runs `tuist generate`, the Debug build, the app-level suites — measured, with the
-per-target coverage table printed into the job summary — XCUITest and the Release gate, and a short
-`record-coverage` job writes those figures into this file on pushes to `main`. Both runners
-are free on a public repository. (This section used to say Actions could not start
+`main`, in eight jobs across five definitions, and finishes in about **29 minutes**. Linux builds
+`Package.swift`, runs the portable suites and every gate that needs no toolchain, in a couple of
+minutes. On macOS, `Build, unit suites, Release, CLI e2e` runs `tuist generate`, the Debug build, the
+app-level suites — measured, with the per-target coverage table printed into the job summary — the
+CLI end-to-end check and the Release gate, while **the XCUITest suite runs beside it in four shards
+on four runners**, rolled up into one `UI suite` status check. A short `record-coverage` job writes
+the coverage figures into this file on pushes to `main`.
+
+The suite is sharded across machines rather than parallelised on one because every UI test shares a
+store, a defaults domain, a window server and a frontmost application; four is the shard count
+because GitHub caps concurrent macOS jobs at five and the non-UI job takes the fifth slot. That split
+is a hand-maintained list of test classes, so
+[`Scripts/check_ui_shards.py`](Scripts/check_ui_shards.py) fails the Linux job if any class is run by
+no shard or by two — a class nobody runs would otherwise leave all four shards green. The workflow's
+own header argues all of it, including why each shard builds for itself instead of downloading one
+shared build. It used to be a single 96-minute job with XCUITest as four fifths of it.
+
+Both runners are free on a public repository. (This section used to say Actions could not start
 a job here at all — true while the repository was private and a billing block killed every run in
 about two seconds; making it public resolved it.)
 
