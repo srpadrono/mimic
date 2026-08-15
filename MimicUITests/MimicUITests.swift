@@ -483,9 +483,14 @@ struct InspectorPage {
         let row = scenarioRow(named: name)
         guard row.waitForExistence(timeout: 5) else { return false }
 
+        // Compared exactly, not with `contains`. `ScenarioRow` sets its value to "active" or
+        // "inactive" and appends ", active" to the spoken label only when the scenario is active —
+        // and "inactive" contains "active", so the `contains` pair this replaces returned true for
+        // every row it was ever handed. Both call sites assert `XCTAssertTrue`, so the helper could
+        // not fail and its two tests were green by construction rather than by evidence.
         let value = (row.value as? String) ?? ""
-        return row.label.localizedCaseInsensitiveContains("active")
-            || value.localizedCaseInsensitiveContains("active")
+        return value.caseInsensitiveCompare("active") == .orderedSame
+            || row.label.hasSuffix(", active")
     }
 }
 
