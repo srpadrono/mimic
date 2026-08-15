@@ -363,6 +363,7 @@ struct ImportWorkflowScreen: View {
                 Text(kind.title)
                     .font(DSTypography.title)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).title")
                 Spacer(minLength: DSSpacing.sm)
                 // `.medium`, like the cancel button in every other sheet and like this screen's own
                 // "Import n endpoints" in the footer. At `.small` it was a 20pt control beside a 20pt

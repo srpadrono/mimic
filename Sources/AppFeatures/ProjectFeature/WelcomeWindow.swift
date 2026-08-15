@@ -118,7 +118,11 @@ struct WelcomeWindow: View {
             }
             Button("Keep project", role: .cancel) { }
         } message: { _ in
+            // The title beside it takes a `String`, not a view, so there is nowhere to hang an
+            // identifier on it; the message is the half of the alert that is a view, and it is the
+            // half that says what deleting actually does.
             Text(ViewState.deleteMessage)
+                .accessibilityIdentifier("welcome.deleteAlert.message")
         }
     }
 
@@ -297,17 +301,24 @@ struct WelcomeWindow: View {
                     Button("Open") {
                         Self.openProject(id: entry.id, onOpenProject: onOpenProject)
                     }
+                    .accessibilityIdentifier("welcome.recents.contextMenu.open")
                     Divider()
                     Button("Duplicate") {
                         Self.duplicateProject(id: entry.id, onDuplicateProject: onDuplicateProject)
                     }
+                    .accessibilityIdentifier("welcome.recents.contextMenu.duplicate")
                     Divider()
                     Button("Delete project\u{2026}", role: .destructive) {
                         viewState.beginDeleting(entry)
                     }
+                    .accessibilityIdentifier("welcome.recents.contextMenu.delete")
                 }
         }
         .listStyle(.plain)
+        // `.contain` before the identifier, so naming the list does not rename the rows —
+        // `recentProject-<name>` is what a test clicks, and this is what it sends arrow keys to.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("welcome.recents.list")
         .scrollContentBackground(.hidden)
         // Arrow keys move the selection because the list has one; this is the other half of the
         // contract. A launcher you cannot open from the keyboard is a launcher you have to aim at.

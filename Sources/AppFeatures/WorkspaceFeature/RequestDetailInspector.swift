@@ -164,6 +164,7 @@ struct RequestDetailInspector: View {
                 Text(log.timestamp, style: .time)
                     .font(DSTypography.caption)
                     .foregroundStyle(DSColors.labelTertiary)
+                    .accessibilityIdentifier("requestDetail.timestamp")
             }
 
             // Two lines, then truncate. `.fixedSize(vertical:)` let this wrap without limit, so a
@@ -275,6 +276,10 @@ struct RequestDetailInspector: View {
         .padding(.horizontal, DSSpacing.md)
         .padding(.vertical, DSSpacing.xs + 1)
         .accessibilityElement(children: .combine)
+        // Derived from the label the same way `InspectorOverview.row` derives its own, so the two
+        // halves of the inspector name their rows alike: "Response body" becomes
+        // `requestDetail.summary.response body`.
+        .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
     }
 
     private var outcomeColor: Color {
@@ -348,6 +353,10 @@ struct RequestDetailInspector: View {
                 .padding(.vertical, DSSpacing.xs + 1)
                 .background(index % 2 == 0 ? Color.clear : DSColors.rowStripe)
                 .accessibilityElement(children: .combine)
+                // Keyed by the header's name, which is what the `ForEach` already keys by, so the
+                // row keeps its identity when the sort puts a new header above it. Sits under the
+                // same `requestDetail.headers.<request|response>` prefix as the empty note.
+                .accessibilityIdentifier("requestDetail.headers.\(identifier).\(header.key)")
             }
         }
     }
@@ -428,6 +437,7 @@ struct RequestDetailInspector: View {
                         .foregroundStyle(DSColors.labelSecondary)
                         .padding(.horizontal, DSSpacing.md)
                         .padding(.vertical, DSSpacing.xs)
+                        .accessibilityIdentifier("requestDetail.body.response.truncated")
                 }
             } else {
                 emptyNote(

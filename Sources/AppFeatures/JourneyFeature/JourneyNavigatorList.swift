@@ -146,12 +146,14 @@ struct JourneyNavigatorRunStrip: View {
                     .fontWeight(.medium)
                     .foregroundStyle(DSColors.accentText)
                     .lineLimit(1)
+                    .accessibilityIdentifier("journeys.runStrip.name")
 
                 if let progress {
                     Text(progress)
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.labelSecondary)
                         .lineLimit(1)
+                        .accessibilityIdentifier("journeys.runStrip.progress")
                 }
             }
 
@@ -280,10 +282,14 @@ struct JourneyNavigatorRow: View {
                     systemImage: isActive ? "stop.circle" : "play.circle"
                 )
             }
+            // One identifier for both wordings: it is one item that toggles, and a test that had to
+            // guess which name it currently wears would be asserting on the label anyway.
+            .accessibilityIdentifier("journeys.contextMenu.toggleActivation")
 
             Button(action: onDuplicate) {
                 Label("Duplicate", systemImage: "doc.on.doc")
             }
+            .accessibilityIdentifier("journeys.contextMenu.duplicate")
 
             Divider()
 
@@ -294,6 +300,7 @@ struct JourneyNavigatorRow: View {
             Button(role: .destructive, action: onDelete) {
                 Label("Delete journey\u{2026}", systemImage: "trash")
             }
+            .accessibilityIdentifier("journeys.contextMenu.delete")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("journeys.row.\(journey.id.uuidString)")

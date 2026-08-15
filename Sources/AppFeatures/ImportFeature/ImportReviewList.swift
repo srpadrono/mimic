@@ -312,6 +312,16 @@ private struct ImportCandidateRow: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    // The row's stable, index-addressable handle. Every other identifier on this
+                    // row is suffixed with a UUID the parser minted this run, so a test cannot name
+                    // a row before it has read one out of the tree; `rowIndex` is the position the
+                    // table actually presents. It goes on the path rather than on the row group
+                    // above, because that group already carries `import.candidate.<uuid>` and one
+                    // view holds one identifier — a second modifier would take the UUID's place
+                    // rather than sit beside it. The path is the row's identity anyway, which is
+                    // what the type's own note says, so `import.candidate.index.3` reads out the
+                    // path of the fourth row.
+                    .accessibilityIdentifier("import.candidate.index.\(rowIndex)")
 
                 // Every GraphQL candidate in a capture shares one path; without the operation the
                 // review is a column of identical rows. Same rule the sidebar follows.
@@ -320,6 +330,7 @@ private struct ImportCandidateRow: View {
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.accentText)
                         .lineLimit(1)
+                        .accessibilityIdentifier("import.candidate.index.\(rowIndex).operation")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -331,6 +342,7 @@ private struct ImportCandidateRow: View {
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.name, alignment: .leading)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).name")
 
             // Coloured text, not a filled pill. A 200 is an ordinary value, and a row where every
             // field is a chip has no emphasis left for the field that needs it.
@@ -338,12 +350,14 @@ private struct ImportCandidateRow: View {
                 .font(DSTypography.codeSmall)
                 .foregroundStyle(DSColors.httpStatusColor(for: candidate.statusCode))
                 .frame(width: ImportColumns.status, alignment: .leading)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
 
             Text(candidate.bodySizeLabel)
                 .font(DSTypography.caption)
                 .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.size, alignment: .leading)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).size")
 
             flag
                 .frame(width: ImportColumns.flag, alignment: .leading)
@@ -398,6 +412,9 @@ private struct ImportCandidateRow: View {
                 // this same import — and for a capture of real traffic the second is the common case.
                 .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
                 .accessibilityLabel("Duplicate — this method and path is already covered")
+                // A name per branch rather than one shared `…flag`: the branches are mutually
+                // exclusive, so which identifier is present *is* the assertion a test wants.
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.duplicate")
         } else if candidate.bodyIsBinary {
             // Before the size branch, deliberately: a binary body's recorded size can also exceed
             // the limit, and binary is the more specific reason there is no body.
@@ -407,6 +424,7 @@ private struct ImportCandidateRow: View {
                 .lineLimit(1)
                 .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
                 .accessibilityLabel("Binary body — the endpoint imports without it")
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.binaryBody")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
                 .font(DSTypography.caption)
@@ -414,6 +432,7 @@ private struct ImportCandidateRow: View {
                 .lineLimit(1)
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")
                 .accessibilityLabel("Response body exceeds the limit and will not be imported")
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.bodyDropped")
         } else {
             // Not decoration — this is what holds the column open, and without it the table's
             // headers sat above the wrong columns.

@@ -27,12 +27,14 @@ struct NewJourneySheet: View {
                 Text("New journey")
                     .font(DSTypography.title)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityIdentifier("newJourney.title")
 
                 Text("A journey scripts an ordered sequence of responses, so the same endpoint can answer "
                     + "differently depending on where the request falls in the flow.")
                     .font(DSTypography.label)
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("newJourney.explanation")
             }
 
             // The design system's field rather than a bare `.roundedBorder` one, so this sheet's

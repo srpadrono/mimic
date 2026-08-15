@@ -108,7 +108,10 @@ struct InspectorOverview: View {
                         .padding(.vertical, DSSpacing.xs + 1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        note("None — endpoints answer directly.")
+                        note(
+                            "None — endpoints answer directly.",
+                            identifier: "inspector.overview.activeJourney.none"
+                        )
                     }
                 }
 
@@ -124,7 +127,10 @@ struct InspectorOverview: View {
                             : DSColors.labelSecondary
                     )
                     if summary.unmatchedCount > 0 {
-                        note("Requests arrived that no endpoint or journey answered.")
+                        note(
+                            "Requests arrived that no endpoint or journey answered.",
+                            identifier: "inspector.overview.unmatched.note"
+                        )
                     }
                 }
 
@@ -133,6 +139,11 @@ struct InspectorOverview: View {
             .padding(.bottom, DSSpacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // `.contain` before the identifier, the way the journey editor's step list orders it. A
+        // named container without it renames every descendant to match — the rows, the notes and
+        // `inspector.overview.openJourneys` all reported `inspector.overview`, which left the one
+        // button in this panel unaddressable.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inspector.overview")
     }
 
@@ -188,8 +199,13 @@ struct InspectorOverview: View {
 
     /// Explanatory prose under a section's rows. Full width rather than in the value column: these
     /// wrap, and 158pt would turn one sentence into four lines.
+    ///
+    /// The identifier is passed in rather than derived from the message, the way
+    /// `EndpointEditorView.validationNote` takes its own: these sentences are the panel's answer to
+    /// "is a journey overriding my mocks" and "is anything arriving unmatched", so a test asserts on
+    /// the note being present, not on the prose staying word for word.
     @ViewBuilder
-    private func note(_ message: String) -> some View {
+    private func note(_ message: String, identifier: String) -> some View {
         Text(message)
             .font(DSTypography.caption)
             // "Requests arrived that no endpoint answered" is the point of the panel, not a hint.
@@ -198,6 +214,7 @@ struct InspectorOverview: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSSpacing.md)
             .padding(.vertical, DSSpacing.xs + 1)
+            .accessibilityIdentifier(identifier)
     }
 
     private var serverStatusText: String {
