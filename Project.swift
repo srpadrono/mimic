@@ -282,12 +282,22 @@ let project = Project(
             product: .uiTests,
             bundleId: "devxa.Mimic.UITests",
             buildableFolders: ["MimicUITests"],
+            // The runner binds a port of its own, so it needs what the other two port-binding test
+            // targets need. The port-conflict alert can only be reached by holding the port the app
+            // is about to take, and the code that does the holding runs in the XCTest *runner* app,
+            // not in Mimic — so the runner is the process that must be allowed to listen. Without
+            // this every `bind(2)` came back `EPERM`, on ports from 21311 to 65535 alike, which
+            // reads as "that port is busy" and is really "this process may not listen at all".
+            // `ControlPlaneTests` and `MockServerEngineTests` carry the same pair for the same
+            // reason; this target was the one that binds a socket without them.
+            entitlements: .file(path: "MimicUITests/MimicUITests.entitlements"),
             dependencies: [
                 .target(name: "Mimic"),
             ],
             settings: .settings(base: [
                 "SWIFT_DEFAULT_ACTOR_ISOLATION": "none",
                 "ENABLE_HARDENED_RUNTIME": "NO",
+                "ENABLE_APP_SANDBOX": "NO",
             ])
         ),
 

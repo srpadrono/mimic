@@ -112,10 +112,7 @@ struct NewProjectSheetPage {
     /// which would break `app.textFields["serverPortField"]` and most of this suite's sheet coverage.
     /// That is a trade, not an oversight — hence matching by label rather than "fixing" the field.
     var portValidationError: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
-                                  "Port must be", "Port must be"))
-            .firstMatch
+        app.validationNote(startingWith: "Port must be")
     }
 }
 
@@ -261,10 +258,7 @@ struct NewEndpointSheetPage {
     /// whole field and that overwrites the row beneath it. CI proved it: the corrected identifier
     /// found nothing either. What survives is the row's `.accessibilityLabel(message)`, so match that.
     var pathError: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
-                                  "Path must", "Path must"))
-            .firstMatch
+        app.validationNote(startingWith: "Path must")
     }
 }
 
@@ -1852,6 +1846,30 @@ final class MimicUITests: XCTestCase {
             _ = workspace.autosaveSavedIndicator.waitForExistence(timeout: 4)
             _ = workspace.autosaveSavingIndicator.waitForNonExistence(timeout: 4)
         }
+    }
+}
+
+// MARK: - Validation notes
+
+@MainActor
+extension XCUIApplication {
+    /// A `DSTextField`'s inline validation note, found by the words it says.
+    ///
+    /// The note's own identifier — `ds.textfield.<id>.error` — is in no tree: every caller stamps an
+    /// identifier on the whole `DSTextField`, and that propagation is the point, since it is what
+    /// makes `app.textFields["serverPortField"]` resolve. It reaches the note too and overwrites it.
+    /// `DSTextField.validationRow` does set `.accessibilityElement()` and `.accessibilityLabel`, so
+    /// the sentence survives.
+    ///
+    /// Scoped to two element types rather than `descendants(matching: .any)`. A predicate over every
+    /// descendant of the whole app is expensive enough that the runner gives up on it: CI failed this
+    /// with "Failed to get matching snapshots: Timed out while evaluating UI query", which is not a
+    /// missing element but a query that never finished. The note realizes as a static text or, when
+    /// AppKit groups it, as a plain element — so ask those two and no more.
+    func validationNote(startingWith prefix: String) -> XCUIElement {
+        let matcher = NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", prefix, prefix)
+        let text = staticTexts.matching(matcher).firstMatch
+        return text.exists ? text : otherElements.matching(matcher).firstMatch
     }
 }
 
