@@ -788,12 +788,25 @@ jobs:
   # run" rather than with anything a reader would connect to the rename. A class is a unit that moves
   # as a whole.
   #
-  # **Test count is still the estimator, and run #89 supports it rather than replacing it.** Its four
-  # shards ran 40 / 38 / 39 / 41 tests in 21m18 / 19m23 / 23m49 / ~22m — the ordering does not track
-  # the counts exactly (shard 3 ran fewer tests than shard 1 and took longer), so per-class cost is
-  # not perfectly uniform, but the spread of times is small enough that counting tests remains the
-  # honest cheap approximation. The constant that falls out is **~26 seconds per test**, from shard
-  # 3's 39 tests in a 22m42 step that also carries the build and the test-target compile.
+  # **Test count is a weaker estimator than it looked, and run #90 is the evidence.** Run #89's four
+  # shards ran 40 / 38 / 39 / 41 tests in 21m18 / 19m23 / 23m49 / ~22m, a spread small enough that
+  # counting seemed sound. Run #90's three ran 51 / 53 / 54 tests in **22m32 / 32m36 / 33m18** — four
+  # per cent more tests on the heaviest shard than the lightest, and forty-eight per cent more time.
+  #
+  # Subtract the build and test-target compile each step also carries (about seven minutes) and the
+  # per-test costs are roughly **17s / 28s / 28s**. The cheap shard is the one holding
+  # `SpecImportUITests`, which reads a bundled fixture and never starts a server, and the bulk of
+  # `MimicUITests`, which is mostly sheets and window state. The expensive shards hold the suites that
+  # bind a port and drive real HTTP — `RequestLogUITests` sends traffic for every assertion,
+  # `ErrorAlertUITests` holds sockets to force conflicts, `WorkspaceShellUITests` starts the server.
+  # **Launch is not the dominant cost after all; a real server is.**
+  #
+  # So the split below is balanced on the wrong axis, and knowingly. Rebalancing on measured time
+  # rather than count would put the worst shard near 28m30 instead of 33m18 — about five minutes,
+  # against a change that has to be re-derived every time a suite's character changes, and a run of
+  # this workflow to measure each attempt. The recipe is below and the data is in every run; take the
+  # five minutes when something else makes it worth a round trip. What must not happen is the next
+  # person reading "balanced by test count" and assuming the count was ever the thing that mattered.
   #
   # To do better than counting, the per-test data is already in each shard's own result bundle.
   # Download a shard's `xcresult-ui-N` artifact and ask
