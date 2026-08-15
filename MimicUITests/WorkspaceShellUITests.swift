@@ -509,6 +509,60 @@ final class WorkspaceShellUITests: MimicUITestCase {
             .firstMatch
     }
 
+    /// Gives the centre pane the width the drawer's header needs, before one of its controls is
+    /// clicked.
+    ///
+    /// `DSPanelHeader` is a single `HStack` — title, count, method popup, unmatched toggle, a 120pt
+    /// filter well, trash button — and nothing in it clips. Offered less width than that row's
+    /// minimum, SwiftUI lays it out *at* its minimum and centres it in the pane, so the row hangs off
+    /// both ends: the title loses characters on the left and the trailing control is drawn past the
+    /// right edge of the `NSHostingController` that owns the pane. `DSPanelHeader`'s own comment
+    /// describes the same mechanism from the other side — "the inspector header read 'narios'
+    /// instead of 'Scenarios', and the trailing controls went with it".
+    ///
+    /// A control drawn outside its hosting view is still in the accessibility tree with the right
+    /// label and the right action, so `AXPress` and VoiceOver reach it; AppKit hit-tests inside the
+    /// view's bounds, so a *pointer* does not. That is the shape of the clear-log failure: the button
+    /// answered every query put to it and the click went to whatever owned that point instead.
+    ///
+    /// The centre pane is the window minus the navigator and the inspector, and the inspector is
+    /// ~280pt of it (`PanelLayoutStore.Bounds.idealInspectorWidth`). The app declares no
+    /// `defaultSize`, so on a hosted runner the window opens near the ideal size its content reports
+    /// — `DSSplitPane.sizeThatFits` answers an unspecified proposal with
+    /// `minimumCentreHeight` for the width — and the centre pane starts far narrower than that row.
+    ///
+    /// Both halves are idempotent, so a caller cannot toggle the panel the wrong way.
+    @MainActor
+    private func widenCentrePaneByHidingTheInspector() {
+        guard inspectorHeader.exists else { return }
+        app.typeKey("i", modifierFlags: [.command, .option])
+        _ = inspectorHeader.waitForNonExistence(timeout: 5)
+    }
+
+    @MainActor
+    private func showInspectorIfHidden() {
+        guard !inspectorHeader.exists else { return }
+        app.typeKey("i", modifierFlags: [.command, .option])
+        _ = inspectorHeader.waitForExistence(timeout: 5)
+    }
+
+    /// What the app has recorded for the request log's visibility, read back out of the same
+    /// defaults suite the run launched it against.
+    ///
+    /// `panel.requestLog.visible` is `PanelLayoutStore`'s own key, spelled here because this target
+    /// links no `Persistence` — the one declaration is `PanelLayoutStore.Key.requestLogVisible`. The
+    /// suite is `MimicUITestCase.testSuite`, which is what `MIMIC_DEFAULTS_SUITE` points the app at,
+    /// so this is the app's write and not the developer's own arrangement.
+    ///
+    /// Only ever used in a failure message. A cross-process read can lag the writing process, so it
+    /// is evidence about which half of a restore failed, not something to assert on.
+    @MainActor
+    private func recordedRequestLogVisibility() -> String {
+        guard let stored = UserDefaults(suiteName: Self.testSuite)?
+            .object(forKey: "panel.requestLog.visible") else { return "<unset>" }
+        return String(describing: stored)
+    }
+
     /// What every element carrying `identifier` is saying, for a failure message.
     ///
     /// Plural on purpose. SwiftUI hands one identifier to more than one element often enough that
@@ -1147,6 +1201,25 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // identifier over its accessory's.
         let clearLog = app.buttons["Clear request log"].firstMatch
         XCTAssertTrue(clearLog.waitForExistence(timeout: 5), "The log should offer a way to clear it")
+
+        // The trash is the last control in a header row that does not clip, so it is the first one
+        // pushed out of the pane when that row runs out of width — see
+        // ``widenCentrePaneByHidingTheInspector()``. The inspector is closed for the click and
+        // reopened for the assertion below, which is what the drawer needs to be wide enough for the
+        // button and what this test needs to observe the fallback.
+        widenCentrePaneByHidingTheInspector()
+
+        // Existence and hittability are separate assertions because they are separate bugs, and the
+        // run that produced the comment below could not tell them apart: an element that is in the
+        // tree, carries the right label and is not hittable is a control drawn outside the view that
+        // owns its points — `AXPress` would still work — and that is a defect in the window, not in
+        // this query. The frames are printed so the next failure says which of the two it is.
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { clearLog.isHittable },
+            "The clear button should be somewhere the pointer can reach it — it is at "
+                + "\(clearLog.frame) inside a window of \(app.windows.firstMatch.frame), and the "
+                + "header is saying " + spokenTexts(forIdentifier: "ds.panelheader.requestLog")
+        )
         clearLog.click()
 
         // Two assertions, because one could not tell the two failures apart. On the first CI run the
@@ -1159,6 +1232,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "The trash button should empty the log — the drawer's header still reads "
                 + spokenTexts(forIdentifier: "ds.panelheader.requestLog")
         )
+
+        // Back on, because the inspector's fallback is what INSPOV-17 is about. Reopening it does not
+        // weaken the assertion: the panel picks its mode from the *current* selection, which the
+        // clear emptied, so a panel still showing "Request" here is still the bug this line names.
+        showInspectorIfHidden()
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Overview"),
             "A cleared log should not leave the inspector showing a request that is gone"
@@ -1705,10 +1783,29 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // Asserted on the panel, not on the toggle's label: the toolbar button publishes its `Label`'s
         // fixed title rather than the directional `.accessibilityLabel` `WorkspaceView` sets — see
         // ``inspectorHeader`` for the whole of that finding.
+        //
+        // **This is a defect in the window, and it is left asserted rather than reached around.**
+        // `PanelLayoutStore` is not the half that is wrong: `WorkspaceView` writes the arrangement on
+        // every change of `showDrawer`, and `WorkspaceView.init` reads it back when `ContentView`
+        // rebuilds the workspace for the reopened project. What undoes it is one layer down.
+        // `DSSplitPaneController` is constructed with `isSecondaryCollapsed: true`, sets
+        // `secondaryItem.isCollapsed` in `viewDidLoad` — and then `viewDidLayout` restores the
+        // *thickness* unconditionally, calling `splitView.setPosition(_:ofDividerAt:)` because a
+        // collapsed pane measures 0 and never matches the `want` it is comparing against. Moving a
+        // divider is how AppKit un-collapses a pane, so the restore re-opens the panel it was asked
+        // to leave shut, on the first layout pass after the project reopens. The missing guard is on
+        // `secondaryItem.isCollapsed`, before the restore, not on the thickness that lands.
+        //
+        // `panel.requestLog.visible` is read into the message so the next run distinguishes the two
+        // halves rather than restating the symptom: `0` there is the store having done its job.
         XCTAssertTrue(
             workspace.drawerEmptyHeading.waitForNonExistence(timeout: 5),
             "The arrangement left behind should be the one restored — the log was hidden when the "
-                + "project closed"
+                + "project closed, and panel.requestLog.visible reads "
+                + recordedRequestLogVisibility()
+                + ". With that reading 0 the store is right and the restore is not: "
+                + "DSSplitPaneController.viewDidLayout calls setPosition on a pane it was built "
+                + "collapsed, and setPosition un-collapses it."
         )
 
         // Not a vacuous absence. The chord brings the same empty state straight back, so what was

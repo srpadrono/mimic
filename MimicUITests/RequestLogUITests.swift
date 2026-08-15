@@ -122,16 +122,85 @@ final class RequestLogUITests: MimicUITestCase {
     @MainActor
     private var clearLogButton: XCUIElement { app.buttons["Clear request log"].firstMatch }
 
-    /// The method popup, likewise flattened. Tried as a pop-up button first and then as any element
-    /// with the label, for the reason `RequestDetailPage.tab(_:)` gives: the realization is a style
-    /// detail and a query pinned to it breaks silently.
+    /// Everything in the drawer's header, as one string, for a failure message.
+    ///
+    /// Every leaf in that row reports the container's `ds.panelheader.requestLog` rather than its
+    /// own identifier, so this is also the only way to see the row as the tree sees it. Guarded on
+    /// `firstMatch.exists` because `count` on a query with no matches raises "Failed to get matching
+    /// snapshot" rather than answering zero.
+    @MainActor
+    private func spokenHeaderControls() -> String {
+        let query = app.descendants(matching: .any).matching(identifier: "ds.panelheader.requestLog")
+        guard query.firstMatch.exists else { return "<nothing carries ds.panelheader.requestLog>" }
+        return (0..<query.count)
+            .map { "[\(text(of: query.element(boundBy: $0)))]" }
+            .joined(separator: " ")
+    }
+
+    /// The method popup, likewise flattened.
+    ///
+    /// **Matched on a label *fragment*, and that is the whole correction.** The control is
+    /// `Picker("Method")` with `.labelsHidden()` and an `.accessibilityLabel("Filter by method")`
+    /// over it, and macOS publishes *both* strings comma-joined: CI read the element as
+    /// `[label: Method, Filter by method, value: All]` — the picker's own title, then the label set
+    /// outside it, with the current selection in the value rather than in either. `.labelsHidden()`
+    /// hides the title from the *window*, not from the accessibility tree, which is the trap.
+    /// So an equality match on either half finds nothing, and "The method filter should be
+    /// addressable" failed on a control that had been in the tree the whole time.
+    ///
+    /// Tried as a pop-up button first and then as any element carrying the fragment, for the reason
+    /// `RequestDetailPage.tab(_:)` gives: the realization is a style detail and a query pinned to it
+    /// breaks silently. The two typed tiers come first because a predicate over
+    /// `descendants(matching: .any)` is the expensive kind — see ``elements(identifierPrefix:)``.
     @MainActor
     private var methodFilterControl: XCUIElement {
-        let byPopUp = app.popUpButtons["Filter by method"].firstMatch
+        let carriesTheLabel = NSPredicate(format: "label CONTAINS %@", "Filter by method")
+        let byPopUp = app.popUpButtons.matching(carriesTheLabel).firstMatch
         if byPopUp.exists { return byPopUp }
-        return app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Filter by method"))
+        let byButton = app.buttons.matching(carriesTheLabel).firstMatch
+        if byButton.exists { return byButton }
+        return app.descendants(matching: .any).matching(carriesTheLabel).firstMatch
+    }
+
+    /// The inspector's panel header, which is how the inspector's presence is witnessed — its
+    /// *contents* change with the selection, its header does not. Same handle
+    /// `WorkspaceShellUITests` uses for PANEL-04.
+    @MainActor
+    private var inspectorHeader: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(identifier: "ds.panelheader.inspector")
             .firstMatch
+    }
+
+    /// Gives the drawer's header the width its own controls need, before one of them is clicked.
+    ///
+    /// `DSPanelHeader` is a single `HStack` — title, count, method popup, unmatched toggle, a 120pt
+    /// filter well, trash button — and nothing in it clips. Asked for less width than that row's
+    /// minimum, SwiftUI lays the row out *at* its minimum and centres it in the pane, so it hangs off
+    /// both ends: the title loses characters on the left and the trailing control is drawn past the
+    /// right edge of the hosting view that owns the pane. `DSPanelHeader`'s own comment describes the
+    /// same mechanism from the other side ("the inspector header read 'narios' instead of
+    /// 'Scenarios', and the trailing controls went with it").
+    ///
+    /// An element drawn outside its hosting view is still in the accessibility tree with the right
+    /// label and the right action — `AXPress` would work, so this is not something a VoiceOver user
+    /// hits — but AppKit hit-tests within the view's bounds, so a *pointer* cannot reach it. That is
+    /// exactly the shape of "the trash button should empty the log": the button answered every query
+    /// put to it and the click went to whatever owned that point instead.
+    ///
+    /// The centre pane is the window minus the navigator and the inspector, and the inspector is
+    /// ~280pt of it (`PanelLayoutStore.Bounds.idealInspectorWidth`). The app opens with no
+    /// `defaultSize`, so on a hosted runner the pane starts near `DSSplitPane`'s own reported ideal —
+    /// far too narrow for that row. ⌥⌘I, the inspector's own chord, is the app's way of giving the
+    /// pane those points back; `WorkspaceShellUITests` covers the chord itself as PANEL-04.
+    ///
+    /// Idempotent: it presses nothing if the inspector is already closed, so a caller cannot
+    /// accidentally *open* it.
+    @MainActor
+    private func widenCentrePaneByHidingTheInspector() {
+        guard inspectorHeader.exists else { return }
+        app.typeKey("i", modifierFlags: [.command, .option])
+        _ = inspectorHeader.waitForNonExistence(timeout: 5)
     }
 
     /// The text filter. Its identifier may or may not survive the header — a plain `TextField` is not
@@ -469,8 +538,14 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(waitForVisibleRowCount(3), "Clearing the filter should bring every row back")
 
         // The method popup. Its identifier is stamped over by the panel header, so it is reached by
-        // label; its items are ordinary menu elements once it is open.
-        XCTAssertTrue(methodFilterControl.waitForExistence(timeout: 5), "The method filter should be addressable")
+        // label — a *fragment* of it, because the label is the picker's title comma-joined with the
+        // accessibility label; see ``methodFilterControl``. Its items are ordinary menu elements once
+        // it is open.
+        XCTAssertTrue(
+            methodFilterControl.waitForExistence(timeout: 5),
+            "The method filter should be addressable — the drawer header is saying "
+                + spokenHeaderControls()
+        )
         methodFilterControl.click()
         let postItem = app.menuItems["POST"]
         XCTAssertTrue(postItem.waitForExistence(timeout: 5), "The method popup should offer POST")
@@ -544,11 +619,34 @@ final class RequestLogUITests: MimicUITestCase {
         // Clearing empties the log outright, and the panel falls back to its idle state — not to the
         // "No matching requests" one, which would be a filter still claiming to be filtering.
         XCTAssertTrue(clearLogButton.waitForExistence(timeout: 5), "The header should offer a clear button")
+
+        // The button is the last thing in a row that does not clip, so it is the first thing pushed
+        // out of the pane when the row runs out of width — see
+        // ``widenCentrePaneByHidingTheInspector()`` for the whole of that finding. The inspector is
+        // not part of what this test is about, so closing it costs the test nothing and gives the
+        // drawer the ~280pt that puts the trash button back inside the pane.
+        widenCentrePaneByHidingTheInspector()
+
+        // Hittability is asserted separately from existence, because the two failures are different
+        // bugs and used to be reported as one. "Not found" is a query that missed; "found but not
+        // hittable" is a control drawn where no pointer can reach it, which is a defect in the
+        // window rather than in this file — and the frames are printed so the next run says which.
+        XCTAssertTrue(
+            poll { self.clearLogButton.isHittable },
+            "The clear button should be somewhere the pointer can reach it — it is at "
+                + "\(clearLogButton.frame) inside a window of \(app.windows.firstMatch.frame). A "
+                + "button that exists, carries the right label and is not hittable is the drawer's "
+                + "header overflowing its pane, not a query that resolved the wrong element."
+        )
         clearLogButton.click()
 
         // Two assertions, in this order, because they fail for different reasons: the rows going is
         // the clear having happened at all, and the empty state is what the panel does about it.
-        XCTAssertTrue(waitForVisibleRowCount(0), "The trash button should empty the log")
+        XCTAssertTrue(
+            waitForVisibleRowCount(0),
+            "The trash button should empty the log — the header still reads "
+                + spokenHeaderControls()
+        )
 
         // `RequestLogDrawerView` checks `requestLogs.isEmpty` before it checks the filter, so a
         // cleared log shows "No requests yet" even with the unmatched filter still on. The heading is

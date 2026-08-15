@@ -579,11 +579,18 @@ final class ErrorAlertUITests: MimicUITestCase {
         // depends on whether it auto-closes one is a trigger that will break on a dependency bump.
         app.typeText("not json")
 
+        // The editor's own contents go into the message beside the warning row. The warning is a
+        // function of what the editor holds, so "no warning" has two causes — the row never rendered
+        // because the text never arrived, or it rendered and says nothing the tree can read — and a
+        // message quoting only the row cannot separate them. `CodeEditor` is an
+        // `NSViewRepresentable` around an `NSTextView`, which publishes its string as the element's
+        // value, so this reads back the eight characters that were typed if they landed at all.
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) {
                 self.jsonWarningText().localizedCaseInsensitiveContains("not valid JSON")
             },
             "A malformed body should raise the \"Not valid JSON\" warning — read: " + jsonWarningText()
+                + " — and the body editor holds: " + combinedText(of: app.textViews.firstMatch)
         )
         XCTAssertTrue(
             jsonWarningText().localizedCaseInsensitiveContains("still saved"),
@@ -918,25 +925,43 @@ final class ErrorAlertUITests: MimicUITestCase {
     @MainActor private var statusCodeNote: XCUIElement { element(identifier: "endpointEditor.statusCode.error") }
     @MainActor private var delayNote: XCUIElement { element(identifier: "endpointEditor.delay.error") }
 
-    /// What `DSJSONEditor`'s warning row says.
+    /// What `DSJSONEditor`'s warning row says — **the whole row, not one element of it**.
     ///
-    /// Scoped to `staticTexts`, and that is the whole correction. The row is an `HStack` of an
-    /// `exclamationmark.triangle.fill` and the sentence, with the identifier on the stack, so *both*
-    /// children carry `ds.jsoneditor.editor.body.error` — and a type-agnostic `firstMatch` over it
-    /// resolves to the icon, whose label is the single word "Warning". `EndpointEditorUITests` failed
-    /// its own version of this assertion reading exactly `Warning|`, which is that icon and nothing
-    /// else. The sentence is the `StaticText` beside it, and the words are polled as a second handle
-    /// in case the identifier does not propagate at all.
+    /// The row is an `HStack` of an `exclamationmark.triangle.fill` and a `Text`, with the identifier
+    /// on the stack and no `.accessibilityElement(children:)`, so `ds.jsoneditor.editor.body.error`
+    /// lands on *both* children. A type-agnostic `firstMatch` over it therefore resolves to the icon,
+    /// whose label is the single word "Warning" — `EndpointEditorUITests` failed its own version of
+    /// this assertion reading exactly `Warning|`, which is that icon and nothing else.
+    ///
+    /// Scoping to `staticTexts` was the previous correction and it was a guess about a realization:
+    /// it read empty here, which says the sentence is not in `app.staticTexts` under either handle.
+    /// So this stops guessing which element carries the sentence and enumerates every element that
+    /// carries the identifier, reading label and value from each. Whatever type SwiftUI gives the
+    /// `Text`, it is in that list, and the icon merely adds "Warning" to the front of the string.
+    ///
+    /// The distinct return for an absent row matters as much as the text: "the warning row is not on
+    /// screen" and "the warning row is on screen and says nothing" are different failures — the first
+    /// is the typing never reaching the editor, the second is the row's own accessibility — and a
+    /// bare empty string reported both as the second. Guarded on `firstMatch.exists` because `count`
+    /// on a query with no matches raises rather than answering zero.
+    ///
+    /// The words are still polled as a second handle, in case the identifier does not propagate at
+    /// all. `staticTexts` is the cheap typed query, unlike a `CONTAINS` over every descendant.
     @MainActor
     private func jsonWarningText() -> String {
         let byWords = NSPredicate(
             format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@", "valid JSON", "valid JSON"
         )
-        let byIdentifier = app.staticTexts
-            .matching(identifier: "ds.jsoneditor.editor.body.error")
-            .allElementsBoundByIndex
         let sentences = app.staticTexts.matching(byWords).allElementsBoundByIndex
-        return (byIdentifier + sentences).map { combinedText(of: $0) }.joined(separator: " | ")
+            .map { combinedText(of: $0) }
+
+        let carriers = app.descendants(matching: .any)
+            .matching(identifier: "ds.jsoneditor.editor.body.error")
+        guard carriers.firstMatch.exists else {
+            return (["<no warning row on screen>"] + sentences).joined(separator: " | ")
+        }
+        let row = (0..<carriers.count).map { combinedText(of: carriers.element(boundBy: $0)) }
+        return (row + sentences).joined(separator: " | ")
     }
 
     /// The drawer's text filter, by identifier and by label together.
