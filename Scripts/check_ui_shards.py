@@ -31,7 +31,15 @@ So the shard list is checked against the tree rather than trusted:
     were chosen for is wrong by that much;
   - a shard naming a class that **does not exist** fails, which is what a rename leaves behind —
     `xcodebuild` reports it as "no tests to run" and exits 0, so the shard goes green having run
-    nothing.
+    nothing;
+  - and `EXPECTED_COVERAGE_BUNDLES` in the same workflow disagreeing with the shard count fails,
+    which is the same shape one level up. The `coverage` job merges one result bundle per test-running
+    job — the unit suites plus every shard — and refuses to publish if fewer arrive than it expects.
+    It cannot count the shards for itself: a job cannot read another job's `matrix`, so the total is
+    written down as a literal. Add a fourth shard and leave the literal at 4 and that job merges
+    three shards' worth of coverage while believing it has all of them, publishing a number lower
+    than the truth with nothing anywhere to say a shard is missing. Lower the literal and the job
+    refuses forever. Both are quiet; this makes them loud.
 
 It reads the workflow as text and the suites as text. Nothing here imports PyYAML: the Linux CI job
 installs `python3-minimal` and has no third-party packages at all, which is a constraint every
@@ -58,6 +66,14 @@ UI_TESTS = ROOT / "MimicUITests"
 TARGET = "MimicUITests"
 
 ONLY_TESTING = re.compile(r"-only-testing:" + TARGET + r"/([A-Za-z_][A-Za-z0-9_]*)")
+
+# The literal the `coverage` job compares its downloaded bundle count against. Matched as an `env:`
+# entry rather than parsed as YAML, for the reason the module header gives: nothing here imports
+# PyYAML.
+EXPECTED_BUNDLES = re.compile(r"^\s*EXPECTED_COVERAGE_BUNDLES:\s*(\d+)\s*$", re.MULTILINE)
+
+# A shard is a `- id: N` entry, and its flags are the `-only-testing:` lines before the next one.
+SHARD_SPLIT = r"^\s*- id:\s*"
 
 # A class declaration at the start of a line, with a superclass. Page objects in this target are
 # `struct`s and are correctly invisible to this; a `class` with no superclass is not an XCTestCase
@@ -100,11 +116,54 @@ def suite_classes(sources):
     return {name: n for name, n in counts.items() if n > 0}
 
 
+def shard_blocks(workflow_text):
+    """`[(id, [class names])]` for every matrix leg that names at least one class.
+
+    A leg naming none is not a shard — it is a `- id:` in some other list, or a leg mid-edit — and
+    counting it would make the bundle-count check below disagree with what the `coverage` job will
+    actually be handed.
+    """
+    blocks = re.split(SHARD_SPLIT, workflow_text, flags=re.MULTILINE)[1:]
+    found = []
+    for block in blocks:
+        names = ONLY_TESTING.findall(block)
+        if names:
+            found.append((block.split("\n", 1)[0].strip(), names))
+    return found
+
+
+def check_bundle_count(workflow_text):
+    """`EXPECTED_COVERAGE_BUNDLES` against the shard count. One string, or none."""
+    shards = len(shard_blocks(workflow_text))
+    declared = EXPECTED_BUNDLES.search(workflow_text)
+
+    if declared is None:
+        return [
+            "no `EXPECTED_COVERAGE_BUNDLES:` in .github/workflows/ci.yml. The `coverage` job needs "
+            "it to know how many result bundles a complete merge has — one from the unit suites and "
+            f"one from each of the {shards} shards, so {shards + 1}. If the coverage job is gone, "
+            "delete this check with it rather than leaving a checker that compares nothing."
+        ]
+
+    expected = shards + 1
+    if int(declared.group(1)) != expected:
+        return [
+            f"EXPECTED_COVERAGE_BUNDLES is {declared.group(1)} in .github/workflows/ci.yml and the "
+            f"`macos-ui` matrix has {shards} shard(s), so a complete merge has {expected} bundles — "
+            f"one from the unit suites and one per shard. Too high and the `coverage` job refuses "
+            f"to publish on every run; too low and it merges fewer shards than exist while "
+            f"believing it has them all, publishing a figure lower than the truth with nothing to "
+            f"say a shard is missing."
+        ]
+
+    return []
+
+
 def check(workflow_text, sources):
     """Returns `(problems, sharded, tests)` — a list of strings, the shard list, the counts."""
     sharded = shard_classes(workflow_text)
     tests = suite_classes(sources)
-    problems = []
+    problems = list(check_bundle_count(workflow_text))
 
     seen = set()
     for name in sharded:
@@ -138,17 +197,10 @@ def report_balance(workflow_text, tests):
     Test count is a proxy for time and the workflow says so; a spread this prints is a prompt to go
     and look at the real per-test durations in a shard's result bundle, not a verdict on anything.
     """
-    # A shard is a `- id: N` entry, and its flags are the `-only-testing:` lines before the next one.
-    blocks = re.split(r"^\s*- id:\s*", workflow_text, flags=re.MULTILINE)[1:]
-    if not blocks:
-        return
-    totals = []
-    for block in blocks:
-        shard_id = block.split("\n", 1)[0].strip()
-        names = ONLY_TESTING.findall(block)
-        if not names:
-            continue
-        totals.append((shard_id, sum(tests.get(n, 0) for n in names), names))
+    totals = [
+        (shard_id, sum(tests.get(n, 0) for n in names), names)
+        for shard_id, names in shard_blocks(workflow_text)
+    ]
     if not totals:
         return
 
@@ -181,6 +233,10 @@ GOOD_WORKFLOW = """
           - id: 2
             only: >-
               -only-testing:MimicUITests/GammaUITests
+
+  coverage:
+    env:
+      EXPECTED_COVERAGE_BUNDLES: 3
 """
 
 GOOD_SOURCES = [
@@ -250,8 +306,52 @@ def self_test():
     # A workflow that has stopped naming any class at all. Every class is then unsharded, which is
     # the loud version of the quiet failure — worth pinning, because a checker that reported "all
     # clear" against an empty flag list would be agreeing with nothing.
-    problems, _s, _t = check("matrix:\n  include: []\n", GOOD_SOURCES)
+    problems, _s, _t = check(
+        "matrix:\n  include: []\nEXPECTED_COVERAGE_BUNDLES: 1\n", GOOD_SOURCES
+    )
     expect("an empty shard list fails for every class", len(problems) == 3, problems)
+
+    # The bundle-count check, driven on its own so a failure names it rather than showing up as a
+    # count that moved. Two shards in the fixture, so a complete merge is three bundles.
+    expect(
+        "a bundle count matching the shards passes",
+        check_bundle_count(GOOD_WORKFLOW) == [],
+        check_bundle_count(GOOD_WORKFLOW),
+    )
+    too_low = GOOD_WORKFLOW.replace("EXPECTED_COVERAGE_BUNDLES: 3", "EXPECTED_COVERAGE_BUNDLES: 2")
+    problems = check_bundle_count(too_low)
+    expect(
+        "a bundle count below the shard count fails",
+        len(problems) == 1 and "lower than the truth" in problems[0],
+        problems,
+    )
+    too_high = GOOD_WORKFLOW.replace("EXPECTED_COVERAGE_BUNDLES: 3", "EXPECTED_COVERAGE_BUNDLES: 9")
+    problems = check_bundle_count(too_high)
+    expect(
+        "a bundle count above the shard count fails",
+        len(problems) == 1 and "refuses to publish" in problems[0],
+        problems,
+    )
+    missing = GOOD_WORKFLOW.replace("      EXPECTED_COVERAGE_BUNDLES: 3\n", "")
+    problems = check_bundle_count(missing)
+    expect(
+        "a workflow with no bundle count at all fails",
+        len(problems) == 1 and "no `EXPECTED_COVERAGE_BUNDLES:`" in problems[0],
+        problems,
+    )
+    # A third shard added to the matrix and the literal left where it was — the drift this check
+    # exists for, and the one that would otherwise publish a figure lower than the truth in silence.
+    grown = GOOD_WORKFLOW.replace(
+        "  coverage:",
+        "          - id: 3\n            only: >-\n"
+        "              -only-testing:MimicUITests/DeltaUITests\n\n  coverage:",
+    )
+    problems = check_bundle_count(grown)
+    expect(
+        "adding a shard without moving the bundle count fails",
+        len(problems) == 1 and "3 shard(s)" in problems[0],
+        problems,
+    )
 
     if failures:
         print(f"\n{len(failures)} self-test failure(s). The checker is not trustworthy — fix it "

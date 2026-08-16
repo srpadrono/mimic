@@ -287,11 +287,27 @@ python3 Scripts/check_doc_counts.py    # recount every number above, and catch a
 
 ### Coverage
 
-**Coverage is measured on every CI run**, by the macOS job running the unit suites with
-`-enableCodeCoverage YES` — XCUITest and the Linux suites excepted, and no floor enforced against
-the figures. **The two badges above are live**: every push to `main` publishes them to an orphan
-`badges` branch as shields.io endpoint payloads, so nothing in the tree changes when they move. The
-detailed per-target block below is the other half, and it is deliberately local-only —
+**Coverage is measured on every CI run**, with `-enableCodeCoverage YES` on the unit suites and on
+all three XCUITest shards. No floor is enforced against the figures.
+
+**The badges are the union of the four**, not a sum. Coverage is a set over executed lines, so four
+sets of per-target numbers cannot be added — a line two suites both reach is one covered line. The
+four result bundles are merged with `xcrun xcresulttool merge` and read once, which is what the
+`Coverage (unit suites + XCUITest)` job does on every push to `main` before the figures are
+published to an orphan `badges` branch as shields.io endpoint payloads. Nothing in the tree changes
+when they move.
+
+That merge is why the numbers moved. Until it existed the badges came from a run passing
+`-skip-testing:MimicUITests`, so all 158 UI tests — the only ones that touch the SwiftUI layer —
+contributed nothing to the published figure for how well this window is tested.
+
+Two things the badges are not. The first reads `Mimic.app coverage`, and `Mimic.app` is the app
+bundle *target*: `App/Sources/MimicApp.swift`, 34 lines, the `@main` entry point. The application
+itself is `AppFeatures`, which the second badge counts among its eight modules. And a run that
+publishes nothing leaves both showing the last figures that did publish — deliberately, since a
+stale number is recoverable and a quietly wrong one is not.
+
+The detailed per-target block below is the other half, and it is deliberately local-only —
 `./Scripts/run_full_test_suite.sh` on a Mac is its only writer, so it is as fresh as the last full
 run somebody did by hand.
 
@@ -299,10 +315,13 @@ run somebody did by hand.
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
-`main`, in seven jobs across five definitions, finishing in about **30 minutes**: Linux builds
+`main`, in eight jobs across six definitions, finishing in about **30 minutes**: Linux builds
 `Package.swift`, the portable suites and every gate needing no toolchain in a couple of minutes;
 macOS does `tuist generate`, the Debug build, the measured app suites, the CLI end-to-end check and
-the Release gate, with the XCUITest suite beside it in three shards on three runners. Both runners
+the Release gate, with the XCUITest suite beside it in three shards on three runners. Four of those
+eight run at once, which is the concurrent-macOS-job limit this repository was measured to get; the
+coverage merge is a fifth macOS job and adds no queue, because it starts only once all four have
+finished — and only on a push to `main`, so a pull request's 30 minutes is untouched. Both runners
 are free on a public repository. Why the work divides that way, and what each gate settles, is in
 [`ci.md`](.agents/skills/mimic-build-and-test/references/ci.md).
 
