@@ -82,6 +82,134 @@ enum UITestApp {
         waitUntil(timeout: timeout) { elements.contains { $0.exists } }
     }
 
+    // MARK: - Menus
+
+    /// Waits until `element` reports the same non-empty frame twice in a row.
+    ///
+    /// `waitForExistence` answers "is it in the accessibility tree", which for an AppKit menu happens
+    /// when the menu is *created* — before it has been positioned and while it is still fading in. A
+    /// `click()` in that window computes a frame that is about to change and synthesizes the event at
+    /// coordinates the item has already left, so the click lands on the menu's backdrop, the menu
+    /// closes, and nothing happens. Nothing about that reads as a missed click afterwards: the test
+    /// simply waits out its timeout for a sheet nobody asked for.
+    ///
+    /// Two equal readings a poll apart is the cheapest statement of "it has stopped moving". It is a
+    /// heuristic and worth naming as one — a frame that pauses mid-animation for a whole poll would
+    /// satisfy it — but it is a far better one than a fixed pause, which this file may not use and
+    /// would be wrong in both directions anyway.
+    ///
+    /// `snapshot()` rather than `.frame`: reading `.frame` on an element that has just gone away
+    /// raises an XCTest failure, and every suite here runs with `continueAfterFailure = false`, so a
+    /// menu that closed underneath this helper would end the test rather than let the caller retry.
+    /// `try?` turns that into "no reading yet".
+    @MainActor
+    static func waitForStableFrame(_ element: XCUIElement, timeout: TimeInterval = 2) {
+        var previous: CGRect?
+        _ = waitUntil(timeout: timeout, pollInterval: 0.1) {
+            let current = (try? element.snapshot())?.frame
+            defer { previous = current }
+            guard let current, current.width > 0, current.height > 0 else { return false }
+            return current == previous
+        }
+    }
+
+    /// Closes whatever menu is open, including a submenu, and returns once none is.
+    ///
+    /// `app.menus` counts open `AXMenu` elements and does not include the menu bar, so this is "is a
+    /// menu on screen" rather than "does the app have menus". One Escape closes one level, which is
+    /// why this loops.
+    @MainActor
+    static func dismissAnyOpenMenu(in app: XCUIApplication, levels: Int = 3) {
+        for _ in 0..<levels {
+            guard app.menus.count > 0 else { return }
+            app.typeKey(.escape, modifierFlags: [])
+            _ = waitUntil(timeout: 1) { app.menus.count == 0 }
+        }
+    }
+
+    /// Opens a submenu, picks `item` out of it, and returns once `outcome` is on screen.
+    ///
+    /// The one interaction in this suite that has flaked in two different tests, and the reason it
+    /// is a helper rather than eight lines written twice.
+    ///
+    /// **What goes wrong.** Driving a nested AppKit menu means clicking a submenu parent, waiting for
+    /// a child that exists before it is placed, and clicking that. Two frames have to be right and
+    /// both are computed from a snapshot taken a moment earlier. When one is not, the menu closes
+    /// having done nothing — and the only evidence is the *absence* of whatever the item was supposed
+    /// to produce, which is indistinguishable from the app failing to produce it.
+    ///
+    /// `RequestLogUITests.testAddingRequestsToAnExistingJourneyFromTheLog` failed exactly that way on
+    /// run #91 with a five-second wait for the sheet, and the fix applied then was to widen the wait
+    /// to fifteen. **Run #98 failed at the same line, twice in the same run, at fifteen.** A sheet
+    /// that is merely slow arrives inside fifteen seconds; one that never arrives is a different
+    /// failure, and widening the clock was the wrong reading of the first one. That is what this
+    /// replaces.
+    ///
+    /// **What it does.** Waits for each menu level to stop moving before clicking it, and if the
+    /// outcome still does not arrive, dismisses whatever is left open and drives the whole
+    /// interaction again — up to `attempts` times. Only the last attempt gets the full
+    /// `outcomeTimeout`; the earlier ones get a short one, so a genuinely slow outcome is still
+    /// waited out properly while a missed click is discovered quickly instead of costing the caller
+    /// three long waits.
+    ///
+    /// **What it does not do, and this is the part worth being honest about.** A retry cannot tell a
+    /// missed click apart from an app that intermittently fails to present. If the product is the
+    /// flaky half, this hides it up to `attempts` times — so each re-open is recorded as an activity
+    /// in the result bundle, and a caller that cares can compare. What it cannot do is turn a broken
+    /// app green: every attempt ends in the same wait for the same `outcome`, so a sheet that never
+    /// comes still fails, with the caller's own message.
+    ///
+    /// Returns whether `outcome` ever appeared, so the caller asserts with its own wording.
+    @MainActor
+    @discardableResult
+    static func chooseFromSubmenu(
+        in app: XCUIApplication,
+        parent: XCUIElement,
+        item: XCUIElement,
+        thenAwait outcome: XCUIElement,
+        // `@MainActor` on the closure type, not decoration: callers build it out of their own
+        // `@MainActor` row helpers, and a plain `() -> Void` cannot call one synchronously under
+        // Swift 6 isolation checking.
+        reopenMenu: @MainActor () -> Void,
+        menuIsAlreadyOpen: Bool = false,
+        attempts: Int = 3,
+        menuTimeout: TimeInterval = 5,
+        outcomeTimeout: TimeInterval = 15
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 || !menuIsAlreadyOpen {
+                if attempt > 1 {
+                    // A marker with an empty body, and the only trace a retry leaves. It lands in the
+                    // result bundle, which is uploaded on a red run — so "this passed, but only on
+                    // the second open" is answerable rather than invisible. `print()` would not do:
+                    // runner output never reaches the xcodebuild log this workflow reads.
+                    XCTContext.runActivity(
+                        named: "Re-opened the submenu (attempt \(attempt) of \(rounds))"
+                    ) { _ in }
+                }
+                dismissAnyOpenMenu(in: app)
+                reopenMenu()
+            }
+
+            guard parent.waitForExistence(timeout: menuTimeout) else { continue }
+            waitForStableFrame(parent)
+            parent.click()
+
+            guard item.waitForExistence(timeout: menuTimeout) else { continue }
+            waitForStableFrame(item)
+            item.click()
+
+            // The full clock only on the way out. An intermediate attempt that waits fifteen seconds
+            // for something a missed click means will never come turns a three-attempt helper into a
+            // forty-five-second one, on a test that already runs past a minute.
+            let isLastAttempt = attempt == rounds
+            let wait = isLastAttempt ? outcomeTimeout : min(outcomeTimeout, 4)
+            if outcome.waitForExistence(timeout: wait) { return true }
+        }
+        return false
+    }
+
     static var launchedApps: [NSRunningApplication] {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
     }
