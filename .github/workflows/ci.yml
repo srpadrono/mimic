@@ -82,6 +82,16 @@ name: CI
 #     ────────────────────────
 #                    4 slots
 #
+# There is a **fifth** macOS job — `coverage`, near the bottom of this file — and it is outside that
+# budget rather than an exception to it. The cap is on jobs running *at the same time*, and that one
+# declares `needs: [macos-checks, macos-ui]`, so it cannot start until all four above have finished
+# and given their slots back. It asks for a slot that is free by construction. What it costs is wall
+# clock on pushes to `main`, after the last shard reports, and nothing at all on a pull request.
+#
+# The rule the paragraph above is really stating, then: **a fifth *concurrent* macOS job queues for
+# about the length of a shard.** A fifth job downstream of the other four does not. Before adding
+# one, ask which kind it is.
+#
 # Fewer, larger shards is the right trade under an observed cap of four. Three shards of ~53 tests
 # each are longer than four of ~40, but nothing queues, and a shard that runs is worth more than a
 # shard that waits: the four-shard split spent 19m26 of wall clock on a slot that did not exist.
@@ -153,6 +163,9 @@ name: CI
 #     macos-ui  (51/53/54)    ~30m    ~1m setup + ~5m Debug + ~1m30 test-target compile
 #                                     + 54 × 26s ≈ 23m24 of tests on the heaviest shard
 #     ui-suite                 ~0m    Linux; rolls the three shard results into one status check
+#     coverage           pushes only  macOS; downloads four result bundles, merges them, publishes
+#                                     the figures. Downstream of everything above, so it adds to a
+#                                     push to `main` and nothing to a pull request.
 #
 # So: **96 minutes originally, 43 measured with four shards, about 30 expected with three.** The
 # saving is not from running less — it is the same 158 tests either way — it is from stopping asking
@@ -414,10 +427,15 @@ jobs:
   # This is the old `macos` job with the UI step lifted out of the middle of it. The rename is not
   # cosmetic — it is what stops "the macOS job" meaning two unrelated things — but it does have one
   # consequence outside this file: **required status checks in branch protection are configured by
-  # job name.** `Build and test (macOS)` no longer exists as a check. Whoever merges this must update
-  # the branch rules to require `Build, unit suites, Release, CLI e2e (macOS)` and `UI suite`, or
-  # `main` accepts a commit no macOS job ever looked at. The `UI suite` job at the bottom exists
-  # partly so that the second of those names never has to change again when the shard count does.
+  # job name.** `Build and test (macOS)` no longer exists as a check; the branch rules were updated
+  # to require `Build, unit suites, Release, CLI e2e (macOS)` and `UI suite` instead. The `UI suite`
+  # job further down exists partly so that the second of those names never has to change again when
+  # the shard count does.
+  #
+  # Neither `coverage` nor `Publish coverage badges` belongs in that list, and adding one would be a
+  # mistake of the kind this file argues against everywhere else: they run only on pushes to `main`,
+  # so on a pull request they never report at all — a required check that never reports blocks the
+  # merge forever — and a coverage measurement is not a verdict on a commit.
   macos-checks:
     name: Build, unit suites, Release, CLI e2e (macOS)
     runs-on: macos-26
@@ -425,12 +443,6 @@ jobs:
     # run #89, so this is generous by more than twofold and still tight enough that a wedged runner
     # is cut loose within the hour.
     timeout-minutes: 45
-
-    # The measured coverage figures, handed to `record-coverage` below. Empty on every run that is
-    # not a push to `main`, and on any run that failed before the measurement — that job treats an
-    # empty value as "nothing to record" rather than as an error.
-    outputs:
-      coverage: ${{ steps.figures.outputs.json }}
 
     # DerivedData inside the checkout, and **every** xcodebuild step below passes it.
     #
@@ -477,12 +489,16 @@ jobs:
       # rendering tests. The rest of the suite already ran on Linux, and XCUITest runs in the sharded
       # job below — `-skip-testing:MimicUITests` is what keeps the two from overlapping.
       #
-      # This is also the only step in this workflow that *measures* how much of this code the tests
-      # reach, rather than reading the tree and reasoning about it. Until it carried
-      # `-enableCodeCoverage YES`, both README badges said `not measured` and meant it: every claim
-      # in this repository about what is and is not tested rested on grep.
-      # `Scripts/run_full_test_suite.sh` passes the flag too, but it needs a Mac and a human who
-      # remembers to run it, and no CI step passed it at all.
+      # This step *measures* how much of this code the tests reach, rather than reading the tree and
+      # reasoning about it. Until it carried `-enableCodeCoverage YES`, both README badges said
+      # `not measured` and meant it: every claim in this repository about what is and is not tested
+      # rested on grep. `Scripts/run_full_test_suite.sh` passes the flag too, but it needs a Mac and
+      # a human who remembers to run it, and no CI step passed it at all.
+      #
+      # It is no longer the *only* such step. The three UI shards carry the flag too, and the
+      # `coverage` job near the bottom of this file merges all four bundles into the union the badges
+      # publish. This one is still the half that runs on every pull request, and its table is what a
+      # reviewer reads on a run that publishes nothing.
       #
       # `-resultBundlePath` is what makes the bundle findable afterwards. Without it xcodebuild
       # writes to `$DERIVED_DATA/Logs/Test/`, and the coverage step below would have to find its
@@ -541,47 +557,53 @@ jobs:
             --title 'Code coverage (unit suites, XCUITest excluded)' \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # (c): the same figures again, as a few hundred bytes of JSON handed to the `record-coverage`
-      # job at the bottom of this file, which turns them into the two badge payloads.
+      # (c): the bundle itself, tarred and handed to the `coverage` job at the bottom of this file,
+      # which merges it with the three UI shards' bundles and emits the badge figures from the union.
       #
-      # A **job output**, not an artifact, and not three more lines on that job. Two constraints
-      # meet here. `contents: write` must not live on this job — it is the one that compiles and
-      # runs code out of a pull request, and a write token here would widen the blast radius of
-      # anything going wrong in that to "can push to `main`". And the `.xcresult` this reads is
-      # several hundred megabytes, so handing the *bundle* to a second job would move all of it
-      # between runners so the other end could re-read nine numbers out of it. An output carries
-      # exactly the nine numbers, costs nothing, and needs no `download-artifact` — which this
-      # workflow has never pinned, and a SHA is not a thing to guess at.
+      # **This used to be nine numbers in a job output, and that was wrong.** The comment here argued
+      # that moving several hundred megabytes between runners so the other end could re-read nine
+      # numbers was waste, and about the cost it was right. About the requirement it was not.
+      # Coverage is a **set union over executed lines, not a sum**: a line the unit suites reach and
+      # a UI test also reaches is one covered line, not two. Four sets of nine numbers therefore
+      # cannot be combined into one set of nine by any arithmetic — not by adding, not by taking the
+      # maximum — because the numbers have thrown away *which* lines. Only the line-level data can be
+      # merged, and that lives in the bundle. So the bundle travels, tarred.
       #
-      # `continue-on-error`, for the same reason the summary step above carries it and no weaker: a
-      # coverage measurement is not a verdict on a commit, and a step that reddens a run whose tests
-      # all passed teaches people to ignore red. It matters more here than there, because the exact
-      # names `xccov` reports targets under in a *workspace-wide* bundle could not be checked from
-      # where this was written — no Mac, no Xcode — and `--emit-json` deliberately refuses to write
-      # a partial table, all nine targets or none, rather than shrinking the badge's denominator
-      # into a pass.
+      # Tarred, and not handed to `upload-artifact` as a directory. An `.xcresult` is thousands of
+      # small files; the uploader walks and posts each one, which turns a bundle into a step measured
+      # in tens of minutes. One `.tar.gz` is one file, and a bundle is mostly JSON, so it compresses
+      # hard. `retention-days: 1` because nothing reads it after the job three below.
       #
-      # That refusal is safe to leave loud-but-not-fatal because its failure announces itself: no
-      # figures means nothing is published, and the badges go on showing the figures from the last
-      # push that did measure — visibly stale rather than quietly wrong. A silent wrong number is the
-      # outcome worth engineering against; an old one is not.
+      # Only on a push to `main`, for the reason the emit step gave: on a pull request there is
+      # nowhere to record the result, and the numbers describe the merged commit anyway. Keeping it
+      # off pull requests is also what keeps this change off the feedback path the sharding bought.
       #
-      # Only on a push to `main`: on a pull request there is nowhere to record the result, and the
-      # numbers describe the merged commit anyway.
-      - name: Emit coverage figures
-        id: figures
+      # **No `if: always()`, deliberately, and this differs from the UI shards.** A step with no
+      # condition is skipped when an earlier one failed, so a genuinely failing unit suite publishes
+      # no coverage — which is right, because the badge should not move for a commit whose tests are
+      # red. The shards below *do* carry `!cancelled()`, because that suite is documented to end red
+      # on a test that passed on its retry, and a flake must not be what decides whether the figures
+      # are recorded.
+      - name: Package the coverage bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
         run: |
-          python3 Scripts/update_readme_coverage.py \
-            --result-bundle .artifacts/coverage/UnitTests.xcresult \
-            --emit-json .artifacts/coverage/coverage.json
-          cat .artifacts/coverage/coverage.json
-          {
-            echo 'json<<COVERAGE_JSON_EOF'
-            cat .artifacts/coverage/coverage.json
-            echo 'COVERAGE_JSON_EOF'
-          } >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          tar -C .artifacts/coverage -czf .artifacts/UnitTests.xcresult.tar.gz UnitTests.xcresult
+          ls -lh .artifacts/UnitTests.xcresult.tar.gz
+
+      # `if-no-files-found: warn` rather than `error`, for the rule this file applies to every
+      # coverage step: a measurement never reddens a commit whose tests passed. A bundle that did not
+      # arrive is caught at the other end instead — the `coverage` job counts what it downloaded
+      # against `EXPECTED_COVERAGE_BUNDLES` and publishes nothing if the count is short, so the
+      # badges go visibly stale rather than quietly dropping whatever the missing job covered.
+      - name: Upload the coverage bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-bundle-unit
+          path: .artifacts/UnitTests.xcresult.tar.gz
+          retention-days: 1
+          if-no-files-found: warn
 
       # The seam nothing else in this workflow reaches: a real process launch, the discovery file on
       # disk, a real control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)`
@@ -922,6 +944,30 @@ jobs:
       # path so the three uploads below cannot collide. `tee` for the reason that step documents: a
       # compile failure in the test target produces a bundle with `totalTestCount: 0`, so the errors
       # exist only in this output.
+      #
+      # `-enableCodeCoverage YES` here is what the `coverage` job at the bottom of this file exists
+      # to use, and it closes the gap that made the first published figure meaningless. The badge
+      # read `Mimic.app coverage 46.67%` and `modules at or above 95% 5/8`, with `AppFeatures` — the
+      # 14,990-line SwiftUI and workflow layer, and the only module these 158 tests touch — measured
+      # at 85.32%. It was measured with `-skip-testing:MimicUITests`, so the entire XCUITest suite
+      # contributed nothing to the number that was published about how well this window is tested.
+      #
+      # It is on for every run, not just the pushes that publish. What CI measures should be what CI
+      # ran, and a flag that is set on `main` and clear on pull requests is a flag whose effect on
+      # this suite nobody sees until it is too late to attribute. Instrumentation costs a few per
+      # cent of a step dominated by app launches and `waitForExistence`, against a 60-minute timeout
+      # the heaviest shard uses 33 of.
+      #
+      # **One thing could make this contribute nothing, and it is worth knowing before reading a
+      # result.** The app under test is sandboxed (`App/Mimic.entitlements`), and an instrumented
+      # binary writes its `.profraw` to a path baked in at build time, under DerivedData and outside
+      # the app's container. If the sandbox refuses that write, this shard's bundle carries coverage
+      # for the *test* target and nothing for the app or the frameworks it links — which is where
+      # `AppFeatures` lives. That would show up as the merged `AppFeatures` figure sitting on 85.32%,
+      # unmoved, which is why the `coverage` job prints the unit-only table beside the merged one
+      # instead of only the number it publishes. The merge cannot make a figure *wrong* either way —
+      # a union with an empty set is the same set — so the failure mode here is "no gain", never "bad
+      # number".
       - name: Test (UI)
         env:
           ONLY_TESTING: ${{ matrix.only }}
@@ -936,6 +982,7 @@ jobs:
             test -destination 'platform=macOS' \
             $ONLY_TESTING \
             -derivedDataPath "$DERIVED_DATA" \
+            -enableCodeCoverage YES \
             -resultBundlePath "$RESULT_BUNDLE" \
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=- 2>&1 | tee "$BUILD_LOG"
@@ -975,6 +1022,44 @@ jobs:
             .artifacts/ui-tests-${{ matrix.id }}.log
           retention-days: 7
           if-no-files-found: ignore
+
+      # This shard's half of the merged measurement — see `Package the coverage bundle` in
+      # `macos-checks` for why the bundle travels rather than a handful of numbers, and why it is
+      # tarred first.
+      #
+      # A second upload of the same bundle on a red push to `main`, and knowingly. Folding the two
+      # together would mean one artifact serving two readers with two retentions, two conditions and
+      # two shapes — the diagnostic one is a bundle a human opens in Xcode and keeps for a week, this
+      # one is a tarball a job untars and nothing keeps. A red push to `main` is rare enough that
+      # paying for it twice is cheaper than the step that has to be right for both.
+      #
+      # **`!cancelled()` rather than no condition, and this is the asymmetry with the unit job.**
+      # `-retry-tests-on-failure` leaves this step red for a test that failed once and passed on its
+      # rerun — the workflow documents that at `Test (UI)` and it has been observed on this suite. A
+      # shard that ends red for a flake still ran everything and its bundle still holds every line
+      # those tests reached; letting that decide whether the figures are recorded would publish
+      # coverage only on the runs where no flake happened to fire.
+      - name: Package the coverage bundle
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          BUNDLE_NAME: UITests-${{ matrix.id }}.xcresult
+        run: |
+          set -euo pipefail
+          if [ ! -d ".artifacts/ui/$BUNDLE_NAME" ]; then
+            echo "::warning::No result bundle at .artifacts/ui/$BUNDLE_NAME — this shard died before xcodebuild wrote one, so the coverage job will find three bundles instead of four and publish nothing."
+            exit 0
+          fi
+          tar -C .artifacts/ui -czf ".artifacts/$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME"
+          ls -lh ".artifacts/$BUNDLE_NAME.tar.gz"
+
+      - name: Upload the coverage bundle
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-bundle-ui-${{ matrix.id }}
+          path: .artifacts/UITests-${{ matrix.id }}.xcresult.tar.gz
+          retention-days: 1
+          if-no-files-found: warn
 
   # One status check standing for all three shards.
   #
@@ -1028,8 +1113,220 @@ jobs:
               ;;
           esac
 
-  # The one job in this workflow that writes to the repository. It publishes the coverage
-  # `macos-checks` measured as the two shields.io endpoint payloads README.md's badges read — the
+  # The union of what the unit suites and the window between them actually execute, which is the
+  # figure the badges publish.
+  #
+  # ## Why this is a job, and why it is not a fifth concurrent Mac
+  #
+  # It is the **fifth** macOS job in this workflow, against a concurrency this repository was
+  # observed to get four of — and it does not queue, because it never asks for a slot while the
+  # other four hold one. `needs: [macos-checks, macos-ui]` means it starts after all four have
+  # finished and released theirs. The cap in this file's header is about jobs running *at the same
+  # time*; a strictly downstream job is outside it. What it does cost is wall clock, on pushes to
+  # `main` only: a download, a merge and two `xccov` reads, after the last shard reports.
+  #
+  # It has to be a Mac. `xcrun xcresulttool` and `xcrun xccov` are Xcode, and no Xcode runs on the
+  # Linux runner — which is also why this cannot be folded into `record-coverage` below.
+  #
+  # It cannot be folded into `macos-checks` either, for a plainer reason: that job finishes around
+  # nineteen minutes and the heaviest shard around thirty-three, so anything that reads all four
+  # bundles has to start after the shards, and a step cannot wait for a job.
+  #
+  # ## Why the bundles are merged rather than the numbers
+  #
+  # Coverage is a **set union over executed lines**. A line the unit suites reach and a UI test also
+  # reaches is one covered line in the union, not two — so four sets of nine numbers cannot be
+  # combined into one set of nine by any arithmetic, because the numbers have already thrown away
+  # *which* lines. Adding them double-counts and can exceed the denominator; taking the maximum
+  # per target discards everything one suite reached that the other did not. Only the line-level data
+  # merges, and that lives in the `.xcresult`, so the four bundles travel here as tarballs and
+  # `xcresulttool merge` does the union.
+  #
+  # ## What this job will not do
+  #
+  # It will not publish a number it cannot stand behind. Two refusals, both ending in "the badges go
+  # on showing the last figures that were published":
+  #
+  #   - **Fewer bundles than `EXPECTED_COVERAGE_BUNDLES`.** A shard that died before writing one
+  #     leaves a union missing everything that shard covered, which is a *lower* number published
+  #     with no sign that anything is missing — the one outcome this whole design is against. The
+  #     count is `1 + the number of legs in macos-ui`, and it is written down here rather than
+  #     derived because a job cannot read another job's matrix; `Scripts/check_ui_shards.py` fails
+  #     the Linux job if this number and that matrix disagree, so it is checked rather than
+  #     remembered.
+  #   - **A merge that fails.** `xcresulttool merge` is the one command in this job whose behaviour
+  #     could not be checked before this landed — no Mac, no Xcode — so a future Xcode that spells it
+  #     differently must show up as a warning and a note in the summary, never as a red X on a commit
+  #     whose tests passed.
+  #
+  # Both are `continue-on-error` for that last reason, which is the rule every coverage step in this
+  # file follows: a measurement is not a verdict on a commit.
+  #
+  # ## Two tables, not one
+  #
+  # The summary carries the unit-only figures beside the merged ones, and the second is not
+  # decoration. Whether XCUITest can contribute coverage *at all* here is an open question with a
+  # specific answer waiting in it: the app under test is sandboxed, and an instrumented binary writes
+  # its `.profraw` under DerivedData, outside the app's container. If the sandbox refuses that write,
+  # the shards' bundles hold coverage for the test target and none for the app or the frameworks it
+  # links, and the merged `AppFeatures` figure comes back exactly equal to the unit-only one. Printed
+  # side by side, that reads as an answer. Printed alone, it reads as a number.
+  coverage:
+    name: Coverage (unit suites + XCUITest)
+    needs: [macos-checks, macos-ui]
+    # `!cancelled()` rather than `always()`, and the same reasoning `ui-suite` gives above: a pull
+    # request that cancelled its own jobs on a new push must not wake this one up to report on
+    # bundles nobody produced. `success()` is too strong in the other direction — a shard red on a
+    # retried flake still ran everything, and `macos-ui` rolls up to `failure` for it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: macos-26
+    # Download, untar, one merge, two `xccov` reads. Generous by several times over, and short enough
+    # that a wedged runner does not hold a slot for an hour.
+    timeout-minutes: 30
+
+    outputs:
+      coverage: ${{ steps.figures.outputs.json }}
+
+    env:
+      # 1 for `macos-checks` + 3 for the legs of `macos-ui`. Checked against the matrix by
+      # `Scripts/check_ui_shards.py` in the Linux job, so adding a shard and forgetting this line
+      # fails there rather than silently publishing a union with a hole in it.
+      EXPECTED_COVERAGE_BUNDLES: 4
+
+    steps:
+      # For `Scripts/update_readme_coverage.py`, which is the only thing this job runs out of the
+      # repository. No build, no test, no `macos-setup` — that action installs Tuist and generates
+      # the workspace, and nothing here compiles anything. `xcrun` finds `xccov` and `xcresulttool`
+      # in whichever Xcode the image selects by default, which is the same Xcode the four jobs
+      # upstream used, because none of them selects one either.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `merge-multiple` flattens the four artifacts into one directory, which is what lets the step
+      # below glob for tarballs instead of naming each job's artifact — so a shard added to the
+      # matrix needs nothing changed here beyond `EXPECTED_COVERAGE_BUNDLES`.
+      #
+      # Pinned by commit like every other third-party action in this file. This workflow had never
+      # used `download-artifact` before, and two of its comments said so as a reason not to move
+      # bundles between jobs; the pin below is v7.0.0, the same major as the `upload-artifact` v7.0.1
+      # the four uploading steps use.
+      - name: Download the four result bundles
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: coverage-bundle-*
+          merge-multiple: true
+          path: .artifacts/download
+
+      # Each tarball is deleted as it is expanded. A hosted runner's disk is finite, four
+      # coverage-instrumented bundles are not small, and the merged bundle is a fifth copy of most of
+      # it — keeping the tarballs alongside all of that buys nothing, since a failure here republishes
+      # nothing rather than retrying.
+      - name: Merge the result bundles
+        id: merge
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p .artifacts/bundles .artifacts/merged
+
+          for tarball in .artifacts/download/*.tar.gz; do
+            [ -f "$tarball" ] || continue
+            tar -C .artifacts/bundles -xzf "$tarball" || exit 1
+            rm -f "$tarball"
+          done
+
+          found="$(find .artifacts/bundles -maxdepth 1 -name '*.xcresult' | sort)"
+          count="$(printf '%s\n' "$found" | grep -c . || true)"
+          echo "Found $count result bundle(s), expected $EXPECTED_COVERAGE_BUNDLES:"
+          printf '%s\n' "$found"
+
+          if [ "$count" -ne "$EXPECTED_COVERAGE_BUNDLES" ]; then
+            {
+              echo '### Coverage not published on this commit'
+              echo
+              echo "The merge needs $EXPECTED_COVERAGE_BUNDLES result bundles — one from the unit"
+              echo "suites and one from each UI shard — and $count arrived. A union missing a"
+              echo 'shard would publish a lower number with nothing to say a shard is missing, so'
+              echo 'nothing is published and the badges go on showing the last figures that were.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Only $count of $EXPECTED_COVERAGE_BUNDLES coverage bundles arrived — nothing published."
+            echo "state=short" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Unquoted on purpose: `$found` is newline-separated and the shell must split it into one
+          # argument per bundle. Every path in it is written by this workflow and contains no spaces.
+          # shellcheck disable=SC2086
+          if ! xcrun xcresulttool merge $found --output-path .artifacts/merged/Coverage.xcresult; then
+            {
+              echo '### Coverage not published on this commit'
+              echo
+              echo '`xcrun xcresulttool merge` failed. It is the one command in this job whose'
+              echo 'behaviour could not be checked before it landed, so this is a warning and not a'
+              echo 'red X — the badges go on showing the last figures that were published. Read the'
+              echo '`Merge the result bundles` step for what it said.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::xcresulttool merge failed — nothing published."
+            echo "state=failed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The three UI bundles are spent — the merged one holds everything they carried. The unit
+          # bundle stays, because the comparison table in the next step reads it.
+          find .artifacts/bundles -maxdepth 1 -name 'UITests-*.xcresult' -exec rm -rf {} +
+          echo "state=ready" >> "$GITHUB_OUTPUT"
+
+      # The comparison, and the reason it is here is in this job's header: the unit-only figures are
+      # what says whether XCUITest contributed anything at all. `AppFeatures` identical in the two
+      # tables means the sandbox refused the app's `.profraw` and the 158 UI tests are still invisible
+      # to the measurement — which is a finding, and one that is unreadable from the merged table on
+      # its own.
+      - name: Coverage report (unit suites only, for comparison)
+        if: steps.merge.outputs.state == 'ready'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/bundles/UnitTests.xcresult \
+            --title 'Code coverage — unit suites alone (the previous basis for the badges)' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage report (merged)
+        if: steps.merge.outputs.state == 'ready'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/merged/Coverage.xcresult \
+            --title 'Code coverage — unit suites and XCUITest, merged (what the badges publish)' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The nine numbers, as a job output for `record-coverage` below. A few hundred bytes, which is
+      # all that needs to reach a Linux runner — the bundles came here rather than there because
+      # merging them needs Xcode, and the merging is done.
+      #
+      # `--emit-json` refuses to write a partial table, all nine targets or none, rather than
+      # shrinking the badge's denominator into a pass. That refusal is safe to leave
+      # loud-but-not-fatal because its failure announces itself: no figures means nothing is
+      # published, and the badges go on showing the figures from the last push that did measure —
+      # visibly stale rather than quietly wrong. A silent wrong number is the outcome worth
+      # engineering against; an old one is not.
+      - name: Emit coverage figures
+        id: figures
+        if: steps.merge.outputs.state == 'ready'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 Scripts/update_readme_coverage.py \
+            --result-bundle .artifacts/merged/Coverage.xcresult \
+            --emit-json .artifacts/coverage.json
+          cat .artifacts/coverage.json
+          {
+            echo 'json<<COVERAGE_JSON_EOF'
+            cat .artifacts/coverage.json
+            echo 'COVERAGE_JSON_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # The one job in this workflow that writes to the repository. It publishes the coverage the
+  # `coverage` job measured as the two shields.io endpoint payloads README.md's badges read — the
   # thing both badges spent this repository's whole history saying `not measured` for while the
   # number was being computed on every run and thrown away with the runner.
   #
@@ -1070,24 +1367,32 @@ jobs:
   #     payloads into the job summary *before* it tries to publish them, so a failed push leaves the
   #     figures visible on the run page rather than lost with the runner.
   #
-  # Why this is a separate job on Linux rather than three more lines on the macOS one is argued at
-  # `Emit coverage figures` above: `contents: write` must not sit on the job that compiles and runs
-  # code out of a pull request. What runs here is one stdlib Python script and some git. No build,
-  # no test, no repository code executes.
+  # Why this is a separate job on Linux rather than three more lines on the `coverage` job above:
+  # `contents: write` must not sit on a job that runs on the same runner image as the ones
+  # compiling code out of a pull request, and the merged bundles have no reason to be near a write
+  # token. What runs here is one stdlib Python script and some git. No build, no test, no
+  # repository code executes.
   #
-  # **`needs: macos-checks`, not the UI shards, and that is now structural rather than a workaround.**
-  # It used to say `needs: macos` with `always()`, because coverage is measured two steps before
-  # XCUITest started and this repository's UI suite is documented as ending red on a test that passed
-  # on its retry — letting that decide whether the number is recorded would mean the README updates
-  # only on runs where a flake happened not to fire. Splitting the UI suite into its own job says the
-  # same thing in the dependency graph instead of in an `always()`: the job that measures coverage is
-  # the job this one waits for, and the shards are simply not upstream of it. `always()` is kept for
-  # the remaining case it covers — a `macos-checks` that died *before* the measurement leaves the
-  # output empty, which the first step below reports and stops on, rather than skipping this job with
-  # no explanation.
+  # **`needs: coverage`, and the shards are upstream of it now.** This used to say `needs:
+  # macos-checks` and argue, at length, that the UI shards must *not* be upstream: coverage was
+  # measured two steps before XCUITest started, and this repository's UI suite is documented as
+  # ending red on a test that passed on its retry, so letting that decide whether the number is
+  # recorded would mean the badges updating only on runs where a flake happened not to fire.
+  #
+  # The first half of that no longer holds — the measurement is the union of the unit bundle and the
+  # three shards', so the shards are upstream of it by construction. The second half still does, and
+  # it moved rather than went away: the `coverage` job takes `!cancelled()` instead of `success()`,
+  # and each shard uploads its bundle under `!cancelled()` too, so a shard red for a flake still
+  # contributes everything it covered. What is *not* tolerated is a shard that produced no bundle at
+  # all — that job counts and refuses. The flake argument is answered by the condition, not by
+  # cutting the shards out of the graph.
+  #
+  # `always()` is kept for the case it always covered — a `coverage` job that died before emitting
+  # leaves the output empty, which the first step below reports and stops on, rather than skipping
+  # this job with no explanation.
   record-coverage:
     name: Publish coverage badges
-    needs: macos-checks
+    needs: coverage
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
@@ -1109,11 +1414,11 @@ jobs:
       - name: Write the figures out
         id: figures
         env:
-          COVERAGE_JSON: ${{ needs.macos-checks.outputs.coverage }}
+          COVERAGE_JSON: ${{ needs.coverage.outputs.coverage }}
         run: |
           set -euo pipefail
           if [ -z "${COVERAGE_JSON:-}" ]; then
-            echo "No coverage figures in this run: the macOS job did not reach the measurement."
+            echo "No coverage figures in this run: the coverage job did not reach the measurement."
             echo "state=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi

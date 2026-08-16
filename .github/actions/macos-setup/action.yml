@@ -80,10 +80,13 @@ runs:
     # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run from
     # rebuilding Vapor and GRDB from source every time.
     #
-    # Now restored by five jobs per run rather than one. They share a key, so the first run on a new
-    # `Tuist/Package.resolved` has five concurrent misses and five concurrent saves of the same
-    # content; `actions/cache` resolves that by refusing the duplicate saves with a warning, which is
-    # noise rather than a failure. Every run after it is five hits.
+    # Now restored by four jobs per run rather than one — this action's four callers. They share a
+    # key, so the first run on a new `Tuist/Package.resolved` has four concurrent misses and four
+    # concurrent saves of the same content; `actions/cache` resolves that by refusing the duplicate
+    # saves with a warning, which is noise rather than a failure. Every run after it is four hits.
+    #
+    # The workflow's `coverage` job is a fifth macOS job and is not one of them: it runs no build,
+    # so it calls neither this action nor Tuist.
     - name: Cache Tuist dependencies
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -102,8 +105,8 @@ runs:
     #
     # No macOS job has a counterpart to the Linux `Lockfiles agree` step, because that check is
     # platform-independent and running it twice buys nothing — but it means this line is the only
-    # thing standing between a re-resolved Tuist lockfile and a green run. It is now run by all five
-    # macOS jobs, so the guarantee holds on whichever of them a re-resolve happens to hit.
+    # thing standing between a re-resolved Tuist lockfile and a green run. It is now run by all four
+    # jobs that build, so the guarantee holds on whichever of them a re-resolve happens to hit.
     - name: Resolve and generate
       shell: bash
       run: |
