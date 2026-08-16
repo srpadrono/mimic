@@ -326,8 +326,9 @@ FULL_SUITE_GENERATED_FROM = (
 )
 FULL_SUITE_PROVENANCE = (
     "These numbers are from whoever last ran the full suite on a Mac. CI measures the same thing on "
-    "every run and records it here on every push to `main`, so this wording means a local run "
-    "overtook the last recorded one."
+    "every run and prints it to the job summary; its attempt to record it here on a push to `main` "
+    "has so far been refused by branch protection every time, so a local run is the only writer "
+    "this file has actually had."
 )
 CI_GENERATED_FROM = (
     "It is written by CI on every push to `main`, from the workspace-wide unit run the macOS job "

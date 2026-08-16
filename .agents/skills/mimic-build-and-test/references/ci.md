@@ -10,7 +10,7 @@ hosted runners on public repositories, macOS included.
 | `macos-checks` | `macos-26` | `tuist generate`, the Debug build, the app-level suites **with the coverage measurement**, the CLI end-to-end check (non-gating), the Release gate and its warning inventory |
 | `macos-ui` (×3) | `macos-26` | The XCUITest suite, sharded across three runners by test class |
 | `ui-suite` | `ubuntu-latest` | Rolls the three shard results into one status check |
-| `record-coverage` | `ubuntu-latest` | Pushes to `main` only: writes the measured coverage into README.md |
+| `record-coverage` | `ubuntu-latest` | Pushes to `main` only: writes the measured coverage into README.md — and has never been allowed to push it, see below |
 
 `record-coverage` is the only job holding `contents: write`, and it holds it precisely so that the
 jobs compiling code out of a pull request do not — see the comments above it and above `Emit coverage
@@ -18,6 +18,63 @@ figures`. It needs `macos-checks` and **not** the UI shards, because coverage is
 and because this repository's UI suite is documented as ending red on a test that passed on its
 retry; making the recording wait on the shards would mean the README updates only on runs where a
 flake happened not to fire.
+
+## Coverage: measured every run, recorded when the branch lets it
+
+The measurement lives inside `macos-checks` rather than in a job of its own. Its `Test (unit suites)`
+step runs the `Mimic-Workspace` scheme with `-enableCodeCoverage YES` and writes the result bundle to
+a named path; the `Coverage report` step reads that bundle with `xcrun xccov` and prints a per-target
+table into the **job summary**, so "how much of this is actually exercised" is a link away rather
+than a script somebody has to remember to run. On a red run the bundle is uploaded as the
+`xcresult-unit` artifact, which is where per-file detail lives.
+
+Two things sit outside the figures, both structurally. **XCUITest**, because the step doing the
+measuring is the one passing `-skip-testing:MimicUITests` — the UI suite runs in three jobs beside
+it. And **everything the Linux job runs**, because gathering coverage needs the Xcode toolchain.
+
+`record-coverage` then rewrites README.md's two badges and the block between its
+`coverage:generated` markers with `Scripts/update_readme_coverage.py`. Four things about that job are
+deliberate, and each is the answer to a way this normally goes wrong:
+
+- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS
+  jobs compile and run code out of a pull request; a write token there would widen the blast radius
+  of anything going wrong in one to "can push to `main`". The recording job runs one Python script
+  over one Markdown file.
+- **A few hundred bytes cross between the two, not the bundle.** The macOS job emits the figures as
+  JSON (`--emit-json`) and hands them on as a job output; the `.xcresult` is hundreds of megabytes
+  and stays on the runner that made it. That hand-off is also what lets the recording run on Linux.
+- **The generated block carries no timestamp, run number or run URL.** It is a pure function of the
+  coverage figures, so an unchanged measurement leaves the file byte-identical and `git diff --quiet`
+  finds nothing to commit — otherwise `main` would collect one commit per push forever. The commit
+  that *is* made carries `[skip ci]`, or it would trigger the workflow that wrote it.
+- **It records; it never gates.** The step is `continue-on-error`. A rejected push warns and prints
+  the diff it wanted to make into the job summary; it never reddens a commit whose tests passed.
+
+**No push has ever landed, and the job is not what is wrong.** It has run and succeeded on every push
+to `main` since it was added, and every push it made was refused:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: - Changes must be made through a pull request.
+! [remote rejected] HEAD -> main (protected branch hook declined)
+##[warning]Could not push the coverage update to main — the diff is in the job summary.
+```
+
+`main` requires changes to arrive through a pull request and the Actions bot is not exempt, so the
+retry-after-rebase path does not help either — this is a rule, not a lost race. That is why both
+coverage badges still read `not measured` and the generated block in README.md is empty, while the
+figures have been in every macOS job summary the whole time. The fix is a repository setting — let
+the bot bypass the rule for that path — not a change to the workflow, which behaves exactly as
+designed. Do not "fix" it in YAML, and do not let the README claim the recording happens.
+
+**No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
+number is either so low it never fires or red on the run that introduces it. Measuring first, then
+setting the floor against a baseline, is the order.
+
+The half of `update_readme_coverage.py` that needs no Mac — the JSON round trip, both rewriters and
+the refusals — is covered by `python3 Scripts/update_readme_coverage.py --self-test`, which the Linux
+job runs beside the other checkers. It had no automated test of any kind before it started writing to
+`main`.
 
 ## Why the macOS work is split the way it is
 
