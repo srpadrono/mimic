@@ -1,36 +1,49 @@
 #!/usr/bin/env python3
 
-"""Reads line coverage out of `.xcresult` bundles. One reader, four callers.
+"""Reads line coverage out of `.xcresult` bundles. One reader, five callers.
+
+**The two figures land in two different places, written by two different people, and that split is
+the design rather than an accident.** The badges at the top of README.md are published by CI, from
+`main`, as shields.io *endpoint* payloads on an orphan `badges` branch — nothing in the tracked tree
+moves when they change. The detailed per-target table between README.md's `coverage:generated`
+markers is written **only** by a local full-suite run on a Mac; no CI path writes it, and no mode of
+this script writes it from anything but `--results-dir`.
 
 **`--results-dir`** is the mode `Scripts/run_full_test_suite.sh` uses: one bundle per scheme, on a
-Mac, after a full suite run. It rewrites README.md's two coverage badges and the block between the
-`coverage:generated` markers, in place.
+Mac, after a full suite run. It rewrites the block between the `coverage:generated` markers, in
+place, and **does not touch the badges** — it checks them instead, see `check_badges`.
 
 **`--result-bundle`** is the mode `.github/workflows/ci.yml` uses for the job summary: one bundle —
 the workspace-wide unit run — printed as Markdown on stdout. It reads the bundle and changes
-nothing, so it is safe on a pull request from a fork, where the token is read-only and a README
-rewrite could not be committed anyway.
+nothing, so it is safe on a pull request from a fork, where the token is read-only.
 
 **`--result-bundle --emit-json`** writes those same numbers to a small JSON file instead of printing
-them. It is what the macOS job hands to the job that records them, so a several-hundred-megabyte
+them. It is what the macOS job hands to the job that publishes them, so a several-hundred-megabyte
 `.xcresult` never has to leave the runner that produced it.
 
-**`--from-json --readme`** rewrites the README from that file. It needs neither Xcode nor a bundle,
-which is what lets the recording job run on Linux holding `contents: write` while the job that
-compiles code out of a pull request keeps a read-only token. It rewrites *only* the two badges and
-the generated block, so a README edited between the measurement and the recording keeps the rest of
-its changes.
+**`--from-json --emit-badges`** turns that file into the two shields.io endpoint payloads the
+`badges` branch carries. It needs neither Xcode nor a bundle, which is what lets the publishing job
+run on Linux holding `contents: write` while the job that compiles code out of a pull request keeps
+a read-only token.
 
-Every mode goes through `target_metrics`, so the numbers a reviewer reads in a job summary and the
-numbers written into the README come out of one piece of code rather than two that agree by hand.
+**`--print-badge-branch`** prints the branch name the workflow force-pushes those payloads to, so
+the branch is written down once — here, beside the URLs the README has to carry — rather than once
+in YAML and once in Markdown.
 
-**Nothing generated here carries a timestamp, a run number or a run URL, deliberately.** The block
-is a pure function of the coverage figures, so an unchanged measurement produces a byte-identical
-README and the recording job's `git diff --quiet` finds nothing to commit. Put a run URL in it and
-`main` grows a commit per push forever.
+Every mode goes through `target_metrics`, so the numbers a reviewer reads in a job summary, the
+numbers on the badges and the numbers in the README table come out of one piece of code rather than
+three that agree by hand.
 
-`--self-test` exercises the JSON round trip and both rewriters against a fixture README, so the half
-of this file that needs no Mac is checked on every Linux CI run.
+**Nothing generated here carries a timestamp, a run number or a run URL, deliberately.** Everything
+written is a pure function of the coverage figures. That property no longer has to hold for CI — the
+badge branch is force-pushed to a single commit every time, so it cannot accumulate history whatever
+the payload says — but it still has to hold for the README block, which a human commits: an
+unchanged local measurement must leave the file byte-identical, or every full-suite run leaves a
+dirty tree and a diff nobody wants to read.
+
+`--self-test` exercises the JSON round trip, the badge payloads, the block rewriter and the refusals
+against fixtures written out longhand in this file, so the half of it that needs no Mac is checked
+on every Linux CI run.
 
 Stdlib only, so the Linux CI container's `python3-minimal` and a Mac's system Python both run it.
 """
@@ -67,6 +80,50 @@ MODULE_TARGETS = [
 # per-scheme runs do — the test bundles themselves among them — and inventing a second ordering for
 # them would be one more list to keep in step with this one.
 SUMMARY_ORDER = [APP_TARGET[1]] + [xccov_name for _, xccov_name, _ in MODULE_TARGETS]
+
+
+# ---------------------------------------------------------------------------
+# The published badges.
+#
+# `main` is protected: changes to it must arrive through a pull request, and the Actions bot is not
+# exempt. Every push the recording job ever made to `main` was refused with GH006, for six merges,
+# while the job itself went green — so the badges read `not measured` for this repository's whole
+# history. The owner declined to weaken the rule for a badge, so the figures go somewhere the rule
+# does not apply: an **orphan branch carrying nothing but these two files**, force-pushed to a single
+# commit on every push to `main`, holding no source and therefore needing no review.
+#
+# The four names below are the whole contract between three files — this script writes the payloads,
+# `.github/workflows/ci.yml` pushes them (asking `--print-badge-branch` for the branch rather than
+# repeating it), and README.md links them. `check_badges` holds the README to them, so renaming a
+# payload here fails the next full-suite run rather than silently turning both badges into
+# shields.io's "invalid" placeholder.
+BADGE_REPO = "srpadrono/mimic"
+BADGE_BRANCH = "badges"
+APP_BADGE_FILE = "app-coverage.json"
+MODULE_BADGE_FILE = "module-coverage.json"
+
+# The labels the badges have always carried, kept verbatim so the two badges do not change wording
+# on the day they start carrying a number.
+APP_BADGE_LABEL = "Mimic.app coverage"
+MODULE_BADGE_LABEL = "modules at or above 95%"
+
+
+def raw_url(filename: str) -> str:
+    """Where shields.io fetches one payload from."""
+    return f"https://raw.githubusercontent.com/{BADGE_REPO}/{BADGE_BRANCH}/{filename}"
+
+
+def endpoint_badge_url(filename: str) -> str:
+    """The `img.shields.io/endpoint` URL README.md must carry for one payload.
+
+    The inner URL is percent-encoded by hand rather than with `urllib.parse.quote`, because this
+    file's one hard constraint is that it imports nothing outside what the Linux container's
+    `python3-minimal` ships. Only `:` and `/` need escaping in a raw.githubusercontent.com URL —
+    everything else in one is unreserved — and `%` is escaped first so the transformation stays
+    correct if a name ever contains one.
+    """
+    encoded = raw_url(filename).replace("%", "%25").replace(":", "%3A").replace("/", "%2F")
+    return f"https://img.shields.io/endpoint?url={encoded}"
 
 
 @dataclass(frozen=True)
@@ -195,7 +252,7 @@ def build_coverage_block(
     for target_name, metrics in module_metrics:
         lines.append(f"| `{target_name}` | `{format_percent(metrics.percent)}` | `{format_lines(metrics)}` |")
 
-    modules_at_or_above_95 = sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
+    at_or_above = modules_at_or_above_95(module_metrics)
     total_executable_lines = app_metrics.executable_lines + sum(metrics.executable_lines for _, metrics in module_metrics)
     lines.extend(
         [
@@ -203,7 +260,7 @@ def build_coverage_block(
             "Coverage notes:",
             "",
             f"- App coverage is currently `{format_percent(app_metrics.percent)}`.",
-            f"- Modules at or above `95%`: `{modules_at_or_above_95}/{len(module_metrics)}`.",
+            f"- Modules at or above `95%`: `{at_or_above}/{len(module_metrics)}`.",
             f"- Total executable lines tracked in this table: `{total_executable_lines:,}`.",
             "- `Lines` shows covered/executable lines reported by `xcrun xccov`.",
             "- Coverage is gathered with `xcodebuild` and `xcrun xccov` from fresh `.xcresult` bundles.",
@@ -266,27 +323,75 @@ def replace_coverage_block(readme: str, new_block: str) -> str:
     return pattern.sub(new_block, readme, count=1)
 
 
-def replace_badges(readme: str, app_percent: float, modules_at_or_above_95: int, module_count: int) -> str:
-    app_badge = (
-        f"[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-"
-        f"{app_percent:.2f}%25-{badge_color(app_percent)})](#coverage)"
-    )
-    modules_badge = (
-        "[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-"
-        f"{modules_at_or_above_95}%2F{module_count}-{badge_color(100.0 * modules_at_or_above_95 / module_count)})](#coverage)"
-    )
+def modules_at_or_above_95(module_metrics: list[tuple[str, CoverageMetrics]]) -> int:
+    return sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
 
-    # `re.sub` with no match returns the string unchanged and raises nothing, so when the README
-    # carried no coverage badges at all this function was a guaranteed silent no-op: the full suite
-    # ran, the script exited 0, `run_full_test_suite.sh` printed "README coverage section updated."
-    # and neither badge had ever existed. `replace_coverage_block` above defends itself; this did not.
-    readme, replaced = re.subn(r"\[!\[App Coverage\]\([^)]+\)\]\(#coverage\)", app_badge, readme, count=1)
-    if replaced != 1:
-        raise RuntimeError("README.md is missing the App Coverage badge.")
-    readme, replaced = re.subn(r"\[!\[Module Coverage\]\([^)]+\)\]\(#coverage\)", modules_badge, readme, count=1)
-    if replaced != 1:
-        raise RuntimeError("README.md is missing the Module Coverage badge.")
-    return readme
+
+def badge_payloads(
+    app_metrics: CoverageMetrics, module_metrics: list[tuple[str, CoverageMetrics]]
+) -> dict[str, dict]:
+    """The two shields.io endpoint payloads, keyed by the file name each is published under.
+
+    Endpoint schema, which shields.io fetches and renders: `schemaVersion` pins the contract,
+    `label` is the grey half, `message` the coloured half, `color` the colour. Nothing else, and
+    no `cacheSeconds` — shields caches an endpoint response for a few minutes of its own accord and
+    a badge that is five minutes stale is not a problem worth a knob.
+    """
+    at_or_above = modules_at_or_above_95(module_metrics)
+    module_count = len(module_metrics)
+    return {
+        APP_BADGE_FILE: {
+            "schemaVersion": 1,
+            "label": APP_BADGE_LABEL,
+            "message": format_percent(app_metrics.percent),
+            "color": badge_color(app_metrics.percent),
+        },
+        MODULE_BADGE_FILE: {
+            "schemaVersion": 1,
+            "label": MODULE_BADGE_LABEL,
+            "message": f"{at_or_above}/{module_count}",
+            # Coloured by the *proportion* of modules clearing the bar, on the same ladder as a
+            # percentage, so "8/8" is bright green and "4/8" is red.
+            "color": badge_color(100.0 * at_or_above / module_count),
+        },
+    }
+
+
+def write_badges(
+    destination: Path,
+    app_metrics: CoverageMetrics,
+    module_metrics: list[tuple[str, CoverageMetrics]],
+) -> list[Path]:
+    destination.mkdir(parents=True, exist_ok=True)
+    written = []
+    for filename, payload in badge_payloads(app_metrics, module_metrics).items():
+        path = destination / filename
+        path.write_text(json.dumps(payload, indent=2) + "\n")
+        written.append(path)
+    return written
+
+
+def check_badges(readme: str) -> None:
+    """Refuse a README whose badges do not point at the payloads this script publishes.
+
+    The badges are no longer *written* here — CI publishes them to the `badges` branch and the
+    README carries a fixed endpoint URL per payload, so the local writer must leave them alone. What
+    it can still do is notice when the two have come apart, which is the drift this arrangement
+    invites: rename a payload, or move the branch, and both badges quietly become shields.io's
+    "invalid" placeholder with nothing going red.
+
+    Its ancestor, `replace_badges`, existed for the mirror-image reason — `re.sub` with no match
+    returns the string unchanged and raises nothing, so a README with no badges at all made the
+    rewrite a guaranteed silent no-op while `run_full_test_suite.sh` printed "README coverage
+    section updated." Neither failure is allowed to be silent.
+    """
+    for filename in (APP_BADGE_FILE, MODULE_BADGE_FILE):
+        if endpoint_badge_url(filename) not in readme:
+            raise RuntimeError(
+                f"README.md does not carry the endpoint badge for {filename}. It must link "
+                f"{endpoint_badge_url(filename)} — that is the URL shields.io reads the figure "
+                f"from, and it names the branch `{BADGE_BRANCH}` that CI force-pushes to."
+            )
 
 
 def report_one_bundle(result_bundle: Path, title: str) -> int:
@@ -316,28 +421,19 @@ def report_one_bundle(result_bundle: Path, title: str) -> int:
     return 0
 
 
-# The two provenance wordings. They differ because the two writers are answering different
-# questions for a reader who finds a number in the README and wants to know how stale it is: one is
-# "a human ran this on their Mac at some point", the other is "CI measured this on the commit that
-# is `main` right now".
+# The one provenance wording left. There used to be two, because CI wrote this block as well and a
+# reader had to be told which of the two writers a number came from. It does not any more: the block
+# is local-only by design, and the badges above it are CI-only, so the answer to "how stale is this"
+# is the same every time.
 FULL_SUITE_GENERATED_FROM = (
     "It is written from the coverage-enabled `.xcresult` bundles `./Scripts/run_full_test_suite.sh` "
     "produces on a Mac, one per scheme."
 )
 FULL_SUITE_PROVENANCE = (
-    "These numbers are from whoever last ran the full suite on a Mac. CI measures the same thing on "
-    "every run and prints it to the job summary; its attempt to record it here on a push to `main` "
-    "has so far been refused by branch protection every time, so a local run is the only writer "
-    "this file has actually had."
-)
-CI_GENERATED_FROM = (
-    "It is written by CI on every push to `main`, from the workspace-wide unit run the macOS job "
-    "measures with `-enableCodeCoverage YES`."
-)
-CI_PROVENANCE = (
-    "XCUITest is not in these figures: the step that measures coverage is the one passing "
-    "`-skip-testing:MimicUITests`, and the Linux job gathers no coverage at all. No floor is "
-    "enforced against them — this records, it does not gate."
+    "This table is as fresh as whoever last ran the full suite on a Mac, and nothing in CI writes "
+    "it. The two badges at the top of this file are the other way round — CI measures them on every "
+    "push to `main` and publishes them to the `badges` branch — so when the two disagree, the badges "
+    "are the current ones."
 )
 
 
@@ -349,9 +445,12 @@ def render_readme(
     generated_from: str,
     provenance: str,
 ) -> str:
-    """The whole rewrite as a string function, so `--self-test` can check it without touching disk."""
-    modules_at_or_above_95 = sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
-    readme = replace_badges(readme, app_metrics.percent, modules_at_or_above_95, len(module_metrics))
+    """The whole rewrite as a string function, so `--self-test` can check it without touching disk.
+
+    The badges are checked and left alone; only the block between the markers is rewritten. A README
+    edited between a measurement and a rewrite therefore keeps every other change it picked up.
+    """
+    check_badges(readme)
     return replace_coverage_block(
         readme,
         build_coverage_block(
@@ -431,7 +530,10 @@ def emit_json(result_bundle: Path, destination: Path) -> None:
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def update_readme_from_json(readme_path: Path, json_path: Path) -> None:
+def metrics_from_json(
+    json_path: Path,
+) -> tuple[CoverageMetrics, list[tuple[str, CoverageMetrics]]]:
+    """Read back what `--emit-json` wrote, on a machine with no Xcode and no bundle."""
     try:
         payload = json.loads(json_path.read_text())
         app_metrics = CoverageMetrics(
@@ -454,21 +556,35 @@ def update_readme_from_json(readme_path: Path, json_path: Path) -> None:
         raise RuntimeError(f"{json_path} is not a coverage payload this script wrote: {error}") from error
 
     if not module_metrics:
-        raise RuntimeError(f"{json_path} carries no modules; refusing to write a table with none.")
+        # The module badge's denominator is `len(module_metrics)`, so an empty list is not an empty
+        # badge — it is a division by zero, and a payload of eight modules that arrived carrying
+        # three would read `3/3` and look like a clean sweep. `split_workspace_metrics` refuses the
+        # partial table upstream for the same reason; this is the same refusal at the other end of
+        # the hand-off, where the file could have been truncated in between.
+        raise RuntimeError(f"{json_path} carries no modules; refusing to publish a badge with none.")
 
-    write_readme(
-        readme_path,
-        app_metrics,
-        module_metrics,
-        generated_from=CI_GENERATED_FROM,
-        provenance=CI_PROVENANCE,
-    )
+    return app_metrics, module_metrics
 
 
-FIXTURE_README = """# Fixture
+# Both URLs are written out longhand, character by character, and are **not** built from
+# `endpoint_badge_url`. A fixture derived from the mechanism moves with the mechanism: point
+# `BADGE_BRANCH` at a branch nothing is pushed to and a generated fixture would follow it, the check
+# would still pass, and both badges would 404 in silence. Written as literals, the same edit fails
+# here — which is the reminder that README.md carries these strings too and has to be edited with
+# them.
+FIXTURE_APP_BADGE_URL = (
+    "https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com"
+    "%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json"
+)
+FIXTURE_MODULE_BADGE_URL = (
+    "https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com"
+    "%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json"
+)
 
-[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
-[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
+FIXTURE_README = f"""# Fixture
+
+[![App Coverage]({FIXTURE_APP_BADGE_URL})](#coverage)
+[![Module Coverage]({FIXTURE_MODULE_BADGE_URL})](#coverage)
 
 Prose that must survive untouched.
 
@@ -478,13 +594,31 @@ Prose that must survive untouched.
 Trailing prose.
 """
 
+# What the README looked like before the badges were published — kept as a fixture because it is
+# exactly what `check_badges` has to refuse, and because it is what a reader will find in this
+# repository's history.
+FIXTURE_README_WITH_STATIC_BADGES = """# Fixture
+
+[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
+[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
+
+<!-- coverage:generated:start -->
+<!-- coverage:generated:end -->
+"""
+
 
 def self_test() -> int:
-    """Check the Mac-free half: the JSON round trip, both rewriters, and the refusals.
+    """Check the Mac-free half: the badge URLs, the badge payloads, the JSON round trip, the block
+    rewriter and every refusal.
 
     This is the only automated coverage the file has. The bundle-reading half needs `xcrun xccov`
     and a real `.xcresult`, so it is exercised only by the macOS job; everything below runs in a
     tenth of a second on the Linux gate alongside the other checkers.
+
+    Every expected value here is written out longhand. Nothing asks a function under test what the
+    right answer is — the badge URLs, the payload dictionaries and the colour ladder are all pinned
+    to literals, so reverting any of those mechanisms turns this red instead of moving the fixture
+    along with the bug.
     """
     import tempfile
 
@@ -494,34 +628,102 @@ def self_test() -> int:
         if not condition:
             failures.append(message)
 
+    # ---- the URLs, pinned to the strings README.md carries -------------------------------------
+    check(
+        endpoint_badge_url(APP_BADGE_FILE) == FIXTURE_APP_BADGE_URL,
+        "the app badge URL is not the one README.md links",
+    )
+    check(
+        endpoint_badge_url(MODULE_BADGE_FILE) == FIXTURE_MODULE_BADGE_URL,
+        "the module badge URL is not the one README.md links",
+    )
+    check(
+        raw_url("app-coverage.json")
+        == "https://raw.githubusercontent.com/srpadrono/mimic/badges/app-coverage.json",
+        "the raw URL is not where the badges branch publishes",
+    )
+    # Not a fixture, a consistency assertion: whatever `--print-badge-branch` tells the workflow to
+    # force-push to has to be the branch the URL above reads from, or CI publishes to one place and
+    # shields.io fetches from another.
+    check(
+        f"%2F{BADGE_BRANCH}%2F" in FIXTURE_APP_BADGE_URL,
+        "--print-badge-branch names a branch the badge URL does not read from",
+    )
+
+    # ---- the colour ladder, at every boundary --------------------------------------------------
+    for percent, expected_color in [
+        (100.0, "brightgreen"),
+        (95.0, "brightgreen"),
+        (94.99, "green"),
+        (90.0, "green"),
+        (89.99, "yellow"),
+        (80.0, "yellow"),
+        (79.99, "red"),
+        (0.0, "red"),
+    ]:
+        check(
+            badge_color(percent) == expected_color,
+            f"badge_color({percent}) is not {expected_color}",
+        )
+
     app = CoverageMetrics(percent=41.5, covered_lines=1_000, executable_lines=2_409)
     modules = [
         ("Domain.framework", CoverageMetrics(percent=96.0, covered_lines=960, executable_lines=1_000)),
         ("ControlPlane.framework", CoverageMetrics(percent=80.25, covered_lines=321, executable_lines=400)),
     ]
 
+    # ---- the payloads, as whole dictionaries ---------------------------------------------------
+    # Compared whole rather than key by key, so a fifth key appearing — a timestamp, a run URL, a
+    # `cacheSeconds` — fails here. shields.io ignores what it does not know, so an extra field would
+    # never show up on the badge; it would only make the payload stop being a pure function of the
+    # figures.
+    check(
+        badge_payloads(app, modules)
+        == {
+            "app-coverage.json": {
+                "schemaVersion": 1,
+                "label": "Mimic.app coverage",
+                "message": "41.50%",
+                "color": "red",
+            },
+            "module-coverage.json": {
+                "schemaVersion": 1,
+                "label": "modules at or above 95%",
+                # One of two modules clears 95%, and 50% of them is red on the same ladder.
+                "message": "1/2",
+                "color": "red",
+            },
+        },
+        "the badge payloads are not the two shields.io endpoint documents expected",
+    )
+
+    # ---- the block rewriter --------------------------------------------------------------------
     rendered = render_readme(
         FIXTURE_README, app, modules, generated_from="From a fixture.", provenance="Fixture note."
     )
-    check("not%20measured" not in rendered, "a badge still reads 'not measured' after a rewrite")
-    check("41.50%25" in rendered, "the app badge does not carry the measured percentage")
-    check("1%2F2" in rendered, "the module badge does not carry the at-or-above-95 count")
     check("`Domain.framework` | `96.00%` | `960/1,000`" in rendered, "a module row is missing or misformatted")
+    check("- Modules at or above `95%`: `1/2`." in rendered, "the at-or-above-95 count is wrong in the block")
     check("Prose that must survive untouched." in rendered, "prose outside the markers was lost")
     check("Trailing prose." in rendered, "prose after the block was lost")
     check(rendered.count("coverage:generated:start") == 1, "the start marker was duplicated or dropped")
     check(rendered.count("coverage:generated:end") == 1, "the end marker was duplicated or dropped")
+    # The badges are published, not written: a local full-suite run must leave them exactly as it
+    # found them, or the next person to run the suite commits a static badge over the live one.
+    check(FIXTURE_APP_BADGE_URL in rendered, "the app badge was rewritten by the local writer")
+    check(FIXTURE_MODULE_BADGE_URL in rendered, "the module badge was rewritten by the local writer")
+    check("41.50%25" not in rendered, "the local writer baked a figure into a badge URL")
 
-    # Idempotence is what makes "commit only when the numbers moved" true: rewriting the *rendered*
-    # README with the same figures has to produce the same bytes, markers and badges included.
+    # Idempotence: rewriting the *rendered* README with the same figures has to produce the same
+    # bytes. Nothing in CI depends on that any more — the badge branch is force-pushed whatever it
+    # says — but a human commits this block, and a full-suite run that dirties the tree on identical
+    # figures is a diff nobody can review.
     again = render_readme(
         rendered, app, modules, generated_from="From a fixture.", provenance="Fixture note."
     )
     check(again == rendered, "rewriting with unchanged figures produced a different README")
 
+    # ---- the JSON round trip, and out the other side as files ----------------------------------
     with tempfile.TemporaryDirectory() as tmp:
-        readme_path = Path(tmp) / "README.md"
-        readme_path.write_text(FIXTURE_README)
         json_path = Path(tmp) / "coverage.json"
         json_path.write_text(
             json.dumps(
@@ -531,18 +733,46 @@ def self_test() -> int:
                 }
             )
         )
-        update_readme_from_json(readme_path, json_path)
-        from_json = readme_path.read_text()
-        check("41.50%25" in from_json, "--from-json did not rewrite the app badge")
-        check(CI_PROVENANCE in from_json, "--from-json did not use the CI provenance wording")
+        round_tripped_app, round_tripped_modules = metrics_from_json(json_path)
+        check(round_tripped_app == app, "the app figures did not survive the JSON round trip")
+        check(round_tripped_modules == modules, "the module figures did not survive the JSON round trip")
+
+        badge_dir = Path(tmp) / "badges"
+        written = write_badges(badge_dir, round_tripped_app, round_tripped_modules)
+        check(
+            sorted(path.name for path in written) == ["app-coverage.json", "module-coverage.json"],
+            "--emit-badges wrote something other than the two payload files",
+        )
+        check(
+            json.loads((badge_dir / "app-coverage.json").read_text())
+            == {
+                "schemaVersion": 1,
+                "label": "Mimic.app coverage",
+                "message": "41.50%",
+                "color": "red",
+            },
+            "the app payload on disk is not the document shields.io expects",
+        )
+        check(
+            (badge_dir / "module-coverage.json").read_text().endswith("}\n"),
+            "a payload was written without a trailing newline",
+        )
 
         json_path.write_text("{\"app\": {}}")
         try:
-            update_readme_from_json(readme_path, json_path)
+            metrics_from_json(json_path)
             failures.append("a malformed payload was accepted")
         except RuntimeError:
             pass
 
+        json_path.write_text(json.dumps({"app": {"name": "Mimic.app", **asdict(app)}, "modules": []}))
+        try:
+            metrics_from_json(json_path)
+            failures.append("a payload carrying no modules was accepted")
+        except RuntimeError:
+            pass
+
+    # ---- the refusals --------------------------------------------------------------------------
     try:
         split_workspace_metrics({"Domain.framework": app})
         failures.append("a report missing eight of nine targets was accepted")
@@ -555,6 +785,14 @@ def self_test() -> int:
     except RuntimeError:
         pass
 
+    try:
+        render_readme(
+            FIXTURE_README_WITH_STATIC_BADGES, app, modules, generated_from="x", provenance="y"
+        )
+        failures.append("a README still carrying the old static badges was accepted")
+    except RuntimeError as error:
+        check(APP_BADGE_FILE in str(error), "the refusal does not name the payload the README must link")
+
     for failure in failures:
         print(f"  FAIL {failure}")
     print(
@@ -566,14 +804,20 @@ def self_test() -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Read coverage from .xcresult bundles: rewrite README, or print a Markdown report."
+        description=(
+            "Read coverage from .xcresult bundles: rewrite the README's generated block, print a "
+            "Markdown report, or write the two shields.io endpoint payloads CI publishes."
+        )
     )
     parser.add_argument(
-        "--readme", default="README.md", help="Path to README.md (--results-dir and --from-json modes)"
+        "--readme", default="README.md", help="Path to README.md (--results-dir mode)"
     )
     parser.add_argument(
         "--results-dir",
-        help="Directory of per-scheme bundles, as Scripts/run_full_test_suite.sh produces. Rewrites the README.",
+        help=(
+            "Directory of per-scheme bundles, as Scripts/run_full_test_suite.sh produces. Rewrites "
+            "the README's generated block. Never touches the badges."
+        ),
     )
     parser.add_argument(
         "--result-bundle",
@@ -585,27 +829,61 @@ def main() -> None:
     )
     parser.add_argument(
         "--from-json",
-        help="A file written by --emit-json. Rewrites the README from it. Needs no Xcode.",
+        help="A file written by --emit-json. Needs no Xcode. Requires --emit-badges.",
+    )
+    parser.add_argument(
+        "--emit-badges",
+        help=(
+            "With --from-json: write the two shields.io endpoint payloads into this directory, for "
+            "the workflow to force-push to the badges branch."
+        ),
+    )
+    parser.add_argument(
+        "--print-badge-branch",
+        action="store_true",
+        help="Print the branch the badge payloads are published to, and exit.",
     )
     parser.add_argument(
         "--self-test",
         action="store_true",
-        help="Check the rewriters and the JSON round trip against a fixture. Needs no Xcode.",
+        help="Check the badge payloads, the rewriter and the JSON round trip. Needs no Xcode.",
     )
     parser.add_argument("--title", default="Code coverage", help="Heading for --result-bundle output.")
     args = parser.parse_args()
 
-    modes = [bool(args.results_dir), bool(args.result_bundle), bool(args.from_json), args.self_test]
+    modes = [
+        bool(args.results_dir),
+        bool(args.result_bundle),
+        bool(args.from_json),
+        args.print_badge_branch,
+        args.self_test,
+    ]
     if sum(modes) != 1:
-        parser.error("pass exactly one of --results-dir, --result-bundle, --from-json or --self-test")
+        parser.error(
+            "pass exactly one of --results-dir, --result-bundle, --from-json, "
+            "--print-badge-branch or --self-test"
+        )
     if args.emit_json and not args.result_bundle:
         parser.error("--emit-json only means something with --result-bundle")
+    if args.emit_badges and not args.from_json:
+        parser.error("--emit-badges only means something with --from-json")
+    # `--from-json` used to rewrite README.md, and refusing it without `--emit-badges` is what stops
+    # a caller written against that shape from silently doing nothing. The README's generated block
+    # is written by `--results-dir` and by nothing else now.
+    if args.from_json and not args.emit_badges:
+        parser.error("--from-json needs --emit-badges: it no longer writes the README")
 
     if args.self_test:
         raise SystemExit(self_test())
 
+    if args.print_badge_branch:
+        print(BADGE_BRANCH)
+        return
+
     if args.from_json:
-        update_readme_from_json(Path(args.readme).resolve(), Path(args.from_json).resolve())
+        app_metrics, module_metrics = metrics_from_json(Path(args.from_json).resolve())
+        for path in write_badges(Path(args.emit_badges).resolve(), app_metrics, module_metrics):
+            print(f"{path}\n{path.read_text()}", end="")
         return
 
     if args.result_bundle:
@@ -614,8 +892,7 @@ def main() -> None:
             # Raises rather than printing a reason and exiting 1, unlike `report_one_bundle` above:
             # nobody is reading this step's stdout as a report, and the caller wants a file or a
             # failure. The workflow marks the step `continue-on-error`, so the failure surfaces as a
-            # warning and the README simply goes on saying whatever it last said — which, until the
-            # first successful recording, is `not measured`.
+            # warning and the badges go on showing whatever was last published.
             emit_json(bundle, Path(args.emit_json).resolve())
             return
         raise SystemExit(report_one_bundle(bundle, args.title))

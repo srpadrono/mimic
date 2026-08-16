@@ -11,8 +11,8 @@ failures, and watch live traffic. Then drive all of it from a script.
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
 [![Tests](https://img.shields.io/badge/tests-1145%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
-[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
+[![App Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
+[![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -287,15 +287,13 @@ python3 Scripts/check_doc_counts.py    # recount every number above, and catch a
 
 ### Coverage
 
-**Coverage is measured on every CI run.** The macOS job runs the unit suites with
-`-enableCodeCoverage YES` and prints a per-target table into that job's summary — XCUITest and the
-Linux suites excepted. No floor is enforced against the figures, deliberately.
-
-**They are not recorded here yet.** The `record-coverage` job rewrites the two badges and the block
-below on every push to `main`, and branch protection has refused every push it has made, since
-changes to `main` must arrive through a pull request. Letting the Actions bot past that rule is a
-repository setting rather than anything the workflow can fix, so the job warns rather than reddening
-a commit whose tests passed — and the badges go on reading `not measured`.
+**Coverage is measured on every CI run**, by the macOS job running the unit suites with
+`-enableCodeCoverage YES` — XCUITest and the Linux suites excepted, and no floor enforced against
+the figures. **The two badges above are live**: every push to `main` publishes them to an orphan
+`badges` branch as shields.io endpoint payloads, so nothing in the tree changes when they move. The
+detailed per-target block below is the other half, and it is deliberately local-only —
+`./Scripts/run_full_test_suite.sh` on a Mac is its only writer, so it is as fresh as the last full
+run somebody did by hand.
 
 <!-- coverage:generated:start -->
 <!-- coverage:generated:end -->

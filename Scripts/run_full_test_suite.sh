@@ -59,4 +59,7 @@ python3 "$ROOT_DIR/Scripts/update_readme_coverage.py" \
 
 echo "Full suite passed."
 echo "Coverage results: $RESULTS_DIR"
-echo "README coverage section updated."
+# The block between the `coverage:generated` markers, and only that. The two badges at the top of
+# the README are published by CI to the `badges` branch and are deliberately left alone here — a
+# local run that rewrote them would pin a laptop's figures over the ones measured on `main`.
+echo "README coverage block updated (the badges are CI's, and were not touched)."
