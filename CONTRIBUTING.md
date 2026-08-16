@@ -117,7 +117,9 @@ from the Debug products it just produced, checking both exist first.
 
 Run on its own after the commands above, it resolves both by searching again — those commands pass no
 `-derivedDataPath` either — so set `MIMIC_BIN` and `MIMIC_APP_PATH` yourself, or the green result is
-about a release you are not working on. The macOS CI job runs it too, but does not gate on it yet:
+about a release you are not working on. CI runs it too, in the `Build, unit suites, Release, CLI e2e
+(macOS)` job — where it now reports about eighty minutes earlier than it used to, because that job no
+longer waits behind the XCUITest suite — but does not gate on it yet:
 its first round there passed and its second failed at the discovery-file assertion, for a reason the
 app makes invisible — see the step's own comment in `.github/workflows/ci.yml`.
 

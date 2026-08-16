@@ -1,6 +1,7 @@
 name: CI
 
-# Two runners, split by what actually needs a Mac.
+# Split by what actually needs a Mac, and then — on the Mac — by what can be run at the same time as
+# what.
 #
 # The domain rules, the mock engine, persistence, the control plane, spec import and the CLI are
 # plain Swift — Vapor's native home is Linux — so `Package.swift` builds them on a Linux runner and
@@ -11,6 +12,152 @@ name: CI
 # included. That was not always true here — while this repo was private, every run died in about two
 # seconds with zero steps executed, which is why the automatic triggers used to be commented out and
 # the macOS job was `if: false`. Making the repo public resolved it.
+#
+# ## Why there are four macOS jobs and not one
+#
+# There used to be one, and it ran strictly in sequence: setup, Debug build, unit suites, coverage,
+# **XCUITest**, CLI end-to-end, Release. Run #87 (green, 6aeff91) measured it at about **96 minutes**
+# end to end, of which the UI suite alone was about **80**. So four fifths of every pull request's
+# feedback was one step, and the Release gate and the end-to-end check — neither of which the UI
+# suite has anything to do with — sat behind it waiting their turn. A reviewer learned that Release
+# still compiles about ninety minutes after learning that the unit suites pass.
+#
+# Two changes, and they are independent:
+#
+#   1. **The non-UI macOS work moved into its own job** (`macos-checks`), so the Debug build, the
+#      unit suites with their coverage measurement, the CLI end-to-end check and the Release gate all
+#      report in around twenty minutes instead of ninety-six — 19m43 measured on run #89.
+#   2. **The UI suite is sharded across three runners** (`macos-ui`), each running a named subset of
+#      the test classes with `-only-testing:`.
+#
+# ## Why sharding, and never `-parallel-testing-enabled`
+#
+# The obvious cheaper move is to let one runner run the suite in parallel workers. It is not
+# available here, for two reasons that hold independently — fix either one and the other still
+# stands.
+#
+#   - **The suites share one store and one defaults domain.** `UITestSupport.databaseURL` resolves to
+#     the fixed name `mimic-uitests.sqlite`, `MIMIC_DEFAULTS_SUITE` is the fixed
+#     `com.devxa.Mimic.UITests`, `resetApp` deletes that store on every app launch, and
+#     `setUpWithError` wipes that domain before every test. Two workers on one machine therefore
+#     destroy each other's state mid-test — not flakily, by construction.
+#   - **This is a macOS app, not a simulator.** Parallel workers share one window server and one
+#     frontmost application, and these suites lean on `typeText`, `typeKey` and ⌘-click, all of which
+#     go to whichever app has focus. There is no simulator-clone equivalent to isolate them with.
+#
+# Sharding across runners dissolves both: each shard is its own machine, with its own store, its own
+# defaults domain and its own window server. Nothing in the tests changed to make this work, and
+# nothing needed to — the suites already use disjoint port ranges (21311–21613, 62084–62118,
+# 62311–62314) and already suffix `MIMIC_CONTROL_FILE` with the runner's pid, so two shards running
+# at the same moment cannot collide on a socket or on a discovery file either.
+#
+# ## Why exactly four macOS jobs — the cap is four here, whatever the documentation says
+#
+# **Read this before adding a macOS job.** GitHub documents the concurrent-macOS-job limit as **five**
+# on Free, Pro and Team plans — a separate, much smaller cap than the 20/40/60 on standard runners,
+# shared across standard and larger runners, with Enterprise Cloud at 50. This file was first written
+# against that documented five: one `macos-checks` plus four shards.
+#
+# **What run #89 actually did was four.** That run (green, 62b80e7) requested five macOS jobs at once.
+# Four of them — `macos-checks` and shards 1, 2 and 3 — started together at 22:01:49. Shard 4 did not
+# start until 22:21:15, **19m26 after the other four**, and two seconds after shard 2 finished and
+# freed a slot. That is not a slow start, it is a queue: the fifth job waited for the first completion
+# and then began, which cost the run the length of a whole shard. Real wall clock was **~43 minutes**
+# against the ~29 this header and the pull request both predicted.
+#
+# The honest form of the claim is therefore an observation and not a rule: **the documented figure is
+# five, the observed concurrency on this repository was four, and a fifth macOS job queued for
+# roughly the length of a shard.** The documentation may well be right in general and wrong for this
+# account, this plan or this runner pool; what is not in doubt is what happened on run #89. Anyone who
+# wants a fifth macOS job — another shard, or the Release gate split out of `macos-checks` — should
+# expect it to queue, and should say so with a measurement rather than with the documented number.
+# One run is enough evidence to design against and not enough to call the documentation wrong.
+#
+# Going over the cap does not fail, it queues — and a queued shard is the worst outcome available,
+# because it starts only when another finishes and so lands at roughly *twice* the shard time. Four
+# jobs is therefore a budget, measured rather than estimated:
+#
+#     macos-checks   1 slot    Debug build, unit suites, coverage, CLI e2e, Release
+#     macos-ui       3 slots   the XCUITest suite, in three shards
+#     ────────────────────────
+#                    4 slots
+#
+# Fewer, larger shards is the right trade under an observed cap of four. Three shards of ~53 tests
+# each are longer than four of ~40, but nothing queues, and a shard that runs is worth more than a
+# shard that waits: the four-shard split spent 19m26 of wall clock on a slot that did not exist.
+#
+# That is also why the non-UI work is *one* job rather than three. Splitting the Release gate and the
+# end-to-end check into jobs of their own would buy about eight minutes on a path the UI shards
+# already dominate, and it would cost two shard slots — pushing the shards from three to one and the
+# whole run past eighty minutes. The arithmetic runs the other way from the intuition, and the cap is
+# why.
+#
+# One consequence worth knowing: `cancel-in-progress` is deliberately off for pushes to `main` (see
+# `concurrency` below), so two overlapping pushes there put eight macOS jobs against a cap of four and
+# the second run's shards queue behind the first's. That is accepted. It is the same trade the
+# concurrency comment already makes — on `main`, a completed run per commit is worth more than a fast
+# one — and pull requests, where the feedback loop actually matters, still cancel.
+#
+# ## Why each shard builds for itself instead of downloading one build
+#
+# The textbook shape for this is `xcodebuild build-for-testing` in one job, then
+# `test-without-building -xctestrun …` in each shard, with the products passed between them as an
+# artifact. It was considered and deliberately not taken, for a reason that is arithmetic before it
+# is risk.
+#
+# Building once removes the ~5-minute Debug build from each shard's clock — but the shards run *at
+# the same time*, so that build was never on the critical path more than once to begin with. What
+# building once actually does is take that build off four parallel clocks and put it on one serial
+# one, ahead of every shard, and then add a tar, an upload and three downloads of a macOS `.app` on
+# top. Measured against the timings below it is a wash at best and slower at worst. Build-once
+# saves *runner minutes*, which are the thing this repository is not billed for.
+#
+# And it is the riskier of the two. A macOS `.app` moved through `actions/upload-artifact` loses
+# symlinks and permissions unless it is tarred first, an `.xctestrun` carries paths that must land
+# where it expects them, and a code signature that does not survive the round trip means every shard
+# fails to launch the app — which presents as a broken suite, not as a broken artifact. Paying four
+# concurrent builds to avoid all of that is the trade this file takes. A slower CI that works beats a
+# faster one that is flaky.
+#
+# The four builds are not from cold: `Tuist/.build` and `~/.cache/tuist` are restored from the same
+# cache key in all four jobs, so what each shard compiles is this repository's own sources against
+# already-resolved dependencies. Caching **DerivedData** itself would cut the shard build further and
+# is also deliberately not done — a restored Xcode module cache that disagrees with the toolchain
+# fails as "module compiled with Swift X cannot be imported by Swift Y", which reads as a source
+# problem and reproduces nowhere locally. The Linux job's cache key carries the compiler version for
+# exactly that reason; until someone is prepared to key DerivedData as carefully, four honest builds
+# is the cheaper mistake.
+#
+# ## Shape of a run, measured
+#
+# Run #89 (62b80e7), the first real run of the sharded workflow, with four shards against a cap that
+# turned out to be four:
+#
+#     linux                    2m20   measured
+#     macos-checks            19m43   measured
+#     macos-ui shard 2 (38)   19m23   measured
+#     macos-ui shard 1 (40)   21m18   measured
+#     macos-ui shard 3 (39)   23m49   measured
+#     macos-ui shard 4 (41)   19m26 queued, then ~22m   ← the job there was no slot for
+#     ────────────────────────────────
+#     wall clock              ~43m
+#
+# Those shard times give the constant everything below is derived from: shard 3 ran 39 tests in a
+# 22m42 step that also contains the Debug build and the test-target compile, so a UI test costs
+# **about 26 seconds**.
+#
+# With three shards and nothing queueing:
+#
+#     linux                   ~2m20   unchanged
+#     macos-checks           ~19m43   unchanged; comfortably inside the shards
+#     macos-ui  (51/53/54)    ~30m    ~1m setup + ~5m Debug + ~1m30 test-target compile
+#                                     + 54 × 26s ≈ 23m24 of tests on the heaviest shard
+#     ui-suite                 ~0m    Linux; rolls the three shard results into one status check
+#
+# So: **96 minutes originally, 43 measured with four shards, about 30 expected with three.** The
+# saving is not from running less — it is the same 158 tests either way — it is from stopping asking
+# for a fifth concurrent macOS job that does not exist. The first red is faster still: a compile
+# break or a unit failure lands in `macos-checks` inside ten minutes.
 on:
   push:
     branches: [main]
@@ -25,6 +172,9 @@ permissions:
 # Every third-party action is pinned to a commit, not a tag. A tag is a moving pointer its owner can
 # repoint at any time, and these run with repository context on pull requests — including forks. The
 # trailing comment is the human-readable version; the SHA is what actually runs.
+#
+# `./.github/actions/macos-setup` is not third-party and takes no SHA: a local action referenced by
+# path is read out of the same commit that is being tested, which is the strongest pin there is.
 
 concurrency:
   # A newer push makes an in-flight run irrelevant *on a pull request*, where only the tip matters.
@@ -162,6 +312,32 @@ jobs:
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
 
+      # The gate the sharded UI job needs and could not have needed before it existed.
+      #
+      # `macos-ui` below runs the XCUITest suite as three shards, and it splits them by naming test
+      # classes: each shard passes a list of `-only-testing:MimicUITests/<Class>` flags. A class that
+      # no shard names therefore never runs — and every shard goes green, because each ran exactly
+      # what it was asked for. Add a suite tomorrow, write twenty tests in it, and CI reports the
+      # window covered.
+      #
+      # That is the same shape as the `buildableFolders` line naming a `Tests/JourneyFeatureTests`
+      # that did not exist, which Tuist tolerated in silence, and the same shape the suite-folder
+      # check in `Documented counts` above exists to close: on a green pipeline, a suite nobody runs
+      # is indistinguishable from one that passed. It is checked rather than remembered.
+      #
+      # Three verdicts — a class in no shard, a class in two, and a shard naming a class that is not
+      # there (which `xcodebuild` reports as "no tests to run" and exits 0 for). `--self-test` first,
+      # as the two checks around it do: its fixtures are a workflow and a suite tree invented inside
+      # the script, so a parser that has stopped recognising either would fail here rather than
+      # reporting that every class is covered.
+      #
+      # On Linux with the other cheap gates: it reads the workflow as text and `MimicUITests/` as
+      # text, imports nothing outside the standard library, and takes about a tenth of a second.
+      - name: UI shards cover every UI test class
+        run: |
+          python3 Scripts/check_ui_shards.py --self-test
+          python3 Scripts/check_ui_shards.py
+
       # AGENTS.md is a router now: it keeps what is true on every task and sends the rest to a skill
       # under `.agents/skills/`, which is why it is 241 lines rather than the 807 it reached. That
       # bought three promises, and all three fail silently. `.claude/skills/` mirrors the skills by
@@ -227,12 +403,23 @@ jobs:
       - name: Test
         run: swift test --skip-build
 
-  macos:
-    name: Build and test (macOS)
+  # Everything that needs Xcode and does *not* need the window: the Debug build, the app-level unit
+  # suites with the coverage measurement, the CLI end-to-end check, and the Release gate.
+  #
+  # This is the old `macos` job with the UI step lifted out of the middle of it. The rename is not
+  # cosmetic — it is what stops "the macOS job" meaning two unrelated things — but it does have one
+  # consequence outside this file: **required status checks in branch protection are configured by
+  # job name.** `Build and test (macOS)` no longer exists as a check. Whoever merges this must update
+  # the branch rules to require `Build, unit suites, Release, CLI e2e (macOS)` and `UI suite`, or
+  # `main` accepts a commit no macOS job ever looked at. The `UI suite` job at the bottom exists
+  # partly so that the second of those names never has to change again when the shard count does.
+  macos-checks:
+    name: Build, unit suites, Release, CLI e2e (macOS)
     runs-on: macos-26
-    # The Release build alone is several minutes on a 3-core runner, and the UI suite launches the
-    # real app once per test.
-    timeout-minutes: 120
+    # It was 120 when this job also carried the ~80-minute UI suite. What is left measured 19m43 on
+    # run #89, so this is generous by more than twofold and still tight enough that a wedged runner
+    # is cut loose within the hour.
+    timeout-minutes: 45
 
     # The measured coverage figures, handed to `record-coverage` below. Empty on every run that is
     # not a push to `main`, and on any run that failed before the measurement — that job treats an
@@ -250,8 +437,8 @@ jobs:
     #
     # Every step, because the builds are shared: point one of them here and the rest re-resolve and
     # rebuild the whole workspace into the default location instead of reusing this one. The two
-    # places that *read* DerivedData — the UI failure dump and the artifact upload — read it from
-    # here for the same reason.
+    # places that *read* DerivedData — the failure dump and the artifact upload — read it from here
+    # for the same reason.
     #
     # `.artifacts/` is in `.gitignore`, and so is any directory named `DerivedData`, so nothing here
     # can dirty the checkout.
@@ -261,80 +448,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # macOS 26 and Swift 6.2 are the floor: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and the
-      # macOS 26 SDK are both required to compile at all, so the image label is load-bearing rather
-      # than a preference. Printed so a green run says which Xcode produced it.
-      - name: Xcode and Swift versions
-        run: |
-          xcodebuild -version
-          swift --version
-          sw_vers
-
-      # The one thing that makes macOS XCUITest possible on a hosted runner.
-      #
-      # Since Monterey, macOS asks a human to approve UI automation before a test runner may drive
-      # another app. Nobody is at the keyboard here, so the request is never answered and the runner
-      # fails to initialise at all: `Timed out while enabling automation mode`, zero tests executed —
-      # which reads like a broken suite rather than a missing permission. This is the supported way
-      # to pre-authorise it, and it is why the UI tests can run here at all.
-      - name: Allow UI automation without an interactive prompt
-        run: sudo automationmodetool enable-automationmode-without-authentication
-
-      # Tuist generates the workspace; nothing in the repo is a checked-in Xcode project.
-      #
-      # Pinned in `mise.toml`, not `brew install tuist`. Homebrew hands out whatever is current — it
-      # produced 4.202.6 against the 4.152.0 this project is developed on, and `tuist install` failed
-      # outright. A generator that silently tracks upstream turns "someone else released" into "our CI
-      # is red".
-      #
-      # The version lives in `mise.toml` rather than here because this action takes no `tools` input —
-      # passing one is accepted, warned about, and ignored, which installs nothing and leaves `tuist`
-      # off PATH for a step that then fails with exit 127.
-      - name: Install Tuist
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
-
-      # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run
-      # from rebuilding Vapor and GRDB from source every time.
-      - name: Cache Tuist dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/tuist
-            Tuist/.build
-          key: ${{ runner.os }}-tuist-${{ hashFiles('Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
-          restore-keys: ${{ runner.os }}-tuist-
-
-      # The macOS half of the same invariant. `tuist install` is a SwiftPM resolve behind another
-      # name, so it rewrites `Tuist/Package.resolved` on exactly the same trigger — a range that
-      # resolves differently on this runner than on the machine that committed it. It is checked
-      # here rather than in a step of its own so that it lands before `tuist generate`: the
-      # workspace every step below builds and tests is generated from whatever `install` resolved,
-      # and a lockfile that moved is a workspace that does not match the commit.
-      #
-      # This job has no counterpart to the Linux `Lockfiles agree` step because that check is
-      # platform-independent and running it twice buys nothing — but it means this line is the only
-      # thing standing between a re-resolved Tuist lockfile and a green run.
-      - name: Resolve and generate
-        run: |
-          tuist version
-          tuist install
-          git diff --exit-code -- Tuist/Package.resolved || {
-            echo "::error::tuist install re-resolved Tuist/Package.resolved (diff above). The workspace this job generated is not the one the commit describes. Reproduce with 'tuist install', commit the result, and move Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
-            exit 1
-          }
-          tuist generate --no-open
-
-      # Tuist reports failures as an unhelpful "Error" and writes the reason to a session log the
-      # runner throws away. Without this a failure here says nothing at all.
-      - name: Tuist logs on failure
-        if: failure()
-        # Never the reason a run is red: this only ever explains one.
-        continue-on-error: true
-        run: |
-          find ~/.local/state/tuist/sessions -name logs.txt 2>/dev/null | while read -r f; do
-            echo "-- $f"
-            tail -100 "$f"
-          done
+      # Xcode and Swift versions, UI automation pre-authorised, Tuist at the pinned version, its
+      # cache restored, `Tuist/Package.resolved` held to the commit, and `tuist generate`. One copy,
+      # shared by this job and the three shards below — see the action's own header for why it is a
+      # file rather than seven steps pasted four times.
+      - uses: ./.github/actions/macos-setup
 
       # Ad-hoc signing throughout. The project carries a DEVELOPMENT_TEAM for local builds, but a
       # hosted runner has none of that team's certificates — and none are needed, because a macOS app
@@ -351,9 +469,10 @@ jobs:
             CODE_SIGN_IDENTITY=- build
 
       # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
-      # rendering tests. The rest of the suite already ran on Linux.
+      # rendering tests. The rest of the suite already ran on Linux, and XCUITest runs in the sharded
+      # job below — `-skip-testing:MimicUITests` is what keeps the two from overlapping.
       #
-      # This is also the only step in either job that *measures* how much of this code the tests
+      # This is also the only step in this workflow that *measures* how much of this code the tests
       # reach, rather than reading the tree and reasoning about it. Until it carried
       # `-enableCodeCoverage YES`, both README badges said `not measured` and meant it: every claim
       # in this repository about what is and is not tested rested on grep.
@@ -418,7 +537,7 @@ jobs:
       # (c): the same figures again, as a few hundred bytes of JSON handed to the `record-coverage`
       # job at the bottom of this file, which writes them into README.md.
       #
-      # A **job output**, not an artifact, and not three more lines on this job. Two constraints
+      # A **job output**, not an artifact, and not three more lines on that job. Two constraints
       # meet here. `contents: write` must not live on this job — it is the one that compiles and
       # runs code out of a pull request, and a write token here would widen the blast radius of
       # anything going wrong in that to "can push to `main`". And the `.xcresult` this reads is
@@ -457,79 +576,13 @@ jobs:
             echo 'COVERAGE_JSON_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # The reason this job exists. XCUITest is the only thing that exercises the real window — the
-      # accessibility tree, the panel layout, and every flow a user actually takes.
-      #
-      # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
-      # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
-      # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
-      #
-      # What the retry does NOT do — observed on this job, 2026-08-14 — is turn the step green: a
-      # test that failed once and passed on the rerun (`testCapturingSelectedRequestsAsJourney`,
-      # final summary "Executed 28 tests, with 0 failures") still ended the step with "Failing
-      # tests:" naming it and exit 65. So red here means "failed at least once", not "failed".
-      # Before treating a red run as a hard break, read the tail: a listed failing test above a
-      # passing final suite summary is the retry having already told you it was transient — the
-      # step's value in that case is the flake's name, not the verdict.
-      - name: Test (UI)
-        run: |
-          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            test -destination 'platform=macOS' -only-testing:MimicUITests \
-            -derivedDataPath "$DERIVED_DATA" \
-            -retry-tests-on-failure -test-iterations 2 \
-            CODE_SIGN_IDENTITY=-
-
-      # The failing assertion, in the job log, where a person can read it. The xcresult holds the
-      # message, the file and the line of every failure — and it ships as a ~280 MB artifact that
-      # needs a Mac and an Xcode to open, which in practice means nobody does: three consecutive red
-      # runs were diagnosed here from the *names* of failing tests alone, because the log's tail
-      # never reaches back to the assertion and the artifact was effectively opaque. `xcresulttool`
-      # exists on this runner, so ask it while we are here. `continue-on-error` on top of
-      # `if: failure()`: a diagnostic that can redden a run it was reading is worse than none.
-      - name: Test failure details
-        if: failure()
-        continue-on-error: true
-        run: |
-          # Both bundle locations, newest first. This used to look only under `$DERIVED_DATA`, which
-          # is where the UI suite writes — so on a *unit* failure, whose bundle the coverage step
-          # puts in `.artifacts/coverage`, the step it exists to serve printed "no xcresult found"
-          # and the assertion had to be read out of the raw log instead. Naming both is the whole
-          # fix; `ls -dt` across them picks whichever run actually failed.
-          # Compile errors first, because an xcresult cannot carry one. A test target that fails to
-          # build produces a bundle with `totalTestCount: 0` and no failures in it — so this step,
-          # written to name the failing assertion, printed a summary saying nothing at all while the
-          # actual errors sat in the build output. Two rounds of this wave were diagnosed by pulling
-          # the raw job log instead, which is the archaeology the step exists to replace.
-          if [ -f .artifacts/unit-tests.log ]; then
-            echo "== compile errors, if any"
-            grep -E '(error|fatal error): ' .artifacts/unit-tests.log | head -40 || echo "   none — the failure is in the results below"
-          fi
-          bundle="$(ls -dt "$DERIVED_DATA"/Logs/Test/*.xcresult .artifacts/coverage/*.xcresult 2>/dev/null | head -1)"
-          if [ -z "$bundle" ]; then echo "no xcresult found"; exit 0; fi
-          echo "== $bundle"
-          xcrun xcresulttool get test-results summary --path "$bundle" || true
-          # Every failure with its message, file and line — the part the job log's tail cannot show.
-          xcrun xcresulttool get test-results tests --path "$bundle" \
-            | python3 -c '
-          import json, sys
-          def walk(node, path):
-              name = node.get("name") or node.get("nodeIdentifier") or ""
-              here = path + [name] if name else path
-              if node.get("result") == "Failed" and node.get("nodeType") in ("Test Case", "Repetition"):
-                  print(" / ".join(here), "->", node.get("result"))
-              if node.get("nodeType") == "Failure Message":
-                  print("    ", name)
-              for child in node.get("children", []):
-                  walk(child, here)
-          data = json.load(sys.stdin)
-          for root in data.get("testNodes", []):
-              walk(root, [])
-          ' || true
-
-      # The seam nothing else in either job reaches: a real process launch, the discovery file on
+      # The seam nothing else in this workflow reaches: a real process launch, the discovery file on
       # disk, a real control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)`
       # called in-process. AGENTS.md and CONTRIBUTING.md each carried a section explaining why no
       # gate ran it, and no runner ever had.
+      #
+      # It now runs about eighty minutes earlier than it used to, because it no longer waits behind
+      # XCUITest for a build it needed before the suite started.
       #
       # What kept it out was never safety, it was that it could not find what the job built. The
       # script resolves the CLI with `find … -path '*Build/Products*'`, which matches nothing while
@@ -600,6 +653,11 @@ jobs:
       # `mimic` tool — and it cannot land until somebody has seen the warning inventory, which is
       # what the step below now publishes on every run. Same order the coverage steps above follow:
       # measure first, gate second.
+      #
+      # It stays in this job rather than becoming a fifth, for the reason argued in the header: run
+      # #89 measured the concurrent-macOS-job cap at four, not the documented five, so a job of its
+      # own would have to come out of the shards — and trading a shard for eight minutes lengthens
+      # the run rather than shortening it. A fifth job would simply queue, as shard 4 did for 19m26.
       - name: Build (Release)
         run: |
           set -o pipefail
@@ -642,43 +700,351 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The result bundle is the only way to read a UI failure after the fact — it holds the failure
-      # screenshots and the automatic UI hierarchy captures.
+      # The failing assertion, in the job log, where a person can read it — compile errors out of the
+      # log first, because an xcresult cannot carry one, then every failure with its message, file
+      # and line out of whichever bundle is newest. The logic moved into
+      # `Scripts/print_test_failures.sh` when the UI suite was sharded: four test-running jobs would
+      # otherwise hold four pasted copies of the same forty-line walker, and a copy that has quietly
+      # stopped printing failures looks exactly like a run that had none.
       #
-      # Two paths now, because `-resultBundlePath` on the unit step *moves* that run's bundle out of
-      # DerivedData: the glob below would no longer find it, so it is named explicitly. It is also
-      # where the per-file coverage lives, for anyone who wants more than the per-target table in
-      # the summary. Still `if: failure()` — a coverage-instrumented bundle is large, and uploading
-      # one on every green run buys a reviewer nothing the summary has not already shown them.
+      # Both bundle locations are named. This used to look only under `$DERIVED_DATA`, which is where
+      # a plain `xcodebuild test` writes — so on a *unit* failure, whose bundle the step above puts in
+      # `.artifacts/coverage`, the step that exists to name the assertion printed "no xcresult found"
+      # and the assertion had to be read out of the raw log instead. The globs are expanded by this
+      # shell and the script skips whatever did not match, so a run that failed before a given
+      # artifact existed simply passes a path that is not there.
+      #
+      # It sits at the end of the job rather than immediately after the test step, which is where its
+      # ancestor sat. That is what puts a failing **Release** build in its scope: the release log is
+      # named below, so a compile error in the Release configuration now gets its `error:` lines
+      # pulled into the job log too, instead of the run going red with the reason a thousand lines up.
+      # Nothing else changes — a step with `if: failure()` runs when any earlier step failed, and
+      # every step between the failure and this one is skipped either way.
+      #
+      # `continue-on-error` on top of `if: failure()`: a diagnostic that can redden a run it was
+      # reading is worse than none.
+      - name: Test failure details
+        if: failure()
+        continue-on-error: true
+        run: |
+          ./Scripts/print_test_failures.sh \
+            .artifacts/unit-tests.log \
+            .artifacts/release-build.log \
+            "$DERIVED_DATA"/Logs/Test/*.xcresult \
+            .artifacts/coverage/*.xcresult
+
+      # The result bundle is where per-file coverage lives, for anyone who wants more than the
+      # per-target table in the summary, and on a red run it is the only place the failure detail
+      # survives in full.
+      #
+      # Named `xcresult-unit` rather than `xcresult`, because artifact names must be unique within a
+      # run and the three UI shards below each upload one of their own. Still `if: failure()` — a
+      # coverage-instrumented bundle is large, and uploading one on every green run buys a reviewer
+      # nothing the summary has not already shown them.
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: xcresult
+          name: xcresult-unit
           path: |
             ${{ env.DERIVED_DATA }}/Logs/Test/*.xcresult
             .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore
 
-  # The one job in this workflow that writes to the repository. It records the coverage the macOS
-  # job measured into README.md's two badges and the block between its `coverage:generated`
-  # markers — the thing both badges spent this repository's whole history saying `not measured` for
-  # while the number was being computed on every run and thrown away with the runner.
+  # The reason this workflow exists at all, and the reason it used to take ninety-six minutes.
+  # XCUITest is the only thing that exercises the real window — the accessibility tree, the panel
+  # layout, and every flow a user actually takes.
+  #
+  # Three shards, three runners, three disjoint sets of test classes. The header of this file argues
+  # why sharding across machines rather than `-parallel-testing-enabled` on one, and why three rather
+  # than some other number — the observed cap of four concurrent macOS jobs, minus the one
+  # `macos-checks` takes. What follows is how the three were chosen.
+  #
+  # ## How the shards are balanced
+  #
+  # By **test count**, which is a proxy for time rather than time itself, and a defensible one here:
+  # nearly every test in these suites launches the app, so per-test cost is dominated by launch
+  # rather than by what the test then does. Counted from the tree — `grep -cE '^\s*func test'` over
+  # each file, the same convention `Scripts/check_doc_counts.py` uses — the ten classes are
+  #
+  #     MimicUITests               33      ErrorAlertUITests          15
+  #     WorkspaceShellUITests      27      JourneyEditorUITests       15
+  #     EndpointEditorUITests      24      SpecImportUITests          10
+  #     WelcomeProjectUITests      17      RequestLogUITests           9
+  #                                        JourneyUITests              7
+  #                                        ControlPlaneIsolationTests  1
+  #
+  # 158 in total, so a perfect third is 52.7. The split below is **51 / 53 / 54**, within 2.5% of even
+  # and short of optimal by one test: exhaustively searching every way of dealing ten classes onto
+  # three shards, the smallest achievable spread is 2 (52 / 52 / 54) and this one takes 3. What the
+  # extra test buys is a shard whose name a reader can trust — the spread-2 splits pair the workspace
+  # shell with the endpoint editor, and a shard called "workspace shell and endpoint editor" tells
+  # nobody where to look when it goes red. One test is about 26 seconds; the naming is worth more.
+  #
+  # **Whole classes, never individual tests.** `-only-testing:` accepts a method, and using it would
+  # let the shards be balanced to the test — but the split would then have to be rewritten every time
+  # somebody adds a test, and a shard naming a method that has been renamed fails with "no tests to
+  # run" rather than with anything a reader would connect to the rename. A class is a unit that moves
+  # as a whole.
+  #
+  # **Test count is a weaker estimator than it looked, and run #90 is the evidence.** Run #89's four
+  # shards ran 40 / 38 / 39 / 41 tests in 21m18 / 19m23 / 23m49 / ~22m, a spread small enough that
+  # counting seemed sound. Run #90's three ran 51 / 53 / 54 tests in **22m32 / 32m36 / 33m18** — four
+  # per cent more tests on the heaviest shard than the lightest, and forty-eight per cent more time.
+  #
+  # Subtract the build and test-target compile each step also carries (about seven minutes) and the
+  # per-test costs are roughly **17s / 28s / 28s**. The cheap shard is the one holding
+  # `SpecImportUITests`, which reads a bundled fixture and never starts a server, and the bulk of
+  # `MimicUITests`, which is mostly sheets and window state. The expensive shards hold the suites that
+  # bind a port and drive real HTTP — `RequestLogUITests` sends traffic for every assertion,
+  # `ErrorAlertUITests` holds sockets to force conflicts, `WorkspaceShellUITests` starts the server.
+  # **Launch is not the dominant cost after all; a real server is.**
+  #
+  # So the split below is balanced on the wrong axis, and knowingly. Rebalancing on measured time
+  # rather than count would put the worst shard near 28m30 instead of 33m18 — about five minutes,
+  # against a change that has to be re-derived every time a suite's character changes, and a run of
+  # this workflow to measure each attempt. The recipe is below and the data is in every run; take the
+  # five minutes when something else makes it worth a round trip. What must not happen is the next
+  # person reading "balanced by test count" and assuming the count was ever the thing that mattered.
+  #
+  # To do better than counting, the per-test data is already in each shard's own result bundle.
+  # Download a shard's `xcresult-ui-N` artifact and ask
+  #
+  #     xcrun xcresulttool get test-results tests --path UITests.xcresult
+  #
+  # for the per-test durations, sum them by class, and rebalance by editing the `matrix` below —
+  # which is a one-line change per shard and needs nothing else in this file touched.
+  #
+  # ## What each shard needs that a single job did not
+  #
+  # Nothing in `MimicUITests` changed to make this work, and that is the point. The suites already
+  # use disjoint port ranges and already suffix `MIMIC_CONTROL_FILE` with the runner's pid, so shards
+  # cannot collide on a socket or a discovery file — and the shared store and shared defaults domain,
+  # which are what make in-process parallelism impossible, are simply not shared between machines.
+  #
+  # The one thing that must survive is the UI target's entitlements: `MimicUITests.entitlements` sets
+  # `app-sandbox: false` and `network.server`, with `ENABLE_APP_SANDBOX: NO`, and four tests bind a
+  # listening socket from the test process. Nothing here overrides code signing beyond the
+  # `CODE_SIGN_IDENTITY=-` this workflow has always passed, so those entitlements are applied on each
+  # shard exactly as they were on the single job. If a shard reports EPERM on a bind, that is the
+  # first thing to look at.
+  macos-ui:
+    name: UI tests (${{ matrix.name }})
+    runs-on: macos-26
+    # A ~40-test shard of the old four-way split measured 19m23 to 23m49 on run #89. The heaviest here
+    # carries 54, so about 30 minutes: ~1m setup, ~5m for the Debug build, ~1m30 to compile the test
+    # target, and 54 × 26s ≈ 23m24 of tests. Double it and round, so a shard that hits
+    # `-test-iterations 2` on several tests still finishes rather than being cut off mid-retry.
+    timeout-minutes: 60
+
+    strategy:
+      # Never `fail-fast`. The default would cancel the other two shards the moment one goes red,
+      # which turns "three independent verdicts" back into "one verdict, chosen by whichever shard
+      # failed first" — and the failure this suite is documented as producing most often is a
+      # SIGKILLed launch under memory pressure, which says nothing about the other two. A red run
+      # should say which parts of the window are broken, all of them, in one pass.
+      fail-fast: false
+      matrix:
+        include:
+          # 51 tests, and the lightest shard, which is why the one-test isolation class rides here:
+          # `ControlPlaneIsolationTests` launches the app like everything else, so it costs a launch
+          # wherever it lands, and the lightest shard is where a rounding error should go. It is the
+          # one class this shard's name does not mention — one test does not earn a fourth clause.
+          - id: 1
+            name: core window, journeys, spec import
+            only: >-
+              -only-testing:MimicUITests/MimicUITests
+              -only-testing:MimicUITests/JourneyUITests
+              -only-testing:MimicUITests/SpecImportUITests
+              -only-testing:MimicUITests/ControlPlaneIsolationTests
+
+          # 53 tests.
+          - id: 2
+            name: workspace shell, welcome, request log
+            only: >-
+              -only-testing:MimicUITests/WorkspaceShellUITests
+              -only-testing:MimicUITests/WelcomeProjectUITests
+              -only-testing:MimicUITests/RequestLogUITests
+
+          # 54 tests, the heaviest, and so the one to watch first if the estimate is wrong — it is
+          # also the shard the 30-minute figure in this job's `timeout-minutes` comment is about.
+          - id: 3
+            name: endpoint editor, alerts, journey editor
+            only: >-
+              -only-testing:MimicUITests/EndpointEditorUITests
+              -only-testing:MimicUITests/ErrorAlertUITests
+              -only-testing:MimicUITests/JourneyEditorUITests
+
+    # Same reasoning as the job above: DerivedData inside the checkout, `.artifacts/` is gitignored,
+    # and the steps that read it read it from here.
+    env:
+      DERIVED_DATA: .artifacts/DerivedData
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/macos-setup
+
+      # No separate `Build (Debug)` step: `xcodebuild test` builds what the test action needs, and a
+      # shard needs nothing else. The build is not free — it is about five minutes of this shard's
+      # thirty — but it runs on three machines at once, so it costs the *run* five minutes rather
+      # than fifteen. That is the whole build-once-versus-build-per-shard argument, and it is made in
+      # full in this file's header.
+      #
+      # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
+      # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
+      # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
+      #
+      # What the retry does NOT do — observed on this suite, 2026-08-14 — is turn the step green: a
+      # test that failed once and passed on the rerun (`testCapturingSelectedRequestsAsJourney`,
+      # final summary "Executed 28 tests, with 0 failures") still ended the step with "Failing
+      # tests:" naming it and exit 65. So red here means "failed at least once", not "failed".
+      # Before treating a red shard as a hard break, read the tail: a listed failing test above a
+      # passing final suite summary is the retry having already told you it was transient — the
+      # step's value in that case is the flake's name, not the verdict.
+      #
+      # `$ONLY_TESTING` is deliberately unquoted: it carries several `-only-testing:` flags and the
+      # shell must split them into separate arguments. It reaches the shell through `env:` rather
+      # than as a `${{ }}` inside the script, which is the habit `record-coverage` explains at the
+      # bottom of this file — an expression interpolated into a `run:` is substituted before the
+      # shell sees it and is therefore parsed as script, while an environment variable can only ever
+      # be data. This value is written three inches above in the same file; the habit is the point.
+      #
+      # `-resultBundlePath` for the same reason the unit step names one, and with the shard id in the
+      # path so the three uploads below cannot collide. `tee` for the reason that step documents: a
+      # compile failure in the test target produces a bundle with `totalTestCount: 0`, so the errors
+      # exist only in this output.
+      - name: Test (UI)
+        env:
+          ONLY_TESTING: ${{ matrix.only }}
+          RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
+          BUILD_LOG: .artifacts/ui-tests-${{ matrix.id }}.log
+        run: |
+          set -o pipefail
+          rm -rf "$RESULT_BUNDLE"
+          mkdir -p .artifacts/ui
+          # shellcheck disable=SC2086
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
+            test -destination 'platform=macOS' \
+            $ONLY_TESTING \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            -retry-tests-on-failure -test-iterations 2 \
+            CODE_SIGN_IDENTITY=- 2>&1 | tee "$BUILD_LOG"
+
+      # The same diagnostic the non-UI job runs, over this shard's own log and bundle. It matters
+      # more here than there: the xcresult a UI failure leaves behind holds the failure screenshots
+      # and the automatic UI hierarchy captures, it is hundreds of megabytes, and reading it needs a
+      # Mac and an Xcode — so in practice the assertion this step prints is the only account of the
+      # failure anybody reads.
+      - name: Test failure details
+        if: failure()
+        continue-on-error: true
+        # Restated rather than inherited: `env:` on a step does not carry to the next one, and the
+        # two paths are the shard-numbered ones the step above wrote.
+        env:
+          RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
+          BUILD_LOG: .artifacts/ui-tests-${{ matrix.id }}.log
+        run: |
+          ./Scripts/print_test_failures.sh \
+            "$BUILD_LOG" \
+            "$RESULT_BUNDLE" \
+            "$DERIVED_DATA"/Logs/Test/*.xcresult
+
+      # One artifact per shard, named by shard id — `upload-artifact` refuses a duplicate name within
+      # a run, and three shards uploading `xcresult` would be three collisions. The name is also how
+      # a reader gets from "shard 3 is red" to the screenshots for shard 3 without downloading the
+      # other two.
+      #
+      # `if: failure()`, as before: these bundles are large and a green run's is worth nothing.
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xcresult-ui-${{ matrix.id }}
+          path: |
+            .artifacts/ui/UITests-${{ matrix.id }}.xcresult
+            .artifacts/ui-tests-${{ matrix.id }}.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # One status check standing for all three shards.
+  #
+  # Each shard already fails the run on its own, so this job changes no verdict. What it buys is a
+  # **stable name**: branch protection requires checks by name, and `UI tests (core window and
+  # journeys)` is a name that changes the day somebody rebalances the matrix — at which point the
+  # required check silently refers to a job that no longer runs, and `main` starts accepting commits
+  # whose UI suite nobody looked at. Requiring `UI suite` instead survives any reshuffle of the
+  # shards, including changing how many there are — which is exactly what the rebalance from four
+  # shards to three did, and this job's name did not move.
+  #
+  # It runs on Linux and does nothing but read a result, so it costs no macOS slot and no measurable
+  # time.
+  #
+  # It reports *that* something is red, not *which* — deliberately. Telling a reader which shard
+  # failed would mean each shard publishing a marker and this job collecting them with
+  # `download-artifact`, which this workflow has never pinned and a SHA is not a thing to guess at.
+  # The run page already answers it: the three shards are named for the parts of the window they
+  # cover, and the red one is the red one.
+  #
+  # `!cancelled()` rather than `always()`. With `always()` this job would run after a pull request
+  # cancelled its own shards on a new push and report a failure caused by nothing, which is exactly
+  # the red-that-means-nothing this workflow keeps removing. A cancelled run skips it instead.
+  ui-suite:
+    name: UI suite
+    needs: macos-ui
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # `needs.<job>.result` over a matrix job is the roll-up of every leg: `success` only when all
+      # three passed, `failure` when any failed, `skipped` when the matrix never ran.
+      - name: Verdict
+        env:
+          RESULT: ${{ needs.macos-ui.result }}
+        run: |
+          set -euo pipefail
+          echo "The three UI shards rolled up to: $RESULT"
+          case "$RESULT" in
+            success)
+              echo "All three shards passed — 158 XCUITest cases across the three runners."
+              ;;
+            skipped)
+              echo "::error::The UI shards did not run, so nothing exercised the window on this commit."
+              exit 1
+              ;;
+            *)
+              echo "::error::At least one UI shard is red. Open the run page: the shards are named for the parts of the window they cover, and each uploads its own xcresult-ui-N artifact. Read the failing shard's 'Test failure details' step first — and note that -retry-tests-on-failure leaves the step red for a test that passed on its rerun, so a listed failure above a passing final summary is a flake, not a break."
+              exit 1
+              ;;
+          esac
+
+  # The one job in this workflow that writes to the repository. It records the coverage
+  # `macos-checks` measured into README.md's two badges and the block between its
+  # `coverage:generated` markers — the thing both badges spent this repository's whole history saying
+  # `not measured` for while the number was being computed on every run and thrown away with the
+  # runner.
   #
   # Why this is a separate job on Linux rather than three more lines on the macOS one is argued at
   # `Emit coverage figures` above: `contents: write` must not sit on the job that compiles and runs
   # code out of a pull request. What runs here is one stdlib Python script over one Markdown file.
   # No build, no test, no repository code executes.
   #
-  # `always()`, guarded to pushes on `main`. Coverage is measured two steps before XCUITest starts,
-  # and this repository's UI suite is documented as ending red on a test that passed on its retry —
-  # letting that decide whether the number is recorded would mean the README updates only on runs
-  # where a flake happened not to fire. A macOS job that died *before* the measurement leaves the
-  # output empty, which the first step below reports and stops on.
+  # **`needs: macos-checks`, not the UI shards, and that is now structural rather than a workaround.**
+  # It used to say `needs: macos` with `always()`, because coverage is measured two steps before
+  # XCUITest started and this repository's UI suite is documented as ending red on a test that passed
+  # on its retry — letting that decide whether the number is recorded would mean the README updates
+  # only on runs where a flake happened not to fire. Splitting the UI suite into its own job says the
+  # same thing in the dependency graph instead of in an `always()`: the job that measures coverage is
+  # the job this one waits for, and the shards are simply not upstream of it. `always()` is kept for
+  # the remaining case it covers — a `macos-checks` that died *before* the measurement leaves the
+  # output empty, which the first step below reports and stops on, rather than skipping this job with
+  # no explanation.
   record-coverage:
     name: Record coverage in README
-    needs: macos
+    needs: macos-checks
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
@@ -701,7 +1067,7 @@ jobs:
       - name: Write the figures out
         id: figures
         env:
-          COVERAGE_JSON: ${{ needs.macos.outputs.coverage }}
+          COVERAGE_JSON: ${{ needs.macos-checks.outputs.coverage }}
         run: |
           set -euo pipefail
           if [ -z "${COVERAGE_JSON:-}" ]; then

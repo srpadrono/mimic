@@ -1030,8 +1030,17 @@ final class RequestLogUITests: MimicUITestCase {
         )
         newJourneyItem.click()
 
+        // Fifteen seconds, not five, and this is the one wait in the file that needs them. Everything
+        // else here waits for an element that is already being drawn; this one waits for AppKit to
+        // tear down a *nested* menu and for SwiftUI to then present a sheet, two animations in series
+        // with a run loop handover between them. Run #91 spent longer than five seconds on exactly
+        // that and failed here — then passed on the retry, which is what says the sheet was coming
+        // and the clock was short rather than the capture being broken.
+        //
+        // Not a weakened assertion. A sheet that never appears still fails, and fails with this same
+        // message; the only thing the longer clock buys is not failing a machine that was busy.
         XCTAssertTrue(
-            captureSheet.nameField.waitForExistence(timeout: 5),
+            captureSheet.nameField.waitForExistence(timeout: 15),
             "Capturing into a new journey should ask for a name first"
         )
         captureSheet.nameField.click()
