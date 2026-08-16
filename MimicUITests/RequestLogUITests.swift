@@ -1007,6 +1007,14 @@ final class RequestLogUITests: MimicUITestCase {
         // Two rows selected, then a right-click on the third — which is *outside* the selection, so
         // the menu must act on the clicked row alone rather than on rows the pointer is nowhere near.
         logRow(identifiers[0]).click()
+        // Selecting a row opens the inspector, and `WorkspaceView` opens it inside
+        // `withAnimation(DSAnimation.drawerToggle)` — so the drawer beneath it narrows while that
+        // runs and every row moves. The two clicks below are aimed at a frame, which makes them a
+        // race against that animation: a ⌘-click landing between two rows selects nothing, and a
+        // right-click landing on a row that *is* in the selection opens the plural menu, which is
+        // the assertion four lines down. Waiting for the row to stop moving removes both.
+        UITestApp.waitForStableFrame(logRow(identifiers[2]))
+
         XCUIElement.perform(withKeyModifiers: .command) {
             logRow(identifiers[1]).click()
         }
@@ -1022,27 +1030,37 @@ final class RequestLogUITests: MimicUITestCase {
             "The menu must not act on a selection the clicked row is not part of"
         )
 
-        singularMenu.click()
-        let newJourneyItem = app.menuItems["New journey from this request\u{2026}"]
-        XCTAssertTrue(
-            newJourneyItem.waitForExistence(timeout: 5),
-            "The submenu should offer a new journey for the single request"
-        )
-        newJourneyItem.click()
-
-        // Fifteen seconds, not five, and this is the one wait in the file that needs them. Everything
-        // else here waits for an element that is already being drawn; this one waits for AppKit to
-        // tear down a *nested* menu and for SwiftUI to then present a sheet, two animations in series
-        // with a run loop handover between them. Run #91 spent longer than five seconds on exactly
-        // that and failed here — then passed on the retry, which is what says the sheet was coming
-        // and the clock was short rather than the capture being broken.
+        // The nested menu is driven through the shared helper rather than clicked here, and the
+        // history is why. This line failed on run #91 waiting five seconds for the sheet; the reading
+        // then was "the machine was busy and the clock was short", and the wait was widened to
+        // fifteen. **Run #98 failed here twice in the same run, at fifteen.** A sheet that is merely
+        // slow arrives inside fifteen seconds. One that never arrives is a different failure, and the
+        // clock was never the thing to change — `UITestApp.chooseFromSubmenu` carries the account.
         //
-        // Not a weakened assertion. A sheet that never appears still fails, and fails with this same
-        // message; the only thing the longer clock buys is not failing a machine that was busy.
-        XCTAssertTrue(
-            captureSheet.nameField.waitForExistence(timeout: 15),
-            "Capturing into a new journey should ask for a name first"
+        // Not a weakened assertion, and this matters more than it did before: every attempt the
+        // helper makes ends waiting for this same field, so a capture that does not present still
+        // fails here. What the helper removes is the *click* being lost, not the sheet being absent.
+        let sheetAppeared = UITestApp.chooseFromSubmenu(
+            in: app,
+            parent: singularMenu,
+            item: app.menuItems["New journey from this request\u{2026}"],
+            thenAwait: captureSheet.nameField,
+            reopenMenu: { self.logRow(identifiers[2]).rightClick() },
+            menuIsAlreadyOpen: true
         )
+        if !sheetAppeared {
+            // Named rather than asserted, in the style this suite already uses for the capture menu:
+            // the three states below are three different bugs and the message has to say which.
+            // `journeyEditorOpen` is the discriminator worth having — a journey that exists without
+            // the sheet ever appearing means the menu item's action *ran* and the presentation was
+            // dropped, which is the app's fault and not the click's.
+            let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
+            XCTFail(
+                "Capturing into a new journey should ask for a name first. "
+                    + "openMenus=\(app.menus.count) visibleMenuItems=\(visible) "
+                    + "journeyEditorOpen=\(app.staticTexts["journeyEditor.name"].exists)"
+            )
+        }
         captureSheet.nameField.click()
         captureSheet.nameField.typeKey("a", modifierFlags: .command)
         captureSheet.nameField.typeText("Checkout")
@@ -1064,22 +1082,28 @@ final class RequestLogUITests: MimicUITestCase {
         // Now the half nothing covered: appending to a journey that already exists, chosen by name
         // from the submenu.
         logRow(identifiers[0]).click()
-        logRow(identifiers[0]).rightClick()
+        UITestApp.waitForStableFrame(logRow(identifiers[0]))
+
+        // The same nested menu as above, so the same helper. There is no sheet on this path — the
+        // journey already exists and picking it by name appends straight away — so the outcome
+        // waited for is the second step appearing in the editor.
         let appendMenu = app.menuItems["Add to journey"]
-        XCTAssertTrue(appendMenu.waitForExistence(timeout: 5), "The row should still offer the capture menu")
-        appendMenu.click()
-
-        let existingJourney = app.menuItems["Checkout"]
-        XCTAssertTrue(
-            existingJourney.waitForExistence(timeout: 5),
-            "The submenu should list the journey that now exists"
+        let appended = UITestApp.chooseFromSubmenu(
+            in: app,
+            parent: appendMenu,
+            item: app.menuItems["Checkout"],
+            thenAwait: element(identifiedBy: "journeyStep-1"),
+            reopenMenu: { self.logRow(identifiers[0]).rightClick() },
+            outcomeTimeout: 10
         )
-        existingJourney.click()
-
-        XCTAssertTrue(
-            element(identifiedBy: "journeyStep-1").waitForExistence(timeout: 10),
-            "Appending should add a second step to the journey and show it"
-        )
+        if !appended {
+            let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
+            XCTFail(
+                "Appending should add a second step to the journey and show it. "
+                    + "openMenus=\(app.menus.count) visibleMenuItems=\(visible) "
+                    + "captureMenuPresent=\(appendMenu.exists)"
+            )
+        }
     }
 
     // MARK: - LOGSEL

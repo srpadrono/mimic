@@ -1355,6 +1355,12 @@ final class MimicUITests: XCTestCase {
         let captureMenu = app.menuItems["Add 2 requests to journey"]
         let collapsedMenu = app.menuItems["Add to journey"]
         firstRow.click()
+        // Selecting the first row opens the inspector with an animation, and the drawer narrows
+        // underneath it while that runs. The ⌘-click and the right-click below are both aimed at a
+        // frame, so they race it — and a ⌘-click that lands between two rows leaves the selection at
+        // one, which presents here as the modifier having been dropped. It is not; the row moved.
+        UITestApp.waitForStableFrame(secondRow)
+
         XCUIElement.perform(withKeyModifiers: .command) {
             secondRow.click()
         }
@@ -1375,20 +1381,27 @@ final class MimicUITests: XCTestCase {
                     + "visibleMenuItems=\(visible)"
             )
         }
-        captureMenu.click()
-
-        let newJourneyItem = app.menuItems["New journey from these 2 requests\u{2026}"]
-        XCTAssertTrue(
-            newJourneyItem.waitForExistence(timeout: 5),
-            "The submenu should offer a new journey for the selection"
+        // The ellipsis promises a dialog, and now there is one. Driven through the shared helper
+        // rather than clicked here: this is the nested-menu interaction that has flaked in two
+        // different suites, and `UITestApp.chooseFromSubmenu` carries the account of why widening the
+        // wait was the wrong fix for it. The assertion is unchanged — every attempt ends waiting for
+        // this same field.
+        let sheetAppeared = UITestApp.chooseFromSubmenu(
+            in: app,
+            parent: captureMenu,
+            item: app.menuItems["New journey from these 2 requests\u{2026}"],
+            thenAwait: captureSheet.nameField,
+            reopenMenu: { secondRow.rightClick() },
+            menuIsAlreadyOpen: true
         )
-        newJourneyItem.click()
-
-        // The ellipsis promises a dialog, and now there is one.
-        XCTAssertTrue(
-            captureSheet.nameField.waitForExistence(timeout: 5),
-            "Capturing into a new journey should ask for a name first"
-        )
+        if !sheetAppeared {
+            let visible = app.menuItems.allElementsBoundByIndex.prefix(8).map(\.title)
+            XCTFail(
+                "Capturing into a new journey should ask for a name first. "
+                    + "openMenus=\(app.menus.count) visibleMenuItems=\(visible) "
+                    + "journeyEditorOpen=\(app.staticTexts["journeyEditor.name"].exists)"
+            )
+        }
         captureSheet.nameField.click()
         captureSheet.nameField.typeKey("a", modifierFlags: .command)
         captureSheet.nameField.typeText("Captured session")

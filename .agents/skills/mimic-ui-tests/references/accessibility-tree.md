@@ -85,3 +85,40 @@ Use a **behavioural read-back** instead: click, type, then assert the field hold
 that the sheet opened, or that the crumb appeared. That catches what the gate was reaching for — a
 click landing on whatever happens to be at that point when the card is below the fold — and it
 catches it at the click rather than three assertions later as "the value never committed".
+
+## `waitForExistence` is not "it has stopped moving", and a click computes a frame
+
+This is the rule behind the longest-running flake in the suite, and the first two attempts to fix it
+were both wrong in the same way.
+
+`waitForExistence` returns when an element enters the accessibility tree. For an AppKit menu that
+happens when the menu is **created** — before it is positioned, and while it is still fading in.
+`click()` then resolves the element again, takes the frame from that snapshot, and synthesizes an
+event at its centre. If the frame is a moment stale, the click lands on the menu's backdrop, the menu
+closes, and **nothing happens at all**. The only evidence is the absence of whatever the item was
+supposed to produce, which is indistinguishable from the app failing to produce it.
+
+The same applies outside menus, to anything the window is animating. Selecting a request log row
+opens the inspector inside `withAnimation(DSAnimation.drawerToggle)`, which narrows the drawer
+underneath it and moves every row — so a ⌘-click aimed at the next row can land between two rows and
+select nothing, and it presents as the modifier having been dropped rather than as a moved target.
+
+**What went wrong twice.** `testAddingRequestsToAnExistingJourneyFromTheLog` failed waiting five
+seconds for the capture sheet on run #91 and passed on the retry, so the wait was widened to fifteen
+under a comment explaining that the machine had been busy. Run #98 failed at that same line **twice
+in one run** at fifteen seconds. A sheet that is merely slow arrives inside fifteen seconds; the
+clock was never the variable. Widening a timeout is what you do when something arrives late — not
+when it never arrives.
+
+**What to do instead.** `UITestApp.waitForStableFrame(_:)` polls until an element reports the same
+non-empty frame twice, which is the cheapest available statement of "it has stopped". Call it before
+any click aimed at something that has just appeared or is being animated. For a nested menu — a
+submenu parent, then a child — use `UITestApp.chooseFromSubmenu(in:parent:item:thenAwait:…)`, which
+settles both levels, and re-opens the whole menu and tries again if the outcome never comes.
+
+Two properties of that helper worth keeping if it is ever rewritten. It takes the **outcome** as an
+argument and every attempt ends waiting for it, so a broken app still fails — the retry removes a
+lost click, not a missing sheet. And a retry is recorded with `XCTContext.runActivity`, because it
+cannot tell a missed click apart from an app that intermittently fails to present, and the result
+bundle is the only place that distinction can be recovered. `print()` is no use for this: runner
+output never reaches the xcodebuild log CI reads.
