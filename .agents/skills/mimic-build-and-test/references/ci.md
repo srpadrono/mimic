@@ -10,14 +10,119 @@ hosted runners on public repositories, macOS included.
 | `macos-checks` | `macos-26` | `tuist generate`, the Debug build, the app-level suites **with the coverage measurement**, the CLI end-to-end check (non-gating), the Release gate and its warning inventory |
 | `macos-ui` (×3) | `macos-26` | The XCUITest suite, sharded across three runners by test class |
 | `ui-suite` | `ubuntu-latest` | Rolls the three shard results into one status check |
-| `record-coverage` | `ubuntu-latest` | Pushes to `main` only: writes the measured coverage into README.md |
+| `record-coverage` | `ubuntu-latest` | Pushes to `main` only: publishes the measured coverage as two shields.io endpoint payloads on the orphan `badges` branch, which README.md's badges read |
 
 `record-coverage` is the only job holding `contents: write`, and it holds it precisely so that the
 jobs compiling code out of a pull request do not — see the comments above it and above `Emit coverage
 figures`. It needs `macos-checks` and **not** the UI shards, because coverage is measured in that job
 and because this repository's UI suite is documented as ending red on a test that passed on its
-retry; making the recording wait on the shards would mean the README updates only on runs where a
+retry; making the publishing wait on the shards would mean the badges update only on runs where a
 flake happened not to fire.
+
+## Coverage: measured every run, published to a branch of its own
+
+The measurement lives inside `macos-checks` rather than in a job of its own. Its `Test (unit suites)`
+step runs the `Mimic-Workspace` scheme with `-enableCodeCoverage YES` and writes the result bundle to
+a named path; the `Coverage report` step reads that bundle with `xcrun xccov` and prints a per-target
+table into the **job summary**, so "how much of this is actually exercised" is a link away rather
+than a script somebody has to remember to run. On a red run the bundle is uploaded as the
+`xcresult-unit` artifact, which is where per-file detail lives.
+
+Two things sit outside the figures, both structurally. **XCUITest**, because the step doing the
+measuring is the one passing `-skip-testing:MimicUITests` — the UI suite runs in three jobs beside
+it. And **everything the Linux job runs**, because gathering coverage needs the Xcode toolchain.
+
+### The two figures go to two different places, on purpose
+
+**The badges at the top of README.md are CI's.** `record-coverage` turns the figures into two
+shields.io *endpoint* payloads with `Scripts/update_readme_coverage.py --from-json --emit-badges`,
+and force-pushes them to the `badges` branch:
+
+```
+badges/app-coverage.json      {"schemaVersion": 1, "label": "Mimic.app coverage",
+                               "message": "72.41%", "color": "red"}
+badges/module-coverage.json   {"schemaVersion": 1, "label": "modules at or above 95%",
+                               "message": "5/8", "color": "red"}
+```
+
+Four keys, nothing else — no timestamp, no run URL. The colour comes from the same ladder the badges
+have always used (95% brightgreen, 90% green, 80% yellow, below that red), and the module badge is
+coloured by the *proportion* clearing the bar, so `5/8` is 62.5% and red while `8/8` is bright green.
+
+The README links each through `https://img.shields.io/endpoint?url=…`, percent-encoded, at
+`raw.githubusercontent.com/srpadrono/mimic/badges/<file>`. **Nothing in the tracked tree moves when
+the badges do**, which is the whole point.
+
+**The detailed per-target block between the `coverage:generated` markers is a local run's.**
+`./Scripts/run_full_test_suite.sh` on a Mac writes it and is its only writer — by design now, not by
+accident: `--from-json` refuses to run without `--emit-badges`, so no CI path can reach the README at
+all. Expect the block to be older than the badges; the block's own provenance line says so.
+
+### Why an orphan branch and not a bypass on `main`
+
+The job used to rewrite README.md and push it to `main`. **Every push it ever made was refused**,
+across six merges, while the job itself went green:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: - Changes must be made through a pull request.
+! [remote rejected] HEAD -> main (protected branch hook declined)
+##[warning]Could not push the coverage update to main — the diff is in the job summary.
+```
+
+That is a rule, not a lost race: `main` takes changes only through a pull request and the Actions bot
+is not exempt, so the retry-after-rebase the old step did could never have helped. Two ways out
+existed — let the bot bypass the rule, or put the figures where the rule does not apply. **The owner
+declined to weaken `main`'s protection for a badge**, so the badges moved.
+
+`badges` is an **orphan** branch: created by the job if absent, no history from `main`, no source in
+it, nothing that could need reviewing. Each run builds one parentless commit holding exactly the two
+JSON files and force-pushes it, so the branch never accumulates history and stays a few hundred bytes
+for the life of the repository. The recipe is worth reading once, because one step in it surprises
+people: `git checkout --orphan` starts the branch with no parent but **keeps `main`'s files staged**,
+so `git rm -r --cached .` clears the index (touching nothing on disk) before the two payloads are
+added. The payloads are written to a `mktemp -d` outside the checkout, both because `.artifacts/` is
+gitignored and `git add` would refuse them, and because they have to survive that index clear.
+
+The branch name is written down **once**, in `Scripts/update_readme_coverage.py`, beside the URL
+builder that produces what README.md must link. The workflow asks for it
+(`--print-badge-branch`) rather than repeating it, and `--self-test` pins the two URLs to literals
+so moving the branch fails the gate instead of silently 404ing both badges.
+
+### What is deliberate about the job
+
+- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS
+  jobs compile and run code out of a pull request; a write token there would widen the blast radius
+  of anything going wrong in one to "can push". This job runs one stdlib Python script and some git —
+  no build, no test, no repository code.
+- **A few hundred bytes cross between the two, not the bundle.** The macOS job emits the figures as
+  JSON (`--emit-json`) and hands them on as a job output; the `.xcresult` is hundreds of megabytes
+  and stays on the runner that made it. That hand-off is also what lets the publishing run on Linux.
+- **Nothing generated carries a timestamp, run number or run URL.** The branch is force-pushed to one
+  commit regardless, so this no longer protects CI from anything — but the README block is still a
+  pure function of the figures, because a *human* commits that one and an unchanged local measurement
+  must leave the file byte-identical rather than dirtying the tree.
+- **No `[skip ci]`, and its absence is the point.** The marker was load-bearing when this pushed to
+  `main`: without it the commit triggered the workflow that wrote it. The `push:` trigger names
+  `branches: [main]`, so a push to `badges` matches nothing. Restore a push to `main` and the marker
+  has to come back with it.
+- **It publishes; it never gates.** The step is `continue-on-error`, and it writes both payloads into
+  the job summary *before* it touches git — so a failed publish leaves the figures on the run page
+  and the badges showing whatever was last published. It never reddens a commit whose tests passed.
+
+**shields.io caches an endpoint response for a few minutes.** A badge that still shows the previous
+figure right after a merge is the cache, not a failed publish; check the raw URL before investigating
+the job.
+
+**No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
+number is either so low it never fires or red on the run that introduces it. Measuring first, then
+setting the floor against a baseline, is the order.
+
+The half of `update_readme_coverage.py` that needs no Mac — the badge URLs, the badge payloads, the
+colour ladder, the JSON round trip, the block rewriter and every refusal — is covered by
+`python3 Scripts/update_readme_coverage.py --self-test`, which the Linux job runs beside the other
+checkers. Every expected value in it is written out longhand; nothing asks a function under test what
+the right answer is.
 
 ## Why the macOS work is split the way it is
 

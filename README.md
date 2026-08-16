@@ -11,8 +11,8 @@ failures, and watch live traffic. Then drive all of it from a script.
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
 [![Tests](https://img.shields.io/badge/tests-1145%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![App Coverage](https://img.shields.io/badge/Mimic.app%20coverage-not%20measured-lightgrey)](#coverage)
-[![Module Coverage](https://img.shields.io/badge/modules%20at%20or%20above%2095%25-not%20measured-lightgrey)](#coverage)
+[![App Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
+[![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -261,9 +261,8 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-1145 tests, counted as `@Test` and `func test` declarations — a parameterized case runs more than
-once and is still one declaration. Swift Testing for units and integration, XCTest with page objects
-for UI.
+1145 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
+and is still one declaration. Swift Testing for units, XCTest with page objects for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
@@ -275,126 +274,37 @@ for UI.
 The portable 634 break down as Domain 232, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
 Persistence 69, ControlPlane 22. The app's 295 are the six folders `MimicTests` builds —
 `WorkspaceFeatureTests` 109, `MimicTests` 142, `JourneyFeatureTests` 14, `ImportFeatureTests` 15,
-`ProjectFeatureTests` 6, `EndpointFeatureTests` 9.
-
-`JourneyFeatureTests` is new, and it closes something this section used to state as a decision:
-`Sources/AppFeatures/JourneyFeature` was described here as deliberately having no suite of its own
-because `MimicTests` covered the journey UI. It was the one feature folder with no tests at all.
-`Project.swift` now lists `Tests/JourneyFeatureTests` among the folders the `MimicTests` target
-builds, and the directory exists behind it.
-
-Only the SwiftUI layer needs a Mac. The domain rules, mock engine, persistence, control plane, spec
-import and CLI are plain Swift, so [`Package.swift`](Package.swift) builds them anywhere while
-[`Project.swift`](Project.swift) (Tuist) builds the app. Both manifests declare those modules from
-the *same* directories, so they cannot drift in what they compile — but they resolve their
-dependencies into two separate lockfiles, and that pair *can* drift, so CI checks the two agree
-before it builds anything.
+`ProjectFeatureTests` 6, `EndpointFeatureTests` 9 — hand counts, two of which have been wrong, which
+is what the last command below is for. Only the SwiftUI layer needs a Mac; the rest is plain Swift,
+which is why [`Package.swift`](Package.swift) builds most of this anywhere.
 
 ```bash
-swift test                    # the portable 634, no Xcode needed
-./Scripts/ci.sh               # full local gate: build, all suites + coverage, Release, UI tests
+swift test                             # the portable 634, no Xcode needed
+./Scripts/ci.sh                        # the full local gate: build, suites, Release, UI, CLI e2e
+./Scripts/run_full_test_suite.sh       # macOS + Xcode; also rewrites the coverage section below
+python3 Scripts/check_doc_counts.py    # recount every number above, and catch a suite nobody runs
 ```
-
-The **Tests** badge at the top is hand-maintained, unlike the two coverage badges beside it, which
-`Scripts/update_readme_coverage.py` rewrites and which make the script fail loudly if the README has
-lost them. That asymmetry is why the counts above keep drifting: the table has twice claimed a
-figure the tree did not support — 469 / 34 / 181 against an actual 487 / 49 / 173, then 173 for the
-app row while a new parity suite was landing 13 more in the same afternoon. A hand count is only ever
-true of the commit that wrote it. It no longer has to be recounted by eye —
-[`Scripts/check_doc_counts.py`](Scripts/check_doc_counts.py) recounts every folder and fails naming
-each number here that has drifted:
-
-```bash
-python3 Scripts/check_doc_counts.py    # also run by ./Scripts/ci.sh and by the Linux CI job
-```
-
-It exits 0 against this table today. It also fails on a suite folder that exists and appears in none
-of its groups, which is what a newly added suite looks like before anybody writes it in — and is how
-`JourneyFeatureTests` was caught, hours after being created.
 
 ### Coverage
 
-**Coverage is measured on every CI run, and the numbers are on the run page.** The macOS job's
-`Test (unit suites)` step runs the `Mimic-Workspace` scheme with `-enableCodeCoverage YES` and
-writes its result bundle to a named path; the `Coverage report` step reads that bundle with
-`xcrun xccov` and prints a per-target table into the **job summary**. So the answer to "how much of
-this is actually exercised" is a link away rather than a script somebody has to remember to run.
-
-Where to look: any run of [`.github/workflows/ci.yml`](.github/workflows/ci.yml), under the
-**Build, unit suites, Release, CLI e2e (macOS)** job's summary. Two things sit outside that
-measurement, both structurally: XCUITest, because the step doing the measuring is the one that skips
-it — the UI suite runs in three sharded jobs beside this one — and everything the Linux job runs,
-because gathering coverage needs the Xcode toolchain. On a red run the bundle is uploaded as the
-`xcresult-unit` artifact, which is where per-file detail lives.
-
-**The numbers are also recorded here, on every push to `main`.** They used to exist only in that job
-summary — computed on every run and thrown away with the runner — which is why both badges above
-spent this repository's entire history reading `not measured` while the measurement was already
-happening. The `record-coverage` job closes that: the macOS job hands its figures on as a job
-output, and that job rewrites the two badges and the block below with
-[`Scripts/update_readme_coverage.py`](Scripts/update_readme_coverage.py).
-
-Four things about it are deliberate, and each is the answer to a way this normally goes wrong:
-
-- **It is a separate job, and the only one in the workflow holding `contents: write`.** The macOS
-  jobs compile and run code out of a pull request; a write token there would widen the blast radius
-  of anything going wrong in one to "can push to `main`". The recording job runs one Python script
-  over one Markdown file.
-- **A few hundred bytes cross between them, not the bundle.** The `.xcresult` is hundreds of
-  megabytes and stays on the runner that made it.
-- **The generated block carries no timestamp, run number or run URL.** It is a pure function of the
-  coverage figures, so an unchanged measurement leaves the file byte-identical and there is nothing
-  to commit — otherwise `main` would collect one commit per push forever. The commit that is made
-  carries `[skip ci]`, or it would trigger the workflow that wrote it.
-- **It records; it never gates.** `main` is a protected branch, and whether its rules let the Actions
-  bot push is a repository setting rather than something a commit can fix. A rejected push warns and
-  prints the diff it wanted to make into the job summary — it never reddens a commit whose tests
-  passed.
-
-A Mac still writes the same section from a full local suite, out of the per-scheme bundles rather
-than the workspace-wide one, and the generated block says which of the two produced it:
-
-```bash
-./Scripts/ci.sh                     # the CI gate locally, and prints the same per-target table
-./Scripts/run_full_test_suite.sh    # macOS + Xcode; rewrites this section and the two badges
-```
-
-The half of that script needing no Mac — the rewriting, the JSON hand-off and the refusals — is
-covered by `python3 Scripts/update_readme_coverage.py --self-test`, which the Linux job runs beside
-the other checkers. It had no automated test of any kind before it started writing to `main`.
-
-**No coverage floor is enforced, deliberately.** A threshold picked before anybody has seen the
-number is either so low it never fires or red on the run that introduces it. Measuring first, then
-setting the floor against a baseline, is the order.
+**Coverage is measured on every CI run**, by the macOS job running the unit suites with
+`-enableCodeCoverage YES` — XCUITest and the Linux suites excepted, and no floor enforced against
+the figures. **The two badges above are live**: every push to `main` publishes them to an orphan
+`badges` branch as shields.io endpoint payloads, so nothing in the tree changes when they move. The
+detailed per-target block below is the other half, and it is deliberately local-only —
+`./Scripts/run_full_test_suite.sh` on a Mac is its only writer, so it is as fresh as the last full
+run somebody did by hand.
 
 <!-- coverage:generated:start -->
 <!-- coverage:generated:end -->
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to
-`main`, in seven jobs across five definitions, and finishes in about **30 minutes**. Linux builds
-`Package.swift`, runs the portable suites and every gate that needs no toolchain, in a couple of
-minutes. On macOS, `Build, unit suites, Release, CLI e2e` runs `tuist generate`, the Debug build, the
-app-level suites — measured, with the per-target coverage table printed into the job summary — the
-CLI end-to-end check and the Release gate, while **the XCUITest suite runs beside it in three shards
-on three runners**, rolled up into one `UI suite` status check. A short `record-coverage` job writes
-the coverage figures into this file on pushes to `main`.
-
-The suite is sharded across machines rather than parallelised on one because every UI test shares a
-store, a defaults domain, a window server and a frontmost application; three is the shard count
-because the non-UI job takes one macOS slot and **four is how many concurrent macOS jobs this
-repository has actually been given**. GitHub documents five, and the first sharded run asked for
-five: run #89 started four jobs together and left the fifth queued for 19m26 — the length of a whole
-shard — which turned a predicted 29-minute run into a measured 43-minute one. Three shards of 51, 53
-and 54 tests fit the observed cap with nothing waiting. That split is a hand-maintained list of test
-classes, so [`Scripts/check_ui_shards.py`](Scripts/check_ui_shards.py) fails the Linux job if any
-class is run by no shard or by two — a class nobody runs would otherwise leave every shard green. The
-workflow's own header argues all of it, including why each shard builds for itself instead of
-downloading one shared build. It used to be a single 96-minute job with XCUITest as four fifths of
-it.
-
-Both runners are free on a public repository. (This section used to say Actions could not start
-a job here at all — true while the repository was private and a billing block killed every run in
-about two seconds; making it public resolved it.)
+`main`, in seven jobs across five definitions, finishing in about **30 minutes**: Linux builds
+`Package.swift`, the portable suites and every gate needing no toolchain in a couple of minutes;
+macOS does `tuist generate`, the Debug build, the measured app suites, the CLI end-to-end check and
+the Release gate, with the XCUITest suite beside it in three shards on three runners. Both runners
+are free on a public repository. Why the work divides that way, and what each gate settles, is in
+[`ci.md`](.agents/skills/mimic-build-and-test/references/ci.md).
 
 ## Documentation
 

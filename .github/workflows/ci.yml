@@ -351,17 +351,22 @@ jobs:
       - name: Skill layout
         run: python3 Scripts/check_skills.py
 
-      # `Scripts/update_readme_coverage.py` is what writes the README's coverage badges and table,
-      # and until this line it had no automated check of any kind. Half of it needs `xcrun xccov`
-      # and a real `.xcresult`, so only the macOS job can exercise that half — but the half that
-      # matters most to a reader, the one that rewrites README.md, is pure string work and runs
-      # anywhere. `--self-test` drives it against a fixture README: both badges, the generated
-      # block, the JSON round trip, prose outside the markers surviving, and the three refusals
-      # (a partial target list, a malformed payload, a README with no badges).
+      # `Scripts/update_readme_coverage.py` builds the badge payloads `record-coverage` publishes
+      # and rewrites the README's generated table, and until this line it had no automated check of
+      # any kind. Half of it needs `xcrun xccov` and a real `.xcresult`, so only the macOS job can
+      # exercise that half — everything else is pure string work and runs anywhere. `--self-test`
+      # covers it against fixtures written out longhand in the script: the two shields.io endpoint
+      # URLs, the two payload documents whole, the colour ladder at every boundary, the JSON round
+      # trip, the generated block, prose outside the markers surviving, and the refusals (a partial
+      # target list, a malformed payload, a payload with no modules, a README with no badges, a
+      # README still carrying the old static ones).
       #
-      # It also pins the property the `record-coverage` job depends on — that rewriting with
-      # unchanged figures produces byte-identical output — because the day that stops being true is
-      # the day `main` starts collecting a commit per push.
+      # Two properties it pins that live outside the script. The badge URLs are literals here *and*
+      # in README.md, so moving the `badges` branch fails this step instead of turning both badges
+      # into shields.io's "invalid" placeholder. And rewriting with unchanged figures still has to
+      # produce byte-identical output — the recording job no longer needs that, since it force-pushes
+      # one commit either way, but a human commits the README block and a full-suite run must not
+      # dirty the tree over an unchanged measurement.
       #
       # Here rather than on macOS for the same reason as the house rules above: it needs nothing a
       # Mac has, and it is a tenth of a second.
@@ -492,9 +497,11 @@ jobs:
       #     exists is either so low it never fires or so high it is red on arrival, and both teach
       #     people to ignore it. The floor is the next step, once a few runs have published numbers
       #     and somebody can pick one that means something.
-      #   - **No README rewrite.** The two badges are still written only by
-      #     `Scripts/run_full_test_suite.sh` on a Mac. This workflow runs with `contents: read` on
-      #     pull requests from forks; a job that edited tracked files would have nowhere to put them.
+      #   - **No writing of any kind.** This step measures and hands the numbers on. The badges are
+      #     published by `record-coverage` at the bottom of this file, to a branch that carries
+      #     nothing else; the README's detailed block is written only by
+      #     `Scripts/run_full_test_suite.sh` on a Mac. This job runs with `contents: read` on pull
+      #     requests from forks, and has no business holding anything wider.
       - name: Test (unit suites)
         run: |
           rm -rf .artifacts/coverage
@@ -535,7 +542,7 @@ jobs:
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       # (c): the same figures again, as a few hundred bytes of JSON handed to the `record-coverage`
-      # job at the bottom of this file, which writes them into README.md.
+      # job at the bottom of this file, which turns them into the two badge payloads.
       #
       # A **job output**, not an artifact, and not three more lines on that job. Two constraints
       # meet here. `contents: write` must not live on this job — it is the one that compiles and
@@ -555,9 +562,9 @@ jobs:
       # into a pass.
       #
       # That refusal is safe to leave loud-but-not-fatal because its failure announces itself: no
-      # figures means no recording, and the badges in the README go on reading `not measured` until
-      # somebody looks. A silent wrong number is the outcome worth engineering against; a visibly
-      # absent one is not.
+      # figures means nothing is published, and the badges go on showing the figures from the last
+      # push that did measure — visibly stale rather than quietly wrong. A silent wrong number is the
+      # outcome worth engineering against; an old one is not.
       #
       # Only on a push to `main`: on a pull request there is nowhere to record the result, and the
       # numbers describe the merged commit anyway.
@@ -1021,16 +1028,52 @@ jobs:
               ;;
           esac
 
-  # The one job in this workflow that writes to the repository. It records the coverage
-  # `macos-checks` measured into README.md's two badges and the block between its
-  # `coverage:generated` markers — the thing both badges spent this repository's whole history saying
-  # `not measured` for while the number was being computed on every run and thrown away with the
-  # runner.
+  # The one job in this workflow that writes to the repository. It publishes the coverage
+  # `macos-checks` measured as the two shields.io endpoint payloads README.md's badges read — the
+  # thing both badges spent this repository's whole history saying `not measured` for while the
+  # number was being computed on every run and thrown away with the runner.
+  #
+  # ## Why an orphan branch and not a commit on `main`
+  #
+  # This job used to rewrite README.md and push it to `main`. **Every push it ever made was refused**,
+  # for six merges, while the job itself went green:
+  #
+  #     remote: error: GH006: Protected branch update failed for refs/heads/main.
+  #     remote: - Changes must be made through a pull request.
+  #
+  # That is a rule rather than a lost race — `main` takes changes only through a pull request, the
+  # Actions bot is not exempt, and the retry-after-rebase the old step did could never have helped.
+  # The two ways out were to let the bot bypass the rule, which weakens `main`'s protection for a
+  # badge, or to put the figures somewhere the rule does not apply. The owner chose the second.
+  #
+  # So the payloads go to **`badges`, an orphan branch**: no history from `main`, no source, nothing
+  # to review, a few hundred bytes forever. `Scripts/update_readme_coverage.py --print-badge-branch`
+  # is what names it, so the branch is written down once — in the same file that builds the badge
+  # URLs README.md has to carry — instead of once here and once in Markdown.
+  #
+  # Three properties the old path needed, and where each of them stands now:
+  #
+  #   - **`[skip ci]` on the commit.** It was load-bearing: a commit on `main` triggers the workflow
+  #     that wrote it, and without the marker this job fed itself forever. The hazard is *gone*
+  #     rather than handled — this workflow's `push:` trigger names `branches: [main]`, and nothing
+  #     pushed to `badges` matches it. Restore a push to `main` here and the marker has to come back
+  #     with it.
+  #   - **"Commit only when the numbers moved."** The old step ran `git diff --quiet` first, because
+  #     `main` would otherwise collect one commit per push forever — which is also why nothing this
+  #     script generates carries a timestamp, a run number or a run URL. The branch below is
+  #     force-pushed to a single parentless commit every time, so it cannot accumulate history
+  #     whatever the payload says, and the check is dead here. **The no-timestamp rule is not**: the
+  #     README's detailed block is still a pure function of the figures, because a human commits that
+  #     one and a full-suite run must not dirty the tree on an unchanged measurement.
+  #   - **It records; it never gates.** Unchanged, and the reason is unchanged: a coverage
+  #     measurement is not a verdict on a commit. The step is `continue-on-error`, and it writes the
+  #     payloads into the job summary *before* it tries to publish them, so a failed push leaves the
+  #     figures visible on the run page rather than lost with the runner.
   #
   # Why this is a separate job on Linux rather than three more lines on the macOS one is argued at
   # `Emit coverage figures` above: `contents: write` must not sit on the job that compiles and runs
-  # code out of a pull request. What runs here is one stdlib Python script over one Markdown file.
-  # No build, no test, no repository code executes.
+  # code out of a pull request. What runs here is one stdlib Python script and some git. No build,
+  # no test, no repository code executes.
   #
   # **`needs: macos-checks`, not the UI shards, and that is now structural rather than a workaround.**
   # It used to say `needs: macos` with `always()`, because coverage is measured two steps before
@@ -1043,7 +1086,7 @@ jobs:
   # output empty, which the first step below reports and stops on, rather than skipping this job with
   # no explanation.
   record-coverage:
-    name: Record coverage in README
+    name: Publish coverage badges
     needs: macos-checks
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
@@ -1051,14 +1094,13 @@ jobs:
       contents: write
 
     steps:
+      # The pushed SHA at depth 1, which is the default and is all this job needs. It used to ask
+      # for `ref: main` and `fetch-depth: 0`, because it committed to `main` and the push at the end
+      # might have had to rebase onto a tip that moved while the macOS job ran. Neither applies to a
+      # parentless commit on a branch nothing else writes to, and taking the pushed SHA is the more
+      # honest of the two anyway: the payloads are produced by the version of
+      # `Scripts/update_readme_coverage.py` that belongs to the commit being measured.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # `main` rather than the pushed SHA, because the number goes where a reader will look for
-          # it. `fetch-depth: 0` because the push at the end may have to rebase onto a tip that
-          # moved while the macOS job was still running, and a depth-1 clone has nothing to rebase
-          # onto.
-          ref: main
-          fetch-depth: 0
 
       # The job output goes through `env:` rather than straight into `run:`. A `${{ }}` interpolated
       # into a shell line is substituted before the shell ever sees it, so its content is parsed as
@@ -1079,58 +1121,68 @@ jobs:
           printf '%s\n' "$COVERAGE_JSON" > .artifacts/coverage/coverage.json
           echo "state=ready" >> "$GITHUB_OUTPUT"
 
-      # `main` is a protected branch. Whether these rules let this token push is a repository
-      # setting rather than anything a commit can fix, so a rejection must not redden a commit whose
-      # tests all passed: the step warns, and puts the diff it wanted to make into the job summary
-      # where somebody can apply it by hand. The number is never lost, at worst it is not committed.
-      - name: Record it in README.md
+      # Two shields.io endpoint payloads, force-pushed as a single parentless commit onto the
+      # `badges` branch. See this job's header for why they do not go into README.md on `main`.
+      #
+      # `continue-on-error`, and the figures reach `$GITHUB_STEP_SUMMARY` before any git runs, so
+      # every way this can fail — the payload malformed, the branch protected after all, the token
+      # refused — leaves the numbers on the run page and the badges showing whatever was last
+      # published. A coverage measurement never reddens a commit whose tests passed.
+      - name: Publish the badge payloads
         if: steps.figures.outputs.state == 'ready'
         continue-on-error: true
         run: |
           set -euo pipefail
 
+          # The script owns the branch name, beside the URLs it builds for README.md. Asking it
+          # keeps this file from being a second place the name is written down.
+          branch="$(python3 Scripts/update_readme_coverage.py --print-badge-branch)"
+
+          # Outside the checkout, because `.artifacts/` is gitignored and `git add` would refuse
+          # these paths, and because the orphan branch below is built by clearing the index — the
+          # payloads have to survive that.
+          badges="$(mktemp -d)"
           python3 Scripts/update_readme_coverage.py \
             --from-json .artifacts/coverage/coverage.json \
-            --readme README.md
+            --emit-badges "$badges"
 
-          # The generated block is a pure function of the figures — no timestamp, no run URL — so an
-          # unchanged measurement leaves the file byte-identical and there is nothing to commit.
-          # Without that property `main` would grow one commit per push forever.
-          if git diff --quiet -- README.md; then
-            echo "README.md already records these figures — nothing to commit."
-            exit 0
-          fi
+          {
+            echo '### Coverage badge payloads'
+            echo
+            echo "Measured on this commit and force-pushed to the \`$branch\` branch, where"
+            echo 'shields.io reads them for the two badges at the top of README.md. If the push'
+            echo 'below failed, the badges still show the last figures that were published and'
+            echo 'these are the ones they would have shown.'
+            for payload in "$badges"/*.json; do
+              echo
+              echo "\`$(basename "$payload")\`:"
+              echo
+              echo '```json'
+              cat "$payload"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md
-          # `[skip ci]` is load-bearing: without it this commit triggers the workflow that wrote it.
-          git commit -m 'docs: record measured coverage in the README [skip ci]'
 
-          if git push origin HEAD:main; then
-            echo "Recorded."
-            exit 0
-          fi
+          # `--orphan` starts a branch with no parent commit, so none of `main`'s history comes with
+          # it. It does keep `main`'s files staged, which is the one surprise in this recipe:
+          # `git rm --cached` clears the index without deleting anything from disk, leaving a commit
+          # that contains the two payloads and nothing else.
+          git checkout --quiet --orphan "$branch"
+          git rm -r --quiet --cached .
+          cp "$badges"/*.json .
+          git add app-coverage.json module-coverage.json
+          git commit --quiet -m 'chore: publish measured coverage as badge endpoints'
 
-          # A push can also simply lose a race — `main` moved while the macOS job was running. That
-          # is worth exactly one rebase before concluding the branch rules are what rejected it.
-          echo "Push rejected; rebasing onto main and trying once more."
-          if git pull --rebase origin main && git push origin HEAD:main; then
-            echo "Recorded after a rebase."
-            exit 0
-          fi
-
-          echo "::warning::Could not push the coverage update to main — the diff is in the job summary."
-          patch="$(git diff 'HEAD^' HEAD -- README.md || true)"
-          {
-            echo '### Coverage measured, but not recorded'
-            echo
-            echo 'The push to `main` was rejected. If branch protection is what refused it, either'
-            echo 'allow the Actions bot to bypass the rule for this path, or apply the diff below by'
-            echo 'hand. The figures themselves are in the macOS job'"'"'s summary and its job output.'
-            echo
-            echo '```diff'
-            printf '%s\n' "$patch"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          # `--force`, always. The branch must never accumulate history: each run replaces its one
+          # commit, the previous one becomes unreachable, and the branch stays a few hundred bytes
+          # for the life of the repository. It also creates the branch on the first run, so nothing
+          # has to exist beforehand.
+          #
+          # No `[skip ci]` on the commit above, and its absence is deliberate rather than an
+          # oversight. The marker was load-bearing when this pushed to `main`; the `push:` trigger at
+          # the top of this file names `branches: [main]`, so a push here cannot trigger anything.
+          git push --force origin "HEAD:refs/heads/$branch"
+          echo "Published to $branch."
