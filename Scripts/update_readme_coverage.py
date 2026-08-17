@@ -102,9 +102,25 @@ BADGE_BRANCH = "badges"
 APP_BADGE_FILE = "app-coverage.json"
 MODULE_BADGE_FILE = "module-coverage.json"
 
-# The labels the badges have always carried, kept verbatim so the two badges do not change wording
-# on the day they start carrying a number.
-APP_BADGE_LABEL = "Mimic.app coverage"
+# The file names are addresses and the labels are descriptions, and only one of the two is allowed
+# to lie for a while.
+#
+# The first badge used to read `Mimic.app coverage`, and measured the target of that name — which is
+# `App/Sources/MimicApp.swift`, thirty-four lines of `@main` entry point that `xccov` counts as sixty
+# executable ones. It published `46.67%`: twenty-eight of those sixty lines. A reader took that for a
+# statement about the application, and it was a statement about a shim. The application is
+# `AppFeatures`, fourteen thousand lines of it, and it is one row in the *other* badge's eight.
+#
+# It reads the **weighted total across all nine targets** now, which is the figure the label always
+# implied. `Mimic.app` keeps its row in the table and its entry in the JSON — sixty lines of entry
+# point is worth reporting, just not worth being the headline.
+#
+# `APP_BADGE_FILE` deliberately keeps its name through that change. It is a URL README.md carries and
+# the `badges` branch serves; renaming it would leave the merged README pointing at a file the next
+# run has not published yet, so both badges would render shields.io's "invalid" placeholder for the
+# length of a CI run. A file name nobody reads is the cheaper inaccuracy, and this paragraph is the
+# price of it.
+TOTAL_BADGE_LABEL = "line coverage"
 MODULE_BADGE_LABEL = "modules at or above 95%"
 
 
@@ -253,15 +269,23 @@ def build_coverage_block(
         lines.append(f"| `{target_name}` | `{format_percent(metrics.percent)}` | `{format_lines(metrics)}` |")
 
     at_or_above = modules_at_or_above_95(module_metrics)
-    total_executable_lines = app_metrics.executable_lines + sum(metrics.executable_lines for _, metrics in module_metrics)
+    total = total_metrics(app_metrics, module_metrics)
+    # The row the first badge publishes, in the table it belongs to. Without it a reader comparing
+    # the badge against this block has to add nine numbers by hand to find out where it came from.
+    lines.append(f"| **All nine targets** | **`{format_percent(total.percent)}`** | **`{format_lines(total)}`** |")
     lines.extend(
         [
             "",
             "Coverage notes:",
             "",
-            f"- App coverage is currently `{format_percent(app_metrics.percent)}`.",
+            f"- Total line coverage across all nine targets is `{format_percent(total.percent)}` — "
+            "the figure the first badge at the top of this file publishes.",
+            f"- `Mimic.app` is the app *bundle* target: `App/Sources/MimicApp.swift`, the `@main` "
+            f"entry point, currently `{format_percent(app_metrics.percent)}` of "
+            f"`{app_metrics.executable_lines:,}` executable lines. The application itself is "
+            "`AppFeatures`.",
             f"- Modules at or above `95%`: `{at_or_above}/{len(module_metrics)}`.",
-            f"- Total executable lines tracked in this table: `{total_executable_lines:,}`.",
+            f"- Total executable lines tracked in this table: `{total.executable_lines:,}`.",
             "- `Lines` shows covered/executable lines reported by `xcrun xccov`.",
             "- Coverage is gathered with `xcodebuild` and `xcrun xccov` from fresh `.xcresult` bundles.",
             f"- {provenance}",
@@ -327,6 +351,33 @@ def modules_at_or_above_95(module_metrics: list[tuple[str, CoverageMetrics]]) ->
     return sum(1 for _, metrics in module_metrics if metrics.percent >= 95.0)
 
 
+def total_metrics(
+    app_metrics: CoverageMetrics, module_metrics: list[tuple[str, CoverageMetrics]]
+) -> CoverageMetrics:
+    """All nine targets as one figure: covered lines over executable lines, not a mean of percents.
+
+    A mean would weight `ControlPlane`'s 413 lines the same as `AppFeatures`' 17,848 and produce a
+    number that describes nothing. Summing the two counts and dividing once is the only honest
+    aggregate, and it is what a reader assumes a coverage badge already is.
+
+    **Summing across targets is sound, and it looks like the thing the workflow refuses to do.** It
+    is not the same operation. Merging four *test runs* cannot be done by adding, because a line the
+    unit suites reach and a UI test also reaches is one covered line in the union and adding counts
+    it twice — that is why `.github/workflows/ci.yml` merges the result bundles instead. These nine
+    targets are disjoint sets of source files, measured in one already-merged report, so no line
+    appears in two of them and the sum is exact.
+    """
+    covered = app_metrics.covered_lines + sum(m.covered_lines for _, m in module_metrics)
+    executable = app_metrics.executable_lines + sum(m.executable_lines for _, m in module_metrics)
+    if executable == 0:
+        raise RuntimeError("the coverage figures carry no executable lines at all.")
+    return CoverageMetrics(
+        percent=100.0 * covered / executable,
+        covered_lines=covered,
+        executable_lines=executable,
+    )
+
+
 def badge_payloads(
     app_metrics: CoverageMetrics, module_metrics: list[tuple[str, CoverageMetrics]]
 ) -> dict[str, dict]:
@@ -339,12 +390,13 @@ def badge_payloads(
     """
     at_or_above = modules_at_or_above_95(module_metrics)
     module_count = len(module_metrics)
+    total = total_metrics(app_metrics, module_metrics)
     return {
         APP_BADGE_FILE: {
             "schemaVersion": 1,
-            "label": APP_BADGE_LABEL,
-            "message": format_percent(app_metrics.percent),
-            "color": badge_color(app_metrics.percent),
+            "label": TOTAL_BADGE_LABEL,
+            "message": format_percent(total.percent),
+            "color": badge_color(total.percent),
         },
         MODULE_BADGE_FILE: {
             "schemaVersion": 1,
@@ -682,8 +734,14 @@ def self_test() -> int:
         == {
             "app-coverage.json": {
                 "schemaVersion": 1,
-                "label": "Mimic.app coverage",
-                "message": "41.50%",
+                "label": "line coverage",
+                # The weighted total, computed by hand from the fixtures above and written out as a
+                # literal: (1,000 + 960 + 321) / (2,409 + 1,000 + 400) = 2,281 / 3,809 = 59.8845…%.
+                # Deliberately *not* the mean of 41.5, 96.0 and 80.25 — that is 72.58%, and a badge
+                # showing it would be weighting a 400-line module the same as a 2,409-line one.
+                # Deliberately not `app.percent` either, which is 41.50% and is what this badge used
+                # to publish about a thirty-four-line entry point.
+                "message": "59.88%",
                 "color": "red",
             },
             "module-coverage.json": {
@@ -703,6 +761,17 @@ def self_test() -> int:
     )
     check("`Domain.framework` | `96.00%` | `960/1,000`" in rendered, "a module row is missing or misformatted")
     check("- Modules at or above `95%`: `1/2`." in rendered, "the at-or-above-95 count is wrong in the block")
+    # The same literal as the badge fixture above, and the point of pinning it in both places is that
+    # the block and the badge must not be able to disagree: a reader who checks one against the other
+    # is doing what this row exists for.
+    check(
+        "| **All nine targets** | **`59.88%`** | **`2,281/3,809`** |" in rendered,
+        "the total row is missing, or is not the weighted total of the rows above it",
+    )
+    check(
+        "Total line coverage across all nine targets is `59.88%`" in rendered,
+        "the block does not state the figure the first badge publishes",
+    )
     check("Prose that must survive untouched." in rendered, "prose outside the markers was lost")
     check("Trailing prose." in rendered, "prose after the block was lost")
     check(rendered.count("coverage:generated:start") == 1, "the start marker was duplicated or dropped")
@@ -747,8 +816,11 @@ def self_test() -> int:
             json.loads((badge_dir / "app-coverage.json").read_text())
             == {
                 "schemaVersion": 1,
-                "label": "Mimic.app coverage",
-                "message": "41.50%",
+                "label": "line coverage",
+                # 2,281/3,809 again, and written out again rather than referred to: this arm is the
+                # one that proves the figure survives the JSON hand-off from the macOS job to the
+                # Linux one, so it has to state the answer independently of the arm above.
+                "message": "59.88%",
                 "color": "red",
             },
             "the app payload on disk is not the document shields.io expects",
