@@ -41,7 +41,7 @@ matching, and [docs/ROADMAP.md](docs/ROADMAP.md) for what is deliberately not bu
 
 ## Where the rules live
 
-Nine skills, in `.agents/skills/`, symlinked into `.claude/skills/` so Claude Code and other agents
+Ten skills, in `.agents/skills/`, symlinked into `.claude/skills/` so Claude Code and other agents
 read one copy. **Load the skill before you touch its domain** — each one carries the failures that
 motivated its rules, which is the part a generic skill cannot tell you.
 
@@ -56,15 +56,25 @@ motivated its rules, which is the part a generic skill cannot tell you.
 | Write `async`/`await`, an actor, a `Task`, or anything `Sendable` | **swift-concurrency-pro** |
 | Run `tuist generate`, tag a target, or change a build config | **using-tuist-generated-projects** |
 | Deepen a module or move a boundary | **improve-codebase-architecture** |
+| Be asked, by the user typing `/teach`, to be taught something over several sessions | **teach** |
 
 Several usually apply at once — a new view is `mimic-window-design` **and** `swiftui-pro`, and its
 tests are `mimic-ui-tests`. Read a skill's `SKILL.md` first; it is a lightweight index that names
 which of its `references/` files you actually need.
 
 Four of these are repo-specific and were carved out of this file: `mimic-build-and-test`,
-`mimic-window-design`, `mimic-ui-tests`, `mimic-control-surface`. `improve-codebase-architecture` is
-vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](skills-lock.json); the rest are
-local.
+`mimic-window-design`, `mimic-ui-tests`, `mimic-control-surface`. `improve-codebase-architecture` and
+`teach` are vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](skills-lock.json);
+the rest are local.
+
+`teach` is the one row in that table that is not about this codebase. It sets
+`disable-model-invocation: true`, so it loads only when the user types `/teach`, and it is listed
+here because `Scripts/check_skills.py` requires every skill on disk to appear in this table — not
+because any Mimic task should reach for it. It also treats **the current directory** as a teaching
+workspace, writing `MISSION.md`, `RESOURCES.md`, `NOTES.md`, `lessons/`, `reference/`,
+`learning-records/` and `assets/` at the root of wherever it is run. Run it from a workspace of its
+own, not from a checkout of Mimic, unless the intent really is to commit a course into this
+repository.
 
 There is no `xcuitest-pro` in this repository — `find . -iname '*xcuitest*'` returns nothing, and
 this sentence is kept so nobody re-adds the reference believing it was an oversight. Agents run with

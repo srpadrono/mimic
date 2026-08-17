@@ -5,11 +5,16 @@ skills it routes to; this directory is the harness around them.
 
 ## `skills/`
 
-Nine symlinks into [`.agents/skills/`](../.agents/skills/), so Claude Code and every other agent read
+Ten symlinks into [`.agents/skills/`](../.agents/skills/), so Claude Code and every other agent read
 one copy rather than two that drift. Four are repo-specific (`mimic-build-and-test`,
 `mimic-window-design`, `mimic-ui-tests`, `mimic-control-surface`) and were carved out of AGENTS.md
-when it grew past 800 lines; four are local Swift guidance; `improve-codebase-architecture` is
-vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](../skills-lock.json).
+when it grew past 800 lines; four are local Swift guidance; `improve-codebase-architecture` and
+`teach` are vendored from `mattpocock/skills` and pinned in
+[`skills-lock.json`](../skills-lock.json).
+
+`teach` is not guidance for working on Mimic — it is a user-invoked (`disable-model-invocation:
+true`) teaching workspace, and it writes its state into whatever directory it runs in. AGENTS.md
+says where to run it and why it appears in the routing table anyway.
 
 Adding a skill means adding the directory under `.agents/skills/` **and** the symlink here. A skill
 that exists in only one of the two places is invisible to half the agents that work on this repo —
