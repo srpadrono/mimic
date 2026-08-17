@@ -88,15 +88,31 @@ shields.io *endpoint* payloads with `Scripts/update_readme_coverage.py --from-js
 and force-pushes them to the `badges` branch:
 
 ```
-badges/app-coverage.json      {"schemaVersion": 1, "label": "Mimic.app coverage",
-                               "message": "72.41%", "color": "red"}
+badges/app-coverage.json      {"schemaVersion": 1, "label": "line coverage",
+                               "message": "96.82%", "color": "brightgreen"}
 badges/module-coverage.json   {"schemaVersion": 1, "label": "modules at or above 95%",
-                               "message": "5/8", "color": "red"}
+                               "message": "6/8", "color": "red"}
 ```
 
 Four keys, nothing else — no timestamp, no run URL. The colour comes from the same ladder the badges
 have always used (95% brightgreen, 90% green, 80% yellow, below that red), and the module badge is
-coloured by the *proportion* clearing the bar, so `5/8` is 62.5% and red while `8/8` is bright green.
+coloured by the *proportion* clearing the bar, so `6/8` is 75% and red while `8/8` is bright green.
+
+**The first payload's file name does not describe what it carries, and that is deliberate.** It
+published `Mimic.app coverage` once — the app *bundle* target, which is `App/Sources/MimicApp.swift`,
+34 lines of `@main` entry point that `xccov` counts as 60 executable ones, and it read `46.67%` while
+readers took it for a statement about the application. It carries the **weighted total across all
+nine targets** now: covered lines over executable lines, computed once, not a mean of nine
+percentages that would weight `ControlPlane`'s 413 lines the same as `AppFeatures`' 17,848.
+
+Summing across targets is exact where summing across *runs* is not — the nine are disjoint sets of
+source files in one already-merged report, so no line is in two of them. That is the same distinction
+the merge above rests on, read the other way round.
+
+`app-coverage.json` keeps its name because it is a URL README.md carries and the `badges` branch
+serves: renaming it would leave a merged README pointing at a file the next run has not published
+yet, so both badges would render shields.io's "invalid" placeholder for the length of a CI run. A
+file name nobody reads is the cheaper inaccuracy.
 
 The README links each through `https://img.shields.io/endpoint?url=…`, percent-encoded, at
 `raw.githubusercontent.com/srpadrono/mimic/badges/<file>`. **Nothing in the tracked tree moves when

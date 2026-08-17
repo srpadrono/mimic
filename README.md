@@ -11,7 +11,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
 [![Tests](https://img.shields.io/badge/tests-1145%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![App Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
+[![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
@@ -301,11 +301,18 @@ That merge is why the numbers moved. Until it existed the badges came from a run
 `-skip-testing:MimicUITests`, so all 158 UI tests — the only ones that touch the SwiftUI layer —
 contributed nothing to the published figure for how well this window is tested.
 
-Two things the badges are not. The first reads `Mimic.app coverage`, and `Mimic.app` is the app
-bundle *target*: `App/Sources/MimicApp.swift`, 34 lines, the `@main` entry point. The application
-itself is `AppFeatures`, which the second badge counts among its eight modules. And a run that
-publishes nothing leaves both showing the last figures that did publish — deliberately, since a
-stale number is recoverable and a quietly wrong one is not.
+**The first badge is the weighted total over all nine targets** — covered lines divided by
+executable lines, once, not a mean of nine percentages. Summing across targets is exact where
+summing across *runs* would not be: the nine are disjoint sets of source files in one already-merged
+report, so no line is counted twice.
+
+It used to read `Mimic.app coverage`, and it measured the target of that name — which is
+`App/Sources/MimicApp.swift`, 34 lines of `@main` entry point. It published `46.67%` and readers
+took that for a statement about the application. The application is `AppFeatures`; `Mimic.app` keeps
+its row in the table below.
+
+A run that publishes nothing leaves both badges showing the last figures that did publish —
+deliberately, since a stale number is recoverable and a quietly wrong one is not.
 
 The detailed per-target block below is the other half, and it is deliberately local-only —
 `./Scripts/run_full_test_suite.sh` on a Mac is its only writer, so it is as fresh as the last full
