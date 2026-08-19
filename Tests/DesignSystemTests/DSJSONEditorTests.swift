@@ -161,6 +161,42 @@ struct DSJSONEditorSizingTests {
         #expect(DSJSONEditor.lineCount(of: "{\n  \"a\": 1\n}") == 3)
     }
 
+    /// Every separator `NSString.lineRange(for:)` honours, because that is what `CodeEditorView`
+    /// builds its own line map with — and the well and the gutter have to agree on how many lines
+    /// there are.
+    ///
+    /// **This is the regression test for a bug the LF-only cases above could never catch.** The old
+    /// implementation compared `Character == "\n"`, which looks equivalent to splitting on newlines
+    /// and is not: `"\r\n"` is a *single* grapheme cluster that compares unequal to `"\n"`, so a
+    /// CRLF document counted as **one line no matter how long it was**. A HAR capture or any
+    /// Windows-authored fixture therefore sized its editor well to a single line. Measured before the
+    /// fix: a four-line CRLF document counted 1, and CR, U+2028, U+2029 and U+0085 each counted 1 for
+    /// a two-line document.
+    @Test("Every newline the editor's own line map honours is counted")
+    func lineCountHonoursEveryNewlineSeparator() {
+        // Literals, not derived from the function under test — reverting `isNewline` to the old
+        // `== "\n"` must turn every one of these red.
+        #expect(DSJSONEditor.lineCount(of: "a\r\nb\r\nc\r\nd") == 4)
+        #expect(DSJSONEditor.lineCount(of: "a\rb") == 2)
+        #expect(DSJSONEditor.lineCount(of: "a\u{2028}b") == 2)
+        #expect(DSJSONEditor.lineCount(of: "a\u{2029}b") == 2)
+        #expect(DSJSONEditor.lineCount(of: "a\u{0085}b") == 2)
+
+        // And a CRLF document must be exactly as tall as the LF document that says the same thing.
+        #expect(DSJSONEditor.lineCount(of: "a\r\nb") == DSJSONEditor.lineCount(of: "a\nb"))
+    }
+
+    /// The consequence, stated in the units the view actually uses: a CRLF payload must not collapse
+    /// to a one-line well.
+    @Test("A CRLF payload gets the height its lines deserve")
+    func crlfPayloadIsNotSizedToOneLine() {
+        let crlf = (0..<20).map { "  \"key\($0)\": \($0)" }.joined(separator: "\r\n")
+
+        #expect(DSJSONEditor.lineCount(of: crlf) == 20)
+        #expect(DSJSONEditor.height(forLines: DSJSONEditor.lineCount(of: crlf))
+                > DSJSONEditor.height(forLines: 1))
+    }
+
     @Test("A trailing newline opens a line rather than closing one")
     func trailingNewlineOpensALine() {
         // The caret sits *after* the separator, on a line of its own, and the well has to have room

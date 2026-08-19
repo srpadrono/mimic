@@ -117,8 +117,15 @@ public struct DSJSONEditor: View {
     /// The number of logical lines in `text` — what ``height(forLines:)`` wants.
     ///
     /// An empty document is one line, not zero: an empty editor still shows a caret on a line.
+    ///
+    /// **Split on `isNewline`, not on `"\n"`.** Counting `Character == "\n"` looks equivalent and is
+    /// not: `"\r\n"` is a *single* grapheme cluster that compares unequal to `"\n"`, so a CRLF
+    /// document — a HAR capture, a Windows-authored fixture — counted as one line no matter how long
+    /// it was. `CodeEditorView` disagrees with that reading, because its own line map splits with
+    /// `NSString.lineRange(for:)`, which honours CR, CRLF, U+2028, U+2029 and U+0085. `isNewline`
+    /// matches that set, so the well and the gutter now count the same lines.
     public static func lineCount(of text: String) -> Int {
-        text.isEmpty ? 1 : text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        text.isEmpty ? 1 : text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
     }
 
     // MARK: - Themes — warm, cohesive with Ink & Electric palette

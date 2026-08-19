@@ -61,9 +61,15 @@ private enum EditorRowMetrics {
 /// to type, and above the ceiling a 500-line payload runs off the window instead of scrolling inside
 /// the well that owns it.
 private enum EditorBody {
-    /// Roughly seven lines. Sized to be a comfortable place to start typing, and to absorb a
-    /// minified payload — one logical line that wraps to several, which `lineCount` cannot see.
-    static let minHeight: CGFloat = 100
+    /// Twelve lines. The floor is the only thing standing between a *wrapped* body and a slit:
+    /// `wrapText` is on, so a minified payload is one logical line that fills the pane, and
+    /// `lineCount` counts logical lines and reports 1.
+    ///
+    /// It was briefly 100, which is 6.6 visible lines — less than the 240 the same body used to get,
+    /// so the change meant to give the pane back to its content took it away from the one body that
+    /// needs it most. 180 is what that case had before and is the number to keep until the wrap is
+    /// actually estimated.
+    static let minHeight: CGFloat = 180
 
     /// Unchanged. Past this the payload scrolls within its own well rather than pushing the cards
     /// below it off the pane.
@@ -71,12 +77,22 @@ private enum EditorBody {
 
     /// The well's natural height for this text, before the bounds are applied.
     ///
-    /// `DSJSONEditor` owns the arithmetic because it owns the font. The editor's frame also has to
-    /// cover the validation row it draws underneath itself when the JSON does not parse, which is
-    /// why this adds a line's worth rather than measuring the editor alone.
+    /// `DSJSONEditor` owns the arithmetic because it owns the font.
+    ///
+    /// The frame wraps the editor *and* the validation row it draws underneath itself when the JSON
+    /// does not parse, so that row's height has to be added rather than borrowed. It was borrowed —
+    /// as "one more editor line" — and an editor line is 15pt where the row measures 18: an 11pt
+    /// `Text` laying out at 14, plus `DSSpacing.xs` of top padding. The fixed row takes its height
+    /// first, so the three-point shortfall came off the editor and clipped the descenders on its
+    /// last line.
     static func height(for text: String) -> CGFloat {
-        DSJSONEditor.height(forLines: DSJSONEditor.lineCount(of: text) + 1)
+        DSJSONEditor.height(forLines: DSJSONEditor.lineCount(of: text)) + validationRowHeight
     }
+
+    /// The validation row `DSJSONEditor` draws under itself: an 11pt `Text` at 14pt of layout, plus
+    /// `DSSpacing.xs` above it. Reserved unconditionally — a well that changes height when the JSON
+    /// stops parsing would move every card below it while you are typing.
+    static let validationRowHeight: CGFloat = 14 + DSSpacing.xs
 }
 
 private enum EditorField {
@@ -543,9 +559,18 @@ struct EndpointEditorView: View {
         // `DSJSONEditor.height(forLines:)` measures the face the editor actually draws with. The
         // floor is what absorbs a *minified* payload, which is one logical line that wraps to many
         // and so under-reports — see that method's note.
+        // **`maxHeight` does not clamp here, and the ceiling has to be applied to the ideal.**
+        //
+        // `.frame(minHeight:idealHeight:maxHeight:)` clamps against a *proposal*, and the enclosing
+        // `ScrollView` proposes nil height — so the frame resolves to `idealHeight` verbatim and the
+        // ceiling never fires. That was harmless while the ideal was a fixed 240; the moment it
+        // became content-derived, a 200-line body rendered a 3,000pt well and pushed everything under
+        // it that far off the pane. Pressing Format on a minified body did it in one click.
+        //
+        // `maxHeight` stays as the guard for the case where something *does* propose a height.
         .frame(
             minHeight: EditorBody.minHeight,
-            idealHeight: EditorBody.height(for: responseBody),
+            idealHeight: min(EditorBody.height(for: responseBody), EditorBody.maxHeight),
             maxHeight: EditorBody.maxHeight
         )
         .padding(.horizontal, DSSpacing.md)
