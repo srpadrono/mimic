@@ -191,7 +191,12 @@ struct InspectorPanelView: View {
                             // title, with a hard edge at the strip's boundary.
                             drawsChrome: false
                         )
-                        .fixedSize()
+                        // No `.fixedSize()`. It made the strip claim its full width before the
+                        // subtitle got a say, and the subtitle here is the endpoint's *path* — so a
+                        // 200pt inspector header rendered "/accoun...ummary", which saves four
+                        // characters and reads as a rendering fault. The strip is icon-only and
+                        // already sized by its content; the rigidity was only ever costing the
+                        // string next to it.
 
                         // Only on the tab it acts on — a "+" above a traffic list would have
                         // nothing to add to.
@@ -209,6 +214,9 @@ struct InspectorPanelView: View {
                     EmptyView()
                 }
             }
+            // The subtitle is an endpoint path and the panel is narrow, so it truncates. Hovering is
+            // how the dropped middle is read back.
+            .help(headerSubtitleHelp ?? "")
 
             switch mode {
             case .request:
@@ -244,6 +252,27 @@ struct InspectorPanelView: View {
                 )
             }
         }
+        // **No fill. The inspector column is a system material and the OS owns it.**
+        //
+        // This was measured rather than assumed. Painting `DSColors.secondary` here — nominally
+        // rgb(44,44,46) in dark — reaches the screen as rgb(28,28,28), because `.inspector`
+        // composites a material over whatever the content draws. A probe fill of pure red rendered
+        // as rgb(255,84,84), which is what proves the background is drawn at all and then blended;
+        // the material samples what is behind the *window*, so any value picked to survive that
+        // blend would be a different colour over a different wallpaper.
+        //
+        // So the panel takes no fill, the same way the navigator does not, and for the reason
+        // `docs/redesign/decisions.md` §3 gives: on macOS 26 the sidebar and inspector take the
+        // material on recompile whether or not the app opts in, and fighting the framework to paint
+        // a flat colour under a translucent surface is work with no payoff.
+        //
+        // The frame stays. It is what makes the panel fill its column so its own chrome is laid out
+        // against the full height rather than hugging its content.
+        //
+        // `RequestDetailInspector` used to paint `secondary` on its own root, which is why the
+        // inspector looked slightly different when you had a log row selected than when you had an
+        // endpoint selected. That fill is gone too — every mode now sits on the same material.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $addScenarioTarget) { target in
             NewScenarioSheet { name in
                 onAddScenario(target.id, name)
@@ -276,12 +305,28 @@ struct InspectorPanelView: View {
     ///
     /// `.scenarios` keeps its path: the scenario rows below it name scenarios, not the endpoint, so
     /// the subtitle is the only thing saying which endpoint they belong to.
+    /// The full path, for the header's tooltip. The subtitle truncates in the middle when the panel
+    /// is narrow — both ends of a route carry meaning, so that is the right mode — and hovering is
+    /// how you read the part it dropped.
+    private var headerSubtitleHelp: String? {
+        mode == .scenarios ? endpoint?.path : nil
+    }
+
+    /// **No subtitle in `.scenarios` mode, and the reason is arithmetic.**
+    ///
+    /// This used to be the endpoint's path, and it rendered as "/accoun...ummary" — a middle
+    /// truncation that saved four characters and read as a rendering fault. The header is about
+    /// 200pt at the inspector's floor and has to seat the title, a three-item tab strip and an add
+    /// button; the path was competing for roughly fifty points and losing. Raising the title to
+    /// 12pt semibold, which is what made it legible as a title, took more still.
+    ///
+    /// Widening the panel to fit it is the wrong trade — the path is already on screen three times:
+    /// the selected row in the navigator, the crumb in the jump bar, and the editor's own identity
+    /// row. A fourth copy, truncated past recognition, is noise in the one slot this component
+    /// documents for a count. The title carries a tooltip with the full path for the case where the
+    /// inspector is the only thing you are looking at.
     private var headerSubtitle: String? {
-        switch mode {
-        case .request: nil
-        case .scenarios: endpoint?.path
-        case .overview, .empty: nil
-        }
+        nil
     }
 }
 

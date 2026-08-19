@@ -36,9 +36,33 @@ public nonisolated enum DSColors {
 
     // MARK: - Surface roles (60/30/10 rule)
 
-    /// Main window background, editor canvas
-    static let dominantLightInk = Ink(red: 0.973, green: 0.973, blue: 0.980)
-    static let dominantDarkInk = Ink(red: 0.110, green: 0.110, blue: 0.118)
+    /// Main window background, editor canvas.
+    ///
+    /// **The dark value is set against the OS materials, not against the other tokens.** On macOS 26
+    /// the navigator and the inspector are system materials and the app cannot paint them — measured,
+    /// they render at about `rgb(26,26,26)`. The canvas used to sit at `rgb(28,28,28)`, ΔL\* **1.00**
+    /// away, so the window read as one flat sheet with hairlines ruled across it rather than as three
+    /// panels around a centre pane. Painting the side panels was tried and does not work: an opaque
+    /// fill under `.inspector` reaches the screen blended with the material, and the material samples
+    /// whatever is behind the *window*.
+    ///
+    /// So the canvas is the only surface in the window whose value the app actually controls, and it
+    /// is what has to move. At `0.074` it measures ΔL\* **3.44** from the material — a boundary you
+    /// can see, in the same territory the band steps off its own host, and short of the theatrical
+    /// near-black that would make the editor look like a different app from its own chrome.
+    ///
+    /// **Light has the same defect, measured worse.** It has now been captured — the first time
+    /// anyone did — and the canvas read `rgb(247,247,249)` against materials at `rgb(246,246,246)`:
+    /// **ΔL\* 0.35**, a third of the gap dark had before it was fixed. Three panels and a centre pane,
+    /// all one sheet of near-white.
+    ///
+    /// White, because in light mode the canvas is paper and the chrome around it is not — which is
+    /// what Xcode's editor does, and what macOS resolves its own window backgrounds to. This palette
+    /// previously contained no white at all. Against the same materials it measures **ΔL\* 3.12**,
+    /// the same order as the dark side's 3.44, so the two appearances now separate their panels by
+    /// comparable amounts rather than one of them not separating at all.
+    static let dominantLightInk = Ink(red: 1.0, green: 1.0, blue: 1.0)
+    static let dominantDarkInk = Ink(red: 0.074, green: 0.074, blue: 0.082)
     public static let dominant = Color(light: dominantLightInk.nsColor(),
                                        dark: dominantDarkInk.nsColor())
 
@@ -291,6 +315,39 @@ public nonisolated enum DSColors {
     /// survive that. See ``warningText``.
     public static let warning = Color(light: .init(red: 0.602, green: 0.373, blue: 0.0),
                                       dark: .init(red: 1.0, green: 0.624, blue: 0.039))
+
+    // MARK: - Journeys
+
+    /// A journey's chrome, progress and fills.
+    ///
+    /// Aliases of the accent rather than a hue of their own, and deliberately so. The redesign
+    /// handoff's build order opened with "de-purple the journeys, it is a token swap" — but there is
+    /// no purple. Journeys have always been blue; the only two purples in this file are the PATCH
+    /// badge and ``Syntax/key``, both of which that handoff preserved. The step was a no-op against a
+    /// palette that was never drawn.
+    ///
+    /// Naming them anyway is worth one indirection: it makes "journey" a role that could be re-hued
+    /// later without hunting for accent call sites that happen to be about journeys, which is exactly
+    /// the search that made the handoff think a purple existed.
+    public enum Journey {
+        /// Fills, dots and progress. Never text.
+        public static let accent = DSColors.accent
+
+        /// The journey as a *word* — a name, a step label, "Active".
+        public static let text = DSColors.accentText
+
+        /// The wash behind an active journey's card or chip.
+        ///
+        /// **Appearance-aware, and the asymmetry is load-bearing.** 11% in light, 15% in dark. A
+        /// percentage of a near-black surface moves the composite far less than the same percentage
+        /// of a near-white one, which is the general reason wash tokens in this palette rarely share
+        /// an alpha across appearances.
+        /// Built from ``DSColors/accentInk`` rather than by calling `.opacity()` on ``accent``,
+        /// because `Color(light:dark:)` here resolves `NSColor`s per appearance — which is the whole
+        /// point of the `Ink` components, and the only way an alpha can differ between the two.
+        public static let fill = Color(light: DSColors.accentInk.nsColor(opacity: 0.11),
+                                       dark: DSColors.accentInk.nsColor(opacity: 0.15))
+    }
 
     // MARK: - Semantic colours as words on a tint of themselves
 

@@ -81,6 +81,46 @@ public struct DSJSONEditor: View {
         }
     }
 
+    // MARK: - Metrics
+
+    /// The face both themes are built from.
+    ///
+    /// Named because it was written twice — once per theme — and because ``height(forLines:)`` has to
+    /// measure the same font the editor actually draws with. A size that moves in one theme and not
+    /// the other is a bug nobody sees until they switch appearance.
+    static let editorFontName = "SFMono-Regular"
+    static let editorFontSize: CGFloat = 12
+
+    /// How tall this editor has to be to show `lines` lines without scrolling itself.
+    ///
+    /// **The caller has to count the lines, because nothing here can.** `CodeEditor` is an
+    /// `NSViewRepresentable` over an `NSScrollView` and implements no `sizeThatFits`, so it has no
+    /// opinion about its own height and a `ScrollView` proposes none — which is why the endpoint
+    /// editor used to hand it a fixed `idealHeight` and get a 240pt well for a five-line body. The
+    /// document's line count is not reachable either: the package's `Info.SelectionSummary` reports
+    /// the *selection*, and its `LineMap` is internal.
+    ///
+    /// Measured from the font rather than assumed, so a substitution or a metrics change moves this
+    /// with it. Ascender minus descender plus leading is what the text system lays a line out at.
+    ///
+    /// **Logical lines, not visual ones.** `wrapText` is on, so one very long line — a minified
+    /// payload — wraps to several and this under-reports it. That is what the call site's floor is
+    /// for; it is not worth threading a width through to predict a wrap that the editor's own scroll
+    /// view already handles.
+    public static func height(forLines lines: Int) -> CGFloat {
+        let font = NSFont(name: editorFontName, size: editorFontSize)
+            ?? .monospacedSystemFont(ofSize: editorFontSize, weight: .regular)
+        let lineHeight = font.ascender - font.descender + font.leading
+        return CGFloat(max(1, lines)) * lineHeight.rounded(.up)
+    }
+
+    /// The number of logical lines in `text` — what ``height(forLines:)`` wants.
+    ///
+    /// An empty document is one line, not zero: an empty editor still shows a caret on a line.
+    public static func lineCount(of text: String) -> Int {
+        text.isEmpty ? 1 : text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+    }
+
     // MARK: - Themes — warm, cohesive with Ink & Electric palette
 
     /// The surface each theme fills with, named rather than inlined.
@@ -123,8 +163,8 @@ public struct DSJSONEditor: View {
     /// `LanguageConfiguration`, a dependency's type, and this comment does not answer it.
     private static let darkTheme = Theme(
         colourScheme: .dark,
-        fontName: "SFMono-Regular",
-        fontSize: 12,
+        fontName: editorFontName,
+        fontSize: editorFontSize,
         textColour: NSColor(srgbRed: 0.87, green: 0.87, blue: 0.89, alpha: 1.0),
         commentColour: NSColor(srgbRed: 0.45, green: 0.48, blue: 0.52, alpha: 1.0),
         stringColour: DSColors.Syntax.stringDarkInk.nsColor(),
@@ -196,8 +236,8 @@ public struct DSJSONEditor: View {
     /// value that had already been corrected once somewhere else.
     private static let lightTheme = Theme(
         colourScheme: .light,
-        fontName: "SFMono-Regular",
-        fontSize: 12,
+        fontName: editorFontName,
+        fontSize: editorFontSize,
         textColour: NSColor(srgbRed: 0.13, green: 0.13, blue: 0.15, alpha: 1.0),
         commentColour: NSColor(srgbRed: 0.45, green: 0.50, blue: 0.55, alpha: 1.0),
         stringColour: DSColors.Syntax.stringLightInk.nsColor(),

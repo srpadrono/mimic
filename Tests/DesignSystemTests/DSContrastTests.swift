@@ -272,12 +272,12 @@ struct DSContrastTests {
             let rows: [(Color, Double, Double, Double, Double)] = switch appearance {
             case .light: [
                 (DSColors.secondary, 0.9255, 0.9412, 1.37, 9.94),
-                (DSColors.dominant, 0.9412, 0.9725, 2.76, 10.24),
+                (DSColors.dominant, 0.9569, 1.0000, 3.79, 10.54),
                 (DSColors.surfaceElevated, 0.9373, 0.9608, 2.09, 10.22)
             ]
             case .dark: [
                 (DSColors.secondary, 0.2000, 0.1725, 3.24, 10.64),
-                (DSColors.dominant, 0.1686, 0.1098, 7.26, 11.31),
+                (DSColors.dominant, 0.1490, 0.0745, 9.28, 11.93),
                 (DSColors.surfaceElevated, 0.2118, 0.2000, 1.37, 10.95)
             ]
             }
@@ -300,17 +300,29 @@ struct DSContrastTests {
             }
         }
 
-        // "the band's own step ranges 1.4–7.3" and "that rule measures ΔL* 9.9–11.3 … in both
-        // appearances and on all three hosts". Both close; the second reaches 11.31 against a stated
-        // 11.3, which is the same reading.
+        // The band's own step ranges 1.4–9.3, and its closing rule 9.9–11.9, in both appearances and
+        // on all three hosts.
+        //
+        // **Both ceilings rose when the dark canvas was darkened**, from 7.30 and 11.35, and the
+        // reason is worth keeping: the band is a fraction of `tertiary` laid over its host, so
+        // moving a host *away* from `tertiary` widens the step without anyone touching the band. The
+        // canvas moved because it is the only surface in the window whose value the app controls —
+        // the navigator and the inspector are OS materials — and it had to step off them to read as
+        // a separate panel at all.
+        //
+        // The cost is real and is recorded here rather than smoothed over: the widest band is now
+        // louder than the boundary between two panels, which is the wrong way round. Quieting it is
+        // not a matter of lowering the alpha, because the same alpha is what holds the narrowest
+        // band above its 1.35 floor on `surfaceElevated`; it needs the band to know its host, and
+        // that is its own change.
         let narrowestBand = try #require(bandSteps.min())
         let widestBand = try #require(bandSteps.max())
         let narrowestRule = try #require(ruleSteps.min())
         let widestRule = try #require(ruleSteps.max())
         #expect(narrowestBand >= 1.35)
-        #expect(widestBand <= 7.30)
+        #expect(widestBand <= 9.30)
         #expect(narrowestRule >= 9.90)
-        #expect(widestRule <= 11.35)
+        #expect(widestRule <= 11.95)
         #expect(widestBand < narrowestRule)
 
         // "the faintest band in the window is a dark-mode one, on a sheet, at ΔL* 1.4 — exactly the
@@ -544,7 +556,8 @@ struct DSContrastTests {
         let textOnCanvas = try contrast(DSColors.accentText, on: darkestSurface, in: .dark)
         let textOnHover = try contrast(DSColors.accentText, on: hoverWell, in: .dark)
         #expect(isClose(textOnPanel, 5.57, within: ratioTolerance))
-        #expect(isClose(textOnCanvas, 6.80, within: ratioTolerance))
+        // 6.80 before the canvas was darkened. A darker bed is more contrast, not less.
+        #expect(isClose(textOnCanvas, 7.42, within: ratioTolerance))
         #expect(isClose(textOnHover, 4.86, within: ratioTolerance))
         for reading in [textOnPanel, textOnCanvas, textOnHover] {
             #expect(reading >= 4.5)
@@ -631,9 +644,12 @@ struct DSContrastTests {
         let amberOnCanvas = try contrast(DSColors.warning, on: DSColors.dominant, in: .light)
         let greenOnCanvas = try contrast(DSColors.success, on: DSColors.dominant, in: .light)
         let redOnCanvas = try contrast(DSColors.destructive, on: DSColors.dominant, in: .light)
-        #expect(isClose(amberOnCanvas, 4.94, within: ratioTolerance))
-        #expect(isClose(greenOnCanvas, 4.96, within: ratioTolerance))
-        #expect(isClose(redOnCanvas, 5.31, within: ratioTolerance))
+        // 4.94 / 4.96 / 5.31 before the canvas went white. All three rose, because a lighter bed
+        // is more contrast for a dark hue — the canvas is the easiest surface in the window now
+        // rather than the second-easiest.
+        #expect(isClose(amberOnCanvas, 5.24, within: ratioTolerance))
+        #expect(isClose(greenOnCanvas, 5.26, within: ratioTolerance))
+        #expect(isClose(redOnCanvas, 5.64, within: ratioTolerance))
 
         // `success`'s unnamed "4.8:1" and `destructive`'s unnamed "5.6:1" — the sheet token, and white.
         let white = try resolve(Color.white, in: .light)
@@ -1273,7 +1289,7 @@ struct DSContrastTests {
         let canvas = try resolve(DSColors.dominant, in: .light)
         let previousShade: [(name: String, alpha: Double, reading: Double)] = [
             ("hovered", 0.88, 3.88),
-            ("pressed", 0.72, 3.06)
+            ("pressed", 0.72, 2.99)
         ]
         for entry in previousShade {
             let thinned = try resolve(DSColors.accentFill.opacity(entry.alpha), in: .light)
@@ -1433,6 +1449,7 @@ struct DSContrastTests {
         ]
 
         var worstInk = Double.greatestFiniteMagnitude
+        var syntaxTokensClearingAA = 0
         var bestSyntax = 0.0
         for appearance in Appearance.allCases {
             for host in hosts {
@@ -1445,10 +1462,7 @@ struct DSContrastTests {
 
                 for token in syntaxValueTokens {
                     let reading = try contrast(token.colour, on: hit, in: appearance)
-                    #expect(
-                        reading < 4.5,
-                        "\(token.name) on a hit over the \(host.name), \(appearance): \(reading)"
-                    )
+                    if reading >= 4.5 { syntaxTokensClearingAA += 1 }
                     bestSyntax = max(bestSyntax, reading)
                 }
             }
@@ -1456,8 +1470,23 @@ struct DSContrastTests {
 
         // `labelPrimary` on a hit over a panel, in dark.
         #expect(isClose(worstInk, 5.52, within: ratioTolerance))
-        // The best any syntax hue manages on that bed — light `key` over the canvas — still misses.
-        #expect(isClose(bestSyntax, 4.43, within: ratioTolerance))
+
+        // **The claim this case makes, restated once it stopped being absolute.**
+        //
+        // It used to assert every syntax hue misses AA on a hit — sixteen pairings, none clearing.
+        // Making the light canvas white lifted one of them past the line: light `key` over the
+        // canvas now reads 4.59 where it read 4.43, because the bed under the hit got lighter.
+        //
+        // The decision that `searchHitText` takes its own ink is unaffected, and asserting the count
+        // rather than a per-token ceiling is what says why. A highlight cannot choose its ink per
+        // token — it does not know which hue it landed on — so it has to be readable against the
+        // worst of them, and fifteen of sixteen still miss. One hue clearing AA by nine hundredths
+        // is not a palette you can rely on; it is the same palette with one lucky pairing.
+        //
+        // If this count ever rises, the question worth asking is whether the hit is still doing its
+        // job as a *highlight*, not whether the ink can be dropped.
+        #expect(syntaxTokensClearingAA <= 1)
+        #expect(isClose(bestSyntax, 4.59, within: ratioTolerance))
 
         // The four readings quoted in `searchHitText`'s own comment, on the harder host.
         let onAPanel: [(Appearance, [Double])] = [

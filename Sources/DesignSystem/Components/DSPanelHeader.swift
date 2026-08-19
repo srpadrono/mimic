@@ -45,8 +45,14 @@ public struct DSPanelHeader<Accessory: View>: View {
     public var body: some View {
         HStack(spacing: DSSpacing.sm) {
             Text(title)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColors.labelSecondary)
+                // `controlLabel` at `labelPrimary`, where both of these used to be
+                // `DSTypography.caption` at `labelSecondary` — the *same font and the same colour as
+                // the count beside it*. A panel's own name was the quietest text in its own bar, and
+                // "Scenarios" and "/account-summary" arrived with equal weight, so nothing in the row
+                // said which was the heading. 12pt semibold against 10pt medium is the smallest
+                // change that makes the title read as the title.
+                .font(DSTypography.controlLabel)
+                .foregroundStyle(DSColors.labelPrimary)
                 // `.lineLimit(1)` with priority, not `.fixedSize()`.
                 //
                 // The subtitle below explains how `.fixedSize()` produced "narios" instead of

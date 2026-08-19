@@ -5,12 +5,34 @@ import DesignSystem
 
 // MARK: - Column & Sort Constants
 
-private enum LogColumns {
+/// The log's column widths.
+///
+/// One flexible column and five fixed ones, which is the structure rather than an accident: the
+/// header cells and the row cells read these same numbers, so a width that lived in only one of them
+/// would put the two out of step — a defect this file has met before.
+///
+/// The fixed five were sized before the columns held what they hold now. `endpoint` and `scenario`
+/// are names a user chose and are routinely longer than the em dash the empty case draws, while
+/// `path` — the only flexible member — took the entire remainder of a wide pane to hold a short
+/// route. Widening the cramped columns spends some of that surplus without changing the structure.
+/// `path` still takes what is left, and still truncates first, which is right: it is the column a
+/// reader scans rather than reads to the end.
+enum LogColumns {
     static let method: CGFloat = 62
-    static let endpoint: CGFloat = 110
-    static let scenario: CGFloat = 90
+
+    /// Up from 110. Holds an endpoint's name, which is prose rather than a token.
+    static let endpoint: CGFloat = 130
+
+    /// Up from 90, for the same reason.
+    static let scenario: CGFloat = 100
+
     static let status: CGFloat = 52
-    static let time: CGFloat = 58
+
+    /// Up from 58, which fitted "9:41 AM" and does not fit "9:41:33 AM". Sized for a 12-hour locale,
+    /// the wider of the two, at `Figure.small`: "11:41:33 PM" is eleven characters and SF Mono
+    /// advances 0.6em, so 11pt needs 72.6 — and 72 was picked by eye before the test measured it.
+    static let time: CGFloat = 74
+
     // path is flexible — takes remaining space
 }
 
@@ -89,26 +111,19 @@ enum RequestLogQuery {
         sortField: SortField,
         sortAscending: Bool
     ) -> [RequestLog] {
-        var filteredLogs = logs
-
-        // "Show me only the calls I have not mocked" — the fastest way to find a missing
-        // configuration, and the reason this filter is a toggle rather than a search term.
-        if unmatchedOnly {
-            filteredLogs = filteredLogs.filter(\.outcome.isMissingConfiguration)
-        }
-
-        if let methodFilter {
-            filteredLogs = filteredLogs.filter { $0.method == methodFilter }
-        }
-
-        if !filterText.isEmpty {
-            let query = filterText.lowercased()
-            filteredLogs = filteredLogs.filter { log in
-                log.path.lowercased().contains(query)
-                    || "\(log.responseStatusCode ?? 0)".contains(query)
-                    || log.outcome.label.lowercased().contains(query)
-            }
-        }
+        // Every predicate here is `RequestLogFilter` in Domain, which `HostReport.requestLog` also
+        // calls. The rules used to be written twice — here for the drawer's rows, and again for the
+        // `logList` command — so `mimic log list --unmatched` and the drawer's own toggle were two
+        // separate answers to one question, agreeing only because nobody had changed either.
+        //
+        // Sorting stays here. It is not a rule about which requests matter, it is a rule about how a
+        // *table* orders itself, and it needs `endpoints` to resolve the "Answered by" column — which
+        // is view state, not a property of the log.
+        var filteredLogs = RequestLogFilter(
+            unmatchedOnly: unmatchedOnly,
+            method: methodFilter,
+            text: filterText
+        ).apply(to: logs)
 
         // Descending is the ascending predicate with its **operands** swapped, never its answer
         // negated. This used to end on `sortAscending ? result : !result`, and `!(a < b)` is `a >= b`:
@@ -387,6 +402,15 @@ struct RequestLogDrawerView: View {
                 tableBody
             }
         }
+        // The drawer paints its own surface. It used to paint none, so the panel showed whatever the
+        // window happened to be behind it — and its own zebra made that visible, because every even
+        // row resolves to `.clear` and was letting the background through rather than sitting on a
+        // surface of its own.
+        //
+        // `dominant`, the same canvas as the editor above it: the two share the centre column and
+        // are separated by `DSSplitPane`'s own divider band, not by a change of colour.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DSColors.dominant)
         .onChange(of: filterText) { _, _ in updateLogs(debounce: true) }
         .onChange(of: methodFilter) { _, _ in updateLogs() }
         .onChange(of: unmatchedOnly) { _, _ in updateLogs() }
@@ -1197,8 +1221,19 @@ struct RequestLogTableRow: View {
                 .frame(width: LogColumns.status, alignment: .leading)
 
             // Time
-            Text(log.timestamp, style: .time)
-                .font(DSTypography.caption)
+            // Seconds, and monospaced digits.
+            //
+            // `style: .time` is hours and minutes, so a burst of requests — which is what a mock
+            // server produces — gave every row the identical "12:38". The one job this column has is
+            // letting you match a row against the tap you just made, and without seconds it could
+            // not do it. `.dateTime` rather than a `DateFormatter` so the 12/24-hour choice stays the
+            // reader's locale rather than this file's opinion.
+            //
+            // `Figure.small` is `codeSmall.monospacedDigit()`, which exists for exactly this: at a
+            // proportional face the colons and the 1s wandered, so a column of times did not line up
+            // as a column.
+            Text(log.timestamp, format: .dateTime.hour().minute().second())
+                .font(DSTypography.Figure.small)
                 .foregroundStyle(DSColors.labelTertiary)
                 .frame(width: LogColumns.time, alignment: .leading)
         }

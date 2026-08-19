@@ -159,7 +159,7 @@ struct SidebarView: View {
                 ForEach(groupedSections, id: \.name) { section in
                     Section(isExpanded: sectionBinding(for: section.name)) {
                         ForEach(section.endpoints) { endpoint in
-                            EndpointSidebarRow(endpoint: endpoint)
+                            EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
                                 .tag(endpoint.id)
                                 .badge("")
                                 .contextMenu { endpointContextMenu(endpoint) }
@@ -196,7 +196,7 @@ struct SidebarView: View {
                 if !ungroupedEndpoints.isEmpty {
                     if groupedSections.isEmpty {
                         ForEach(ungroupedEndpoints) { endpoint in
-                            EndpointSidebarRow(endpoint: endpoint)
+                            EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
                                 .tag(endpoint.id)
                                 .badge("")
                                 .contextMenu { endpointContextMenu(endpoint) }
@@ -208,7 +208,7 @@ struct SidebarView: View {
                         // test this is the same kind of thing: the heading over a run of rows.
                         Section {
                             ForEach(ungroupedEndpoints) { endpoint in
-                                EndpointSidebarRow(endpoint: endpoint)
+                                EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
                                     .tag(endpoint.id)
                                     .badge("")
                                     .contextMenu { endpointContextMenu(endpoint) }
@@ -375,6 +375,27 @@ enum SidebarQuery {
 struct EndpointSidebarRow: View {
     let endpoint: Endpoint
 
+    /// Whether this row is the selected one.
+    ///
+    /// **A `List` row is not told.** Selection lives in `List(selection:)` and AppKit draws the fill,
+    /// but the content inside never learns about it — so this row's path stayed `labelPrimary` and
+    /// its trailing name stayed `labelSecondary` *over* the selection fill, and a selected row read
+    /// as unselected content with colour painted underneath it. A Mac list feels solid because the
+    /// whole row's foreground flips; flipping it is what this flag is for.
+    var isSelected: Bool = false
+
+    /// The path's colour. `.primary` when selected, so SwiftUI resolves it against whatever the
+    /// selection fill actually is — including the *unfocused* grey one, which a hard-coded white
+    /// would get wrong the moment focus moved to the editor.
+    private var pathColour: Color { isSelected ? .primary : DSColors.labelPrimary }
+
+    /// The trailing name, one step quieter, by the same mechanism.
+    private var subtitleColour: Color { isSelected ? .secondary : DSColors.labelSecondary }
+
+    /// The method badge keeps its own hue when selected, deliberately. Xcode does the same with the
+    /// file icons in its navigator: the badge is a token you recognise by colour, not prose whose
+    /// legibility depends on the bed under it.
+
     /// The endpoint's name, when it adds something the path above it has not already said.
     ///
     /// Names created from a logged request read "POST /api/orders", and the sidebar's own creation
@@ -409,7 +430,7 @@ struct EndpointSidebarRow: View {
             // only by their method badge.
             Text(endpoint.path)
                 .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelPrimary)
+                .foregroundStyle(pathColour)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 // The path outranks the name, stated on the path rather than as a negative priority
@@ -428,7 +449,7 @@ struct EndpointSidebarRow: View {
 
                 Text(name)
                     .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .foregroundStyle(subtitleColour)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     // Yields before the path does — but *not* via `.layoutPriority(-1)`, which was
