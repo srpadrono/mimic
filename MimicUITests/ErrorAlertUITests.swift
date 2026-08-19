@@ -170,25 +170,55 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// ones that trim to nothing, so `" "` produces the same empty dictionary the scenario already
     /// holds, `headersAreDirty` answers `false`, and no command is ever issued.
     ///
-    /// **A colon, one keystroke, is the trigger this uses**, and the choice is about determinism
-    /// rather than about taste. `":"` is not a `tchar` (RFC 9110 §5.6.2), so the *first* character
+    /// **A comma, one keystroke, is the trigger this uses**, and the choice is about determinism
+    /// rather than about taste. `","` is not a `tchar` (RFC 9110 §5.6.2), so the *first* character
     /// typed is already refused — with a name like `"X Bad"` the debounce commits the honest prefix
     /// `"X"` first, which is a perfectly valid header, and the refusal then arrives on some later
     /// keystroke with the remaining ones landing on an alert that is already up. One character means
     /// one settle, one command, one alert, and nothing typed into it afterwards. It is also the
-    /// vector `EndpointValidator.validateHeader` names: a colon in a name ends the name, and
-    /// everything after it is read by the client as a further header.
+    /// vector `EndpointValidator.validateHeader` names: a separator character in a name ends the
+    /// name, and everything after it is read by the client as a further header.
+    ///
+    /// **It used to type `":"`, and that made the test depend on the host's keyboard layout.** On a
+    /// British layout `:` is Shift-`;`, and `typeText(":")` is silently dropped — the field kept
+    /// whatever it already held and no command was ever issued, so the assertion that fired was the
+    /// one about the missing alert and it pointed squarely at the app's header validation. The
+    /// validation was never at fault; nothing had been typed for it to refuse. Proven by typing a
+    /// plain `"a"` first: the `a` landed and the `:` after it did not. `,` is unshifted on both US
+    /// and British layouts and is equally absent from the token grammar, so the test now asserts the
+    /// same rule without asserting anything about the machine it runs on.
     @MainActor
     func testRefusedHeaderNameRaisesTheCommandErrorAlert() throws {
         launchApp()
         createProjectViaUI(name: "Header Refusal")
         createEndpointViaUI(name: "Users", path: "/api/users")
 
+        // Hide the drawer and scroll each target into view before clicking it — the idiom every
+        // other editor test here uses. Not what was breaking this one, but this test was the only
+        // editor interaction in the suite that skipped it.
+        hideRequestLogDrawer()
+
+        XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5), "The editor should offer 'Add header'")
+        XCTAssertTrue(revealInEditor(addHeaderButton), "'Add header' should be reachable in the editor")
         addHeaderButton.click()
+
         let key = endpointEditor.headerKeyField(at: 0)
         XCTAssertTrue(key.waitForExistence(timeout: 5), "Adding a header should give the row a name field")
+        XCTAssertTrue(revealInEditor(key), "The header name field should be reachable in the editor")
         key.click()
-        key.typeText(":")
+        key.typeText(",")
+
+        // Prove the keystroke landed *before* waiting on anything downstream of it.
+        //
+        // Without this the test cannot tell "the app failed to refuse a bad header" from "the
+        // character never reached the field", and those have opposite fixes — the second one is what
+        // was actually happening, and it read as the first for as long as this check sat at the end
+        // of the test instead of here.
+        XCTAssertEqual(
+            (key.value as? String) ?? "",
+            ",",
+            "The comma should have landed in the header name field"
+        )
 
         // The 300ms settle, then `applyScenarioSpec` → `validateHeaders` → `lastCommandError`.
         XCTAssertTrue(
@@ -219,7 +249,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         // field here — which is exactly the silent-revert this alert was added to end.
         XCTAssertEqual(
             (key.value as? String) ?? "",
-            ":",
+            ",",
             "The editor should still show the text the executor refused"
         )
     }
