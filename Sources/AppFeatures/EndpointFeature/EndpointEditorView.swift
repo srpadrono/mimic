@@ -385,8 +385,9 @@ struct EndpointEditorView: View {
                     .frame(height: EditorField.height)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+            // `.dsPlain` rather than `.plain` plus a hover modifier: same hover, and a pressed
+            // state the pair could not provide, because a modifier cannot see the press.
+            .buttonStyle(.dsPlain)
             .help("Add a response header")
             .accessibilityIdentifier("endpointEditor.addHeaderButton")
             .accessibilityLabel("Add header")
@@ -474,12 +475,10 @@ struct EndpointEditorView: View {
                     .frame(width: EditorField.height, height: EditorField.height)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            // The same hover well the two section-header actions above it wear. This button sat
-            // between them with none: a `.plain` button gives no pressed state and no pointer
-            // response, so the one control in the row that destroys something was also the only one
-            // that never acknowledged being pointed at.
-            .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+            // The same well the two section-header actions above it wear, and now the same pressed
+            // state. This button sat between them with neither: the one control in the row that
+            // destroys something was also the only one that never acknowledged being pointed at.
+            .buttonStyle(.dsPlain)
             .help("Remove this header")
             .accessibilityIdentifier("endpointEditor.removeHeader.\(index)")
             .accessibilityLabel("Remove header")
@@ -522,8 +521,9 @@ struct EndpointEditorView: View {
                     .frame(height: EditorField.height)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+            // `.dsPlain` rather than `.plain` plus a hover modifier: same hover, and a pressed
+            // state the pair could not provide, because a modifier cannot see the press.
+            .buttonStyle(.dsPlain)
             .disabled(!canFormatBody)
             .help("Pretty-print the JSON body")
             .accessibilityIdentifier("endpointEditor.prettyPrintButton")

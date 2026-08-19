@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-1184%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1188%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
@@ -261,13 +261,13 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-1184 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
+1188 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
 and is still one declaration. Swift Testing for units, XCTest with page objects for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
 | Domain, persistence, engine, control plane, import, CLI | 662 | Linux or macOS — `swift test` |
-| Design system | 65 | macOS — needs SwiftUI |
+| Design system | 69 | macOS — needs SwiftUI |
 | App and coordination | 299 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 158 | macOS, interactive session |
 

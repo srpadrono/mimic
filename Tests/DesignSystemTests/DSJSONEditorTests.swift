@@ -311,3 +311,44 @@ struct DSColorsTests {
 //
 // Nothing is left to move, which is why this file now ends at `DSColorsTests` and two notes about
 // what used to follow it.
+
+@Suite("DSPlainButtonStyle states")
+struct DSPlainButtonStyleTests {
+
+    @Test("The three states are three different washes")
+    func statesAreDistinct() {
+        // The defect this style exists for: twenty `.plain` call sites drew hover and nothing on
+        // press, so a click left no evidence it had landed. Rest, hover and pressed have to be three
+        // values a user can tell apart — which is a property of the style, not of any one alpha.
+        let rest = DSPlainButtonStyle.wash(isPressed: false, isHovered: false)
+        let hover = DSPlainButtonStyle.wash(isPressed: false, isHovered: true)
+        let pressed = DSPlainButtonStyle.wash(isPressed: true, isHovered: false)
+
+        #expect(rest != hover)
+        #expect(hover != pressed)
+        #expect(rest != pressed)
+    }
+
+    @Test("Pressing wins over hovering")
+    func pressedWinsOverHovered() {
+        // The pointer is by definition on the control while it is being pressed, so both flags are
+        // true at once and the style has to answer with the pressed wash. Reading them in the other
+        // order would make a press look exactly like a hover.
+        #expect(DSPlainButtonStyle.wash(isPressed: true, isHovered: true)
+                == DSPlainButtonStyle.wash(isPressed: true, isHovered: false))
+    }
+
+    @Test("Rest is clear, so a row and a button agree about not-hovered")
+    func restIsClear() {
+        // `DSHoverHighlight` rests at `.clear` and these sit next to each other in every panel. A
+        // zero-alpha tint would read the same but compare differently, and the point of pinning it
+        // is that the two components cannot drift apart.
+        #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: false) == Color.clear)
+    }
+
+    @Test("Both states reuse existing accent rungs rather than minting new ones")
+    func statesReuseAccentRungs() {
+        #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: true) == DSColors.accentSubtle)
+        #expect(DSPlainButtonStyle.wash(isPressed: true, isHovered: false) == DSColors.accentMuted)
+    }
+}
