@@ -277,7 +277,7 @@ struct DSContrastTests {
             ]
             case .dark: [
                 (DSColors.secondary, 0.2000, 0.1725, 3.24, 10.64),
-                (DSColors.dominant, 0.1686, 0.1098, 7.26, 11.31),
+                (DSColors.dominant, 0.1490, 0.0745, 9.28, 11.93),
                 (DSColors.surfaceElevated, 0.2118, 0.2000, 1.37, 10.95)
             ]
             }
@@ -300,17 +300,29 @@ struct DSContrastTests {
             }
         }
 
-        // "the band's own step ranges 1.4–7.3" and "that rule measures ΔL* 9.9–11.3 … in both
-        // appearances and on all three hosts". Both close; the second reaches 11.31 against a stated
-        // 11.3, which is the same reading.
+        // The band's own step ranges 1.4–9.3, and its closing rule 9.9–11.9, in both appearances and
+        // on all three hosts.
+        //
+        // **Both ceilings rose when the dark canvas was darkened**, from 7.30 and 11.35, and the
+        // reason is worth keeping: the band is a fraction of `tertiary` laid over its host, so
+        // moving a host *away* from `tertiary` widens the step without anyone touching the band. The
+        // canvas moved because it is the only surface in the window whose value the app controls —
+        // the navigator and the inspector are OS materials — and it had to step off them to read as
+        // a separate panel at all.
+        //
+        // The cost is real and is recorded here rather than smoothed over: the widest band is now
+        // louder than the boundary between two panels, which is the wrong way round. Quieting it is
+        // not a matter of lowering the alpha, because the same alpha is what holds the narrowest
+        // band above its 1.35 floor on `surfaceElevated`; it needs the band to know its host, and
+        // that is its own change.
         let narrowestBand = try #require(bandSteps.min())
         let widestBand = try #require(bandSteps.max())
         let narrowestRule = try #require(ruleSteps.min())
         let widestRule = try #require(ruleSteps.max())
         #expect(narrowestBand >= 1.35)
-        #expect(widestBand <= 7.30)
+        #expect(widestBand <= 9.30)
         #expect(narrowestRule >= 9.90)
-        #expect(widestRule <= 11.35)
+        #expect(widestRule <= 11.95)
         #expect(widestBand < narrowestRule)
 
         // "the faintest band in the window is a dark-mode one, on a sheet, at ΔL* 1.4 — exactly the
@@ -544,7 +556,8 @@ struct DSContrastTests {
         let textOnCanvas = try contrast(DSColors.accentText, on: darkestSurface, in: .dark)
         let textOnHover = try contrast(DSColors.accentText, on: hoverWell, in: .dark)
         #expect(isClose(textOnPanel, 5.57, within: ratioTolerance))
-        #expect(isClose(textOnCanvas, 6.80, within: ratioTolerance))
+        // 6.80 before the canvas was darkened. A darker bed is more contrast, not less.
+        #expect(isClose(textOnCanvas, 7.42, within: ratioTolerance))
         #expect(isClose(textOnHover, 4.86, within: ratioTolerance))
         for reading in [textOnPanel, textOnCanvas, textOnHover] {
             #expect(reading >= 4.5)

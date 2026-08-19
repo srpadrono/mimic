@@ -36,9 +36,26 @@ public nonisolated enum DSColors {
 
     // MARK: - Surface roles (60/30/10 rule)
 
-    /// Main window background, editor canvas
+    /// Main window background, editor canvas.
+    ///
+    /// **The dark value is set against the OS materials, not against the other tokens.** On macOS 26
+    /// the navigator and the inspector are system materials and the app cannot paint them — measured,
+    /// they render at about `rgb(26,26,26)`. The canvas used to sit at `rgb(28,28,28)`, ΔL\* **1.00**
+    /// away, so the window read as one flat sheet with hairlines ruled across it rather than as three
+    /// panels around a centre pane. Painting the side panels was tried and does not work: an opaque
+    /// fill under `.inspector` reaches the screen blended with the material, and the material samples
+    /// whatever is behind the *window*.
+    ///
+    /// So the canvas is the only surface in the window whose value the app actually controls, and it
+    /// is what has to move. At `0.074` it measures ΔL\* **3.44** from the material — a boundary you
+    /// can see, in the same territory the band steps off its own host, and short of the theatrical
+    /// near-black that would make the editor look like a different app from its own chrome.
+    ///
+    /// Light is deliberately unchanged. There the canvas is already the lightest surface in the
+    /// window and the relationship this fixes does not exist — and light mode has never been captured,
+    /// so moving it would be guessing at a problem nobody has looked at.
     static let dominantLightInk = Ink(red: 0.973, green: 0.973, blue: 0.980)
-    static let dominantDarkInk = Ink(red: 0.110, green: 0.110, blue: 0.118)
+    static let dominantDarkInk = Ink(red: 0.074, green: 0.074, blue: 0.082)
     public static let dominant = Color(light: dominantLightInk.nsColor(),
                                        dark: dominantDarkInk.nsColor())
 
