@@ -122,10 +122,10 @@ public struct DSScenarioControl: View {
             }
 
             Image(systemName: "chevron.up.chevron.down")
-                // 8pt, the floor. The handoff asks for 6.5 here; below 8 this stops being an
-                // affordance and becomes a smudge, which is the rule the filter field's scope
-                // indicator already holds.
-                .font(.system(size: 8, weight: .semibold))
+                // `indicator`, which sits on `DSGlyph.minimum` — the floor. The redesign handoff
+                // asks for 6.5 here; below 8 this stops being an affordance and becomes a smudge,
+                // which is the rule the filter field's scope indicator already holds.
+                .font(.system(size: DSGlyph.indicator, weight: .semibold))
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityHidden(true)
         }
