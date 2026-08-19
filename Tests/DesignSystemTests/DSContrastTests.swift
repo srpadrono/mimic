@@ -272,7 +272,7 @@ struct DSContrastTests {
             let rows: [(Color, Double, Double, Double, Double)] = switch appearance {
             case .light: [
                 (DSColors.secondary, 0.9255, 0.9412, 1.37, 9.94),
-                (DSColors.dominant, 0.9412, 0.9725, 2.76, 10.24),
+                (DSColors.dominant, 0.9569, 1.0000, 3.79, 10.54),
                 (DSColors.surfaceElevated, 0.9373, 0.9608, 2.09, 10.22)
             ]
             case .dark: [
@@ -644,9 +644,12 @@ struct DSContrastTests {
         let amberOnCanvas = try contrast(DSColors.warning, on: DSColors.dominant, in: .light)
         let greenOnCanvas = try contrast(DSColors.success, on: DSColors.dominant, in: .light)
         let redOnCanvas = try contrast(DSColors.destructive, on: DSColors.dominant, in: .light)
-        #expect(isClose(amberOnCanvas, 4.94, within: ratioTolerance))
-        #expect(isClose(greenOnCanvas, 4.96, within: ratioTolerance))
-        #expect(isClose(redOnCanvas, 5.31, within: ratioTolerance))
+        // 4.94 / 4.96 / 5.31 before the canvas went white. All three rose, because a lighter bed
+        // is more contrast for a dark hue — the canvas is the easiest surface in the window now
+        // rather than the second-easiest.
+        #expect(isClose(amberOnCanvas, 5.24, within: ratioTolerance))
+        #expect(isClose(greenOnCanvas, 5.26, within: ratioTolerance))
+        #expect(isClose(redOnCanvas, 5.64, within: ratioTolerance))
 
         // `success`'s unnamed "4.8:1" and `destructive`'s unnamed "5.6:1" — the sheet token, and white.
         let white = try resolve(Color.white, in: .light)
@@ -1286,7 +1289,7 @@ struct DSContrastTests {
         let canvas = try resolve(DSColors.dominant, in: .light)
         let previousShade: [(name: String, alpha: Double, reading: Double)] = [
             ("hovered", 0.88, 3.88),
-            ("pressed", 0.72, 3.06)
+            ("pressed", 0.72, 2.99)
         ]
         for entry in previousShade {
             let thinned = try resolve(DSColors.accentFill.opacity(entry.alpha), in: .light)
@@ -1446,6 +1449,7 @@ struct DSContrastTests {
         ]
 
         var worstInk = Double.greatestFiniteMagnitude
+        var syntaxTokensClearingAA = 0
         var bestSyntax = 0.0
         for appearance in Appearance.allCases {
             for host in hosts {
@@ -1458,10 +1462,7 @@ struct DSContrastTests {
 
                 for token in syntaxValueTokens {
                     let reading = try contrast(token.colour, on: hit, in: appearance)
-                    #expect(
-                        reading < 4.5,
-                        "\(token.name) on a hit over the \(host.name), \(appearance): \(reading)"
-                    )
+                    if reading >= 4.5 { syntaxTokensClearingAA += 1 }
                     bestSyntax = max(bestSyntax, reading)
                 }
             }
@@ -1469,8 +1470,23 @@ struct DSContrastTests {
 
         // `labelPrimary` on a hit over a panel, in dark.
         #expect(isClose(worstInk, 5.52, within: ratioTolerance))
-        // The best any syntax hue manages on that bed — light `key` over the canvas — still misses.
-        #expect(isClose(bestSyntax, 4.43, within: ratioTolerance))
+
+        // **The claim this case makes, restated once it stopped being absolute.**
+        //
+        // It used to assert every syntax hue misses AA on a hit — sixteen pairings, none clearing.
+        // Making the light canvas white lifted one of them past the line: light `key` over the
+        // canvas now reads 4.59 where it read 4.43, because the bed under the hit got lighter.
+        //
+        // The decision that `searchHitText` takes its own ink is unaffected, and asserting the count
+        // rather than a per-token ceiling is what says why. A highlight cannot choose its ink per
+        // token — it does not know which hue it landed on — so it has to be readable against the
+        // worst of them, and fifteen of sixteen still miss. One hue clearing AA by nine hundredths
+        // is not a palette you can rely on; it is the same palette with one lucky pairing.
+        //
+        // If this count ever rises, the question worth asking is whether the hit is still doing its
+        // job as a *highlight*, not whether the ink can be dropped.
+        #expect(syntaxTokensClearingAA <= 1)
+        #expect(isClose(bestSyntax, 4.59, within: ratioTolerance))
 
         // The four readings quoted in `searchHitText`'s own comment, on the harder host.
         let onAPanel: [(Appearance, [Double])] = [

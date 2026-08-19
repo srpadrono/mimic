@@ -51,10 +51,17 @@ public nonisolated enum DSColors {
     /// can see, in the same territory the band steps off its own host, and short of the theatrical
     /// near-black that would make the editor look like a different app from its own chrome.
     ///
-    /// Light is deliberately unchanged. There the canvas is already the lightest surface in the
-    /// window and the relationship this fixes does not exist — and light mode has never been captured,
-    /// so moving it would be guessing at a problem nobody has looked at.
-    static let dominantLightInk = Ink(red: 0.973, green: 0.973, blue: 0.980)
+    /// **Light has the same defect, measured worse.** It has now been captured — the first time
+    /// anyone did — and the canvas read `rgb(247,247,249)` against materials at `rgb(246,246,246)`:
+    /// **ΔL\* 0.35**, a third of the gap dark had before it was fixed. Three panels and a centre pane,
+    /// all one sheet of near-white.
+    ///
+    /// White, because in light mode the canvas is paper and the chrome around it is not — which is
+    /// what Xcode's editor does, and what macOS resolves its own window backgrounds to. This palette
+    /// previously contained no white at all. Against the same materials it measures **ΔL\* 3.12**,
+    /// the same order as the dark side's 3.44, so the two appearances now separate their panels by
+    /// comparable amounts rather than one of them not separating at all.
+    static let dominantLightInk = Ink(red: 1.0, green: 1.0, blue: 1.0)
     static let dominantDarkInk = Ink(red: 0.074, green: 0.074, blue: 0.082)
     public static let dominant = Color(light: dominantLightInk.nsColor(),
                                        dark: dominantDarkInk.nsColor())
