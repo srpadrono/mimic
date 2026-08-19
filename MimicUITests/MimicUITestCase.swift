@@ -203,7 +203,11 @@ class MimicUITestCase: XCTestCase {
     /// Driving traffic from the test process rather than seeding the log through a launch hook keeps
     /// the test honest: it exercises the same path a client would, so what lands in the inspector is
     /// what the engine actually recorded.
-    func sendRequest(port: Int, path: String, method: String = "GET", body: String? = nil) async {
+    // `@nonobjc` works around a swift-frontend crash on Xcode 26.0 (17A324): emitting the
+    // native-to-foreign thunk for this `async` method on an `XCTestCase` subclass segfaults the
+    // compiler in SILGen. Nothing calls it from Objective-C — XCTest only needs runtime visibility
+    // for `test*` methods, and this is a helper — so hiding it from the ObjC runtime costs nothing.
+    @nonobjc func sendRequest(port: Int, path: String, method: String = "GET", body: String? = nil) async {
         guard let url = URL(string: "http://localhost:\(port)\(path)") else {
             XCTFail("Could not build a request URL for \(path)")
             return
