@@ -175,10 +175,11 @@ public enum HostReport {
         limit: Int?,
         unmatchedOnly: Bool?
     ) -> [RequestLog] {
-        var entries = logs
-        if unmatchedOnly == true {
-            entries = entries.filter(\.outcome.isMissingConfiguration)
-        }
+        // `RequestLogFilter`, shared with the window's drawer. This was the second implementation
+        // of "what counts as unmatched" — the drawer had the other — which meant
+        // `mimic log list --unmatched` and the same question asked inside the window were two
+        // separate answers that agreed only by coincidence.
+        var entries = RequestLogFilter(unmatchedOnly: unmatchedOnly == true).apply(to: logs)
         if let limit {
             entries = Array(entries.suffix(max(0, limit)))
         }

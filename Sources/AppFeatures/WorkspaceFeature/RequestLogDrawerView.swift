@@ -89,26 +89,19 @@ enum RequestLogQuery {
         sortField: SortField,
         sortAscending: Bool
     ) -> [RequestLog] {
-        var filteredLogs = logs
-
-        // "Show me only the calls I have not mocked" — the fastest way to find a missing
-        // configuration, and the reason this filter is a toggle rather than a search term.
-        if unmatchedOnly {
-            filteredLogs = filteredLogs.filter(\.outcome.isMissingConfiguration)
-        }
-
-        if let methodFilter {
-            filteredLogs = filteredLogs.filter { $0.method == methodFilter }
-        }
-
-        if !filterText.isEmpty {
-            let query = filterText.lowercased()
-            filteredLogs = filteredLogs.filter { log in
-                log.path.lowercased().contains(query)
-                    || "\(log.responseStatusCode ?? 0)".contains(query)
-                    || log.outcome.label.lowercased().contains(query)
-            }
-        }
+        // Every predicate here is `RequestLogFilter` in Domain, which `HostReport.requestLog` also
+        // calls. The rules used to be written twice — here for the drawer's rows, and again for the
+        // `logList` command — so `mimic log list --unmatched` and the drawer's own toggle were two
+        // separate answers to one question, agreeing only because nobody had changed either.
+        //
+        // Sorting stays here. It is not a rule about which requests matter, it is a rule about how a
+        // *table* orders itself, and it needs `endpoints` to resolve the "Answered by" column — which
+        // is view state, not a property of the log.
+        var filteredLogs = RequestLogFilter(
+            unmatchedOnly: unmatchedOnly,
+            method: methodFilter,
+            text: filterText
+        ).apply(to: logs)
 
         // Descending is the ascending predicate with its **operands** swapped, never its answer
         // negated. This used to end on `sortAscending ? result : !result`, and `!(a < b)` is `a >= b`:
