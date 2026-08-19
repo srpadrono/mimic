@@ -133,10 +133,11 @@ struct RequestDetailInspector: View {
 
             copyBar
         }
-        // The panel carries its own surface rather than inheriting one from `DSDrawer`. Without it
-        // the tab row and the find field sit on whatever is behind them — which is the window's bare
-        // background the moment this view is hosted anywhere else.
-        .background(DSColors.secondary)
+        // No surface of its own. `InspectorPanelView` paints `secondary` for every mode now, so
+        // painting it again here would be a fill over an identical fill — and while this view was
+        // the *only* one painting it, the inspector changed colour depending on what you had
+        // clicked. If this view is ever hosted somewhere that is not the inspector, that host paints
+        // the surface, the same way the inspector does.
         // The tab is per-request state: carrying "Body" over to the next request you click is right,
         // but carrying a search term for a payload you are no longer looking at is not.
         .onChange(of: log.id) { _, _ in searchText = "" }

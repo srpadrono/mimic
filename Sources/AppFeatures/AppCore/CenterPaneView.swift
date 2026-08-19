@@ -12,12 +12,26 @@ struct CenterPaneView: View {
     let content: CenterPaneContent
 
     var body: some View {
-        switch content {
-        case let .endpoint(endpointID):
-            endpointEditor(for: endpointID)
-        case let .journey(journeyID):
-            journeyEditor(for: journeyID)
+        Group {
+            switch content {
+            case let .endpoint(endpointID):
+                endpointEditor(for: endpointID)
+            case let .journey(journeyID):
+                journeyEditor(for: journeyID)
+            }
         }
+        // The canvas belongs to the pane, not to the editors inside it.
+        //
+        // Both editors used to paint `dominant` on their own roots and the two empty states painted
+        // nothing at all — `DSEmptyState` has no background — so the centre column was one colour
+        // when something was selected and whatever the window happened to be behind it when nothing
+        // was. Selecting an endpoint changed the pane's colour, which reads as a redraw glitch
+        // rather than as a selection.
+        //
+        // Stated once here, so every branch of the switch above lands on the same surface and a
+        // future third branch cannot forget to.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DSColors.dominant)
     }
 
     // MARK: - Endpoints

@@ -222,7 +222,6 @@ struct EndpointEditorView: View {
         // the whole editor would grow past the pane's trailing edge instead of letting the cards
         // truncate inside it.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DSColors.dominant)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
         .onChange(of: endpoint.activeScenarioID) { syncFromModel() }

@@ -47,7 +47,6 @@ struct JourneyEditorView: View {
             stepList
                 .frame(minHeight: 0, maxHeight: .infinity)
         }
-        .background(DSColors.dominant)
         // The centre pane tags this view with an identifier of its own, and a bare
         // `.accessibilityIdentifier` on a container renames every descendant to match it — which
         // would take `journeyEditor.name`, `journeyEditor.addStepButton` and every `journeyStep-n`

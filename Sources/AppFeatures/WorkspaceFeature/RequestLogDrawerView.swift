@@ -380,6 +380,15 @@ struct RequestLogDrawerView: View {
                 tableBody
             }
         }
+        // The drawer paints its own surface. It used to paint none, so the panel showed whatever the
+        // window happened to be behind it — and its own zebra made that visible, because every even
+        // row resolves to `.clear` and was letting the background through rather than sitting on a
+        // surface of its own.
+        //
+        // `dominant`, the same canvas as the editor above it: the two share the centre column and
+        // are separated by `DSSplitPane`'s own divider band, not by a change of colour.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DSColors.dominant)
         .onChange(of: filterText) { _, _ in updateLogs(debounce: true) }
         .onChange(of: methodFilter) { _, _ in updateLogs() }
         .onChange(of: unmatchedOnly) { _, _ in updateLogs() }

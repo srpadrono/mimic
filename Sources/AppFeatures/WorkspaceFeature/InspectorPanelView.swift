@@ -244,6 +244,27 @@ struct InspectorPanelView: View {
                 )
             }
         }
+        // **No fill. The inspector column is a system material and the OS owns it.**
+        //
+        // This was measured rather than assumed. Painting `DSColors.secondary` here — nominally
+        // rgb(44,44,46) in dark — reaches the screen as rgb(28,28,28), because `.inspector`
+        // composites a material over whatever the content draws. A probe fill of pure red rendered
+        // as rgb(255,84,84), which is what proves the background is drawn at all and then blended;
+        // the material samples what is behind the *window*, so any value picked to survive that
+        // blend would be a different colour over a different wallpaper.
+        //
+        // So the panel takes no fill, the same way the navigator does not, and for the reason
+        // `docs/redesign/decisions.md` §3 gives: on macOS 26 the sidebar and inspector take the
+        // material on recompile whether or not the app opts in, and fighting the framework to paint
+        // a flat colour under a translucent surface is work with no payoff.
+        //
+        // The frame stays. It is what makes the panel fill its column so its own chrome is laid out
+        // against the full height rather than hugging its content.
+        //
+        // `RequestDetailInspector` used to paint `secondary` on its own root, which is why the
+        // inspector looked slightly different when you had a log row selected than when you had an
+        // endpoint selected. That fill is gone too — every mode now sits on the same material.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $addScenarioTarget) { target in
             NewScenarioSheet { name in
                 onAddScenario(target.id, name)
