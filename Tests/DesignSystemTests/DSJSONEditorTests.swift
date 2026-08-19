@@ -142,6 +142,76 @@ struct DSJSONEditorTests {
 
 // MARK: - DSColors tests
 
+@Suite("DSJSONEditor sizing")
+struct DSJSONEditorSizingTests {
+
+    // MARK: - Counting lines
+
+    @Test("An empty document is one line, not none")
+    func emptyDocumentIsOneLine() {
+        // An empty editor still shows a caret sitting on a line, so zero would size the well to
+        // nothing and there would be nowhere to start typing.
+        #expect(DSJSONEditor.lineCount(of: "") == 1)
+    }
+
+    @Test("A line count is separators plus one")
+    func lineCountIsSeparatorsPlusOne() {
+        #expect(DSJSONEditor.lineCount(of: "{}") == 1)
+        #expect(DSJSONEditor.lineCount(of: "{\n}") == 2)
+        #expect(DSJSONEditor.lineCount(of: "{\n  \"a\": 1\n}") == 3)
+    }
+
+    @Test("A trailing newline opens a line rather than closing one")
+    func trailingNewlineOpensALine() {
+        // The caret sits *after* the separator, on a line of its own, and the well has to have room
+        // for it. Counting separators alone would leave the caret against the bottom edge.
+        #expect(DSJSONEditor.lineCount(of: "{}\n") == 2)
+    }
+
+    // MARK: - Turning lines into a height
+
+    @Test("Height grows with the line count, and never reports zero")
+    func heightGrowsWithLines() {
+        let one = DSJSONEditor.height(forLines: 1)
+        let five = DSJSONEditor.height(forLines: 5)
+
+        #expect(one > 0)
+        #expect(five > one)
+        // Linear in the line count: five lines is five times one line, because every line is laid
+        // out at the same height. A ratio rather than a literal, so a font-metrics change moves both
+        // sides together instead of failing on a number nobody chose.
+        #expect(abs(five - one * 5) < 0.001)
+    }
+
+    @Test("A line count below one is floored rather than negated")
+    func lineCountBelowOneIsFloored() {
+        // Defensive: a caller subtracting its way to zero should get one line's worth of well, not a
+        // zero-height frame or — with a negative — an inverted one that traps in layout.
+        #expect(DSJSONEditor.height(forLines: 0) == DSJSONEditor.height(forLines: 1))
+        #expect(DSJSONEditor.height(forLines: -3) == DSJSONEditor.height(forLines: 1))
+    }
+
+    @Test("One line of SF Mono at 12pt is a plausible line height")
+    func oneLineIsAPlausibleHeight() {
+        // Deliberately a range, not a number. The point is that the measurement comes from the font
+        // rather than from a literal, so pinning it exactly would fail on a metrics change that is
+        // not a regression. Outside this range something has gone wrong — a missing face falling
+        // back to a display font, or a size read from the wrong theme.
+        let height = DSJSONEditor.height(forLines: 1)
+        #expect(height >= 12)
+        #expect(height <= 22)
+    }
+
+    @Test("The two themes are built from one face")
+    func themesShareOneFace() {
+        // The font name and size were written twice, once per theme. They are constants now, and
+        // `height(forLines:)` measures that same face — so a size that moved in one appearance and
+        // not the other would put the well's height and the text inside it out of step.
+        #expect(DSJSONEditor.editorFontName == "SFMono-Regular")
+        #expect(DSJSONEditor.editorFontSize == 12)
+    }
+}
+
 @Suite("DSColors")
 struct DSColorsTests {
 

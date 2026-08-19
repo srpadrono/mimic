@@ -33,6 +33,16 @@ private enum EditorRowMetrics {
     /// Where a value starts, measured from the card's leading edge. Prose that explains a row lines
     /// up here rather than at the card edge, so it reads as belonging to the row above it.
     static let valueInset: CGFloat = DSSpacing.md + labelColumn + DSSpacing.sm
+
+    /// How wide a card is allowed to get.
+    ///
+    /// The widest row this has to hold is a response header: a 200pt name column, a gap, and a value
+    /// field that should still be worth typing into — plus the card's own 12pt insets on both sides.
+    /// 640 seats that with room to spare and keeps the form readable along one edge instead of
+    /// stretching a 68pt label away from its control.
+    ///
+    /// A cap, not a width: a centre pane narrower than this still gets a card that fits it.
+    static let cardMaxWidth: CGFloat = 640
 }
 
 /// The well every editable field in this pane wears.
@@ -45,6 +55,30 @@ private enum EditorRowMetrics {
 /// apart by a point the way four independently written literals eventually do. `field` is the rung a
 /// control a user types into stands on; it is also the minimum height of a row, so a row whose value
 /// is plain text keeps the rhythm of one holding a field.
+/// How tall the response-body well stands.
+///
+/// Bounded rather than free: below the floor a one-line body collapses the card and leaves nowhere
+/// to type, and above the ceiling a 500-line payload runs off the window instead of scrolling inside
+/// the well that owns it.
+private enum EditorBody {
+    /// Roughly seven lines. Sized to be a comfortable place to start typing, and to absorb a
+    /// minified payload — one logical line that wraps to several, which `lineCount` cannot see.
+    static let minHeight: CGFloat = 100
+
+    /// Unchanged. Past this the payload scrolls within its own well rather than pushing the cards
+    /// below it off the pane.
+    static let maxHeight: CGFloat = 420
+
+    /// The well's natural height for this text, before the bounds are applied.
+    ///
+    /// `DSJSONEditor` owns the arithmetic because it owns the font. The editor's frame also has to
+    /// cover the validation row it draws underneath itself when the JSON does not parse, which is
+    /// why this adds a line's worth rather than measuring the editor alone.
+    static func height(for text: String) -> CGFloat {
+        DSJSONEditor.height(forLines: DSJSONEditor.lineCount(of: text) + 1)
+    }
+}
+
 private enum EditorField {
     static let verticalPadding = DSControlHeight.verticalPadding
     static let height = DSControlHeight.field
@@ -502,9 +536,19 @@ struct EndpointEditorView: View {
         }
         // A `CodeEditor` has no opinion about its own height and a `ScrollView` proposes none, so
         // `minHeight` alone handed the decision to whatever the representable reported — either
-        // nothing, or the whole payload. `idealHeight` is what a nil proposal resolves to, and the
-        // bounds stop a one-line body collapsing the card or a 500-line one running off the window.
-        .frame(minHeight: 180, idealHeight: 240, maxHeight: 420)
+        // nothing, or the whole payload. The fix used to be a fixed `idealHeight` of 240, and the
+        // cost of that was the largest object in the window being mostly empty: a five-line body
+        // measures about 72pt and was given 240 regardless, on the one surface in this app that
+        // holds real content.
+        //
+        // `DSJSONEditor.height(forLines:)` measures the face the editor actually draws with. The
+        // floor is what absorbs a *minified* payload, which is one logical line that wraps to many
+        // and so under-reports — see that method's note.
+        .frame(
+            minHeight: EditorBody.minHeight,
+            idealHeight: EditorBody.height(for: responseBody),
+            maxHeight: EditorBody.maxHeight
+        )
         .padding(.horizontal, DSSpacing.md)
         .onChange(of: responseBody) { debounceBody() }
     }
@@ -689,13 +733,24 @@ struct EndpointEditorView: View {
             content()
         }
         .padding(.bottom, DSSpacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Capped, not `.infinity`. `formRow` is a 68pt label column, a fixed field and a
+        // `Spacer(minLength: 0)` — so whatever width the card is given, the spacer swallows it, and
+        // a 68pt label with a 72pt field beside it was spanning the better part of 900pt. A form is
+        // read along its leading edge; the rest of that width was carrying nothing.
+        //
+        // Leading-aligned rather than centred: the cards hang off the same edge as the section
+        // headers above them and the identity row above those.
+        .frame(maxWidth: EditorRowMetrics.cardMaxWidth, alignment: .leading)
         .background(DSColors.secondary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: DSCornerRadius.lg)
                 .stroke(DSColors.border, lineWidth: DSStroke.hairline)
         )
+        // After the fill and the stroke, never before. This frame is what pins the capped card to
+        // the pane's leading edge; applied first, the background would paint *it* rather than the
+        // card, and the cap above would draw nothing.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Derived state
