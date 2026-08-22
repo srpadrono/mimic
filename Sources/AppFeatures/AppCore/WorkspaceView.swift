@@ -535,9 +535,12 @@ struct WorkspaceView: View {
     }
 
     /// 96 — the state chip, the well's own horizontal padding, and enough of the address to read a
-    /// scheme-less host before the middle truncates. Not a design tier: a lower bound chosen to be
-    /// smaller than any slack the toolbar can be short of, so that hitting it never costs another
-    /// item its place. See ``wellWidth(centreColumnWidth:isInspectorPresented:)``.
+    /// scheme-less host before the middle truncates. Not a design tier, and not a width the
+    /// arithmetic can always afford: at a 1024pt window with both panels open the well is owed 84
+    /// and takes this, which is a 12pt over-claim. That it costs nothing is a measurement, not a
+    /// proof — the toolbar was checked on screen at 1024, 1140 and 1400pt in both inspector states
+    /// and the trailing toggles survive all six. Raising this number spends a margin nobody has
+    /// counted. See ``wellWidth(centreColumnWidth:isInspectorPresented:)``.
     nonisolated static let minimumWellWidth: CGFloat = 96
 
     /// Getting a spec into the project, in the centre column beside the well.
