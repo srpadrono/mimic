@@ -272,8 +272,8 @@ and is still one declaration. Swift Testing for units, XCTest with page objects 
 | macOS UI (XCUITest) | 158 | macOS, interactive session |
 
 The portable 662 break down as Domain 260, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
-Persistence 69, ControlPlane 22. The app's 299 are the six folders `MimicTests` builds —
-`WorkspaceFeatureTests` 113, `MimicTests` 142, `JourneyFeatureTests` 14, `ImportFeatureTests` 15,
+Persistence 69, ControlPlane 22. The app's 300 are the six folders `MimicTests` builds —
+`WorkspaceFeatureTests` 113, `MimicTests` 143, `JourneyFeatureTests` 14, `ImportFeatureTests` 15,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 9 — hand counts, two of which have been wrong, which
 is what the last command below is for. Only the SwiftUI layer needs a Mac; the rest is plain Swift,
 which is why [`Package.swift`](Package.swift) builds most of this anywhere.

@@ -509,9 +509,20 @@ struct WorkspaceView: View {
     ///   the same rule. Closed, there is no divider and that whole cluster stands over the centre
     ///   column: toggles, the 54pt autosave reserve, and margins, ~250pt in all.
     ///
-    /// The 220pt floor is the old fixed floor, kept for the same reason: below it the address
-    /// truncates mid-port, and a segment that tight means the window is at its minimum with every
-    /// panel open — AppKit's overflow menu is the right failure there, not an unreadable address.
+    /// **The floor is the part that has already broken once, so it is the part to be careful with.**
+    /// This rule first carried a 220pt floor — the well's old fixed minimum, kept out of habit — and
+    /// a floor is a claim on space the segment may not have. At a 1024pt window with both panels
+    /// open the centre column is ~444pt, of which the play button, the title and Import want ~285;
+    /// the well is owed ~84 and demanded 220, and AppKit resolved the 136pt of over-claim the only
+    /// way it can — by moving the trailing items into the overflow menu. The panel toggles stopped
+    /// existing as toolbar buttons, and three `WorkspaceShellUITests` that click them failed on CI
+    /// while passing on a wide local window.
+    ///
+    /// So the well takes what is left and no more. ``minimumWellWidth`` is a floor only against
+    /// zero and negative widths, low enough that granting it cannot push anything out: at that size
+    /// the state mark and a middle-truncated address still render, which is the least this well can
+    /// usefully be. A window tight enough to reach it is one where *something* has to give, and the
+    /// well giving way is right — the toggles are controls, and this is a readout.
     nonisolated static func wellWidth(
         centreColumnWidth: CGFloat,
         isInspectorPresented: Bool
@@ -519,8 +530,15 @@ struct WorkspaceView: View {
         let leadingBudget: CGFloat = 240
         let importBudget: CGFloat = 95
         let trailingBudget: CGFloat = isInspectorPresented ? 25 : 250
-        return max(220, (centreColumnWidth - leadingBudget - importBudget - trailingBudget).rounded(.down))
+        let available = (centreColumnWidth - leadingBudget - importBudget - trailingBudget).rounded(.down)
+        return max(minimumWellWidth, available)
     }
+
+    /// 96 — the state chip, the well's own horizontal padding, and enough of the address to read a
+    /// scheme-less host before the middle truncates. Not a design tier: a lower bound chosen to be
+    /// smaller than any slack the toolbar can be short of, so that hitting it never costs another
+    /// item its place. See ``wellWidth(centreColumnWidth:isInspectorPresented:)``.
+    nonisolated static let minimumWellWidth: CGFloat = 96
 
     /// Getting a spec into the project, in the centre column beside the well.
     ///

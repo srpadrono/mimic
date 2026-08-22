@@ -1856,10 +1856,16 @@ struct AppStateFacadeTests {
         // 1187 − 240 − 95 − 250 = 602.
         #expect(WorkspaceView.wellWidth(centreColumnWidth: 1187, isInspectorPresented: false) == 602)
 
-        // The minimum window with every panel open leaves less than the floor; the floor wins.
-        // 560 − 360 = 200, which is under 220.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 560, isInspectorPresented: true) == 220)
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 0, isInspectorPresented: false) == 220)
+        // **The regression this rule shipped once.** A 1024pt window with both panels open leaves a
+        // ~444pt centre column, and the well is owed 84 — less than the 220pt floor this carried at
+        // first. Demanding 220 there pushed the trailing toggles into AppKit's overflow menu and
+        // failed three WorkspaceShellUITests on CI. The well must take what is left.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 444, isInspectorPresented: true) == 84)
+
+        // Only zero and negative widths are floored, and the floor is small enough that granting it
+        // cannot cost another item its place.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 400, isInspectorPresented: true) == 96)
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 0, isInspectorPresented: false) == 96)
 
         // Fractional layout widths land on whole points, rounded down — a toolbar item asked for
         // 567.7pt would re-raster its hairline on the half pixel.
