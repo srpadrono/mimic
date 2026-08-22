@@ -45,6 +45,11 @@ struct WorkspaceView: View {
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
 
+    /// The measured width of the centre column — the toolbar segment the server well lives in.
+    /// Nil until the first layout pass reports; the well falls back to its content size for that
+    /// one frame rather than flashing the 220pt floor.
+    @State private var centreColumnWidth: CGFloat?
+
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
     private let layoutStore: PanelLayoutStore
@@ -169,6 +174,21 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
+                // The width of this column is the width of the toolbar's centre segment: the
+                // `.inspector` below divides the bar at its edge, and everything from the navigator's
+                // edge to that divider stands over this VStack. The server well is sized from this
+                // number — see `Self.wellWidth` for the arithmetic — which is what lets it stretch
+                // and shrink with the panels the way Xcode's activity view does, instead of holding
+                // one width while the window moves around it.
+                //
+                // Attached *before* `.inspector`, deliberately: this VStack is the view the inspector
+                // splits against, so its width already excludes the inspector's column when the
+                // inspector is open. Measured after that modifier it would include it.
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.width
+                } action: { width in
+                    centreColumnWidth = width
+                }
                 // A real column, not a trailing drawer inside the detail view.
                 //
                 // As a `DSDrawer` the inspector lived *inside* the detail pane, so the window had one
@@ -201,37 +221,19 @@ struct WorkspaceView: View {
                             onStart: appState.startServer,
                             onStop: appState.stopServer
                         )
-
-                        // Import stays here because it acts on the *project*, not on one panel.
-                        //
-                        // "Add endpoint" used to sit beside it and no longer does: the navigator
-                        // already owns that action in its own strip, where it adds an endpoint or a
-                        // journey depending on which tab is showing. Two "+" buttons for one job,
-                        // one of which was wrong half the time.
-                        Menu {
-                            Button { showHARImport = true } label: {
-                                Label("Import HAR file\u{2026}", systemImage: "doc.text")
-                            }
-                            .accessibilityIdentifier("importHARMenuItem")
-                            .accessibilityLabel("Import HAR file")
-
-                            Button { showOpenAPIImport = true } label: {
-                                Label("Import OpenAPI spec\u{2026}", systemImage: "doc.badge.gearshape")
-                            }
-                            .accessibilityIdentifier("importOpenAPIMenuItem")
-                            .accessibilityLabel("Import OpenAPI spec")
-                        } label: {
-                            Label("Import", systemImage: "square.and.arrow.down")
-                        }
-                        .help("Import a HAR file or an OpenAPI spec")
-                        .accessibilityIdentifier("importMenuButton")
-                        .accessibilityLabel("Import")
                     }
 
-                    // Dead centre, like Xcode's activity view. This is not what made the toolbar read
-                    // as three islands — the fault was that everything *else* was pinned to the two
-                    // far edges, so the centre had nothing around it. With the content actions moved
-                    // into this column the bar now reads as one row.
+                    // The well is Xcode's activity view, mechanism included: a flexible item that
+                    // absorbs the centre segment's slack, so Import lands against the segment's
+                    // trailing edge because the well has already spent everything before it. The
+                    // width is *computed*, not flexed — SwiftUI has no flexible toolbar item, and the
+                    // two declarative routes both fail in ways this toolbar has now shipped once
+                    // each: a fixed frame holds one width while the panels move around it, and
+                    // `ToolbarSpacer(.flexible)` stretches the principal group across the
+                    // segmentation divider, which put Import on top of the inspector's toolbar
+                    // region. So the centre column reports its width (`onGeometryChange`, above) and
+                    // `Self.wellWidth` turns it into the one width that fills the segment without
+                    // crossing it.
                     ToolbarItem(placement: .principal) {
                         ServerStatusWell(
                             serverState: appState.serverState,
@@ -246,6 +248,13 @@ struct WorkspaceView: View {
                                 showUnmatchedOnly = true
                             }
                         )
+                        .frame(width: centreColumnWidth.map {
+                            Self.wellWidth(centreColumnWidth: $0, isInspectorPresented: showInspector)
+                        })
+                    }
+
+                    ToolbarItem(placement: .principal) {
+                        importMenu
                     }
 
                     // The autosave indicator is empty while idle, so it must not be allowed to
@@ -474,6 +483,87 @@ struct WorkspaceView: View {
         }
         .task { await presentInjectedImportIfNeeded() }
         #endif
+    }
+
+    // MARK: - Toolbar
+
+    /// The server well's width, as a function of the centre column's — which is how Xcode sizes
+    /// its activity view, measured rather than assumed: at a 1279pt window Xcode draws it at
+    /// ~314pt, and at ~1810pt at ~710pt. The item is not a fraction of anything; it absorbs
+    /// whatever the centre segment has left after its fixed neighbours, and gives it back first
+    /// when the segment tightens. That is the behaviour a fixed 460pt frame could not fake, and
+    /// the reason the well now follows the panels: this rule re-runs every time the centre column
+    /// reports a new width — a window resize, the navigator collapsing, the inspector opening.
+    ///
+    /// The budgets are the fixed neighbours, measured off the running toolbar at 1× and rounded
+    /// up a little so a point of AppKit spacing drift overflows into the gap, not into the
+    /// divider:
+    ///
+    /// - **240pt leading** — the play button and the window title stand over the head of the
+    ///   centre column. The title is the project's name, so this is a budget for a *reasonable*
+    ///   name, not a bound: "Acme Storefront" plus the button and gaps measures 235.
+    /// - **95pt for Import** — the pull-down (~80) and the gap between the two principal items.
+    /// - **Trailing, the term that depends on the inspector.** Open, the panel toggles and the
+    ///   autosave slot stand over the *inspector's* toolbar region, so the well only owes a 25pt
+    ///   margin to the segmentation divider — the gap Xcode keeps between its warning badges and
+    ///   the same rule. Closed, there is no divider and that whole cluster stands over the centre
+    ///   column: toggles, the 54pt autosave reserve, and margins, ~250pt in all.
+    ///
+    /// The 220pt floor is the old fixed floor, kept for the same reason: below it the address
+    /// truncates mid-port, and a segment that tight means the window is at its minimum with every
+    /// panel open — AppKit's overflow menu is the right failure there, not an unreadable address.
+    nonisolated static func wellWidth(
+        centreColumnWidth: CGFloat,
+        isInspectorPresented: Bool
+    ) -> CGFloat {
+        let leadingBudget: CGFloat = 240
+        let importBudget: CGFloat = 95
+        let trailingBudget: CGFloat = isInspectorPresented ? 25 : 250
+        return max(220, (centreColumnWidth - leadingBudget - importBudget - trailingBudget).rounded(.down))
+    }
+
+    /// Getting a spec into the project, in the centre column beside the well.
+    ///
+    /// Import acts on the *project*, not on one panel, which is the reason it never belonged with
+    /// the panel toggles at the trailing edge. It used to sit in the leading group with the server
+    /// toggle, which put the app's two least-related actions in one cluster: start the thing that is
+    /// already configured, and configure the thing from a file. Beside the well it reads with what
+    /// it changes — the well counts the traffic your endpoints answer, and this is where the
+    /// endpoints come from.
+    ///
+    /// "Add endpoint" used to sit beside it and no longer does: the navigator already owns that
+    /// action in its own strip, where it adds an endpoint or a journey depending on which tab is
+    /// showing. Two "+" buttons for one job, one of which was wrong half the time.
+    ///
+    /// A computed property so the `.toolbar` builder stays readable, but still handed *directly* to
+    /// a `ToolbarItem` rather than wrapped in a stack with the well — which is what it was first
+    /// written as, and which cost it its chrome: macOS 26 draws one glass background per item, so a
+    /// pair sharing one item share one capsule and the pull-down inside it renders bare. All three
+    /// accessibility identifiers are unchanged; `MimicUITests` addresses each by name.
+    private var importMenu: some View {
+        Menu {
+            Button { showHARImport = true } label: {
+                Label("Import HAR file\u{2026}", systemImage: "doc.text")
+            }
+            .accessibilityIdentifier("importHARMenuItem")
+            .accessibilityLabel("Import HAR file")
+
+            Button { showOpenAPIImport = true } label: {
+                Label("Import OpenAPI spec\u{2026}", systemImage: "doc.badge.gearshape")
+            }
+            .accessibilityIdentifier("importOpenAPIMenuItem")
+            .accessibilityLabel("Import OpenAPI spec")
+        } label: {
+            // `.titleAndIcon` explicitly. A `Label` in a toolbar item takes the window's toolbar
+            // display mode, which on this window is icon-only, so the word was dropped and Import
+            // showed as a glyph and a chevron — an unlabelled pull-down beside a well that is all
+            // words. This is the only content action in the bar; it can afford its own name.
+            Label("Import", systemImage: "square.and.arrow.down")
+                .labelStyle(.titleAndIcon)
+        }
+        .help("Import a HAR file or an OpenAPI spec")
+        .accessibilityIdentifier("importMenuButton")
+        .accessibilityLabel("Import")
     }
 
     // MARK: - Breadcrumb

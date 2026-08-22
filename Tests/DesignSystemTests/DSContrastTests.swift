@@ -1679,4 +1679,101 @@ struct DSContrastTests {
         #expect(DSColors.httpStatusColor(for: 100) == .secondary)
         #expect(DSColors.httpStatusColor(for: 0) == .secondary)
     }
+
+    // MARK: - successSubtle
+
+    /// **The well goes green while the server is up, and a tint under text is a cost before it is a
+    /// signal.** This is the reading that decided what the well may draw on itself.
+    ///
+    /// ``DSColors/successSubtle`` is 12% of ``DSColors/success`` on the toolbar surface, a ΔL\* step
+    /// of 6.1 in light and 7.1 in dark — a surface you see change, in the same territory as the
+    /// widest band step in the window. What that costs is the whole question, and the answer is not
+    /// uniform: the address at `labelPrimary` never notices (12.94 and 9.01), the amber unmatched
+    /// badge clears comfortably (5.31 and 5.40), and `labelSecondary` — which clears AA on the bare
+    /// toolbar at 4.61 — drops to **4.40 in light**, under the bar.
+    ///
+    /// So the well draws no *word* at `labelSecondary`. The one thing that tier is left holding is
+    /// the request-count glyph, which is a mark rather than text and is measured against the 3:1
+    /// non-text bar it actually answers to. The copy chip's word moved onto ``DSColors/tertiary``
+    /// for exactly this reason, and the four readings that pushed it there — the 6% ink wash it was
+    /// first drawn on at rest, and the `accentSubtle` well it lit to — are pinned below as the
+    /// negative control, because "we
+    /// tried the obvious fill and it failed" is the part a later reader cannot re-derive from a
+    /// passing test.
+    ///
+    /// Every reading here is `ServerStatusWell`'s, and the composites are spelled the way that view
+    /// spells them: `successSubtle` over ``DSColors/secondary``, which is the toolbar.
+    @Test("The running well's tint costs nothing the text on it can afford")
+    func runningWellTintIsReadable() throws {
+        /// What each appearance is expected to measure. Light first in every pair.
+        let expected: [Appearance: (
+            wellStep: Double,
+            address: Double,
+            unmatched: Double,
+            countGlyph: Double,
+            chipAtRest: Double,
+            chipHovered: Double,
+            chipConfirming: Double,
+            inkWashAtRest: Double,
+            inkWashHovered: Double
+        )] = [
+            .light: (6.09, 12.94, 5.31, 4.40, 4.55, 4.98, 5.76, 4.27, 4.03),
+            .dark: (7.08, 9.01, 5.40, 4.60, 4.67, 4.54, 5.61, 4.16, 3.96)
+        ]
+
+        for appearance in Appearance.allCases {
+            let bar = try #require(expected[appearance])
+            let toolbar = try resolve(DSColors.secondary, in: appearance)
+            let well = try resolve(DSColors.successSubtle, in: appearance).composited(over: toolbar)
+            let chip = try resolve(DSColors.tertiary, in: appearance).composited(over: well)
+
+            let step = deltaLStar(well, toolbar)
+            #expect(
+                isClose(step, bar.wellStep, within: deltaLTolerance),
+                "The tint's step off the toolbar is \(step) in \(appearance), documented as \(bar.wellStep)"
+            )
+
+            // The two things the well draws directly on the tint.
+            let address = try contrast(DSColors.labelPrimary, on: well, in: appearance)
+            let unmatched = try contrast(DSColors.httpStatusColor(for: 404), on: well, in: appearance)
+            #expect(isClose(address, bar.address, within: ratioTolerance))
+            #expect(isClose(unmatched, bar.unmatched, within: ratioTolerance))
+            #expect(address >= 4.5, "The address reads \(address) in \(appearance)")
+            #expect(unmatched >= 4.5, "The unmatched badge reads \(unmatched) in \(appearance)")
+
+            // The count glyph is the one mark left at `labelSecondary` on the tint, and it is a
+            // glyph: 3:1 is the bar a non-text component answers to. It fails the text bar in light
+            // at 4.40, which is why nothing that has to be *read* is left on this tier.
+            let countGlyph = try contrast(DSColors.labelSecondary, on: well, in: appearance)
+            #expect(isClose(countGlyph, bar.countGlyph, within: ratioTolerance))
+            #expect(countGlyph >= 3.0, "The count glyph reads \(countGlyph) in \(appearance)")
+
+            // The copy chip, in its three states, on the fill it settled on.
+            let atRest = try contrast(DSColors.labelSecondary, on: chip, in: appearance)
+            let hovered = try contrast(DSColors.accentText, on: chip, in: appearance)
+            let confirming = try contrast(DSColors.successText, on: chip, in: appearance)
+            #expect(isClose(atRest, bar.chipAtRest, within: ratioTolerance))
+            #expect(isClose(hovered, bar.chipHovered, within: ratioTolerance))
+            #expect(isClose(confirming, bar.chipConfirming, within: ratioTolerance))
+            for (state, reading) in [("at rest", atRest), ("hovered", hovered), ("confirming", confirming)] {
+                #expect(reading >= 4.5, "The copy chip \(state) reads \(reading) in \(appearance)")
+            }
+
+            // **Negative control.** The fill the chip was first drawn on — a 6% ink wash lighting to
+            // `accentSubtle` — put back and shown failing, so that reverting to the idiom the rest
+            // of the window uses for a hover well fails here rather than shipping.
+            let inkWash = try resolve(DSColors.labelPrimary.opacity(0.06), in: appearance)
+                .composited(over: well)
+            // The hover *replaced* the wash rather than layering on it, so this is `accentSubtle`
+            // on the well, not on the ink.
+            let inkWashHover = try resolve(DSColors.accentSubtle, in: appearance)
+                .composited(over: well)
+            let wasAtRest = try contrast(DSColors.labelSecondary, on: inkWash, in: appearance)
+            let wasHovered = try contrast(DSColors.accentText, on: inkWashHover, in: appearance)
+            #expect(isClose(wasAtRest, bar.inkWashAtRest, within: ratioTolerance))
+            #expect(isClose(wasHovered, bar.inkWashHovered, within: ratioTolerance))
+            #expect(wasAtRest < 4.5, "The 6% ink wash is the composite `tertiary` replaced")
+            #expect(wasHovered < 4.5, "An `accentSubtle` hover on it failed in both appearances")
+        }
+    }
 }

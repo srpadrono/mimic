@@ -365,6 +365,30 @@ public nonisolated enum DSColors {
     public static let successText = Color(light: .init(red: 0.038, green: 0.403, blue: 0.154),
                                           dark: .init(red: 0.188, green: 0.820, blue: 0.345))
 
+    /// A surface that is green because the thing standing on it is running — the toolbar's status
+    /// well while the server is up, and the chip its state mark sits in.
+    ///
+    /// The same two rungs ``accentSubtle`` and ``accentMuted`` cut for the accent, and cut at the
+    /// same depths for the same reason: 12% is a wash you read as a tint rather than as a colour,
+    /// and 25% is the most a *border* can take before the container starts reading as a filled
+    /// control. A well that turns green when the server comes up is the one piece of state in this
+    /// window worth saying twice — the mark and the surface.
+    ///
+    /// **It is not free, and the bill lands on one tier.** On the toolbar this steps ΔL\* 6.1 in
+    /// light and 7.1 in dark, and ``labelSecondary`` — which clears AA on the bare toolbar at 4.61 —
+    /// reads **4.40** on it. ``labelPrimary`` (12.94) and the amber 404 the unmatched badge takes
+    /// (5.31) never notice. So the rule this token comes with is: nothing that has to be *read* sits
+    /// at ``labelSecondary`` on it. `ServerStatusWell` leaves exactly one mark there, its
+    /// request-count glyph, which answers to the 3:1 non-text bar instead; its copy chip's word
+    /// moved onto ``tertiary`` for this reason. `DSContrastTests.runningWellTintIsReadable` measures
+    /// all of it, and pins the fill that failed alongside the one that replaced it.
+    ///
+    /// ``success`` and not ``successText``: nothing here is a letterform. This is a tint of the same
+    /// green the state mark is drawn in, which is what makes the well read as *that mark's* surface.
+    public static let successSubtle = success.opacity(0.12)
+    /// The border and the state mark's own chip on a ``successSubtle`` well. See it for the depths.
+    public static let successMuted = success.opacity(0.25)
+
     /// Warning — amber, on a tint of itself. **This is the token the other two are documented from.**
     ///
     /// ``success``, ``warning`` and ``destructive`` each carry a light variant pushed down until it

@@ -52,8 +52,19 @@ struct ServerStatusWell: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            stateDot
+            stateChip
             primaryElement
+
+            // Xcode's arrangement, and the reason the well can afford to be this wide: the activity
+            // text sits at the leading edge and the issue counts are pinned to the trailing one, so
+            // the space between them is structure rather than slack. Packed left in a 460pt well the
+            // same content would leave two hundred points of empty green, which reads as a layout
+            // fault rather than as a status bar.
+            //
+            // The state mark stays leading in every state. A group centred as a whole would slide it
+            // sideways with the length of the address, and a status light you have to look for is
+            // the one thing this well cannot afford.
+            Spacer(minLength: DSSpacing.md)
 
             if hasTraffic {
                 trafficDivider
@@ -64,26 +75,40 @@ struct ServerStatusWell: View {
                 unmatchedElement
             }
         }
+        // 12 and not the 8 a chip's own inset would suggest, because the well is a capsule: the first
+        // 11pt of it is curve, and a 16pt state chip set 8pt in has its top and bottom corners inside
+        // that curve.
         .padding(.horizontal, DSSpacing.md)
         // `DSControlHeight.verticalPadding`, which is what this 3 always was: the inset above and
         // below a control's own content, half of `DSSpacing.sm` and deliberately off the spacing
         // scale because it is internal geometry rather than a gap between two things. The request
         // log's header wells and the endpoint editor's fields take the same rung.
         .padding(.vertical, DSControlHeight.verticalPadding)
+        // The well carries no width of its own. It used to — a fixed `minWidth`/`maxWidth` pair —
+        // and that is the frame that could not follow the panels: a `.principal` item sizes to its
+        // content's ideal width, so the well held one number while the window, the navigator and
+        // the inspector all moved around it. The width now arrives from outside:
+        // `WorkspaceView.wellWidth` measures the centre column and hands this view a `.frame(width:)`,
+        // which is how the well stretches and gives way the way Xcode's activity view does. The
+        // `Spacer` in the row above is what makes any given width look intentional — content
+        // anchored to both edges, slack in the middle.
+        //
+        // The `Spacer` is also what keeps the fill honest against the item's glass. macOS 26 draws
+        // a glass capsule behind every toolbar item, sized to the item's frame; the first cut of
+        // this well painted its fill at content width inside a wider frame and shipped two nested
+        // pills — a 220pt system capsule with a 120pt badge floating in it. Here the fill wraps the
+        // row, the row's `Spacer` accepts whatever width the external frame proposes, and so fill,
+        // frame and glass are always the same box.
         .background {
+            // A `Capsule`, matching the shape macOS draws behind a toolbar item, for the reason
+            // directly above: this fill is standing *on* that glass, and a rounded rect at any radius
+            // leaves four crescents of it showing at the corners. The radius ladder would put a 22pt
+            // control at `smPlus`; the platform overrules it here, and this is the one place in the
+            // window where that is true.
             Capsule()
-                .fill(DSColors.tertiary)
-                .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
+                .fill(wellFill)
+                .strokeBorder(wellBorder, lineWidth: DSStroke.hairline)
         }
-        // A floor as well as a ceiling. Xcode's activity view keeps its width whether it is reporting
-        // a build or sitting idle, so the toolbar does not re-flow every time the text changes
-        // length. Sized to content alone this read as a small chip rather than the window's status.
-        // Bounded, because a `.principal` toolbar item sizes to its content regardless — `maxWidth:
-        // .infinity` was tried here and changed nothing, so claiming it fills the bar would be a lie
-        // in a comment. What actually closed the toolbar's void was moving the content actions into
-        // the centre column beside the server control; this well just has to stay legible between
-        // them.
-        .frame(minWidth: 220, maxWidth: 420)
         .fixedSize(horizontal: false, vertical: true)
         .help(wellHelpText)
         // The identifier alone would rename every descendant; `.contain` keeps the well addressable
@@ -97,17 +122,41 @@ struct ServerStatusWell: View {
 
     // MARK: - Pieces
 
-    private var stateDot: some View {
-        Circle()
+    /// What the server is doing, as a mark on a surface of its own colour.
+    ///
+    /// A rounded square rather than a circle, and on a chip rather than floating: a 7pt dot at the
+    /// left edge of a 220pt well is the smallest thing in the toolbar, and it is carrying the one
+    /// state a mock server has. `DSCornerRadius.xs` is the tier its own note names for exactly this
+    /// — "a status dot, a copy chip" — and at 8pt a 3pt radius reads as a rounded square, which is a
+    /// shape you can find, where a dot of the same area is a speck.
+    ///
+    /// The chip is `dotColor` at ``DSColors/successMuted``'s depth rather than the token itself,
+    /// because it has to follow the mark through all five states and only one of them is green.
+    private var stateChip: some View {
+        RoundedRectangle(cornerRadius: DSCornerRadius.xs, style: .continuous)
             .fill(dotColor)
-            .frame(width: 7, height: 7)
+            // `indicator` and not `minimum`, which is the same number answering a different
+            // question — that one is a floor to check against, and its own note says not to draw at
+            // it. This rung's list names a state dot by name.
+            .frame(width: DSGlyph.indicator, height: DSGlyph.indicator)
             .scaleEffect(isPulsing ? 1.25 : 1.0)
             .opacity(isPulsing ? 0.45 : 1.0)
             .animation(pulseAnimation, value: isPulsing)
+            .frame(width: Self.stateChipSide, height: Self.stateChipSide)
+            .background {
+                RoundedRectangle(cornerRadius: DSCornerRadius.sm, style: .continuous)
+                    .fill(dotColor.opacity(0.25))
+            }
             // The state it encodes is spoken by the element beside it; on its own it would be an
             // unlabelled stop in the VoiceOver rotor.
             .accessibilityHidden(true)
     }
+
+    /// 16 — the state chip's side, and what sets the well's own height at `DSControlHeight.field`
+    /// once `DSControlHeight.verticalPadding` is paid above and below it. Off the spacing scale for
+    /// the reason that padding is: it is a control's internal geometry rather than a gap between two
+    /// things.
+    private static let stateChipSide: CGFloat = 16
 
     @ViewBuilder
     private var primaryElement: some View {
@@ -128,22 +177,84 @@ struct ServerStatusWell: View {
         }
     }
 
+    /// The address and the word that says what clicking it does, as one control.
+    ///
+    /// One `Button`, not two. The chip is an affordance on the address rather than a second target
+    /// beside it: splitting them would put a 26pt hit area next to a 90pt one that does the same
+    /// thing, and the suite clicks the address itself (`WorkspaceShellUITests`, SRVWELL). So the
+    /// whole run reads as one control, lights as one control, and answers as one control.
     private var primaryLabel: some View {
-        primaryTextView
-            // Monospaced only for the address: digits that change as the port changes should not
-            // reflow the row, and a project name in SF Mono reads as a filename.
-            .font(isRunning ? DSTypography.codeSmall : DSTypography.label)
-            .foregroundStyle(primaryColor)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .contentTransition(.opacity)
-            .contentShape(.rect)
+        HStack(spacing: DSSpacing.sm) {
+            primaryTextView
+                // Monospaced only for the address: digits that change as the port changes should not
+                // reflow the row, and a project name in SF Mono reads as a filename. Semibold and
+                // `.monospacedDigit()` come with `Figure.status` — see that token for why a port is
+                // a figure rather than a word.
+                .font(isRunning ? DSTypography.Figure.status : DSTypography.label)
+                .foregroundStyle(primaryColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .contentTransition(.opacity)
+
+            if showsCopyChip {
+                copyChip
+            }
+        }
+        .contentShape(.rect)
     }
 
+    /// The word "Copy", on a well of its own.
+    ///
+    /// The house rule is that every interactive control answers the pointer, and this one used to
+    /// fail a weaker test than that: at rest it did not exist. The address was clickable and nothing
+    /// said so — the type's own note calls it the most-copied string in the app — so the affordance
+    /// was a tooltip you had to already be hovering to read. A chip is the smallest thing that can
+    /// be there before the pointer is.
+    ///
+    /// It takes a well where the address deliberately does not. That is not the two controls
+    /// disagreeing: the address is *type*, and lighting a rectangle behind a line of type inside a
+    /// container that already has a fill and a hairline is what `DSClearButton` argues against. The
+    /// chip is a chip — a filled rectangle at rest, which is a thing a pointer can be *on*. What
+    /// moves under the pointer is the word rather than the fill, and ``copyChipFill`` records the
+    /// contrast reading that decided that.
+    ///
+    /// The hidden "Copied" underneath is what stops the toolbar re-flowing when you click. The two
+    /// words differ by about twenty points, and without a floor the divider and both counts slide
+    /// right for a second and a half every time the address is copied — a jump the eye reads as the
+    /// well having changed shape rather than as a confirmation.
+    private var copyChip: some View {
+        ZStack {
+            Text("Copied").hidden()
+            Text(showsCopyConfirmation ? "Copied" : "Copy")
+        }
+            .font(DSTypography.caption)
+            .foregroundStyle(copyChipForeground)
+            .padding(.horizontal, DSSpacing.xs)
+            // 2, so the chip stands the same 16pt as the state mark's chip at the other end of the
+            // well and the two read as one family.
+            .padding(.vertical, DSSpacing.xxs)
+            .background {
+                RoundedRectangle(cornerRadius: DSCornerRadius.xs, style: .continuous)
+                    .fill(copyChipFill)
+            }
+            // Not `.fixedSize()`, which the house rules name as a latent clipping bug in a row: it
+            // makes the row demand more width than it has and an `HStack` pays for that out of its
+            // *leading* edge. Priority says the same thing without the trap — the chip keeps its
+            // intrinsic width and the address, which already truncates in the middle, is what gives.
+            .layoutPriority(1)
+            // The whole run is one button and one accessibility element; the chip is the picture of
+            // what that button does, spoken already by `spokenPrimaryLabel`.
+            .accessibilityHidden(true)
+    }
+
+    /// Always the address, never the confirmation.
+    ///
+    /// It used to swap to "Copied" for a second and a half, which took the port off the screen at
+    /// the one moment a user is demonstrably looking at it — you copy an address to paste it beside
+    /// the window it came from, and half the time you then want to read it back. The chip carries
+    /// the confirmation now, which is where the state belongs: it is the button's, not the string's.
     private var primaryTextView: Text {
-        showsCopyConfirmation
-            ? Text("Copied")
-            : Text(verbatim: Self.primaryText(serverState: serverState, projectName: projectName))
+        Text(verbatim: Self.primaryText(serverState: serverState, projectName: projectName))
     }
 
     private var trafficDivider: some View {
@@ -153,12 +264,31 @@ struct ServerStatusWell: View {
             .accessibilityHidden(true)
     }
 
+    /// How much has arrived, as a glyph and a figure.
+    ///
+    /// The bare number had no subject. Beside a warning triangle and a count it read as the first
+    /// half of a pair — two numbers, one of them explained — and the question it answers, "how many
+    /// requests", was carried entirely by a tooltip. The glyph is the subject, so it takes
+    /// `DSGlyph.inlineSmall` and `labelSecondary`, the tier the ladder reserves for "a mark that
+    /// qualifies the count beside it": the same rung and the same reasoning as the unmatched
+    /// triangle below.
+    ///
+    /// The figure itself moves up to `labelPrimary`. It was the one number in the well nobody could
+    /// read at a glance, at 55% alpha next to an amber badge at full strength — and the house rule
+    /// that nothing a user must read sits at `labelTertiary` is really a rule about which of two
+    /// things in a pair is the content.
     private var requestCountElement: some View {
-        Text(verbatim: "\(requestCount)")
-            .font(DSTypography.codeSmall)
-            .foregroundStyle(DSColors.labelSecondary)
-            .accessibilityIdentifier("serverStatusWell.requestCount")
-            .accessibilityLabel(Self.requestCountLabel(requestCount))
+        HStack(spacing: DSSpacing.xs) {
+            Image(systemName: "chart.bar.fill")
+                .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
+                .foregroundStyle(DSColors.labelSecondary)
+            Text(verbatim: "\(requestCount)")
+                .font(DSTypography.Figure.small)
+                .foregroundStyle(DSColors.labelPrimary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("serverStatusWell.requestCount")
+        .accessibilityLabel(Self.requestCountLabel(requestCount))
     }
 
     @ViewBuilder
@@ -191,8 +321,12 @@ struct ServerStatusWell: View {
             // count beside it rather than being the control itself.
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
+            // `Figure.small` rather than `codeSmall`, which is the same face without
+            // `.monospacedDigit()`. The two counts in this well sit a few points apart and both tick
+            // while a run is in flight; one of them shuffling as it crosses 9 and the other not is a
+            // difference you see without being able to name.
             Text(verbatim: "\(unmatchedCount)")
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.Figure.small)
         }
         .foregroundStyle(unmatchedColor)
         .contentShape(.rect)
@@ -212,6 +346,55 @@ struct ServerStatusWell: View {
         guard isRunning else { return DSColors.labelSecondary }
         return isURLHovered ? DSColors.accentText : DSColors.labelPrimary
     }
+
+    /// The well's own surface: green while something is listening, the neutral recess otherwise.
+    ///
+    /// The well was `tertiary` in every state, which meant the toolbar looked identical whether or
+    /// not the app was doing the one thing it exists to do. The dot said so, at 7pt. Tinting the
+    /// surface says it at the size of the well, and it costs nothing to read — see
+    /// ``DSColors/successSubtle`` for the measurement.
+    ///
+    /// **Running only, deliberately.** An error tint was the obvious next step and is not taken: the
+    /// window already puts errors in an alert, and a red toolbar segment that persists after the
+    /// alert is dismissed is a wall of colour saying something already said. The quiet states —
+    /// stopped, starting, stopping — keep the recess, which is the same call `DSColors` records for
+    /// server state generally: "a state nobody has to act on is a label rather than a signal".
+    private var wellFill: Color {
+        isRunning ? DSColors.successSubtle : DSColors.tertiary
+    }
+
+    private var wellBorder: Color {
+        isRunning ? DSColors.successMuted : DSColors.border
+    }
+
+    /// The chip appears only when there is a URL to put on the pasteboard. Offering "Copy" beside
+    /// "Server stopped" would be a button for an address that does not exist.
+    private var showsCopyChip: Bool { isRunning }
+
+    /// Confirmation is green — the one place in this well where the success colour is a *word* — so
+    /// it takes ``DSColors/successText``, the variant measured on a tint of itself, rather than
+    /// ``DSColors/success``, which is a signal colour and reads 3.94 there.
+    private var copyChipForeground: Color {
+        if showsCopyConfirmation { return DSColors.successText }
+        return isURLHovered ? DSColors.accentText : DSColors.labelSecondary
+    }
+
+    /// One fill, in all three states, and it is the only one of the obvious candidates that a 10pt
+    /// word can be read on.
+    ///
+    /// The chip was first drawn as a 6% ink wash that lit to ``DSColors/accentSubtle`` under the
+    /// pointer, which is the idiom the rest of the window uses for a hover well — and measured on
+    /// the green well it puts "Copy" at 4.27:1 in light and 4.16 in dark at rest, and the hovered
+    /// blue at 4.37 and 4.05. Four readings, four failures, on a control whose entire job is to be
+    /// legible before you have found it. The tint is what does it: `labelSecondary` clears AA on the
+    /// bare toolbar at 4.61 and loses that margin the moment the well goes green.
+    ///
+    /// ``DSColors/tertiary`` is the recess token, opaque, and it steps *away* from the tint in both
+    /// appearances rather than deeper into it. On it the three states read 4.55/4.67 at rest,
+    /// 4.98/4.54 hovered and 5.76/5.61 confirming — measured in
+    /// `DSContrastTests.runningWellTintIsReadable`. So the fill holds still and the *word* carries
+    /// all three states, which is also the quieter animation.
+    private var copyChipFill: Color { DSColors.tertiary }
 
     /// The unmatched badge, and whether the pointer is on it. Same answer as the address above, so
     /// the well's two buttons respond to the pointer the same way rather than inventing one idiom
