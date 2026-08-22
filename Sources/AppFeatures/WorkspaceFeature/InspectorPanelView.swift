@@ -191,12 +191,19 @@ struct InspectorPanelView: View {
                             // title, with a hard edge at the strip's boundary.
                             drawsChrome: false
                         )
-                        // No `.fixedSize()`. It made the strip claim its full width before the
-                        // subtitle got a say, and the subtitle here is the endpoint's *path* — so a
-                        // 200pt inspector header rendered "/accoun...ummary", which saves four
-                        // characters and reads as a rendering fault. The strip is icon-only and
-                        // already sized by its content; the rigidity was only ever costing the
-                        // string next to it.
+                        // `.fixedSize()` is load-bearing and was briefly removed in error.
+                        //
+                        // `DSTabStrip` ends its `HStack` with `Spacer(minLength: 0)` so an accessory
+                        // can hold the trailing edge. With no accessory — which is this call site —
+                        // that spacer is a greedy trailing element, and without `.fixedSize()` the
+                        // strip becomes infinitely flexible and swallows the whole header: the tabs
+                        // park against the title and the "+" is stranded at the far right, the gap
+                        // between them growing with the panel. Measured at 10pt with it, and
+                        // 35/95/215/455pt without it at header widths 220/280/400/640.
+                        //
+                        // It was removed to buy width for the subtitle — and then the same change
+                        // made `headerSubtitle` nil, so there was nothing left to buy width for.
+                        .fixedSize()
 
                         // Only on the tab it acts on — a "+" above a traffic list would have
                         // nothing to add to.
