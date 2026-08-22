@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-22
+
 ### Added
 
 - **`MIMIC_CONTROL_FILE` relocates the control plane's discovery file**, so a CI job or an end-to-end
@@ -226,6 +228,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a field nothing read, so a header containing a newline silently kept the old value.
 - **Restarting the control service logs again.** `shutdown()` cancelled the log drain, which finishes
   the shared stream, so a later `start()` served traffic and recorded none of it.
+- **A long response body no longer pushes the rest of the editor off the pane.** The well's
+  `idealHeight` became content-derived, and `.frame(minHeight:idealHeight:maxHeight:)` clamps against
+  a *proposal* — the enclosing `ScrollView` proposes no height, so the frame resolved to the ideal
+  verbatim and `maxHeight` never fired. A 200-line body rendered a well about 3,000pt tall and put
+  everything beneath it that far off the pane; pressing **Format** on a minified body did it in one
+  click.
+- **The response editor sizes a Windows-authored body correctly.** `lineCount` compared
+  `Character == "\n"`, and `"\r\n"` is a single grapheme cluster that does not equal it — so a HAR
+  capture, or any CRLF fixture, counted as one line however long it was and collapsed the well to
+  15pt. It counts the separators `NSString.lineRange(for:)` honours now, which is the set the gutter
+  beside it already used, so the two agree.
+- **The last line of the response editor is no longer clipped.** The validation row beneath it was
+  counted as one more editor line, but an editor line is 15pt where that row measures 18 — and the
+  fixed row takes its height first, so the 3pt shortfall came off the editor and cut the descenders.
+- **The inspector's tab strip no longer swallows its header.** The strip ends in a greedy spacer so an
+  accessory can hold the trailing edge; with no accessory the tabs parked against the title and the
+  "+" stranded at the far right, by 35pt on a narrow panel and 455pt on a wide one.
 - **The import review's warning flags are drawn in an ink that clears AA on the sheet's own rows.**
   The "Binary body" and "Body dropped" flags and the size label of a body that will be dropped were
   the base amber, and a candidate row is the wrong bed for it: the row stripes, and it washes under
@@ -262,6 +281,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The workspace was rebuilt around one surface.** The centre column had been painting backgrounds
+  the OS owns, so it read as the same grey as the panels either side of it and the seams between the
+  three were guesswork. It has a single surface now, on a canvas darkened until the column stands
+  clear of it — and a white canvas in light mode. A click leaves evidence, a selected row looks
+  selected, and the response body is sized to its content rather than spanning the pane.
+- **The toolbar's centre is a status well, and Import sits at its trailing edge.** The well tints
+  green the moment the server is up and keeps a neutral recess in the quiet states, the way Xcode's
+  activity view does. The address is set in monospaced digits beside a Copy chip, so the port never
+  leaves the screen at the moment you are looking at it, and the endpoint and request counts carry
+  glyphs saying what they count at a size that stops them shuffling as they tick past nine. Import
+  moved out of the leading group into the centre column, beside what it feeds.
+- **The request log's filter had three implementations and now has one.**
 - The CLI reference now documents the output the CLI actually produces. `docs/CLI.md` promised that
   "every response uses one envelope, so a caller branches on a single boolean" and showed
   `{"ok": true, "result": {…}}` — a shape `mimic` has never printed. It prints the bare result on
@@ -294,12 +325,6 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The two were reconciled onto Vapor 4.121.3, NIO 2.97.1 and GRDB 7.10.0; twenty-one shared packages
   had diverged.
 - Both manifests declare macOS 26, the floor every other artefact already stated.
-
-### Known issues
-
-- (The long-standing entry here — ⌘Q draining the open project's edit but not a project-lifecycle
-  write still in flight — moved to **Fixed** above: `applicationShouldTerminate` now answers
-  `.terminateLater` and drains the chain before AppKit commits to terminating.)
 
 ## [0.9.3] — 2026-08-06
 
@@ -409,6 +434,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.10.0]: https://github.com/srpadrono/mimic/releases/tag/v0.10.0
 [0.9.3]: https://github.com/srpadrono/mimic/releases/tag/v0.9.3
 [0.9.2]: https://github.com/srpadrono/mimic/releases/tag/v0.9.2
 [0.9.1]: https://github.com/srpadrono/mimic/releases/tag/v0.9.1

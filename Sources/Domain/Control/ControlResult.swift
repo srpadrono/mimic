@@ -469,7 +469,7 @@ public enum ControlAPI {
     /// Kept in step with `MARKETING_VERSION` in `Project.swift`. The app can read its own bundle, but
     /// a SwiftPM build of the CLI has no bundle to read — and a `--version` that reports the *API*
     /// version tells a user nothing about which build they installed.
-    public static let releaseVersion = "0.9.3"
+    public static let releaseVersion = "0.10.0"
 
     /// URL path prefix for the HTTP surface, so the CLI and the server cannot disagree about it.
     public static let pathPrefix = "/\(version)"
