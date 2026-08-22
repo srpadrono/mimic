@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-1192%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1193%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
@@ -261,7 +261,7 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-1192 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
+1193 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
 and is still one declaration. Swift Testing for units, XCTest with page objects for UI.
 
 | Suite | Count | Where it runs |
@@ -269,7 +269,7 @@ and is still one declaration. Swift Testing for units, XCTest with page objects 
 | Domain, persistence, engine, control plane, import, CLI | 662 | Linux or macOS — `swift test` |
 | Design system | 72 | macOS — needs SwiftUI |
 | App and coordination | 300 | macOS — hosted by the app |
-| macOS UI (XCUITest) | 158 | macOS, interactive session |
+| macOS UI (XCUITest) | 159 | macOS, interactive session |
 
 The portable 662 break down as Domain 260, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
 Persistence 69, ControlPlane 22. The app's 300 are the six folders `MimicTests` builds —
@@ -298,7 +298,7 @@ published to an orphan `badges` branch as shields.io endpoint payloads. Nothing 
 when they move.
 
 That merge is why the numbers moved. Until it existed the badges came from a run passing
-`-skip-testing:MimicUITests`, so all 158 UI tests — the only ones that touch the SwiftUI layer —
+`-skip-testing:MimicUITests`, so all 159 UI tests — the only ones that touch the SwiftUI layer —
 contributed nothing to the published figure for how well this window is tested.
 
 **The first badge is the weighted total over all nine targets** — covered lines divided by
