@@ -114,7 +114,13 @@ public enum DSTypography {
     public enum Figure {
         /// SF Mono 11px — a timestamp or a small count in a table row.
         public static let small: Font = DSTypography.codeSmall.monospacedDigit()
-        /// SF Mono 11.5px semibold — a status code as coloured text in the log.
+        /// SF Mono 11.5px semibold — a status code as coloured text in the log, and the base URL in
+        /// the toolbar's status well.
+        ///
+        /// The well is the second consumer and it is the one this rung's `.monospacedDigit()` was
+        /// written for: a port is four or five digits that change with every run, and the well sits
+        /// between two other clusters in a toolbar, so proportional digits move its neighbours every
+        /// time the server comes up on a different port.
         public static let status: Font = Font
             .system(size: 11.5, weight: .semibold, design: .monospaced)
             .monospacedDigit()

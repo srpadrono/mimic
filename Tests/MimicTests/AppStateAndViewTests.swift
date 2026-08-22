@@ -1837,4 +1837,44 @@ struct AppStateFacadeTests {
 
         #expect(appState.lastCommandError == refusal)
     }
+
+    // MARK: - The server well's width rule
+
+    /// `WorkspaceView.wellWidth` is the whole mechanism behind the well following the panels —
+    /// Xcode's flexible activity view, rebuilt as arithmetic because SwiftUI has no flexible
+    /// toolbar item. Every expectation below is a literal, not the formula re-run: the budgets are
+    /// 240 leading, 95 for Import, and 25 or 250 trailing depending on the inspector, and if one of
+    /// them moves, the sums here go red instead of moving with it.
+    @Test("The well absorbs the centre column's slack, and the inspector decides the trailing bill")
+    func wellWidthFollowsTheCentreColumn() {
+        // Default window, inspector open: the measured centre column is ~927pt.
+        // 927 − 240 − 95 − 25 = 567.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true) == 567)
+
+        // Same window, inspector closed: the column grows to ~1187, but the panel toggles and the
+        // autosave reserve now stand over it, so the well nets almost the same width.
+        // 1187 − 240 − 95 − 250 = 602.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 1187, isInspectorPresented: false) == 602)
+
+        // Above the floor the well takes exactly what is left — no tier, no rounding up.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 600, isInspectorPresented: true) == 240)
+
+        // **The regression this rule shipped once.** A 1024pt window with both panels open leaves a
+        // ~444pt centre column, where the well is owed 84 — far less than the 220pt floor this
+        // carried at first. Demanding 220 there pushed the trailing toggles into AppKit's overflow
+        // menu and failed three WorkspaceShellUITests on CI. The floor is 96 now, so the answer here
+        // is 96: still 12pt more than the arithmetic leaves, and that is the honest reading of what
+        // this floor is — a small over-claim the toolbar's own slack absorbs, checked on screen at
+        // 1024pt with both panels open rather than argued from the budgets.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 444, isInspectorPresented: true) == 96)
+
+        // The floor catches everything under it, including the degenerate widths a first layout pass
+        // can report.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 400, isInspectorPresented: true) == 96)
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 0, isInspectorPresented: false) == 96)
+
+        // Fractional layout widths land on whole points, rounded down — a toolbar item asked for
+        // 567.7pt would re-raster its hairline on the half pixel.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927.7, isInspectorPresented: true) == 567)
+    }
 }
