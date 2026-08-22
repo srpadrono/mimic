@@ -16,7 +16,7 @@ import XCTest
 ///   -destination 'platform=macOS' -only-testing:MimicUITests/DocScreenshotTests
 /// ```
 ///
-**Grant the runner Documents access before the first run.** macOS raises a TCC prompt —
+/// **Grant the runner Documents access before the first run.** macOS raises a TCC prompt —
 /// *"MimicUITests-Runner would like to access files in your Documents folder"* — the first time a run
 /// touches the checkout, and until someone answers it the test **hangs** rather than failing: the
 /// dialog is modal, the runner waits, and `xcodebuild` sits there until it is killed. Worse for this
@@ -69,7 +69,12 @@ final class DocScreenshotTests: MimicUITestCase {
 
         // Let the window settle. A capture taken mid-transition catches a half-drawn panel, and that
         // is the kind of defect nobody notices until the image is in the README.
-        Thread.sleep(forTimeInterval: 1.5)
+        //
+        // Polled, not paused: `UITestApp.waitForStableFrame` returns as soon as the window reports
+        // the same frame twice a poll apart, which is what "settled" actually means. The fixed 1.5s
+        // this replaced was both slower than it needed to be on a quiet machine and no guarantee at
+        // all on a loaded CI runner — and the house rules forbid it for exactly that reason.
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
         try capture(named: "workspace.png")
 
         // Journeys. The navigator tab, not a menu item — the same route a reader of the docs takes.
@@ -77,7 +82,7 @@ final class DocScreenshotTests: MimicUITestCase {
         XCTAssertTrue(journeys.waitForExistence(timeout: 5), "The navigator should offer a Journeys tab")
         journeys.click()
 
-        Thread.sleep(forTimeInterval: 1.5)
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
         try capture(named: "journeys.png")
     }
 
