@@ -16,7 +16,10 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [Install](#install) · [Quickstart](#quickstart) · [Journeys](#journeys) · [CLI](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md)
 
-<img src="docs/images/workspace.png" alt="Mimic's workspace: endpoints grouped in the sidebar, a response editor in the centre, an endpoint's scenarios in the inspector, and a live request log showing which calls went unmatched" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/workspace-dark.png">
+  <img src="docs/images/workspace-light.png" alt="Mimic's workspace: endpoints grouped in the sidebar, a response editor in the centre, an endpoint's scenarios in the inspector, and a live request log showing which calls went unmatched" width="100%">
+</picture>
 
 </div>
 
@@ -87,7 +90,10 @@ curl       localhost:8080/account-summary    # 200  ← retry succeeds
 Journeys live in the sidebar's **Journeys** tab (⌘2), beside the endpoints they override — selecting
 one opens its steps in the editor, with the run controls and live progress above them.
 
-<img src="docs/images/journeys.png" alt="A running journey: steps one and two served, the cursor on step three, and the request log showing GET /account-summary answered 500 by the journey rather than by its endpoint" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/journeys-dark.png">
+  <img src="docs/images/journeys-light.png" alt="A running journey: steps one and two served, the cursor on step three, and the request log showing GET /account-summary answered 500 by the journey rather than by its endpoint" width="100%">
+</picture>
 
 Served steps are ticked, the cursor marks what answers next, and the request log names the journey
 that answered — so a flow mid-run tells you where it is without guessing.
