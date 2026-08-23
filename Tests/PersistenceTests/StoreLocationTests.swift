@@ -21,10 +21,31 @@ struct StoreLocationTests {
         get throws { try DatabaseFactory.resolveDatabaseURL(environment: [:]) }
     }
 
-    @Test("The store is Application Support/devxa.Mimic/mimic.sqlite")
-    func storePathTailIsPinned() throws {
+    /// The part that is true everywhere: the directory and the filename.
+    ///
+    /// Split from the macOS path below because the suites this file lives in run on Linux too, where
+    /// `applicationSupportDirectory` resolves to `~/.local/share` — so a single assertion pinning
+    /// `/Library/Application Support` fails there for a reason that has nothing to do with the
+    /// invariant being guarded. This half is the invariant: whatever the platform calls its
+    /// application-support directory, Mimic's store is `devxa.Mimic/mimic.sqlite` inside it.
+    @Test("The store is devxa.Mimic/mimic.sqlite inside application support")
+    func storeDirectoryAndFilenameArePinned() throws {
+        let path = try resolved.path
+        #expect(path.hasSuffix("/devxa.Mimic/mimic.sqlite"), "\(path)")
+    }
+
+    /// And the whole macOS path, which is the one that ships.
+    ///
+    /// Written out as a literal rather than rebuilt from `DatabaseFactory`'s own components: a test
+    /// that assembles the path the same way the code does agrees with it by construction. On a
+    /// sandboxed build this sits inside the app's container, which is what an installer cannot reach
+    /// and therefore what makes an update safe.
+    @Test("On macOS that is Library/Application Support")
+    func macOSStorePathIsPinned() throws {
+        #if canImport(Darwin)
         let path = try resolved.path
         #expect(path.hasSuffix("/Library/Application Support/devxa.Mimic/mimic.sqlite"), "\(path)")
+        #endif
     }
 
     /// The one that matters for updates: anything inside `Mimic.app` is replaced wholesale.

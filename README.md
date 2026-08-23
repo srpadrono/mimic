@@ -9,7 +9,7 @@ failures, and watch live traffic. Then drive all of it from a script.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)](https://www.swift.org/)
-[![Tests](https://img.shields.io/badge/tests-1281%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1282%20passing-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#coverage)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#coverage)
@@ -267,25 +267,25 @@ every command through the shipped host. See [AGENTS.md](AGENTS.md#one-host) and
 
 ## Testing
 
-1281 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
+1282 tests, counted as `@Test` and `func test` declarations — a parameterized case runs many times
 and is still one declaration. Swift Testing for units, XCTest with page objects for UI.
 
 | Suite | Count | Where it runs |
 |-------|-------|---------------|
-| Domain, persistence, engine, control plane, import, CLI | 715 | Linux or macOS — `swift test` |
+| Domain, persistence, engine, control plane, import, CLI | 716 | Linux or macOS — `swift test` |
 | Design system | 72 | macOS — needs SwiftUI |
 | App and coordination | 328 | macOS — hosted by the app |
 | macOS UI (XCUITest) | 166 | macOS, interactive session |
 
-The portable 715 break down as Domain 290, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
-Persistence 92, ControlPlane 22. The app's 328 are the six folders `MimicTests` builds —
+The portable 716 break down as Domain 290, SpecImport 128, MimicCLICore 113, MockServerEngine 70,
+Persistence 93, ControlPlane 22. The app's 328 are the six folders `MimicTests` builds —
 `WorkspaceFeatureTests` 113, `MimicTests` 171, `JourneyFeatureTests` 14, `ImportFeatureTests` 15,
 `ProjectFeatureTests` 6, `EndpointFeatureTests` 9 — hand counts, two of which have been wrong, which
 is what the last command below is for. Only the SwiftUI layer needs a Mac; the rest is plain Swift,
 which is why [`Package.swift`](Package.swift) builds most of this anywhere.
 
 ```bash
-swift test                             # the portable 715, no Xcode needed
+swift test                             # the portable 716, no Xcode needed
 ./Scripts/ci.sh                        # the full local gate: build, suites, Release, UI, CLI e2e
 ./Scripts/run_full_test_suite.sh       # macOS + Xcode; also rewrites the coverage section below
 python3 Scripts/check_doc_counts.py    # recount every number above, and catch a suite nobody runs
