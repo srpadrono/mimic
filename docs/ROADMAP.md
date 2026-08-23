@@ -15,8 +15,9 @@ commitment or a date.
 | Request log | Live, with request *and* response, outcome labelling, and an unmatched filter. |
 | Import | HAR captures and OpenAPI/Swagger specs, reviewed before commit. **Window only** — see the gaps below. |
 | GraphQL | Matching by operation, with fallback for anonymous queries; import splits per operation. |
-| Automation | `mimic` CLI and a loopback HTTP control API covering 47 operations: every project, server, endpoint, scenario, journey and request-log operation the window has. |
+| Automation | `mimic` CLI and a loopback HTTP control API covering 48 operations: every project, server, endpoint, scenario, journey and request-log operation the window has, plus the update check. |
 | Headless | `mimic daemon start` for CI and agents — the app, windowless. |
+| Updates | Checks GitHub Releases daily and on demand; downloads the installer, verifies its published SHA-256 and Developer ID, and hands it to macOS's Installer. Checking is also `mimic app update-check`; **installing is window-only** — see the gaps below. |
 
 ## Known gaps
 
@@ -34,6 +35,13 @@ Real limitations, not planned work:
   larger change than it looks, because it would give `ControlPlane` a dependency it has deliberately
   never had. Note that `mimic project import` is a different operation: it reads a Mimic project
   export.
+- **Installing an update is window-only, and deliberately.** `mimic app update-check` reports
+  whether a newer release exists; there is no command that installs one. Installing quits the app and
+  runs macOS's `Installer.app` against a signed package, which asks for an admin password at a GUI
+  prompt — not something a headless caller can consent to for somebody, and a command that returned
+  before the prompt would report a success that had not happened. The check is the automatable half
+  and it is automated; the consent is not.
+
 - **`mimic daemon start` runs the app, not a daemon — by decision now, not by accident.** It sets
   `--headless` on `mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app
   hides its Dock icon and serves the control API through `AppControlHost`, the same code path the

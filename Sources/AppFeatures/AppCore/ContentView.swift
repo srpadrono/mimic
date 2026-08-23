@@ -6,6 +6,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var appState = appState
+        @Bindable var updates = appState.updates
 
         // Deliberately unanimated, and it must stay that way. This branch swaps 100% of the window's
         // contents, so any transition here is the whole window cross-fading — and `WorkspaceView`
@@ -41,6 +42,31 @@ struct ContentView: View {
                 appState.createProject(name: name, port: port)
             }
         }
+        // One presenter, for the same reason the new-project sheet has one: the menu item works from
+        // the welcome window and from an open project, and the background check can raise it from
+        // either.
+        .sheet(isPresented: $updates.isShowingSheet) {
+            UpdateSheet(service: appState.updates)
+        }
+        // The automatic check, once the window is up.
+        //
+        // Delayed, and `Task.sleep` rather than `DispatchQueue.asyncAfter` — the house rule. The
+        // delay is not cosmetic: launch is already opening the store, restoring a project and
+        // starting the control plane, and a network request in the middle of that competes with
+        // work the user is waiting for. `UpdatePreferences.isAutomaticCheckDue` decides whether
+        // anything actually happens, so on all but one launch a day this is a sleep and a `false`.
+        .task {
+            #if DEBUG
+            // Never in a test run — see `UITestSupport.suppressesAutomaticUpdateChecks`. A unit
+            // suite is hosted by this app, so without the guard every `swift`/`xcodebuild test`
+            // invocation would call GitHub; and a UI test would race its own sheet against one this
+            // raised behind it.
+            guard !UITestSupport.suppressesAutomaticUpdateChecks() else { return }
+            #endif
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            appState.updates.checkAutomaticallyIfDue()
+        }
         // Losing everything on quit is not something to mention in a status bar. If the store could
         // not be opened, the session is ephemeral and the user needs to know before they do work.
         .alert(
@@ -61,6 +87,22 @@ struct ContentView: View {
             // sentence somebody will reword.
             Text(reason)
                 .accessibilityIdentifier("storeFailure.message")
+        }
+        // A store one version ahead opens, reads, and looks completely normal — and loses data the
+        // moment anything is saved, with no error raised anywhere. That is why it gets an alert of
+        // its own rather than a line in a status bar: by the time a symptom is visible, the writing
+        // has already happened. See `StoreProvenance` for how the condition is detected.
+        .alert(
+            "These projects were saved by a newer Mimic",
+            isPresented: $appState.isShowingNewerStoreWarning,
+            presenting: appState.newerStoreWarning
+        ) { _ in
+            Button("Continue anyway") { appState.newerStoreWarning = nil }
+                .accessibilityIdentifier("newerStore.continueButton")
+                .accessibilityLabel("Continue anyway")
+        } message: { warning in
+            Text(warning)
+                .accessibilityIdentifier("newerStore.message")
         }
         // Every rule the window breaks is refused by `ProjectCommandExecutor`, and until this alert
         // existed the refusal went nowhere: `AppState.run` set `lastCommandError` and nothing in the

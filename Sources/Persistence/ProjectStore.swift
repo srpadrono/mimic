@@ -15,10 +15,21 @@ public enum ProjectStore {
         /// `nil` when the on-disk store opened normally. Otherwise the session is in memory and this
         /// explains why — the caller is expected to surface it, because unsaved work is not a detail.
         public let failure: String?
+        /// What the store on disk says about the builds that have opened it.
+        ///
+        /// Carried here rather than fetched later because it has to be read at the moment the store
+        /// is opened and before anything writes to it — which is the one moment this type already
+        /// owns. ``StoreProvenance/unknown`` for an in-memory session, which has no history to have.
+        public let provenance: StoreProvenance
 
-        public init(repository: any ProjectRepository, failure: String?) {
+        public init(
+            repository: any ProjectRepository,
+            failure: String?,
+            provenance: StoreProvenance = .unknown
+        ) {
             self.repository = repository
             self.failure = failure
+            self.provenance = provenance
         }
 
         public var isEphemeral: Bool { failure != nil }
@@ -32,12 +43,26 @@ public enum ProjectStore {
     ///
     /// The makers are injectable so the degraded branch is testable; it is the path that matters most
     /// and the hardest to reach by hand.
+    /// - Parameter runningVersion: the build doing the opening, recorded in the store as a
+    ///   high-water mark so a later, older build can tell it is looking at a newer store. Defaults
+    ///   to `ControlAPI.releaseVersion`, which `Scripts/package_release.sh` holds equal to the
+    ///   bundle's `MARKETING_VERSION` at release time.
     public static func open(
         makeOnDisk: () throws -> DatabaseQueue = { try DatabaseFactory.makeAppDatabaseQueue() },
-        makeInMemory: () throws -> DatabaseQueue = { try DatabaseFactory.makeInMemoryDatabaseQueue() }
+        makeInMemory: () throws -> DatabaseQueue = { try DatabaseFactory.makeInMemoryDatabaseQueue() },
+        runningVersion: String = ControlAPI.releaseVersion
     ) -> Opened {
         do {
-            return Opened(repository: GRDBProjectRepository(dbQueue: try makeOnDisk()), failure: nil)
+            let dbQueue = try makeOnDisk()
+            // Best-effort: a store that opened but whose provenance could not be read is still a
+            // working store, and refusing to open it over a bookkeeping row would be a worse
+            // failure than the one being guarded against.
+            let provenance = (try? StoreStamp.readAndStamp(dbQueue, version: runningVersion)) ?? .unknown
+            return Opened(
+                repository: GRDBProjectRepository(dbQueue: dbQueue),
+                failure: nil,
+                provenance: provenance
+            )
         } catch {
             guard let fallback = try? makeInMemory() else {
                 // An empty in-memory queue essentially cannot fail to open, so reaching here means the

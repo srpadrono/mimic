@@ -573,6 +573,7 @@ struct EmittedCommandTests {
             ["journey", "step", "remove", "Flow", "--index", "1"],
             ["journey", "step", "move", "Flow", "--index", "0", "--to", "2"],
             ["log", "list", "--limit", "20"], ["log", "clear"],
+            ["app", "update-check"],
         ]
 
         let transport = RecordingTransport()

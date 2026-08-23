@@ -84,11 +84,39 @@ struct HostCommandSweepTests {
             panelLayoutStore: PanelLayoutStore(defaults: defaults)
         )
         return Session(
-            host: AppControlHost(appState: appState, repository: appState.repository),
+            host: AppControlHost(
+                appState: appState,
+                repository: appState.repository,
+                // The sweeps walk every host-scoped command through this host, and `appUpdateCheck`
+                // is the one arm that would otherwise reach the network — twice per sweep, on every
+                // machine that runs the unit suite, failing whenever GitHub or the network is having
+                // a bad day. What is under test here is routing, so a canned release routes exactly
+                // as well as a fetched one.
+                fetchLatestRelease: { Self.cannedRelease }
+            ),
             appState: appState,
             engine: engine
         )
     }
+
+    /// A release the sweep can be answered with, so the update arm is exercised without a network.
+    /// `nonisolated` because the injected fetch is a `@Sendable` closure that runs outside the main
+    /// actor, and this target defaults to `MainActor` isolation. `UpdateRelease` is a `Sendable`
+    /// value, so there is nothing to protect.
+    nonisolated static let cannedRelease = UpdateRelease(
+        version: ReleaseVersion(major: 99, minor: 0, patch: 0),
+        tag: "v99.0.0",
+        title: "Mimic v99.0.0",
+        notes: "Swept.",
+        pageURL: URL(string: "https://example.invalid/releases/tag/v99.0.0")!,
+        publishedAt: Date(timeIntervalSince1970: 1_787_420_565),
+        asset: UpdateRelease.Asset(
+            name: "Mimic-99.0.0.pkg",
+            downloadURL: URL(string: "https://example.invalid/Mimic-99.0.0.pkg")!,
+            sizeInBytes: 1,
+            sha256: String(repeating: "a", count: 64)
+        )
+    )
 
     /// Opens a project through the command surface rather than around it. The reply is optimistic —
     /// the window answers before the write lands — but the project is open synchronously, which is
@@ -126,6 +154,7 @@ struct HostCommandSweepTests {
         case .describeCommands: .describeCommands
         case .state: .state
         case .reset: .reset(scope: .all)
+        case .appUpdateCheck: .appUpdateCheck
         case .projectList: .projectList
         case .projectCreate: .projectCreate(name: "Swept", port: 9098)
         case .projectOpen: .projectOpen(project: .name("Swept"))

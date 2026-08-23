@@ -31,6 +31,13 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// Everything a caller needs to decide what to do next: server, project, journey, counts.
     case state
     case reset(scope: ResetScope)
+    /// Asks whether a newer Mimic has been published, and reports what it found.
+    ///
+    /// Host-scoped: it is a fact about the running instance and the world, not about the open
+    /// document. Note the asymmetry with the window — *checking* is a command, **installing is
+    /// not**. An install quits the app, hands a package to macOS's Installer and needs an admin
+    /// password at a GUI prompt, none of which a headless caller can consent to on a user's behalf.
+    case appUpdateCheck
 
     // MARK: Projects
 

@@ -347,6 +347,11 @@ public actor ControlServer {
         case .noProjectOpen, .noActiveJourney, .serverPortInUse, .serverBusy:
             // The request was well formed but the instance is not in a state to satisfy it.
             return .conflict
+        case .updateCheckFailed:
+            // Mimic answered; the service it had to ask did not. 502 rather than 500 so a
+            // `curl --fail` caller can tell "the release feed is unreachable" apart from "this
+            // instance is broken" — the retry is worth making for one and not for the other.
+            return .badGateway
         case .serverStartFailed, .persistenceFailure, .internalFailure, .encodingFailure:
             return .internalServerError
         }

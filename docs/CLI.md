@@ -66,6 +66,7 @@ mimic app start --headless     # no window — for CI and agent workflows
 mimic daemon start             # the same thing, named for the case it exists for
 mimic app status               # is anything running, and what is it doing?
 mimic app stop                 # SIGTERM, so pending saves flush
+mimic app update-check         # has a newer Mimic been released?
 ```
 
 "Pending saves flush" is a real guarantee now rather than an aspiration: the signal handler writes
@@ -76,6 +77,40 @@ write by 500 ms, and the handler used to exit inside that window.
 
 `app start` **waits for readiness** rather than sleeping a guessed interval, so the next command in a
 script cannot race startup.
+
+`app update-check` asks the **running instance**, so the version it reports as installed is the app's
+own — read from its bundle — and not this command line tool's. That distinction is the reason the
+command exists in this shape: the two are installed together by one `.pkg` and are meant to match, so
+when they do not, the check prints a warning to stderr naming both. Nothing else in the system raises
+that, and a `mimic` a release behind its app is a quiet source of wrong answers.
+
+```json
+{
+  "update": {
+    "installed": "0.10.0",
+    "latest": "0.11.0",
+    "updateAvailable": true,
+    "releaseURL": "https://github.com/srpadrono/mimic/releases/tag/v0.11.0",
+    "publishedAt": "2026-08-22T17:42:45Z",
+    "assetName": "Mimic-0.11.0.pkg",
+    "assetSizeInBytes": 54618197,
+    "title": "Mimic v0.11.0"
+  }
+}
+```
+
+It exits `0` whether or not an update exists — "no update" is an answer, not a failure — so branch on
+`updateAvailable`. A release feed that cannot be reached or read exits `4` with the code
+`update.checkFailed`, which the HTTP surface answers as `502`: Mimic is fine, the service it had to
+ask is not, and that is worth retrying where a `500` is not.
+
+**Checking is a command; installing is not.** The window can download the installer, verify it
+against the checksum GitHub publishes and the Developer ID it is signed with, and hand it to macOS's
+`Installer.app` — which asks for an admin password. None of that is something a headless caller can
+agree to on somebody's behalf, and a command that returned before the admin prompt would be reporting
+a success that had not happened. So `mimic app update-check` tells a script that an update exists,
+and a person installs it. Note that installing replaces `Mimic.app` **and** `/usr/local/bin/mimic`
+together, because one package carries both.
 
 `daemon start` is `app start --headless` — not a euphemism for it, the same code: `DaemonCommand.Start`
 sets `headless` on an `AppCommand.Start` and runs it. Both launch `Mimic.app`, and `--headless` only

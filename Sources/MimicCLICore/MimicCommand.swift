@@ -149,7 +149,7 @@ struct AppCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "app",
         abstract: "Start or stop the Mimic application.",
-        subcommands: [Start.self, Stop.self, Status.self]
+        subcommands: [Start.self, Stop.self, Status.self, UpdateCheck.self]
     )
 
     struct Start: AsyncParsableCommand {
@@ -226,6 +226,44 @@ struct AppCommand: AsyncParsableCommand {
                 return
             }
             try Output(options).emit(try await client.send(.state))
+        }
+    }
+}
+
+extension AppCommand {
+
+    /// `mimic app update-check` — is a newer Mimic published?
+    ///
+    /// Deliberately a check and not an install. Installing runs macOS's Installer against a signed
+    /// package and needs an admin password at a GUI prompt, so it belongs to the window; a command
+    /// that returned before any of that happened would be reporting a success that had not been
+    /// agreed to. See `docs/CLI.md`.
+    struct UpdateCheck: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "update-check",
+            abstract: "Report whether a newer Mimic has been released.",
+            discussion: """
+            Asks the running instance, so the version reported is the app's own — not this command             line tool's. The two are installed together by one package and are meant to match; when             they do not, this prints a warning naming both, because a `mimic` a release behind its             app is a source of confusing answers rather than an error anything would raise.
+
+            Exits 0 whether or not an update exists — "no update" is an answer, not a failure.             Branch on `updateAvailable` in the JSON. An unreachable or unreadable release feed             exits 4 with the code `update.checkFailed`.
+            """
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            let response = try await options.client().send(.appUpdateCheck)
+            // The skew warning goes to stderr, so it cannot land in the middle of the JSON a script
+            // is parsing off stdout — the output contract this module is built on.
+            if let installed = response.result?.update?.installed, installed != ControlAPI.releaseVersion {
+                FileHandle.standardError.write(Data("""
+                warning: this `mimic` is \(ControlAPI.releaseVersion) but the app it is talking to \
+                is \(installed). They ship in one installer and are meant to match; reinstall to \
+                bring them back in step.
+
+                """.utf8))
+            }
+            try Output(options).emit(response)
         }
     }
 }

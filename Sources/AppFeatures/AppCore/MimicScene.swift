@@ -36,6 +36,14 @@ public struct MimicScene: Scene {
                 #endif
         }
         .commands {
+            // Directly under "About Mimic", where every Mac app puts this and where people look for
+            // it. Title Case because it is in the menu bar — the one place in this app that is not
+            // sentence case, per Apple's HIG and Xcode's own menus.
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates\u{2026}") { appState.updates.checkForUpdates() }
+                    .accessibilityIdentifier("menu.checkForUpdates")
+            }
+
             CommandGroup(replacing: .newItem) {
                 // "New Project…" opens the new-project sheet. It used to be wired straight to
                 // `closeProject`, so the menu item named after creating a project did not create one

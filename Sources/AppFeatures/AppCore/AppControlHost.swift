@@ -29,9 +29,26 @@ final class AppControlHost: ControlHost {
     private var isChangingServerState = false
     private let repository: any ProjectRepository
 
-    init(appState: AppState, repository: any ProjectRepository) {
+    /// How this host answers `appUpdateCheck`.
+    ///
+    /// Injectable because it is the one arm that reaches outside the machine. The command sweeps in
+    /// `MimicTests` walk **every** host-scoped kind through this type; with the real fetch wired in,
+    /// running the unit suite would make live requests to GitHub — twice per sweep, on every
+    /// developer's machine and every CI run — and would fail or hang whenever the network did. What
+    /// those sweeps are testing is that the command reaches an implementation at all, so the
+    /// implementation they reach only has to be a real one, not a networked one.
+    private let fetchLatestRelease: @Sendable () async throws -> UpdateRelease
+
+    init(
+        appState: AppState,
+        repository: any ProjectRepository,
+        fetchLatestRelease: @escaping @Sendable () async throws -> UpdateRelease = {
+            try await UpdateFeedClient().latestRelease()
+        }
+    ) {
         self.appState = appState
         self.repository = repository
+        self.fetchLatestRelease = fetchLatestRelease
     }
 
     nonisolated func execute(_ command: ControlCommand) async -> ControlResponse {
@@ -117,6 +134,9 @@ final class AppControlHost: ControlHost {
 
         case .describeCommands:
             return .success(.init(commands: CommandCatalog.descriptors))
+
+        case .appUpdateCheck:
+            return await checkForUpdate()
 
         case .state:
             return .success(.init(state: await makeState(appState)))
@@ -396,6 +416,41 @@ final class AppControlHost: ControlHost {
                 "\(command.kind.rawValue) is host-scoped but the app's control host does not implement it."
             ))
         }
+    }
+
+    // MARK: - Updates
+
+    /// Answers "is there a newer Mimic?" — and only that.
+    ///
+    /// Installing is not reachable from here on purpose. It quits the app, hands a package to
+    /// macOS's Installer and waits for an admin password at a GUI prompt; a headless caller cannot
+    /// consent to that on a user's behalf, and a command that returned before any of it happened
+    /// would be reporting success for something that had not been agreed to. `docs/CLI.md` and
+    /// AGENTS.md both record the split.
+    private func checkForUpdate() async -> ControlResponse {
+        guard let installed = ReleaseVersion(Self.installedVersion) else {
+            return .failure(.internalFailure(
+                "This build reports its version as \"\(Self.installedVersion)\", which is not a version."
+            ))
+        }
+        do {
+            let release = try await fetchLatestRelease()
+            let outcome = UpdateCheck.outcome(installed: installed, latest: release)
+            return .success(.init(update: UpdateReport(installed: installed, outcome: outcome, release: release)))
+        } catch {
+            return .failure(.updateCheckFailed(error.localizedDescription))
+        }
+    }
+
+    /// The running build's version.
+    ///
+    /// The bundle first, because that is the number the user sees in About and the one the installer
+    /// wrote. `ControlAPI.releaseVersion` is the fallback for a context with no bundle to read, and
+    /// `Scripts/package_release.sh` refuses to build a release where the two disagree.
+    /// `nonisolated`: it reads the bundle and a source constant, and `AppState` reaches it from the
+    /// `@Sendable` closure that keeps this read out of the launch path entirely.
+    nonisolated static var installedVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ControlAPI.releaseVersion
     }
 
     // MARK: - Project lifecycle

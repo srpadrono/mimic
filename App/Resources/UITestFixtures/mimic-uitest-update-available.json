@@ -1,0 +1,31 @@
+{
+  "url": "https://api.github.com/repos/srpadrono/mimic/releases/374995582",
+  "html_url": "https://github.com/srpadrono/mimic/releases/tag/v0.10.0",
+  "id": 374995582,
+  "tag_name": "v99.0.0",
+  "name": "Mimic v99.0.0 \u2014 the update fixture",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-08-22T17:42:28Z",
+  "updated_at": "2026-08-22T17:42:45Z",
+  "published_at": "2026-08-22T17:42:45Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/srpadrono/mimic/releases/assets/525281042",
+      "id": 525281042,
+      "node_id": "RA_kwDOR8LD8c4fTycS",
+      "name": "Mimic-0.10.0.pkg",
+      "label": "",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 54618197,
+      "digest": "sha256:2213186b58dc26c199d7948a34694e9ef3965a2a3c429c62b642463b02c299f8",
+      "download_count": 1,
+      "created_at": "2026-08-22T17:42:41Z",
+      "updated_at": "2026-08-22T17:42:44Z",
+      "browser_download_url": "https://github.com/srpadrono/mimic/releases/download/v0.10.0/Mimic-0.10.0.pkg"
+    }
+  ],
+  "body": "A release that exists only so the update sheet has something to show.\n"
+}

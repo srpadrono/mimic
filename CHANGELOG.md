@@ -5,6 +5,55 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Mimic ▸ Check for Updates…** Mimic now notices when a newer release exists, offers it with its
+  release notes, downloads the installer, verifies it, and hands it to macOS's `Installer.app`. It
+  also checks once a day on its own — switchable in the sheet, and a version can be skipped without
+  turning the whole thing off. The release feed is this repository's own GitHub Releases, which
+  `gh release create` already keeps current, so publishing a release is still one step.
+
+  The downloaded package is checked two ways before anything is offered as installable: its
+  SHA-256 against the digest GitHub publishes for the asset, and its Developer ID against the team
+  the release is signed with. A flat `.pkg` cannot be verified in-process the way an app bundle can —
+  its signature is CMS in the archive header, and `SecAssessment`, the API that reads that, is not in
+  the public SDK — so the signature check shells out to `pkgutil`, which works from inside the App
+  Sandbox. Note what it does *not* prove: the sandbox suppresses `pkgutil`'s notarisation line, so
+  notarisation is enforced by Gatekeeper when Installer opens the file, which is why Mimic marks the
+  download as quarantined on the way out rather than leaving it as a plain local file.
+
+  Installing replaces `Mimic.app` **and** `/usr/local/bin/mimic`, because one package carries both.
+  That is the reason the whole flow is built around the installer rather than around swapping the app
+  bundle: an updater that replaced only the app would leave the command line tool a version behind —
+  the exact drift `Scripts/package_release.sh` refuses to ship, reproduced on a user's machine.
+
+- **`mimic app update-check`** reports whether a newer Mimic has been released, as the 48th control
+  command. It asks the running instance, so the installed version it reports is the app's own; when
+  that disagrees with the `mimic` binary's, it says so on stderr. Installing stays window-only — it
+  needs an admin password at a GUI prompt, which no headless caller can agree to for somebody.
+
+- **Your projects are copied before an update installs.** A snapshot of the store goes to
+  `Application Support/devxa.Mimic/Backups/`, newest three kept, taken with `VACUUM INTO` so it is
+  one consistent file rather than a copy that might be mid-transaction. An update cannot itself harm
+  the store — the installer writes only `/Applications` and `/usr/local/bin`, and the database is in
+  the sandbox container — but the *next launch* runs whatever migrations the new version added, and
+  until now there was nothing to go back to if one of those went wrong.
+
+- **Mimic notices when its store was written by a newer version of itself.** Opening the store
+  records the highest version that has ever opened it, and GRDB's migration ledger says whether the
+  schema carries migrations this build has never heard of. If it does, the window says so and names
+  the newest backup. This is the migration-level counterpart to the existing document-level
+  `schemaVersion` guard, which cannot see it: add a column in 0.11.0, open with 0.10.0, and every
+  read succeeds while the next save quietly drops that column's values.
+
+### Fixed
+
+- **The unit suite no longer opens the developer's real `mimic.sqlite`.** `AppSession.shared` builds
+  the real composition root and one unit test touches it, and neither of the existing gates — the
+  `-MimicResetForTesting` argument and `MIMIC_DEFAULTS_SUITE` — is set in a unit test process. It had
+  always been a read, so it never showed; recording which build last opened a store would have made
+  it a write. A unit-test process that names no store of its own now gets `mimic-unittests.sqlite`.
+
 ## [0.10.0] — 2026-08-22
 
 ### Added
