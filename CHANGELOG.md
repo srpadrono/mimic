@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-23
+
 ### Added
 
 - **Mimic ▸ Check for Updates…** Mimic now notices when a newer release exists, offers it with its
@@ -483,6 +485,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.11.0]: https://github.com/srpadrono/mimic/releases/tag/v0.11.0
 [0.10.0]: https://github.com/srpadrono/mimic/releases/tag/v0.10.0
 [0.9.3]: https://github.com/srpadrono/mimic/releases/tag/v0.9.3
 [0.9.2]: https://github.com/srpadrono/mimic/releases/tag/v0.9.2
