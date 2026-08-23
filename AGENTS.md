@@ -17,11 +17,11 @@ and inspect live request traffic — so client work can start before the backend
 Vapor server runs **in-process** (direct Swift calls, never HTTP-to-self).
 
 Mimic is also drivable from a script. The `mimic` CLI and a loopback HTTP control API expose the
-forty-seven operations in `CommandCatalog` — every project, server, endpoint, scenario, journey and
+forty-eight operations in `CommandCatalog` — every project, server, endpoint, scenario, journey and
 request-log operation — so a UI test or an AI agent can create configurations, script flows, and drive
 a run without touching the interface.
 
-**One workflow is window-only: spec import.** Turning a HAR capture or an OpenAPI/Swagger document
+**Two things are window-only: spec import, and installing an update.** Turning a HAR capture or an OpenAPI/Swagger document
 into endpoints has no `ControlCommand`, and neither `ControlPlane` nor `MimicCLICore` depends on
 `SpecImport` — in `Package.swift` or in `Project.swift`. A script that wants a spec's routes parses
 the file itself and issues `endpointCreate` + `scenarioUpdate` per route, which is what
@@ -30,8 +30,17 @@ the file itself and issues `endpointCreate` + `scenarioUpdate` per route, which 
 entirely — it decodes a `MockProject`, the document `mimic project export` writes, and refuses
 anything else with "is not a Mimic project document".
 
+The second is newer and is a different kind of exception. `appUpdateCheck` **is** a `ControlCommand`,
+so a script can ask whether a newer Mimic exists — `mimic app update-check`. What has no command is
+*installing* one, and that is a decision rather than an omission: installing quits the app and runs
+macOS's `Installer.app` against a signed `.pkg`, which asks for an admin password at a GUI prompt. A
+headless caller cannot consent to that on a user's behalf, and a command that returned before the
+prompt appeared would report a success that had not happened. So the automatable half is automated
+and the consent is not. `UpdateService` and `UpdateInstaller` live in `AppFeatures` and are linked by
+nothing else, which is what keeps that true.
+
 So: "every operation the window offers" is true of everything a project is made of, and false of
-getting a spec into one. Do not restore the shorter, absolute claim.
+getting a spec into one and of installing an update. Do not restore the shorter, absolute claim.
 
 Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain language and the reasoning
 behind the module boundaries. Then [docs/JOURNEYS.md](docs/JOURNEYS.md) for the journey model,

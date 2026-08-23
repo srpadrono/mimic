@@ -16,7 +16,7 @@ import Testing
 /// have — because what is being checked here is routing and encoding, not success.
 enum ControlCommandSamples {
     static let all: [ControlCommand] = [
-        .ping, .describeCommands, .state, .reset(scope: .journey),
+        .ping, .describeCommands, .state, .reset(scope: .journey), .appUpdateCheck,
         .projectList, .projectCreate(name: "Checkout", port: 9090),
         .projectOpen(project: .name("Checkout")), .projectClose,
         .projectDelete(project: .id(UUID())), .projectRename(name: "Renamed"),

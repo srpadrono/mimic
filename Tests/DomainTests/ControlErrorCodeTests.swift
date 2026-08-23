@@ -239,6 +239,7 @@ struct ControlErrorCodeTests {
             .undecodableRequest: "request.undecodable",
             .unauthorized: "request.unauthorized",
             .forbiddenOrigin: "request.forbiddenOrigin",
+            .updateCheckFailed: "update.checkFailed",
             .persistenceFailure: "persistence.failure",
             .internalFailure: "internal.failure",
             .encodingFailure: "internal.encoding",

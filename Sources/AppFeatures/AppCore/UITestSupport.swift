@@ -28,6 +28,70 @@ enum UITestSupport {
         arguments.contains("-MimicResetForTesting") || environment["MIMIC_DEFAULTS_SUITE"] != nil
     }
 
+    /// Whether this process is a **unit** test bundle host rather than a running app.
+    ///
+    /// Distinct from ``isRunningUITests(environment:arguments:)``, which asks whether the app was
+    /// *launched by* a UI test harness. This asks whether the app's code is being hosted by
+    /// `xctest`, which is the case for `MimicTests` — and that process has neither the launch
+    /// argument nor the defaults-suite variable, so every existing guard here waves it through.
+    ///
+    /// It matters because at least one unit test constructs the real composition root:
+    /// `sceneInitDoesNotRebuildAppState` touches `AppSession.shared`, whose `AppState()` opens
+    /// whatever store `openStore()` resolves. That has always been the developer's own
+    /// `mimic.sqlite`. It went unnoticed while opening a store only *read* from it; recording which
+    /// build last opened a store made it a write, and the whole point of that record is that it is
+    /// trustworthy. A unit suite quietly stamping a developer's real database — the same database
+    /// this repository has already lost a project from — is exactly the class of accident the rules
+    /// around `databaseURL` exist to make impossible rather than unlikely.
+    ///
+    /// `XCTestConfigurationFilePath` is set by the test runner for the host process, including for
+    /// Swift Testing suites, which run under the same host.
+    static func isRunningUnitTests(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
+    }
+
+    /// A throwaway store for a unit-test process that named none of its own.
+    ///
+    /// Beside the real one rather than in a temporary directory, so it is subject to the same
+    /// sandbox container as everything else and shows up in the same place when somebody goes
+    /// looking for it. `nil` outside a unit test process, so no production path can reach it.
+    static func unitTestDatabaseURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> URL? {
+        guard isRunningUnitTests(environment: environment) else { return nil }
+        // A run that already named a store, or that is a UI test run, is handled ahead of this.
+        guard !isRunningUITests(environment: environment, arguments: arguments) else { return nil }
+        guard overriddenDatabaseURL(environment: environment) == nil else { return nil }
+        return try? DatabaseFactory.resolveDatabaseURL(environment: [:])
+            .deletingLastPathComponent()
+            .appendingPathComponent("mimic-unittests.sqlite")
+    }
+
+    /// Whether this process must not check for updates on its own.
+    ///
+    /// True for both kinds of test run, for two different reasons:
+    ///
+    /// - **A unit test run** is hosted *by the app*, so `ContentView` appears and its launch task
+    ///   runs. Without this the unit suite would make a live request to GitHub on every invocation,
+    ///   on every developer's machine and in CI, and would depend on the network to pass.
+    /// - **A UI test run** has a bundled feed fixture, so the network is not the problem — the race
+    ///   is. A background check firing three seconds after launch raises the same sheet the test is
+    ///   about to open from the menu, so the assertions would sometimes be looking at a sheet the
+    ///   test did not ask for. A test that drives the check explicitly is testing the thing it names.
+    ///
+    /// The automatic path itself is covered by `UpdateServiceTests`, which calls
+    /// `checkAutomaticallyIfDue()` directly against a stub — no window, no network, no clock.
+    static func suppressesAutomaticUpdateChecks(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> Bool {
+        isRunningUnitTests(environment: environment)
+            || isRunningUITests(environment: environment, arguments: arguments)
+    }
+
     @MainActor
     static func activateAppIfNeeded() {
         scheduleForegroundActivationIfNeeded(isRunningUITests: isRunningUITests)
@@ -377,7 +441,12 @@ enum UITestSupport {
     /// read as "the hook did not run", while a URL that is not there fails the read with the path in
     /// the message — which is what `WorkspaceView.presentInjectedImportIfNeeded()` carries out to the
     /// runner through the sheet's error text.
-    static func importFixtureURL(for value: String) -> URL? {
+    /// `nonisolated` so `UpdateFeedClient` — which is nonisolated, to keep its fetch and decode off
+    /// the main actor — can resolve its feed fixtures through this same lookup instead of writing a
+    /// second one. The three-step search below is the part that must not be duplicated: the built
+    /// bundle **flattens** `App/Resources`, so a resolver that only looks in `UITestFixtures/` finds
+    /// nothing and the run fails as a network error rather than as a missing file.
+    nonisolated static func importFixtureURL(for value: String) -> URL? {
         guard !value.contains("/") else {
             return URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
         }
@@ -398,7 +467,11 @@ enum UITestSupport {
 
     /// The folder the fixtures sit in under `App/Resources`, and the first place they are looked for
     /// in the built bundle.
-    static let importFixtureSubdirectory = "UITestFixtures"
+    ///
+    /// `nonisolated` because `UpdateFeedClient` resolves its own feed fixtures out of the same
+    /// folder, and that type is nonisolated so its fetch and decode stay off the main actor. A
+    /// constant string has nothing to protect.
+    nonisolated static let importFixtureSubdirectory = "UITestFixtures"
 
     /// The fixture's bytes, with ``importPaddingToken`` expanded when this run asked for padding.
     ///

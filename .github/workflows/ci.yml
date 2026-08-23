@@ -888,6 +888,7 @@ jobs:
               -only-testing:MimicUITests/SpecImportUITests
               -only-testing:MimicUITests/ControlPlaneIsolationTests
               -only-testing:MimicUITests/DocScreenshotTests
+              -only-testing:MimicUITests/UpdateUITests
 
           # 53 tests.
           - id: 2

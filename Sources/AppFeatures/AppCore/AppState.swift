@@ -151,7 +151,8 @@ final class AppState {
         projectRepository: any ProjectRepository,
         recentProjectsStore: RecentProjectsStore,
         panelLayoutStore: PanelLayoutStore = PanelLayoutStore(),
-        presentation: WindowPresentation = WindowPresentation()
+        presentation: WindowPresentation = WindowPresentation(),
+        updates: UpdateService? = nil
     ) {
         #if DEBUG
         Self.instancesCreated += 1
@@ -159,6 +160,13 @@ final class AppState {
         self.server = server
         self.panelLayoutStore = panelLayoutStore
         self.presentation = presentation
+        // Defaulted so the many test call sites that do not care about updates keep compiling, and
+        // so the one they get is bound to a throwaway suite rather than to `.standard` — a test that
+        // silently turned off the developer's update checks would be very hard to notice.
+        self.updates = updates ?? UpdateService(
+            installedVersion: { Self.installedReleaseVersion },
+            preferences: UpdatePreferences(defaults: .standard)
+        )
         repository = projectRepository
         projects = ProjectWorkspace(
             projectRepository: projectRepository,
@@ -187,9 +195,37 @@ final class AppState {
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
             // Same defaults instance as recents, so a UI test run cannot inherit — or overwrite —
             // the developer's real window arrangement.
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                // A closure, not a value: resolving it reads the bundle, and `init` must not — see
+                // `UpdateService.resolveInstalledVersion`.
+                installedVersion: { Self.installedReleaseVersion },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
         storeFailure = opened.failure
+        newerStoreWarning = opened.provenance.warning(latestBackup: Self.latestBackup())
+    }
+
+    /// The newest snapshot beside whichever store this session opened, or `nil` if there is none.
+    ///
+    /// Resolved the same way ``openStore()`` resolves the store itself, so the path named in the
+    /// warning is a backup of the database the session is actually using. A UI test run must not be
+    /// told about backups of the developer's real store.
+    private static func latestBackup() -> URL? {
+        sessionStoreURL().flatMap(StoreBackup.latest(for:))
+    }
+
+    /// The database file this session opened, resolved exactly the way ``openStore()`` resolves it.
+    ///
+    /// One place, because two callers now need it — the warning that names a backup, and the
+    /// snapshot taken before an update installs — and a second copy of this branch would be a way
+    /// for a UI test run to end up backing up, or reporting on, the developer's real store.
+    static func sessionStoreURL() -> URL? {
+        #if DEBUG
+        if let testDatabaseURL = UITestSupport.databaseURL() { return testDatabaseURL }
+        #endif
+        return try? DatabaseFactory.resolveDatabaseURL()
     }
 
     /// Why the on-disk store could not be opened, or `nil` when it opened normally.
@@ -200,6 +236,35 @@ final class AppState {
     var isShowingStoreFailure: Bool {
         get { storeFailure != nil }
         set { if !newValue { storeFailure = nil } }
+    }
+
+    /// The update flow — checking, offering, downloading, handing off to macOS's installer.
+    let updates: UpdateService
+
+    /// This build's version, or `0.0.0` if the bundle somehow has none.
+    ///
+    /// The fallback is never reached in a real app — the bundle always carries
+    /// `CFBundleShortVersionString`, and `Scripts/package_release.sh` refuses to ship a build where
+    /// it disagrees with `ControlAPI.releaseVersion`. It exists so a preview or a test host with no
+    /// Info.plist gets a comparable version instead of a crash, and `0.0.0` is the safe direction:
+    /// it makes every release look newer, which shows an offer nobody has to accept, rather than
+    /// hiding one.
+    /// `nonisolated` so it can be read from the `@Sendable` closure `UpdateService` defers it
+    /// behind. It touches `Bundle.main` and a constant, neither of which is main-actor state.
+    nonisolated static var installedReleaseVersion: ReleaseVersion {
+        ReleaseVersion(AppControlHost.installedVersion) ?? ReleaseVersion(major: 0, minor: 0, patch: 0)
+    }
+
+    /// Set when the store was written by a build newer than this one, and `nil` otherwise.
+    ///
+    /// A separate alert from ``storeFailure`` because it is a separate situation with a different
+    /// answer: the store opened fine, reads fine, and the risk is entirely in *writing* to it. See
+    /// `StoreProvenance` for why an older build can do that damage without any error being raised.
+    var newerStoreWarning: String?
+
+    var isShowingNewerStoreWarning: Bool {
+        get { newerStoreWarning != nil }
+        set { if !newValue { newerStoreWarning = nil } }
     }
 
     /// Where the panels were left last time. Held here because this is the one place that knows
@@ -231,8 +296,21 @@ final class AppState {
             // through `Opened.failure`. Only the writes are refused.
             return ProjectStore.Opened(
                 repository: UITestSupport.projectRepositoryFailingWritesIfRequested(opened.repository),
-                failure: opened.failure
+                failure: opened.failure,
+                // Carried through rather than defaulted: this branch rebuilds `Opened` around a
+                // wrapped repository, and anything not named here is silently the default.
+                provenance: opened.provenance
             )
+        }
+        // A unit-test process that named no store of its own gets one anyway, rather than the
+        // developer's. `AppSession.shared` builds the real composition root, and one unit test
+        // touches it — see `UITestSupport.unitTestDatabaseURL`.
+        if let unitTestDatabaseURL = UITestSupport.unitTestDatabaseURL() {
+            return ProjectStore.open(makeOnDisk: {
+                try DatabaseFactory.makeAppDatabaseQueue(
+                    environment: [DatabaseFactory.databasePathEnvironmentKey: unitTestDatabaseURL.path]
+                )
+            })
         }
         #endif
         return ProjectStore.open()

@@ -22,6 +22,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
     // State
     case state
     case reset
+    case appUpdateCheck
 
     // Projects
     case projectList
@@ -118,6 +119,11 @@ extension CommandKind {
         case .ping, .describeCommands, .state, .reset:
             .host
 
+        // Nothing about the open document decides whether a newer Mimic exists, and the answer has
+        // to come from the instance that knows its own bundle version.
+        case .appUpdateCheck:
+            .host
+
         // Choosing, creating, copying and moving documents around. Which one is open is the host's
         // to know; the store is the host's to reach.
         case .projectList, .projectCreate, .projectOpen, .projectClose, .projectDelete,
@@ -175,6 +181,7 @@ extension ControlCommand {
         case .describeCommands: .describeCommands
         case .state: .state
         case .reset: .reset
+        case .appUpdateCheck: .appUpdateCheck
         case .projectList: .projectList
         case .projectCreate: .projectCreate
         case .projectOpen: .projectOpen

@@ -50,6 +50,12 @@ public enum ControlErrorCode: String, Sendable, CaseIterable {
     case unauthorized = "request.unauthorized"
     case forbiddenOrigin = "request.forbiddenOrigin"
 
+    // MARK: The world outside
+
+    /// The release feed could not be reached or could not be read. Mimic is fine; the answer is not
+    /// available, which is a different thing from there being no update.
+    case updateCheckFailed = "update.checkFailed"
+
     // MARK: Mimic's own failures
 
     case persistenceFailure = "persistence.failure"

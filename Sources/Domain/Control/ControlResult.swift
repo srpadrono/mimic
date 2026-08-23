@@ -48,6 +48,7 @@ public struct ControlResult: Codable, Sendable, Equatable {
     public var server: ServerStatusReport?
     public var logs: [RequestLog]?
     public var commands: [CommandDescriptor]?
+    public var update: UpdateReport?
 
     public init(
         message: String? = nil,
@@ -64,7 +65,8 @@ public struct ControlResult: Codable, Sendable, Equatable {
         journeyTemplates: [JourneyTemplates.Template]? = nil,
         server: ServerStatusReport? = nil,
         logs: [RequestLog]? = nil,
-        commands: [CommandDescriptor]? = nil
+        commands: [CommandDescriptor]? = nil,
+        update: UpdateReport? = nil
     ) {
         self.message = message
         self.state = state
@@ -81,6 +83,7 @@ public struct ControlResult: Codable, Sendable, Equatable {
         self.server = server
         self.logs = logs
         self.commands = commands
+        self.update = update
     }
 
     public static func message(_ text: String) -> ControlResult {
@@ -278,6 +281,13 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
 
     public static func internalFailure(_ message: String) -> ControlError {
         ControlError(code: .internalFailure, message: message)
+    }
+
+    /// The release feed could not be reached or read. Carries the underlying reason, because
+    /// "offline", "rate-limited" and "the feed changed shape" need three different responses from
+    /// whoever is reading it.
+    public static func updateCheckFailed(_ message: String) -> ControlError {
+        ControlError(code: .updateCheckFailed, message: message)
     }
 
     private static func describe(id: UUID?, name: String?) -> String {

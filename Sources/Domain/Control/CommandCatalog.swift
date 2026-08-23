@@ -15,6 +15,7 @@ public enum CommandCatalog {
         // State
         .init(name: "state", summary: "Full snapshot: server, project, journey, counts.", parameters: [], cli: "mimic state"),
         .init(name: "reset", summary: "Clear live state (logs, journey cursor, or both).", parameters: ["scope"], cli: "mimic reset [--scope logs|journey|all]"),
+        .init(name: "appUpdateCheck", summary: "Report whether a newer Mimic has been released.", parameters: [], cli: "mimic app update-check"),
 
         // Projects
         .init(name: "projectList", summary: "List stored projects.", parameters: [], cli: "mimic project list"),
