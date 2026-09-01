@@ -1212,7 +1212,7 @@ jobs:
       # bundles between jobs; the pin below is v7.0.0, the same major as the `upload-artifact` v7.0.1
       # the four uploading steps use.
       - name: Download the four result bundles
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-bundle-*
           merge-multiple: true
