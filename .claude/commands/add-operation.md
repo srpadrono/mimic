@@ -11,9 +11,8 @@ Missing a place does not always break the build, so work from the checklist rath
 
 ## Before you write anything
 
-**Load the `mimic-control-surface` skill and follow its Definition of Done.** It is the authority for
-this task; everything below is orchestration around it. Read its `references/one-host.md` too if the
-operation is host-scoped.
+Follow the Definition of Done in [AGENTS.md](../../AGENTS.md) and the command documentation in
+[docs/CLI.md](../../docs/CLI.md). The checklist below covers the control-surface touch points.
 
 Then answer one question, because it decides half the work: **is this operation a pure function of
 the open project, or is it stateful?** Endpoints, scenarios, journeys and project metadata are

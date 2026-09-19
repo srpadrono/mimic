@@ -96,8 +96,8 @@ test` and six more, and README's generated coverage block is written from the `.
 they produce. (That local run is the block's only writer, deliberately. CI measures the same thing on
 every run, from the one workspace-wide bundle its macOS job produces, but what it publishes on a push
 to `main` is the two README *badges*, as shields.io endpoint payloads force-pushed to an orphan
-`badges` branch — it never edits a tracked file. See the `mimic-build-and-test` skill,
-[`references/ci.md`](.agents/skills/mimic-build-and-test/references/ci.md).) (This file used to claim
+`badges` branch — it never edits a tracked file. See
+[the CI workflow](.github/workflows/ci.yml).) (This file used to claim
 the opposite about the schemes, which is why `Mimic-Workspace` was presented as the
 only way to run a unit suite. Prefer it because it covers everything in one pass, not because the
 others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
