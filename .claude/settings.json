@@ -1,19 +1,4 @@
 {
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(python3 Scripts/check_doc_counts.py:*)",
@@ -34,5 +19,18 @@
       "Bash(git show:*)",
       "Bash(git branch:*)"
     ]
-  }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {}
 }
