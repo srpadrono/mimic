@@ -208,6 +208,13 @@ are the homes for HAR and traffic, and the OpenAPI/Swagger shape cases sit besid
 
 A UI change isn't done until the XCUITests cover it and pass. Three things reliably bite:
 
+**A UI test must never open or delete the developer's `mimic.sqlite`.** Launch with an isolated
+`MIMIC_DEFAULTS_SUITE`; `UITestSupport.databaseURL` then gives both `AppState` and the reset the
+same test-owned store (`mimic-uitests.sqlite`, or an explicitly named `MIMIC_DATABASE_PATH`). The
+reset is inert outside a UI test run, and `MIMIC_DATABASE_PATH` alone must not arm it. Likewise,
+`MIMIC_ERASE_DB_ON_SCHEMA_CHANGE` may erase only when an explicit database path is set. Never let
+a test or an erasing convenience derive its own deletion target from the production store.
+
 1. **Launch through `UITestApp.launchAndBringToForeground`.** `XCUIApplication.launch()` returns when
    the process is running, which is not the same as having a window the accessibility layer can see —
    the app can come up hidden or behind the runner. A suite without the activation retry fails every

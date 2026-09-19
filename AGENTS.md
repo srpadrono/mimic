@@ -206,7 +206,8 @@ perpetual animations honor Reduce Motion.
 **XCUITests:** page objects (no scattered raw queries); `.waitForExistence(timeout:)` (never
 `sleep()`); accessibility-id targeting; configure state via launch environment, not UI; cover happy
 path, error, empty, and edge cases. When either of two elements may appear, use
-`UITestApp.waitForAny([a, b], timeout:)` rather than waiting for them sequentially.
+`UITestApp.waitForAny([a, b], timeout:)` rather than waiting for them sequentially. A UI run must
+never open or delete the developer's `mimic.sqlite`; see [UI changes](CONTRIBUTING.md#ui-changes).
 
 **Swift concurrency:** Domain models are `Sendable`; use `actor` for shared mutable state; prefer
 structured concurrency; all UI updates on `@MainActor`. State that a request mutates — the journey
@@ -238,6 +239,8 @@ sizes; no glyph is below 8 pt. Inject `UserDefaults` for window layout state ins
 `@AppStorage` to the developer's defaults during tests.
 
 **The control plane never binds beyond `127.0.0.1`**, and the discovery file is a credential —
-`0600`, and its token goes only to the instance that advertised it.
+`0600`. Attach its token only to a loopback destination on the exact port the file advertised;
+an explicit remote or forwarded destination needs a caller-supplied token. See
+[CLI instance discovery](docs/CLI.md#finding-an-instance) before changing discovery.
 
 Several of these are enforced mechanically by `Scripts/check_house_rules.sh`.
