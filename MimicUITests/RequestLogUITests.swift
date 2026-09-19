@@ -673,17 +673,9 @@ final class RequestLogUITests: MimicUITestCase {
         // "No matching requests" one, which would be a filter still claiming to be filtering.
         XCTAssertTrue(clearLogButton.waitForExistence(timeout: 5), "The header should offer a clear button")
 
-        // The button is the last thing in a row that does not clip, so it is the first thing pushed
-        // out of the pane when the row runs out of width — see
-        // ``widenCentrePaneByHidingTheInspector()`` for the whole of that finding. The inspector is
-        // not part of what this test is about, so closing it costs the test nothing and gives the
-        // drawer the ~280pt that puts the trash button back inside the pane.
-        widenCentrePaneByHidingTheInspector()
-
-        // Hittability is asserted separately from existence, because the two failures are different
-        // bugs and used to be reported as one. "Not found" is a query that missed; "found but not
-        // hittable" is a control drawn where no pointer can reach it, which is a defect in the
-        // window rather than in this file — and the frames are printed so the next run says which.
+        // Keep the inspector open. The filter moves to a second pinned row when the centre pane
+        // narrows, so the clear action must remain reachable without changing the user's layout.
+        // Existence alone would miss a button drawn outside the pane's bounds.
         XCTAssertTrue(
             poll { self.clearLogButton.isHittable },
             "The clear button should be somewhere the pointer can reach it — it is at "

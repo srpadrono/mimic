@@ -8,6 +8,7 @@ import Persistence
 /// only the request log is a tenant of the centre.
 struct WorkspaceView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInspector: Bool
     @State private var showDrawer: Bool
     @State private var selectedEndpointID: UUID?
@@ -319,7 +320,9 @@ struct WorkspaceView: View {
                         .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
 
                         Button {
-                            withAnimation(DSAnimation.drawerToggle) { showInspector.toggle() }
+                            withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) {
+                                showInspector.toggle()
+                            }
                         } label: {
                             // Directional for the reason the drawer toggle above records.
                             Label(
@@ -450,7 +453,9 @@ struct WorkspaceView: View {
         // happens to be collapsed.
         .onChange(of: selectedLogIDs) { _, newValue in
             guard !newValue.isEmpty, !showInspector else { return }
-            withAnimation(DSAnimation.drawerToggle) { showInspector = true }
+            withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) {
+                showInspector = true
+            }
         }
         // The inspector shows one thing at a time, so the newer selection wins. Picking an endpoint
         // while a request is up should show that endpoint — not silently lose the click.
