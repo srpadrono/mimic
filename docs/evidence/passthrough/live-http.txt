@@ -6,3 +6,4 @@ PASS captured GraphQL operation does not intercept other operations
 PASS live pause/resume retains URL; automatic mock works with forwarding off
 PASS mixed-backend journey export preserves routing
 PASS connection failure is distinct and is never captured
+PASS shared HTTP client packaging has no duplicate runtime classes

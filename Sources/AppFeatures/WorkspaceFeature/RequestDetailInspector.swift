@@ -132,27 +132,17 @@ struct RequestDetailInspector: View {
             }
 
             ScrollView {
-                switch selectedTab {
-                case .summary: summaryContent
-                case .headers: headersContent
-                case .body: bodyContent
+                VStack(alignment: .leading, spacing: 0) {
+                    captureControls
+                    switch selectedTab {
+                    case .summary: summaryContent
+                    case .headers: headersContent
+                    case .body: bodyContent
+                    }
                 }
             }
             .background(DSColors.dominant)
 
-            if log.outcome == .passthrough, let onSaveAsMock {
-                Button("Save response as mock", systemImage: "square.and.arrow.down") { onSaveAsMock(log.id) }
-                    .disabled(captureIssue != nil)
-                    .help("Saves the response body and safe headers in this project. Review private data before sharing.")
-                    .accessibilityIdentifier("requestDetail.saveMock")
-                    .accessibilityLabel("Save response as mock")
-                    .padding(DSSpacing.md)
-                if let captureIssue {
-                    Text(captureIssue).font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
-                        .fixedSize(horizontal: false, vertical: true).padding(.horizontal, DSSpacing.md)
-                        .accessibilityIdentifier("requestDetail.captureIssue")
-                }
-            }
             copyBar
         }
         // No surface of its own. `InspectorPanelView` paints `secondary` for every mode now, so
@@ -171,6 +161,25 @@ struct RequestDetailInspector: View {
         // reporting `requestDetail.<uuid>` instead of their own names, which makes each of them
         // unaddressable from a test. `requestDetail.path` is the handle for "detail is showing".
         .accessibilityElement(children: .contain)
+    }
+
+    // Keep capture guidance inside the scrollable region. Making its wrapped text part of
+    // the inspector's minimum height can trigger an AppKit constraint-update loop in small windows.
+    @ViewBuilder
+    private var captureControls: some View {
+        if log.outcome == .passthrough, let onSaveAsMock {
+            Button("Save response as mock", systemImage: "square.and.arrow.down") { onSaveAsMock(log.id) }
+                .disabled(captureIssue != nil)
+                .help("Saves the response body and safe headers in this project. Review private data before sharing.")
+                .accessibilityIdentifier("requestDetail.saveMock")
+                .accessibilityLabel("Save response as mock")
+                .padding(DSSpacing.md)
+            if let captureIssue {
+                Text(captureIssue).font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, DSSpacing.md)
+                    .accessibilityIdentifier("requestDetail.captureIssue")
+            }
+        }
     }
 
     // MARK: - Request line
@@ -302,11 +311,12 @@ struct RequestDetailInspector: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .padding(.vertical, DSSpacing.xs + 1)
-        .accessibilityElement(children: .combine)
-        // Derived from the label the same way `InspectorOverview.row` derives its own, so the two
-        // halves of the inspector name their rows alike: "Response body" becomes
-        // `requestDetail.summary.response body`.
-        .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
+        // Selectable AppKit text can hide its value when SwiftUI combines the row.
+        // Give assistive technology one stable label/value representation.
+        .accessibilityRepresentation {
+            Text("\(label): \(value)")
+                .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
+        }
     }
 
     private var outcomeColor: Color {

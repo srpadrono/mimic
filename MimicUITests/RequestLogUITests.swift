@@ -409,15 +409,21 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: 62130, path: "/profile")
         await sendRequest(port: 62130, path: "/binary")
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15))
+        XCTAssertTrue(rowLabel(forPath: "/binary").contains("passed through"), rowLabel(forPath: "/binary"))
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/binary"))).click()
+        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), app.debugDescription)
         let save = app.buttons["requestDetail.saveMock"].firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").exists)
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/profile"))).click()
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
-        XCTAssertTrue(save.isEnabled)
-        XCTAssertTrue(text(of: element(identifiedBy: "requestDetail.summary.backend")).contains("Catalog"))
+        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(poll { save.isEnabled }, app.debugDescription)
+        XCTAssertTrue(speech(of: element(identifiedBy: "requestDetail.summary.backend")).contains("Catalog"), app.debugDescription)
+        let drawer = element(identifiedBy: "drawer")
+        let methodHeader = element(identifiedBy: "drawer.columnHeader.method")
+        XCTAssertGreaterThanOrEqual(methodHeader.frame.minX, drawer.frame.minX,
+                                    "Narrow traffic tables must keep their leading column visible")
         let screenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         screenshot.name = "Passed-through request — backend and capture action"
         screenshot.lifetime = .keepAlways

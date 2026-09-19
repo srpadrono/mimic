@@ -33,6 +33,9 @@ enum LogColumns {
     /// advances 0.6em, so 11pt needs 72.6 — and 72 was picked by eye before the test measured it.
     static let time: CGFloat = 74
 
+    // Reserve a readable path column before offering horizontal scrolling.
+    static let minimumTableWidth = method + endpoint + scenario + status + time + endpoint + DSSpacing.md * 2
+
     // path is flexible — takes remaining space
 }
 
@@ -378,10 +381,16 @@ struct RequestLogDrawerView: View {
     }
 
     public var body: some View {
+        GeometryReader { geometry in
+            drawerContent(width: geometry.size.width)
+        }
+    }
+
+    private func drawerContent(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             // Zone 1: the panel's single row of chrome. `DSPanelHeader` draws its own hairline, so
             // there is no separate divider here — two would read as a double rule.
-            drawerToolbar
+            drawerToolbar(compact: width < LogColumns.minimumTableWidth)
 
             // Zone 2 & 3: Content
             if requestLogs.isEmpty {
@@ -398,13 +407,16 @@ struct RequestLogDrawerView: View {
                     identifier: "drawer.noMatches"
                 )
             } else {
-                // Table header
-                tableHeader
-
-                DSDivider(style: .standard, identifier: "drawer.table.header")
-
-                // The list gets the whole panel, selected row or not. Detail lives in the inspector.
-                tableBody
+                GeometryReader { table in
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            tableHeader
+                            DSDivider(style: .standard, identifier: "drawer.table.header")
+                            tableBody
+                        }
+                        .frame(width: max(table.size.width, LogColumns.minimumTableWidth), height: table.size.height)
+                    }
+                }
             }
         }
         // The drawer paints its own surface. It used to paint none, so the panel showed whatever the
@@ -440,8 +452,8 @@ struct RequestLogDrawerView: View {
     /// count rides in the header's subtitle slot and the filters sit as trailing controls, so the
     /// same information costs one row instead of two.
     @ViewBuilder
-    private var drawerToolbar: some View {
-        DSPanelHeader("Request log", subtitle: countSubtitle, identifier: "requestLog") {
+    private func drawerToolbar(compact: Bool) -> some View {
+        DSPanelHeader("Request log", subtitle: compact ? nil : countSubtitle, identifier: "requestLog") {
             HStack(spacing: DSSpacing.sm) {
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
@@ -463,7 +475,8 @@ struct RequestLogDrawerView: View {
 
                     UnmatchedFilterToggle(
                         count: RequestLogQuery.unmatchedCount(logs: requestLogs),
-                        unmatchedOnly: $unmatchedOnly
+                        unmatchedOnly: $unmatchedOnly,
+                        compact: compact
                     )
 
                     HStack(spacing: DSSpacing.xs) {
@@ -492,8 +505,8 @@ struct RequestLogDrawerView: View {
                         fill: DSColors.tertiary,
                         stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
                         strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
-                        minWidth: 120,
-                        idealWidth: 160
+                        minWidth: compact ? LogColumns.time : 120,
+                        idealWidth: compact ? LogColumns.time : 160
                     )
                     .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
 
@@ -1011,6 +1024,7 @@ struct RequestLogDrawerView: View {
 private struct UnmatchedFilterToggle: View {
     let count: Int
     @Binding var unmatchedOnly: Bool
+    var compact = false
 
     @State private var isHovered = false
 
@@ -1025,8 +1039,10 @@ private struct UnmatchedFilterToggle: View {
             HStack(spacing: DSSpacing.xs) {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: DSGlyph.inline))
-                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                    .font(DSTypography.caption)
+                if !compact {
+                    Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
+                        .font(DSTypography.caption)
+                }
             }
             .foregroundStyle(foreground)
             // The same well as the filter field beside it — one height, one radius, one hairline.
