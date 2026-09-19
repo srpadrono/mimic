@@ -5,57 +5,85 @@ import XCTest
 @MainActor
 private struct BackendSettingsPage {
     let app: XCUIApplication
-
-    var openButton: XCUIElement { app.buttons["backend.settingsButton"].firstMatch }
-    var sheet: XCUIElement { app.descendants(matching: .any)["backend.settings"].firstMatch }
+    var open: XCUIElement { app.buttons["backend.settingsButton"].firstMatch }
+    var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
-    var savePrimary: XCUIElement { app.buttons["backend.primary.save"].firstMatch }
-    var name: XCUIElement { app.textFields["backend.name"].firstMatch }
-    var port: XCUIElement { app.textFields["backend.port"].firstMatch }
-    var upstream: XCUIElement { app.textFields["backend.upstream"].firstMatch }
-    var saveBackend: XCUIElement { app.buttons["backend.save"].firstMatch }
+    var primaryEnabled: XCUIElement { app.descendants(matching: .any)["backend.primary.enabled"].firstMatch }
+    var add: XCUIElement { app.buttons["backend.add"].firstMatch }
+    var apply: XCUIElement { app.buttons["backend.apply"].firstMatch }
+    var cancel: XCUIElement { app.buttons["backend.cancel"].firstMatch }
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
-    var done: XCUIElement { app.buttons["backend.done"].firstMatch }
-
+    func additional(_ suffix: String) -> XCUIElement {
+        app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
+    }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
-        // Pasting keeps punctuation intact across keyboard layouts (notably the colon in a URL).
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        _ = pasteboard.setString(value, forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
         app.typeKey("v", modifierFlags: .command)
+        field.typeKey(.tab, modifierFlags: [])
     }
 }
 
 final class BackendSettingsUITests: MimicUITestCase {
     @MainActor
-    func testConfigureTwoBackendPortsAndRejectDuplicatePort() {
+    func testConfigureTwoBackendsAndValidateAtomically() {
         launchApp()
         createProjectViaUI(name: "Two backends")
-        let settings = BackendSettingsPage(app: app)
-        XCTAssertTrue(settings.openButton.waitForExistence(timeout: 5))
-        settings.openButton.click()
-        XCTAssertTrue(settings.primaryPort.waitForExistence(timeout: 5))
-        settings.replace(settings.primaryUpstream, with: "https://api.example.com")
-        settings.savePrimary.click()
+        let page = BackendSettingsPage(app: app)
+        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.replace(page.primaryName, with: "Catalog")
+        page.primaryEnabled.click()
+        page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
+        page.add.click()
+        XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        page.replace(page.additional("name"), with: "Accounts")
+        page.replace(page.additional("port"), with: "8080")
+        page.apply.click()
+        XCTAssertTrue(page.error.waitForExistence(timeout: 5))
+        page.replace(page.additional("port"), with: "18081")
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertEqual(page.primaryName.value as? String, "Catalog")
+        XCTAssertEqual(page.additional("port").value as? String, "18081")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Backend settings — saved configuration"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        page.cancel.click()
+    }
 
-        settings.replace(settings.name, with: "Accounts")
-        settings.replace(settings.port, with: "8081")
-        settings.replace(settings.upstream, with: "https://accounts.example.com")
-        settings.saveBackend.click()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(
-            format: "label == %@", "Edit Accounts"
-        )).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-
-        settings.replace(settings.name, with: "Duplicate")
-        settings.replace(settings.port, with: "8081")
-        settings.saveBackend.click()
-        XCTAssertTrue(settings.error.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons.matching(NSPredicate(
-            format: "label == %@", "Edit Duplicate"
-        )).firstMatch.exists)
-        settings.done.click()
+    @MainActor
+    func testCancelDiscardsChangesAndDisableKeepsURL() {
+        launchApp()
+        createProjectViaUI(name: "Settings draft")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.replace(page.primaryName, with: "Discarded")
+        page.cancel.click()
+        page.open.click()
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertEqual(page.primaryName.value as? String, "Primary")
+        page.primaryEnabled.click()
+        page.replace(page.primaryUpstream, with: "https://api.example.com")
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryEnabled.waitForExistence(timeout: 5))
+        page.primaryEnabled.click()
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        XCTAssertEqual(page.primaryUpstream.value as? String, "https://api.example.com")
+        XCTAssertFalse(page.primaryUpstream.isEnabled)
+        page.cancel.click()
     }
 }

@@ -176,5 +176,13 @@ enum AppMigrations {
                 t.add(column: "backendID", .text)
             }
         }
+        migrator.registerMigration("v6_backend_controls") { db in
+            try db.alter(table: "project") { t in
+                t.add(column: "primaryName", .text).notNull().defaults(to: "Primary")
+                t.add(column: "passthroughEnabled", .boolean).notNull().defaults(to: false)
+                t.add(column: "captureResponses", .boolean).notNull().defaults(to: false)
+            }
+            try db.execute(sql: "UPDATE project SET passthroughEnabled = (upstreamURL IS NOT NULL)")
+        }
     }
 }

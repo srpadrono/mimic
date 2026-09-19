@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
+import Vapor
 import Domain
 @testable import MockServerEngine
 
@@ -71,4 +72,33 @@ struct PassthroughTests {
         #expect((response as? HTTPURLResponse)?.statusCode == 404)
         #expect(String(decoding: data, as: UTF8.self) == "Request is not part of the active journey.")
     }
+    @Test("Disabling forwarding takes effect without rebinding the listener")
+    func disableLive() async throws {
+        let upstream = MockServerEngine(), proxy = MockServerEngine()
+        let real = try Self.port(), local = try Self.port()
+        await upstream.updateConfiguration(endpoints: [Self.endpoint("/live", body: "real")])
+        try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
+        defer { Task { try? await proxy.stop(); try? await upstream.stop() } }
+        var config = ServerConfiguration(port: local, globalDelayMs: 0, upstreamURL: "http://127.0.0.1:\(real)")
+        try await proxy.start(configuration: config)
+        let url = URL(string: "http://127.0.0.1:\(local)/live")!
+        let (before, _) = try await URLSession.shared.data(from: url)
+        #expect(String(decoding: before, as: UTF8.self) == "real")
+        config.passthroughEnabled = false
+        await proxy.updateServerConfiguration(config)
+        let (_, after) = try await URLSession.shared.data(from: url)
+        #expect((after as? HTTPURLResponse)?.statusCode == 404)
+    }
+
+    @Test("Repeated cookies survive and Connection-nominated headers do not")
+    func headers() {
+        let input = Vapor.HTTPHeaders([("Set-Cookie", "a=one; Path=/"), ("Set-Cookie", "b=two; Path=/"),
+            ("Connection", "X-Hop, keep-alive"), ("X-Hop", "private"), ("Content-Encoding", "gzip")])
+        let forwarded = ProxyForwarder.endToEndHeaders(input)
+        #expect(forwarded["Set-Cookie"] == ["a=one; Path=/", "b=two; Path=/"])
+        #expect(forwarded["X-Hop"].isEmpty)
+        #expect(forwarded["Connection"].isEmpty)
+        #expect(forwarded["Content-Encoding"] == ["gzip"])
+    }
+
 }

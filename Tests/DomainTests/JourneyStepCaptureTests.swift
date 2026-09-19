@@ -26,8 +26,8 @@ struct JourneyStepCaptureTests {
     }
 
     @Test("The captured step reproduces the response the client received")
-    func capturesTheResponse() {
-        let spec = JourneyStepSpec.capturing(
+    func capturesTheResponse() throws {
+        let spec = try JourneyStepSpec.capturing(
             Self.log(
                 method: .post,
                 path: "/payments",
@@ -46,35 +46,35 @@ struct JourneyStepCaptureTests {
     }
 
     @Test("Content-Type is modelled once, not repeated as a header")
-    func contentTypeIsNotDuplicated() {
-        let spec = JourneyStepSpec.capturing(Self.log())
+    func contentTypeIsNotDuplicated() throws {
+        let spec = try JourneyStepSpec.capturing(Self.log())
         // The step already carries the content type; emitting it as a header too would write it twice.
         #expect(spec.contentType == .json)
         #expect(spec.headers?["Content-Type"] == nil)
     }
 
     @Test("A step with no headers beyond the content type carries none")
-    func noSpuriousEmptyHeaders() {
-        let spec = JourneyStepSpec.capturing(Self.log(headers: ["Content-Type": "text/plain"]))
+    func noSpuriousEmptyHeaders() throws {
+        let spec = try JourneyStepSpec.capturing(Self.log(headers: ["Content-Type": "text/plain"]))
         #expect(spec.headers == nil)
         #expect(spec.contentType == .plainText)
     }
 
     @Test("The query string is dropped, because it belongs to the call and not the route")
-    func queryStringIsDropped() {
-        let spec = JourneyStepSpec.capturing(Self.log(path: "/inbox?page=2&unread=true"))
+    func queryStringIsDropped() throws {
+        let spec = try JourneyStepSpec.capturing(Self.log(path: "/inbox?page=2&unread=true"))
         #expect(spec.path == "/inbox")
     }
 
     @Test("A step defaults to a name naming its route")
-    func defaultName() {
-        #expect(JourneyStepSpec.capturing(Self.log(method: .put, path: "/things/9")).name == "PUT /things/9")
-        #expect(JourneyStepSpec.capturing(Self.log(), name: "Chosen").name == "Chosen")
+    func defaultName() throws {
+        #expect(try JourneyStepSpec.capturing(Self.log(method: .put, path: "/things/9")).name == "PUT /things/9")
+        #expect(try JourneyStepSpec.capturing(Self.log(), name: "Chosen").name == "Chosen")
     }
 
     @Test("An unmatched request keeps its status but not Mimic's own diagnostic body")
-    func unmatchedKeepsStatusOnly() {
-        let spec = JourneyStepSpec.capturing(
+    func unmatchedKeepsStatusOnly() throws {
+        let spec = try JourneyStepSpec.capturing(
             Self.log(
                 path: "/never-mocked",
                 status: 404,
@@ -92,8 +92,8 @@ struct JourneyStepCaptureTests {
     }
 
     @Test("A request an active journey blocked is treated the same way")
-    func blockedKeepsStatusOnly() {
-        let spec = JourneyStepSpec.capturing(
+    func blockedKeepsStatusOnly() throws {
+        let spec = try JourneyStepSpec.capturing(
             Self.log(body: "Request is not part of the active journey.", outcome: .blockedByJourney)
         )
         #expect(spec.body == nil)
@@ -132,8 +132,8 @@ struct JourneyStepCaptureTests {
     }
 
     @Test("A path without a leading slash is normalized so the step is valid")
-    func pathIsNormalized() {
-        #expect(JourneyStepSpec.capturing(Self.log(path: "inbox")).path == "/inbox")
+    func pathIsNormalized() throws {
+        #expect(try JourneyStepSpec.capturing(Self.log(path: "inbox")).path == "/inbox")
     }
 }
 
@@ -163,10 +163,10 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("Steps follow the order the calls arrived, not the order they were handed over")
-    func ordersChronologically() {
+    func ordersChronologically() throws {
         // Newest-first is the log's default sort, so this reversed order is what a selection normally
         // arrives in. Capturing it as given would replay the whole flow backwards.
-        let steps = JourneyStepSpec.capturing([
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/third", at: 300),
             Self.log("/first", at: 100),
             Self.log("/second", at: 200),
@@ -176,10 +176,10 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("Requests logged in the same instant keep the order they were given")
-    func tiesAreDeterministic() {
+    func tiesAreDeterministic() throws {
         // `sorted(by:)` promises no stability, so without the index tiebreak these could swap between
         // runs — and a journey that captures differently each time is not reproducible.
-        let steps = JourneyStepSpec.capturing([
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/a", at: 100),
             Self.log("/b", at: 100),
             Self.log("/c", at: 100),
@@ -189,8 +189,8 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("Requests a journey already answered are left out")
-    func dropsRequestsAlreadyInAJourney() {
-        let steps = JourneyStepSpec.capturing([
+    func dropsRequestsAlreadyInAJourney() throws {
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/login", at: 100),
             Self.log("/scripted", at: 200, outcome: .journey),
             Self.log("/inbox", at: 300),
@@ -200,8 +200,8 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("A run of identical polls becomes one step that repeats")
-    func collapsesConsecutiveRepeats() {
-        let steps = JourneyStepSpec.capturing([
+    func collapsesConsecutiveRepeats() throws {
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/status", at: 100, status: 202, body: #"{"state":"pending"}"#),
             Self.log("/status", at: 200, status: 202, body: #"{"state":"pending"}"#),
             Self.log("/status", at: 300, status: 202, body: #"{"state":"pending"}"#),
@@ -212,8 +212,8 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("A poll that changes its answer keeps the transition")
-    func doesNotCollapseAcrossAChangedResponse() {
-        let steps = JourneyStepSpec.capturing([
+    func doesNotCollapseAcrossAChangedResponse() throws {
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/status", at: 100, status: 202, body: #"{"state":"pending"}"#),
             Self.log("/status", at: 200, status: 202, body: #"{"state":"pending"}"#),
             Self.log("/status", at: 300, status: 200, body: #"{"state":"done"}"#),
@@ -228,8 +228,8 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("Identical calls separated by another call stay separate steps")
-    func onlyConsecutiveRunsCollapse() {
-        let steps = JourneyStepSpec.capturing([
+    func onlyConsecutiveRunsCollapse() throws {
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/summary", at: 100),
             Self.log("/inbox", at: 200),
             Self.log("/summary", at: 300),
@@ -240,9 +240,9 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("Two calls to one route that answered differently are not collapsed")
-    func differingStatusesStayApart() {
+    func differingStatusesStayApart() throws {
         // The failure-then-retry flow is the reason journeys exist at all.
-        let steps = JourneyStepSpec.capturing([
+        let steps = try JourneyStepSpec.capturing([
             Self.log("/account-summary", at: 100, status: 500, body: #"{"error":"boom"}"#),
             Self.log("/account-summary", at: 200, status: 200, body: #"{"balance":10}"#),
         ])
@@ -251,9 +251,9 @@ struct JourneySessionCaptureTests {
     }
 
     @Test("A selection with nothing capturable yields no steps")
-    func emptySelection() {
-        #expect(JourneyStepSpec.capturing([]).isEmpty)
-        #expect(JourneyStepSpec.capturing([Self.log("/x", at: 100, outcome: .journey)]).isEmpty)
+    func emptySelection() throws {
+        #expect(try JourneyStepSpec.capturing([]).isEmpty)
+        #expect(try JourneyStepSpec.capturing([Self.log("/x", at: 100, outcome: .journey)]).isEmpty)
     }
 
     @Test("A captured run replays through a real journey in the order it was observed")
@@ -263,7 +263,7 @@ struct JourneySessionCaptureTests {
             .journeyCreate(
                 name: "Retry flow",
                 // Handed over newest-first, the way the log draws it.
-                spec: JourneySpec(steps: JourneyStepSpec.capturing([
+                spec: JourneySpec(steps: try JourneyStepSpec.capturing([
                     Self.log("/account-summary", at: 200, status: 200, body: #"{"balance":10}"#),
                     Self.log("/account-summary", at: 100, status: 500, body: #"{"error":"boom"}"#),
                 ]))

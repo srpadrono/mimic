@@ -30,6 +30,16 @@ public enum ProjectCommandExecutor {
         _ command: ControlCommand,
         to project: inout MockProject
     ) throws -> ProjectCommandOutcome? {
+        var candidate = project
+        let result = try applyAtomically(command, to: &candidate)
+        if result?.didMutate == true, [.serverConfigure, .backendUpsert, .backendDelete].contains(command.kind) {
+            try validate { try ProjectValidator.validate(candidate) }
+        }
+        project = candidate
+        return result
+    }
+
+    private static func applyAtomically(_ command: ControlCommand, to project: inout MockProject) throws -> ProjectCommandOutcome? {
         // Host-scoped commands — server lifecycle, project selection, journey runtime, logs,
         // discovery — reach state a pure `inout MockProject` transformation cannot see, so they are
         // the host's to answer. `nil` is the signal to keep looking, not a failure.
@@ -54,7 +64,17 @@ public enum ProjectCommandExecutor {
             project.name = trimmed
             return mutated(.init(message: "Renamed project to \"\(trimmed)\".", project: project))
 
-        case let .serverConfigure(port, globalDelayMs, upstreamURL):
+        case let .serverConfigure(port, globalDelayMs, upstreamURL, configuration, name, passthroughEnabled, captureResponses):
+            if let configuration {
+                guard port == nil, globalDelayMs == nil, upstreamURL == nil, name == nil,
+                      passthroughEnabled == nil, captureResponses == nil else {
+                    throw ControlError.invalid("Provide a complete configuration or individual fields, not both.")
+                }
+                guard configuration.globalDelayMs >= 0 else { throw ControlError.invalid("Global delay must be zero or greater.") }
+                project.serverConfiguration = configuration
+                try validate { try ProjectValidator.validate(project) }
+                return mutated(.init(message: "Updated server configuration.", project: project))
+            }
             if let port {
                 try validate { try EndpointValidator.validatePort(port) }
                 guard !project.serverConfiguration.backends.contains(where: { $0.port == port }) else {
@@ -70,14 +90,18 @@ public enum ProjectCommandExecutor {
             }
             if let upstreamURL {
                 try validateUpstream(upstreamURL, localPort: project.serverConfiguration.port)
-                project.serverConfiguration.upstreamURL = upstreamURL.nilIfEmpty
+                if let url = upstreamURL.nilIfEmpty { project.serverConfiguration.upstreamURL = url }
+                project.serverConfiguration.passthroughEnabled = upstreamURL.nilIfEmpty != nil
             }
-            guard port != nil || globalDelayMs != nil || upstreamURL != nil else {
+            if let name { project.serverConfiguration.primaryName = name }
+            if let passthroughEnabled { project.serverConfiguration.passthroughEnabled = passthroughEnabled }
+            if let captureResponses { project.serverConfiguration.captureResponses = captureResponses }
+            guard port != nil || globalDelayMs != nil || upstreamURL != nil || name != nil || passthroughEnabled != nil || captureResponses != nil else {
                 throw ControlError.invalid("Provide a port, globalDelayMs, or upstreamURL.")
             }
             return mutated(.init(message: "Updated server configuration.", project: project))
 
-        case let .backendUpsert(id, name, port, upstreamURL):
+        case let .backendUpsert(id, name, port, upstreamURL, passthroughEnabled, captureResponses):
             if let id {
                 guard let index = project.serverConfiguration.backends.firstIndex(where: { $0.id == id }) else {
                     throw ControlError.invalid("Backend not found: \(id).")
@@ -96,8 +120,11 @@ public enum ProjectCommandExecutor {
                 }
                 if let upstreamURL {
                     try validateUpstream(upstreamURL, localPort: project.serverConfiguration.backends[index].port)
-                    project.serverConfiguration.backends[index].upstreamURL = upstreamURL.nilIfEmpty
+                    if let url = upstreamURL.nilIfEmpty { project.serverConfiguration.backends[index].upstreamURL = url }
+                    project.serverConfiguration.backends[index].passthroughEnabled = upstreamURL.nilIfEmpty != nil
                 }
+                if let passthroughEnabled { project.serverConfiguration.backends[index].passthroughEnabled = passthroughEnabled }
+                if let captureResponses { project.serverConfiguration.backends[index].captureResponses = captureResponses }
             } else {
                 guard let name = name?.nilIfEmpty, let port else {
                     throw ControlError.invalid("A new backend needs a name and port.")
@@ -109,7 +136,7 @@ public enum ProjectCommandExecutor {
                 }
                 if let upstreamURL { try validateUpstream(upstreamURL, localPort: port) }
                 project.serverConfiguration.backends.append(BackendConfiguration(
-                    name: name, port: port, upstreamURL: upstreamURL?.nilIfEmpty
+                    name: name, port: port, upstreamURL: upstreamURL?.nilIfEmpty, passthroughEnabled: passthroughEnabled, captureResponses: captureResponses ?? false
                 ))
             }
             return mutated(.init(message: "Updated backend configuration.", project: project))
@@ -374,7 +401,7 @@ public enum ProjectCommandExecutor {
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else {
             throw ControlError.invalid("Real backend must be an HTTP or HTTPS base URL without credentials, query, or fragment.")
         }
-        if ["127.0.0.1", "localhost", "::1"].contains(host.lowercased()), parts.port == localPort {
+        if ["127.0.0.1", "localhost", "::1"].contains(host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))), (parts.port ?? (scheme == "https" ? 443 : 80)) == localPort {
             throw ControlError.invalid("The real backend cannot point to its own local port.")
         }
     }

@@ -729,6 +729,7 @@ enum JourneyFile {
                 case let .respond(response):
                     JourneyStepSpec(
                         name: step.name,
+                        backend: step.backendID?.uuidString ?? "primary",
                         method: step.method,
                         path: step.path,
                         statusCode: response.statusCode,
@@ -742,6 +743,7 @@ enum JourneyFile {
                 case let .networkFailure(failure):
                     JourneyStepSpec(
                         name: step.name,
+                        backend: step.backendID?.uuidString ?? "primary",
                         method: step.method,
                         path: step.path,
                         failure: failure,

@@ -244,14 +244,37 @@ backend has an upstream URL, Mimic forwards the original request, including its 
 and body, and returns the real HTTP reply. An explicit journey block stays blocked. A backend
 without an upstream keeps the existing unmatched `404`. Select a backend for a journey step with
 `mimic journey step add ... --backend <UUID>` or `mimic journey step update ... --backend <UUID>`;
-use `--backend primary` for the original port. Changes to listening ports or upstream
-URLs take effect after restarting the server. Mimic listens on `127.0.0.1` only.
+use `--backend primary` for the original port. Real backend URL and pass-through switches apply immediately. Changes to listening ports require a restart; `server status` reports `restartRequired` and the actual `activeBackends` alongside the configured backends. Mimic listens on `127.0.0.1` only.
 
 Forwarded calls appear in the request log as `passthrough`. To turn one into an editable text mock,
 inspect it and run `mimic log save-as-mock <log-UUID>`, or use **Save real response as mock** in
-the request log. This is explicit because real replies can contain private data. Credential
+the request log or request inspector. Automatic capture is off by default because real replies can contain private data. Credential
 response headers are removed from the saved mock; response bodies must be reviewed before sharing
 the project. Truncated and binary replies cannot be saved as text mocks.
+
+Name and control each backend without losing its saved URL:
+
+```bash
+mimic server configure --name Catalog --upstream https://catalog.example.com
+mimic server configure --pass-through false       # pause, retain URL
+mimic server configure --pass-through true        # resume
+mimic server configure --capture-responses true   # opt in to automatic mocks
+mimic server backend update <UUID> --pass-through true --capture-responses true
+mimic server configure --file server-settings.json # atomically apply a ServerConfiguration object
+```
+
+Automatic capture saves the first complete supported reply per backend, method, path, and GraphQL
+operation. Subsequent calls use that mock. Query parameters are forwarded but are not mock match
+criteria. Capture removes credential and transport headers; inspect bodies before sharing. Binary,
+compressed, truncated (over 64 KiB), and failed responses are never saved as text fixtures. Binary
+and compressed replies are still forwarded byte-for-byte. Large responses and event streams are
+forwarded with backpressure and only a bounded preview is logged after completion. Incoming request
+bodies retain the existing 10 MB limit. WebSocket upgrades are not supported. Backend connection
+failures appear as `proxyFailure`, separately from real upstream 5xx responses. Redirects are returned
+to the client, never followed by Mimic.
+
+Journey export preserves backend UUIDs. Import a journey into a project with the same backends, or
+map its `backend` values to that project's IDs before importing; use `primary` for its primary port.
 
 ### Projects — whole configurations
 

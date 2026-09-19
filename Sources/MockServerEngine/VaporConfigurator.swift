@@ -14,7 +14,7 @@ enum VaporConfigurator {
         routeStore: MockRouteStore,
         logContinuation: AsyncStream<RequestLog>.Continuation,
         backendID: UUID? = nil,
-        upstreamURL: String? = nil,
+        listenerPort: Int = 8080,
         localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
@@ -33,26 +33,15 @@ enum VaporConfigurator {
             // concurrent requests can never consume the same step.
             let resolved = await routeStore.resolve(request: incoming)
 
-            if resolved.outcome == .unmatched, let upstreamURL {
-                let response = await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts)
-                let (requestBody, _) = RequestLog.cappedBody(incoming.body)
-                let (responseBody, truncated) = RequestLog.cappedBody(response.body.string)
-                logContinuation.yield(RequestLog(
-                    method: incoming.method,
-                    path: req.url.string,
-                    backendID: backendID,
-                    requestHeaders: incoming.headers,
-                    requestBody: requestBody,
-                    responseStatusCode: Int(response.status.code),
-                    responseHeaders: Dictionary(response.headers.map { ($0.name, $0.value) }, uniquingKeysWith: { _, last in last }),
-                    responseBody: responseBody,
-                    responseBodyTruncated: truncated,
-                    outcome: .passthrough
-                ))
-                return response
+            let projectID = await routeStore.projectID
+            let backend = await routeStore.backend(id: backendID)
+            if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
+                return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
+                    incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
+                    logContinuation: logContinuation)
             }
 
-            logContinuation.yield(makeLog(incoming: incoming, resolved: resolved))
+            logContinuation.yield(makeLog(incoming: incoming, resolved: resolved, backendName: backend?.name, listenerPort: listenerPort))
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing
@@ -184,7 +173,7 @@ enum VaporConfigurator {
 
     // MARK: - Logging
 
-    static func makeLog(incoming: IncomingRequest, resolved: ResolvedResponse) -> RequestLog {
+    static func makeLog(incoming: IncomingRequest, resolved: ResolvedResponse, backendName: String? = nil, listenerPort: Int? = nil) -> RequestLog {
         // A failed request wrote no body, so recording the scenario's would be a fiction.
         let (body, truncated) = resolved.failure == nil
             ? RequestLog.cappedBody(resolved.body)
@@ -199,6 +188,7 @@ enum VaporConfigurator {
             method: incoming.method,
             path: incoming.path,
             backendID: incoming.backendID,
+            backendName: backendName, listenerPort: listenerPort,
             requestHeaders: incoming.headers,
             requestBody: requestBody,
             matchedEndpointID: resolved.matchedEndpointID,

@@ -1309,6 +1309,7 @@ struct RequestLogTableRow: View {
             }
             if log.outcome == .passthrough, onSaveAsMock != nil {
                 Button("Save real response as mock") { showingSaveConfirmation = true }
+                    .disabled((try? ResponseCapture.validate(log)) == nil)
                     .accessibilityIdentifier("requestLog.saveAsMock.\(log.id.uuidString)")
                     .accessibilityLabel("Save real response as mock")
             }
@@ -1390,8 +1391,10 @@ struct RequestLogTableRow: View {
                     .font(DSTypography.caption)
                     .foregroundStyle(DSColors.accentText)
                     .lineLimit(1)
+            case .proxyFailure:
+                Text(RequestOutcome.proxyFailure.label).foregroundStyle(DSColors.destructive)
             case .passthrough:
-                Text(RequestOutcome.passthrough.label)
+                Text((log.backendName.map { $0 + " · " } ?? "") + RequestOutcome.passthrough.label)
                     .font(DSTypography.caption)
                     .foregroundStyle(DSColors.success)
                     .lineLimit(1)
@@ -1451,6 +1454,7 @@ struct RequestLogTableRow: View {
             case .unmatched: label += ", unmatched"
             case .blockedByJourney: label += ", blocked by journey"
             case .journey: label += ", answered by journey"
+            case .proxyFailure: label += ", backend unavailable"
             case .passthrough: label += ", passed through to real backend"
             case .endpoint: break
             }

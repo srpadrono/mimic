@@ -1,131 +1,116 @@
 import SwiftUI
+import AppKit
 import Domain
 import DesignSystem
 
-/// Edits the same project-scoped commands used by the CLI and control API.
+/// A single draft: validation and publication use the same atomic command as automation.
 struct BackendSettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-
-    @State private var primaryPort = ""
-    @State private var primaryUpstream = ""
-    @State private var editingID: UUID?
-    @State private var backendName = ""
-    @State private var backendPort = ""
-    @State private var backendUpstream = ""
+    @State private var draft = ServerConfiguration.default
+    @State private var portText: [String: String] = [:]
+    @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            Text("Server settings")
-                .font(DSTypography.title)
-            Text("Each local port can forward calls without a mock to its own real backend.")
-                .foregroundStyle(DSColors.labelSecondary)
-
+        VStack(alignment: .leading, spacing: DSSpacing.lg) {
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                Text("Server settings").font(DSTypography.title)
+                Text("Point your app to each local URL. Mimic serves your mocks first, then forwards other calls to the real backend.")
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Form {
                 Section("Primary backend") {
-                    TextField("Local port", text: $primaryPort)
-                        .accessibilityIdentifier("backend.primary.port")
-                        .accessibilityLabel("Primary local port")
-                    TextField("Real backend URL", text: $primaryUpstream)
-                        .accessibilityIdentifier("backend.primary.upstream")
-                        .accessibilityLabel("Primary real backend URL")
-                    Button("Save primary backend") {
-                        guard let port = Int(primaryPort) else { return }
-                        _ = appState.configurePrimaryBackend(port: port, upstreamURL: primaryUpstream)
-                    }
-                    .disabled(Int(primaryPort) == nil)
-                    .accessibilityIdentifier("backend.primary.save")
-                    .accessibilityLabel("Save primary backend")
+                    fields(name: $draft.primaryName, port: $draft.port, upstream: $draft.upstreamURL,
+                           enabled: $draft.passthroughEnabled, capture: $draft.captureResponses, prefix: "backend.primary")
                 }
-
-                Section("Additional backends") {
-                    ForEach(appState.serverConfiguration.backends) { backend in
-                        HStack(spacing: DSSpacing.sm) {
-                            VStack(alignment: .leading) {
-                                Text(backend.name)
-                                Text("localhost:\(backend.port) → \(backend.upstreamURL ?? "Pass-through off")")
-                                    .foregroundStyle(DSColors.labelSecondary)
-                            }
-                            Spacer()
-                            Button("Edit") { edit(backend) }
-                                .accessibilityIdentifier("backend.edit.\(backend.id)")
-                                .accessibilityLabel("Edit \(backend.name)")
-                            Button("Delete") { _ = appState.deleteBackend(id: backend.id) }
-                                .accessibilityIdentifier("backend.delete.\(backend.id)")
-                                .accessibilityLabel("Delete \(backend.name)")
+                ForEach($draft.backends) { $backend in
+                    Section {
+                        fields(name: $backend.name, port: $backend.port, upstream: $backend.upstreamURL,
+                               enabled: $backend.passthroughEnabled, capture: $backend.captureResponses,
+                               prefix: "backend.\(backend.id)")
+                        Button("Remove backend", role: .destructive) {
+                            draft.backends.removeAll { $0.id == backend.id }
                         }
-                    }
-
-                    Text(editingID == nil ? "Add backend" : "Edit backend")
-                        .font(DSTypography.headline)
-                    TextField("Name", text: $backendName)
-                        .accessibilityIdentifier("backend.name")
-                        .accessibilityLabel("Backend name")
-                    TextField("Local port", text: $backendPort)
-                        .accessibilityIdentifier("backend.port")
-                        .accessibilityLabel("Backend local port")
-                    TextField("Real backend URL", text: $backendUpstream)
-                        .accessibilityIdentifier("backend.upstream")
-                        .accessibilityLabel("Backend real URL")
-                    HStack {
-                        Button(editingID == nil ? "Add backend" : "Save backend") { saveBackend() }
-                            .disabled(backendName.isEmpty || Int(backendPort) == nil)
-                            .accessibilityIdentifier("backend.save")
-                            .accessibilityLabel(editingID == nil ? "Add backend" : "Save backend")
-                        if editingID != nil {
-                            Button("Cancel edit") { resetEditor() }
-                                .accessibilityIdentifier("backend.cancelEdit")
-                                .accessibilityLabel("Cancel edit")
-                        }
-                    }
+                        .accessibilityIdentifier("backend.delete.\(backend.id)")
+                        .accessibilityLabel("Remove \(backend.name)")
+                    } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
                 }
+                Button("Add backend", systemImage: "plus") {
+                    let used = Set(draft.listeners.map(\.port))
+                    let port = (8081...65535).first { !used.contains($0) } ?? 8081
+                    draft.backends.append(BackendConfiguration(name: "New backend", port: port))
+                }
+                .accessibilityIdentifier("backend.add")
+                .accessibilityLabel("Add backend")
             }
-
-            if let error = appState.lastCommandError {
-                Text(error)
-                    .foregroundStyle(DSColors.destructive)
+            .formStyle(.grouped)
+            if let error {
+                Text(error).foregroundStyle(DSColors.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("backend.error")
             }
-            HStack {
-                Text("Changes to local ports take effect when you restart the server.")
-                    .foregroundStyle(DSColors.labelSecondary)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .accessibilityIdentifier("backend.done")
-                    .accessibilityLabel("Done")
+            HStack(spacing: DSSpacing.md) {
+                Text("Backend URLs and pass-through changes apply immediately. Adding, removing, or changing a local port requires a server restart.")
+                    .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: DSSpacing.md)
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("backend.cancel")
+                    .accessibilityLabel("Cancel settings changes")
+                Button("Apply") {
+                    if appState.applyServerConfiguration(draft) { dismiss() }
+                    else { error = appState.lastCommandError }
+                }
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("backend.apply")
+                .accessibilityLabel("Apply server settings")
             }
         }
         .padding(DSSpacing.lg)
-        .onAppear {
-            primaryPort = String(appState.serverConfiguration.port)
-            primaryUpstream = appState.serverConfiguration.upstreamURL ?? ""
-        }
+        // A settings sheet needs room for a complete URL and two backend cards.
+        .frame(width: BackendSettingsGeometry.width, height: BackendSettingsGeometry.height)
+        .onAppear { draft = appState.serverConfiguration }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("backend.settings")
     }
 
-    private func edit(_ backend: BackendConfiguration) {
-        editingID = backend.id
-        backendName = backend.name
-        backendPort = String(backend.port)
-        backendUpstream = backend.upstreamURL ?? ""
-    }
-
-    private func saveBackend() {
-        guard let port = Int(backendPort) else { return }
-        let saved: Bool
-        if let editingID {
-            saved = appState.updateBackend(id: editingID, name: backendName, port: port, upstreamURL: backendUpstream)
-        } else {
-            saved = appState.addBackend(name: backendName, port: port, upstreamURL: backendUpstream)
+    @ViewBuilder
+    private func fields(name: Binding<String>, port: Binding<Int>, upstream: Binding<String?>,
+                        enabled: Binding<Bool>, capture: Binding<Bool>, prefix: String) -> some View {
+        TextField("Name", text: name)
+            .accessibilityIdentifier(prefix + ".name").accessibilityLabel("Backend name")
+        TextField("Local port", text: Binding(get: { portText[prefix] ?? String(port.wrappedValue) }, set: {
+            portText[prefix] = $0
+            port.wrappedValue = Int($0) ?? 0
+        }))
+            .accessibilityIdentifier(prefix + ".port").accessibilityLabel("Local port")
+        LabeledContent("App connects to") {
+            HStack {
+                Text("http://localhost:\(String(port.wrappedValue))").textSelection(.enabled)
+                Button("Copy", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("http://localhost:\(port.wrappedValue)", forType: .string)
+                }
+                .accessibilityIdentifier(prefix + ".copy").accessibilityLabel("Copy local URL")
+            }
         }
-        if saved { resetEditor() }
+        Toggle("Pass through unmatched requests", isOn: enabled)
+            .accessibilityIdentifier(prefix + ".enabled").accessibilityLabel("Pass through unmatched requests")
+        TextField("Real backend URL", text: Binding(get: { upstream.wrappedValue ?? "" }, set: { upstream.wrappedValue = $0.isEmpty ? nil : $0 }))
+            .disabled(!enabled.wrappedValue)
+            .accessibilityIdentifier(prefix + ".upstream").accessibilityLabel("Real backend URL")
+        Toggle("Automatically save responses as mocks", isOn: capture)
+            .disabled(!enabled.wrappedValue)
+            .accessibilityIdentifier(prefix + ".capture").accessibilityLabel("Automatically save responses as mocks")
+        Text("Capture saves complete text responses up to 64 KB and removes credential headers. Bodies may contain private data. Once saved, a mock answers future matching calls.")
+            .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    private func resetEditor() {
-        editingID = nil
-        backendName = ""
-        backendPort = ""
-        backendUpstream = ""
-    }
+private enum BackendSettingsGeometry {
+    static let width: CGFloat = 640
+    static let height: CGFloat = 650
 }

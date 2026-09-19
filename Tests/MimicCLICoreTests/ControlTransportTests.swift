@@ -40,6 +40,8 @@ private let singleCommandVerbs: [([String], ControlCommand)] = [
     (["server", "status"], .serverStatus),
     (["server", "configure", "--port", "9000", "--delay", "250"],
      .serverConfigure(port: 9000, globalDelayMs: 250)),
+    (["server", "configure", "--name", "Catalog", "--pass-through", "false", "--capture-responses", "true"],
+     .serverConfigure(port: nil, globalDelayMs: nil, name: "Catalog", passthroughEnabled: false, captureResponses: true)),
     (["server", "backend", "add", "--name", "Accounts", "--port", "9001", "--upstream", "https://accounts.example.com"],
      .backendUpsert(id: nil, name: "Accounts", port: 9001, upstreamURL: "https://accounts.example.com")),
     (["server", "backend", "delete", "00000000-0000-0000-0000-000000000001"],

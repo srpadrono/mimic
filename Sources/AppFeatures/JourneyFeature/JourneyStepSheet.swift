@@ -96,8 +96,8 @@ struct JourneyStepSheet: View {
                     .accessibilityLabel("HTTP method")
 
                     Picker("Backend", selection: $selectedBackend) {
-                        Text("Primary").tag("primary")
-                        ForEach(backends) { backend in
+                        Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
+                        ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
                             Text(backend.name).tag(backend.id.uuidString)
                         }
                     }

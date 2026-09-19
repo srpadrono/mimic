@@ -15,6 +15,9 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var globalDelayMs: Int
     public var upstreamURL: String?
     public var backendsJSON: String
+    public var primaryName: String
+    public var passthroughEnabled: Bool
+    public var captureResponses: Bool
     public var activeJourneyID: String?
 
     /// Creates a ProjectRecord from a domain MockProject.
@@ -28,6 +31,9 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.globalDelayMs = project.serverConfiguration.globalDelayMs
         self.upstreamURL = project.serverConfiguration.upstreamURL
         self.backendsJSON = String(data: (try? JSONEncoder().encode(project.serverConfiguration.backends)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
+        self.primaryName = project.serverConfiguration.primaryName
+        self.passthroughEnabled = project.serverConfiguration.passthroughEnabled
+        self.captureResponses = project.serverConfiguration.captureResponses
         self.activeJourneyID = project.activeJourneyID?.uuidString
     }
 
@@ -71,15 +77,16 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     ///
     /// Carrying the stored integer through unchanged would need a `schemaVersion:` parameter on
     /// `MockProject.init`, which is a change to Domain rather than to this record.
-    public func toDomain() -> MockProject {
-        MockProject(
+    public func toDomain() throws -> MockProject {
+        let backends = try JSONDecoder().decode([BackendConfiguration].self, from: Data(backendsJSON.utf8))
+        return MockProject(
             id: UUID(uuidString: id) ?? UUID(),
             name: name,
             serverConfiguration: ServerConfiguration(
                 port: serverPort,
                 globalDelayMs: globalDelayMs,
                 upstreamURL: upstreamURL,
-                backends: (try? JSONDecoder().decode([BackendConfiguration].self, from: Data(backendsJSON.utf8))) ?? []
+                backends: backends, primaryName: primaryName, passthroughEnabled: passthroughEnabled, captureResponses: captureResponses
             ),
             endpoints: [],
             journeys: [],

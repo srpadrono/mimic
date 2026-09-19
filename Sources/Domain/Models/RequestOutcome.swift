@@ -24,6 +24,7 @@ public enum RequestOutcome: String, Codable, Sendable, CaseIterable {
     case blockedByJourney
     /// No mock matched; the configured real backend answered.
     case passthrough
+    case proxyFailure
 
     /// Whether this outcome means Mimic had nothing configured for the request.
     public var isMissingConfiguration: Bool {
@@ -38,6 +39,7 @@ public enum RequestOutcome: String, Codable, Sendable, CaseIterable {
         case .unmatched: "Unmatched"
         case .blockedByJourney: "Blocked"
         case .passthrough: "Passed through"
+        case .proxyFailure: "Backend unavailable"
         }
     }
 }

@@ -162,7 +162,7 @@ public enum ProjectValidator {
         }
         for backend in additional { try EndpointValidator.validatePort(backend.port) }
         let backendIDs = Set(additional.map(\.id))
-        guard backendIDs.count == additional.count else {
+        guard backendIDs.count == additional.count, !backendIDs.contains(ServerConfiguration.primaryID) else {
             throw ValidationError.invalidDocument(context: "server configuration", reason: "Backend IDs must be unique.")
         }
         if let upstreamURL = project.serverConfiguration.upstreamURL {
@@ -176,6 +176,17 @@ public enum ProjectValidator {
             }
         }
 
+        for backend in project.serverConfiguration.listeners {
+            guard !backend.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidDocument(context: "backend", reason: "A name is required.")
+            }
+            if backend.passthroughEnabled && backend.upstreamURL?.isEmpty != false {
+                throw ValidationError.invalidDocument(context: backend.name, reason: "Enter a real backend URL or turn off pass-through.")
+            }
+            if let url = backend.upstreamURL {
+                for port in allPorts { try ProjectCommandExecutor.validateUpstream(url, localPort: port) }
+            }
+        }
         for endpoint in project.endpoints {
             if let backendID = endpoint.backendID, !backendIDs.contains(backendID) {
                 throw ValidationError.invalidDocument(context: context(for: endpoint), reason: "Backend does not exist.")

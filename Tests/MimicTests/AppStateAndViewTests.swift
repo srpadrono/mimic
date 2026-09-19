@@ -52,6 +52,49 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.endpoints.isEmpty == true)
     }
 
+    @Test("Capture preserves GraphQL identity and refuses duplicate mocks")
+    func capturedGraphQLStaysSpecific() throws {
+        let appState = try makeAppState()
+        appState.currentProject = MockProject(name: "GraphQL")
+        let log = RequestLog(method: .post, path: "/graphql", requestBody: #"{"query":"query Account { me { id } }","operationName":"Account"}"#,
+            responseStatusCode: 200, responseBody: "{}", outcome: .passthrough)
+        appState.requestLogs = [log]
+        let endpoint = try #require(appState.savePassedThroughLogAsMock(id: log.id))
+        #expect(endpoint.graphqlOperation == "Account")
+        #expect(appState.savePassedThroughLogAsMock(id: log.id) == nil)
+        #expect(appState.currentProject?.endpoints.count == 1)
+    }
+
+    @Test("Automatic capture accepts only the current project and captures once")
+    func automaticCaptureIsProjectScoped() throws {
+        let appState = try makeAppState()
+        let project = MockProject(name: "Capture", serverConfiguration: .init(port: 8080, globalDelayMs: 0,
+            upstreamURL: "https://api.example.com", captureResponses: true))
+        appState.currentProject = project
+        let stale = RequestLog(method: .get, path: "/stale", projectID: UUID(), responseStatusCode: 200, responseBody: "old", outcome: .passthrough)
+        let current = RequestLog(method: .get, path: "/current", projectID: project.id, responseStatusCode: 200, responseBody: "new", outcome: .passthrough)
+        appState.requestLogs = [stale, current]
+        appState.server.onLog?(stale)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+        appState.server.onLog?(current)
+        appState.server.onLog?(current)
+        #expect(appState.currentProject?.endpoints.count == 1)
+        #expect(appState.currentProject?.endpoints.first?.path == "/current")
+    }
+
+    @Test("Retry changes the conflicting secondary backend and skips occupied project ports")
+    func secondaryPortConflictRecovery() async throws {
+        let engine = StubEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        appState.currentProject = MockProject(name: "Ports", serverConfiguration: .init(port: 9002, globalDelayMs: 0,
+            backends: [.init(name: "Accounts", port: 9001)]))
+        appState.retryStartOnNextPort(from: 9001)
+        try await waitUntil { await engine.startConfigurations.count == 1 }
+        #expect(appState.serverConfiguration.port == 9002)
+        #expect(appState.serverConfiguration.backends.first?.port == 9003)
+        #expect(await engine.startConfigurations.first?.backends.first?.port == 9003)
+    }
+
     actor StubEngine: MockServerEngineProtocol {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation

@@ -36,23 +36,26 @@ public actor MockServerEngine {
         isStarting = true
         defer { isStarting = false }
 
-        let listeners: [(Int, UUID?, String?)] = [(configuration.port, nil, configuration.upstreamURL)]
-            + configuration.backends.map { ($0.port, $0.id, $0.upstreamURL) }
+        await routeStore.updateServerConfiguration(configuration)
+        let listeners = configuration.listeners.map { ($0.port, $0.id == ServerConfiguration.primaryID ? nil : Optional($0.id)) }
         let localPorts = Set(listeners.map(\.0))
         guard localPorts.count == listeners.count else {
             throw MockServerError.invalidConfiguration("Each backend must use a different local port.")
         }
         var started: [Int: Application] = [:]
         do {
-            for (port, backendID, upstreamURL) in listeners {
+            for (port, backendID) in listeners {
                 let env = Environment(name: "development", arguments: ["vapor"])
                 let newApp = try await Application.make(env)
                 newApp.logger.logLevel = .warning
+                newApp.http.client.configuration.redirectConfiguration = .disallow
+                newApp.http.client.configuration.decompression = .disabled
+                newApp.http.client.configuration.timeout = .init(connect: .seconds(10), read: .seconds(30))
                 newApp.http.server.configuration.hostname = "127.0.0.1"
                 newApp.http.server.configuration.port = port
                 VaporConfigurator.registerRoutes(
                     on: newApp, routeStore: routeStore, logContinuation: logContinuation,
-                    backendID: backendID, upstreamURL: upstreamURL, localPorts: localPorts
+                    backendID: backendID, listenerPort: port, localPorts: localPorts
                 )
                 do {
                     try await newApp.server.start(address: .hostname("127.0.0.1", port: port))
@@ -70,6 +73,10 @@ public actor MockServerEngine {
             }
             throw error
         }
+    }
+
+    public func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID? = nil) async {
+        await routeStore.updateServerConfiguration(configuration, projectID: projectID)
     }
 
     public func stop() async throws {

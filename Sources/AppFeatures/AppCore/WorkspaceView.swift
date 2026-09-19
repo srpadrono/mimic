@@ -262,10 +262,10 @@ struct WorkspaceView: View {
                         Button {
                             showBackendSettings = true
                         } label: {
-                            Label("Server settings", systemImage: "network")
+                            Label(appState.server.restartRequired ? "Restart required" : "Server settings", systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "network")
                         }
                         .disabled(appState.currentProject == nil)
-                        .help("Configure local ports and real backends")
+                        .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
                         .accessibilityIdentifier("backend.settingsButton")
                         .accessibilityLabel("Server settings")
                     }
@@ -920,7 +920,10 @@ struct WorkspaceView: View {
             onAddScenario: { _ = appState.addScenario(endpointID: $0, name: $1) },
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
-            onDeleteScenario: appState.deleteScenario
+            onDeleteScenario: appState.deleteScenario,
+            onSaveAsMock: { id in
+                _ = appState.savePassedThroughLogAsMock(id: id)
+            }
         )
     }
 
@@ -944,7 +947,7 @@ struct WorkspaceView: View {
                 scenarioID: log.matchedScenarioID,
                 endpoints: endpoints
             ),
-            port: appState.serverState.runningPort
+            port: log.listenerPort ?? appState.serverState.runningPort
         )
     }
 

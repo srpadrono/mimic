@@ -663,6 +663,11 @@ jobs:
           export MIMIC_APP_PATH="$products/Mimic.app"
           ./Scripts/run_cli_e2e.sh
 
+      - name: Pass-through end-to-end (synthetic HTTP)
+        run: |
+          products="$PWD/$DERIVED_DATA/Build/Products/Debug"
+          python3 Scripts/test_passthrough_e2e.py --app "$products/Mimic.app" --cli "$products/mimic"
+
       # Run after the tests so a compile-only failure does not hide a test result.
       #
       # This step's comment used to claim Release compiles with "different warnings-as-errors, so it
@@ -894,6 +899,7 @@ jobs:
           - id: 2
             name: workspace shell, welcome, request log
             only: >-
+              -only-testing:MimicUITests/BackendSettingsUITests
               -only-testing:MimicUITests/WorkspaceShellUITests
               -only-testing:MimicUITests/WelcomeProjectUITests
               -only-testing:MimicUITests/RequestLogUITests

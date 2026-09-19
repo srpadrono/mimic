@@ -58,8 +58,8 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case serverStart(port: Int?)
     case serverStop
     case serverStatus
-    case serverConfigure(port: Int?, globalDelayMs: Int?, upstreamURL: String? = nil)
-    case backendUpsert(id: UUID?, name: String?, port: Int?, upstreamURL: String?)
+    case serverConfigure(port: Int?, globalDelayMs: Int?, upstreamURL: String? = nil, configuration: ServerConfiguration? = nil, name: String? = nil, passthroughEnabled: Bool? = nil, captureResponses: Bool? = nil)
+    case backendUpsert(id: UUID?, name: String?, port: Int?, upstreamURL: String?, passthroughEnabled: Bool? = nil, captureResponses: Bool? = nil)
     case backendDelete(id: UUID)
 
     // MARK: Endpoints
@@ -362,7 +362,8 @@ extension JourneyStepSpec {
     /// than the route a step matches. And for a request nothing answered — `unmatched`, or one an
     /// active journey blocked — the *status* is copied but the body is not: that body is Mimic's own
     /// diagnostic text, and baking "No mock endpoint matched." into a journey would be nonsense.
-    public static func capturing(_ log: RequestLog, name: String? = nil) -> JourneyStepSpec {
+    public static func capturing(_ log: RequestLog, name: String? = nil) throws -> JourneyStepSpec {
+        try ResponseCapture.validate(log)
         let path = log.path.firstIndex(of: "?").map { String(log.path[log.path.startIndex..<$0]) } ?? log.path
         let route = path.hasPrefix("/") ? path : "/\(path)"
 
@@ -389,7 +390,10 @@ extension JourneyStepSpec {
 
     /// Headers worth scripting: everything except the content type, which the step models separately.
     private static func replayableHeaders(_ headers: [String: String]) -> [String: String]? {
-        let filtered = headers.filter { $0.key.caseInsensitiveCompare("Content-Type") != .orderedSame }
+        let filtered = ResponseCapture.headers(headers).filter {
+            $0.key.caseInsensitiveCompare("Content-Type") != .orderedSame
+                || !["application/json", "text/plain"].contains($0.value.lowercased())
+        }
         return filtered.isEmpty ? nil : filtered
     }
 
@@ -413,7 +417,7 @@ extension JourneyStepSpec {
     ///   exactly what that field models. Only *consecutive*, and only when the response matches too:
     ///   a poll returning `202, 202, 202, 200` is two steps, and collapsing it into one would erase
     ///   the transition the journey exists to reproduce.
-    public static func capturing(_ logs: [RequestLog]) -> [JourneyStepSpec] {
+    public static func capturing(_ logs: [RequestLog]) throws -> [JourneyStepSpec] {
         // `enumerated()` before sorting because `sorted(by:)` guarantees no stability: two requests
         // logged in the same instant would otherwise land in either order from one run to the next,
         // and a captured journey has to be reproducible.
@@ -425,8 +429,8 @@ extension JourneyStepSpec {
                     : lhs.element.timestamp < rhs.element.timestamp
             }
 
-        return ordered.reduce(into: []) { steps, entry in
-            let step = capturing(entry.element)
+        return try ordered.reduce(into: []) { steps, entry in
+            let step = try capturing(entry.element)
             guard let previous = steps.last, previous.isAnotherOccurrence(of: step) else {
                 steps.append(step)
                 return

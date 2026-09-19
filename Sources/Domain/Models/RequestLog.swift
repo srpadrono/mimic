@@ -46,7 +46,13 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
     public let timestamp: Date
     public let method: HTTPMethod
     public let path: String
+    public let projectID: UUID?
     public let backendID: UUID?
+    public let backendName: String?
+    public let listenerPort: Int?
+    public let upstreamURL: String?
+    public let durationMs: Int?
+    public let responseBodyIsBinary: Bool?
     public let requestHeaders: [String: String]
     public let requestBody: String?
     public let matchedEndpointID: UUID?
@@ -79,6 +85,12 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         method: HTTPMethod,
         path: String,
         backendID: UUID? = nil,
+        projectID: UUID? = nil,
+        backendName: String? = nil,
+        listenerPort: Int? = nil,
+        upstreamURL: String? = nil,
+        durationMs: Int? = nil,
+        responseBodyIsBinary: Bool? = nil,
         requestHeaders: [String: String] = [:],
         requestBody: String? = nil,
         matchedEndpointID: UUID? = nil,
@@ -96,7 +108,13 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         self.timestamp = timestamp
         self.method = method
         self.path = path
+        self.projectID = projectID
         self.backendID = backendID
+        self.backendName = backendName
+        self.listenerPort = listenerPort
+        self.upstreamURL = upstreamURL
+        self.durationMs = durationMs
+        self.responseBodyIsBinary = responseBodyIsBinary
         self.requestHeaders = requestHeaders
         self.requestBody = requestBody
         self.matchedEndpointID = matchedEndpointID
@@ -127,7 +145,12 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
             timestamp: timestamp,
             method: method,
             path: path,
-            backendID: backendID,
+            backendID: backendID, projectID: projectID,
+            backendName: backendName,
+            listenerPort: listenerPort,
+            upstreamURL: upstreamURL,
+            durationMs: durationMs,
+            responseBodyIsBinary: responseBodyIsBinary,
             requestHeaders: Self.redacted(requestHeaders),
             requestBody: requestBody,
             matchedEndpointID: matchedEndpointID,

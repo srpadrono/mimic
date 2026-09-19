@@ -54,7 +54,7 @@ struct CenterPaneView: View {
                 endpoint: endpoint,
                 activeScenario: activeScenario,
                 globalDelayMs: appState.serverConfiguration.globalDelayMs,
-                backends: appState.serverConfiguration.backends,
+                backends: appState.serverConfiguration.listeners,
                 actions: EndpointEditorActions(
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },

@@ -120,7 +120,7 @@ struct DuplicationCompletenessTests {
             backends: [BackendConfiguration(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000099")!,
                 name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com"
-            )]
+            )], primaryName: "Catalog", captureResponses: true
         ),
         endpoints: [endpoint],
         journeys: [journey],

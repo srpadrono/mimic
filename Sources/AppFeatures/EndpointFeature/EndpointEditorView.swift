@@ -590,8 +590,8 @@ struct EndpointEditorView: View {
                 get: { endpoint.backendID },
                 set: { actions.onUpdateBackend($0) }
             )) {
-                Text("Primary").tag(nil as UUID?)
-                ForEach(backends) { backend in
+                Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag(nil as UUID?)
+                ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
                     Text(backend.name).tag(backend.id as UUID?)
                 }
             }

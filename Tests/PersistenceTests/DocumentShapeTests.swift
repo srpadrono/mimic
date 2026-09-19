@@ -29,7 +29,7 @@ struct DocumentShapeTests {
 
     /// The version `recordedKeyPaths` below describes. Bumped with `currentSchemaVersion`, never
     /// before or after it.
-    private static let recordedShapeVersion = 4
+    private static let recordedShapeVersion = 5
 
     /// Every key path `fullyPopulatedProject()` encodes to, as of `recordedShapeVersion`.
     ///
@@ -54,6 +54,11 @@ struct DocumentShapeTests {
         "modifiedAt",
 
         // ServerConfiguration
+        "serverConfiguration.primaryName",
+        "serverConfiguration.passthroughEnabled",
+        "serverConfiguration.captureResponses",
+        "serverConfiguration.backends[].passthroughEnabled",
+        "serverConfiguration.backends[].captureResponses",
         "serverConfiguration.port",
         "serverConfiguration.globalDelayMs",
         "serverConfiguration.upstreamURL",

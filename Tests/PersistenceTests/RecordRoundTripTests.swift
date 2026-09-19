@@ -151,7 +151,7 @@ struct RecordRoundTripTests {
         name: "Round trip",
         serverConfiguration: ServerConfiguration(
             port: 9191, globalDelayMs: 250, upstreamURL: "https://api.example.com",
-            backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com")]
+            backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com")], primaryName: "Catalog", captureResponses: true
         ),
         endpoints: [endpoint],
         journeys: [journey],
