@@ -40,7 +40,7 @@ enum ProxyForwarder {
         logContinuation: AsyncStream<RequestLog>.Continuation
     ) async -> Response {
         let started = ContinuousClock.now
-        let requestBody = RequestLog.cappedBody(incoming.body).body
+        let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
         @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
             let text = String(data: preview, encoding: .utf8)
             let elapsed = started.duration(to: .now).components
@@ -50,7 +50,7 @@ enum ProxyForwarder {
                 upstreamURL: target(base: upstreamURL, requestURI: request.url.string)?.absoluteString,
                 durationMs: Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000),
                 responseBodyIsBinary: text == nil,
-                requestHeaders: incoming.headers, requestBody: requestBody,
+                requestHeaders: incoming.headers, requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
                 responseStatusCode: status,
                 responseHeaders: Dictionary(headers.map { ($0.name, $0.value) }, uniquingKeysWith: { first, last in first + ", " + last }),
                 responseBody: text, responseBodyTruncated: truncated,
@@ -76,7 +76,7 @@ enum ProxyForwarder {
             if let body = request.body.data { outgoing.body = .bytes(body) }
             // AsyncHTTPClient cancels this deadline timer when response headers arrive; streaming
             // bodies retain the idle read timeout without a fixed total-duration limit.
-            let upstream = try await request.application.http.client.shared.execute(outgoing, deadline: .now() + .seconds(30))
+            let upstream = try await request.application.http.client.shared.execute(outgoing, timeout: .seconds(30))
             let headers = endToEndHeaders(upstream.headers)
             let status = Int(upstream.status.code)
             if request.method == .HEAD || status == 204 || status == 304 {

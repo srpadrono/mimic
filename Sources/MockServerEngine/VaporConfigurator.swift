@@ -182,7 +182,7 @@ enum VaporConfigurator {
         // The request body is capped on the same terms as the response. It arrives up to the route's
         // 10 MB collect limit and the log holds a thousand entries, so an uncapped one is the larger
         // of the two exposures — a client posting big payloads grows the log without bound.
-        let (requestBody, _) = RequestLog.cappedBody(incoming.body)
+        let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
 
         return RequestLog(
             method: incoming.method,
@@ -190,7 +190,7 @@ enum VaporConfigurator {
             backendID: incoming.backendID,
             backendName: backendName, listenerPort: listenerPort,
             requestHeaders: incoming.headers,
-            requestBody: requestBody,
+            requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
             matchedEndpointID: resolved.matchedEndpointID,
             matchedScenarioID: resolved.matchedScenarioID,
             // A failed request never produced a status; recording one would be a lie the request log

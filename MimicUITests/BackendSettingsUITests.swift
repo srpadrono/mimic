@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 
 @MainActor
-private struct BackendSettingsPage {
+struct BackendSettingsPage {
     let app: XCUIApplication
     var open: XCUIElement { app.buttons["backend.settingsButton"].firstMatch }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
@@ -52,7 +52,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
         XCTAssertEqual(page.primaryName.value as? String, "Catalog")
         XCTAssertEqual(page.additional("port").value as? String, "18081")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         screenshot.name = "Backend settings — saved configuration"
         screenshot.lifetime = .keepAlways
         add(screenshot)

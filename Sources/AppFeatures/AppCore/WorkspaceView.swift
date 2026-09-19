@@ -873,6 +873,7 @@ struct WorkspaceView: View {
             onSaveAsMock: { id in
                 if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
                     selectedEndpointID = endpoint.id
+                    selectedLogIDs = []
                 }
             },
             journeys: appState.journeys,
@@ -922,7 +923,10 @@ struct WorkspaceView: View {
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
             onDeleteScenario: appState.deleteScenario,
             onSaveAsMock: { id in
-                _ = appState.savePassedThroughLogAsMock(id: id)
+                if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
+                    selectedEndpointID = endpoint.id
+                    selectedLogIDs = []
+                }
             }
         )
     }

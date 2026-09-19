@@ -55,6 +55,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
     public let responseBodyIsBinary: Bool?
     public let requestHeaders: [String: String]
     public let requestBody: String?
+    public let requestBodyTruncated: Bool?
     public let matchedEndpointID: UUID?
     public let matchedScenarioID: UUID?
     public let responseStatusCode: Int?
@@ -93,6 +94,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         responseBodyIsBinary: Bool? = nil,
         requestHeaders: [String: String] = [:],
         requestBody: String? = nil,
+        requestBodyTruncated: Bool? = nil,
         matchedEndpointID: UUID? = nil,
         matchedScenarioID: UUID? = nil,
         responseStatusCode: Int? = nil,
@@ -117,6 +119,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         self.responseBodyIsBinary = responseBodyIsBinary
         self.requestHeaders = requestHeaders
         self.requestBody = requestBody
+        self.requestBodyTruncated = requestBodyTruncated
         self.matchedEndpointID = matchedEndpointID
         self.matchedScenarioID = matchedScenarioID
         self.responseStatusCode = responseStatusCode
@@ -152,7 +155,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
             durationMs: durationMs,
             responseBodyIsBinary: responseBodyIsBinary,
             requestHeaders: Self.redacted(requestHeaders),
-            requestBody: requestBody,
+            requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
             matchedEndpointID: matchedEndpointID,
             matchedScenarioID: matchedScenarioID,
             responseStatusCode: responseStatusCode,

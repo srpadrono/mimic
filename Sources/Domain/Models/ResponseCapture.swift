@@ -6,6 +6,9 @@ public enum ResponseCapture {
         guard log.outcome != .proxyFailure else {
             throw ControlError.invalid("The backend did not return a complete response.")
         }
+        guard log.requestBodyTruncated != true else {
+            throw ControlError.invalid("The request preview is incomplete, so its operation cannot be captured safely.")
+        }
         guard !log.responseBodyTruncated else {
             throw ControlError.invalid("This response exceeds the capture limit. Save a complete response instead.")
         }

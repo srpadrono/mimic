@@ -15,7 +15,9 @@ struct ResponseCaptureTests {
         let partial = RequestLog(method: .get, path: "/large", responseStatusCode: 200, responseBody: "partial", responseBodyTruncated: true, outcome: .passthrough)
         let failed = RequestLog(method: .get, path: "/offline", responseStatusCode: 502, outcome: .proxyFailure)
         let compressed = RequestLog(method: .get, path: "/gzip", responseStatusCode: 200, responseHeaders: ["Content-Encoding": "gzip"], outcome: .passthrough)
-        for log in [binary, partial, failed, compressed] {
+        let partialRequest = RequestLog(method: .post, path: "/graphql", requestBody: "{partial", requestBodyTruncated: true,
+            responseStatusCode: 200, responseBody: "{}", outcome: .passthrough)
+        for log in [binary, partial, failed, compressed, partialRequest] {
             #expect(throws: ControlError.self) { try ResponseCapture.validate(log) }
             #expect(throws: ControlError.self) { try JourneyStepSpec.capturing(log) }
         }
