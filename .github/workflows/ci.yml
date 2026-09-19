@@ -351,19 +351,6 @@ jobs:
           python3 Scripts/check_ui_shards.py --self-test
           python3 Scripts/check_ui_shards.py
 
-      # AGENTS.md is a router now: it keeps what is true on every task and sends the rest to a skill
-      # under `.agents/skills/`, which is why it is 241 lines rather than the 807 it reached. That
-      # bought three promises, and all three fail silently. `.claude/skills/` mirrors the skills by
-      # symlink so Claude Code and every other agent read one copy — add a skill to only one side and
-      # it is invisible to half of them, with nothing going red. Each `SKILL.md`'s front matter has to
-      # name its own directory, because an agent matches the front matter while the tooling finds the
-      # file by path. And the routing table has to cover every skill and point only at real ones: a
-      # row naming a skill that does not exist sends an agent nowhere, a skill missing from the table
-      # is one it never thinks to load. Directory listings and a little text — no toolchain, which is
-      # why it sits in the Linux job with the other cheap gates.
-      - name: Skill layout
-        run: python3 Scripts/check_skills.py
-
       # `Scripts/update_readme_coverage.py` builds the badge payloads `record-coverage` publishes
       # and rewrites the README's generated table, and until this line it had no automated check of
       # any kind. Half of it needs `xcrun xccov` and a real `.xcresult`, so only the macOS job can

@@ -1,25 +1,7 @@
 # `.claude/` — Claude Code configuration
 
-What is here and why. The repository's actual guidance lives in [AGENTS.md](../AGENTS.md) and the
-skills it routes to; this directory is the harness around them.
-
-## `skills/`
-
-Nine symlinks into [`.agents/skills/`](../.agents/skills/), so Claude Code and every other agent read
-one copy rather than two that drift. Four are repo-specific (`mimic-build-and-test`,
-`mimic-window-design`, `mimic-ui-tests`, `mimic-control-surface`) and were carved out of AGENTS.md
-when it grew past 800 lines; four are local Swift guidance; `improve-codebase-architecture` is
-vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](../skills-lock.json).
-
-Adding a skill means adding the directory under `.agents/skills/` **and** the symlink here. A skill
-that exists in only one of the two places is invisible to half the agents that work on this repo —
-silently, because nothing fails, the rule is simply never read.
-
-[`Scripts/check_skills.py`](../Scripts/check_skills.py) is what makes that impossible to ship. It
-runs in `ci.sh` and in the Linux CI job, and it settles three things: the mirror is complete and is
-symlinks rather than copies, every `SKILL.md`'s front matter names its own directory, and AGENTS.md's
-routing table covers every skill and points only at real ones. It needs no toolchain, so it also
-runs in a web session.
+What is here and why. The repository's guidance lives in [AGENTS.md](../AGENTS.md); this directory
+contains Claude Code commands, settings, and a session-start hook. There are no repository skills.
 
 ## `hooks/session-start.sh`
 

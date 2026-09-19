@@ -96,8 +96,8 @@ test` and six more, and README's generated coverage block is written from the `.
 they produce. (That local run is the block's only writer, deliberately. CI measures the same thing on
 every run, from the one workspace-wide bundle its macOS job produces, but what it publishes on a push
 to `main` is the two README *badges*, as shields.io endpoint payloads force-pushed to an orphan
-`badges` branch — it never edits a tracked file. See the `mimic-build-and-test` skill,
-[`references/ci.md`](.agents/skills/mimic-build-and-test/references/ci.md).) (This file used to claim
+`badges` branch — it never edits a tracked file. See
+[the CI workflow](.github/workflows/ci.yml).) (This file used to claim
 the opposite about the schemes, which is why `Mimic-Workspace` was presented as the
 only way to run a unit suite. Prefer it because it covers everything in one pass, not because the
 others cannot test.) `xcodebuild -workspace Mimic.xcworkspace -list` prints what was actually
@@ -207,6 +207,13 @@ are the homes for HAR and traffic, and the OpenAPI/Swagger shape cases sit besid
 ## UI changes
 
 A UI change isn't done until the XCUITests cover it and pass. Three things reliably bite:
+
+**A UI test must never open or delete the developer's `mimic.sqlite`.** Launch with an isolated
+`MIMIC_DEFAULTS_SUITE`; `UITestSupport.databaseURL` then gives both `AppState` and the reset the
+same test-owned store (`mimic-uitests.sqlite`, or an explicitly named `MIMIC_DATABASE_PATH`). The
+reset is inert outside a UI test run, and `MIMIC_DATABASE_PATH` alone must not arm it. Likewise,
+`MIMIC_ERASE_DB_ON_SCHEMA_CHANGE` may erase only when an explicit database path is set. Never let
+a test or an erasing convenience derive its own deletion target from the production store.
 
 1. **Launch through `UITestApp.launchAndBringToForeground`.** `XCUIApplication.launch()` returns when
    the process is running, which is not the same as having a window the accessibility layer can see —
