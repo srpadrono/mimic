@@ -11,6 +11,47 @@ import Persistence
 @Suite("AppState And Views")
 @MainActor
 struct AppStateAndViewTests {
+    @Test("Saving a passed-through call copies the real reply onto its backend")
+    func savesPassedThroughReplyAsMock() throws {
+        let appState = try makeAppState()
+        let backendID = UUID()
+        appState.currentProject = MockProject(
+            name: "Captured",
+            serverConfiguration: .init(port: 8080, globalDelayMs: 0, backends: [
+                .init(id: backendID, name: "Accounts", port: 8081, upstreamURL: "https://accounts.example.com")
+            ])
+        )
+        let entry = RequestLog(
+            method: .get, path: "/profile?full=1", backendID: backendID,
+            responseStatusCode: 201,
+            responseHeaders: ["Content-Type": "application/json", "Set-Cookie": "secret", "X-Trace": "ok"],
+            responseBody: #"{"name":"Ada"}"#,
+            outcome: .passthrough
+        )
+        appState.requestLogs = [entry]
+        let endpoint = try #require(appState.savePassedThroughLogAsMock(id: entry.id))
+        #expect(endpoint.backendID == backendID)
+        #expect(endpoint.path == "/profile")
+        let scenario = try #require(endpoint.scenarios.first)
+        #expect(scenario.statusCode == 201)
+        #expect(scenario.body == #"{"name":"Ada"}"#)
+        #expect(scenario.headers["Set-Cookie"] == nil)
+        #expect(scenario.headers["X-Trace"] == "ok")
+    }
+
+    @Test("A truncated real response is refused as a mock")
+    func truncatedPassedThroughReplyIsRefused() throws {
+        let appState = try makeAppState()
+        appState.currentProject = MockProject(name: "Captured")
+        let entry = RequestLog(
+            method: .get, path: "/large", responseStatusCode: 200,
+            responseBody: "partial", responseBodyTruncated: true, outcome: .passthrough
+        )
+        appState.requestLogs = [entry]
+        #expect(appState.savePassedThroughLogAsMock(id: entry.id) == nil)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+    }
+
     actor StubEngine: MockServerEngineProtocol {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation

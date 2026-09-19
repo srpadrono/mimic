@@ -3,7 +3,7 @@ import Foundation
 public struct Endpoint: Identifiable, Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, method, path, scenarios, activeScenarioID, delayMs, groupTag, graphqlOperation
+        case id, name, method, path, scenarios, activeScenarioID, delayMs, groupTag, graphqlOperation, backendID
     }
 
     public let id: UUID
@@ -14,6 +14,8 @@ public struct Endpoint: Identifiable, Codable, Sendable, Equatable {
     public var activeScenarioID: UUID?
     public var delayMs: Int
     public var groupTag: String?
+    /// Nil selects the project's original listener; otherwise selects an additional backend.
+    public var backendID: UUID?
     /// Matches only requests asking for this GraphQL operation.
     ///
     /// GraphQL routes everything through one path, so method and path cannot tell two calls apart.
@@ -30,7 +32,8 @@ public struct Endpoint: Identifiable, Codable, Sendable, Equatable {
         activeScenarioID: UUID? = nil,
         delayMs: Int = 0,
         groupTag: String? = nil,
-        graphqlOperation: String? = nil
+        graphqlOperation: String? = nil,
+        backendID: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,6 +44,7 @@ public struct Endpoint: Identifiable, Codable, Sendable, Equatable {
         self.delayMs = delayMs
         self.groupTag = groupTag
         self.graphqlOperation = graphqlOperation
+        self.backendID = backendID
     }
 
     /// Hand-written so documents exported before GraphQL matching existed still decode.
@@ -55,5 +59,6 @@ public struct Endpoint: Identifiable, Codable, Sendable, Equatable {
         delayMs = try container.decodeIfPresent(Int.self, forKey: .delayMs) ?? 0
         groupTag = try container.decodeIfPresent(String.self, forKey: .groupTag)
         graphqlOperation = try container.decodeIfPresent(String.self, forKey: .graphqlOperation)
+        backendID = try container.decodeIfPresent(UUID.self, forKey: .backendID)
     }
 }

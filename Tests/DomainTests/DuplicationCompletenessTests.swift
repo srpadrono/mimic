@@ -70,7 +70,8 @@ struct DuplicationCompletenessTests {
         activeScenarioID: activeScenario.id,
         delayMs: 125,
         groupTag: "Billing",
-        graphqlOperation: "AccountSummary"
+        graphqlOperation: "AccountSummary",
+        backendID: UUID(uuidString: "00000000-0000-0000-0000-000000000099")
     )
 
     static let response = JourneyResponse(
@@ -87,7 +88,8 @@ struct DuplicationCompletenessTests {
         outcome: .respond(response),
         delayMs: 45,
         repeatCount: 4,
-        graphqlOperation: "AccountSummary"
+        graphqlOperation: "AccountSummary",
+        backendID: UUID(uuidString: "00000000-0000-0000-0000-000000000099")
     )
 
     static let timingOutStep = JourneyStep(
@@ -97,7 +99,8 @@ struct DuplicationCompletenessTests {
         outcome: .networkFailure(.timeout(holdMs: 7_500)),
         delayMs: 5,
         repeatCount: 2,
-        graphqlOperation: "AccountSummaryPoll"
+        graphqlOperation: "AccountSummaryPoll",
+        backendID: UUID(uuidString: "00000000-0000-0000-0000-000000000099")
     )
 
     static let journey = Journey(
@@ -112,7 +115,13 @@ struct DuplicationCompletenessTests {
 
     static let project = MockProject(
         name: "Round trip",
-        serverConfiguration: ServerConfiguration(port: 9191, globalDelayMs: 250),
+        serverConfiguration: ServerConfiguration(
+            port: 9191, globalDelayMs: 250, upstreamURL: "https://api.example.com",
+            backends: [BackendConfiguration(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000099")!,
+                name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com"
+            )]
+        ),
         endpoints: [endpoint],
         journeys: [journey],
         activeJourneyID: journey.id,
@@ -300,21 +309,23 @@ struct DuplicationCompletenessTests {
         return Self.withPositionalIdentifiers(in: String(decoding: data, as: UTF8.self))
     }
 
-    /// Every identifier the value encodes, taken from the encoded document rather than from a list of
-    /// properties — so an identifier added to a type later is covered without an edit here.
+    /// Database row identifiers only. A backend id is a project-local routing key and is deliberately
+    /// retained by a copy along with endpoint and journey references to it.
     static func identifiers(in value: some Encodable) throws -> Set<String> {
         let data = try JSONEncoder().encode(value)
-        let text = String(decoding: data, as: UTF8.self)
+        let object = try JSONSerialization.jsonObject(with: data)
         var found: Set<String> = []
-        var searchStart = text.startIndex
-        while let range = text.range(
-            of: Self.uuidPattern,
-            options: .regularExpression,
-            range: searchStart..<text.endIndex
-        ) {
-            found.insert(String(text[range]))
-            searchStart = range.upperBound
+        func walk(_ object: Any, inBackends: Bool = false) {
+            if let dictionary = object as? [String: Any] {
+                for (key, child) in dictionary {
+                    if key == "id", !inBackends, let id = child as? String { found.insert(id) }
+                    walk(child, inBackends: inBackends || key == "backends")
+                }
+            } else if let array = object as? [Any] {
+                for child in array { walk(child, inBackends: inBackends) }
+            }
         }
+        walk(object)
         return found
     }
 

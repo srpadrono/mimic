@@ -8,7 +8,7 @@ import Domain
 /// consumer drains. The stream spans the engine's whole lifetime (it is *not* finished on `stop`),
 /// so a stop/start cycle keeps delivering logs to the same consumer.
 public actor MockServerEngine {
-    private var app: Application?
+    private var apps: [Int: Application] = [:]
     private var isStarting = false
     /// Set for the whole of `stop()`, because `stop()` clears `app` before it awaits the shutdown and
     /// `app == nil` is otherwise indistinguishable from "nothing is listening". See `start`.
@@ -25,7 +25,7 @@ public actor MockServerEngine {
     }
 
     public func start(configuration: ServerConfiguration) async throws {
-        guard app == nil, !isStarting else { throw MockServerError.alreadyRunning }
+        guard apps.isEmpty, !isStarting else { throw MockServerError.alreadyRunning }
         // A stop in flight is invisible to the guard above: `stop()` sets `app = nil` and only then
         // suspends on `server.shutdown()`, and an actor admits another call at that suspension — so a
         // start arriving in that window sees `nil`, passes, and binds a port the outgoing application
@@ -36,41 +36,57 @@ public actor MockServerEngine {
         isStarting = true
         defer { isStarting = false }
 
-        // The route store (endpoints + global delay + journey) is populated via
-        // `updateConfiguration`, which the runtime calls when a project is applied — start() must not
-        // clobber the already-loaded config.
-        let env = Environment(name: "development", arguments: ["vapor"])
-        let newApp = try await Application.make(env)
-        newApp.logger.logLevel = .warning
-        newApp.http.server.configuration.hostname = "127.0.0.1"
-        newApp.http.server.configuration.port = configuration.port
-
-        VaporConfigurator.registerRoutes(on: newApp, routeStore: routeStore, logContinuation: logContinuation)
-
-        do {
-            try await newApp.server.start(address: .hostname("127.0.0.1", port: configuration.port))
-        } catch {
-            try await newApp.asyncShutdown()
-            throw VaporConfigurator.mapStartError(error, port: configuration.port)
+        let listeners: [(Int, UUID?, String?)] = [(configuration.port, nil, configuration.upstreamURL)]
+            + configuration.backends.map { ($0.port, $0.id, $0.upstreamURL) }
+        let localPorts = Set(listeners.map(\.0))
+        guard localPorts.count == listeners.count else {
+            throw MockServerError.invalidConfiguration("Each backend must use a different local port.")
         }
-
-        app = newApp
+        var started: [Int: Application] = [:]
+        do {
+            for (port, backendID, upstreamURL) in listeners {
+                let env = Environment(name: "development", arguments: ["vapor"])
+                let newApp = try await Application.make(env)
+                newApp.logger.logLevel = .warning
+                newApp.http.server.configuration.hostname = "127.0.0.1"
+                newApp.http.server.configuration.port = port
+                VaporConfigurator.registerRoutes(
+                    on: newApp, routeStore: routeStore, logContinuation: logContinuation,
+                    backendID: backendID, upstreamURL: upstreamURL, localPorts: localPorts
+                )
+                do {
+                    try await newApp.server.start(address: .hostname("127.0.0.1", port: port))
+                } catch {
+                    try await newApp.asyncShutdown()
+                    throw VaporConfigurator.mapStartError(error, port: port)
+                }
+                started[port] = newApp
+            }
+            apps = started
+        } catch {
+            for running in started.values {
+                await running.server.shutdown()
+                try? await running.asyncShutdown()
+            }
+            throw error
+        }
     }
 
     public func stop() async throws {
-        guard let running = app else { throw MockServerError.notRunning }
+        guard !apps.isEmpty else { throw MockServerError.notRunning }
         // Both assignments happen before the first suspension, so no other call can observe the
         // half-stopped state: `app` already cleared, the socket still open.
         isStopping = true
-        app = nil
+        let running = apps
+        apps = [:]
         defer { isStopping = false }
-        await running.server.shutdown()
-        try await running.asyncShutdown()
+        for app in running.values { await app.server.shutdown() }
+        for app in running.values { try await app.asyncShutdown() }
         // Intentionally does NOT finish `logContinuation` — the engine may be started again and the
         // same consumer must keep receiving logs across stop/start cycles.
     }
 
-    public var isRunning: Bool { app != nil }
+    public var isRunning: Bool { !apps.isEmpty }
 
     /// Replaces the live configuration. `globalDelayMs` defaults to `0` so direct callers (and the
     /// engine's own tests) can update routes without restating delay.

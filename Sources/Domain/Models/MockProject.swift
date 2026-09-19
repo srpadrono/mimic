@@ -19,7 +19,7 @@ public struct MockProject: Identifiable, Codable, Sendable, Equatable {
     /// the moment the encoded document stops matching what it has recorded, and asks for both edits by
     /// name. Bumping needs no migration code on the read side: every field added so far decodes to its
     /// empty value, which is what the build that wrote a document without it meant.
-    public static let currentSchemaVersion: Int = 3
+    public static let currentSchemaVersion: Int = 4
 
     public let id: UUID
     public let schemaVersion: Int

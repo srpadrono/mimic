@@ -94,12 +94,12 @@ When adding or changing an operation:
    that exist: `mimic journey export` is a `journeyGet` rendered as a spec, `mimic journey import` is
    a `journeyGet` then a `journeyCreate` or `journeyUpdate`, and `mimic journey deactivate` is
    `journeyActivate` with no name. Everything else the CLI can do maps onto exactly one `CommandKind`
-   case — 48 of them as this is written, which
+   case — 51 of them as this is written, which
    `awk '/^public enum CommandKind/,/^}/' Sources/Domain/Control/CommandKind.swift | grep -c '^    case '`
    will confirm and `CommandCatalog.descriptors` matches one for one.
 
    **No test asserts that number any more, and none should.** `DomainTests` used to end on
-   `CommandKind.allCases.count == 48`; it was a hand-edited mirror of a fact the type system already
+   `CommandKind.allCases.count == 51`; it was a hand-edited mirror of a fact the type system already
    knows, so adding a command and bumping the literal was one edit and the assertion only ever caught
    somebody who had not run the suite. What it was reaching for is asserted structurally instead —
    every kind has a sample, a catalog entry, and an executor answer that agrees with its declared

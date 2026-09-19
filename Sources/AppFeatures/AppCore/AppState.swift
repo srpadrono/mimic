@@ -86,6 +86,26 @@ final class AppState {
             server.serverConfiguration = newValue
         }
     }
+
+    @discardableResult
+    func configurePrimaryBackend(port: Int, upstreamURL: String) -> Bool {
+        run(.serverConfigure(port: port, globalDelayMs: nil, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func addBackend(name: String, port: Int, upstreamURL: String) -> Bool {
+        run(.backendUpsert(id: nil, name: name, port: port, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func updateBackend(id: UUID, name: String, port: Int, upstreamURL: String) -> Bool {
+        run(.backendUpsert(id: id, name: name, port: port, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func deleteBackend(id: UUID) -> Bool {
+        run(.backendDelete(id: id)) != nil
+    }
     var requestLogs: [RequestLog] {
         get { server.requestLogs }
         set { server.requestLogs = newValue }
@@ -407,6 +427,61 @@ final class AppState {
     func updateEndpointGroupTag(id: UUID, groupTag: String?) {
         // The executor treats an empty string as "clear", which is also how the CLI spells it.
         _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(groupTag: groupTag ?? "")))
+    }
+
+    func updateEndpointBackend(id: UUID, backendID: UUID?) {
+        _ = run(.endpointUpdate(
+            endpoint: .id(id),
+            spec: EndpointSpec(backend: backendID?.uuidString ?? "primary")
+        ))
+    }
+
+    /// Explicitly promotes one observed real response into an editable mock in a single publish.
+    @discardableResult
+    func savePassedThroughLogAsMock(id: UUID) -> Endpoint? {
+        guard let log = requestLogs.first(where: { $0.id == id }), log.outcome == .passthrough,
+              !log.responseBodyTruncated,
+              let status = log.responseStatusCode,
+              EndpointValidator.serveableStatusCodes.contains(status),
+              var project = currentProject else {
+            lastCommandError = "Select a complete passed-through HTTP response to save."
+            return nil
+        }
+        let contentType = log.responseHeaders.first { $0.key.lowercased() == "content-type" }?.value.lowercased() ?? ""
+        guard log.responseBody != nil || contentType.isEmpty || contentType.contains("json")
+            || contentType.hasPrefix("text/") else {
+            lastCommandError = "Binary responses cannot be saved as text mocks."
+            return nil
+        }
+        do {
+            let route = EndpointFromLog.mockablePath(from: log.path)
+            let created = try ProjectCommandExecutor.apply(.endpointCreate(
+                name: EndpointFromLog.suggestedName(method: log.method, path: route),
+                method: log.method,
+                path: route,
+                spec: EndpointSpec(backend: log.backendID?.uuidString ?? "primary")
+            ), to: &project)
+            guard let endpoint = created?.result.endpoint, let scenarioID = endpoint.activeScenarioID else {
+                return nil
+            }
+            _ = try ProjectCommandExecutor.apply(.scenarioUpdate(
+                endpoint: .id(endpoint.id), scenario: .id(scenarioID),
+                spec: ScenarioSpec(
+                    statusCode: status,
+                    headers: ImportHeaderPolicy.replayable(log.responseHeaders),
+                    body: log.responseBody,
+                    contentType: contentType.contains("json") ? .json : .plainText
+                )
+            ), to: &project)
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+            lastCommandError = nil
+            return project.endpoints.first(where: { $0.id == endpoint.id })
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
     }
 
     /// One writer. The command mutates the project, and applying the project is what reaches the

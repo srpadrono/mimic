@@ -22,6 +22,8 @@ public enum RequestOutcome: String, Codable, Sendable, CaseIterable {
     /// A journey is active with `unmatchedBehavior == .notFound` and refused an unscripted request.
     /// Distinct from ``unmatched``: the configuration is deliberate, not missing.
     case blockedByJourney
+    /// No mock matched; the configured real backend answered.
+    case passthrough
 
     /// Whether this outcome means Mimic had nothing configured for the request.
     public var isMissingConfiguration: Bool {
@@ -35,6 +37,7 @@ public enum RequestOutcome: String, Codable, Sendable, CaseIterable {
         case .journey: "Journey"
         case .unmatched: "Unmatched"
         case .blockedByJourney: "Blocked"
+        case .passthrough: "Passed through"
         }
     }
 }

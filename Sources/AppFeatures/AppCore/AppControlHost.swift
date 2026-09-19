@@ -398,6 +398,12 @@ final class AppControlHost: ControlHost {
             appState.requestLogs = []
             return .success(.message(ControlMessages.logCleared(count: count)))
 
+        case let .logSaveAsMock(id):
+            guard let endpoint = appState.savePassedThroughLogAsMock(id: id) else {
+                return .failure(.invalid(appState.lastCommandError ?? "Could not save the response as a mock."))
+            }
+            return .success(.init(message: "Saved passed-through response as a mock.", endpoint: endpoint))
+
         // MARK: Projects — these touch the store, so they are answered asynchronously
 
         case .projectList, .projectCreate, .projectOpen, .projectClose, .projectDelete,
@@ -757,6 +763,8 @@ final class AppControlHost: ControlHost {
             globalDelayMs: appState.serverConfiguration.globalDelayMs
         )
         report.errorCode = appState.serverStartFailure?.code
+        report.upstreamURL = appState.serverConfiguration.upstreamURL
+        report.backends = appState.serverConfiguration.backends
         return report
     }
 }

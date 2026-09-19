@@ -102,6 +102,7 @@ public struct JourneyStep: Identifiable, Codable, Sendable, Equatable {
     /// Without it every step of a GraphQL flow would look identical — same method, same path — and
     /// the journey could not tell them apart.
     public var graphqlOperation: String?
+    public var backendID: UUID?
 
     public init(
         id: UUID = UUID(),
@@ -111,7 +112,8 @@ public struct JourneyStep: Identifiable, Codable, Sendable, Equatable {
         outcome: JourneyStepOutcome,
         delayMs: Int = 0,
         repeatCount: Int = 1,
-        graphqlOperation: String? = nil
+        graphqlOperation: String? = nil,
+        backendID: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -121,10 +123,11 @@ public struct JourneyStep: Identifiable, Codable, Sendable, Equatable {
         self.delayMs = delayMs
         self.repeatCount = max(1, repeatCount)
         self.graphqlOperation = graphqlOperation
+        self.backendID = backendID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, method, path, outcome, delayMs, repeatCount, graphqlOperation
+        case id, name, method, path, outcome, delayMs, repeatCount, graphqlOperation, backendID
     }
 
     /// Hand-written so journey files written before GraphQL matching existed still load.
@@ -138,6 +141,7 @@ public struct JourneyStep: Identifiable, Codable, Sendable, Equatable {
         delayMs = try container.decodeIfPresent(Int.self, forKey: .delayMs) ?? 0
         repeatCount = max(1, try container.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1)
         graphqlOperation = try container.decodeIfPresent(String.self, forKey: .graphqlOperation)
+        backendID = try container.decodeIfPresent(UUID.self, forKey: .backendID)
     }
 }
 

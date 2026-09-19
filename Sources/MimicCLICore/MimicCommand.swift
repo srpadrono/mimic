@@ -313,7 +313,7 @@ struct ServerCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "server",
         abstract: "Control the mock HTTP server.",
-        subcommands: [Start.self, Stop.self, Status.self, Configure.self]
+        subcommands: [Start.self, Stop.self, Status.self, Configure.self, Backend.self]
     )
 
     struct Start: AsyncParsableCommand {
@@ -360,15 +360,75 @@ struct ServerCommand: AsyncParsableCommand {
         @Option(name: .long, help: "Global delay in milliseconds, added to every response.")
         var delay: Int?
 
+        @Option(name: .long, help: "Real HTTP(S) backend for unmatched requests on the primary port.")
+        var upstream: String?
+
+        @Flag(name: .long, help: "Turn off pass-through on the primary port.")
+        var disableUpstream = false
+
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            guard port != nil || delay != nil else {
-                throw CLIFailure.badArgument("Provide --port and/or --delay.")
+            guard !(disableUpstream && upstream != nil) else {
+                throw CLIFailure.badArgument("Choose --upstream or --disable-upstream.")
+            }
+            guard port != nil || delay != nil || upstream != nil || disableUpstream else {
+                throw CLIFailure.badArgument("Provide --port, --delay, or --upstream.")
             }
             try Output(options).emit(
-                await options.client().send(.serverConfigure(port: port, globalDelayMs: delay))
+                await options.client().send(.serverConfigure(
+                    port: port, globalDelayMs: delay, upstreamURL: disableUpstream ? "" : upstream
+                ))
             )
+        }
+    }
+
+    struct Backend: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Configure additional local ports and their real backends.",
+            subcommands: [Add.self, Update.self, Delete.self]
+        )
+
+        struct Add: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(abstract: "Add a backend listener to the project.")
+            @Option(name: .long) var name: String
+            @Option(name: .long) var port: Int
+            @Option(name: .long) var upstream: String?
+            @OptionGroup var options: GlobalOptions
+            func run() async throws {
+                try Output(options).emit(await options.client().send(.backendUpsert(
+                    id: nil, name: name, port: port, upstreamURL: upstream
+                )))
+            }
+        }
+
+        struct Update: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(abstract: "Edit an additional backend listener.")
+            @Argument var id: String
+            @Option(name: .long) var name: String?
+            @Option(name: .long) var port: Int?
+            @Option(name: .long) var upstream: String?
+            @Flag(name: .long) var disableUpstream = false
+            @OptionGroup var options: GlobalOptions
+            func run() async throws {
+                guard let uuid = UUID(uuidString: id) else { throw CLIFailure.badArgument("Invalid backend UUID.") }
+                guard !(disableUpstream && upstream != nil) else {
+                    throw CLIFailure.badArgument("Choose --upstream or --disable-upstream.")
+                }
+                try Output(options).emit(await options.client().send(.backendUpsert(
+                    id: uuid, name: name, port: port, upstreamURL: disableUpstream ? "" : upstream
+                )))
+            }
+        }
+
+        struct Delete: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(abstract: "Remove an additional backend listener.")
+            @Argument var id: String
+            @OptionGroup var options: GlobalOptions
+            func run() async throws {
+                guard let uuid = UUID(uuidString: id) else { throw CLIFailure.badArgument("Invalid backend UUID.") }
+                try Output(options).emit(await options.client().send(.backendDelete(id: uuid)))
+            }
         }
     }
 }
@@ -379,7 +439,7 @@ struct LogCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "log",
         abstract: "Read or clear the served-request log.",
-        subcommands: [List.self, Clear.self]
+        subcommands: [List.self, Clear.self, SaveAsMock.self]
     )
 
     struct List: AsyncParsableCommand {
@@ -417,6 +477,20 @@ struct LogCommand: AsyncParsableCommand {
 
         func run() async throws {
             try Output(options).emit(await options.client().send(.logClear))
+        }
+    }
+
+    struct SaveAsMock: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "save-as-mock",
+            abstract: "Save one passed-through response from the log as an editable mock."
+        )
+        @Argument(help: "Request-log entry UUID.") var id: String
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            guard let uuid = UUID(uuidString: id) else { throw CLIFailure.badArgument("Invalid log UUID.") }
+            try Output(options).emit(await options.client().send(.logSaveAsMock(id: uuid)))
         }
     }
 }

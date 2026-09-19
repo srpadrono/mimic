@@ -5,12 +5,14 @@ public struct IncomingRequest: Sendable, Equatable {
     public let path: String
     public let headers: [String: String]
     public let body: String?
+    public let backendID: UUID?
 
-    public init(method: HTTPMethod, path: String, headers: [String: String] = [:], body: String? = nil) {
+    public init(method: HTTPMethod, path: String, headers: [String: String] = [:], body: String? = nil, backendID: UUID? = nil) {
         self.method = method
         self.path = path
         self.headers = headers
         self.body = body
+        self.backendID = backendID
     }
 }
 
@@ -137,6 +139,7 @@ public enum RequestMatcher {
         var best: (endpoint: Endpoint, scenario: Scenario, specificity: MatchSpecificity)?
 
         for endpoint in endpoints {
+            guard endpoint.backendID == request.backendID else { continue }
             guard endpoint.method == request.method else { continue }
             guard let segments = PathPattern.specificity(requestPath: request.path, pattern: endpoint.path) else { continue }
             guard let matchedOperation = operationSpecificity(declared: endpoint.graphqlOperation, request: request)

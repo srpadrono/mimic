@@ -58,7 +58,9 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case serverStart(port: Int?)
     case serverStop
     case serverStatus
-    case serverConfigure(port: Int?, globalDelayMs: Int?)
+    case serverConfigure(port: Int?, globalDelayMs: Int?, upstreamURL: String? = nil)
+    case backendUpsert(id: UUID?, name: String?, port: Int?, upstreamURL: String?)
+    case backendDelete(id: UUID)
 
     // MARK: Endpoints
 
@@ -111,6 +113,8 @@ public enum ControlCommand: Codable, Sendable, Equatable {
 
     case logList(limit: Int?, unmatchedOnly: Bool?)
     case logClear
+    /// Save a passed-through response as an editable mock after explicit review.
+    case logSaveAsMock(id: UUID)
 }
 
 /// How much live state `reset` clears.
@@ -218,6 +222,8 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
     public var groupTag: String?
     /// Restricts the endpoint to one GraphQL operation. Empty string clears it.
     public var graphqlOperation: String?
+    /// Additional backend UUID, or "primary" to move an endpoint to the original listener.
+    public var backend: String?
 
     public init(
         name: String? = nil,
@@ -225,7 +231,8 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
         path: String? = nil,
         delayMs: Int? = nil,
         groupTag: String? = nil,
-        graphqlOperation: String? = nil
+        graphqlOperation: String? = nil,
+        backend: String? = nil
     ) {
         self.name = name
         self.method = method
@@ -233,6 +240,7 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
         self.delayMs = delayMs
         self.groupTag = groupTag
         self.graphqlOperation = graphqlOperation
+        self.backend = backend
     }
 }
 
@@ -299,6 +307,8 @@ public struct JourneySpec: Codable, Sendable, Equatable {
 /// ```
 public struct JourneyStepSpec: Codable, Sendable, Equatable {
     public var name: String?
+    /// "primary" or the UUID of an additional backend.
+    public var backend: String?
     public var method: HTTPMethod?
     public var path: String?
     public var statusCode: Int?
@@ -314,6 +324,7 @@ public struct JourneyStepSpec: Codable, Sendable, Equatable {
 
     public init(
         name: String? = nil,
+        backend: String? = nil,
         method: HTTPMethod? = nil,
         path: String? = nil,
         statusCode: Int? = nil,
@@ -326,6 +337,7 @@ public struct JourneyStepSpec: Codable, Sendable, Equatable {
         graphqlOperation: String? = nil
     ) {
         self.name = name
+        self.backend = backend
         self.method = method
         self.path = path
         self.statusCode = statusCode
@@ -354,13 +366,14 @@ extension JourneyStepSpec {
         let path = log.path.firstIndex(of: "?").map { String(log.path[log.path.startIndex..<$0]) } ?? log.path
         let route = path.hasPrefix("/") ? path : "/\(path)"
 
-        let carriesRealResponse = log.outcome == .endpoint || log.outcome == .journey
+        let carriesRealResponse = log.outcome == .endpoint || log.outcome == .journey || log.outcome == .passthrough
         let contentType: Scenario.ContentType? = log.responseHeaders
             .first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }
             .map { $0.value.lowercased().contains("json") ? .json : .plainText }
 
         return JourneyStepSpec(
             name: name ?? "\(log.method.rawValue) \(route)",
+            backend: log.backendID?.uuidString ?? "primary",
             method: log.method,
             path: route,
             statusCode: log.responseStatusCode,

@@ -289,6 +289,7 @@ struct RequestDetailInspector: View {
         case .journey: DSColors.accentText
         case .unmatched: DSColors.httpStatusColor(for: 404)
         case .blockedByJourney: DSColors.warning
+        case .passthrough: DSColors.success
         }
     }
 
@@ -593,6 +594,7 @@ struct RequestDetailInspector: View {
         case .journey: "Response \(noun) (journey)"
         case .unmatched: "Response \(noun) (no endpoint configured)"
         case .blockedByJourney: "Response \(noun) (blocked by the active journey)"
+        case .passthrough: "Response \(noun) (real backend)"
         }
     }
 

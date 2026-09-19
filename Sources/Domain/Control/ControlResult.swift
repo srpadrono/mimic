@@ -371,6 +371,8 @@ public struct ServerStatusReport: Codable, Sendable, Equatable {
     /// Present only while running, so a caller can point a client at it without string-building.
     public var baseURL: String?
     public var globalDelayMs: Int
+    public var upstreamURL: String? = nil
+    public var backends: [BackendConfiguration]? = nil
     public var message: String?
     /// The stable, dotted code for the failure ``message`` describes — `server.portInUse`,
     /// `server.startFailed` — and `nil` whenever the server is not in an error state.

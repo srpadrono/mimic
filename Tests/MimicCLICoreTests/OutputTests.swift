@@ -132,6 +132,8 @@ struct TextRendererTests {
         #expect(TextRenderer.render(ControlResult(project: project)) == """
         Checkout
           port         9090
+          real backend Off
+          extra ports  0
           global delay 50ms
           endpoints    3
           journeys     2

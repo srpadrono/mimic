@@ -24,6 +24,8 @@ enum ControlCommandSamples {
         .projectImport(project: MockProject(name: "Imported"), activate: true),
         .serverStart(port: 8081), .serverStop, .serverStatus,
         .serverConfigure(port: 8080, globalDelayMs: 250),
+        .backendUpsert(id: nil, name: "Accounts", port: 8081, upstreamURL: "https://accounts.example.com"),
+        .backendDelete(id: UUID()),
         .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
         .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
         .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
@@ -51,12 +53,36 @@ enum ControlCommandSamples {
         .journeyStepRemove(journey: .name("J"), step: .index(1)),
         .journeyStepMove(journey: .name("J"), step: .index(0), toIndex: 3),
         .journeyActivate(journey: nil), .journeyRestart, .journeyAdvance, .journeyStatus,
-        .logList(limit: 50, unmatchedOnly: true), .logClear,
+        .logList(limit: 50, unmatchedOnly: true), .logClear, .logSaveAsMock(id: UUID()),
     ]
 }
 
 @Suite("Control command execution")
 struct ControlCommandExecutionTests {
+
+    @Test("Journey steps can select a backend and switch back to primary")
+    func journeyBackendSelection() throws {
+        let backendID = UUID()
+        var project = Self.project
+        project.serverConfiguration.backends = [.init(id: backendID, name: "Accounts", port: 8081, upstreamURL: nil)]
+        project.journeys = [Journey(name: "Flow")]
+        let added = try Self.apply(
+            .journeyStepAdd(journey: .name("Flow"), step: .init(backend: backendID.uuidString, method: .get, path: "/same"), atIndex: nil),
+            to: project
+        ).project
+        #expect(added.journeys[0].steps[0].backendID == backendID)
+        let updated = try Self.apply(
+            .journeyStepUpdate(journey: .name("Flow"), step: .index(0), spec: .init(backend: "primary")),
+            to: added
+        ).project
+        #expect(updated.journeys[0].steps[0].backendID == nil)
+        #expect(throws: ControlError.self) {
+            _ = try Self.apply(
+                .journeyStepAdd(journey: .name("Flow"), step: .init(backend: UUID().uuidString, path: "/bad"), atIndex: nil),
+                to: project
+            )
+        }
+    }
 
     /// Applies a command and returns the mutated project plus the outcome, failing the test if the
     /// command turns out to be host-scoped.

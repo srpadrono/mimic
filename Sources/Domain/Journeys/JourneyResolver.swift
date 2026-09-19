@@ -84,6 +84,7 @@ public enum JourneyResolver {
             let step = journey.steps[index]
             guard !state.isExhausted(step, autoAdvance: journey.autoAdvance) else { continue }
             guard step.method == request.method else { continue }
+            guard step.backendID == request.backendID else { continue }
             guard PathPattern.matches(requestPath: request.path, pattern: step.path) else { continue }
             // A step naming an operation answers only that operation, so a GraphQL flow can script
             // several calls that are otherwise identical.

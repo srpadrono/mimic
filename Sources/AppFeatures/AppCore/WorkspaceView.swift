@@ -32,6 +32,7 @@ struct WorkspaceView: View {
     @State private var isNavigatingHistory = false
     @State private var showHARImport = false
     @State private var showOpenAPIImport = false
+    @State private var showBackendSettings = false
     #if DEBUG
     /// The result of parsing a UI test's injected file — see ``presentInjectedImportIfNeeded()``.
     /// Non-nil *is* "the injected import sheet is up", the way `pendingCapture` works.
@@ -257,6 +258,18 @@ struct WorkspaceView: View {
                         importMenu
                     }
 
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showBackendSettings = true
+                        } label: {
+                            Label("Server settings", systemImage: "network")
+                        }
+                        .disabled(appState.currentProject == nil)
+                        .help("Configure local ports and real backends")
+                        .accessibilityIdentifier("backend.settingsButton")
+                        .accessibilityLabel("Server settings")
+                    }
+
                     // The autosave indicator is empty while idle, so it must not be allowed to
                     // change the toolbar's layout when it flickers into view for two seconds. A
                     // reserved slot keeps its neighbours still.
@@ -393,6 +406,10 @@ struct WorkspaceView: View {
                 existingEndpoints: currentEndpoints,
                 onCommitImport: appState.commitImportedCandidates
             )
+        }
+        .sheet(isPresented: $showBackendSettings) {
+            BackendSettingsView()
+                .environment(appState)
         }
         // OpenAPI import sheet
         .sheet(isPresented: $showOpenAPIImport) {
@@ -850,6 +867,11 @@ struct WorkspaceView: View {
                     method: method,
                     path: path
                 ) {
+                    selectedEndpointID = endpoint.id
+                }
+            },
+            onSaveAsMock: { id in
+                if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
                     selectedEndpointID = endpoint.id
                 }
             },

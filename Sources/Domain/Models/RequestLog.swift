@@ -46,6 +46,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
     public let timestamp: Date
     public let method: HTTPMethod
     public let path: String
+    public let backendID: UUID?
     public let requestHeaders: [String: String]
     public let requestBody: String?
     public let matchedEndpointID: UUID?
@@ -77,6 +78,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         timestamp: Date = Date(),
         method: HTTPMethod,
         path: String,
+        backendID: UUID? = nil,
         requestHeaders: [String: String] = [:],
         requestBody: String? = nil,
         matchedEndpointID: UUID? = nil,
@@ -94,6 +96,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         self.timestamp = timestamp
         self.method = method
         self.path = path
+        self.backendID = backendID
         self.requestHeaders = requestHeaders
         self.requestBody = requestBody
         self.matchedEndpointID = matchedEndpointID
@@ -124,6 +127,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
             timestamp: timestamp,
             method: method,
             path: path,
+            backendID: backendID,
             requestHeaders: Self.redacted(requestHeaders),
             requestBody: requestBody,
             matchedEndpointID: matchedEndpointID,

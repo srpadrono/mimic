@@ -120,7 +120,8 @@ extension Endpoint {
             activeScenarioID: activeIndex.map { copiedScenarios[$0].id } ?? copiedScenarios.first?.id,
             delayMs: delayMs,
             groupTag: groupTag,
-            graphqlOperation: graphqlOperation
+            graphqlOperation: graphqlOperation,
+            backendID: backendID
         )
     }
 }
@@ -177,7 +178,8 @@ extension JourneyStep {
             outcome: outcome,
             delayMs: delayMs,
             repeatCount: repeatCount,
-            graphqlOperation: graphqlOperation
+            graphqlOperation: graphqlOperation,
+            backendID: backendID
         )
     }
 }

@@ -456,6 +456,9 @@ struct JourneyCommand: AsyncParsableCommand {
             @Option(name: .long, help: "Match only this GraphQL operation, so a flow can script several calls to the same path.")
             var graphqlOperation: String?
 
+            @Option(name: .long, help: "Backend UUID, or 'primary'.")
+            var backend: String?
+
             @OptionGroup var response: ResponseOptions
             @OptionGroup var failure: FailureOption
             @OptionGroup var options: GlobalOptions
@@ -471,6 +474,7 @@ struct JourneyCommand: AsyncParsableCommand {
                     repeatCount: repeatCount
                 )
                 spec.graphqlOperation = graphqlOperation
+                spec.backend = backend
                 try Output(options).emit(await options.client().send(
                     .journeyStepAdd(journey: .name(journey), step: spec, atIndex: at)
                 ))
@@ -510,6 +514,9 @@ struct JourneyCommand: AsyncParsableCommand {
             @Option(name: .long, help: "Match only this GraphQL operation. Pass \"\" to clear.")
             var graphqlOperation: String?
 
+            @Option(name: .long, help: "Backend UUID, or 'primary'.")
+            var backend: String?
+
             @OptionGroup var response: ResponseOptions
             @OptionGroup var failure: FailureOption
             @OptionGroup var options: GlobalOptions
@@ -517,6 +524,7 @@ struct JourneyCommand: AsyncParsableCommand {
             func run() async throws {
                 let spec = JourneyStepSpec(
                     name: newName,
+                    backend: backend,
                     method: try newMethod.map(ArgumentParsing.method),
                     path: newPath,
                     statusCode: response.status,

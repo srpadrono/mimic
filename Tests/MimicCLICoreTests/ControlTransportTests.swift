@@ -40,6 +40,10 @@ private let singleCommandVerbs: [([String], ControlCommand)] = [
     (["server", "status"], .serverStatus),
     (["server", "configure", "--port", "9000", "--delay", "250"],
      .serverConfigure(port: 9000, globalDelayMs: 250)),
+    (["server", "backend", "add", "--name", "Accounts", "--port", "9001", "--upstream", "https://accounts.example.com"],
+     .backendUpsert(id: nil, name: "Accounts", port: 9001, upstreamURL: "https://accounts.example.com")),
+    (["server", "backend", "delete", "00000000-0000-0000-0000-000000000001"],
+     .backendDelete(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)),
     (["project", "list"], .projectList),
     (["project", "create", "Checkout", "--port", "9000"], .projectCreate(name: "Checkout", port: 9000)),
     (["project", "open", "Checkout"], .projectOpen(project: .name("Checkout"))),
@@ -93,6 +97,8 @@ private let singleCommandVerbs: [([String], ControlCommand)] = [
     (["log", "list", "--limit", "20"], .logList(limit: 20, unmatchedOnly: nil)),
     (["log", "list", "--unmatched"], .logList(limit: nil, unmatchedOnly: true)),
     (["log", "clear"], .logClear),
+    (["log", "save-as-mock", "00000000-0000-0000-0000-000000000001"],
+     .logSaveAsMock(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)),
 ]
 
 @Suite("CLI emitted commands")
@@ -547,6 +553,8 @@ struct EmittedCommandTests {
             ["ping"], ["state"], ["commands"], ["reset", "--scope", "logs"],
             ["server", "start", "--port", "8080"], ["server", "stop"], ["server", "status"],
             ["server", "configure", "--delay", "250"],
+            ["server", "backend", "add", "--name", "Accounts", "--port", "8081"],
+            ["server", "backend", "delete", "00000000-0000-0000-0000-000000000001"],
             ["project", "list"], ["project", "create", "Checkout", "--port", "9000"],
             ["project", "open", "Checkout"], ["project", "close"], ["project", "delete", "Checkout"],
             ["project", "rename", "New"], ["project", "duplicate", "Checkout"],
@@ -573,6 +581,7 @@ struct EmittedCommandTests {
             ["journey", "step", "remove", "Flow", "--index", "1"],
             ["journey", "step", "move", "Flow", "--index", "0", "--to", "2"],
             ["log", "list", "--limit", "20"], ["log", "clear"],
+            ["log", "save-as-mock", "00000000-0000-0000-0000-000000000001"],
             ["app", "update-check"],
         ]
 

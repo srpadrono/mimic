@@ -12,7 +12,10 @@ enum VaporConfigurator {
     static func registerRoutes(
         on app: Application,
         routeStore: MockRouteStore,
-        logContinuation: AsyncStream<RequestLog>.Continuation
+        logContinuation: AsyncStream<RequestLog>.Continuation,
+        backendID: UUID? = nil,
+        upstreamURL: String? = nil,
+        localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
             let incoming = IncomingRequest(
@@ -22,12 +25,32 @@ enum VaporConfigurator {
                     req.headers.map { ($0.name, $0.value) },
                     uniquingKeysWith: { _, last in last }
                 ),
-                body: req.body.string
+                body: req.body.string,
+                backendID: backendID
             )
 
             // One actor hop resolves the request *and* advances the journey cursor, so
             // concurrent requests can never consume the same step.
             let resolved = await routeStore.resolve(request: incoming)
+
+            if resolved.outcome == .unmatched, let upstreamURL {
+                let response = await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts)
+                let (requestBody, _) = RequestLog.cappedBody(incoming.body)
+                let (responseBody, truncated) = RequestLog.cappedBody(response.body.string)
+                logContinuation.yield(RequestLog(
+                    method: incoming.method,
+                    path: req.url.string,
+                    backendID: backendID,
+                    requestHeaders: incoming.headers,
+                    requestBody: requestBody,
+                    responseStatusCode: Int(response.status.code),
+                    responseHeaders: Dictionary(response.headers.map { ($0.name, $0.value) }, uniquingKeysWith: { _, last in last }),
+                    responseBody: responseBody,
+                    responseBodyTruncated: truncated,
+                    outcome: .passthrough
+                ))
+                return response
+            }
 
             logContinuation.yield(makeLog(incoming: incoming, resolved: resolved))
 
@@ -175,6 +198,7 @@ enum VaporConfigurator {
         return RequestLog(
             method: incoming.method,
             path: incoming.path,
+            backendID: incoming.backendID,
             requestHeaders: incoming.headers,
             requestBody: requestBody,
             matchedEndpointID: resolved.matchedEndpointID,

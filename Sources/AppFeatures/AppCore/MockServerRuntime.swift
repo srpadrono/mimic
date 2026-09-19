@@ -4,7 +4,7 @@ import MockServerEngine
 import Observation
 
 /// Abstraction over the embedded server engine so the runtime can be driven by a fake in tests.
-protocol MockServerEngineProtocol: Sendable {
+nonisolated protocol MockServerEngineProtocol: Sendable {
     var logStream: AsyncStream<RequestLog> { get }
     func start(configuration: ServerConfiguration) async throws
     func stop() async throws

@@ -47,6 +47,7 @@ struct CatalogCLIExampleTests {
             "FILE": "/tmp/mimic-example.json",
             "file": "/tmp/mimic-example.json",
             "template-id": "session-expiry",
+            "UUID": "00000000-0000-0000-0000-000000000001",
         ]
 
         /// Metavariables that appear bare, outside any bracket, as the value of a *required* option:

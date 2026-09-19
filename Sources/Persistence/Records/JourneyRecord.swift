@@ -70,6 +70,7 @@ public struct JourneyStepRecord: Codable, FetchableRecord, PersistableRecord, Se
     public var delayMs: Int
     public var repeatCount: Int
     public var graphqlOperation: String?
+    public var backendID: String?
     public var sortOrder: Int
 
     public init(from step: JourneyStep, journeyID: String, sortOrder: Int = 0) {
@@ -81,6 +82,7 @@ public struct JourneyStepRecord: Codable, FetchableRecord, PersistableRecord, Se
         self.delayMs = step.delayMs
         self.repeatCount = step.repeatCount
         self.graphqlOperation = step.graphqlOperation
+        self.backendID = step.backendID?.uuidString
         self.sortOrder = sortOrder
 
         switch step.outcome {
@@ -116,7 +118,8 @@ public struct JourneyStepRecord: Codable, FetchableRecord, PersistableRecord, Se
             outcome: decodedOutcome(),
             delayMs: delayMs,
             repeatCount: repeatCount,
-            graphqlOperation: graphqlOperation
+            graphqlOperation: graphqlOperation,
+            backendID: backendID.flatMap(UUID.init(uuidString:))
         )
     }
 

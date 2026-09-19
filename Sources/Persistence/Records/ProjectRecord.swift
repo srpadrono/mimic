@@ -13,6 +13,8 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var modifiedAt: Date
     public var serverPort: Int
     public var globalDelayMs: Int
+    public var upstreamURL: String?
+    public var backendsJSON: String
     public var activeJourneyID: String?
 
     /// Creates a ProjectRecord from a domain MockProject.
@@ -24,6 +26,8 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.modifiedAt = project.modifiedAt
         self.serverPort = project.serverConfiguration.port
         self.globalDelayMs = project.serverConfiguration.globalDelayMs
+        self.upstreamURL = project.serverConfiguration.upstreamURL
+        self.backendsJSON = String(data: (try? JSONEncoder().encode(project.serverConfiguration.backends)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
         self.activeJourneyID = project.activeJourneyID?.uuidString
     }
 
@@ -73,7 +77,9 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
             name: name,
             serverConfiguration: ServerConfiguration(
                 port: serverPort,
-                globalDelayMs: globalDelayMs
+                globalDelayMs: globalDelayMs,
+                upstreamURL: upstreamURL,
+                backends: (try? JSONDecoder().decode([BackendConfiguration].self, from: Data(backendsJSON.utf8))) ?? []
             ),
             endpoints: [],
             journeys: [],
