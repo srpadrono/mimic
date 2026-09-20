@@ -226,6 +226,16 @@ struct ServerStatusWellPage {
     var requestCount: XCUIElement { named("serverStatusWell.requestCount") }
     var unmatchedBadge: XCUIElement { named("serverStatusWell.unmatched") }
 
+    /// At the minimum three-panel width, the well deliberately gives its counters to the request
+    /// log and overview. Collapse the navigator when a test is specifically exercising the full
+    /// toolbar counters or their jump action.
+    func revealTrafficControlsIfCompact() {
+        guard well.frame.width < 150 else { return }
+        let hideSidebar = app.toolbars.buttons["Hide Sidebar"].firstMatch
+        guard hideSidebar.waitForExistence(timeout: 5) else { return }
+        hideSidebar.click()
+    }
+
     func spoken(_ element: XCUIElement) -> String {
         guard element.exists else { return "<absent>" }
         let value = element.value.map { String(describing: $0) } ?? ""
@@ -1168,6 +1178,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Both requests should reach the log"
         )
 
+        well.revealTrafficControlsIfCompact()
+
         // SRVWELL-08 / SRVWELL-09 — the well counts what arrived and warns about what nothing
         // answered. Both state their meaning in their accessibility label rather than in the digit
         // they draw.
@@ -1430,6 +1442,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "The request log should be hidden before the badge is clicked"
         )
 
+        well.revealTrafficControlsIfCompact()
         XCTAssertTrue(well.unmatchedBadge.waitForExistence(timeout: 5), "The badge should be in the well")
         well.unmatchedBadge.click()
 

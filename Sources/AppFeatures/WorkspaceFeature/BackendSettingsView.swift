@@ -75,7 +75,10 @@ struct BackendSettingsView: View {
         // are added, then let the form scroll once the window reaches a practical height.
         .frame(
             width: BackendSettingsGeometry.width,
-            height: BackendSettingsGeometry.height(forBackendCount: draft.backends.count)
+            height: BackendSettingsGeometry.height(
+                forBackendCount: draft.backends.count,
+                visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900
+            )
         )
         .onAppear { draft = appState.serverConfiguration }
         .accessibilityElement(children: .contain)
@@ -119,7 +122,10 @@ struct BackendSettingsView: View {
 private enum BackendSettingsGeometry {
     static let width: CGFloat = 640
 
-    static func height(forBackendCount count: Int) -> CGFloat {
-        min(760, 520 + CGFloat(count) * 240)
+    static func height(forBackendCount count: Int, visibleScreenHeight: CGFloat) -> CGFloat {
+        // Leave enough room above and below the sheet for macOS chrome. The Form owns scrolling;
+        // the footer must stay on-screen even on the compact CI/display configuration.
+        let screenCap = max(440, visibleScreenHeight - 200)
+        return min(screenCap, 760, 520 + CGFloat(count) * 240)
     }
 }

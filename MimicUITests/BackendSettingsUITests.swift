@@ -43,11 +43,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
         page.add.click()
         XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) {
-                self.app.sheets.firstMatch.frame.height > singleBackendHeight + 100
-            },
-            "Adding a backend should give the second card room before the form scrolls"
+        XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
+        XCTAssertGreaterThanOrEqual(
+            app.sheets.firstMatch.frame.height, singleBackendHeight,
+            "Adding a backend should not shrink the sheet"
         )
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: "8080")

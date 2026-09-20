@@ -240,9 +240,9 @@ final class RequestLogUITests: MimicUITestCase {
         app.staticTexts.matching(
             NSPredicate(
                 format: "(value == %@ OR label == %@)"
-                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@)",
+                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@ OR identifier == %@)",
                 count, count,
-                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", ""
+                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", "drawer.count", ""
             )
         ).firstMatch
     }
@@ -654,6 +654,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         // The toolbar's badge is the other way in: it opens the drawer already filtered, the way
         // Xcode's warning count jumps you to the issue navigator.
+        ServerStatusWellPage(app: app).revealTrafficControlsIfCompact()
         let toolbarBadge = app.buttons["1 unmatched request, show it"].firstMatch
         XCTAssertTrue(toolbarBadge.waitForExistence(timeout: 5), "The status well should badge the unmatched call")
         toolbarBadge.click()

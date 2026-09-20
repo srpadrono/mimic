@@ -396,14 +396,24 @@ struct RequestLogDrawerView: View {
             // At a narrow centre-column width, keep the search usable instead of compressing it
             // between the popup, unmatched toggle and clear action in the fixed-height header.
             if narrow && !requestLogs.isEmpty {
-                filterControl
-                    .padding(.horizontal, DSSpacing.md)
-                    .frame(height: DSBarHeight.controlRow)
-                    .frame(maxWidth: .infinity)
-                    .background(DSColors.band)
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+                HStack(spacing: DSSpacing.md) {
+                    if let countSubtitle {
+                        Text(countSubtitle)
+                            .font(DSTypography.caption)
+                            .foregroundStyle(DSColors.labelSecondary)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("drawer.count")
                     }
+                    filterControl
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .frame(height: DSBarHeight.controlRow)
+                .frame(maxWidth: .infinity)
+                .background(DSColors.band)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+                }
             }
 
             // Zone 2 & 3: Content
@@ -467,7 +477,7 @@ struct RequestLogDrawerView: View {
     /// same information costs one row instead of two.
     @ViewBuilder
     private func drawerToolbar(compact: Bool, narrow: Bool) -> some View {
-        DSPanelHeader("Request log", subtitle: compact ? nil : countSubtitle, identifier: "requestLog") {
+        DSPanelHeader("Request log", subtitle: narrow ? nil : countSubtitle, identifier: "requestLog") {
             HStack(spacing: DSSpacing.sm) {
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
