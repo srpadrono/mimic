@@ -36,11 +36,19 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        let singleBackendHeight = app.sheets.firstMatch.frame.height
+        XCTAssertLessThan(singleBackendHeight, 600, "A single backend should not open a mostly empty sheet")
         page.replace(page.primaryName, with: "Catalog")
         page.primaryEnabled.click()
         page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
         page.add.click()
         XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                self.app.sheets.firstMatch.frame.height > singleBackendHeight + 100
+            },
+            "Adding a backend should give the second card room before the form scrolls"
+        )
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: "8080")
         page.apply.click()

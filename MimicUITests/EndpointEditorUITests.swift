@@ -368,16 +368,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         )
     }
 
-    // There is no `toggleGroupSection` here any more, and its absence is the record of a gap.
-    //
-    // A sidebar section built with `Section(isExpanded:)` collapses through SwiftUI's own affordance,
-    // which the app never declares and therefore cannot name. Two ways in were tried over a CI round
-    // and neither moved the section: clicking the header row — the header is a caption, not the
-    // control — and hovering the row to reach the "Hide"/"Show" button AppKit is documented to draw
-    // in it, which `sidebarElement.buttons` did not find under either label. What is left is a
-    // coordinate click at a guessed point, which is not a test of an affordance but a test of a
-    // layout, so the collapse step is left uncovered instead. The note on
-    // `testAGroupSectionKeepsItsEndpointListedWhileASiblingIsEdited()` carries the production fix.
+    @MainActor
+    private func groupDisclosure(_ action: String, name: String) -> XCUIElement {
+        app.buttons["\(action) \(name)"].firstMatch
+    }
 
     // MARK: - Editor element resolution
 
@@ -1027,18 +1021,8 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// assertion about the editor rather than about the sidebar. Moving the editor to `/api/users`
     /// first leaves the sidebar as the only place `/api/health` can be showing.
     ///
-    /// **SIDEBAR-14 — collapsing a group section — is deliberately not claimed here, and this test
-    /// was cut back to say only what it can prove.** The collapse itself is real:
-    /// `SidebarView.sectionBinding(for:)` writes `collapsedSections`, and
-    /// `SidebarView.updatedCollapsedSections` is unit-tested. What is missing is a way to *reach* it.
-    /// `Section(isExpanded:)` draws SwiftUI's own disclosure, the app declares no control there and
-    /// so gives it no identifier, and a CI round proved that neither clicking the header row nor
-    /// hovering it for AppKit's "Hide"/"Show" button toggles the section from a test. The production
-    /// fix is an identified affordance of the app's own in `SidebarView`'s section header —
-    /// `.accessibilityIdentifier("sidebar.group.<name>.disclosure")` on a control that flips the same
-    /// binding — and that is a change to the window, not something a test should reach around with a
-    /// coordinate click at a guessed point. `.pathfinder/journeys.json` already records SIDEBAR-14 as
-    /// untested with this reason; it stays that way until the window offers a name.
+    /// The group's disclosure is an explicit button, so both directions can be reached by name
+    /// without guessing the coordinates of AppKit's implicit section control.
     @MainActor
     func testAGroupSectionKeepsItsEndpointListedWhileASiblingIsEdited() throws {
         launchApp()
@@ -1064,6 +1048,16 @@ final class EndpointEditorUITests: MimicUITestCase {
             },
             "Clicking the ungrouped row should move the editor to it"
         )
+
+        let collapse = groupDisclosure("Collapse", name: "Ops")
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+        collapse.click()
+        XCTAssertTrue(workspace.endpointPathText("/api/health").waitForNonExistence(timeout: 5))
+
+        let expand = groupDisclosure("Expand", name: "Ops")
+        XCTAssertTrue(expand.waitForExistence(timeout: 5))
+        expand.click()
+        XCTAssertTrue(workspace.endpointPathText("/api/health").waitForExistence(timeout: 5))
 
         let healthPath = app.staticTexts["/api/health"]
         XCTAssertTrue(healthPath.waitForExistence(timeout: 5),

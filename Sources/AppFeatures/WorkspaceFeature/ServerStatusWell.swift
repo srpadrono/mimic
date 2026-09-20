@@ -64,7 +64,11 @@ struct ServerStatusWell: View {
             // The state mark stays leading in every state. A group centred as a whole would slide it
             // sideways with the length of the address, and a status light you have to look for is
             // the one thing this well cannot afford.
-            Spacer(minLength: DSSpacing.md)
+            // A spacer with no trailing counters still claims twelve points. At the toolbar's
+            // narrowest width that was enough to turn "Stopped" into "S…ed" for no reason.
+            if hasTraffic || unmatchedCount > 0 {
+                Spacer(minLength: DSSpacing.md)
+            }
 
             if hasTraffic {
                 trafficDivider

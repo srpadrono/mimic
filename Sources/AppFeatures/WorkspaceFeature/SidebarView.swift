@@ -4,6 +4,7 @@ import DesignSystem
 
 /// Sidebar — endpoint list with search filtering and group collapse/expand.
 struct SidebarView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let projectName: String?
     let endpoints: [Endpoint]
     @Binding var selectedEndpointID: UUID?
@@ -157,39 +158,41 @@ struct SidebarView: View {
                 }
             } else {
                 ForEach(groupedSections, id: \.name) { section in
-                    Section(isExpanded: sectionBinding(for: section.name)) {
-                        ForEach(section.endpoints) { endpoint in
-                            EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
-                                .tag(endpoint.id)
-                                .badge("")
-                                .contextMenu { endpointContextMenu(endpoint) }
+                    Section {
+                        if !collapsedSections.contains(section.name) {
+                            ForEach(section.endpoints) { endpoint in
+                                EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
+                                    .tag(endpoint.id)
+                                    .badge("")
+                                    .contextMenu { endpointContextMenu(endpoint) }
+                            }
                         }
                     } header: {
-                        HStack(spacing: DSSpacing.xs) {
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: DSGlyph.inline))
-                                .foregroundStyle(DSColors.labelTertiary)
-                            Text(section.name)
-                                .font(DSTypography.label)
-                                .foregroundStyle(DSColors.labelSecondary)
-                            Spacer()
-                            Text("\(section.endpoints.count)")
-                                .font(DSTypography.caption)
-                                // The only number a group header gives you. At 36% a column of them
-                                // reads as a smudge down the trailing edge — the same correction the
-                                // journeys navigator's step count already carries.
-                                .foregroundStyle(DSColors.labelSecondary)
-                                // No capsule. `tertiary` on the sidebar's own surface measures about
-                                // 1.07:1 — an invisible pill wrapped around the number, costing 8pt
-                                // of width to draw nothing. Xcode sets its navigator group counts as
-                                // plain secondary text, which is what this is now.
+                        Button {
+                            toggleSection(section.name)
+                        } label: {
+                            HStack(spacing: DSSpacing.xs) {
+                                Image(systemName: collapsedSections.contains(section.name) ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                                    .frame(width: DSGlyph.control)
+                                    .accessibilityHidden(true)
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: DSGlyph.inline))
+                                    .accessibilityHidden(true)
+                                Text(section.name)
+                                    .font(DSTypography.label)
+                                    .lineLimit(1)
+                                Spacer(minLength: DSSpacing.xs)
+                                Text("\(section.endpoints.count)")
+                                    .font(DSTypography.caption)
+                            }
+                            .foregroundStyle(DSColors.labelSecondary)
+                            .contentShape(Rectangle())
                         }
-                        // Paired the way `EndpointSidebarRow` pairs its own, and for the reason CI
-                        // found: without it AppKit's outline header row swallows the name, so
-                        // `sidebar.group.<name>` was never in the tree and no test could tell that
-                        // tagging an endpoint had grouped it.
-                        .accessibilityElement(children: .contain)
+                        .buttonStyle(.dsPlain)
                         .accessibilityIdentifier("sidebar.group.\(section.name)")
+                        .accessibilityLabel("\(collapsedSections.contains(section.name) ? "Expand" : "Collapse") \(section.name)")
+                        .accessibilityValue("\(section.endpoints.count) endpoints")
                     }
                 }
 
@@ -241,13 +244,15 @@ struct SidebarView: View {
         .accessibilityIdentifier("sidebar.contextMenu.delete")
     }
 
-    private func sectionBinding(for name: String) -> Binding<Bool> {
-        Binding(
-            get: { !collapsedSections.contains(name) },
-            set: { isExpanded in
-                collapsedSections = Self.updatedCollapsedSections(collapsedSections, name: name, isExpanded: isExpanded)
-            }
-        )
+    private func toggleSection(_ name: String) {
+        let isExpanded = collapsedSections.contains(name)
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.normal)) {
+            collapsedSections = Self.updatedCollapsedSections(
+                collapsedSections,
+                name: name,
+                isExpanded: isExpanded
+            )
+        }
     }
 
     // MARK: - Data

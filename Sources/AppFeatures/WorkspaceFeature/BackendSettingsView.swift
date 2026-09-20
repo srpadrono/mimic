@@ -55,11 +55,13 @@ struct BackendSettingsView: View {
                     .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: DSSpacing.md)
-                Button("Cancel") { dismiss() }
+                DSButton("Cancel", variant: .ghost, size: .medium, identifier: "backend.cancel") {
+                    dismiss()
+                }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("backend.cancel")
                     .accessibilityLabel("Cancel settings changes")
-                Button("Apply") {
+                DSButton("Apply", variant: .primary, size: .medium, identifier: "backend.apply") {
                     if appState.applyServerConfiguration(draft) { dismiss() }
                     else { error = appState.lastCommandError }
                 }
@@ -69,8 +71,12 @@ struct BackendSettingsView: View {
             }
         }
         .padding(DSSpacing.lg)
-        // A settings sheet needs room for a complete URL and two backend cards.
-        .frame(width: BackendSettingsGeometry.width, height: BackendSettingsGeometry.height)
+        // One backend should not leave a large empty scroll region. Grow the sheet as listeners
+        // are added, then let the form scroll once the window reaches a practical height.
+        .frame(
+            width: BackendSettingsGeometry.width,
+            height: BackendSettingsGeometry.height(forBackendCount: draft.backends.count)
+        )
         .onAppear { draft = appState.serverConfiguration }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("backend.settings")
@@ -112,5 +118,8 @@ struct BackendSettingsView: View {
 
 private enum BackendSettingsGeometry {
     static let width: CGFloat = 640
-    static let height: CGFloat = 650
+
+    static func height(forBackendCount count: Int) -> CGFloat {
+        min(760, 520 + CGFloat(count) * 240)
+    }
 }
