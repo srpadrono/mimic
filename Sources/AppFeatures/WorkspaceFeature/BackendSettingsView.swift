@@ -19,32 +19,42 @@ struct BackendSettingsView: View {
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Form {
-                Section("Primary backend") {
-                    fields(name: $draft.primaryName, port: $draft.port, upstream: $draft.upstreamURL,
-                           enabled: $draft.passthroughEnabled, capture: $draft.captureResponses, prefix: "backend.primary")
-                }
-                ForEach($draft.backends) { $backend in
-                    Section {
-                        fields(name: $backend.name, port: $backend.port, upstream: $backend.upstreamURL,
-                               enabled: $backend.passthroughEnabled, capture: $backend.captureResponses,
-                               prefix: "backend.\(backend.id)")
-                        Button("Remove backend", role: .destructive) {
-                            draft.backends.removeAll { $0.id == backend.id }
+            ScrollViewReader { scrollProxy in
+                Form {
+                    Section("Primary backend") {
+                        fields(name: $draft.primaryName, port: $draft.port, upstream: $draft.upstreamURL,
+                               enabled: $draft.passthroughEnabled, capture: $draft.captureResponses, prefix: "backend.primary")
+                    }
+                    ForEach($draft.backends) { $backend in
+                        Section {
+                            fields(name: $backend.name, port: $backend.port, upstream: $backend.upstreamURL,
+                                   enabled: $backend.passthroughEnabled, capture: $backend.captureResponses,
+                                   prefix: "backend.\(backend.id)")
+                            Button("Remove backend", role: .destructive) {
+                                draft.backends.removeAll { $0.id == backend.id }
+                            }
+                            .accessibilityIdentifier("backend.delete.\(backend.id)")
+                            .accessibilityLabel("Remove \(backend.name)")
+                        } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
+                            .id(backend.id)
+                    }
+                    Button("Add backend", systemImage: "plus") {
+                        let used = Set(draft.listeners.map(\.port))
+                        let port = (8081...65535).first { !used.contains($0) } ?? 8081
+                        let backend = BackendConfiguration(name: "New backend", port: port)
+                        draft.backends.append(backend)
+                        // Form lazily realizes rows on compact displays. Bring the newly added
+                        // listener into view instead of leaving its fields below the viewport.
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(100))
+                            scrollProxy.scrollTo(backend.id, anchor: .top)
                         }
-                        .accessibilityIdentifier("backend.delete.\(backend.id)")
-                        .accessibilityLabel("Remove \(backend.name)")
-                    } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
+                    }
+                    .accessibilityIdentifier("backend.add")
+                    .accessibilityLabel("Add backend")
                 }
-                Button("Add backend", systemImage: "plus") {
-                    let used = Set(draft.listeners.map(\.port))
-                    let port = (8081...65535).first { !used.contains($0) } ?? 8081
-                    draft.backends.append(BackendConfiguration(name: "New backend", port: port))
-                }
-                .accessibilityIdentifier("backend.add")
-                .accessibilityLabel("Add backend")
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
             if let error {
                 Text(error).foregroundStyle(DSColors.destructive)
                     .fixedSize(horizontal: false, vertical: true)

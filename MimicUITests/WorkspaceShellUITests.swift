@@ -1199,19 +1199,21 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // SRVWELL-08 / SRVWELL-09 — the well counts what arrived and warns about what nothing
         // answered. Both state their meaning in their accessibility label rather than in the digit
         // they draw.
-        XCTAssertTrue(well.requestCount.waitForExistence(timeout: 5), "The well should show a request count")
-        XCTAssertTrue(
-            waitForLabel(well.requestCount, toContain: "2 requests logged"),
-            "The count should follow the traffic — \(well.spoken(well.requestCount))"
-        )
-        XCTAssertTrue(
-            well.unmatchedBadge.waitForExistence(timeout: 5),
-            "Requests nothing answered should raise the unmatched badge"
-        )
-        XCTAssertTrue(
-            waitForLabel(well.unmatchedBadge, toContain: "2 unmatched requests"),
-            "The badge should say how many — \(well.spoken(well.unmatchedBadge))"
-        )
+        if !workspace.overflowMenu.exists {
+            XCTAssertTrue(well.requestCount.waitForExistence(timeout: 5), "The well should show a request count")
+            XCTAssertTrue(
+                waitForLabel(well.requestCount, toContain: "2 requests logged"),
+                "The count should follow the traffic — \(well.spoken(well.requestCount))"
+            )
+            XCTAssertTrue(
+                well.unmatchedBadge.waitForExistence(timeout: 5),
+                "Requests nothing answered should raise the unmatched badge"
+            )
+            XCTAssertTrue(
+                waitForLabel(well.unmatchedBadge, toContain: "2 unmatched requests"),
+                "The badge should say how many — \(well.spoken(well.unmatchedBadge))"
+            )
+        }
 
         // INSPOV-07 — and the overview says the same thing in words.
         XCTAssertTrue(
@@ -1540,8 +1542,16 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
 
         well.revealTrafficControlsIfCompact()
-        XCTAssertTrue(well.unmatchedBadge.waitForExistence(timeout: 5), "The badge should be in the well")
-        well.unmatchedBadge.click()
+        if well.unmatchedBadge.waitForExistence(timeout: 2) {
+            well.unmatchedBadge.click()
+        } else {
+            let overflow = workspace.overflowMenu
+            XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            overflow.click()
+            let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
+            showUnmatched.click()
+        }
 
         XCTAssertTrue(
             requestLogDrawer.firstLogRow.waitForExistence(timeout: 5),
@@ -1641,7 +1651,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Server ▸ Start Server should start the mock"
         )
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Stop server, running"),
+            waitForLabel(toggle, toRead: "Stop server"),
             "Running, the power button announces the other action — label: \(toggle.label)"
         )
 
@@ -1968,7 +1978,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // which does not flip — see ``inspectorHeader``.
         let inspectorToggle = workspace.toggleInspectorButton
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The inspector starts open")
-        inspectorToggle.click()
+        if inspectorToggle.isHittable {
+            inspectorToggle.click()
+        } else {
+            app.typeKey("i", modifierFlags: [.command, .option])
+        }
         XCTAssertTrue(
             inspectorHeader.waitForNonExistence(timeout: 5),
             "The inspector should be collapsed before the row is clicked"

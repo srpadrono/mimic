@@ -428,12 +428,12 @@ struct WorkspaceView: View {
         .sharedBackgroundVisibility(.hidden)
 
         if usesToolbarOverflow {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .navigation) {
                 overflowMenu
             }
         } else {
-            ToolbarItem(placement: .principal) { importMenu }
-            ToolbarItem(placement: .principal) { serverSettingsButton }
+            ToolbarItem(placement: .navigation) { importMenu }
+            ToolbarItem(placement: .navigation) { serverSettingsButton }
         }
 
         // Above the inspector, in both layouts: never fold these into the editor's menu.

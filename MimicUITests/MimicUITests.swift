@@ -208,8 +208,9 @@ struct WorkspacePage {
     }
 
     func showSidebarIfNeeded() {
+        if addEndpointButton.exists { return }
         let show = app.toolbars.buttons["Show Sidebar"].firstMatch
-        if show.exists { show.click() }
+        if show.isHittable { show.click() }
         _ = addEndpointButton.waitForExistence(timeout: 5)
     }
 
