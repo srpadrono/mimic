@@ -24,6 +24,10 @@ public enum DSControlHeight {
     /// ``verticalPadding`` above and below.
     public static let field: CGFloat = 22
 
+    /// 26 — readable panel search fields and icon-and-title navigation targets.
+    public static let search: CGFloat = 26
+    public static let navigation: CGFloat = 26
+
     /// 26 — one row of a dense table, which is a different thing from a control and is here because
     /// nothing else names heights. `row` is 20 and `field` 22, and neither holds a `compact`
     /// `DSMethodBadge` above a line of `codeSmall`; a table row is not something a user aims at, so

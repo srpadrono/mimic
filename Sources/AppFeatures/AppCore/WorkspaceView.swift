@@ -757,9 +757,8 @@ struct WorkspaceView: View {
             // a `MenuButton` here against a `Button` there. Element type is not identity — it is a
             // property of the menu *style* — so modernising `DSIconMenu` off the deprecated
             // `.menuStyle(.borderlessButton)` would have repointed the suite's query at the empty
-            // state's button, where every wait for a menu item would then time out. The label is
-            // also the only handle the suite has: `DSTabStrip` stamps its own identifier over the
-            // one passed below.
+            // state's button, where every wait for a menu item would then time out. Both the label
+            // and the menu's own identifier now remain available to assistive technology and tests.
             label: "Choose how to add a journey",
             identifier: "journeys.addJourneyButton"
         ) {
@@ -803,7 +802,8 @@ struct WorkspaceView: View {
                         // The badge is the point of putting journeys here: a running journey is
                         // overriding every endpoint you look at, and you should not have to open a
                         // window to find that out.
-                        badge: tab == .journeys && appState.activeJourney != nil ? 1 : nil
+                        badge: tab == .journeys && appState.activeJourney != nil ? 1 : nil,
+                        title: tab.title
                     )
                 },
                 selection: navigatorTabBinding,

@@ -743,6 +743,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createProjectViaUI(name: "Tab Strip")
 
         XCTAssertTrue(shell.journeysTab.waitForExistence(timeout: 5), "The strip should offer both tabs")
+        XCTAssertEqual(shell.journeysTab.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(shell.endpointsTab.frame.height, 26, accuracy: 1)
         shell.journeysTab.click()
 
         // `DSEmptyState` flattens its leaves, so the heading's own identifier never lands — the
@@ -786,6 +788,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
             inspector.addScenarioButton.waitForExistence(timeout: 5),
             "Returning to Endpoints should restore the selected endpoint's inspector"
         )
+
+        let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        evidence.name = "navigation-updated"
+        evidence.lifetime = .keepAlways
+        add(evidence)
     }
 
     // MARK: - 2. The breadcrumb jump bar

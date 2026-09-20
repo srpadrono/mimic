@@ -28,3 +28,18 @@ selected. The fixture has served two journey steps.
 These screenshots document the visible states above. They do not claim coverage
 of every dialog, animation, or window size; those checks are described separately
 in PR #78.
+
+## Adaptive navigation and taller search fields
+
+The following later capture shows the updated 26-point navigation buttons and
+search fields. The navigator uses icons at 240 points and icon-and-title buttons
+at 340 points; the panel header keeps its 30-point height in both states.
+
+The focused navigation UI test verifies navigation and button height and captures
+the real app window with an isolated synthetic project. The compact/expanded
+transition was verified separately in the live app at 240 and 340 points; the
+XCUITest pointer drag did not reliably move the native divider, so it is not used
+as evidence of resizing. Source result bundle:
+`/tmp/mimic-navigation-screenshot-final.xcresult`.
+
+![Updated navigation and taller search](navigation-updated.png)

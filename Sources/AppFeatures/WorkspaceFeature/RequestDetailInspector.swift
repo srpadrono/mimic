@@ -410,7 +410,7 @@ struct RequestDetailInspector: View {
                 .foregroundStyle(DSColors.labelTertiary)
             TextField("Find in body", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.label)
                 .focused($searchFieldIsFocused)
                 .accessibilityIdentifier("requestDetail.bodySearchField")
                 .accessibilityLabel("Find in body")
@@ -429,11 +429,8 @@ struct RequestDetailInspector: View {
             }
         }
         .padding(.horizontal, DSSpacing.sm)
-        // `DSControlHeight.row` — the rung `DSFilterField` and the request log's header controls
-        // stand on. This well inferred its height from padding alone, so the app's two search fields
-        // were a point apart for no reason anyone chose; the note that fixed that then wrote the
-        // number out by hand next to the name of the token holding it.
-        .frame(height: DSControlHeight.row)
+        // One search-field height across the navigator, request log, and body inspector.
+        .frame(height: DSControlHeight.search)
         .background(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                 .fill(DSColors.tertiary)

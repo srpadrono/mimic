@@ -69,7 +69,7 @@ enum SortField: String {
 /// that promise now lives, so adopting the component later cannot change this row's shape.
 private enum HeaderControl {
     static let verticalPadding = DSControlHeight.verticalPadding
-    static let height = DSControlHeight.row
+    static let height = DSControlHeight.search
     static let cornerRadius = DSCornerRadius.sm
     static let borderWidth = DSStroke.hairline
 }
@@ -525,7 +525,7 @@ struct RequestLogDrawerView: View {
                 .foregroundStyle(DSColors.labelTertiary)
             TextField("Filter", text: $filterText)
                 .textFieldStyle(.plain)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.label)
                 .focused($filterFieldIsFocused)
                 .accessibilityIdentifier("drawer.filterField")
                 .accessibilityLabel("Filter request log")
