@@ -57,7 +57,8 @@ public struct DSTabStrip: View {
                 }
                 tabButtons(showsTitles: false)
             }
-            Spacer(minLength: 0)
+            // Embedded strips should size to their chosen buttons, not absorb the header's slack.
+            if drawsChrome { Spacer(minLength: 0) }
             accessory
         }
         .padding(.leading, DSSpacing.xs)

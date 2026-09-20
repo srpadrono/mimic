@@ -1367,13 +1367,17 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Both requests should reach the log"
         )
 
-        // The tab is a leaf inside a `DSTabStrip` nested in a `DSPanelHeader` — two containers, each
-        // of which stamps its own identifier over its children — so the label is the only handle.
+        // The label is stable across the icon-only and icon-and-title presentations.
         let trafficTab = app.buttons["Show the requests this endpoint answered"].firstMatch
         XCTAssertTrue(
             trafficTab.waitForExistence(timeout: 5),
             "The inspector should offer a Traffic tab for the selected endpoint"
         )
+        XCTAssertEqual(trafficTab.frame.height, 26, accuracy: 1)
+        let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        evidence.name = "inspector-adaptive-controls"
+        evidence.lifetime = .keepAlways
+        add(evidence)
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) { (trafficTab.value as? String) == "2" },
             "The tab should badge how many requests this endpoint answered"

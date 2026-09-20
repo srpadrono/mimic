@@ -180,7 +180,8 @@ struct InspectorPanelView: View {
                                     // making you switch tabs to find out.
                                     badge: tab == .traffic && !endpointTraffic.isEmpty
                                         ? endpointTraffic.count
-                                        : nil
+                                        : nil,
+                                    title: tab.title
                                 )
                             },
                             selection: endpointTabBinding,
@@ -193,19 +194,8 @@ struct InspectorPanelView: View {
                             // title, with a hard edge at the strip's boundary.
                             drawsChrome: false
                         )
-                        // `.fixedSize()` is load-bearing and was briefly removed in error.
-                        //
-                        // `DSTabStrip` ends its `HStack` with `Spacer(minLength: 0)` so an accessory
-                        // can hold the trailing edge. With no accessory — which is this call site —
-                        // that spacer is a greedy trailing element, and without `.fixedSize()` the
-                        // strip becomes infinitely flexible and swallows the whole header: the tabs
-                        // park against the title and the "+" is stranded at the far right, the gap
-                        // between them growing with the panel. Measured at 10pt with it, and
-                        // 35/95/215/455pt without it at header widths 220/280/400/640.
-                        //
-                        // It was removed to buy width for the subtitle — and then the same change
-                        // made `headerSubtitle` nil, so there was nothing left to buy width for.
-                        .fixedSize()
+                        // Let the strip receive the header's remaining width so it can collapse
+                        // labels. Embedded strips have no spacer, keeping the Add action nearby.
 
                         // Only on the tab it acts on — a "+" above a traffic list would have
                         // nothing to add to.

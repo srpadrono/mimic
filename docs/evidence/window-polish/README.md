@@ -43,3 +43,17 @@ as evidence of resizing. Source result bundle:
 `/tmp/mimic-navigation-screenshot-final.xcresult`.
 
 ![Updated navigation and taller search](navigation-updated.png)
+
+## Adaptive inspector tabs
+
+Scenarios and Traffic now use the same 26-point adaptive buttons as the navigator.
+Live inspection verified icon-only controls at a 220-point inspector width and
+icon-and-title controls at 380 points, including switching between both tabs.
+The panel title and Add scenario action remain visible in the compact state.
+
+The screenshot below is from the passing focused inspector traffic test with
+synthetic requests. All 11 design-system checks also passed in
+`/tmp/mimic-inspector-adaptive.xcresult`. It records the compact layout; expanded
+layout screenshots were inspected directly in the live app.
+
+![Compact inspector controls with request traffic](inspector-adaptive.png)
