@@ -5,6 +5,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-20
+
+### Added
+
+- Servers can route to named backends, pass requests through to an upstream, and capture upstream
+  responses for later local replay. Backend settings are available in the window and through the CLI.
+
+### Improved
+
+- The workspace panels, navigation, search fields, inspectors, and dialogs have more consistent
+  sizing and controls. The center toolbar gathers actions into an overflow menu when space is tight;
+  the right toolbar keeps the inspector and lower-panel toggles visible.
+
+### Fixed
+
+- The repository's obsolete skill references and checks no longer interrupt normal development.
+
 ## [0.11.0] — 2026-08-23
 
 ### Added
