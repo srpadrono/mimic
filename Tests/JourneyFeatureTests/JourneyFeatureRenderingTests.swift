@@ -305,16 +305,14 @@ struct JourneyFeatureRenderingTests {
 
     // MARK: - The sheets
 
-    /// The four journey sheets open at the widths the shared convention names.
+    /// The four journey sheets open at widths suited to their content.
     ///
     /// That convention — sentence-case heading, `DSSpacing.lg` between the blocks, cancel to the left
     /// of the confirm action — ends in a `.frame(minWidth:idealWidth:)` written out separately in
-    /// every file, and the two numbers are the only part of it a test can hold. `NewJourneySheet` and
-    /// `CaptureJourneySheet` are single-column dialogs at the 420 floor; the step sheet and the
-    /// template picker are the multi-section ones and declare the wider 520 ideal.
-    ///
-    /// Compared with each other rather than against the literals alone, so that a sheet leaving the
-    /// convention fails here even if somebody moves the numbers.
+    /// every file. `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 420
+    /// floor. The template picker needs 520 for its list; the step editor needs 560 so the multiline
+    /// headers and body fields retain useful width. Equalizing those two would either squeeze the
+    /// editor again or add empty width to the picker.
     @Test("Every journey sheet opens at the width its convention gives it")
     func journeySheetsShareTheSheetConvention() {
         let newJourney = render(NewJourneySheet { _ in })
@@ -325,8 +323,8 @@ struct JourneyFeatureRenderingTests {
         #expect(newJourney.width == capture.width)
         #expect(newJourney.width >= 420)
 
-        #expect(stepSheet.width == templatePicker.width)
-        #expect(stepSheet.width >= 520)
+        #expect(templatePicker.width == 520)
+        #expect(stepSheet.width == 560)
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)
