@@ -365,20 +365,6 @@ struct ImportWorkflowScreen: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).title")
                 Spacer(minLength: DSSpacing.sm)
-                // `.medium`, like the cancel button in every other sheet and like this screen's own
-                // "Import n endpoints" in the footer. At `.small` it was a 20pt control beside a 20pt
-                // heading, which read as undersized and gave the escape action the smallest hit
-                // target on the screen.
-                DSButton(
-                    "Cancel",
-                    variant: .ghost,
-                    size: .medium,
-                    identifier: "\(kind.rootAccessibilityIdentifier).cancel",
-                    action: dismiss.callAsFunction
-                )
-                .accessibilityIdentifier(kind.cancelAccessibilityIdentifier)
-                .accessibilityLabel("Cancel")
-                .keyboardShortcut(.cancelAction)
             }
             .padding(DSSpacing.md)
 
@@ -421,8 +407,19 @@ struct ImportWorkflowScreen: View {
             } else {
                 ImportReviewList(
                     candidates: $workflow.candidates,
+                    cancelIdentifier: kind.cancelAccessibilityIdentifier,
+                    onCancel: dismiss.callAsFunction,
                     onImport: workflow.commitAction(onCommit: onCommitImport, dismiss: dismiss.callAsFunction)
                 )
+            }
+
+            if workflow.isParsing || workflow.parseError != nil || workflow.candidates.isEmpty {
+                DSDivider(identifier: "\(kind.rootAccessibilityIdentifier).footer")
+                HStack {
+                    Spacer()
+                    cancelButton
+                }
+                .padding(DSSpacing.md)
             }
         }
         .frame(minWidth: 600, minHeight: 450)
@@ -435,6 +432,19 @@ struct ImportWorkflowScreen: View {
         // progress view are leaves whose identifiers are the ones a test looks for.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(kind.rootAccessibilityIdentifier)
+    }
+
+    private var cancelButton: some View {
+        DSButton(
+            "Cancel",
+            variant: .ghost,
+            size: .medium,
+            identifier: "\(kind.rootAccessibilityIdentifier).cancel",
+            action: dismiss.callAsFunction
+        )
+        .accessibilityIdentifier(kind.cancelAccessibilityIdentifier)
+        .accessibilityLabel("Cancel")
+        .keyboardShortcut(.cancelAction)
     }
 }
 

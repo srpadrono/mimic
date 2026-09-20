@@ -1925,22 +1925,17 @@ struct AppStateFacadeTests {
     // MARK: - The server well's width rule
 
     /// `WorkspaceView.wellWidth` is the whole mechanism behind the well following the panels —
-    /// Xcode's flexible activity view, rebuilt as arithmetic because SwiftUI has no flexible
-    /// toolbar item. Every expectation below is a literal, not the formula re-run: the budgets are
-    /// 240 leading, 95 for Import, and 25 or 250 trailing depending on the inspector, and if one of
-    /// them moves, the sums here go red instead of moving with it.
-    @Test("The well absorbs the centre column's slack, and the inspector decides the trailing bill")
+    /// Xcode's activity view, rebuilt as arithmetic because SwiftUI has no flexible toolbar item.
+    /// It yields in a narrow window but stops expanding once more width becomes empty chrome.
+    @Test("The well follows the centre column without becoming an empty wide capsule")
     func wellWidthFollowsTheCentreColumn() {
-        // Default window, inspector open: the measured centre column is ~927pt.
-        // 927 − 240 − 95 − 25 = 567.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true) == 567)
+        // With no traffic, a wide centre column need not reserve a table of counts yet.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true) == 280)
 
-        // Same window, inspector closed: the column grows to ~1187, but the panel toggles and the
-        // autosave reserve now stand over it, so the well nets almost the same width.
-        // 1187 − 240 − 95 − 250 = 602.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 1187, isInspectorPresented: false) == 602)
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 1187, isInspectorPresented: false) == 280)
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true, hasTraffic: true) == 460)
 
-        // Above the floor the well takes exactly what is left — no tier, no rounding up.
+        // Between the floor and cap it takes exactly what is left.
         #expect(WorkspaceView.wellWidth(centreColumnWidth: 600, isInspectorPresented: true) == 240)
 
         // **The regression this rule shipped once.** A 1024pt window with both panels open leaves a
@@ -1957,8 +1952,7 @@ struct AppStateFacadeTests {
         #expect(WorkspaceView.wellWidth(centreColumnWidth: 400, isInspectorPresented: true) == 96)
         #expect(WorkspaceView.wellWidth(centreColumnWidth: 0, isInspectorPresented: false) == 96)
 
-        // Fractional layout widths land on whole points, rounded down — a toolbar item asked for
-        // 567.7pt would re-raster its hairline on the half pixel.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927.7, isInspectorPresented: true) == 567)
+        // Fractional layout widths land on whole points, rounded down.
+        #expect(WorkspaceView.wellWidth(centreColumnWidth: 600.7, isInspectorPresented: true) == 240)
     }
 }

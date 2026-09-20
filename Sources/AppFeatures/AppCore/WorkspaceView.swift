@@ -225,17 +225,15 @@ struct WorkspaceView: View {
                         )
                     }
 
-                    // The well is Xcode's activity view, mechanism included: a flexible item that
-                    // absorbs the centre segment's slack, so Import lands against the segment's
-                    // trailing edge because the well has already spent everything before it. The
+                    // The well is Xcode's activity view: it yields as the centre segment narrows,
+                    // but caps its width before an empty capsule dominates a wide toolbar. The
                     // width is *computed*, not flexed — SwiftUI has no flexible toolbar item, and the
                     // two declarative routes both fail in ways this toolbar has now shipped once
                     // each: a fixed frame holds one width while the panels move around it, and
                     // `ToolbarSpacer(.flexible)` stretches the principal group across the
                     // segmentation divider, which put Import on top of the inspector's toolbar
                     // region. So the centre column reports its width (`onGeometryChange`, above) and
-                    // `Self.wellWidth` turns it into the one width that fills the segment without
-                    // crossing it.
+                    // `Self.wellWidth` keeps it inside the segment without crossing it.
                     ToolbarItem(placement: .principal) {
                         ServerStatusWell(
                             serverState: appState.serverState,
@@ -243,7 +241,11 @@ struct WorkspaceView: View {
                             requestCount: appState.requestLogs.count,
                             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
                             compact: centreColumnWidth.map {
-                                Self.wellWidth(centreColumnWidth: $0, isInspectorPresented: showInspector) < 150
+                                Self.wellWidth(
+                                    centreColumnWidth: $0,
+                                    isInspectorPresented: showInspector,
+                                    hasTraffic: !appState.requestLogs.isEmpty
+                                ) < 150
                             } ?? false,
                             // No `withAnimation`: the request log is an `NSSplitViewItem` now, and
                             // AppKit animates the reveal through its own animator. Wrapping the flag
@@ -254,7 +256,11 @@ struct WorkspaceView: View {
                             }
                         )
                         .frame(width: centreColumnWidth.map {
-                            Self.wellWidth(centreColumnWidth: $0, isInspectorPresented: showInspector)
+                            Self.wellWidth(
+                                centreColumnWidth: $0,
+                                isInspectorPresented: showInspector,
+                                hasTraffic: !appState.requestLogs.isEmpty
+                            )
                         })
                     }
 
@@ -550,14 +556,21 @@ struct WorkspaceView: View {
     /// well giving way is right — the toggles are controls, and this is a readout.
     nonisolated static func wellWidth(
         centreColumnWidth: CGFloat,
-        isInspectorPresented: Bool
+        isInspectorPresented: Bool,
+        hasTraffic: Bool = false
     ) -> CGFloat {
         let leadingBudget: CGFloat = 240
         let importBudget: CGFloat = 95
         let trailingBudget: CGFloat = isInspectorPresented ? 25 : 250
         let available = (centreColumnWidth - leadingBudget - importBudget - trailingBudget).rounded(.down)
-        return max(minimumWellWidth, available)
+        let cap = hasTraffic ? maximumWellWidthWithTraffic : maximumWellWidth
+        return min(cap, max(minimumWellWidth, available))
     }
+
+    /// Beyond this point the readout becomes an empty capsule rather than useful toolbar space.
+    /// Xcode's activity view stays a compact focal point even when the editor grows very wide.
+    nonisolated static let maximumWellWidth: CGFloat = 280
+    nonisolated static let maximumWellWidthWithTraffic: CGFloat = 460
 
     /// 96 — the state chip, the well's own horizontal padding, and enough of the address to read a
     /// scheme-less host before the middle truncates. Not a design tier, and not a width the
