@@ -150,7 +150,9 @@ struct WorkspacePage {
     /// offers "Add endpoint" and both call the same action, so either is a correct answer to "open
     /// the new-endpoint sheet". Pinning this to the strip's copy would make every test that adds the
     /// *first* endpoint depend on which of two identical buttons the tree happened to list first.
-    var addEndpointButton: XCUIElement { app.buttons["Add endpoint"].firstMatch }
+    var addEndpointButton: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@", "Add endpoint")).firstMatch
+    }
     /// Asserts the removal, so the duplicate cannot come back unnoticed.
     var toolbarAddEndpointButton: XCUIElement {
         app.toolbars.buttons["addEndpointButton"].firstMatch

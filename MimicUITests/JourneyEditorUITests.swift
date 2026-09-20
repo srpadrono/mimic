@@ -263,9 +263,12 @@ extension JourneyStepSheetPage {
     func reveal(_ field: XCUIElement, byScrollingUp: Bool) {
         let form = app.sheets.firstMatch.scrollViews.firstMatch
         for _ in 0..<5 {
-            if field.isHittable { return }
+            let viewport = form.frame.insetBy(dx: 8, dy: 8)
+            let fieldCenter = CGPoint(x: field.frame.midX, y: field.frame.midY)
+            if viewport.contains(fieldCenter) && field.isHittable { return }
             if byScrollingUp { form.swipeUp() } else { form.swipeDown() }
         }
+        XCTFail("\(field.identifier) did not scroll into the form's visible area")
     }
 
     var delayField: XCUIElement { app.textFields["stepSheet.delayField"] }
