@@ -3,11 +3,8 @@
 Guidance for AI assistants and contributors working in this repository. This is the single source
 of truth; `CLAUDE.md` points here.
 
-This file is deliberately short. It carries what is true on *every* task — what Mimic is, how to
-build it, the module map, and the invariants that must never be broken — and routes everything else
-to a skill under [`.agents/skills/`](.agents/skills/). The depth is not gone; it moved somewhere it
-can be loaded when it is relevant instead of paid for on every turn. **Start at "Where the rules
-live" and load the skill for what you are about to touch.**
+This file carries the repository's agent guidance. Use the linked documentation and scripts for
+task-specific detail; this repository does not install its own agent skills.
 
 ## What is Mimic?
 
@@ -50,35 +47,9 @@ matching, and [docs/ROADMAP.md](docs/ROADMAP.md) for what is deliberately not bu
 
 ## Where the rules live
 
-Nine skills, in `.agents/skills/`, symlinked into `.claude/skills/` so Claude Code and other agents
-read one copy. **Load the skill before you touch its domain** — each one carries the failures that
-motivated its rules, which is the part a generic skill cannot tell you.
-
-| If you are about to… | Load |
-|----------------------|------|
-| Run or change a build, pick a `-scheme`, edit CI or a `Scripts/check_*` gate, chase a Linux-only failure | **mimic-build-and-test** |
-| Write or review any view; pick a size, colour, weight or capitalization | **mimic-window-design** |
-| Change a view or navigation; write or debug `MimicUITests`; touch test isolation | **mimic-ui-tests** |
-| Add or change an operation, a CLI verb, or anything in the control plane | **mimic-control-surface** |
-| Write SwiftUI | **swiftui-pro** |
-| Write a unit or integration test | **swift-testing-pro** |
-| Write `async`/`await`, an actor, a `Task`, or anything `Sendable` | **swift-concurrency-pro** |
-| Run `tuist generate`, tag a target, or change a build config | **using-tuist-generated-projects** |
-| Deepen a module or move a boundary | **improve-codebase-architecture** |
-
-Several usually apply at once — a new view is `mimic-window-design` **and** `swiftui-pro`, and its
-tests are `mimic-ui-tests`. Read a skill's `SKILL.md` first; it is a lightweight index that names
-which of its `references/` files you actually need.
-
-Four of these are repo-specific and were carved out of this file: `mimic-build-and-test`,
-`mimic-window-design`, `mimic-ui-tests`, `mimic-control-surface`. `improve-codebase-architecture` is
-vendored from `mattpocock/skills` and pinned in [`skills-lock.json`](skills-lock.json); the rest are
-local.
-
-There is no `xcuitest-pro` in this repository — `find . -iname '*xcuitest*'` returns nothing, and
-this sentence is kept so nobody re-adds the reference believing it was an oversight. Agents run with
-their own skill sets and some do carry one; if yours does, use it alongside `mimic-ui-tests`, which
-is where this repo's hard-won XCUITest contract lives.
+Use [CONTRIBUTING.md](CONTRIBUTING.md) for build, test, and CI details; the documents linked above
+for domain and command behavior; and the non-negotiable patterns below for implementation. Agent
+tools may provide their own skills, but none are required or mirrored by this repository.
 
 ## Build & Test Commands
 
@@ -107,16 +78,14 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release COD
 # Every gate CI runs, locally:
 ./Scripts/ci.sh
 
-# CLI end-to-end (launches Mimic headless against a throwaway store — read the skill's caveats
-# before running it):
+# CLI end-to-end (launches Mimic headless against a throwaway store):
 ./Scripts/run_cli_e2e.sh
 ```
 
 After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && tuist generate`.
 
-**Which scheme runs what, what each CI job covers, and what `run_cli_e2e.sh` needs before it can
-find the CLI a gate just built** are in the **mimic-build-and-test** skill. Read it before editing a
-workflow or concluding a scheme cannot test.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant script before changing a gate or
+concluding that a scheme cannot run a test target.
 
 ## Project Configuration
 
@@ -124,9 +93,7 @@ workflow or concluding a scheme cannot test.
 - **Swift:** 6.2 with `SWIFT_APPROACHABLE_CONCURRENCY = YES` everywhere, and
   `SWIFT_DEFAULT_ACTOR_ISOLATION` set **per target, not project-wide** — `MainActor` in the shared
   base, overridden to `"none"` by fourteen targets. Read the default as "MainActor when there is a
-  window involved": the SwiftUI half is MainActor-by-default and the portable half is not. Which
-  targets, why each override is load-bearing, and why Linux agrees only by coincidence are in
-  **mimic-build-and-test**, `references/actor-isolation.md`.
+  window involved": the SwiftUI half is MainActor-by-default and the portable half is not.
 - **Bundle ID:** `devxa.Mimic`
 - **Sandbox:** App Sandbox and Hardened Runtime enabled (relaxed only where a test target requires it,
   and for the `mimic` command line tool, which launches and signals the app)
@@ -214,23 +181,20 @@ repository has shipped. The owner deleted it. `Scripts/check_module_edges.py` fa
 looks like starting to regrow; if one is ever wanted, that is a decision to argue with the owner,
 not a dependency to add in passing.
 
-The full account — how headless resolves to the app bundle, what went with the deletion, and why
-`ControlServerTests` is not evidence about the host — is in **mimic-control-surface**,
-`references/one-host.md`.
+`ControlServerTests` exercises the server adapter, not the production host; verify host behavior
+through `AppControlHost` and its integration tests.
 
 ## Definition of Done
 
-Two checklists gate the work, and both live in skills because each is a hundred lines of hard-won
-detail:
+Two checklists gate the work:
 
-- **Changing a view or navigation** → **mimic-ui-tests**. Accessibility identifiers, XCUITests
+- **Changing a view or navigation** → Accessibility identifiers, XCUITests
   covering the changed flows, a passing suite, and test-only state kept out of production sources.
-- **Adding or changing an operation** → **mimic-control-surface**. `ControlCommand` case,
+- **Adding or changing an operation** → `ControlCommand` case,
   `CommandKind` case, `scope` classification, executor or host implementation, samples, catalog
   descriptor, CLI subcommand, exit codes.
 
-Neither is optional and neither is fully compile-enforced. Load the skill rather than working from
-memory of it.
+Neither is optional and neither is fully compile-enforced.
 
 ## Non-negotiable patterns
 
@@ -241,7 +205,9 @@ perpetual animations honor Reduce Motion.
 
 **XCUITests:** page objects (no scattered raw queries); `.waitForExistence(timeout:)` (never
 `sleep()`); accessibility-id targeting; configure state via launch environment, not UI; cover happy
-path, error, empty, and edge cases.
+path, error, empty, and edge cases. When either of two elements may appear, use
+`UITestApp.waitForAny([a, b], timeout:)` rather than waiting for them sequentially. A UI run must
+never open or delete the developer's `mimic.sqlite`; see [UI changes](CONTRIBUTING.md#ui-changes).
 
 **Swift concurrency:** Domain models are `Sendable`; use `actor` for shared mutable state; prefer
 structured concurrency; all UI updates on `@MainActor`. State that a request mutates — the journey
@@ -268,12 +234,13 @@ Negative controls are worth labelling as such in the test's own comment, so a la
 mistake a test that is green by construction for one that is guarding something.
 
 **Visual:** sentence case inside the window, Title Case in the menu bar; every interactive control
-answers the pointer; sizes come from the `DS*` ladders, never from a literal. The reasoning, the
-exceptions and the layout traps are in **mimic-window-design**.
+answers the pointer; sizes come from the `DS*` ladders, never from a literal. Use `DSGlyph` for glyph
+sizes; no glyph is below 8 pt. Inject `UserDefaults` for window layout state instead of binding
+`@AppStorage` to the developer's defaults during tests.
 
 **The control plane never binds beyond `127.0.0.1`**, and the discovery file is a credential —
-`0600`, and its token goes only to the instance that advertised it. See **mimic-control-surface**,
-`references/loopback-security.md`, before touching any of it.
+`0600`. Attach its token only to a loopback destination on the exact port the file advertised;
+an explicit remote or forwarded destination needs a caller-supplied token. See
+[CLI instance discovery](docs/CLI.md#finding-an-instance) before changing discovery.
 
-Several of these are enforced mechanically by `Scripts/check_house_rules.sh`, which cites the skill
-that explains each rule when it fails.
+Several of these are enforced mechanically by `Scripts/check_house_rules.sh`.

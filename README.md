@@ -335,8 +335,8 @@ the Release gate, with the XCUITest suite beside it in three shards on three run
 eight run at once, which is the concurrent-macOS-job limit this repository was measured to get; the
 coverage merge is a fifth macOS job and adds no queue, because it starts only once all four have
 finished — and only on a push to `main`, so a pull request's 30 minutes is untouched. Both runners
-are free on a public repository. Why the work divides that way, and what each gate settles, is in
-[`ci.md`](.agents/skills/mimic-build-and-test/references/ci.md).
+are free on a public repository. The job definitions and gates are in
+[the CI workflow](.github/workflows/ci.yml).
 
 ## Documentation
 

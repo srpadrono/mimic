@@ -16,14 +16,12 @@ python3 Scripts/check_doc_counts.py
 python3 Scripts/check_module_edges.py
 python3 Scripts/check_compiler_settings.py
 python3 Scripts/check_lockfiles.py
-python3 Scripts/check_skills.py
 ./Scripts/check_house_rules.sh --self-test && ./Scripts/check_house_rules.sh
 ```
 
-Run all six. They need only the Python stdlib and find/awk/grep, and they catch real regressions: a
+Run all five. They need only the Python stdlib and find/awk/grep, and they catch real regressions: a
 documented count that no longer matches the tree, a forbidden module edge, a lockfile drifted from
-the one the shipped `.pkg` was built against, a skill that fell out of the `.claude/skills/` mirror
-or the AGENTS.md routing table, a house rule broken in a way a grep can settle.
+the one the shipped `.pkg` was built against, or a house rule broken in a way a grep can settle.
 
 The house-rule self-test runs **before** the real scan for a reason — it plants each forbidden
 pattern and requires the scanner to catch it, so a scan that passes because its regex broke is told
@@ -45,7 +43,7 @@ above. Read its header first — it names the three things it cannot reproduce, 
 not a green CI run.
 
 If you only need one suite, prefer the smallest scheme containing it over `Mimic-Workspace`; the
-`mimic-build-and-test` skill explains which schemes exist and what each one bundles.
+[CONTRIBUTING.md](../../CONTRIBUTING.md) explains which schemes exist and what each one bundles.
 
 ## Reporting
 

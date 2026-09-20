@@ -1,10 +1,8 @@
 # CLAUDE.md
 
 Repository guidance for all AI assistants — including Claude Code — lives in a single source of
-truth, [AGENTS.md](AGENTS.md). It carries what is true on every task — what Mimic is, the build and
-test commands, the module map, and the non-negotiable patterns — and routes the depth to nine skills
-in [`.agents/skills/`](.agents/skills/), which `.claude/skills/` symlinks so every agent reads one
-copy. Its "Where the rules live" table says which skill to load for what you are touching; load it
-rather than working from memory of it.
+truth, [AGENTS.md](AGENTS.md). It covers Mimic's build and test commands, module map, and
+non-negotiable patterns, and links to the task-specific documentation. This repository does not
+install agent skills.
 
 @AGENTS.md
