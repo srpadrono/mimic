@@ -91,8 +91,9 @@ struct BackendSettingsView: View {
             )
         )
         .onAppear { draft = appState.serverConfiguration }
+        // The form's dynamic sections must keep the identifiers on their individual fields.
+        // A parent identifier can flatten onto newly realized rows on compact AppKit forms.
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("backend.settings")
     }
 
     @ViewBuilder

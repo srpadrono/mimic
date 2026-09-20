@@ -48,7 +48,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         for _ in 0..<4 where !page.additional("name").exists {
             form.swipeUp()
         }
-        XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            page.additional("name").waitForExistence(timeout: 5),
+            "Added backend name is absent after scrolling: \(app.debugDescription)"
+        )
         XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
         XCTAssertGreaterThanOrEqual(
             app.sheets.firstMatch.frame.height, singleBackendHeight,
