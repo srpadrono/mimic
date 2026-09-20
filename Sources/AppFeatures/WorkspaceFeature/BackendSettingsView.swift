@@ -7,14 +7,29 @@ import DesignSystem
 struct BackendSettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = ServerConfiguration.default
+    @State private var draft: ServerConfiguration
     @State private var portText: [String: String] = [:]
     @State private var error: String?
+    @State private var newestBackendID: UUID?
+
+    init(configuration: ServerConfiguration) {
+        _draft = State(initialValue: configuration)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                Text("Server settings").font(DSTypography.title)
+                HStack {
+                    Text("Server settings").font(DSTypography.title)
+                    Spacer()
+                    // Keep the creation action outside the scrolling Form. On a short display,
+                    // a click on its last row can be consumed while dismissing field focus.
+                    DSButton("Add backend", variant: .secondary, size: .small, identifier: "backend.add") {
+                        addBackend()
+                    }
+                    .accessibilityIdentifier("backend.add")
+                    .accessibilityLabel("Add backend")
+                }
                 Text("Point your app to each local URL. Mimic serves your mocks first, then forwards other calls to the real backend.")
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -38,22 +53,15 @@ struct BackendSettingsView: View {
                         } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
                             .id(backend.id)
                     }
-                    Button("Add backend", systemImage: "plus") {
-                        let used = Set(draft.listeners.map(\.port))
-                        let port = (8081...65535).first { !used.contains($0) } ?? 8081
-                        let backend = BackendConfiguration(name: "New backend", port: port)
-                        draft.backends.append(backend)
-                        // Form lazily realizes rows on compact displays. Bring the newly added
-                        // listener into view instead of leaving its fields below the viewport.
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(100))
-                            scrollProxy.scrollTo(backend.id, anchor: .top)
-                        }
-                    }
-                    .accessibilityIdentifier("backend.add")
-                    .accessibilityLabel("Add backend")
                 }
                 .formStyle(.grouped)
+                .onChange(of: newestBackendID) { _, id in
+                    guard let id else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        scrollProxy.scrollTo(id, anchor: .top)
+                    }
+                }
             }
             if let error {
                 Text(error).foregroundStyle(DSColors.destructive)
@@ -90,10 +98,17 @@ struct BackendSettingsView: View {
                 visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900
             )
         )
-        .onAppear { draft = appState.serverConfiguration }
         // The form's dynamic sections must keep the identifiers on their individual fields.
         // A parent identifier can flatten onto newly realized rows on compact AppKit forms.
         .accessibilityElement(children: .contain)
+    }
+
+    private func addBackend() {
+        let used = Set(draft.listeners.map(\.port))
+        let port = (8081...65535).first { !used.contains($0) } ?? 8081
+        let backend = BackendConfiguration(name: "New backend", port: port)
+        draft.backends.append(backend)
+        newestBackendID = backend.id
     }
 
     @ViewBuilder

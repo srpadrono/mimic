@@ -75,20 +75,21 @@ Live checks also resized the side panels at a fixed window width, including a
 running mock server with a synthetic `/account-summary` request. Center actions
 collapsed and expanded without moving the two right-hand panel toggles.
 
-The following unedited XCUITest window screenshots use isolated synthetic data,
-in dark appearance. They document the toolbar layout, not a complete app regression.
-The expanded capture is 1920 × 988 pixels; the compact captures are 961 × 541.
-Source: the passing
+The following unedited XCUITest window screenshots use isolated synthetic data
+in dark appearance. They document the current toolbar layout, not a complete app
+regression. The expanded capture is 1920 × 988 pixels; the compact captures are
+961 × 541. Source: the passing focused
 `WorkspaceShellUITests/testCenterToolbarOverflowKeepsPanelControlsSeparate()` in
-`/tmp/mimic-center-toolbar-three-panels.xcresult`, captured on 20 September 2026.
+`Test-Mimic-2026.09.20_18-17-19-+0100.xcresult`, captured on 20 September 2026.
+This refresh shows the editor actions in the navigation group, clear of the
+inspector boundary, while the right-hand panel toggles remain separate.
 
 Validation for this revision: 26 focused unit checks passed in
 `/tmp/mimic-center-toolbar-units.xcresult`. The center-toolbar test and both nested
 import-sheet actions passed in `/tmp/mimic-center-toolbar-final.xcresult`; panel
 shortcuts and copying the server address passed in the earlier focused batch.
-Earlier test attempts used stale menu identifiers and an incorrect assumption that
-opening space in the center should leave it compact; those test expectations were
-corrected and rerun. No full UI suite or CI checks were run.
+The focused toolbar test passed again after this revision. CI status for the PR
+must be checked separately before merge; these captures alone are not CI evidence.
 
 ![Expanded center toolbar with separate right-hand toggles](center-toolbar-expanded.png)
 

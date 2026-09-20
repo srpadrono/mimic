@@ -273,7 +273,7 @@ struct WorkspaceView: View {
             )
         }
         .sheet(isPresented: $showBackendSettings) {
-            BackendSettingsView()
+            BackendSettingsView(configuration: appState.serverConfiguration)
                 .environment(appState)
         }
         // OpenAPI import sheet
