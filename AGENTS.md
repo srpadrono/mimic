@@ -14,7 +14,7 @@ and inspect live request traffic — so client work can start before the backend
 Vapor server runs **in-process** (direct Swift calls, never HTTP-to-self).
 
 Mimic is also drivable from a script. The `mimic` CLI and a loopback HTTP control API expose the
-forty-eight operations in `CommandCatalog` — every project, server, endpoint, scenario, journey and
+fifty-one operations in `CommandCatalog` — every project, server, endpoint, scenario, journey and
 request-log operation — so a UI test or an AI agent can create configurations, script flows, and drive
 a run without touching the interface.
 

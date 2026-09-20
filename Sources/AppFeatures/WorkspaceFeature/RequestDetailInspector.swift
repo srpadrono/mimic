@@ -38,11 +38,17 @@ struct RequestDetailInspector: View {
         }
     }
 
+    var onSaveAsMock: ((UUID) -> Void)?
     let log: RequestLog
     let endpointName: String?
     let scenarioName: String?
     /// The port the server is on, for the `curl` command. `nil` when the server is stopped.
     let port: Int?
+
+    private var captureIssue: String? {
+        do { try ResponseCapture.validate(log); return nil }
+        catch { return error.localizedDescription }
+    }
 
     @State private var selectedTab: RequestDetailTab
     @State private var searchText: String
@@ -59,9 +65,11 @@ struct RequestDetailInspector: View {
         endpointName: String? = nil,
         scenarioName: String? = nil,
         port: Int? = nil,
+        onSaveAsMock: ((UUID) -> Void)? = nil,
         initialTab: RequestDetailTab = .summary,
         initialSearchText: String = ""
     ) {
+        self.onSaveAsMock = onSaveAsMock
         self.log = log
         self.endpointName = endpointName
         self.scenarioName = scenarioName
@@ -70,12 +78,13 @@ struct RequestDetailInspector: View {
         _searchText = State(initialValue: initialSearchText)
     }
 
-    init(context: Context, initialTab: RequestDetailTab = .summary, initialSearchText: String = "") {
+    init(context: Context, onSaveAsMock: ((UUID) -> Void)? = nil, initialTab: RequestDetailTab = .summary, initialSearchText: String = "") {
         self.init(
             log: context.log,
             endpointName: context.endpointName,
             scenarioName: context.scenarioName,
             port: context.port,
+            onSaveAsMock: onSaveAsMock,
             initialTab: initialTab,
             initialSearchText: initialSearchText
         )
@@ -123,10 +132,13 @@ struct RequestDetailInspector: View {
             }
 
             ScrollView {
-                switch selectedTab {
-                case .summary: summaryContent
-                case .headers: headersContent
-                case .body: bodyContent
+                VStack(alignment: .leading, spacing: 0) {
+                    captureControls
+                    switch selectedTab {
+                    case .summary: summaryContent
+                    case .headers: headersContent
+                    case .body: bodyContent
+                    }
                 }
             }
             .background(DSColors.dominant)
@@ -149,6 +161,25 @@ struct RequestDetailInspector: View {
         // reporting `requestDetail.<uuid>` instead of their own names, which makes each of them
         // unaddressable from a test. `requestDetail.path` is the handle for "detail is showing".
         .accessibilityElement(children: .contain)
+    }
+
+    // Keep capture guidance inside the scrollable region. Making its wrapped text part of
+    // the inspector's minimum height can trigger an AppKit constraint-update loop in small windows.
+    @ViewBuilder
+    private var captureControls: some View {
+        if log.outcome == .passthrough, let onSaveAsMock {
+            Button("Save response as mock", systemImage: "square.and.arrow.down") { onSaveAsMock(log.id) }
+                .disabled(captureIssue != nil)
+                .help("Saves the response body and safe headers in this project. Review private data before sharing.")
+                .accessibilityIdentifier("requestDetail.saveMock")
+                .accessibilityLabel("Save response as mock")
+                .padding(DSSpacing.md)
+            if let captureIssue {
+                Text(captureIssue).font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, DSSpacing.md)
+                    .accessibilityIdentifier("requestDetail.captureIssue")
+            }
+        }
     }
 
     // MARK: - Request line
@@ -224,6 +255,10 @@ struct RequestDetailInspector: View {
             DSSectionHeader("Answered by", identifier: "requestDetail.answeredBy")
 
             summaryRow("Outcome", value: log.outcome.label, valueColor: outcomeColor)
+            if let name = log.backendName { summaryRow("Backend", value: name) }
+            if let port = log.listenerPort { summaryRow("Local URL", value: "http://localhost:\(port)") }
+            if let upstream = log.upstreamURL { summaryRow("Forwarded to", value: upstream) }
+            if let duration = log.durationMs { summaryRow("Duration", value: "\(duration) ms") }
             summaryRow("Endpoint", value: endpointName ?? "\u{2014}")
             summaryRow("Scenario", value: scenarioName ?? "\u{2014}", valueColor: scenarioName != nil ? DSColors.accentText : nil)
 
@@ -232,7 +267,7 @@ struct RequestDetailInspector: View {
             summaryRow("Request body", value: Self.byteSummary(log.requestBody))
             summaryRow(
                 "Response body",
-                value: Self.byteSummary(log.responseBody) + (log.responseBodyTruncated ? " (truncated)" : "")
+                value: (log.responseBodyIsBinary == true ? "Binary or non-UTF-8 (not previewed)" : Self.byteSummary(log.responseBody)) + (log.responseBodyTruncated ? " (truncated)" : "")
             )
             summaryRow("Request headers", value: "\(log.requestHeaders.count)")
             summaryRow("Response headers", value: "\(log.responseHeaders.count)")
@@ -276,11 +311,12 @@ struct RequestDetailInspector: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .padding(.vertical, DSSpacing.xs + 1)
-        .accessibilityElement(children: .combine)
-        // Derived from the label the same way `InspectorOverview.row` derives its own, so the two
-        // halves of the inspector name their rows alike: "Response body" becomes
-        // `requestDetail.summary.response body`.
-        .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
+        // Selectable AppKit text can hide its value when SwiftUI combines the row.
+        // Give assistive technology one stable label/value representation.
+        .accessibilityRepresentation {
+            Text("\(label): \(value)")
+                .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
+        }
     }
 
     private var outcomeColor: Color {
@@ -289,6 +325,8 @@ struct RequestDetailInspector: View {
         case .journey: DSColors.accentText
         case .unmatched: DSColors.httpStatusColor(for: 404)
         case .blockedByJourney: DSColors.warning
+        case .proxyFailure: DSColors.destructive
+        case .passthrough: DSColors.success
         }
     }
 
@@ -593,6 +631,8 @@ struct RequestDetailInspector: View {
         case .journey: "Response \(noun) (journey)"
         case .unmatched: "Response \(noun) (no endpoint configured)"
         case .blockedByJourney: "Response \(noun) (blocked by the active journey)"
+        case .proxyFailure: "Backend failure \(noun)"
+        case .passthrough: "Response \(noun) (real backend)"
         }
     }
 

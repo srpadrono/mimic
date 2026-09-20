@@ -7,6 +7,23 @@ import ProjectDescription
 let packageSettings = PackageSettings(
     productTypes: [
         "Vapor": .framework,
+        // Shared by Vapor and the streaming forwarder. Dynamic products keep a single runtime
+        // copy of the client, TLS, connection pools, and their transitive type metadata.
+        "AsyncHTTPClient": .framework,
+        "Algorithms": .framework,
+        "NIOFoundationCompat": .framework,
+        "NIOHTTP2": .framework,
+        "NIOHTTPCompression": .framework,
+        "NIOSSL": .framework,
+        "NIOTLS": .framework,
+        "Logging": .framework,
+        "Instrumentation": .framework,
+        "Tracing": .framework,
+        "ServiceContextModule": .framework,
+        "SystemPackage": .framework,
+        "RealModule": .framework,
+
+        "NIOTransportServices": .framework,
         "NIOEmbedded": .framework,
         "NIOCore": .framework,
         "NIOPosix": .framework,
@@ -34,6 +51,7 @@ let package = Package(
         // Vapor declared via SPM URL (not Tuist external) — workaround for vapor/vapor #3369
         // SPM's linker handles ManagedAtomic correctly; Tuist's does not
         .package(url: "https://github.com/vapor/vapor", from: "4.76.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.33.1"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.15.4"),
         .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "3.3.0"),

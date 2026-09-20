@@ -155,8 +155,42 @@ public enum ProjectValidator {
         }
 
         try EndpointValidator.validatePort(project.serverConfiguration.port)
+        let additional = project.serverConfiguration.backends
+        let allPorts = [project.serverConfiguration.port] + additional.map(\.port)
+        guard Set(allPorts).count == allPorts.count else {
+            throw ValidationError.invalidDocument(context: "server configuration", reason: "Backend ports must be unique.")
+        }
+        for backend in additional { try EndpointValidator.validatePort(backend.port) }
+        let backendIDs = Set(additional.map(\.id))
+        guard backendIDs.count == additional.count, !backendIDs.contains(ServerConfiguration.primaryID) else {
+            throw ValidationError.invalidDocument(context: "server configuration", reason: "Backend IDs must be unique.")
+        }
+        if let upstreamURL = project.serverConfiguration.upstreamURL {
+            do { try ProjectCommandExecutor.validateUpstream(upstreamURL, localPort: project.serverConfiguration.port) }
+            catch { throw ValidationError.invalidDocument(context: "server configuration", reason: "Invalid primary real backend URL.") }
+        }
+        for backend in additional {
+            if let upstreamURL = backend.upstreamURL {
+                do { try ProjectCommandExecutor.validateUpstream(upstreamURL, localPort: backend.port) }
+                catch { throw ValidationError.invalidDocument(context: "backend \"\(backend.name)\"", reason: "Invalid real backend URL.") }
+            }
+        }
 
+        for backend in project.serverConfiguration.listeners {
+            guard !backend.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidDocument(context: "backend", reason: "A name is required.")
+            }
+            if backend.passthroughEnabled && backend.upstreamURL?.isEmpty != false {
+                throw ValidationError.invalidDocument(context: backend.name, reason: "Enter a real backend URL or turn off pass-through.")
+            }
+            if let url = backend.upstreamURL {
+                for port in allPorts { try ProjectCommandExecutor.validateUpstream(url, localPort: port) }
+            }
+        }
         for endpoint in project.endpoints {
+            if let backendID = endpoint.backendID, !backendIDs.contains(backendID) {
+                throw ValidationError.invalidDocument(context: context(for: endpoint), reason: "Backend does not exist.")
+            }
             do {
                 try EndpointValidator.validatePath(endpoint.path)
                 for scenario in endpoint.scenarios {
@@ -203,6 +237,9 @@ public enum ProjectValidator {
 
         for journey in project.journeys {
             for step in journey.steps {
+                if let backendID = step.backendID, !backendIDs.contains(backendID) {
+                    throw ValidationError.invalidDocument(context: "journey \"\(journey.name)\", step \"\(step.name)\"", reason: "Backend does not exist.")
+                }
                 do {
                     try EndpointValidator.validatePath(step.path)
                     if case let .respond(response) = step.outcome {

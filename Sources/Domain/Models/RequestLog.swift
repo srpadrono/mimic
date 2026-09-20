@@ -46,8 +46,16 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
     public let timestamp: Date
     public let method: HTTPMethod
     public let path: String
+    public let projectID: UUID?
+    public let backendID: UUID?
+    public let backendName: String?
+    public let listenerPort: Int?
+    public let upstreamURL: String?
+    public let durationMs: Int?
+    public let responseBodyIsBinary: Bool?
     public let requestHeaders: [String: String]
     public let requestBody: String?
+    public let requestBodyTruncated: Bool?
     public let matchedEndpointID: UUID?
     public let matchedScenarioID: UUID?
     public let responseStatusCode: Int?
@@ -77,8 +85,16 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         timestamp: Date = Date(),
         method: HTTPMethod,
         path: String,
+        backendID: UUID? = nil,
+        projectID: UUID? = nil,
+        backendName: String? = nil,
+        listenerPort: Int? = nil,
+        upstreamURL: String? = nil,
+        durationMs: Int? = nil,
+        responseBodyIsBinary: Bool? = nil,
         requestHeaders: [String: String] = [:],
         requestBody: String? = nil,
+        requestBodyTruncated: Bool? = nil,
         matchedEndpointID: UUID? = nil,
         matchedScenarioID: UUID? = nil,
         responseStatusCode: Int? = nil,
@@ -94,8 +110,16 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         self.timestamp = timestamp
         self.method = method
         self.path = path
+        self.projectID = projectID
+        self.backendID = backendID
+        self.backendName = backendName
+        self.listenerPort = listenerPort
+        self.upstreamURL = upstreamURL
+        self.durationMs = durationMs
+        self.responseBodyIsBinary = responseBodyIsBinary
         self.requestHeaders = requestHeaders
         self.requestBody = requestBody
+        self.requestBodyTruncated = requestBodyTruncated
         self.matchedEndpointID = matchedEndpointID
         self.matchedScenarioID = matchedScenarioID
         self.responseStatusCode = responseStatusCode
@@ -124,8 +148,14 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
             timestamp: timestamp,
             method: method,
             path: path,
+            backendID: backendID, projectID: projectID,
+            backendName: backendName,
+            listenerPort: listenerPort,
+            upstreamURL: upstreamURL,
+            durationMs: durationMs,
+            responseBodyIsBinary: responseBodyIsBinary,
             requestHeaders: Self.redacted(requestHeaders),
-            requestBody: requestBody,
+            requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
             matchedEndpointID: matchedEndpointID,
             matchedScenarioID: matchedScenarioID,
             responseStatusCode: responseStatusCode,

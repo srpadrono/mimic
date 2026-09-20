@@ -53,12 +53,12 @@ struct JourneyEditorView: View {
         // out of the tree. Declaring the container here keeps them addressable whoever wraps it.
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $showNewStepSheet) {
-            JourneyStepSheet(step: nil) { spec in
+            JourneyStepSheet(step: nil, backends: appState.currentProject?.serverConfiguration.listeners ?? []) { spec in
                 appState.addJourneyStep(journeyID: journey.id, spec: spec)
             }
         }
         .sheet(item: editingStep) { step in
-            JourneyStepSheet(step: step) { spec in
+            JourneyStepSheet(step: step, backends: appState.currentProject?.serverConfiguration.listeners ?? []) { spec in
                 appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
             }
         }

@@ -114,11 +114,16 @@ enum TextRenderer {
             lines.append("""
             \(project.name)
               port         \(project.serverConfiguration.port)
+              real backend \(project.serverConfiguration.backend(id: nil)?.effectiveUpstream ?? "Off")
+              extra ports  \(project.serverConfiguration.backends.count)
               global delay \(project.serverConfiguration.globalDelayMs)ms
               endpoints    \(project.endpoints.count)
               journeys     \(project.journeys.count)\
             \(project.activeJourney.map { "\n  active       \($0.name)" } ?? "")
             """)
+            for backend in project.serverConfiguration.backends {
+                lines.append("  \(backend.name)  localhost:\(backend.port) → \(backend.effectiveUpstream ?? "Off")  id \(backend.id)")
+            }
         }
         if let endpoints = result.endpoints {
             lines.append(endpoints.isEmpty ? "No endpoints." : endpoints.map(renderEndpoint).joined(separator: "\n"))
@@ -192,6 +197,11 @@ enum TextRenderer {
         var text = "server       \(server.state) on port \(server.port)"
         if let baseURL = server.baseURL { text += " (\(baseURL))" }
         if server.globalDelayMs > 0 { text += ", global delay \(server.globalDelayMs)ms" }
+        if let upstreamURL = server.upstreamURL { text += "\n  primary → \(upstreamURL)" }
+        if server.restartRequired == true { text += "\n  Restart required to apply local port changes." }
+        for backend in server.activeBackends ?? server.backends ?? [] {
+            text += "\n  \(backend.name) localhost:\(backend.port) → \(backend.effectiveUpstream ?? "Off")"
+        }
         if let message = server.message { text += "\n             \(message)" }
         return text
     }

@@ -5,6 +5,13 @@ import Domain
 
 @Suite("Persistence Support")
 struct PersistenceSupportTests {
+    @Test("Corrupt backend JSON is refused rather than loaded as an empty list")
+    func corruptBackendsAreNotDiscarded() {
+        var record = ProjectRecord(from: MockProject(name: "Preserve my data"))
+        record.backendsJSON = "{broken"
+        #expect(throws: (any Error).self) { try record.toDomain() }
+    }
+
     @Test("DatabaseFactory creates an app database in Application Support")
     func makeAppDatabaseQueueCreatesExpectedFile() throws {
         let originalHome = NSHomeDirectory()
@@ -40,7 +47,7 @@ struct PersistenceSupportTests {
     }
 
     @Test("ScenarioRecord round-trips scenario fields")
-    func scenarioRecordRoundTrip() {
+    func scenarioRecordRoundTrip() throws {
         let scenario = Scenario(
             id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
             name: "Success",
@@ -66,7 +73,7 @@ struct PersistenceSupportTests {
     }
 
     @Test("ScenarioRecord falls back for malformed persisted data")
-    func scenarioRecordFallbacks() {
+    func scenarioRecordFallbacks() throws {
         var record = ScenarioRecord(
             from: Scenario(name: "Broken", statusCode: 500),
             endpointID: "endpoint-2"

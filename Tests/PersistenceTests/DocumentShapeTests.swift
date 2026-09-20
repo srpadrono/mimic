@@ -29,7 +29,7 @@ struct DocumentShapeTests {
 
     /// The version `recordedKeyPaths` below describes. Bumped with `currentSchemaVersion`, never
     /// before or after it.
-    private static let recordedShapeVersion = 3
+    private static let recordedShapeVersion = 5
 
     /// Every key path `fullyPopulatedProject()` encodes to, as of `recordedShapeVersion`.
     ///
@@ -54,8 +54,19 @@ struct DocumentShapeTests {
         "modifiedAt",
 
         // ServerConfiguration
+        "serverConfiguration.primaryName",
+        "serverConfiguration.passthroughEnabled",
+        "serverConfiguration.captureResponses",
+        "serverConfiguration.backends[].passthroughEnabled",
+        "serverConfiguration.backends[].captureResponses",
         "serverConfiguration.port",
         "serverConfiguration.globalDelayMs",
+        "serverConfiguration.upstreamURL",
+        "serverConfiguration.backends",
+        "serverConfiguration.backends[].id",
+        "serverConfiguration.backends[].name",
+        "serverConfiguration.backends[].port",
+        "serverConfiguration.backends[].upstreamURL",
 
         // Endpoint
         "endpoints[].id",
@@ -67,6 +78,7 @@ struct DocumentShapeTests {
         "endpoints[].delayMs",
         "endpoints[].groupTag",
         "endpoints[].graphqlOperation",
+        "endpoints[].backendID",
 
         // Scenario
         "endpoints[].scenarios[].id",
@@ -96,6 +108,7 @@ struct DocumentShapeTests {
         "journeys[].steps[].delayMs",
         "journeys[].steps[].repeatCount",
         "journeys[].steps[].graphqlOperation",
+        "journeys[].steps[].backendID",
 
         // JourneyStepOutcome.respond — an unlabelled associated value, so its payload sits under
         // `_0`, the spelling `GraphQLDocumentCompatibilityTests.legacyStepDecodes` reads back.
@@ -164,6 +177,7 @@ struct DocumentShapeTests {
         let scenario = try #require(endpoint.scenarios.first)
         let journey = try #require(project.journeys.first)
         let step = try #require(journey.steps.first)
+        let backend = try #require(project.serverConfiguration.backends.first)
         guard case let .respond(response) = step.outcome else {
             Issue.record("the fixture's first step is the one that carries a JourneyResponse")
             return
@@ -173,6 +187,7 @@ struct DocumentShapeTests {
         let documentTypes: [(value: Any, prefix: String)] = [
             (project, ""),
             (project.serverConfiguration, "serverConfiguration"),
+            (backend, "serverConfiguration.backends[]"),
             (endpoint, "endpoints[]"),
             (scenario, "endpoints[].scenarios[]"),
             (journey, "journeys[]"),
@@ -209,6 +224,7 @@ struct DocumentShapeTests {
     /// the same reason: a case with no payload (`connectionDrop`) and one with a payload (`timeout`)
     /// encode to different shapes, and only the case the fixture uses is visible.
     private static func fullyPopulatedProject() -> MockProject {
+        let backendID = UUID()
         let scenarioID = UUID()
         let scenario = Scenario(
             id: scenarioID,
@@ -226,7 +242,8 @@ struct DocumentShapeTests {
             activeScenarioID: scenarioID,
             delayMs: 25,
             groupTag: "auth",
-            graphqlOperation: "Login"
+            graphqlOperation: "Login",
+            backendID: backendID
         )
         let journey = Journey(
             name: "Retry after failure",
@@ -246,7 +263,8 @@ struct DocumentShapeTests {
                     ),
                     delayMs: 10,
                     repeatCount: 2,
-                    graphqlOperation: "Login"
+                    graphqlOperation: "Login",
+                    backendID: backendID
                 ),
                 JourneyStep(
                     name: "Summary hangs",
@@ -274,7 +292,10 @@ struct DocumentShapeTests {
         )
         return MockProject(
             name: "Shape",
-            serverConfiguration: ServerConfiguration(port: 8080, globalDelayMs: 5),
+            serverConfiguration: ServerConfiguration(
+                port: 8080, globalDelayMs: 5, upstreamURL: "https://api.example.com",
+                backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 8081, upstreamURL: "https://accounts.example.com")]
+            ),
             endpoints: [endpoint],
             journeys: [journey],
             activeJourneyID: journey.id

@@ -40,6 +40,8 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
     case serverStop
     case serverStatus
     case serverConfigure
+    case backendUpsert
+    case backendDelete
 
     // Endpoints
     case endpointList
@@ -78,6 +80,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
     // Logs
     case logList
     case logClear
+    case logSaveAsMock
 }
 
 /// Which of the two implementations of the command surface owns a command.
@@ -140,7 +143,7 @@ extension CommandKind {
         case .serverStart, .serverStop, .serverStatus:
             .host
 
-        case .serverConfigure:
+        case .serverConfigure, .backendUpsert, .backendDelete:
             .project
 
         case .endpointList, .endpointGet, .endpointCreate, .endpointUpdate, .endpointDelete,
@@ -162,7 +165,7 @@ extension CommandKind {
             .host
 
         // The request log is per-instance and never persisted.
-        case .logList, .logClear:
+        case .logList, .logClear, .logSaveAsMock:
             .host
         }
     }
@@ -195,6 +198,8 @@ extension ControlCommand {
         case .serverStop: .serverStop
         case .serverStatus: .serverStatus
         case .serverConfigure: .serverConfigure
+        case .backendUpsert: .backendUpsert
+        case .backendDelete: .backendDelete
         case .endpointList: .endpointList
         case .endpointGet: .endpointGet
         case .endpointCreate: .endpointCreate
@@ -225,6 +230,7 @@ extension ControlCommand {
         case .journeyStatus: .journeyStatus
         case .logList: .logList
         case .logClear: .logClear
+        case .logSaveAsMock: .logSaveAsMock
         }
     }
 }

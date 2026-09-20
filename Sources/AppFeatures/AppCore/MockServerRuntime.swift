@@ -4,9 +4,10 @@ import MockServerEngine
 import Observation
 
 /// Abstraction over the embedded server engine so the runtime can be driven by a fake in tests.
-protocol MockServerEngineProtocol: Sendable {
+nonisolated protocol MockServerEngineProtocol: Sendable {
     var logStream: AsyncStream<RequestLog> { get }
     func start(configuration: ServerConfiguration) async throws
+    func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async
     func stop() async throws
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async
@@ -28,6 +29,7 @@ extension MockServerEngine: MockServerEngineProtocol {}
 /// The defaults are honest rather than convenient: a fake that ignores journeys reports *no* journey,
 /// which is exactly what it has. Silently returning a fabricated status would let a runtime bug pass.
 extension MockServerEngineProtocol {
+    func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async {}
     func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
         await updateConfiguration(endpoints: endpoints, globalDelayMs: globalDelayMs)
     }
@@ -56,6 +58,10 @@ extension MockServerEngineProtocol {
 final class MockServerRuntime {
     var serverState: ServerState = .stopped
     var serverConfiguration: ServerConfiguration = .default
+    private var projectID: UUID?
+    var boundConfiguration: ServerConfiguration?
+    var restartRequired: Bool { serverState.runningPort != nil && boundConfiguration.map { !$0.hasSameListeners(as: serverConfiguration) } == true }
+    var onLog: ((RequestLog) -> Void)?
     var requestLogs: [RequestLog] = []
     var portConflictAlert: PortConflictAlertData?
     var genericStartError: String?
@@ -145,6 +151,7 @@ final class MockServerRuntime {
                     serverState = .stopped
                     return
                 }
+                boundConfiguration = configuration
                 serverState = .running(port: configuration.port)
             } catch let error as MockServerError {
                 if consumeStopRequestedMidStartAfterFailedBind() { return }
@@ -228,7 +235,12 @@ final class MockServerRuntime {
     }
 
     func retryStartOnNextPort(from conflictingPort: Int) {
-        serverConfiguration.port = conflictingPort + 1
+        let used = Set(serverConfiguration.listeners.map(\.port))
+        let next = ((conflictingPort + 1)...65536).first { !used.contains($0) } ?? 65536
+        if serverConfiguration.port == conflictingPort { serverConfiguration.port = next }
+        else if let index = serverConfiguration.backends.firstIndex(where: { $0.port == conflictingPort }) {
+            serverConfiguration.backends[index].port = next
+        }
         portConflictAlert = nil
         startServer()
     }
@@ -291,7 +303,9 @@ final class MockServerRuntime {
     /// callers that do not serialize; see
     /// `MockRouteStore.update(endpoints:globalDelayMs:journey:activationEpoch:)`.
     func updateMocks(endpoints: [Endpoint], journey: Journey? = nil) {
-        let globalDelayMs = serverConfiguration.globalDelayMs
+        let configuration = serverConfiguration
+        let projectID = projectID
+        let globalDelayMs = configuration.globalDelayMs
         let activationEpoch = journeyActivationEpoch
         let predecessor = pendingMockUpdate
         pendingMockUpdate = Task { @MainActor [weak self] in
@@ -299,6 +313,7 @@ final class MockServerRuntime {
             // has landed.
             await predecessor?.value
             guard let self else { return }
+            await engine.updateServerConfiguration(configuration, projectID: projectID)
             await engine.updateConfiguration(
                 endpoints: endpoints,
                 globalDelayMs: globalDelayMs,
@@ -310,6 +325,7 @@ final class MockServerRuntime {
     }
 
     func applyProject(_ project: MockProject?) {
+        projectID = project?.id
         guard let project else {
             serverConfiguration = .default
             updateMocks(endpoints: [], journey: nil)
@@ -440,6 +456,7 @@ final class MockServerRuntime {
 
     private func appendLog(_ entry: RequestLog) {
         requestLogs.append(entry)
+        onLog?(entry)
         if requestLogs.count > Self.maxRequestLogEntries {
             requestLogs.removeFirst(requestLogs.count - Self.maxRequestLogEntries)
         }

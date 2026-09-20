@@ -54,12 +54,14 @@ struct CenterPaneView: View {
                 endpoint: endpoint,
                 activeScenario: activeScenario,
                 globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                backends: appState.serverConfiguration.listeners,
                 actions: EndpointEditorActions(
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
                     onUpdateScenario: { appState.updateActiveScenario(endpointID: endpointID, statusCode: $0, headers: $1, body: $2) },
                     onUpdateDelay: { appState.updateEndpointDelay(id: endpointID, delayMs: $0) },
-                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) }
+                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) },
+                    onUpdateBackend: { appState.updateEndpointBackend(id: endpointID, backendID: $0) }
                 )
             )
         } else {

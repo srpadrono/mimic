@@ -58,6 +58,7 @@ let project = Project(
             dependencies: [
                 .target(name: "Domain"),
                 .external(name: "Vapor"),
+                .external(name: "AsyncHTTPClient"),
             ],
             settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
         ),

@@ -32,7 +32,9 @@ public enum CommandCatalog {
         .init(name: "serverStart", summary: "Start the mock server.", parameters: ["port?"], cli: "mimic server start [--port N]"),
         .init(name: "serverStop", summary: "Stop the mock server.", parameters: [], cli: "mimic server stop"),
         .init(name: "serverStatus", summary: "Report server state, port, and base URL.", parameters: [], cli: "mimic server status"),
-        .init(name: "serverConfigure", summary: "Set the port and/or global delay.", parameters: ["port?", "globalDelayMs?"], cli: "mimic server configure [--port N] [--delay MS]"),
+        .init(name: "serverConfigure", summary: "Set the primary port, delay, or real backend URL.", parameters: ["port?", "globalDelayMs?", "upstreamURL?", "configuration?", "name?", "passthroughEnabled?", "captureResponses?"], cli: "mimic server configure [--port N] [--delay MS] [--upstream URL] [--file FILE]"),
+        .init(name: "backendUpsert", summary: "Add or edit an additional local backend listener.", parameters: ["id?", "name?", "port?", "upstreamURL?", "passthroughEnabled?", "captureResponses?"], cli: "mimic server backend add --name Accounts --port 8081 [--upstream URL]"),
+        .init(name: "backendDelete", summary: "Delete an additional backend listener.", parameters: ["id"], cli: "mimic server backend delete <UUID>"),
 
         // Endpoints
         .init(name: "endpointList", summary: "List endpoints in the open project.", parameters: [], cli: "mimic endpoint list"),
@@ -71,5 +73,6 @@ public enum CommandCatalog {
         // Logs
         .init(name: "logList", summary: "Read served requests, newest last.", parameters: ["limit?", "unmatchedOnly?"], cli: "mimic log list [--limit N] [--unmatched]"),
         .init(name: "logClear", summary: "Clear the request log.", parameters: [], cli: "mimic log clear"),
+        .init(name: "logSaveAsMock", summary: "Save a passed-through response as an editable mock.", parameters: ["id"], cli: "mimic log save-as-mock <UUID>"),
     ]
 }

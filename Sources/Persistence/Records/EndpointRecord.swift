@@ -15,6 +15,7 @@ public struct EndpointRecord: Codable, FetchableRecord, PersistableRecord, Senda
     public var delayMs: Int
     public var groupTag: String?
     public var graphqlOperation: String?
+    public var backendID: String?
     public var sortOrder: Int
 
     /// Creates an EndpointRecord from a domain Endpoint and its parent project ID.
@@ -28,6 +29,7 @@ public struct EndpointRecord: Codable, FetchableRecord, PersistableRecord, Senda
         self.delayMs = endpoint.delayMs
         self.groupTag = endpoint.groupTag
         self.graphqlOperation = endpoint.graphqlOperation
+        self.backendID = endpoint.backendID?.uuidString
         self.sortOrder = sortOrder
     }
 
@@ -42,7 +44,8 @@ public struct EndpointRecord: Codable, FetchableRecord, PersistableRecord, Senda
             activeScenarioID: activeScenarioID.flatMap { UUID(uuidString: $0) },
             delayMs: delayMs,
             groupTag: groupTag,
-            graphqlOperation: graphqlOperation
+            graphqlOperation: graphqlOperation,
+            backendID: backendID.flatMap(UUID.init(uuidString:))
         )
     }
 }

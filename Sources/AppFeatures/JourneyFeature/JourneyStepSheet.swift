@@ -17,6 +17,7 @@ struct JourneyStepSheet: View {
 
     /// `nil` when adding.
     let step: JourneyStep?
+    var backends: [BackendConfiguration] = []
     let onCommit: (JourneyStepSpec) -> Void
 
     private enum Kind: String, CaseIterable, Identifiable {
@@ -59,6 +60,7 @@ struct JourneyStepSheet: View {
     @State private var kind: Kind = .respond
     @State private var name = ""
     @State private var method: HTTPMethod = .get
+    @State private var selectedBackend = "primary"
     @State private var path = ""
     @State private var statusCode = "200"
     @State private var responseBody = ""
@@ -92,6 +94,15 @@ struct JourneyStepSheet: View {
                     }
                     .accessibilityIdentifier("stepSheet.methodPicker")
                     .accessibilityLabel("HTTP method")
+
+                    Picker("Backend", selection: $selectedBackend) {
+                        Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
+                        ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
+                            Text(backend.name).tag(backend.id.uuidString)
+                        }
+                    }
+                    .accessibilityIdentifier("stepSheet.backendPicker")
+                    .accessibilityLabel("Backend")
 
                     TextField("Path", text: $path, prompt: Text("/account-summary"))
                         .focused($focusedField, equals: .path)
@@ -272,6 +283,7 @@ struct JourneyStepSheet: View {
         guard let step else { return }
         name = step.name
         method = step.method
+        selectedBackend = step.backendID?.uuidString ?? "primary"
         path = step.path
         delayMs = String(step.delayMs)
         repeatCount = String(step.repeatCount)
@@ -331,6 +343,7 @@ struct JourneyStepSheet: View {
 
         var spec = JourneyStepSpec(
             name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name,
+            backend: selectedBackend,
             method: method,
             path: trimmedPath,
             delayMs: delay,

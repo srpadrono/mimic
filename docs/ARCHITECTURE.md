@@ -14,7 +14,7 @@ responses, switch scenarios, script journeys, simulate latency and network failu
 request traffic — so frontend work can start before the backend exists. An embedded Vapor server runs
 **in-process** (direct Swift calls, never HTTP-to-self).
 
-It is also a testing platform: 48 operations — every project, server, endpoint, scenario, journey and
+It is also a testing platform: 51 operations — every project, server, endpoint, scenario, journey and
 request-log operation the window performs — are available as commands, so UI tests, integration
 tests, and AI agents can reproduce a whole application scenario without driving the UI. The one
 workflow that is not a command is **spec import**: `SpecImport` is linked by `AppFeatures` and by the

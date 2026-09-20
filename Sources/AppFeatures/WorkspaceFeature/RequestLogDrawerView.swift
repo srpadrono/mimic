@@ -33,6 +33,9 @@ enum LogColumns {
     /// advances 0.6em, so 11pt needs 72.6 — and 72 was picked by eye before the test measured it.
     static let time: CGFloat = 74
 
+    // Reserve a readable path column before offering horizontal scrolling.
+    static let minimumTableWidth = method + endpoint + scenario + status + time + endpoint + DSSpacing.md * 2
+
     // path is flexible — takes remaining space
 }
 
@@ -286,6 +289,7 @@ struct RequestLogDrawerView: View {
     /// Creates a mock for a request that matched nothing. Optional so the drawer stays usable in
     /// previews and tests that do not care about it.
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
+    var onSaveAsMock: ((UUID) -> Void)?
     /// Journeys the selected requests can be appended to.
     var journeys: [Journey] = []
     /// Appends the requests to an existing journey, copying the responses they received.
@@ -321,6 +325,7 @@ struct RequestLogDrawerView: View {
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
         onCreateEndpoint: ((HTTPMethod, String) -> Void)? = nil,
+        onSaveAsMock: ((UUID) -> Void)? = nil,
         journeys: [Journey] = [],
         onAddToJourney: (([RequestLog], UUID) -> Void)? = nil,
         onAddToNewJourney: (([RequestLog]) -> Void)? = nil
@@ -332,6 +337,7 @@ struct RequestLogDrawerView: View {
             selectedLogIDs: selectedLogIDs,
             unmatchedOnly: unmatchedOnly,
             onCreateEndpoint: onCreateEndpoint,
+            onSaveAsMock: onSaveAsMock,
             journeys: journeys,
             onAddToJourney: onAddToJourney,
             onAddToNewJourney: onAddToNewJourney,
@@ -349,6 +355,7 @@ struct RequestLogDrawerView: View {
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
         onCreateEndpoint: ((HTTPMethod, String) -> Void)? = nil,
+        onSaveAsMock: ((UUID) -> Void)? = nil,
         journeys: [Journey] = [],
         onAddToJourney: (([RequestLog], UUID) -> Void)? = nil,
         onAddToNewJourney: (([RequestLog]) -> Void)? = nil,
@@ -363,6 +370,7 @@ struct RequestLogDrawerView: View {
         _selectedLogIDs = selectedLogIDs
         _unmatchedOnly = unmatchedOnly
         self.onCreateEndpoint = onCreateEndpoint
+        self.onSaveAsMock = onSaveAsMock
         self.journeys = journeys
         self.onAddToJourney = onAddToJourney
         self.onAddToNewJourney = onAddToNewJourney
@@ -373,10 +381,16 @@ struct RequestLogDrawerView: View {
     }
 
     public var body: some View {
+        GeometryReader { geometry in
+            drawerContent(width: geometry.size.width)
+        }
+    }
+
+    private func drawerContent(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             // Zone 1: the panel's single row of chrome. `DSPanelHeader` draws its own hairline, so
             // there is no separate divider here — two would read as a double rule.
-            drawerToolbar
+            drawerToolbar(compact: width < LogColumns.minimumTableWidth)
 
             // Zone 2 & 3: Content
             if requestLogs.isEmpty {
@@ -393,13 +407,16 @@ struct RequestLogDrawerView: View {
                     identifier: "drawer.noMatches"
                 )
             } else {
-                // Table header
-                tableHeader
-
-                DSDivider(style: .standard, identifier: "drawer.table.header")
-
-                // The list gets the whole panel, selected row or not. Detail lives in the inspector.
-                tableBody
+                GeometryReader { table in
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            tableHeader
+                            DSDivider(style: .standard, identifier: "drawer.table.header")
+                            tableBody
+                        }
+                        .frame(width: max(table.size.width, LogColumns.minimumTableWidth), height: table.size.height)
+                    }
+                }
             }
         }
         // The drawer paints its own surface. It used to paint none, so the panel showed whatever the
@@ -435,8 +452,8 @@ struct RequestLogDrawerView: View {
     /// count rides in the header's subtitle slot and the filters sit as trailing controls, so the
     /// same information costs one row instead of two.
     @ViewBuilder
-    private var drawerToolbar: some View {
-        DSPanelHeader("Request log", subtitle: countSubtitle, identifier: "requestLog") {
+    private func drawerToolbar(compact: Bool) -> some View {
+        DSPanelHeader("Request log", subtitle: compact ? nil : countSubtitle, identifier: "requestLog") {
             HStack(spacing: DSSpacing.sm) {
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
@@ -458,7 +475,8 @@ struct RequestLogDrawerView: View {
 
                     UnmatchedFilterToggle(
                         count: RequestLogQuery.unmatchedCount(logs: requestLogs),
-                        unmatchedOnly: $unmatchedOnly
+                        unmatchedOnly: $unmatchedOnly,
+                        compact: compact
                     )
 
                     HStack(spacing: DSSpacing.xs) {
@@ -487,8 +505,8 @@ struct RequestLogDrawerView: View {
                         fill: DSColors.tertiary,
                         stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
                         strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
-                        minWidth: 120,
-                        idealWidth: 160
+                        minWidth: compact ? LogColumns.time : 120,
+                        idealWidth: compact ? LogColumns.time : 160
                     )
                     .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
 
@@ -576,6 +594,7 @@ struct RequestLogDrawerView: View {
                             rowIndex: index,
                             isSelected: selectedLogIDs.contains(log.id),
                             onCreateEndpoint: onCreateEndpoint,
+                            onSaveAsMock: onSaveAsMock,
                             journeys: journeys,
                             selection: selection,
                             onAddToJourney: onAddToJourney,
@@ -1005,6 +1024,7 @@ struct RequestLogDrawerView: View {
 private struct UnmatchedFilterToggle: View {
     let count: Int
     @Binding var unmatchedOnly: Bool
+    var compact = false
 
     @State private var isHovered = false
 
@@ -1019,8 +1039,10 @@ private struct UnmatchedFilterToggle: View {
             HStack(spacing: DSSpacing.xs) {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: DSGlyph.inline))
-                Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                    .font(DSTypography.caption)
+                if !compact {
+                    Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
+                        .font(DSTypography.caption)
+                }
             }
             .foregroundStyle(foreground)
             // The same well as the filter field beside it — one height, one radius, one hairline.
@@ -1163,6 +1185,8 @@ struct RequestLogTableRow: View {
     let rowIndex: Int
     let isSelected: Bool
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
+    var onSaveAsMock: ((UUID) -> Void)? = nil
+    @State private var showingSaveConfirmation = false
     var journeys: [Journey] = []
     /// Every selected row, in display order, so a right-click on one of them can act on all of them.
     var selection: [RequestLog] = []
@@ -1277,6 +1301,14 @@ struct RequestLogTableRow: View {
         // which spent five CI rounds masquerading as a flaky modifier. Attached out here, the open
         // menu's items are ordinary elements again. It also widens the right-click target from the
         // padded content to the full row frame, matching where the row already takes a left click.
+        .alert("Save real response as mock?", isPresented: $showingSaveConfirmation) {
+            Button("Save mock") { onSaveAsMock?(log.id) }
+                .accessibilityIdentifier("requestLog.confirmSaveMock")
+            Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier("requestLog.cancelSaveMock")
+        } message: {
+            Text("The saved response may contain private data. Review its body before sharing the project.")
+        }
         .contextMenu {
             // Going from "this call is unmocked" to "it is mocked now" should not require retyping
             // the method and path into a sheet.
@@ -1290,6 +1322,12 @@ struct RequestLogTableRow: View {
                     )
                 }
                 .accessibilityIdentifier("requestLog.createEndpoint.\(log.id.uuidString)")
+            }
+            if log.outcome == .passthrough, onSaveAsMock != nil {
+                Button("Save real response as mock") { showingSaveConfirmation = true }
+                    .disabled((try? ResponseCapture.validate(log)) == nil)
+                    .accessibilityIdentifier("requestLog.saveAsMock.\(log.id.uuidString)")
+                    .accessibilityLabel("Save real response as mock")
             }
 
             // A request a journey already answered is by definition in one, so offering to add it
@@ -1369,6 +1407,13 @@ struct RequestLogTableRow: View {
                     .font(DSTypography.caption)
                     .foregroundStyle(DSColors.accentText)
                     .lineLimit(1)
+            case .proxyFailure:
+                Text(RequestOutcome.proxyFailure.label).foregroundStyle(DSColors.destructive)
+            case .passthrough:
+                Text((log.backendName.map { $0 + " · " } ?? "") + RequestOutcome.passthrough.label)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.success)
+                    .lineLimit(1)
             case .endpoint:
                 // An endpoint answered but has since been renamed or deleted.
                 Text("\u{2014}")
@@ -1425,6 +1470,8 @@ struct RequestLogTableRow: View {
             case .unmatched: label += ", unmatched"
             case .blockedByJourney: label += ", blocked by journey"
             case .journey: label += ", answered by journey"
+            case .proxyFailure: label += ", backend unavailable"
+            case .passthrough: label += ", passed through to real backend"
             case .endpoint: break
             }
         }

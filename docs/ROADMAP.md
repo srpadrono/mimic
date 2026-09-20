@@ -15,7 +15,8 @@ commitment or a date.
 | Request log | Live, with request *and* response, outcome labelling, and an unmatched filter. |
 | Import | HAR captures and OpenAPI/Swagger specs, reviewed before commit. **Window only** — see the gaps below. |
 | GraphQL | Matching by operation, with fallback for anonymous queries; import splits per operation. |
-| Automation | `mimic` CLI and a loopback HTTP control API covering 48 operations: every project, server, endpoint, scenario, journey and request-log operation the window has, plus the update check. |
+| Automation | `mimic` CLI and a loopback HTTP control API covering 51 operations: every project, server, endpoint, scenario, journey and request-log operation the window has, plus the update check. |
+| Pass-through | One project can bind multiple local ports, each with an optional real backend. Unmatched calls forward; observed text responses can be saved as mocks explicitly. |
 | Headless | `mimic daemon start` for CI and agents — the app, windowless. |
 | Updates | Checks GitHub Releases daily and on demand; downloads the installer, verifies its published SHA-256 and Developer ID, and hands it to macOS's Installer. Checking is also `mimic app update-check`; **installing is window-only** — see the gaps below. |
 
@@ -58,8 +59,6 @@ Real limitations, not planned work:
   wall.
 - **No dynamic responses.** Bodies are static text: no templating, no echoing request values back,
   no counters beyond a journey step's `repeatCount`.
-- **No passthrough.** Mimic can't proxy unmatched requests to a real backend, which is the usual way
-  to mock one service and leave the rest live.
 - **Beta, and versioned below 1.0.** The interface and the stored project format may still change
   between releases.
 - **One active journey per project.** Enough for a test case; not enough to model two independent
@@ -70,9 +69,8 @@ Real limitations, not planned work:
 Roughly ordered by how often the gap gets hit:
 
 1. **Header and body matching** — the largest gap, and the matcher already has the inputs.
-2. **Passthrough for unmatched requests** — mock one endpoint, let the rest reach a real backend.
-3. **Response templating** — echo path params and request fields into the body.
-4. **Journey assertions** — let a journey declare the calls it *expects*, so a test can fail on a
+2. **Response templating** — echo path params and request fields into the body.
+3. **Journey assertions** — let a journey declare the calls it *expects*, so a test can fail on a
    missing call and not only on a wrong response.
 
 ## History

@@ -14,6 +14,7 @@ struct InspectorPanelView: View {
     let endpoint: Endpoint?
     /// Project-level facts, shown when nothing is selected so the panel is never dead space.
     let overview: InspectorOverview.Summary?
+    let onSaveAsMock: ((UUID) -> Void)?
     let onShowJourneys: () -> Void
     let onCloseRequestDetail: () -> Void
     let onAddScenario: (_ endpointID: UUID, _ name: String) -> Void
@@ -90,8 +91,10 @@ struct InspectorPanelView: View {
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
+        onSaveAsMock: ((UUID) -> Void)? = nil,
         initialEndpointTab: EndpointTab = .scenarios
     ) {
+        self.onSaveAsMock = onSaveAsMock
         self.endpoint = endpoint
         self.requestDetail = requestDetail
         self.overview = overview
@@ -228,7 +231,7 @@ struct InspectorPanelView: View {
             switch mode {
             case .request:
                 if let requestDetail {
-                    RequestDetailInspector(context: requestDetail)
+                    RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
                 }
             case .scenarios:
                 if let endpoint {

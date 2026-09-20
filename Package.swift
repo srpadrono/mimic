@@ -41,6 +41,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor", from: "4.76.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.33.1"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "3.3.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
@@ -62,7 +63,7 @@ let package = Package(
 
         .target(
             name: "MockServerEngine",
-            dependencies: ["Domain", .product(name: "Vapor", package: "vapor")],
+            dependencies: ["Domain", .product(name: "Vapor", package: "vapor"), .product(name: "AsyncHTTPClient", package: "async-http-client")],
             path: "Sources/MockServerEngine"
         ),
         .testTarget(

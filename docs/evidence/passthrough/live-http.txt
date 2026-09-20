@@ -1,0 +1,9 @@
+PASS binary bytes preserved; unsafe capture refused
+PASS repeated cookies, hop headers, secondary listener metadata
+PASS compressed and large replies forwarded exactly; capture stays bounded
+PASS streaming first bytes in 0.002s before the delayed second chunk
+PASS captured GraphQL operation does not intercept other operations
+PASS live pause/resume retains URL; automatic mock works with forwarding off
+PASS mixed-backend journey export preserves routing
+PASS connection failure is distinct and is never captured
+PASS shared HTTP client packaging has no duplicate runtime classes

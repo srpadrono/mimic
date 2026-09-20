@@ -163,5 +163,26 @@ enum AppMigrations {
             try db.create(index: "endpoint_projectID", on: "endpoint", columns: ["projectID"])
             try db.create(index: "scenario_endpointID", on: "scenario", columns: ["endpointID"])
         }
+
+        migrator.registerMigration("v5_backend_passthrough") { db in
+            try db.alter(table: "project") { t in
+                t.add(column: "upstreamURL", .text)
+                t.add(column: "backendsJSON", .text).notNull().defaults(to: "[]")
+            }
+            try db.alter(table: "endpoint") { t in
+                t.add(column: "backendID", .text)
+            }
+            try db.alter(table: "journeyStep") { t in
+                t.add(column: "backendID", .text)
+            }
+        }
+        migrator.registerMigration("v6_backend_controls") { db in
+            try db.alter(table: "project") { t in
+                t.add(column: "primaryName", .text).notNull().defaults(to: "Primary")
+                t.add(column: "passthroughEnabled", .boolean).notNull().defaults(to: false)
+                t.add(column: "captureResponses", .boolean).notNull().defaults(to: false)
+            }
+            try db.execute(sql: "UPDATE project SET passthroughEnabled = (upstreamURL IS NOT NULL)")
+        }
     }
 }

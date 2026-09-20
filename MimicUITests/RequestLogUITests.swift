@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import XCTest
 
 /// The request log's own suite: sorting, filtering, selection, the row context menu, the request
@@ -385,6 +386,58 @@ final class RequestLogUITests: MimicUITestCase {
             workspace.waitForServerURL(port: port),
             "The server should report its base URL once running"
         )
+    }
+
+    @MainActor
+    func testPassedThroughInspectorSavesTextAndRefusesBinary() async throws {
+        let ready = expectation(description: "Synthetic backend ready")
+        let fixture = try PassthroughUIBackend(port: 62131) { ready.fulfill() }
+        defer { fixture.stop() }
+        await fulfillment(of: [ready], timeout: 5)
+        launchApp()
+        createProjectViaUI(name: "Real backend capture", port: 62130)
+        let settings = BackendSettingsPage(app: app)
+        settings.open.click()
+        XCTAssertTrue(settings.primaryName.waitForExistence(timeout: 5))
+        settings.replace(settings.primaryName, with: "Catalog")
+        settings.primaryEnabled.click()
+        settings.replace(settings.primaryUpstream, with: "http://127.0.0.1:62131")
+        settings.apply.click()
+        XCTAssertTrue(settings.apply.waitForNonExistence(timeout: 5))
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerURL(port: 62130))
+        await sendRequest(port: 62130, path: "/profile")
+        await sendRequest(port: 62130, path: "/binary")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15))
+        XCTAssertTrue(rowLabel(forPath: "/binary").contains("passed through"), rowLabel(forPath: "/binary"))
+        logRow(try XCTUnwrap(rowIdentifier(forPath: "/binary"))).click()
+        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), app.debugDescription)
+        let save = app.buttons["requestDetail.saveMock"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").exists)
+        logRow(try XCTUnwrap(rowIdentifier(forPath: "/profile"))).click()
+        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(poll { save.isEnabled }, app.debugDescription)
+        XCTAssertTrue(speech(of: element(identifiedBy: "requestDetail.summary.backend")).contains("Catalog"), app.debugDescription)
+        let drawer = element(identifiedBy: "drawer")
+        let methodHeader = element(identifiedBy: "drawer.columnHeader.method")
+        XCTAssertGreaterThanOrEqual(methodHeader.frame.minX, drawer.frame.minX,
+                                    "Narrow traffic tables must keep their leading column visible")
+        let screenshot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        screenshot.name = "Passed-through request — backend and capture action"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        save.click()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
+        settings.open.click()
+        XCTAssertTrue(settings.primaryEnabled.waitForExistence(timeout: 5))
+        settings.primaryEnabled.click()
+        settings.apply.click()
+        XCTAssertTrue(settings.apply.waitForNonExistence(timeout: 5))
+        let (data, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:62130/profile")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"account":"Ada"}"#)
     }
 
     // MARK: - LOGSORT
@@ -1321,5 +1374,39 @@ final class RequestLogUITests: MimicUITestCase {
             poll { self.text(of: self.requestDetail.path).contains("/api/users") },
             "The detail should be showing the request that was clicked"
         )
+    }
+}
+
+/// A real, test-owned upstream. No production hooks and no external network.
+nonisolated private final class PassthroughUIBackend: @unchecked Sendable {
+    private let listener: NWListener
+    init(port: UInt16, ready: @escaping @Sendable () -> Void) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
+        listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { if case .ready = $0 { ready() } }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: DispatchQueue(label: "mimic.ui.backend.connection"))
+            Self.receive(connection, bytes: Data())
+        }
+        listener.start(queue: DispatchQueue(label: "mimic.ui.backend.listener"))
+    }
+    func stop() { listener.cancel() }
+    private static func receive(_ connection: NWConnection, bytes: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, complete, error in
+            var request = bytes
+            if let data { request.append(data) }
+            guard request.range(of: Data("\r\n\r\n".utf8)) != nil else {
+                if complete || error != nil || request.count > 65536 { connection.cancel() }
+                else { receive(connection, bytes: request) }
+                return
+            }
+            let binary = String(decoding: request, as: UTF8.self).hasPrefix("GET /binary ")
+            let body = binary ? Data([0x89, 0x50, 0x4E, 0x47, 0xFF]) : Data(#"{"account":"Ada"}"#.utf8)
+            let type = binary ? "image/png" : "application/json"
+            var reply = Data("HTTP/1.1 200 OK\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
+            reply.append(body)
+            connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
+        }
     }
 }

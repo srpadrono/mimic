@@ -104,6 +104,7 @@ final class AppControlHost: ControlHost {
                         project.modifiedAt = Date()
                         appState.currentProject = project
                         appState.scheduleAutosave()
+                        _ = await appState.server.journeyStatusAfterPendingUpdates()
                     }
                     return .success(outcome.result)
                 }
@@ -397,6 +398,12 @@ final class AppControlHost: ControlHost {
             let count = appState.requestLogs.count
             appState.requestLogs = []
             return .success(.message(ControlMessages.logCleared(count: count)))
+
+        case let .logSaveAsMock(id):
+            guard let endpoint = appState.savePassedThroughLogAsMock(id: id) else {
+                return .failure(.invalid(appState.lastCommandError ?? "Could not save the response as a mock."))
+            }
+            return .success(.init(message: "Saved passed-through response as a mock.", endpoint: endpoint))
 
         // MARK: Projects — these touch the store, so they are answered asynchronously
 
@@ -757,6 +764,15 @@ final class AppControlHost: ControlHost {
             globalDelayMs: appState.serverConfiguration.globalDelayMs
         )
         report.errorCode = appState.serverStartFailure?.code
+        report.upstreamURL = appState.serverConfiguration.backend(id: nil)?.effectiveUpstream
+        report.restartRequired = appState.server.restartRequired
+        report.activeBackends = appState.serverState.runningPort == nil ? [] : appState.server.boundConfiguration?.listeners.map { bound in
+            var active = appState.serverConfiguration.backend(id: bound.id == ServerConfiguration.primaryID ? nil : bound.id) ?? bound
+            active.port = bound.port
+            if appState.serverConfiguration.backend(id: bound.id == ServerConfiguration.primaryID ? nil : bound.id) == nil { active.passthroughEnabled = false }
+            return active
+        }
+        report.backends = appState.serverConfiguration.backends
         return report
     }
 }

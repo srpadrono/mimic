@@ -6,6 +6,7 @@ public enum MockServerError: Error, Sendable, LocalizedError {
     case alreadyRunning
     case notRunning
     case invalidState(ServerState)
+    case invalidConfiguration(String)
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +18,8 @@ public enum MockServerError: Error, Sendable, LocalizedError {
             return "Server is not running."
         case .invalidState(let state):
             return "Cannot perform operation in state: \(state)."
+        case .invalidConfiguration(let message):
+            return message
         }
     }
 }

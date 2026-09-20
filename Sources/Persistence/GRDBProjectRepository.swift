@@ -113,7 +113,7 @@ public struct GRDBProjectRepository: ProjectRepository {
                 return journeyRecord.toDomain(steps: stepRecords.map { $0.toDomain() })
             }
 
-            var project = projectRecord.toDomain()
+            var project = try projectRecord.toDomain()
             project.endpoints = endpoints
             project.journeys = journeys
             // A stored selection whose journey has since been removed is dropped rather than kept
@@ -139,7 +139,7 @@ public struct GRDBProjectRepository: ProjectRepository {
             // exactly like the symptom this repository has already lost a project to once — "the
             // recents list is empty". So it lists, and `load` refuses it by name with both version
             // numbers if they try to open it.
-            return records.map { $0.toDomain() }
+            return try records.map { try $0.toDomain() }
         }
     }
 

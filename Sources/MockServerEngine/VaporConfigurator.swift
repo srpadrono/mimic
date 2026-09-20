@@ -12,7 +12,10 @@ enum VaporConfigurator {
     static func registerRoutes(
         on app: Application,
         routeStore: MockRouteStore,
-        logContinuation: AsyncStream<RequestLog>.Continuation
+        logContinuation: AsyncStream<RequestLog>.Continuation,
+        backendID: UUID? = nil,
+        listenerPort: Int = 8080,
+        localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
             let incoming = IncomingRequest(
@@ -22,14 +25,23 @@ enum VaporConfigurator {
                     req.headers.map { ($0.name, $0.value) },
                     uniquingKeysWith: { _, last in last }
                 ),
-                body: req.body.string
+                body: req.body.string,
+                backendID: backendID
             )
 
             // One actor hop resolves the request *and* advances the journey cursor, so
             // concurrent requests can never consume the same step.
             let resolved = await routeStore.resolve(request: incoming)
 
-            logContinuation.yield(makeLog(incoming: incoming, resolved: resolved))
+            let projectID = await routeStore.projectID
+            let backend = await routeStore.backend(id: backendID)
+            if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
+                return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
+                    incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
+                    logContinuation: logContinuation)
+            }
+
+            logContinuation.yield(makeLog(incoming: incoming, resolved: resolved, backendName: backend?.name, listenerPort: listenerPort))
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing
@@ -161,7 +173,7 @@ enum VaporConfigurator {
 
     // MARK: - Logging
 
-    static func makeLog(incoming: IncomingRequest, resolved: ResolvedResponse) -> RequestLog {
+    static func makeLog(incoming: IncomingRequest, resolved: ResolvedResponse, backendName: String? = nil, listenerPort: Int? = nil) -> RequestLog {
         // A failed request wrote no body, so recording the scenario's would be a fiction.
         let (body, truncated) = resolved.failure == nil
             ? RequestLog.cappedBody(resolved.body)
@@ -170,13 +182,15 @@ enum VaporConfigurator {
         // The request body is capped on the same terms as the response. It arrives up to the route's
         // 10 MB collect limit and the log holds a thousand entries, so an uncapped one is the larger
         // of the two exposures — a client posting big payloads grows the log without bound.
-        let (requestBody, _) = RequestLog.cappedBody(incoming.body)
+        let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
 
         return RequestLog(
             method: incoming.method,
             path: incoming.path,
+            backendID: incoming.backendID,
+            backendName: backendName, listenerPort: listenerPort,
             requestHeaders: incoming.headers,
-            requestBody: requestBody,
+            requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
             matchedEndpointID: resolved.matchedEndpointID,
             matchedScenarioID: resolved.matchedScenarioID,
             // A failed request never produced a status; recording one would be a lie the request log

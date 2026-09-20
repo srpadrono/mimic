@@ -30,6 +30,16 @@ public enum ProjectCommandExecutor {
         _ command: ControlCommand,
         to project: inout MockProject
     ) throws -> ProjectCommandOutcome? {
+        var candidate = project
+        let result = try applyAtomically(command, to: &candidate)
+        if result?.didMutate == true, [.serverConfigure, .backendUpsert, .backendDelete].contains(command.kind) {
+            try validate { try ProjectValidator.validate(candidate) }
+        }
+        project = candidate
+        return result
+    }
+
+    private static func applyAtomically(_ command: ControlCommand, to project: inout MockProject) throws -> ProjectCommandOutcome? {
         // Host-scoped commands — server lifecycle, project selection, journey runtime, logs,
         // discovery — reach state a pure `inout MockProject` transformation cannot see, so they are
         // the host's to answer. `nil` is the signal to keep looking, not a failure.
@@ -54,9 +64,22 @@ public enum ProjectCommandExecutor {
             project.name = trimmed
             return mutated(.init(message: "Renamed project to \"\(trimmed)\".", project: project))
 
-        case let .serverConfigure(port, globalDelayMs):
+        case let .serverConfigure(port, globalDelayMs, upstreamURL, configuration, name, passthroughEnabled, captureResponses):
+            if let configuration {
+                guard port == nil, globalDelayMs == nil, upstreamURL == nil, name == nil,
+                      passthroughEnabled == nil, captureResponses == nil else {
+                    throw ControlError.invalid("Provide a complete configuration or individual fields, not both.")
+                }
+                guard configuration.globalDelayMs >= 0 else { throw ControlError.invalid("Global delay must be zero or greater.") }
+                project.serverConfiguration = configuration
+                try validate { try ProjectValidator.validate(project) }
+                return mutated(.init(message: "Updated server configuration.", project: project))
+            }
             if let port {
                 try validate { try EndpointValidator.validatePort(port) }
+                guard !project.serverConfiguration.backends.contains(where: { $0.port == port }) else {
+                    throw ControlError.invalid("The port is already used by another backend.")
+                }
                 project.serverConfiguration.port = port
             }
             if let globalDelayMs {
@@ -65,10 +88,69 @@ public enum ProjectCommandExecutor {
                 }
                 project.serverConfiguration.globalDelayMs = globalDelayMs
             }
-            guard port != nil || globalDelayMs != nil else {
-                throw ControlError.invalid("Provide at least one of port or globalDelayMs.")
+            if let upstreamURL {
+                try validateUpstream(upstreamURL, localPort: project.serverConfiguration.port)
+                if let url = upstreamURL.nilIfEmpty { project.serverConfiguration.upstreamURL = url }
+                project.serverConfiguration.passthroughEnabled = upstreamURL.nilIfEmpty != nil
+            }
+            if let name { project.serverConfiguration.primaryName = name }
+            if let passthroughEnabled { project.serverConfiguration.passthroughEnabled = passthroughEnabled }
+            if let captureResponses { project.serverConfiguration.captureResponses = captureResponses }
+            guard port != nil || globalDelayMs != nil || upstreamURL != nil || name != nil || passthroughEnabled != nil || captureResponses != nil else {
+                throw ControlError.invalid("Provide a port, globalDelayMs, or upstreamURL.")
             }
             return mutated(.init(message: "Updated server configuration.", project: project))
+
+        case let .backendUpsert(id, name, port, upstreamURL, passthroughEnabled, captureResponses):
+            if let id {
+                guard let index = project.serverConfiguration.backends.firstIndex(where: { $0.id == id }) else {
+                    throw ControlError.invalid("Backend not found: \(id).")
+                }
+                if let name {
+                    guard let trimmed = name.nilIfEmpty else { throw ControlError.invalid("Backend name is required.") }
+                    project.serverConfiguration.backends[index].name = trimmed
+                }
+                if let port {
+                    try validate { try EndpointValidator.validatePort(port) }
+                    guard port != project.serverConfiguration.port,
+                          !project.serverConfiguration.backends.contains(where: { $0.port == port && $0.id != id }) else {
+                        throw ControlError.invalid("The port is already used by another backend.")
+                    }
+                    project.serverConfiguration.backends[index].port = port
+                }
+                if let upstreamURL {
+                    try validateUpstream(upstreamURL, localPort: project.serverConfiguration.backends[index].port)
+                    if let url = upstreamURL.nilIfEmpty { project.serverConfiguration.backends[index].upstreamURL = url }
+                    project.serverConfiguration.backends[index].passthroughEnabled = upstreamURL.nilIfEmpty != nil
+                }
+                if let passthroughEnabled { project.serverConfiguration.backends[index].passthroughEnabled = passthroughEnabled }
+                if let captureResponses { project.serverConfiguration.backends[index].captureResponses = captureResponses }
+            } else {
+                guard let name = name?.nilIfEmpty, let port else {
+                    throw ControlError.invalid("A new backend needs a name and port.")
+                }
+                try validate { try EndpointValidator.validatePort(port) }
+                guard port != project.serverConfiguration.port,
+                      !project.serverConfiguration.backends.contains(where: { $0.port == port }) else {
+                    throw ControlError.invalid("The port is already used by another backend.")
+                }
+                if let upstreamURL { try validateUpstream(upstreamURL, localPort: port) }
+                project.serverConfiguration.backends.append(BackendConfiguration(
+                    name: name, port: port, upstreamURL: upstreamURL?.nilIfEmpty, passthroughEnabled: passthroughEnabled, captureResponses: captureResponses ?? false
+                ))
+            }
+            return mutated(.init(message: "Updated backend configuration.", project: project))
+
+        case let .backendDelete(id):
+            guard project.serverConfiguration.backends.contains(where: { $0.id == id }) else {
+                throw ControlError.invalid("Backend not found: \(id).")
+            }
+            guard !project.endpoints.contains(where: { $0.backendID == id }),
+                  !project.journeys.flatMap(\.steps).contains(where: { $0.backendID == id }) else {
+                throw ControlError.invalid("Move or delete the backend's endpoints and journey steps first.")
+            }
+            project.serverConfiguration.backends.removeAll { $0.id == id }
+            return mutated(.init(message: "Deleted backend.", project: project))
 
         // MARK: Endpoints
 
@@ -80,7 +162,8 @@ public enum ProjectCommandExecutor {
             return read(.init(endpoint: endpoint))
 
         case let .endpointCreate(name, method, path, spec):
-            let endpoint = try makeEndpoint(name: name, method: method, path: path, spec: spec)
+            var endpoint = try makeEndpoint(name: name, method: method, path: path, spec: spec)
+            if let backend = spec?.backend { endpoint.backendID = try resolveBackend(backend, in: project) }
             project.endpoints.append(endpoint)
             return mutated(.init(
                 message: "Created endpoint \(endpoint.method.rawValue) \(endpoint.path).",
@@ -90,6 +173,9 @@ public enum ProjectCommandExecutor {
         case let .endpointUpdate(ref, spec):
             let index = try project.requireEndpointIndex(ref)
             try applyEndpointSpec(spec, to: &project.endpoints[index])
+            if let backend = spec.backend {
+                project.endpoints[index].backendID = try resolveBackend(backend, in: project)
+            }
             return mutated(.init(message: "Updated endpoint.", endpoint: project.endpoints[index]))
 
         case let .endpointDelete(ref):
@@ -172,7 +258,7 @@ public enum ProjectCommandExecutor {
             var journey = Journey(name: trimmed)
             // `applyJourneySpec` already prefers the spec's name over the one the journey was built
             // with, so there is nothing left to reconcile afterwards.
-            try applyJourneySpec(spec ?? JourneySpec(), to: &journey)
+            try applyJourneySpec(spec ?? JourneySpec(), to: &journey, backends: project.serverConfiguration.backends)
             project.journeys.append(journey)
             return mutated(.init(message: "Created journey \"\(journey.name)\".", journey: journey))
 
@@ -188,7 +274,7 @@ public enum ProjectCommandExecutor {
                 )
             }
             var journey = Journey(name: name?.nilIfEmpty ?? template.title)
-            try applyJourneySpec(template.spec, to: &journey)
+            try applyJourneySpec(template.spec, to: &journey, backends: project.serverConfiguration.backends)
             // Applied after the spec, because the template's own `name` must not override a name the
             // caller asked for explicitly.
             journey.name = name?.nilIfEmpty ?? template.title
@@ -200,7 +286,7 @@ public enum ProjectCommandExecutor {
 
         case let .journeyUpdate(ref, spec):
             let index = try project.requireJourneyIndex(ref)
-            try applyJourneySpec(spec, to: &project.journeys[index])
+            try applyJourneySpec(spec, to: &project.journeys[index], backends: project.serverConfiguration.backends)
             return mutated(.init(message: "Updated journey.", journey: project.journeys[index]))
 
         case let .journeyDelete(ref):
@@ -219,7 +305,7 @@ public enum ProjectCommandExecutor {
 
         case let .journeyStepAdd(ref, spec, atIndex):
             let journeyIndex = try project.requireJourneyIndex(ref)
-            let step = try makeStep(from: spec, position: project.journeys[journeyIndex].steps.count)
+            let step = try makeStep(from: spec, position: project.journeys[journeyIndex].steps.count, backends: project.serverConfiguration.backends)
             let insertAt = min(max(0, atIndex ?? project.journeys[journeyIndex].steps.count),
                                project.journeys[journeyIndex].steps.count)
             project.journeys[journeyIndex].steps.insert(step, at: insertAt)
@@ -235,7 +321,7 @@ public enum ProjectCommandExecutor {
             // through a loop of inserts would commit the steps that came first.
             let existingCount = project.journeys[journeyIndex].steps.count
             let steps = try specs.enumerated().map { offset, spec in
-                try makeStep(from: spec, position: existingCount + offset)
+                try makeStep(from: spec, position: existingCount + offset, backends: project.serverConfiguration.backends)
             }
             let insertAt = min(max(0, atIndex ?? existingCount), existingCount)
             project.journeys[journeyIndex].steps.insert(contentsOf: steps, at: insertAt)
@@ -249,7 +335,7 @@ public enum ProjectCommandExecutor {
         case let .journeyStepUpdate(ref, stepRef, spec):
             let journeyIndex = try project.requireJourneyIndex(ref)
             let stepIndex = try project.journeys[journeyIndex].requireStepIndex(stepRef)
-            try applyStepSpec(spec, to: &project.journeys[journeyIndex].steps[stepIndex])
+            try applyStepSpec(spec, to: &project.journeys[journeyIndex].steps[stepIndex], backends: project.serverConfiguration.backends)
             return mutated(.init(message: "Updated step.", journey: project.journeys[journeyIndex]))
 
         case let .journeyStepRemove(ref, stepRef):
@@ -292,6 +378,33 @@ public enum ProjectCommandExecutor {
     }
 
     // MARK: - Spec application
+
+    static func resolveBackend(_ value: String, in project: MockProject) throws -> UUID? {
+        try resolveBackend(value, backends: project.serverConfiguration.backends)
+    }
+
+    static func resolveBackend(_ value: String?, backends: [BackendConfiguration]) throws -> UUID? {
+        guard let value else { return nil }
+        if value.lowercased() == "primary" { return nil }
+        guard let id = UUID(uuidString: value),
+              backends.contains(where: { $0.id == id }) else {
+            throw ControlError.invalid("Backend must be 'primary' or an existing backend UUID.")
+        }
+        return id
+    }
+
+    static func validateUpstream(_ value: String, localPort: Int) throws {
+        if value.isEmpty { return }
+        guard let parts = URLComponents(string: value),
+              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else {
+            throw ControlError.invalid("Real backend must be an HTTP or HTTPS base URL without credentials, query, or fragment.")
+        }
+        if ["127.0.0.1", "localhost", "::1"].contains(host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))), (parts.port ?? (scheme == "https" ? 443 : 80)) == localPort {
+            throw ControlError.invalid("The real backend cannot point to its own local port.")
+        }
+    }
 
     static func makeEndpoint(
         name: String?,
@@ -357,7 +470,7 @@ public enum ProjectCommandExecutor {
         if let contentType = spec.contentType { scenario.bodyContentType = contentType }
     }
 
-    static func applyJourneySpec(_ spec: JourneySpec, to journey: inout Journey) throws {
+    static func applyJourneySpec(_ spec: JourneySpec, to journey: inout Journey, backends: [BackendConfiguration] = []) throws {
         if let name = spec.name?.nilIfEmpty { journey.name = name }
         if let summary = spec.summary { journey.summary = summary.nilIfEmpty }
         if let matchMode = spec.matchMode { journey.matchMode = matchMode }
@@ -365,12 +478,12 @@ public enum ProjectCommandExecutor {
         if let unmatched = spec.unmatchedBehavior { journey.unmatchedBehavior = unmatched }
         if let autoAdvance = spec.autoAdvance { journey.autoAdvance = autoAdvance }
         if let steps = spec.steps {
-            journey.steps = try steps.enumerated().map { try makeStep(from: $1, position: $0) }
+            journey.steps = try steps.enumerated().map { try makeStep(from: $1, position: $0, backends: backends) }
         }
     }
 
     /// Builds a step from the flat spec, deciding response-vs-failure from whether `failure` is set.
-    static func makeStep(from spec: JourneyStepSpec, position: Int) throws -> JourneyStep {
+    static func makeStep(from spec: JourneyStepSpec, position: Int, backends: [BackendConfiguration] = []) throws -> JourneyStep {
         guard let path = spec.path?.nilIfEmpty else {
             throw ControlError.invalid("Journey step requires a path.")
         }
@@ -409,7 +522,8 @@ public enum ProjectCommandExecutor {
             outcome: outcome,
             delayMs: spec.delayMs ?? 0,
             repeatCount: spec.repeatCount ?? 1,
-            graphqlOperation: spec.graphqlOperation?.nilIfEmpty
+            graphqlOperation: spec.graphqlOperation?.nilIfEmpty,
+            backendID: try resolveBackend(spec.backend, backends: backends)
         )
     }
 
@@ -430,7 +544,8 @@ public enum ProjectCommandExecutor {
     /// Applies a partial spec to an existing step. Response fields are merged into the existing
     /// response so `--status 500` alone does not wipe a carefully written body; providing `failure`
     /// converts the step to a failure, and providing any response field converts it back.
-    static func applyStepSpec(_ spec: JourneyStepSpec, to step: inout JourneyStep) throws {
+    static func applyStepSpec(_ spec: JourneyStepSpec, to step: inout JourneyStep, backends: [BackendConfiguration] = []) throws {
+        if let backend = spec.backend { step.backendID = try resolveBackend(backend, backends: backends) }
         if let name = spec.name?.nilIfEmpty { step.name = name }
         if let method = spec.method { step.method = method }
         if let path = spec.path?.nilIfEmpty {

@@ -158,8 +158,8 @@ struct MigrationTests {
         let fetched = try dbQueue.read { db in try ProjectRecord.fetchOne(db, key: project.id.uuidString) }
         let stored = try #require(fetched)
         #expect(stored.schemaVersion == 1, "the column itself round-trips")
-        #expect(stored.toDomain().schemaVersion == MockProject.currentSchemaVersion)
-        #expect(stored.toDomain().journeys.isEmpty)
+        #expect(try stored.toDomain().schemaVersion == MockProject.currentSchemaVersion)
+        #expect(try stored.toDomain().journeys.isEmpty)
     }
 
     /// The reading the column exists for, and the one it never had.

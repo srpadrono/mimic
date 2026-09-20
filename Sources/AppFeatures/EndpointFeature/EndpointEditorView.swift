@@ -142,6 +142,7 @@ struct EndpointEditorView: View {
     let endpoint: Endpoint
     let activeScenario: Scenario?
     let globalDelayMs: Int
+    var backends: [BackendConfiguration] = []
     let actions: EndpointEditorActions
 
     @State private var statusCodeString = ""
@@ -166,11 +167,12 @@ struct EndpointEditorView: View {
     @FocusState private var isGroupTagFocused: Bool
     @FocusState private var isDelayFocused: Bool
 
-    init(endpoint: Endpoint, activeScenario: Scenario?, globalDelayMs: Int, actions: EndpointEditorActions) {
+    init(endpoint: Endpoint, activeScenario: Scenario?, globalDelayMs: Int, backends: [BackendConfiguration] = [], actions: EndpointEditorActions) {
         self.init(
             endpoint: endpoint,
             activeScenario: activeScenario,
             globalDelayMs: globalDelayMs,
+            backends: backends,
             actions: actions,
             initialStatusCodeString: "",
             initialResponseBody: "",
@@ -184,6 +186,7 @@ struct EndpointEditorView: View {
         endpoint: Endpoint,
         activeScenario: Scenario?,
         globalDelayMs: Int,
+        backends: [BackendConfiguration] = [],
         actions: EndpointEditorActions,
         initialStatusCodeString: String,
         initialResponseBody: String,
@@ -195,6 +198,7 @@ struct EndpointEditorView: View {
         self.endpoint = endpoint
         self.activeScenario = activeScenario
         self.globalDelayMs = globalDelayMs
+        self.backends = backends
         self.actions = actions
         _statusCodeString = State(initialValue: initialStatusCodeString)
         _responseBody = State(initialValue: initialResponseBody)
@@ -580,6 +584,21 @@ struct EndpointEditorView: View {
     @ViewBuilder
     private var settingsSection: some View {
         DSSectionHeader("Settings", identifier: "editor.settings")
+
+        formRow("Backend") {
+            Picker("Backend", selection: Binding<UUID?>(
+                get: { endpoint.backendID },
+                set: { actions.onUpdateBackend($0) }
+            )) {
+                Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag(nil as UUID?)
+                ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
+                    Text(backend.name).tag(backend.id as UUID?)
+                }
+            }
+            .labelsHidden()
+            .accessibilityIdentifier("endpointEditor.backend")
+            .accessibilityLabel("Backend")
+        }
 
         formRow("Group tag") {
             TextField("e.g. Users, Auth", text: $groupTag)

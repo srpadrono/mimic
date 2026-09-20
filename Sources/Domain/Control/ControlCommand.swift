@@ -58,7 +58,9 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case serverStart(port: Int?)
     case serverStop
     case serverStatus
-    case serverConfigure(port: Int?, globalDelayMs: Int?)
+    case serverConfigure(port: Int?, globalDelayMs: Int?, upstreamURL: String? = nil, configuration: ServerConfiguration? = nil, name: String? = nil, passthroughEnabled: Bool? = nil, captureResponses: Bool? = nil)
+    case backendUpsert(id: UUID?, name: String?, port: Int?, upstreamURL: String?, passthroughEnabled: Bool? = nil, captureResponses: Bool? = nil)
+    case backendDelete(id: UUID)
 
     // MARK: Endpoints
 
@@ -111,6 +113,8 @@ public enum ControlCommand: Codable, Sendable, Equatable {
 
     case logList(limit: Int?, unmatchedOnly: Bool?)
     case logClear
+    /// Save a passed-through response as an editable mock after explicit review.
+    case logSaveAsMock(id: UUID)
 }
 
 /// How much live state `reset` clears.
@@ -218,6 +222,8 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
     public var groupTag: String?
     /// Restricts the endpoint to one GraphQL operation. Empty string clears it.
     public var graphqlOperation: String?
+    /// Additional backend UUID, or "primary" to move an endpoint to the original listener.
+    public var backend: String?
 
     public init(
         name: String? = nil,
@@ -225,7 +231,8 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
         path: String? = nil,
         delayMs: Int? = nil,
         groupTag: String? = nil,
-        graphqlOperation: String? = nil
+        graphqlOperation: String? = nil,
+        backend: String? = nil
     ) {
         self.name = name
         self.method = method
@@ -233,6 +240,7 @@ public struct EndpointSpec: Codable, Sendable, Equatable {
         self.delayMs = delayMs
         self.groupTag = groupTag
         self.graphqlOperation = graphqlOperation
+        self.backend = backend
     }
 }
 
@@ -299,6 +307,8 @@ public struct JourneySpec: Codable, Sendable, Equatable {
 /// ```
 public struct JourneyStepSpec: Codable, Sendable, Equatable {
     public var name: String?
+    /// "primary" or the UUID of an additional backend.
+    public var backend: String?
     public var method: HTTPMethod?
     public var path: String?
     public var statusCode: Int?
@@ -314,6 +324,7 @@ public struct JourneyStepSpec: Codable, Sendable, Equatable {
 
     public init(
         name: String? = nil,
+        backend: String? = nil,
         method: HTTPMethod? = nil,
         path: String? = nil,
         statusCode: Int? = nil,
@@ -326,6 +337,7 @@ public struct JourneyStepSpec: Codable, Sendable, Equatable {
         graphqlOperation: String? = nil
     ) {
         self.name = name
+        self.backend = backend
         self.method = method
         self.path = path
         self.statusCode = statusCode
@@ -350,17 +362,19 @@ extension JourneyStepSpec {
     /// than the route a step matches. And for a request nothing answered — `unmatched`, or one an
     /// active journey blocked — the *status* is copied but the body is not: that body is Mimic's own
     /// diagnostic text, and baking "No mock endpoint matched." into a journey would be nonsense.
-    public static func capturing(_ log: RequestLog, name: String? = nil) -> JourneyStepSpec {
+    public static func capturing(_ log: RequestLog, name: String? = nil) throws -> JourneyStepSpec {
+        try ResponseCapture.validate(log)
         let path = log.path.firstIndex(of: "?").map { String(log.path[log.path.startIndex..<$0]) } ?? log.path
         let route = path.hasPrefix("/") ? path : "/\(path)"
 
-        let carriesRealResponse = log.outcome == .endpoint || log.outcome == .journey
+        let carriesRealResponse = log.outcome == .endpoint || log.outcome == .journey || log.outcome == .passthrough
         let contentType: Scenario.ContentType? = log.responseHeaders
             .first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }
             .map { $0.value.lowercased().contains("json") ? .json : .plainText }
 
         return JourneyStepSpec(
             name: name ?? "\(log.method.rawValue) \(route)",
+            backend: log.backendID?.uuidString ?? "primary",
             method: log.method,
             path: route,
             statusCode: log.responseStatusCode,
@@ -376,7 +390,10 @@ extension JourneyStepSpec {
 
     /// Headers worth scripting: everything except the content type, which the step models separately.
     private static func replayableHeaders(_ headers: [String: String]) -> [String: String]? {
-        let filtered = headers.filter { $0.key.caseInsensitiveCompare("Content-Type") != .orderedSame }
+        let filtered = ResponseCapture.headers(headers).filter {
+            $0.key.caseInsensitiveCompare("Content-Type") != .orderedSame
+                || !["application/json", "text/plain"].contains($0.value.lowercased())
+        }
         return filtered.isEmpty ? nil : filtered
     }
 
@@ -400,7 +417,7 @@ extension JourneyStepSpec {
     ///   exactly what that field models. Only *consecutive*, and only when the response matches too:
     ///   a poll returning `202, 202, 202, 200` is two steps, and collapsing it into one would erase
     ///   the transition the journey exists to reproduce.
-    public static func capturing(_ logs: [RequestLog]) -> [JourneyStepSpec] {
+    public static func capturing(_ logs: [RequestLog]) throws -> [JourneyStepSpec] {
         // `enumerated()` before sorting because `sorted(by:)` guarantees no stability: two requests
         // logged in the same instant would otherwise land in either order from one run to the next,
         // and a captured journey has to be reproducible.
@@ -412,8 +429,8 @@ extension JourneyStepSpec {
                     : lhs.element.timestamp < rhs.element.timestamp
             }
 
-        return ordered.reduce(into: []) { steps, entry in
-            let step = capturing(entry.element)
+        return try ordered.reduce(into: []) { steps, entry in
+            let step = try capturing(entry.element)
             guard let previous = steps.last, previous.isAnotherOccurrence(of: step) else {
                 steps.append(step)
                 return

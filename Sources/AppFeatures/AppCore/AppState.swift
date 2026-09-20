@@ -86,6 +86,30 @@ final class AppState {
             server.serverConfiguration = newValue
         }
     }
+
+    @discardableResult
+    func applyServerConfiguration(_ configuration: ServerConfiguration) -> Bool {
+        run(.serverConfigure(port: nil, globalDelayMs: nil, configuration: configuration)) != nil
+    }
+
+    func configurePrimaryBackend(port: Int, upstreamURL: String) -> Bool {
+        run(.serverConfigure(port: port, globalDelayMs: nil, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func addBackend(name: String, port: Int, upstreamURL: String) -> Bool {
+        run(.backendUpsert(id: nil, name: name, port: port, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func updateBackend(id: UUID, name: String, port: Int, upstreamURL: String) -> Bool {
+        run(.backendUpsert(id: id, name: name, port: port, upstreamURL: upstreamURL)) != nil
+    }
+
+    @discardableResult
+    func deleteBackend(id: UUID) -> Bool {
+        run(.backendDelete(id: id)) != nil
+    }
     var requestLogs: [RequestLog] {
         get { server.requestLogs }
         set { server.requestLogs = newValue }
@@ -172,6 +196,17 @@ final class AppState {
             projectRepository: projectRepository,
             recentProjectsStore: recentProjectsStore
         )
+        server.onLog = { [weak self] log in
+            guard let self, log.outcome == .passthrough, log.projectID == self.currentProject?.id,
+                  self.serverConfiguration.backend(id: log.backendID)?.captureResponses == true,
+                  (try? ResponseCapture.validate(log)) != nil else { return }
+            let path = EndpointFromLog.mockablePath(from: log.path)
+            let operation = GraphQLRequest.operation(inBody: log.requestBody)?.name
+            guard !(self.currentProject?.endpoints ?? []).contains(where: {
+                $0.backendID == log.backendID && $0.method == log.method && $0.path == path && $0.graphqlOperation == operation
+            }) else { return }
+            _ = self.savePassedThroughLogAsMock(id: log.id)
+        }
         bindProjectWorkspace()
         _ = projects.loadLastOpenedProject()
     }
@@ -356,7 +391,15 @@ final class AppState {
         // project does not have, which is the divergence this whole path exists to close. `run` has
         // already put the reason in `lastCommandError`, so the user is told rather than left with a
         // server that quietly did not start.
-        guard run(.serverConfigure(port: port + 1, globalDelayMs: nil)) != nil else { return }
+        let used = Set(serverConfiguration.listeners.map(\.port))
+        guard let next = ((port + 1)...65536).first(where: { !used.contains($0) }) else { return }
+        let command: ControlCommand
+        if let backend = serverConfiguration.backends.first(where: { $0.port == port }) {
+            command = .backendUpsert(id: backend.id, name: nil, port: next, upstreamURL: nil)
+        } else {
+            command = .serverConfigure(port: next, globalDelayMs: nil)
+        }
+        guard run(command) != nil else { return }
         server.retryStartOnNextPort(from: port)
     }
 
@@ -407,6 +450,61 @@ final class AppState {
     func updateEndpointGroupTag(id: UUID, groupTag: String?) {
         // The executor treats an empty string as "clear", which is also how the CLI spells it.
         _ = run(.endpointUpdate(endpoint: .id(id), spec: EndpointSpec(groupTag: groupTag ?? "")))
+    }
+
+    func updateEndpointBackend(id: UUID, backendID: UUID?) {
+        _ = run(.endpointUpdate(
+            endpoint: .id(id),
+            spec: EndpointSpec(backend: backendID?.uuidString ?? "primary")
+        ))
+    }
+
+    /// Explicitly promotes one observed real response into an editable mock in a single publish.
+    @discardableResult
+    func savePassedThroughLogAsMock(id: UUID) -> Endpoint? {
+        guard let log = requestLogs.first(where: { $0.id == id }), log.outcome == .passthrough,
+              !log.responseBodyTruncated,
+              let status = log.responseStatusCode,
+              EndpointValidator.serveableStatusCodes.contains(status),
+              var project = currentProject else {
+            lastCommandError = "Select a complete passed-through HTTP response to save."
+            return nil
+        }
+        let contentType = log.responseHeaders.first { $0.key.lowercased() == "content-type" }?.value.lowercased() ?? ""
+        do {
+            try ResponseCapture.validate(log)
+            let route = EndpointFromLog.mockablePath(from: log.path)
+            let operation = GraphQLRequest.operation(inBody: log.requestBody)?.name
+            guard !project.endpoints.contains(where: {
+                $0.backendID == log.backendID && $0.method == log.method && $0.path == route && $0.graphqlOperation == operation
+            }) else { throw ControlError.invalid("A mock already exists for this backend, method, path, and operation. Edit its scenarios instead.") }
+            let created = try ProjectCommandExecutor.apply(.endpointCreate(
+                name: EndpointFromLog.suggestedName(method: log.method, path: route),
+                method: log.method,
+                path: route,
+                spec: EndpointSpec(graphqlOperation: GraphQLRequest.operation(inBody: log.requestBody)?.name, backend: log.backendID?.uuidString ?? "primary")
+            ), to: &project)
+            guard let endpoint = created?.result.endpoint, let scenarioID = endpoint.activeScenarioID else {
+                return nil
+            }
+            _ = try ProjectCommandExecutor.apply(.scenarioUpdate(
+                endpoint: .id(endpoint.id), scenario: .id(scenarioID),
+                spec: ScenarioSpec(
+                    statusCode: status,
+                    headers: ResponseCapture.headers(log.responseHeaders),
+                    body: log.responseBody,
+                    contentType: contentType.contains("json") ? .json : .plainText
+                )
+            ), to: &project)
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+            lastCommandError = nil
+            return project.endpoints.first(where: { $0.id == endpoint.id })
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
     }
 
     /// One writer. The command mutates the project, and applying the project is what reaches the
@@ -541,9 +639,14 @@ final class AppState {
     /// and capturing a session is a dozen of them at once.
     @discardableResult
     func addJourneySteps(journeyID: UUID, capturing logs: [RequestLog]) -> Journey? {
-        let steps = JourneyStepSpec.capturing(logs)
-        guard !steps.isEmpty else { return nil }
-        return run(.journeyStepsAdd(journey: .id(journeyID), steps: steps, atIndex: nil))?.journey
+        do {
+            let steps = try JourneyStepSpec.capturing(logs)
+            guard !steps.isEmpty else { return nil }
+            return run(.journeyStepsAdd(journey: .id(journeyID), steps: steps, atIndex: nil))?.journey
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
     }
 
     /// Creates a journey from a run of observed requests — the way a flow usually starts.
@@ -552,10 +655,13 @@ final class AppState {
     /// one-action-one-save reason as ``addJourneySteps(journeyID:capturing:)``.
     @discardableResult
     func addJourney(name: String, capturing logs: [RequestLog]) -> Journey? {
-        run(.journeyCreate(
-            name: name,
-            spec: JourneySpec(steps: JourneyStepSpec.capturing(logs))
-        ))?.journey
+        do {
+            let steps = try JourneyStepSpec.capturing(logs)
+            return run(.journeyCreate(name: name, spec: JourneySpec(steps: steps)))?.journey
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
     }
 
     /// How many steps a selection would actually produce, for the capture sheet to report before the

@@ -62,6 +62,9 @@ struct EndpointCommand: AsyncParsableCommand {
         @Option(name: .long, help: "Answer only this GraphQL operation. GraphQL routes everything through one path, so this is what tells two calls apart.")
         var graphqlOperation: String?
 
+        @Option(name: .long, help: "Backend UUID, or 'primary'.")
+        var backend: String?
+
         @OptionGroup var response: ResponseOptions
         @OptionGroup var options: GlobalOptions
 
@@ -86,7 +89,7 @@ struct EndpointCommand: AsyncParsableCommand {
                 name: name,
                 method: resolvedMethod,
                 path: path,
-                spec: EndpointSpec(delayMs: delay, groupTag: group, graphqlOperation: graphqlOperation)
+                spec: EndpointSpec(delayMs: delay, groupTag: group, graphqlOperation: graphqlOperation, backend: backend)
             ))
             guard created.ok else {
                 throw CLIFailure.commandFailed(created.error ?? .internalFailure("Create failed."))
@@ -171,6 +174,9 @@ struct EndpointCommand: AsyncParsableCommand {
         @Option(name: .long, help: "Answer only this GraphQL operation. Pass \"\" to clear.")
         var graphqlOperation: String?
 
+        @Option(name: .long, help: "Backend UUID, or 'primary'.")
+        var backend: String?
+
         @OptionGroup var response: ResponseOptions
         @OptionGroup var options: GlobalOptions
 
@@ -184,7 +190,8 @@ struct EndpointCommand: AsyncParsableCommand {
                 path: newPath,
                 delayMs: delay,
                 groupTag: group,
-                graphqlOperation: graphqlOperation
+                graphqlOperation: graphqlOperation,
+                backend: backend
             )
             let responseSpec = try response.scenarioSpec()
 

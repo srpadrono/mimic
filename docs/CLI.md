@@ -224,8 +224,58 @@ mimic reset [--scope logs|journey|all]     # deterministic starting point for a 
 mimic server start [--port N]
 mimic server stop
 mimic server status
-mimic server configure [--port N] [--delay MS]
+mimic server configure [--port N] [--delay MS] [--upstream https://api.example.com]
+mimic server configure --disable-upstream
+mimic server backend add --name Accounts --port 8081 --upstream https://accounts.example.com
+mimic server backend update <UUID> [--name NAME] [--port N] [--upstream URL]
+mimic server backend update <UUID> --disable-upstream
+mimic server backend delete <UUID>
 ```
+
+One project can listen on several local ports. The original port is the **primary backend**;
+additional backends each have a stable UUID, name, local port, and optional real backend URL.
+Point each of your app's existing backend settings at its corresponding local port. An endpoint
+belongs to one backend, selected with `mimic endpoint create ... --backend <UUID>` or changed with
+`mimic endpoint update ... --backend <UUID>`. Use `--backend primary` for the original port.
+The project and server status JSON report the configured backends and ports.
+
+Mimic tries a journey step, then an endpoint on that backend. When neither matches and that
+backend has forwarding enabled and an upstream URL, Mimic forwards the original request, including its query, headers,
+and body, and returns the real HTTP reply. An explicit journey block stays blocked. A backend
+without active forwarding keeps the existing unmatched `404`. Select a backend for a journey step with
+`mimic journey step add ... --backend <UUID>` or `mimic journey step update ... --backend <UUID>`;
+use `--backend primary` for the original port. Real backend URL and pass-through switches apply immediately. Changes to listening ports require a restart; `server status` reports `restartRequired` and the actual `activeBackends` alongside the configured backends. Mimic listens on `127.0.0.1` only.
+
+Forwarded calls appear in the request log as `passthrough`. To turn one into an editable text mock,
+inspect it and run `mimic log save-as-mock <log-UUID>`, or use **Save real response as mock** in
+the request log, or **Save response as mock** in the request inspector. Automatic capture is off by default because real replies can contain private data. Credential
+response headers are removed from the saved mock; response bodies must be reviewed before sharing
+the project. Truncated and binary replies cannot be saved as text mocks.
+
+Name and control each backend without losing its saved URL:
+
+```bash
+mimic server configure --name Catalog --upstream https://catalog.example.com
+mimic server configure --pass-through false       # pause, retain URL
+mimic server configure --pass-through true        # resume
+mimic server configure --capture-responses true   # opt in to automatic mocks
+mimic server backend update <UUID> --pass-through true --capture-responses true
+mimic server configure --file server-settings.json # atomically apply a ServerConfiguration object
+```
+
+Automatic capture saves the first complete supported reply per backend, method, path, and GraphQL
+operation. Subsequent calls use that mock. Query parameters are forwarded but are not mock match
+criteria. Capture removes credential and transport headers; inspect bodies before sharing. Binary,
+compressed, truncated (over 64 KiB), and failed responses are never saved as text fixtures. A
+truncated request preview is also refused because it could lose GraphQL operation identity. Binary
+and compressed replies are still forwarded byte-for-byte. Large responses and event streams are
+forwarded with backpressure and only a bounded preview is logged after completion. Incoming request
+bodies retain the existing 10 MB limit. WebSocket upgrades are not supported. Backend connection
+failures appear as `proxyFailure`, separately from real upstream 5xx responses. Redirects are returned
+to the client, never followed by Mimic.
+
+Journey export preserves backend UUIDs. Import a journey into a project with the same backends, or
+map its `backend` values to that project's IDs before importing; use `primary` for its primary port.
 
 ### Projects — whole configurations
 
@@ -339,6 +389,7 @@ save them as a journey.
 mimic log list [--limit N]
 mimic log list --unmatched          # only calls nothing is configured for
 mimic log clear
+mimic log save-as-mock <log-UUID>
 ```
 
 Each entry names what answered it — `endpoint`, `journey`, `unmatched`, or `blockedByJourney` — so a

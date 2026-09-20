@@ -23,7 +23,7 @@ nonisolated enum JourneyCapture {
     /// user commits. Not `logs.count`: requests a journey already answered are dropped, and a run of
     /// identical polls collapses into one repeating step.
     static func stepCount(_ logs: [RequestLog]) -> Int {
-        JourneyStepSpec.capturing(logs).count
+        (try? JourneyStepSpec.capturing(logs).count) ?? 0
     }
 
     /// Names a journey captured from a run after the resource its *earliest* call touches — the call

@@ -41,6 +41,7 @@ import Domain
 /// edit; that is the one thing this file cannot check for you.
 @Suite("Record round trip")
 struct RecordRoundTripTests {
+    static let backendID = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
 
     // MARK: - Fixture
     //
@@ -86,7 +87,8 @@ struct RecordRoundTripTests {
         activeScenarioID: activeScenario.id,
         delayMs: 125,
         groupTag: "Billing",
-        graphqlOperation: "AccountSummary"
+        graphqlOperation: "AccountSummary",
+        backendID: backendID
     )
 
     static let response = JourneyResponse(
@@ -103,7 +105,8 @@ struct RecordRoundTripTests {
         outcome: .respond(response),
         delayMs: 45,
         repeatCount: 4,
-        graphqlOperation: "AccountSummary"
+        graphqlOperation: "AccountSummary",
+        backendID: backendID
     )
 
     /// The hold is deliberately **not** `NetworkFailure.defaultTimeoutHoldMs`: that is the value
@@ -118,7 +121,8 @@ struct RecordRoundTripTests {
         outcome: .networkFailure(.timeout(holdMs: 7_500)),
         delayMs: 5,
         repeatCount: 2,
-        graphqlOperation: "AccountSummaryPoll"
+        graphqlOperation: "AccountSummaryPoll",
+        backendID: backendID
     )
 
     /// The other discriminator value for `failureKind`, and the one that leaves `failureHoldMs` null.
@@ -129,7 +133,8 @@ struct RecordRoundTripTests {
         outcome: .networkFailure(.connectionDrop),
         delayMs: 1,
         repeatCount: 3,
-        graphqlOperation: "AccountSummaryDrop"
+        graphqlOperation: "AccountSummaryDrop",
+        backendID: backendID
     )
 
     static let journey = Journey(
@@ -144,7 +149,10 @@ struct RecordRoundTripTests {
 
     static let project = MockProject(
         name: "Round trip",
-        serverConfiguration: ServerConfiguration(port: 9191, globalDelayMs: 250),
+        serverConfiguration: ServerConfiguration(
+            port: 9191, globalDelayMs: 250, upstreamURL: "https://api.example.com",
+            backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com")], primaryName: "Catalog", captureResponses: true
+        ),
         endpoints: [endpoint],
         journeys: [journey],
         activeJourneyID: journey.id,

@@ -168,6 +168,8 @@ struct HostCommandSweepTests {
         case .serverStop: .serverStop
         case .serverStatus: .serverStatus
         case .serverConfigure: .serverConfigure(port: 9097, globalDelayMs: 10)
+        case .backendUpsert: .backendUpsert(id: nil, name: "Accounts", port: 9096, upstreamURL: nil)
+        case .backendDelete: .backendDelete(id: UUID())
         case .endpointList: .endpointList
         case .endpointGet: .endpointGet(endpoint: .route(.get, "/a"))
         case .endpointCreate: .endpointCreate(name: "A", method: .get, path: "/a", spec: nil)
@@ -210,6 +212,7 @@ struct HostCommandSweepTests {
         case .journeyStatus: .journeyStatus
         case .logList: .logList(limit: 5, unmatchedOnly: nil)
         case .logClear: .logClear
+        case .logSaveAsMock: .logSaveAsMock(id: UUID())
         }
     }
 

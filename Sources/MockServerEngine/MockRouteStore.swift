@@ -1,3 +1,4 @@
+import Foundation
 import Domain
 
 /// Thread-safe holder for the live mock configuration, including the active journey and where its
@@ -9,6 +10,14 @@ import Domain
 /// read-then-write would have. Matching and delay arithmetic stay in Domain — this actor only owns
 /// the snapshot and the cursor.
 actor MockRouteStore {
+    private(set) var projectID: UUID?
+    private var configuration = ServerConfiguration.default
+    func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID? = nil) {
+        self.configuration = configuration
+        if let projectID { self.projectID = projectID }
+    }
+    func backend(id: UUID?) -> BackendConfiguration? { configuration.backend(id: id) }
+
     private var endpoints: [Endpoint] = []
     private var globalDelayMs: Int = 0
     private var journey: Journey?

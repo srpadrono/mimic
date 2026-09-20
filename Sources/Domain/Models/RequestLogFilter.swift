@@ -68,6 +68,9 @@ public struct RequestLogFilter: Equatable, Sendable {
         // request or response body: the field's placeholder has never promised body search, and
         // scanning a 20KB payload per keystroke on every row is not a filter, it is a stall.
         let query = text.lowercased()
+        if log.backendName?.lowercased().contains(query) == true { return true }
+        if log.upstreamURL?.lowercased().contains(query) == true { return true }
+        if let port = log.listenerPort, String(port).contains(query) { return true }
         if log.path.lowercased().contains(query) { return true }
         if let code = log.responseStatusCode, "\(code)".contains(query) { return true }
         if log.outcome.label.lowercased().contains(query) { return true }
