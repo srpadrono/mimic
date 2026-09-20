@@ -773,6 +773,19 @@ final class WorkspaceShellUITests: MimicUITestCase {
             workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
             "The navigator should go back to the endpoints list"
         )
+
+        createEndpointViaUI(name: "Account", path: "/account")
+        XCTAssertTrue(inspector.addScenarioButton.waitForExistence(timeout: 5))
+        shell.journeysTab.click()
+        XCTAssertTrue(
+            overview.row("status").waitForExistence(timeout: 5),
+            "Journeys should show the project overview, not the last endpoint's scenarios"
+        )
+        shell.endpointsTab.click()
+        XCTAssertTrue(
+            inspector.addScenarioButton.waitForExistence(timeout: 5),
+            "Returning to Endpoints should restore the selected endpoint's inspector"
+        )
     }
 
     // MARK: - 2. The breadcrumb jump bar

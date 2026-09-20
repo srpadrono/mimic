@@ -461,7 +461,7 @@ struct RequestDetailPage {
     /// own identifier over its children's, so `inspector.closeRequestDetailButton` never reaches the
     /// accessibility tree. The label is the stable handle here.
     var closeButton: XCUIElement {
-        app.buttons["Back to the endpoint inspector"].firstMatch
+        app.buttons["Close request details"].firstMatch
     }
     var bodySearchField: XCUIElement {
         app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch

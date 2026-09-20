@@ -571,10 +571,11 @@ struct EndpointEditorView: View {
         // became content-derived, a 200-line body rendered a 3,000pt well and pushed everything under
         // it that far off the pane. Pressing Format on a minified body did it in one click.
         //
-        // `maxHeight` stays as the guard for the case where something *does* propose a height.
+        // Clamp the ideal at both ends: an ideal below the minimum is a contradictory SwiftUI
+        // constraint, which occurs for every short response. The bounds also guard finite proposals.
         .frame(
             minHeight: EditorBody.minHeight,
-            idealHeight: min(EditorBody.height(for: responseBody), EditorBody.maxHeight),
+            idealHeight: max(EditorBody.minHeight, min(EditorBody.height(for: responseBody), EditorBody.maxHeight)),
             maxHeight: EditorBody.maxHeight
         )
         .padding(.horizontal, DSSpacing.md)

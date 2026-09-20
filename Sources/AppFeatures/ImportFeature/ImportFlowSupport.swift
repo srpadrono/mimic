@@ -422,7 +422,7 @@ struct ImportWorkflowScreen: View {
                 .padding(DSSpacing.md)
             }
         }
-        .frame(minWidth: 600, minHeight: 450)
+        .frame(minWidth: 600, minHeight: 360)
         // Paired, or this one identifier renames every control in the import sheet — the cancel
         // button, the select-all pair, and all two hundred candidate toggles would each report
         // "harImportView" and none of them would be addressable. Still correct: this container holds

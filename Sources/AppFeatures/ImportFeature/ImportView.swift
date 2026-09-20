@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Domain
 import SpecImport
@@ -52,10 +53,12 @@ struct ImportView: View {
             initialState: initialState,
             onCommitImport: onCommitImport
         )
-        // The screen inside asks for 600×450. That is a dialog, and this is a table: a real HAR is
-        // two hundred entries, and at 450pt the review showed about a dozen of them at a time while
-        // its own chrome took a fifth of the height. The floor is raised here rather than in the
-        // screen so the workflow view stays presentable in a smaller container if one ever needs it.
-        .frame(minWidth: 760, minHeight: 560)
+        // Keep the footer on screen even on a compact display. The review list owns scrolling;
+        // a 560pt minimum on the whole sheet made the actions impossible to reach on a 540pt screen.
+        .frame(minWidth: 760, minHeight: 360, idealHeight: preferredHeight, maxHeight: preferredHeight)
+    }
+
+    private var preferredHeight: CGFloat {
+        min(560, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 120))
     }
 }

@@ -126,8 +126,8 @@ public struct DSFilterField: View {
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
         // Paired deliberately: an identifier alone on a container overrides its descendants', and
         // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
-        .accessibilityIdentifier("ds.filterfield.\(identifier)")
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.filterfield.\(identifier)")
     }
 
     /// The scope pill.

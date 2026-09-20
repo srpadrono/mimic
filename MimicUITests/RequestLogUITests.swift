@@ -1011,6 +1011,11 @@ final class RequestLogUITests: MimicUITestCase {
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(journeyItem.waitForNonExistence(timeout: 5), "Escape should dismiss the context menu")
 
+        // Traffic remains available while editing journeys. Creating its missing mock must switch
+        // the editor back to Endpoints rather than silently selecting an off-screen endpoint.
+        let shell = WorkspaceShellPage(app: app)
+        shell.journeysTab.click()
+
         logRow(unmatchedID).rightClick()
         let createItem = app.menuItems["Create endpoint for GET /api/orders"]
         XCTAssertTrue(

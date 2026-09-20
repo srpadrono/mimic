@@ -117,8 +117,8 @@ public struct DSPanelHeader<Accessory: View>: View {
                 .fill(DSColors.separator)
                 .frame(height: DSStroke.hairline)
         }
-        .accessibilityIdentifier("ds.panelheader.\(identifier)")
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.panelheader.\(identifier)")
     }
 }
 

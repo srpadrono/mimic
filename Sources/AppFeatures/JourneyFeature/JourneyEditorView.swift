@@ -97,6 +97,7 @@ struct JourneyEditorView: View {
                 // compress in proportion to their ideal widths, so a one-line summary would squeeze
                 // the name — the identity of the thing you are editing — down to a few characters.
                 .layoutPriority(1)
+                .help(journey.name)
                 .accessibilityIdentifier("journeyEditor.name")
 
             if isActive {
@@ -154,6 +155,7 @@ struct JourneyEditorView: View {
             }
             .accessibilityIdentifier("journeyEditor.addStepButton")
             .accessibilityLabel("Add step")
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, DSSpacing.md)
         // The shared panel-header height, so this bar lines up with the sidebar's and the
@@ -196,6 +198,20 @@ struct JourneyEditorView: View {
                     autoAdvanceToggle
                 }
             }
+
+            // Labels move above their controls when two inline label/value pairs no longer fit.
+            // This preserves the same four controls without making the entire editor overflow or
+            // consuming four rows of the height needed by the steps below.
+            Grid(alignment: .leading, horizontalSpacing: DSSpacing.md, verticalSpacing: DSSpacing.sm) {
+                GridRow {
+                    compactBehaviorControl("Match") { matchModePicker.labelsHidden() }
+                    compactBehaviorControl("On completion") { completionPicker.labelsHidden() }
+                }
+                GridRow {
+                    compactBehaviorControl("Unscripted") { unmatchedPicker.labelsHidden() }
+                    autoAdvanceToggle
+                }
+            }
         }
         .font(DSTypography.label)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -207,6 +223,18 @@ struct JourneyEditorView: View {
         // candidate is two rows of pickers and needs about 56, and a fixed 32 would hold the container
         // at one row's worth of space while the grid drew straight over the step list below it.
         .frame(minHeight: DSBarHeight.controlRow)
+    }
+
+    private func compactBehaviorControl<Control: View>(
+        _ title: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            Text(title)
+                .foregroundStyle(DSColors.labelSecondary)
+                .accessibilityHidden(true)
+            control()
+        }
     }
 
     /// `.small` and `.fixedSize()` on all four: one height down the row, and a control that reports

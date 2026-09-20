@@ -389,7 +389,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $appState.showNewEndpointSheet) {
             NewEndpointSheet { name, method, path in
                 if let endpoint = appState.addEndpoint(name: name, method: method, path: path) {
-                    selectedEndpointID = endpoint.id
+                    revealEndpoint(endpoint)
                 }
             }
         }
@@ -477,6 +477,8 @@ struct WorkspaceView: View {
             }
             endpointHistory.visit(newValue)
         }
+        .onChange(of: navigatorTab) { _, _ in selectedLogIDs = [] }
+        .onChange(of: appState.selectedJourneyID) { _, _ in selectedLogIDs = [] }
         // A cleared log takes its selection with it; otherwise the inspector goes on showing a
         // request that is no longer in the list.
         .onChange(of: appState.requestLogs.isEmpty) { _, isEmpty in
@@ -888,13 +890,12 @@ struct WorkspaceView: View {
                     method: method,
                     path: path
                 ) {
-                    selectedEndpointID = endpoint.id
+                    revealEndpoint(endpoint)
                 }
             },
             onSaveAsMock: { id in
                 if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
-                    selectedEndpointID = endpoint.id
-                    selectedLogIDs = []
+                    revealEndpoint(endpoint)
                 }
             },
             journeys: appState.journeys,
@@ -924,7 +925,7 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var inspectorPanel: some View {
         let endpoint: Endpoint? = {
-            guard let id = selectedEndpointID else { return nil }
+            guard navigatorTab == .endpoints, let id = selectedEndpointID else { return nil }
             return appState.currentProject?.endpoints.first { $0.id == id }
         }()
         let detail = requestDetailContext
@@ -945,11 +946,17 @@ struct WorkspaceView: View {
             onDeleteScenario: appState.deleteScenario,
             onSaveAsMock: { id in
                 if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
-                    selectedEndpointID = endpoint.id
-                    selectedLogIDs = []
+                    revealEndpoint(endpoint)
                 }
             }
         )
+    }
+
+    /// Creating a mock from traffic should reveal what was created even when Journeys is open.
+    private func revealEndpoint(_ endpoint: Endpoint) {
+        navigatorTab = .endpoints
+        selectedEndpointID = endpoint.id
+        selectedLogIDs = []
     }
 
     /// The selected request, resolved against the current project so the endpoint and scenario names

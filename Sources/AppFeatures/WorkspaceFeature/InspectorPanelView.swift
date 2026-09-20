@@ -158,11 +158,10 @@ struct InspectorPanelView: View {
             ) {
                 switch mode {
                 case .request:
-                    // Named "back" rather than "close": it returns the panel to whatever it was
-                    // showing, which is not the same as dismissing it.
+                    // Close this detail, keeping the inspector open on the current navigator's context.
                     DSPanelHeaderButton(
                         systemImage: "xmark",
-                        help: "Back to the endpoint inspector",
+                        help: "Close request details",
                         identifier: "inspector.closeRequestDetailButton",
                         action: onCloseRequestDetail
                     )

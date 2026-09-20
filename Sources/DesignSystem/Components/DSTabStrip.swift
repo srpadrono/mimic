@@ -139,8 +139,8 @@ public struct DSTabStrip: View {
         // Paired deliberately. A bare identifier on a container makes every descendant report the
         // container's name instead of its own, and each `…tab.…` query in the UI suite would come
         // back empty for reasons that look nothing like the cause.
-        .accessibilityIdentifier("ds.tabstrip.\(identifier)")
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.tabstrip.\(identifier)")
     }
 
     /// Its own view so hover state stays local. Held on the strip as a `hoveredID`, one pointer
