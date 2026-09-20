@@ -38,8 +38,12 @@ public struct DSEmptyState: View {
     /// component in the taller centre pane wrapped the same string cleanly.
     ///
     /// So the check is on the container, not on the text. An icon is an illustration; the sentence is
-    /// the only thing here that tells you what to do.
+    /// the only thing here that tells you what to do. At still shorter heights, the outer spacing
+    /// yields too; removing the illustration alone does not save the two-line sentence.
     private static let minimumHeightForIcon: CGFloat = 200
+    /// A collapsed drawer can leave less than 100pt below its header. Preserve the explanation by
+    /// spending less space on decoration and outer rhythm before allowing the text to be squeezed.
+    private static let compactHeight: CGFloat = 130
 
     private let systemImage: String?
     private let heading: String
@@ -84,8 +88,12 @@ public struct DSEmptyState: View {
         availableHeight == 0 || availableHeight >= Self.minimumHeightForIcon
     }
 
+    private var isCompact: Bool {
+        availableHeight > 0 && availableHeight < Self.compactHeight
+    }
+
     public var body: some View {
-        VStack(spacing: DSSpacing.md) {
+        VStack(spacing: isCompact ? DSSpacing.sm : DSSpacing.md) {
             if let systemImage, showsIcon {
                 icon(systemImage)
             }
@@ -134,7 +142,7 @@ public struct DSEmptyState: View {
         .padding(.horizontal, DSSpacing.lg)
         // `lg` rather than `xl` once the illustration is gone: without it the block is short enough
         // that 24pt above and below reads as the panel having been left half-empty on purpose.
-        .padding(.vertical, showsIcon ? DSSpacing.xl : DSSpacing.lg)
+        .padding(.vertical, isCompact ? DSSpacing.xs : (showsIcon ? DSSpacing.xl : DSSpacing.lg))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The container's height, not the content's. `.frame(maxHeight: .infinity)` above means this
         // view always takes whatever it is offered, so this reports exactly what there is to work in.
