@@ -89,9 +89,7 @@ struct WorkspaceView: View {
         )
     }
 
-    var body: some View {
-        @Bindable var appState = appState
-
+    private var workspaceLayout: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 navigator
@@ -191,8 +189,18 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .toolbar(removing: .title)
-        .toolbar { workspaceToolbar }
+    }
+
+    private var workspaceWithToolbar: some View {
+        workspaceLayout
+            .toolbar(removing: .title)
+            .toolbar { workspaceToolbar }
+    }
+
+    var body: some View {
+        @Bindable var appState = appState
+
+        workspaceWithToolbar
         // Port conflict alert
         // `String(...)` around the port, not the bare `Int`. This first argument is a
         // `LocalizedStringKey`, so an interpolated integer is formatted for the current locale and
