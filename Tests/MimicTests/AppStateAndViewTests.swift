@@ -1922,37 +1922,14 @@ struct AppStateFacadeTests {
         #expect(appState.lastCommandError == refusal)
     }
 
-    // MARK: - The server well's width rule
-
-    /// `WorkspaceView.wellWidth` is the whole mechanism behind the well following the panels —
-    /// Xcode's activity view, rebuilt as arithmetic because SwiftUI has no flexible toolbar item.
-    /// It yields in a narrow window but stops expanding once more width becomes empty chrome.
-    @Test("The well follows the centre column without becoming an empty wide capsule")
-    func wellWidthFollowsTheCentreColumn() {
-        // With no traffic, a wide centre column need not reserve a table of counts yet.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true) == 280)
-
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 1187, isInspectorPresented: false) == 280)
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 927, isInspectorPresented: true, hasTraffic: true) == 460)
-
-        // Between the floor and cap it takes exactly what is left.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 600, isInspectorPresented: true) == 240)
-
-        // **The regression this rule shipped once.** A 1024pt window with both panels open leaves a
-        // ~444pt centre column, where the well is owed 84 — far less than the 220pt floor this
-        // carried at first. Demanding 220 there pushed the trailing toggles into AppKit's overflow
-        // menu and failed three WorkspaceShellUITests on CI. The floor is 96 now, so the answer here
-        // is 96: still 12pt more than the arithmetic leaves, and that is the honest reading of what
-        // this floor is — a small over-claim the toolbar's own slack absorbs, checked on screen at
-        // 1024pt with both panels open rather than argued from the budgets.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 444, isInspectorPresented: true) == 96)
-
-        // The floor catches everything under it, including the degenerate widths a first layout pass
-        // can report.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 400, isInspectorPresented: true) == 96)
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 0, isInspectorPresented: false) == 96)
-
-        // Fractional layout widths land on whole points, rounded down.
-        #expect(WorkspaceView.wellWidth(centreColumnWidth: 600.7, isInspectorPresented: true) == 240)
+    @Test("Editor toolbar overflow follows the space between the side panels")
+    func toolbarOverflowFollowsCenterWidth() {
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 440))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 759))
+        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 760))
+        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 1400))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 0))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .infinity))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .nan))
     }
 }

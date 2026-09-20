@@ -170,13 +170,57 @@ struct WorkspacePage {
     /// element rather than as a direct descendant of the toolbar — at which point every query here
     /// would miss it and the failure would read as "Import does nothing".
     var importMenuButton: XCUIElement {
-        let inToolbar = app.toolbars.descendants(matching: .any)
-            .matching(identifier: "importMenuButton").firstMatch
-        if inToolbar.exists { return inToolbar }
-        return app.descendants(matching: .any).matching(identifier: "importMenuButton").firstMatch
+        toolbarAction("importMenuButton")
+    }
+    // AppKit replaces identifiers with menuAction: for nested SwiftUI Menu items. Match the
+    // exact native title as a fallback; both branches still identify the same single action.
+    var importHARMenuItem: XCUIElement {
+        let named = app.menuItems["importHARMenuItem"].firstMatch
+        return named.exists ? named : app.menuItems["Import HAR file…"].firstMatch
+    }
+    var importOpenAPIMenuItem: XCUIElement {
+        let named = app.menuItems["importOpenAPIMenuItem"].firstMatch
+        return named.exists ? named : app.menuItems["Import OpenAPI spec…"].firstMatch
     }
     var toggleInspectorButton: XCUIElement { app.toolbars.buttons["toggleInspectorButton"].firstMatch }
     var toggleDrawerButton: XCUIElement { app.toolbars.buttons["toggleDrawerButton"].firstMatch }
+    var overflowMenu: XCUIElement {
+        app.toolbars.descendants(matching: .any).matching(identifier: "toolbar.overflow").firstMatch
+    }
+
+    /// Actions stay addressable whether inline or inside the narrow-window menu.
+    func toolbarAction(_ identifier: String) -> XCUIElement {
+        let action = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        if action.exists { return action }
+        if overflowMenu.waitForExistence(timeout: 3) { overflowMenu.click() }
+        return action
+    }
+
+    func closeToolbarMenu() {
+        UITestApp.dismissAnyOpenMenu(in: app)
+    }
+
+    func fillWindow() {
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuItems["Fill"].click()
+        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width >= 1180 }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+    }
+
+    func showSidebarIfNeeded() {
+        let show = app.toolbars.buttons["Show Sidebar"].firstMatch
+        if show.exists { show.click() }
+        _ = addEndpointButton.waitForExistence(timeout: 5)
+    }
+
+    func compactWindow() {
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuItems["Move & Resize"].click()
+        // Right edge keeps the native overflow popup inside the window screenshot.
+        app.menuItems["Top Right"].click()
+        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width < 1180 }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+    }
 
     // Autosave
     //
@@ -1585,6 +1629,7 @@ final class MimicUITests: XCTestCase {
     func testImportMenuOpensHARSheet() throws {
         launchApp()
         createProjectViaUI(name: "HAR Import Test")
+        workspace.compactWindow()
 
         // Import menu button should exist in toolbar
         XCTAssertTrue(workspace.importMenuButton.waitForExistence(timeout: 5),
@@ -1593,7 +1638,7 @@ final class MimicUITests: XCTestCase {
         workspace.importMenuButton.click()
 
         // Click HAR import menu item
-        let harMenuItem = app.menuItems["importHARMenuItem"]
+        let harMenuItem = workspace.importHARMenuItem
         XCTAssertTrue(harMenuItem.waitForExistence(timeout: 3),
                       "Import HAR menu item should exist")
         harMenuItem.click()
@@ -1615,11 +1660,12 @@ final class MimicUITests: XCTestCase {
     func testImportMenuOpensOpenAPISheet() throws {
         launchApp()
         createProjectViaUI(name: "OpenAPI Import Test")
+        workspace.compactWindow()
 
         workspace.importMenuButton.click()
 
         // Click OpenAPI import menu item
-        let openAPIMenuItem = app.menuItems["importOpenAPIMenuItem"]
+        let openAPIMenuItem = workspace.importOpenAPIMenuItem
         XCTAssertTrue(openAPIMenuItem.waitForExistence(timeout: 3),
                       "Import OpenAPI menu item should exist")
         openAPIMenuItem.click()

@@ -68,3 +68,12 @@ public enum DSStroke {
     /// because it answers a different question: this one is a state, not a boundary.
     public static let focusRing: CGFloat = 1
 }
+
+/// Editor toolbar geometry. Panel toggles keep their own trailing section.
+nonisolated public enum DSToolbarGeometry {
+    public static let expandedCenterWidth: CGFloat = 760
+    public static let projectTitleWidth: CGFloat = 180
+    public static let compactStatusWidth: CGFloat = 128
+    public static let statusWidth: CGFloat = 220
+    public static let trafficStatusWidth: CGFloat = 320
+}

@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 struct BackendSettingsPage {
     let app: XCUIApplication
-    var open: XCUIElement { app.buttons["backend.settingsButton"].firstMatch }
+    var open: XCUIElement { WorkspacePage(app: app).toolbarAction("backend.settingsButton") }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }

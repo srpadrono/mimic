@@ -89,11 +89,8 @@ struct WorkspaceFeatureRenderingTests {
 
     /// The app's primary action keeps one footprint through the whole start/stop cycle.
     ///
-    /// The glyph inside it does change size — 10pt while transitioning, 12pt otherwise — so without
-    /// the fixed 34pt frame around it the toolbar would resize twice every time the server was
-    /// started, and the controls beside it would slide. The number is deliberately larger than the
-    /// 18–22pt every other icon control takes, which is only defensible if it is the same 34 in all
-    /// five states.
+    /// Run and Stop remain present in every state; only availability changes. Neither the
+    /// transitioning states nor an error may move the neighbouring project name or status.
     @Test("The server toggle is one size in every server state")
     func serverToggleKeepsOneFootprint() {
         let measure = CGSize(width: 120, height: 80)

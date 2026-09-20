@@ -47,10 +47,8 @@ struct WorkspaceView: View {
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
 
-    /// The measured width of the centre column — the toolbar segment the server well lives in.
-    /// Nil until the first layout pass reports; the well falls back to its content size for that
-    /// one frame rather than flashing the 220pt floor.
-    @State private var centreColumnWidth: CGFloat?
+    /// Only the editor column owns the adaptive actions; inspector controls remain separate.
+    @State private var centerToolbarWidth: CGFloat = 0
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -176,29 +174,8 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
-                // The width of this column is the width of the toolbar's centre segment: the
-                // `.inspector` below divides the bar at its edge, and everything from the navigator's
-                // edge to that divider stands over this VStack. The server well is sized from this
-                // number — see `Self.wellWidth` for the arithmetic — which is what lets it stretch
-                // and shrink with the panels the way Xcode's activity view does, instead of holding
-                // one width while the window moves around it.
-                //
-                // Attached *before* `.inspector`, deliberately: this VStack is the view the inspector
-                // splits against, so its width already excludes the inspector's column when the
-                // inspector is open. Measured after that modifier it would include it.
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.width
-                } action: { width in
-                    centreColumnWidth = width
-                }
-                // A real column, not a trailing drawer inside the detail view.
-                //
-                // As a `DSDrawer` the inspector lived *inside* the detail pane, so the window had one
-                // unbroken toolbar spanning the editor and the inspector both, and the panel toggles
-                // simply floated at its far right. Xcode divides the toolbar at the inspector's edge:
-                // a vertical rule runs from the very top of the bar down through the content, and the
-                // inspector's toolbar region holds only its own toggle. `.inspector` is what produces
-                // that structure — the divider, the column, and the toolbar segmentation come with it.
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { centerToolbarWidth = $0 }
+                // Measure before the inspector so opening/resizing it reduces the editor's budget.
                 .inspector(isPresented: $showInspector) {
                     inspectorPanel
                         .inspectorColumnWidth(
@@ -212,142 +189,10 @@ struct WorkspaceView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("inspector")
                 }
-                .toolbar {
-                    // Grouped, not two adjacent singletons. AppKit sets related controls in a
-                    // `ToolbarItemGroup` closer together and treats them as one unit when the window
-                    // narrows, which is what makes Xcode's toolbar read as clusters rather than a
-                    // row of loose buttons.
-                    ToolbarItemGroup(placement: .navigation) {
-                        ServerToggleButton(
-                            serverState: appState.serverState,
-                            onStart: appState.startServer,
-                            onStop: appState.stopServer
-                        )
-                    }
-
-                    // The well is Xcode's activity view: it yields as the centre segment narrows,
-                    // but caps its width before an empty capsule dominates a wide toolbar. The
-                    // width is *computed*, not flexed — SwiftUI has no flexible toolbar item, and the
-                    // two declarative routes both fail in ways this toolbar has now shipped once
-                    // each: a fixed frame holds one width while the panels move around it, and
-                    // `ToolbarSpacer(.flexible)` stretches the principal group across the
-                    // segmentation divider, which put Import on top of the inspector's toolbar
-                    // region. So the centre column reports its width (`onGeometryChange`, above) and
-                    // `Self.wellWidth` keeps it inside the segment without crossing it.
-                    ToolbarItem(placement: .principal) {
-                        ServerStatusWell(
-                            serverState: appState.serverState,
-                            projectName: appState.currentProject?.name,
-                            requestCount: appState.requestLogs.count,
-                            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
-                            compact: centreColumnWidth.map {
-                                Self.wellWidth(
-                                    centreColumnWidth: $0,
-                                    isInspectorPresented: showInspector,
-                                    hasTraffic: !appState.requestLogs.isEmpty
-                                ) < 150
-                            } ?? false,
-                            // No `withAnimation`: the request log is an `NSSplitViewItem` now, and
-                            // AppKit animates the reveal through its own animator. Wrapping the flag
-                            // in a SwiftUI animation would only animate the flag.
-                            onShowUnmatched: {
-                                showDrawer = true
-                                showUnmatchedOnly = true
-                            }
-                        )
-                        .frame(width: centreColumnWidth.map {
-                            Self.wellWidth(
-                                centreColumnWidth: $0,
-                                isInspectorPresented: showInspector,
-                                hasTraffic: !appState.requestLogs.isEmpty
-                            )
-                        })
-                    }
-
-                    ToolbarItem(placement: .principal) {
-                        importMenu
-                    }
-
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showBackendSettings = true
-                        } label: {
-                            Label(appState.server.restartRequired ? "Restart required" : "Server settings", systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "network")
-                        }
-                        .disabled(appState.currentProject == nil)
-                        .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
-                        .accessibilityIdentifier("backend.settingsButton")
-                        .accessibilityLabel("Server settings")
-                    }
-
-                    // The autosave indicator is empty while idle, so it must not be allowed to
-                    // change the toolbar's layout when it flickers into view for two seconds. A
-                    // reserved slot keeps its neighbours still.
-                    //
-                    // The slot is deliberately unnamed, and must stay that way. `MimicUITests`
-                    // carries a page-object property querying `"autosaveStatusIndicator"`, which
-                    // exists nowhere in `Sources` and is referenced by no test — a dead query, not a
-                    // missing identifier. Naming this container to satisfy it would do two kinds of
-                    // damage: a container's identifier overrides its descendants' (see
-                    // mimic-ui-tests, references/accessibility-tree.md), so the three identifiers
-                    // `AutosaveStatusIndicator` sets — `autosaveStatus.saving`, `.saved`, `.failed`,
-                    // the two the suite actually queries — would stop landing; and the reserved slot
-                    // renders `EmptyView` while idle, so an element named here would be a handle on
-                    // a status that is, most of the time, no status at all. The state-specific
-                    // identifiers are the addressable surface.
-                    ToolbarItem(placement: .primaryAction) {
-                        AutosaveStatusIndicator(status: appState.autosaveStatus)
-                            .frame(minWidth: 54, alignment: .trailing)
-                    }
-
-                    // Panel toggles as their own cluster at the trailing edge, which is where every
-                    // macOS app that has them puts them — Xcode included.
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        Button {
-                            showDrawer.toggle()
-                        } label: {
-                            // The title carries the direction, not just the `.accessibilityLabel`
-                            // below. A `Button` whose label is a `Label`, placed directly in a
-                            // `ToolbarItemGroup`, publishes the `Label`'s own title and the
-                            // accessibility label set outside it does not win — CI read "Toggle
-                            // request log" through both states. So VoiceOver announced the same
-                            // words whether the panel was open or shut, on the one control whose
-                            // whole meaning is which way it goes. `ServerToggleButton` keeps its
-                            // flipping title because it is a custom view rather than a bare
-                            // `Label`, which is the shape that works here.
-                            Label(
-                                showDrawer ? "Hide request log" : "Show request log",
-                                systemImage: "rectangle.bottomhalf.inset.filled"
-                            )
-                        }
-                        .keyboardShortcut("l", modifiers: [.command, .option])
-                        // The shortcut is named here because it is named nowhere else: these two
-                        // toggles appear in no menu, so without the tooltip ⌥⌘L and ⌥⌘I are
-                        // undiscoverable. Xcode puts the equivalents in its View menu.
-                        .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
-                        .accessibilityIdentifier("toggleDrawerButton")
-                        .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
-
-                        Button {
-                            withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) {
-                                showInspector.toggle()
-                            }
-                        } label: {
-                            // Directional for the reason the drawer toggle above records.
-                            Label(
-                                showInspector ? "Hide inspector" : "Show inspector",
-                                systemImage: "sidebar.right"
-                            )
-                        }
-                        .keyboardShortcut("i", modifiers: [.command, .option])
-                        .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
-                        .accessibilityIdentifier("toggleInspectorButton")
-                        .accessibilityLabel(showInspector ? "Hide inspector" : "Show inspector")
-                    }
-                }
             }
-
         }
+        .toolbar(removing: .title)
+        .toolbar { workspaceToolbar }
         // Port conflict alert
         // `String(...)` around the port, not the bare `Int`. This first argument is a
         // `LocalizedStringKey`, so an interpolated integer is formatted for the current locale and
@@ -520,87 +365,144 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// The server well's width, as a function of the centre column's — which is how Xcode sizes
-    /// its activity view, measured rather than assumed: at a 1279pt window Xcode draws it at
-    /// ~314pt, and at ~1810pt at ~710pt. The item is not a fraction of anything; it absorbs
-    /// whatever the centre segment has left after its fixed neighbours, and gives it back first
-    /// when the segment tightens. That is the behaviour a fixed 460pt frame could not fake, and
-    /// the reason the well now follows the panels: this rule re-runs every time the centre column
-    /// reports a new width — a window resize, the navigator collapsing, the inspector opening.
-    ///
-    /// The budgets are the fixed neighbours, measured off the running toolbar at 1× and rounded
-    /// up a little so a point of AppKit spacing drift overflows into the gap, not into the
-    /// divider:
-    ///
-    /// - **240pt leading** — the play button and the window title stand over the head of the
-    ///   centre column. The title is the project's name, so this is a budget for a *reasonable*
-    ///   name, not a bound: "Acme Storefront" plus the button and gaps measures 235.
-    /// - **95pt for Import** — the pull-down (~80) and the gap between the two principal items.
-    /// - **Trailing, the term that depends on the inspector.** Open, the panel toggles and the
-    ///   autosave slot stand over the *inspector's* toolbar region, so the well only owes a 25pt
-    ///   margin to the segmentation divider — the gap Xcode keeps between its warning badges and
-    ///   the same rule. Closed, there is no divider and that whole cluster stands over the centre
-    ///   column: toggles, the 54pt autosave reserve, and margins, ~250pt in all.
-    ///
-    /// **The floor is the part that has already broken once, so it is the part to be careful with.**
-    /// This rule first carried a 220pt floor — the well's old fixed minimum, kept out of habit — and
-    /// a floor is a claim on space the segment may not have. At a 1024pt window with both panels
-    /// open the centre column is ~444pt, of which the play button, the title and Import want ~285;
-    /// the well is owed ~84 and demanded 220, and AppKit resolved the 136pt of over-claim the only
-    /// way it can — by moving the trailing items into the overflow menu. The panel toggles stopped
-    /// existing as toolbar buttons, and three `WorkspaceShellUITests` that click them failed on CI
-    /// while passing on a wide local window.
-    ///
-    /// So the well takes what is left and no more. ``minimumWellWidth`` is a floor only against
-    /// zero and negative widths, low enough that granting it cannot push anything out: at that size
-    /// the state mark and a middle-truncated address still render, which is the least this well can
-    /// usefully be. A window tight enough to reach it is one where *something* has to give, and the
-    /// well giving way is right — the toggles are controls, and this is a readout.
-    nonisolated static func wellWidth(
-        centreColumnWidth: CGFloat,
-        isInspectorPresented: Bool,
-        hasTraffic: Bool = false
-    ) -> CGFloat {
-        let leadingBudget: CGFloat = 240
-        let importBudget: CGFloat = 95
-        let trailingBudget: CGFloat = isInspectorPresented ? 25 : 250
-        let available = (centreColumnWidth - leadingBudget - importBudget - trailingBudget).rounded(.down)
-        let cap = hasTraffic ? maximumWellWidthWithTraffic : maximumWellWidth
-        return min(cap, max(minimumWellWidth, available))
+    /// Only editor actions overflow. The two panel controls keep their own trailing section.
+    nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
+        !centerWidth.isFinite || centerWidth < DSToolbarGeometry.expandedCenterWidth
     }
 
-    /// Beyond this point the readout becomes an empty capsule rather than useful toolbar space.
-    /// Xcode's activity view stays a compact focal point even when the editor grows very wide.
-    nonisolated static let maximumWellWidth: CGFloat = 280
-    nonisolated static let maximumWellWidthWithTraffic: CGFloat = 460
+    private var usesToolbarOverflow: Bool {
+        Self.toolbarUsesOverflow(centerWidth: centerToolbarWidth)
+    }
 
-    /// 96 — the state chip, the well's own horizontal padding, and enough of the address to read a
-    /// scheme-less host before the middle truncates. Not a design tier, and not a width the
-    /// arithmetic can always afford: at a 1024pt window with both panels open the well is owed 84
-    /// and takes this, which is a 12pt over-claim. That it costs nothing is a measurement, not a
-    /// proof — the toolbar was checked on screen at 1024, 1140 and 1400pt in both inspector states
-    /// and the trailing toggles survive all six. Raising this number spends a margin nobody has
-    /// counted. See ``wellWidth(centreColumnWidth:isInspectorPresented:)``.
-    nonisolated static let minimumWellWidth: CGFloat = 96
+    @ToolbarContentBuilder
+    private var workspaceToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            ServerToggleButton(
+                serverState: appState.serverState,
+                onStart: appState.startServer,
+                onStop: appState.stopServer
+            )
+        }
 
-    /// Getting a spec into the project, in the centre column beside the well.
-    ///
-    /// Import acts on the *project*, not on one panel, which is the reason it never belonged with
-    /// the panel toggles at the trailing edge. It used to sit in the leading group with the server
-    /// toggle, which put the app's two least-related actions in one cluster: start the thing that is
-    /// already configured, and configure the thing from a file. Beside the well it reads with what
-    /// it changes — the well counts the traffic your endpoints answer, and this is where the
-    /// endpoints come from.
-    ///
-    /// "Add endpoint" used to sit beside it and no longer does: the navigator already owns that
-    /// action in its own strip, where it adds an endpoint or a journey depending on which tab is
-    /// showing. Two "+" buttons for one job, one of which was wrong half the time.
-    ///
-    /// A computed property so the `.toolbar` builder stays readable, but still handed *directly* to
-    /// a `ToolbarItem` rather than wrapped in a stack with the well — which is what it was first
-    /// written as, and which cost it its chrome: macOS 26 draws one glass background per item, so a
-    /// pair sharing one item share one capsule and the pull-down inside it renders bare. All three
-    /// accessibility identifiers are unchanged; `MimicUITests` addresses each by name.
+        if !usesToolbarOverflow {
+            ToolbarItem(placement: .navigation) {
+                Text(appState.currentProject?.name ?? "Mimic")
+                    .font(DSTypography.bodyBold)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: DSToolbarGeometry.projectTitleWidth)
+                    .help(appState.currentProject?.name ?? "Mimic")
+                    .accessibilityIdentifier("toolbar.projectName")
+            }
+        }
+
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: DSSpacing.xxs) {
+                ServerStatusWell(
+                    serverState: appState.serverState,
+                    projectName: appState.currentProject?.name,
+                    requestCount: appState.requestLogs.count,
+                    unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+                    compact: usesToolbarOverflow,
+                    onShowUnmatched: {
+                        showDrawer = true
+                        showUnmatchedOnly = true
+                    }
+                )
+                .frame(width: usesToolbarOverflow
+                    ? DSToolbarGeometry.compactStatusWidth
+                    : (appState.requestLogs.isEmpty ? DSToolbarGeometry.statusWidth : DSToolbarGeometry.trafficStatusWidth))
+
+                AutosaveStatusIndicator(status: appState.autosaveStatus)
+                    .frame(height: DSBarHeight.columnHeader - DSSpacing.sm)
+            }
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        if usesToolbarOverflow {
+            ToolbarItem(placement: .principal) {
+                overflowMenu
+            }
+        } else {
+            ToolbarItem(placement: .principal) { importMenu }
+            ToolbarItem(placement: .principal) { serverSettingsButton }
+        }
+
+        // Above the inspector, in both layouts: never fold these into the editor's menu.
+        ToolbarItemGroup(placement: .primaryAction) {
+            drawerToolbarButton
+            inspectorToolbarButton
+        }
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Text(appState.currentProject?.name ?? "Mimic")
+            Divider()
+            importMenu
+            serverSettingsButton
+            if !appState.requestLogs.isEmpty {
+                Divider()
+                Button("Show unmatched requests") {
+                    showDrawer = true
+                    showUnmatchedOnly = true
+                }
+                .accessibilityIdentifier("toolbar.showUnmatched")
+                .accessibilityLabel("Show unmatched requests")
+            }
+        } label: {
+            Label("More actions", systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+        }
+        .menuIndicator(.hidden)
+        .help("More editor actions: import and server settings")
+        .accessibilityIdentifier("toolbar.overflow")
+        .accessibilityLabel("More actions")
+        .accessibilityValue(appState.server.restartRequired ? "Server restart required" : "")
+    }
+
+    private var serverSettingsButton: some View {
+        Button { showBackendSettings = true } label: {
+            Label(
+                appState.server.restartRequired ? "Server settings — restart required" : "Server settings",
+                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "network"
+            )
+        }
+        .disabled(appState.currentProject == nil)
+        .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
+        .accessibilityIdentifier("backend.settingsButton")
+        .accessibilityLabel("Server settings")
+    }
+
+    private var inspectorPresentation: Binding<Bool> {
+        Binding(
+            get: { showInspector },
+            set: { value in
+                withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) { showInspector = value }
+            }
+        )
+    }
+
+    private var drawerToolbarButton: some View {
+        Button { showDrawer.toggle() } label: {
+            Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomhalf.inset.filled")
+        }
+        .keyboardShortcut("l", modifiers: [.command, .option])
+        .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
+        .accessibilityIdentifier("toggleDrawerButton")
+        .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
+    }
+
+    private var inspectorToolbarButton: some View {
+        Button { inspectorPresentation.wrappedValue.toggle() } label: {
+            Label(showInspector ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
+        }
+        .keyboardShortcut("i", modifiers: [.command, .option])
+        .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
+        .accessibilityIdentifier("toggleInspectorButton")
+        .accessibilityLabel(showInspector ? "Hide inspector" : "Show inspector")
+    }
+
+    /// Shared by the full toolbar and its compact overflow menu.
     private var importMenu: some View {
         Menu {
             Button { showHARImport = true } label: {
@@ -622,6 +524,7 @@ struct WorkspaceView: View {
             Label("Import", systemImage: "square.and.arrow.down")
                 .labelStyle(.titleAndIcon)
         }
+        .disabled(appState.currentProject == nil)
         .help("Import a HAR file or an OpenAPI spec")
         .accessibilityIdentifier("importMenuButton")
         .accessibilityLabel("Import")

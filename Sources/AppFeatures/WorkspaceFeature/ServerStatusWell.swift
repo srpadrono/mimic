@@ -91,27 +91,11 @@ struct ServerStatusWell: View {
         // scale because it is internal geometry rather than a gap between two things. The request
         // log's header wells and the endpoint editor's fields take the same rung.
         .padding(.vertical, DSControlHeight.verticalPadding)
-        // The well carries no width of its own. It used to — a fixed `minWidth`/`maxWidth` pair —
-        // and that is the frame that could not follow the panels: a `.principal` item sizes to its
-        // content's ideal width, so the well held one number while the window, the navigator and
-        // the inspector all moved around it. The width now arrives from outside:
-        // `WorkspaceView.wellWidth` measures the centre column and hands this view a `.frame(width:)`,
-        // which is how the well stretches and gives way the way Xcode's activity view does. The
-        // `Spacer` in the row above is what makes any given width look intentional — content
-        // anchored to both edges, slack in the middle.
-        //
-        // The `Spacer` is also what keeps the fill honest against the item's glass. macOS 26 draws
-        // a glass capsule behind every toolbar item, sized to the item's frame; the first cut of
-        // this well painted its fill at content width inside a wider frame and shipped two nested
-        // pills — a 220pt system capsule with a 120pt badge floating in it. Here the fill wraps the
-        // row, the row's `Spacer` accepts whatever width the external frame proposes, and so fill,
-        // frame and glass are always the same box.
+        // WorkspaceView proposes a width for the wide or compact window layout. With traffic,
+        // the spacer anchors status and counters to opposite edges; without it the capsule hugs
+        // its contents. The toolbar's shared background is hidden to avoid nested capsules.
         .background {
-            // A `Capsule`, matching the shape macOS draws behind a toolbar item, for the reason
-            // directly above: this fill is standing *on* that glass, and a rounded rect at any radius
-            // leaves four crescents of it showing at the corners. The radius ladder would put a 22pt
-            // control at `smPlus`; the platform overrules it here, and this is the one place in the
-            // window where that is true.
+            // The status capsule echoes native toolbar controls without a second glass layer.
             Capsule()
                 .fill(wellFill)
                 .strokeBorder(wellBorder, lineWidth: DSStroke.hairline)

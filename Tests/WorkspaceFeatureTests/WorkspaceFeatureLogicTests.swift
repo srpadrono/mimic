@@ -466,34 +466,18 @@ struct WorkspaceFeatureLogicTests {
         #expect(RequestLogDrawerView.SelectionModifier([.command, .shift]) == .toggle)
     }
 
-    @Test("Server toggle helper starts and stops only for actionable states")
-    func serverToggleHelperPerformsExpectedAction() {
-        var startCount = 0
-        var stopCount = 0
-
-        ServerToggleButton.performAction(
-            serverState: .stopped,
-            onStart: { startCount += 1 },
-            onStop: { stopCount += 1 }
-        )
-        ServerToggleButton.performAction(
-            serverState: .error("Boom"),
-            onStart: { startCount += 1 },
-            onStop: { stopCount += 1 }
-        )
-        ServerToggleButton.performAction(
-            serverState: .running(port: 8080),
-            onStart: { startCount += 1 },
-            onStop: { stopCount += 1 }
-        )
-        ServerToggleButton.performAction(
-            serverState: .starting,
-            onStart: { startCount += 1 },
-            onStop: { stopCount += 1 }
-        )
-
-        #expect(startCount == 2)
-        #expect(stopCount == 1)
+    @Test("Run and Stop availability follows each server state")
+    func serverControlsEnableOnlyActionableStates() {
+        #expect(ServerToggleButton.canStart(in: .stopped))
+        #expect(ServerToggleButton.canStart(in: .error("Port in use")))
+        #expect(!ServerToggleButton.canStart(in: .starting))
+        #expect(!ServerToggleButton.canStart(in: .running(port: 8080)))
+        #expect(!ServerToggleButton.canStart(in: .stopping))
+        #expect(ServerToggleButton.canStop(in: .running(port: 8080)))
+        #expect(!ServerToggleButton.canStop(in: .stopped))
+        #expect(!ServerToggleButton.canStop(in: .starting))
+        #expect(!ServerToggleButton.canStop(in: .stopping))
+        #expect(!ServerToggleButton.canStop(in: .error("Port in use")))
     }
 
     @Test("New scenario helper trims whitespace and rejects empty names")

@@ -226,14 +226,10 @@ struct ServerStatusWellPage {
     var requestCount: XCUIElement { named("serverStatusWell.requestCount") }
     var unmatchedBadge: XCUIElement { named("serverStatusWell.unmatched") }
 
-    /// At the minimum three-panel width, the well deliberately gives its counters to the request
-    /// log and overview. Collapse the navigator when a test is specifically exercising the full
-    /// toolbar counters or their jump action.
+    /// Enlarge the editor segment when a test specifically exercises its full status counters.
     func revealTrafficControlsIfCompact() {
-        guard well.frame.width < 150 else { return }
-        let hideSidebar = app.toolbars.buttons["Hide Sidebar"].firstMatch
-        guard hideSidebar.waitForExistence(timeout: 5) else { return }
-        hideSidebar.click()
+        let workspace = WorkspacePage(app: app)
+        if workspace.overflowMenu.exists { workspace.fillWindow() }
     }
 
     func spoken(_ element: XCUIElement) -> String {
@@ -1406,6 +1402,78 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     // MARK: - 4. The toolbar's server well
 
+    @MainActor
+    func testCenterToolbarOverflowKeepsPanelControlsSeparate() throws {
+        launchShell()
+        createProjectViaUI(name: "Acme Storefront", port: 62118)
+        workspace.fillWindow()
+        workspace.showSidebarIfNeeded()
+        createEndpointViaUI(name: "Account summary", path: "/account-summary")
+        XCTAssertTrue(workspace.overflowMenu.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.importMenuButton.exists)
+        XCTAssertLessThan(workspace.importMenuButton.frame.maxX, inspectorHeader.frame.minX)
+        XCTAssertLessThan(app.toolbars.buttons["backend.settingsButton"].frame.maxX, inspectorHeader.frame.minX)
+        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        XCTAssertFalse(app.buttons["serverStopButton"].isEnabled)
+        let wide = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        wide.name = "center-toolbar-expanded"
+        wide.lifetime = .keepAlways
+        add(wide)
+
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.toolbars.buttons["backend.settingsButton"].exists)
+        XCTAssertTrue(workspace.serverToggleButton.isHittable)
+        XCTAssertLessThan(workspace.overflowMenu.frame.maxX, inspectorHeader.frame.minX)
+        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
+        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
+        let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        compact.name = "center-toolbar-compact"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        workspace.overflowMenu.click()
+        XCTAssertTrue(app.menuItems["backend.settingsButton"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.menuItems["toggleDrawerButton"].exists)
+        XCTAssertFalse(app.menuItems["toggleInspectorButton"].exists)
+        XCTAssertTrue(workspace.importMenuButton.exists)
+        let menu = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        menu.name = "center-toolbar-overflow-menu"
+        menu.lifetime = .keepAlways
+        add(menu)
+        workspace.closeToolbarMenu()
+
+        let settings = BackendSettingsPage(app: app)
+        settings.open.click()
+        XCTAssertTrue(settings.primaryPort.waitForExistence(timeout: 5))
+        settings.cancel.click()
+        XCTAssertTrue(settings.cancel.waitForNonExistence(timeout: 5))
+
+        startServer(onPort: 62118)
+        XCTAssertFalse(app.buttons["serverStartButton"].isEnabled)
+        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
+
+        // Panel controls remain directly reachable even while the center actions overflow.
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
+        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
+        workspace.fillWindow()
+        XCTAssertTrue(workspace.overflowMenu.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].exists)
+    }
+
     /// SRVWELL-01, SRVWELL-04.
     @MainActor
     func testServerWellReportsItsStateAndCopiesTheAddress() throws {
@@ -1769,11 +1837,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testPanelChordsToggleBothPanels() throws {
         launchShell()
         createProjectViaUI(name: "Panel Chords")
+        workspace.compactWindow()
 
         let drawerToggle = workspace.toggleDrawerButton
         let inspectorToggle = workspace.toggleInspectorButton
         XCTAssertTrue(drawerToggle.waitForExistence(timeout: 5), "The toolbar should offer both toggles")
         XCTAssertTrue(inspectorToggle.exists, "The toolbar should offer both toggles")
+        workspace.closeToolbarMenu()
 
         // Both panels start open, which is what makes the first press of each chord a *hide*.
         XCTAssertTrue(
