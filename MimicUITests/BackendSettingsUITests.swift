@@ -44,7 +44,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.add.click()
         // Grouped Form lazily realizes the new card below the viewport on a short display.
         // Scroll the form, not the sheet's fixed action row, before addressing its fields.
-        app.sheets.firstMatch.scrollViews.firstMatch.swipeUp()
+        let form = app.sheets.firstMatch.scrollViews.firstMatch
+        for _ in 0..<4 where !page.additional("name").exists {
+            form.swipeUp()
+        }
         XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
         XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
         XCTAssertGreaterThanOrEqual(

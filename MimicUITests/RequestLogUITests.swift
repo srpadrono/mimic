@@ -656,8 +656,18 @@ final class RequestLogUITests: MimicUITestCase {
         // Xcode's warning count jumps you to the issue navigator.
         ServerStatusWellPage(app: app).revealTrafficControlsIfCompact()
         let toolbarBadge = app.buttons["1 unmatched request, show it"].firstMatch
-        XCTAssertTrue(toolbarBadge.waitForExistence(timeout: 5), "The status well should badge the unmatched call")
-        toolbarBadge.click()
+        if toolbarBadge.waitForExistence(timeout: 2) {
+            toolbarBadge.click()
+        } else {
+            // On a compact display the well intentionally hides traffic counts. The center
+            // toolbar's overflow menu keeps the same unmatched-request action reachable.
+            let overflow = WorkspacePage(app: app).overflowMenu
+            XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            overflow.click()
+            let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
+            showUnmatched.click()
+        }
         XCTAssertTrue(waitForVisibleRowCount(1), "The badge should filter the log down to the unmatched call")
         XCTAssertTrue(
             poll { self.firstRowLabel().contains("unmatched") },

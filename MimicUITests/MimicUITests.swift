@@ -1299,11 +1299,9 @@ final class MimicUITests: XCTestCase {
                       "Get Posts endpoint should be visible")
 
         // The search field is pinned above the list, not a row inside it.
-        // `ds.filterfield.sidebar.filter`, not `sidebar.filter.field`. `DSFilterField` wraps a single
-        // text field, and AppKit hands that field the container's identifier — `.contain` does not
-        // prevent it. The element type is what separates the field from the scope menu beside it,
-        // which reports the same name. Confirmed against `app.debugDescription`, not assumed.
-        let searchField = app.textFields["ds.filterfield.sidebar.filter"]
+        // Address the field itself, not the filter's container. AppKit can flatten a container
+        // identifier onto its children differently across macOS releases.
+        let searchField = app.textFields["sidebar.filter.field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5),
                       "Search field should be available in sidebar")
         searchField.click()

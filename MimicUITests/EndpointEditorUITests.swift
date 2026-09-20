@@ -277,15 +277,13 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     @MainActor
     private var sidebarFilterField: XCUIElement {
-        // `ds.filterfield.sidebar.filter`, and the element *type* is what separates the field from
-        // the scope menu beside it — both report the container's name, which is what
-        // `DSFilterField`'s own doc says will happen.
-        app.textFields["ds.filterfield.sidebar.filter"]
+        // Query the field's own identifier, independent of AppKit container flattening.
+        app.textFields["sidebar.filter.field"]
     }
 
     /// The filter's scope pill. A SwiftUI `Menu` realizes as a menu button or a pop-up button
     /// depending on placement, and `app.buttons[…]` matches neither, so all three are tried — by
-    /// **label**, since the identifier is flattened onto the `DSFilterField` container.
+    /// **label**, since AppKit can expose a menu as different element types.
     @MainActor
     private var sidebarFilterScopeMenu: XCUIElement {
         let byMenuButton = app.menuButtons["Filter scope"].firstMatch

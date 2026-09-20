@@ -106,10 +106,9 @@ public struct DSFilterField: View {
                 .onTapGesture { isFocused = true }
         }
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
-        // Paired deliberately: an identifier alone on a container overrides its descendants', and
-        // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
+        // Keep the child controls distinct. Naming this container can flatten its identifier onto
+        // the text field on one macOS release and hide that field on another.
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ds.filterfield.\(identifier)")
     }
 
     /// The scope pill.
