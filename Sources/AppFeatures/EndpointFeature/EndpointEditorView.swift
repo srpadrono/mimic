@@ -663,10 +663,10 @@ struct EndpointEditorView: View {
             unitLabel("ms")
         }
 
-        // Non-breaking spaces inside the command: wrapped at 420pt the sentence broke it across two
-        // lines as "configure --" / "delay", which is not a thing anyone can copy.
+        // Keep the secondary explanation short enough for a narrow editor pane. Non-breaking
+        // spaces keep the CLI command together instead of leaving a dangling flag on a new line.
         note(
-            "Project-wide, and added on top of this endpoint's own delay. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.",
+            "Adds to endpoint delay. Set project-wide with mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay.",
             identifier: "endpointEditor.globalDelay.note"
         )
     }

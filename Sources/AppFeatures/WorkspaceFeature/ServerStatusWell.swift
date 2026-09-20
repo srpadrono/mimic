@@ -19,6 +19,7 @@ struct ServerStatusWell: View {
     let projectName: String?
     let requestCount: Int
     let unmatchedCount: Int
+    let compact: Bool
     /// Filters the request log to unmatched requests. Nil disables the affordance.
     var onShowUnmatched: (() -> Void)?
 
@@ -41,12 +42,14 @@ struct ServerStatusWell: View {
         projectName: String?,
         requestCount: Int,
         unmatchedCount: Int,
+        compact: Bool = false,
         onShowUnmatched: (() -> Void)? = nil
     ) {
         self.serverState = serverState
         self.projectName = projectName
         self.requestCount = requestCount
         self.unmatchedCount = unmatchedCount
+        self.compact = compact
         self.onShowUnmatched = onShowUnmatched
     }
 
@@ -66,16 +69,16 @@ struct ServerStatusWell: View {
             // the one thing this well cannot afford.
             // A spacer with no trailing counters still claims twelve points. At the toolbar's
             // narrowest width that was enough to turn "Stopped" into "S…ed" for no reason.
-            if hasTraffic || unmatchedCount > 0 {
+            if !compact && hasTraffic {
                 Spacer(minLength: DSSpacing.md)
             }
 
-            if hasTraffic {
+            if !compact && hasTraffic {
                 trafficDivider
                 requestCountElement
             }
 
-            if unmatchedCount > 0 {
+            if !compact && unmatchedCount > 0 {
                 unmatchedElement
             }
         }
@@ -258,7 +261,9 @@ struct ServerStatusWell: View {
     /// the window it came from, and half the time you then want to read it back. The chip carries
     /// the confirmation now, which is where the state belongs: it is the button's, not the string's.
     private var primaryTextView: Text {
-        Text(verbatim: Self.primaryText(serverState: serverState, projectName: projectName))
+        Text(verbatim: compact
+             ? Self.compactPrimaryText(serverState: serverState, projectName: projectName)
+             : Self.primaryText(serverState: serverState, projectName: projectName))
     }
 
     private var trafficDivider: some View {
@@ -373,7 +378,7 @@ struct ServerStatusWell: View {
 
     /// The chip appears only when there is a URL to put on the pasteboard. Offering "Copy" beside
     /// "Server stopped" would be a button for an address that does not exist.
-    private var showsCopyChip: Bool { isRunning }
+    private var showsCopyChip: Bool { isRunning && !compact }
 
     /// Confirmation is green — the one place in this well where the success colour is a *word* — so
     /// it takes ``DSColors/successText``, the variant measured on a tint of itself, rather than
@@ -511,6 +516,20 @@ struct ServerStatusWell: View {
         case .stopping: return "Stopping\u{2026}"
         case .error:    return "Server error"
         default:        return "Server stopped"
+        }
+    }
+
+    /// A 96pt toolbar well cannot hold the state mark and a full address or sentence. Keep the
+    /// distinguishing word (or listening port) visible instead of clipping both ends of it.
+    nonisolated static func compactPrimaryText(serverState: ServerState, projectName: String?) -> String {
+        if let port = serverState.runningPort { return String(port) }
+        let hasProject = projectName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        guard hasProject else { return "No project" }
+        switch serverState {
+        case .starting: return "Starting"
+        case .stopping: return "Stopping"
+        case .error: return "Error"
+        default: return "Stopped"
         }
     }
 

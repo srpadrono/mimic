@@ -114,14 +114,20 @@ struct JourneyStepSheet: View {
                 }
 
                 Section {
-                    Picker("Outcome", selection: $kind) {
-                        ForEach(Kind.allCases) { kind in
-                            Text(kind.title).tag(kind)
+                    VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                        Text("Outcome")
+                            .font(DSTypography.label)
+                            .foregroundStyle(DSColors.labelSecondary)
+                        Picker("Outcome", selection: $kind) {
+                            ForEach(Kind.allCases) { kind in
+                                Text(kind.title).tag(kind)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("stepSheet.outcomePicker")
+                        .accessibilityLabel("Outcome")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("stepSheet.outcomePicker")
-                    .accessibilityLabel("Outcome")
                     // Switching outcome hides the field a message was pointing at, and a complaint
                     // with nothing to point at reads as a bug in the sheet.
                     .onChange(of: kind) { validation = nil }
@@ -136,30 +142,40 @@ struct JourneyStepSheet: View {
 
                         validationMessage(under: .statusCode)
 
-                        TextField("Headers", text: $headerText, prompt: Text("Retry-After: 30"), axis: .vertical)
-                            .lineLimit(2...4)
-                            .font(DSTypography.code)
-                            .focused($focusedField, equals: .headers)
-                            .accessibilityIdentifier("stepSheet.headersField")
-                            .accessibilityLabel("Response headers, one per line, option-Return for a new line")
+                        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                            Text("Headers")
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelSecondary)
+                            TextEditor(text: $headerText)
+                                .frame(height: DSControlHeight.field * 2)
+                                .font(DSTypography.code)
+                                .scrollContentBackground(.hidden)
+                                .background(DSColors.surfaceElevated)
+                                .focused($focusedField, equals: .headers)
+                                .accessibilityIdentifier("stepSheet.headersField")
+                                .accessibilityLabel("Response headers, one per line")
+                        }
 
-                        // The prompt used to say "one per line" and stop there, which is the half of
-                        // the instruction that does not help. Driven from the keyboard, Return in this
-                        // field ends the edit — it neither adds a line nor commits the sheet — so
-                        // somebody following the prompt types one header, presses Return, and finds no
-                        // second line and no explanation. ⌥Return is the key that works, and it is not
-                        // guessable. The caption idiom is already this sheet's, twice below.
-                        Text("One per line \u{2014} press \u{2325}\u{21A9} for a new line.")
+                        // The multiline editor accepts Return directly; its former TextField
+                        // required Option-Return and needed a longer instruction here.
+                        Text("One per line. Press Return to add another.")
                             .font(DSTypography.caption)
                             .foregroundStyle(DSColors.labelSecondary)
                             .accessibilityIdentifier("stepSheet.headersHint")
 
-                        TextField("Body", text: $responseBody, prompt: Text("{\"balance\": 1520.44}"), axis: .vertical)
-                            .lineLimit(4...10)
-                            .font(DSTypography.code)
-                            .focused($focusedField, equals: .body)
-                            .accessibilityIdentifier("stepSheet.bodyField")
-                            .accessibilityLabel("Response body")
+                        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                            Text("Body")
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelSecondary)
+                            TextEditor(text: $responseBody)
+                                .frame(height: DSControlHeight.field * 4)
+                                .font(DSTypography.code)
+                                .scrollContentBackground(.hidden)
+                                .background(DSColors.surfaceElevated)
+                                .focused($focusedField, equals: .body)
+                                .accessibilityIdentifier("stepSheet.bodyField")
+                                .accessibilityLabel("Response body")
+                        }
 
                     case .drop:
                         Text("The connection is torn down mid-response. The client sees a network "
@@ -243,7 +259,7 @@ struct JourneyStepSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(minWidth: 420, idealWidth: 520)
+        .frame(width: 560)
         .defaultFocus($focusedField, .name)
         .onAppear(perform: loadExistingStep)
     }

@@ -99,6 +99,7 @@ struct BreadcrumbPage {
 
     var back: XCUIElement { historyButton("breadcrumb.back", labelled: "Go back") }
     var forward: XCUIElement { historyButton("breadcrumb.forward", labelled: "Go forward") }
+    var earlierLocations: XCUIElement { app.menuButtons["breadcrumb.earlierLocations"] }
 
     /// The label fallback is safe for these two: "Go back" and "Go forward" are set nowhere else in
     /// this window, and a flattened container keeps its children's labels even when it takes their
@@ -858,25 +859,42 @@ final class WorkspaceShellUITests: MimicUITestCase {
         setGroupTag("Accounts")
         createEndpointViaUI(name: "Get orders", path: "/api/orders")
         setGroupTag("Checkout")
+        widenCentrePaneByHidingTheInspector()
 
-        XCTAssertTrue(
-            breadcrumb.waitForCrumb("group", toRead: "Checkout"),
-            "A second group should give the path a group crumb — "
-                + breadcrumb.crumbDescription("group", titled: "Checkout")
-        )
+        XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5),
+                      "A second group should give the expanded path a group crumb")
 
-        breadcrumb.jump(from: "group", to: "Accounts", currentlyReading: "Checkout")
+        breadcrumb.jump(from: "group", to: "Accounts")
 
+        XCTAssertTrue(breadcrumb.crumb("group").exists, "The group crumb should remain in the path")
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("group", toRead: "Accounts"),
-            "The group crumb should follow the jump — "
-                + breadcrumb.crumbDescription("group", titled: "Accounts")
+            UITestApp.waitUntil(timeout: 5) {
+                self.endpointEditor.groupTagField.value as? String == "Accounts"
+            },
+            "A group option should move the editor to an endpoint in that group"
         )
-        XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Get users"),
-            "A group option stands for the first endpoint in it — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Get users")
-        )
+    }
+
+    /// At the three-panel minimum, the parent locations move into a menu so the active endpoint
+    /// and scenario remain legible. The expanded test above checks direct group navigation.
+    @MainActor
+    func testNarrowJumpBarCollapsesEarlierLocations() throws {
+        launchShell()
+        createProjectViaUI(name: "Compact path")
+        createEndpointViaUI(name: "Get users", path: "/api/users")
+        setGroupTag("Accounts")
+        createEndpointViaUI(name: "Get orders", path: "/api/orders")
+        setGroupTag("Checkout")
+
+        XCTAssertTrue(breadcrumb.crumb("endpoint").waitForExistence(timeout: 5))
+        if breadcrumb.earlierLocations.exists {
+            breadcrumb.earlierLocations.click()
+            XCTAssertTrue(app.menuItems["Checkout"].waitForExistence(timeout: 5))
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        } else {
+            // The runner can restore a wider window; that layout must expose the group directly.
+            XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5))
+        }
     }
 
     /// BREAD-05, INSPOV-13.

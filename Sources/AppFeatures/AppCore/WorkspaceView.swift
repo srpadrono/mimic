@@ -242,6 +242,9 @@ struct WorkspaceView: View {
                             projectName: appState.currentProject?.name,
                             requestCount: appState.requestLogs.count,
                             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+                            compact: centreColumnWidth.map {
+                                Self.wellWidth(centreColumnWidth: $0, isInspectorPresented: showInspector) < 150
+                            } ?? false,
                             // No `withAnimation`: the request log is an `NSSplitViewItem` now, and
                             // AppKit animates the reveal through its own animator. Wrapping the flag
                             // in a SwiftUI animation would only animate the flag.
