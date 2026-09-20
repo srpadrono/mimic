@@ -444,14 +444,16 @@ struct WorkspaceView: View {
     }
 
     private var overflowMenu: some View {
-        Menu {
+        let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
+        let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
+        return Menu {
             Text(appState.currentProject?.name ?? "Mimic")
             Divider()
             importMenu
             serverSettingsButton
             if !appState.requestLogs.isEmpty {
                 Divider()
-                Button("Show unmatched requests") {
+                Button("Show unmatched requests (\(unmatchedCount))") {
                     showDrawer = true
                     showUnmatchedOnly = true
                 }
@@ -459,13 +461,25 @@ struct WorkspaceView: View {
                 .accessibilityLabel("Show unmatched requests")
             }
         } label: {
-            Label("More actions", systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+                if unmatchedCount > 0 {
+                    Text("\(unmatchedCount)")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warningText)
+                        .monospacedDigit()
+                }
+            }
         }
         .menuIndicator(.hidden)
-        .help("More editor actions: import and server settings")
+        .help(unmatchedCount > 0
+            ? "More editor actions; \(unmatchedDescription)"
+            : "More editor actions: import and server settings")
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
-        .accessibilityValue(appState.server.restartRequired ? "Server restart required" : "")
+        .accessibilityValue(unmatchedCount > 0
+            ? unmatchedDescription
+            : (appState.server.restartRequired ? "Server restart required" : ""))
     }
 
     private var serverSettingsButton: some View {

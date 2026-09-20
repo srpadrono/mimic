@@ -663,6 +663,7 @@ final class RequestLogUITests: MimicUITestCase {
             // toolbar's overflow menu keeps the same unmatched-request action reachable.
             let overflow = WorkspacePage(app: app).overflowMenu
             XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            XCTAssertEqual(overflow.value as? String, "1 unmatched request")
             overflow.click()
             let showUnmatched = app.menuItems["toolbar.showUnmatched"]
             XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
