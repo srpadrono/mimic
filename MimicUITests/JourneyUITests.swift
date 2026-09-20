@@ -17,39 +17,15 @@ struct JourneysNavigatorPage {
 
     /// The navigator's tab, matched by **label**.
     ///
-    /// Its identifier does not survive: `DSTabStrip` pairs its own identifier with
-    /// `.accessibilityElement(children: .contain)`, and that keeps children as their own elements
-    /// with their own labels and values but *not* their own identifiers — dumped from
-    /// `app.debugDescription`, all three of the strip's buttons report `ds.tabstrip.navigator`. The
-    /// label comes from `NavigatorTab.journeys.help`.
+    /// The label comes from `NavigatorTab.journeys.help`.
     var tab: XCUIElement { app.buttons["Show journeys"].firstMatch }
 
-    /// The navigator's add control, matched by **its own label** — which nothing else carries.
-    ///
-    /// This used to match on label *and element type*, and the element type was the half doing the
-    /// separating. Dumped from `app.debugDescription` back then, with the Journeys tab showing and
-    /// no journeys yet, the two controls read:
-    ///
-    /// ```
-    /// MenuButton, identifier: 'ds.tabstrip.navigator',   label: 'Add journey'   ← this one
-    /// Button,     identifier: 'ds.empty.journeys.empty', label: 'Add journey'   ← the empty state
-    /// ```
-    ///
-    /// Same words on two controls that do different things: this one opens a chooser, the empty
-    /// state's adds a journey outright — so a query that resolved to the wrong one would wait
-    /// forever for a menu item that never appears. `MenuButton` versus `Button` separated them, and
-    /// that is a property of `DSIconMenu`'s *menu style*, not of either control. It made a
-    /// deprecated modifier unmovable: change the style and this query silently changes what it
-    /// finds. The labels are distinct now — "Choose how to add a journey" here,
-    /// `JourneyNavigatorList`'s "Add journey" there — and each says what its control does.
-    ///
-    /// The identifier is still no use: `DSTabStrip` flattens its children's, so the
-    /// `journeys.addJourneyButton` set on the menu reports as the strip's own name. The element
-    /// type is now only a *locator*, and it is tried both ways for the reason
-    /// `RequestDetailPage.tab(_:)` gives — so that a style change breaks nothing here. Today
-    /// `DSIconMenu` still takes `.menuStyle(.borderlessButton)`, which AppKit realizes as a
-    /// `MenuButton`, and the first branch is the one that answers.
+    /// Prefer the menu's identifier. The label fallback tolerates native menu representations
+    /// while remaining distinct from the empty state's "Add journey" action.
     var addButton: XCUIElement {
+        let byIdentifier = app.descendants(matching: .any)
+            .matching(identifier: "journeys.addJourneyButton").firstMatch
+        if byIdentifier.exists { return byIdentifier }
         let byMenuButton = app.menuButtons["Choose how to add a journey"].firstMatch
         if byMenuButton.exists { return byMenuButton }
         return app.descendants(matching: .any)

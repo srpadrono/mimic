@@ -150,7 +150,9 @@ struct WorkspacePage {
     /// offers "Add endpoint" and both call the same action, so either is a correct answer to "open
     /// the new-endpoint sheet". Pinning this to the strip's copy would make every test that adds the
     /// *first* endpoint depend on which of two identical buttons the tree happened to list first.
-    var addEndpointButton: XCUIElement { app.buttons["Add endpoint"].firstMatch }
+    var addEndpointButton: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@", "Add endpoint")).firstMatch
+    }
     /// Asserts the removal, so the duplicate cannot come back unnoticed.
     var toolbarAddEndpointButton: XCUIElement {
         app.toolbars.buttons["addEndpointButton"].firstMatch
@@ -168,13 +170,58 @@ struct WorkspacePage {
     /// element rather than as a direct descendant of the toolbar — at which point every query here
     /// would miss it and the failure would read as "Import does nothing".
     var importMenuButton: XCUIElement {
-        let inToolbar = app.toolbars.descendants(matching: .any)
-            .matching(identifier: "importMenuButton").firstMatch
-        if inToolbar.exists { return inToolbar }
-        return app.descendants(matching: .any).matching(identifier: "importMenuButton").firstMatch
+        toolbarAction("importMenuButton")
+    }
+    // AppKit replaces identifiers with menuAction: for nested SwiftUI Menu items. Match the
+    // exact native title as a fallback; both branches still identify the same single action.
+    var importHARMenuItem: XCUIElement {
+        let named = app.menuItems["importHARMenuItem"].firstMatch
+        return named.exists ? named : app.menuItems["Import HAR file…"].firstMatch
+    }
+    var importOpenAPIMenuItem: XCUIElement {
+        let named = app.menuItems["importOpenAPIMenuItem"].firstMatch
+        return named.exists ? named : app.menuItems["Import OpenAPI spec…"].firstMatch
     }
     var toggleInspectorButton: XCUIElement { app.toolbars.buttons["toggleInspectorButton"].firstMatch }
     var toggleDrawerButton: XCUIElement { app.toolbars.buttons["toggleDrawerButton"].firstMatch }
+    var overflowMenu: XCUIElement {
+        app.toolbars.descendants(matching: .any).matching(identifier: "toolbar.overflow").firstMatch
+    }
+
+    /// Actions stay addressable whether inline or inside the narrow-window menu.
+    func toolbarAction(_ identifier: String) -> XCUIElement {
+        let action = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        if action.exists { return action }
+        if overflowMenu.waitForExistence(timeout: 3) { overflowMenu.click() }
+        return action
+    }
+
+    func closeToolbarMenu() {
+        UITestApp.dismissAnyOpenMenu(in: app)
+    }
+
+    func fillWindow() {
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuItems["Fill"].click()
+        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width >= 1180 }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+    }
+
+    func showSidebarIfNeeded() {
+        if addEndpointButton.exists { return }
+        let show = app.toolbars.buttons["Show Sidebar"].firstMatch
+        if show.isHittable { show.click() }
+        _ = addEndpointButton.waitForExistence(timeout: 5)
+    }
+
+    func compactWindow() {
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuItems["Move & Resize"].click()
+        // Right edge keeps the native overflow popup inside the window screenshot.
+        app.menuItems["Top Right"].click()
+        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width < 1180 }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+    }
 
     // Autosave
     //
@@ -459,7 +506,7 @@ struct RequestDetailPage {
     /// own identifier over its children's, so `inspector.closeRequestDetailButton` never reaches the
     /// accessibility tree. The label is the stable handle here.
     var closeButton: XCUIElement {
-        app.buttons["Back to the endpoint inspector"].firstMatch
+        app.buttons["Close request details"].firstMatch
     }
     var bodySearchField: XCUIElement {
         app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch
@@ -1253,11 +1300,9 @@ final class MimicUITests: XCTestCase {
                       "Get Posts endpoint should be visible")
 
         // The search field is pinned above the list, not a row inside it.
-        // `ds.filterfield.sidebar.filter`, not `sidebar.filter.field`. `DSFilterField` wraps a single
-        // text field, and AppKit hands that field the container's identifier — `.contain` does not
-        // prevent it. The element type is what separates the field from the scope menu beside it,
-        // which reports the same name. Confirmed against `app.debugDescription`, not assumed.
-        let searchField = app.textFields["ds.filterfield.sidebar.filter"]
+        // Address the field itself, not the filter's container. AppKit can flatten a container
+        // identifier onto its children differently across macOS releases.
+        let searchField = app.textFields["sidebar.filter.field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5),
                       "Search field should be available in sidebar")
         searchField.click()
@@ -1583,6 +1628,7 @@ final class MimicUITests: XCTestCase {
     func testImportMenuOpensHARSheet() throws {
         launchApp()
         createProjectViaUI(name: "HAR Import Test")
+        workspace.compactWindow()
 
         // Import menu button should exist in toolbar
         XCTAssertTrue(workspace.importMenuButton.waitForExistence(timeout: 5),
@@ -1591,7 +1637,7 @@ final class MimicUITests: XCTestCase {
         workspace.importMenuButton.click()
 
         // Click HAR import menu item
-        let harMenuItem = app.menuItems["importHARMenuItem"]
+        let harMenuItem = workspace.importHARMenuItem
         XCTAssertTrue(harMenuItem.waitForExistence(timeout: 3),
                       "Import HAR menu item should exist")
         harMenuItem.click()
@@ -1613,11 +1659,12 @@ final class MimicUITests: XCTestCase {
     func testImportMenuOpensOpenAPISheet() throws {
         launchApp()
         createProjectViaUI(name: "OpenAPI Import Test")
+        workspace.compactWindow()
 
         workspace.importMenuButton.click()
 
         // Click OpenAPI import menu item
-        let openAPIMenuItem = app.menuItems["importOpenAPIMenuItem"]
+        let openAPIMenuItem = workspace.importOpenAPIMenuItem
         XCTAssertTrue(openAPIMenuItem.waitForExistence(timeout: 3),
                       "Import OpenAPI menu item should exist")
         openAPIMenuItem.click()

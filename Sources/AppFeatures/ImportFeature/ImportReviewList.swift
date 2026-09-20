@@ -85,10 +85,19 @@ enum ImportRow {
 /// fixed column you can scan down.
 struct ImportReviewList: View {
     @Binding var candidates: [ImportCandidate]
+    let cancelIdentifier: String
+    let onCancel: () -> Void
     let onImport: () -> Void
 
-    public init(candidates: Binding<[ImportCandidate]>, onImport: @escaping () -> Void) {
+    public init(
+        candidates: Binding<[ImportCandidate]>,
+        cancelIdentifier: String = "import.cancelButton",
+        onCancel: @escaping () -> Void = {},
+        onImport: @escaping () -> Void
+    ) {
         self._candidates = candidates
+        self.cancelIdentifier = cancelIdentifier
+        self.onCancel = onCancel
         self.onImport = onImport
     }
 
@@ -219,37 +228,42 @@ struct ImportReviewList: View {
 
     private var footer: some View {
         HStack(spacing: DSSpacing.md) {
-            // A real warning: these bodies are dropped on import, so something is lost.
-            if candidates.contains(where: { $0.bodySizeExceedsLimit }) {
-                Label("Some entries exceed the 1 MB body limit", systemImage: "exclamationmark.triangle")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.warning)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("import.bodySizeWarning")
-            }
+            // Multiple import notices must stack. In one HStack they competed with each other and
+            // with the actions, so a capture containing binary, oversized, and duplicate entries
+            // compressed every warning into an unreadable fragment at the sheet's minimum width.
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                if candidates.contains(where: { $0.bodySizeExceedsLimit }) {
+                    Label("Some entries exceed the 1 MB body limit", systemImage: "exclamationmark.triangle")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warning)
+                        .accessibilityIdentifier("import.bodySizeWarning")
+                }
 
-            // Same class of warning as the size limit: a binary body — an image, a font, a
-            // compressed payload — cannot be carried by a text mock body, so it is dropped on import.
-            if candidates.contains(where: { $0.bodyIsBinary }) {
-                Label("Some entries have binary bodies, which import without one", systemImage: "exclamationmark.triangle")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.warning)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("import.binaryBodyWarning")
-            }
+                if candidates.contains(where: { $0.bodyIsBinary }) {
+                    Label("Some entries have binary bodies, which import without one", systemImage: "exclamationmark.triangle")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warning)
+                        .accessibilityIdentifier("import.binaryBodyWarning")
+                }
 
-            // Not a warning: nothing is wrong and nothing is lost, the rows are simply pre-answered.
-            // It was amber, which made it indistinguishable at a glance from the line above it —
-            // and a colour that means "look here" stops meaning anything once it is on everything.
-            if candidates.contains(where: { $0.isDuplicate }) {
-                Label("Duplicates are deselected by default", systemImage: "doc.on.doc")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("import.duplicateWarning")
+                // Duplicates are pre-answered, not erroneous and not a loss of data.
+                if candidates.contains(where: { $0.isDuplicate }) {
+                    Label("Duplicates are deselected by default", systemImage: "doc.on.doc")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .accessibilityIdentifier("import.duplicateWarning")
+                }
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: DSSpacing.md)
+
+            DSButton("Cancel", variant: .ghost, size: .medium, identifier: "import.cancel") {
+                onCancel()
+            }
+            .accessibilityIdentifier(cancelIdentifier)
+            .accessibilityLabel("Cancel")
+            .keyboardShortcut(.cancelAction)
 
             DSButton(
                 "Import \(selectedCount) endpoint\(selectedCount == 1 ? "" : "s")",

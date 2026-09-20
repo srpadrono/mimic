@@ -19,6 +19,7 @@ struct ServerStatusWell: View {
     let projectName: String?
     let requestCount: Int
     let unmatchedCount: Int
+    let compact: Bool
     /// Filters the request log to unmatched requests. Nil disables the affordance.
     var onShowUnmatched: (() -> Void)?
 
@@ -41,12 +42,14 @@ struct ServerStatusWell: View {
         projectName: String?,
         requestCount: Int,
         unmatchedCount: Int,
+        compact: Bool = false,
         onShowUnmatched: (() -> Void)? = nil
     ) {
         self.serverState = serverState
         self.projectName = projectName
         self.requestCount = requestCount
         self.unmatchedCount = unmatchedCount
+        self.compact = compact
         self.onShowUnmatched = onShowUnmatched
     }
 
@@ -64,14 +67,18 @@ struct ServerStatusWell: View {
             // The state mark stays leading in every state. A group centred as a whole would slide it
             // sideways with the length of the address, and a status light you have to look for is
             // the one thing this well cannot afford.
-            Spacer(minLength: DSSpacing.md)
+            // A spacer with no trailing counters still claims twelve points. At the toolbar's
+            // narrowest width that was enough to turn "Stopped" into "S…ed" for no reason.
+            if !compact && hasTraffic {
+                Spacer(minLength: DSSpacing.md)
+            }
 
-            if hasTraffic {
+            if !compact && hasTraffic {
                 trafficDivider
                 requestCountElement
             }
 
-            if unmatchedCount > 0 {
+            if !compact && unmatchedCount > 0 {
                 unmatchedElement
             }
         }
@@ -84,27 +91,11 @@ struct ServerStatusWell: View {
         // scale because it is internal geometry rather than a gap between two things. The request
         // log's header wells and the endpoint editor's fields take the same rung.
         .padding(.vertical, DSControlHeight.verticalPadding)
-        // The well carries no width of its own. It used to — a fixed `minWidth`/`maxWidth` pair —
-        // and that is the frame that could not follow the panels: a `.principal` item sizes to its
-        // content's ideal width, so the well held one number while the window, the navigator and
-        // the inspector all moved around it. The width now arrives from outside:
-        // `WorkspaceView.wellWidth` measures the centre column and hands this view a `.frame(width:)`,
-        // which is how the well stretches and gives way the way Xcode's activity view does. The
-        // `Spacer` in the row above is what makes any given width look intentional — content
-        // anchored to both edges, slack in the middle.
-        //
-        // The `Spacer` is also what keeps the fill honest against the item's glass. macOS 26 draws
-        // a glass capsule behind every toolbar item, sized to the item's frame; the first cut of
-        // this well painted its fill at content width inside a wider frame and shipped two nested
-        // pills — a 220pt system capsule with a 120pt badge floating in it. Here the fill wraps the
-        // row, the row's `Spacer` accepts whatever width the external frame proposes, and so fill,
-        // frame and glass are always the same box.
+        // WorkspaceView proposes a width for the wide or compact window layout. With traffic,
+        // the spacer anchors status and counters to opposite edges; without it the capsule hugs
+        // its contents. The toolbar's shared background is hidden to avoid nested capsules.
         .background {
-            // A `Capsule`, matching the shape macOS draws behind a toolbar item, for the reason
-            // directly above: this fill is standing *on* that glass, and a rounded rect at any radius
-            // leaves four crescents of it showing at the corners. The radius ladder would put a 22pt
-            // control at `smPlus`; the platform overrules it here, and this is the one place in the
-            // window where that is true.
+            // The status capsule echoes native toolbar controls without a second glass layer.
             Capsule()
                 .fill(wellFill)
                 .strokeBorder(wellBorder, lineWidth: DSStroke.hairline)
@@ -254,7 +245,9 @@ struct ServerStatusWell: View {
     /// the window it came from, and half the time you then want to read it back. The chip carries
     /// the confirmation now, which is where the state belongs: it is the button's, not the string's.
     private var primaryTextView: Text {
-        Text(verbatim: Self.primaryText(serverState: serverState, projectName: projectName))
+        Text(verbatim: compact
+             ? Self.compactPrimaryText(serverState: serverState, projectName: projectName)
+             : Self.primaryText(serverState: serverState, projectName: projectName))
     }
 
     private var trafficDivider: some View {
@@ -369,7 +362,7 @@ struct ServerStatusWell: View {
 
     /// The chip appears only when there is a URL to put on the pasteboard. Offering "Copy" beside
     /// "Server stopped" would be a button for an address that does not exist.
-    private var showsCopyChip: Bool { isRunning }
+    private var showsCopyChip: Bool { isRunning && !compact }
 
     /// Confirmation is green — the one place in this well where the success colour is a *word* — so
     /// it takes ``DSColors/successText``, the variant measured on a tint of itself, rather than
@@ -507,6 +500,20 @@ struct ServerStatusWell: View {
         case .stopping: return "Stopping\u{2026}"
         case .error:    return "Server error"
         default:        return "Server stopped"
+        }
+    }
+
+    /// A 96pt toolbar well cannot hold the state mark and a full address or sentence. Keep the
+    /// distinguishing word (or listening port) visible instead of clipping both ends of it.
+    nonisolated static func compactPrimaryText(serverState: ServerState, projectName: String?) -> String {
+        if let port = serverState.runningPort { return String(port) }
+        let hasProject = projectName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        guard hasProject else { return "No project" }
+        switch serverState {
+        case .starting: return "Starting"
+        case .stopping: return "Stopping"
+        case .error: return "Error"
+        default: return "Stopped"
         }
     }
 

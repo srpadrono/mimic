@@ -1177,6 +1177,14 @@ final class SpecImportUITests: MimicUITestCase {
         assertReviewList(sheet, "The file should parse and the review screen should appear")
         assertExists(sheet.selectionCount("3 of 4 selected"), "The initial selection count")
 
+        // Sheet actions belong together in the footer; a Cancel floating beside the heading
+        // makes the primary and escape actions feel unrelated. Keep this an actual geometry check,
+        // since both buttons still existed when the layout was wrong.
+        assertExists(sheet.cancelButton, "The review's Cancel action")
+        assertExists(sheet.importButton, "The review's Import action")
+        XCTAssertLessThan(sheet.cancelButton.frame.maxX, sheet.importButton.frame.minX)
+        XCTAssertLessThan(abs(sheet.cancelButton.frame.midY - sheet.importButton.frame.midY), 4)
+
         // IMPREV-09 — select all takes the deselected duplicate with it.
         assertEnabled(sheet.selectAllButton, "Select all, while a candidate is deselected")
         sheet.selectAllButton.click()

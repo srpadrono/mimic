@@ -159,6 +159,7 @@ class MimicUITestCase: XCTestCase {
     /// does anything.
     @MainActor
     func createEndpointViaUI(name: String, path: String, method: String = "GET") {
+        XCTAssertTrue(workspace.addEndpointButton.waitForExistence(timeout: 5), "Add endpoint should be reachable")
         workspace.addEndpointButton.click()
         _ = newEndpointSheet.nameField.waitForExistence(timeout: 3)
         newEndpointSheet.nameField.click()

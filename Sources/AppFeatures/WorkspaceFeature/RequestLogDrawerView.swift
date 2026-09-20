@@ -69,7 +69,7 @@ enum SortField: String {
 /// that promise now lives, so adopting the component later cannot change this row's shape.
 private enum HeaderControl {
     static let verticalPadding = DSControlHeight.verticalPadding
-    static let height = DSControlHeight.row
+    static let height = DSControlHeight.search
     static let cornerRadius = DSCornerRadius.sm
     static let borderWidth = DSStroke.hairline
 }
@@ -387,10 +387,34 @@ struct RequestLogDrawerView: View {
     }
 
     private func drawerContent(width: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        let narrow = width < 560
+        return VStack(spacing: 0) {
             // Zone 1: the panel's single row of chrome. `DSPanelHeader` draws its own hairline, so
             // there is no separate divider here — two would read as a double rule.
-            drawerToolbar(compact: width < LogColumns.minimumTableWidth)
+            drawerToolbar(compact: width < LogColumns.minimumTableWidth, narrow: narrow)
+
+            // At a narrow centre-column width, keep the search usable instead of compressing it
+            // between the popup, unmatched toggle and clear action in the fixed-height header.
+            if narrow && !requestLogs.isEmpty {
+                HStack(spacing: DSSpacing.md) {
+                    if let countSubtitle {
+                        Text(countSubtitle)
+                            .font(DSTypography.caption)
+                            .foregroundStyle(DSColors.labelSecondary)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("drawer.count")
+                    }
+                    filterControl
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .frame(height: DSBarHeight.controlRow)
+                .frame(maxWidth: .infinity)
+                .background(DSColors.band)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+                }
+            }
 
             // Zone 2 & 3: Content
             if requestLogs.isEmpty {
@@ -452,8 +476,8 @@ struct RequestLogDrawerView: View {
     /// count rides in the header's subtitle slot and the filters sit as trailing controls, so the
     /// same information costs one row instead of two.
     @ViewBuilder
-    private func drawerToolbar(compact: Bool) -> some View {
-        DSPanelHeader("Request log", subtitle: compact ? nil : countSubtitle, identifier: "requestLog") {
+    private func drawerToolbar(compact: Bool, narrow: Bool) -> some View {
+        DSPanelHeader("Request log", subtitle: narrow ? nil : countSubtitle, identifier: "requestLog") {
             HStack(spacing: DSSpacing.sm) {
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
@@ -479,36 +503,7 @@ struct RequestLogDrawerView: View {
                         compact: compact
                     )
 
-                    HStack(spacing: DSSpacing.xs) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: DSGlyph.inline, weight: .medium))
-                            .foregroundStyle(DSColors.labelTertiary)
-                        TextField("Filter", text: $filterText)
-                            .textFieldStyle(.plain)
-                            .font(DSTypography.codeSmall)
-                            .focused($filterFieldIsFocused)
-                            .accessibilityIdentifier("drawer.filterField")
-                            .accessibilityLabel("Filter request log")
-                    }
-                    // Range rather than a fixed 150pt: a filter field is the one control in this row
-                    // whose useful width depends on the window, and 150 was simultaneously too wide
-                    // for a narrow drawer and too narrow to read a path in a wide one.
-                    //
-                    // The focused line is `DSFilterField`'s exactly — `borderFocused` at
-                    // `DSStroke.focusRing` — because `.textFieldStyle(.plain)` throws AppKit's own
-                    // ring away, and a control that looks identical whether or not it has the
-                    // keyboard is the hover defect applied to Full Keyboard Access. This field is
-                    // one of the two hand-rolled ones that component's own note names; it keeps its
-                    // shape here rather than adopting the component, because the component is a
-                    // capsule with a scope pill and this row is four rectangular wells.
-                    .headerControlWell(
-                        fill: DSColors.tertiary,
-                        stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
-                        strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
-                        minWidth: compact ? LogColumns.time : 120,
-                        idealWidth: compact ? LogColumns.time : 160
-                    )
-                    .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
+                    if !narrow { filterControl }
 
                     DSPanelHeaderButton(
                         systemImage: "trash",
@@ -521,6 +516,39 @@ struct RequestLogDrawerView: View {
                 }
             }
         }
+    }
+
+    private var filterControl: some View {
+        HStack(spacing: DSSpacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: DSGlyph.inline, weight: .medium))
+                .foregroundStyle(DSColors.labelTertiary)
+            TextField("Filter", text: $filterText)
+                .textFieldStyle(.plain)
+                .font(DSTypography.label)
+                .focused($filterFieldIsFocused)
+                .accessibilityIdentifier("drawer.filterField")
+                .accessibilityLabel("Filter request log")
+        }
+                    // Range rather than a fixed 150pt: a filter field is the one control in this row
+                    // whose useful width depends on the window, and 150 was simultaneously too wide
+                    // for a narrow drawer and too narrow to read a path in a wide one.
+                    //
+                    // The focused line is `DSFilterField`'s exactly — `borderFocused` at
+                    // `DSStroke.focusRing` — because `.textFieldStyle(.plain)` throws AppKit's own
+                    // ring away, and a control that looks identical whether or not it has the
+                    // keyboard is the hover defect applied to Full Keyboard Access. This field is
+                    // one of the two hand-rolled ones that component's own note names; it keeps its
+                    // shape here rather than adopting the component, because the component is a
+                    // capsule with a scope pill and this row is four rectangular wells.
+        .headerControlWell(
+            fill: DSColors.tertiary,
+            stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
+            strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
+            minWidth: LogColumns.time,
+            idealWidth: 160
+        )
+        .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
     }
 
     /// The request count, or `nil` when there is nothing to count — an empty panel does not need a

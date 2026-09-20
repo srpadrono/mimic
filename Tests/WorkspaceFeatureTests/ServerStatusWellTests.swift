@@ -31,6 +31,15 @@ struct ServerStatusWellTests {
         #expect(text(.error("Port 8080 in use")) == "Server error")
     }
 
+    @Test("Compact toolbar wording preserves the state or listening port")
+    func compactWordingFitsTheWell() {
+        #expect(ServerStatusWell.compactPrimaryText(serverState: .stopped, projectName: "Payments API") == "Stopped")
+        #expect(ServerStatusWell.compactPrimaryText(serverState: .starting, projectName: "Payments API") == "Starting")
+        #expect(ServerStatusWell.compactPrimaryText(serverState: .stopping, projectName: "Payments API") == "Stopping")
+        #expect(ServerStatusWell.compactPrimaryText(serverState: .error("Port in use"), projectName: "Payments API") == "Error")
+        #expect(ServerStatusWell.compactPrimaryText(serverState: .running(port: 8080), projectName: "Payments API") == "8080")
+    }
+
     @Test("With no project the well says so rather than going blank")
     func namesTheAbsenceOfAProject() {
         #expect(ServerStatusWell.primaryText(serverState: .stopped, projectName: nil) == "No project")

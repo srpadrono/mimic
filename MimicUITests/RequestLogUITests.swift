@@ -240,9 +240,9 @@ final class RequestLogUITests: MimicUITestCase {
         app.staticTexts.matching(
             NSPredicate(
                 format: "(value == %@ OR label == %@)"
-                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@)",
+                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@ OR identifier == %@)",
                 count, count,
-                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", ""
+                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", "drawer.count", ""
             )
         ).firstMatch
     }
@@ -654,9 +654,21 @@ final class RequestLogUITests: MimicUITestCase {
 
         // The toolbar's badge is the other way in: it opens the drawer already filtered, the way
         // Xcode's warning count jumps you to the issue navigator.
+        ServerStatusWellPage(app: app).revealTrafficControlsIfCompact()
         let toolbarBadge = app.buttons["1 unmatched request, show it"].firstMatch
-        XCTAssertTrue(toolbarBadge.waitForExistence(timeout: 5), "The status well should badge the unmatched call")
-        toolbarBadge.click()
+        if toolbarBadge.waitForExistence(timeout: 2) {
+            toolbarBadge.click()
+        } else {
+            // On a compact display the well intentionally hides traffic counts. The center
+            // toolbar's overflow menu keeps the same unmatched-request action reachable.
+            let overflow = WorkspacePage(app: app).overflowMenu
+            XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            XCTAssertEqual(overflow.value as? String, "1 unmatched request")
+            overflow.click()
+            let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
+            showUnmatched.click()
+        }
         XCTAssertTrue(waitForVisibleRowCount(1), "The badge should filter the log down to the unmatched call")
         XCTAssertTrue(
             poll { self.firstRowLabel().contains("unmatched") },
@@ -673,17 +685,9 @@ final class RequestLogUITests: MimicUITestCase {
         // "No matching requests" one, which would be a filter still claiming to be filtering.
         XCTAssertTrue(clearLogButton.waitForExistence(timeout: 5), "The header should offer a clear button")
 
-        // The button is the last thing in a row that does not clip, so it is the first thing pushed
-        // out of the pane when the row runs out of width — see
-        // ``widenCentrePaneByHidingTheInspector()`` for the whole of that finding. The inspector is
-        // not part of what this test is about, so closing it costs the test nothing and gives the
-        // drawer the ~280pt that puts the trash button back inside the pane.
-        widenCentrePaneByHidingTheInspector()
-
-        // Hittability is asserted separately from existence, because the two failures are different
-        // bugs and used to be reported as one. "Not found" is a query that missed; "found but not
-        // hittable" is a control drawn where no pointer can reach it, which is a defect in the
-        // window rather than in this file — and the frames are printed so the next run says which.
+        // Keep the inspector open. The filter moves to a second pinned row when the centre pane
+        // narrows, so the clear action must remain reachable without changing the user's layout.
+        // Existence alone would miss a button drawn outside the pane's bounds.
         XCTAssertTrue(
             poll { self.clearLogButton.isHittable },
             "The clear button should be somewhere the pointer can reach it — it is at "
@@ -1017,6 +1021,11 @@ final class RequestLogUITests: MimicUITestCase {
         )
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(journeyItem.waitForNonExistence(timeout: 5), "Escape should dismiss the context menu")
+
+        // Traffic remains available while editing journeys. Creating its missing mock must switch
+        // the editor back to Endpoints rather than silently selecting an off-screen endpoint.
+        let shell = WorkspaceShellPage(app: app)
+        shell.journeysTab.click()
 
         logRow(unmatchedID).rightClick()
         let createItem = app.menuItems["Create endpoint for GET /api/orders"]

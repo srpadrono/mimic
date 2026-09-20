@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 struct BackendSettingsPage {
     let app: XCUIApplication
-    var open: XCUIElement { app.buttons["backend.settingsButton"].firstMatch }
+    var open: XCUIElement { WorkspacePage(app: app).toolbarAction("backend.settingsButton") }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
@@ -36,11 +36,27 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        let singleBackendHeight = app.sheets.firstMatch.frame.height
+        XCTAssertLessThan(singleBackendHeight, 600, "A single backend should not open a mostly empty sheet")
         page.replace(page.primaryName, with: "Catalog")
         page.primaryEnabled.click()
         page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
         page.add.click()
-        XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        // Grouped Form lazily realizes the new card below the viewport on a short display.
+        // Scroll the form, not the sheet's fixed action row, before addressing its fields.
+        let form = app.sheets.firstMatch.scrollViews.firstMatch
+        for _ in 0..<4 where !page.additional("name").exists {
+            form.swipeUp()
+        }
+        XCTAssertTrue(
+            page.additional("name").waitForExistence(timeout: 5),
+            "Added backend name is absent after scrolling: \(app.debugDescription)"
+        )
+        XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
+        XCTAssertGreaterThanOrEqual(
+            app.sheets.firstMatch.frame.height, singleBackendHeight,
+            "Adding a backend should not shrink the sheet"
+        )
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: "8080")
         page.apply.click()

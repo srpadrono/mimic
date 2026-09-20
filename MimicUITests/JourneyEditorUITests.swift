@@ -258,6 +258,19 @@ extension JourneyStepSheetPage {
         return app.descendants(matching: .any).matching(identifier: "stepSheet.bodyField").firstMatch
     }
 
+    /// The grouped Form scrolls inside a fixed sheet. XCUITest does not scroll an offscreen
+    /// TextEditor into view before clicking it, so drive the form's visible scroll surface first.
+    func reveal(_ field: XCUIElement, byScrollingUp: Bool) {
+        let form = app.sheets.firstMatch.scrollViews.firstMatch
+        for _ in 0..<5 {
+            let viewport = form.frame.insetBy(dx: 8, dy: 8)
+            let fieldCenter = CGPoint(x: field.frame.midX, y: field.frame.midY)
+            if viewport.contains(fieldCenter) && field.isHittable { return }
+            if byScrollingUp { form.swipeUp() } else { form.swipeDown() }
+        }
+        XCTFail("\(field.identifier) did not scroll into the form's visible area")
+    }
+
     var delayField: XCUIElement { app.textFields["stepSheet.delayField"] }
     var repeatField: XCUIElement { app.textFields["stepSheet.repeatField"] }
 
@@ -1068,6 +1081,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-09 / JRNSTEP-11.
         stepSheet.headersField.click()
         stepSheet.headersField.typeText("Retry-After: 30")
+        stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
+        XCTAssertTrue(stepSheet.bodyField.isHittable, "The response body should scroll into view")
         stepSheet.bodyField.click()
         stepSheet.bodyField.typeText("{\"error\":\"card_declined\"}")
 

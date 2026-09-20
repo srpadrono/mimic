@@ -93,7 +93,8 @@ public struct DSIconMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            Image(systemName: systemImage)
+            Label(label, systemImage: systemImage)
+                .labelStyle(.iconOnly)
                 .font(.system(size: DSGlyph.controlProminent, weight: .medium))
                 // `labelSecondary` at rest, never `labelTertiary`: at 36% alpha an icon-only control
                 // is one you have to already know about to find. `DSPanelHeaderButton` records the

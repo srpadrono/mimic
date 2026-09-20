@@ -330,16 +330,15 @@ struct ImportFeatureRenderingTests {
 
     /// The sheet is one size in every state it can be in.
     ///
-    /// `ImportView` puts a 760×560 floor under `ImportWorkflowScreen`'s own 600×450, and it does that
+    /// `ImportView` puts a 760pt width floor and a screen-aware height under the workflow, and does that
     /// because a real HAR is a browsing session rather than three entries: at 450pt the review showed
     /// about a dozen rows while its own chrome took a fifth of the height. A floor only works if it is
     /// the floor in every state — a sheet that opened dialog-sized to say "parsing", then jumped to
     /// table size when the parse landed, would move under the pointer at the moment you are reaching
     /// for a checkbox.
     ///
-    /// So the states are compared with each other rather than against literals, and the floor itself
-    /// is asserted as a floor: a `>=` that fails the moment either frame is removed, without pinning a
-    /// number that belongs to the view.
+    /// So the states are compared with each other, and the floor is checked against the screen's
+    /// available height. A 560pt-only assertion fails on compact CI displays even when the view is correct.
     @Test("The import sheet is the same size parsing, failed, empty and populated")
     func importSheetKeepsOneSizeAcrossStates() {
         let candidates = [
@@ -380,9 +379,12 @@ struct ImportFeatureRenderingTests {
         #expect(failed == empty)
         #expect(populated == empty)
 
-        // The floor `ImportView` states, not the dialog size the screen inside it asks for.
+        // Assert the presentation contract independently of the view implementation. Compact
+        // displays reserve 120pt for the surrounding window and menu bar.
+        let availableHeight = NSScreen.main?.visibleFrame.height ?? 900
+        let expectedHeight = min(560, max(360, availableHeight - 120))
         #expect(empty.width >= 760)
-        #expect(empty.height >= 560)
+        #expect(empty.height >= expectedHeight)
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.

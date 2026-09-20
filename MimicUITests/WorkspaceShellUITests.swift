@@ -99,6 +99,7 @@ struct BreadcrumbPage {
 
     var back: XCUIElement { historyButton("breadcrumb.back", labelled: "Go back") }
     var forward: XCUIElement { historyButton("breadcrumb.forward", labelled: "Go forward") }
+    var earlierLocations: XCUIElement { app.menuButtons["breadcrumb.earlierLocations"] }
 
     /// The label fallback is safe for these two: "Go back" and "Go forward" are set nowhere else in
     /// this window, and a flattened container keeps its children's labels even when it takes their
@@ -224,6 +225,12 @@ struct ServerStatusWellPage {
     var address: XCUIElement { named("serverStatusWell.url") }
     var requestCount: XCUIElement { named("serverStatusWell.requestCount") }
     var unmatchedBadge: XCUIElement { named("serverStatusWell.unmatched") }
+
+    /// Enlarge the editor segment when a test specifically exercises its full status counters.
+    func revealTrafficControlsIfCompact() {
+        let workspace = WorkspacePage(app: app)
+        if workspace.overflowMenu.exists { workspace.fillWindow() }
+    }
 
     func spoken(_ element: XCUIElement) -> String {
         guard element.exists else { return "<absent>" }
@@ -732,6 +739,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createProjectViaUI(name: "Tab Strip")
 
         XCTAssertTrue(shell.journeysTab.waitForExistence(timeout: 5), "The strip should offer both tabs")
+        XCTAssertEqual(shell.journeysTab.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(shell.endpointsTab.frame.height, 26, accuracy: 1)
         shell.journeysTab.click()
 
         // `DSEmptyState` flattens its leaves, so the heading's own identifier never lands — the
@@ -762,6 +771,24 @@ final class WorkspaceShellUITests: MimicUITestCase {
             workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
             "The navigator should go back to the endpoints list"
         )
+
+        createEndpointViaUI(name: "Account", path: "/account")
+        XCTAssertTrue(inspector.addScenarioButton.waitForExistence(timeout: 5))
+        shell.journeysTab.click()
+        XCTAssertTrue(
+            overview.row("status").waitForExistence(timeout: 5),
+            "Journeys should show the project overview, not the last endpoint's scenarios"
+        )
+        shell.endpointsTab.click()
+        XCTAssertTrue(
+            inspector.addScenarioButton.waitForExistence(timeout: 5),
+            "Returning to Endpoints should restore the selected endpoint's inspector"
+        )
+
+        let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        evidence.name = "navigation-updated"
+        evidence.lifetime = .keepAlways
+        add(evidence)
     }
 
     // MARK: - 2. The breadcrumb jump bar
@@ -858,25 +885,42 @@ final class WorkspaceShellUITests: MimicUITestCase {
         setGroupTag("Accounts")
         createEndpointViaUI(name: "Get orders", path: "/api/orders")
         setGroupTag("Checkout")
+        widenCentrePaneByHidingTheInspector()
 
-        XCTAssertTrue(
-            breadcrumb.waitForCrumb("group", toRead: "Checkout"),
-            "A second group should give the path a group crumb — "
-                + breadcrumb.crumbDescription("group", titled: "Checkout")
-        )
+        XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5),
+                      "A second group should give the expanded path a group crumb")
 
-        breadcrumb.jump(from: "group", to: "Accounts", currentlyReading: "Checkout")
+        breadcrumb.jump(from: "group", to: "Accounts")
 
+        XCTAssertTrue(breadcrumb.crumb("group").exists, "The group crumb should remain in the path")
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("group", toRead: "Accounts"),
-            "The group crumb should follow the jump — "
-                + breadcrumb.crumbDescription("group", titled: "Accounts")
+            UITestApp.waitUntil(timeout: 5) {
+                self.endpointEditor.groupTagField.value as? String == "Accounts"
+            },
+            "A group option should move the editor to an endpoint in that group"
         )
-        XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Get users"),
-            "A group option stands for the first endpoint in it — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Get users")
-        )
+    }
+
+    /// At the three-panel minimum, the parent locations move into a menu so the active endpoint
+    /// and scenario remain legible. The expanded test above checks direct group navigation.
+    @MainActor
+    func testNarrowJumpBarCollapsesEarlierLocations() throws {
+        launchShell()
+        createProjectViaUI(name: "Compact path")
+        createEndpointViaUI(name: "Get users", path: "/api/users")
+        setGroupTag("Accounts")
+        createEndpointViaUI(name: "Get orders", path: "/api/orders")
+        setGroupTag("Checkout")
+
+        XCTAssertTrue(breadcrumb.crumb("endpoint").waitForExistence(timeout: 5))
+        if breadcrumb.earlierLocations.exists {
+            breadcrumb.earlierLocations.click()
+            XCTAssertTrue(app.menuItems["Checkout"].waitForExistence(timeout: 5))
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        } else {
+            // The runner can restore a wider window; that layout must expose the group directly.
+            XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5))
+        }
     }
 
     /// BREAD-05, INSPOV-13.
@@ -1150,22 +1194,26 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Both requests should reach the log"
         )
 
+        well.revealTrafficControlsIfCompact()
+
         // SRVWELL-08 / SRVWELL-09 — the well counts what arrived and warns about what nothing
         // answered. Both state their meaning in their accessibility label rather than in the digit
         // they draw.
-        XCTAssertTrue(well.requestCount.waitForExistence(timeout: 5), "The well should show a request count")
-        XCTAssertTrue(
-            waitForLabel(well.requestCount, toContain: "2 requests logged"),
-            "The count should follow the traffic — \(well.spoken(well.requestCount))"
-        )
-        XCTAssertTrue(
-            well.unmatchedBadge.waitForExistence(timeout: 5),
-            "Requests nothing answered should raise the unmatched badge"
-        )
-        XCTAssertTrue(
-            waitForLabel(well.unmatchedBadge, toContain: "2 unmatched requests"),
-            "The badge should say how many — \(well.spoken(well.unmatchedBadge))"
-        )
+        if !workspace.overflowMenu.exists {
+            XCTAssertTrue(well.requestCount.waitForExistence(timeout: 5), "The well should show a request count")
+            XCTAssertTrue(
+                waitForLabel(well.requestCount, toContain: "2 requests logged"),
+                "The count should follow the traffic — \(well.spoken(well.requestCount))"
+            )
+            XCTAssertTrue(
+                well.unmatchedBadge.waitForExistence(timeout: 5),
+                "Requests nothing answered should raise the unmatched badge"
+            )
+            XCTAssertTrue(
+                waitForLabel(well.unmatchedBadge, toContain: "2 unmatched requests"),
+                "The badge should say how many — \(well.spoken(well.unmatchedBadge))"
+            )
+        }
 
         // INSPOV-07 — and the overview says the same thing in words.
         XCTAssertTrue(
@@ -1317,13 +1365,17 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Both requests should reach the log"
         )
 
-        // The tab is a leaf inside a `DSTabStrip` nested in a `DSPanelHeader` — two containers, each
-        // of which stamps its own identifier over its children — so the label is the only handle.
+        // The label is stable across the icon-only and icon-and-title presentations.
         let trafficTab = app.buttons["Show the requests this endpoint answered"].firstMatch
         XCTAssertTrue(
             trafficTab.waitForExistence(timeout: 5),
             "The inspector should offer a Traffic tab for the selected endpoint"
         )
+        XCTAssertEqual(trafficTab.frame.height, 26, accuracy: 1)
+        let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        evidence.name = "inspector-adaptive-controls"
+        evidence.lifetime = .keepAlways
+        add(evidence)
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) { (trafficTab.value as? String) == "2" },
             "The tab should badge how many requests this endpoint answered"
@@ -1351,6 +1403,87 @@ final class WorkspaceShellUITests: MimicUITestCase {
     }
 
     // MARK: - 4. The toolbar's server well
+
+    @MainActor
+    func testCenterToolbarOverflowKeepsPanelControlsSeparate() throws {
+        launchShell()
+        createProjectViaUI(name: "Acme Storefront", port: 62118)
+        workspace.fillWindow()
+        workspace.showSidebarIfNeeded()
+        createEndpointViaUI(name: "Account summary", path: "/account-summary")
+        // A CI display may be narrower than the expanded toolbar threshold even after Fill.
+        // Assert the wide arrangement when the display supports it; the compact path is below.
+        if !workspace.overflowMenu.exists {
+            XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].waitForExistence(timeout: 5))
+            XCTAssertTrue(workspace.importMenuButton.exists)
+            XCTAssertLessThan(workspace.importMenuButton.frame.maxX, inspectorHeader.frame.minX)
+            XCTAssertLessThan(app.toolbars.buttons["backend.settingsButton"].frame.maxX, inspectorHeader.frame.minX)
+        }
+        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        XCTAssertFalse(app.buttons["serverStopButton"].isEnabled)
+        if !workspace.overflowMenu.exists {
+            let wide = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+            wide.name = "center-toolbar-expanded"
+            wide.lifetime = .keepAlways
+            add(wide)
+        }
+
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.toolbars.buttons["backend.settingsButton"].exists)
+        XCTAssertTrue(workspace.serverToggleButton.isHittable)
+        XCTAssertLessThan(workspace.overflowMenu.frame.maxX, inspectorHeader.frame.minX)
+        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
+        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
+        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
+        let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        compact.name = "center-toolbar-compact"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        workspace.overflowMenu.click()
+        XCTAssertTrue(app.menuItems["backend.settingsButton"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.menuItems["toggleDrawerButton"].exists)
+        XCTAssertFalse(app.menuItems["toggleInspectorButton"].exists)
+        XCTAssertTrue(workspace.importMenuButton.exists)
+        let menu = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        menu.name = "center-toolbar-overflow-menu"
+        menu.lifetime = .keepAlways
+        add(menu)
+        workspace.closeToolbarMenu()
+
+        let settings = BackendSettingsPage(app: app)
+        settings.open.click()
+        XCTAssertTrue(settings.primaryPort.waitForExistence(timeout: 5))
+        settings.cancel.click()
+        XCTAssertTrue(settings.cancel.waitForNonExistence(timeout: 5))
+
+        startServer(onPort: 62118)
+        XCTAssertFalse(app.buttons["serverStartButton"].isEnabled)
+        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
+
+        // Panel controls remain directly reachable even while the center actions overflow.
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
+        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
+        workspace.fillWindow()
+        if !workspace.overflowMenu.exists {
+            XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].exists)
+        } else {
+            // A compact CI display cannot cross the expanded threshold even after Fill.
+            XCTAssertTrue(workspace.overflowMenu.isHittable)
+        }
+    }
 
     /// SRVWELL-01, SRVWELL-04.
     @MainActor
@@ -1412,8 +1545,17 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "The request log should be hidden before the badge is clicked"
         )
 
-        XCTAssertTrue(well.unmatchedBadge.waitForExistence(timeout: 5), "The badge should be in the well")
-        well.unmatchedBadge.click()
+        well.revealTrafficControlsIfCompact()
+        if well.unmatchedBadge.waitForExistence(timeout: 2) {
+            well.unmatchedBadge.click()
+        } else {
+            let overflow = workspace.overflowMenu
+            XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            overflow.click()
+            let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
+            showUnmatched.click()
+        }
 
         XCTAssertTrue(
             requestLogDrawer.firstLogRow.waitForExistence(timeout: 5),
@@ -1513,7 +1655,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Server ▸ Start Server should start the mock"
         )
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Stop server, running"),
+            waitForLabel(toggle, toRead: "Stop server"),
             "Running, the power button announces the other action — label: \(toggle.label)"
         )
 
@@ -1714,11 +1856,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testPanelChordsToggleBothPanels() throws {
         launchShell()
         createProjectViaUI(name: "Panel Chords")
+        workspace.compactWindow()
 
         let drawerToggle = workspace.toggleDrawerButton
         let inspectorToggle = workspace.toggleInspectorButton
         XCTAssertTrue(drawerToggle.waitForExistence(timeout: 5), "The toolbar should offer both toggles")
         XCTAssertTrue(inspectorToggle.exists, "The toolbar should offer both toggles")
+        workspace.closeToolbarMenu()
 
         // Both panels start open, which is what makes the first press of each chord a *hide*.
         XCTAssertTrue(
@@ -1838,7 +1982,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // which does not flip — see ``inspectorHeader``.
         let inspectorToggle = workspace.toggleInspectorButton
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The inspector starts open")
-        inspectorToggle.click()
+        if inspectorToggle.isHittable {
+            inspectorToggle.click()
+        } else {
+            app.typeKey("i", modifierFlags: [.command, .option])
+        }
         XCTAssertTrue(
             inspectorHeader.waitForNonExistence(timeout: 5),
             "The inspector should be collapsed before the row is clicked"

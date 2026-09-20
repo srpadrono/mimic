@@ -571,10 +571,11 @@ struct EndpointEditorView: View {
         // became content-derived, a 200-line body rendered a 3,000pt well and pushed everything under
         // it that far off the pane. Pressing Format on a minified body did it in one click.
         //
-        // `maxHeight` stays as the guard for the case where something *does* propose a height.
+        // Clamp the ideal at both ends: an ideal below the minimum is a contradictory SwiftUI
+        // constraint, which occurs for every short response. The bounds also guard finite proposals.
         .frame(
             minHeight: EditorBody.minHeight,
-            idealHeight: min(EditorBody.height(for: responseBody), EditorBody.maxHeight),
+            idealHeight: max(EditorBody.minHeight, min(EditorBody.height(for: responseBody), EditorBody.maxHeight)),
             maxHeight: EditorBody.maxHeight
         )
         .padding(.horizontal, DSSpacing.md)
@@ -663,10 +664,10 @@ struct EndpointEditorView: View {
             unitLabel("ms")
         }
 
-        // Non-breaking spaces inside the command: wrapped at 420pt the sentence broke it across two
-        // lines as "configure --" / "delay", which is not a thing anyone can copy.
+        // Keep the secondary explanation short enough for a narrow editor pane. Non-breaking
+        // spaces keep the CLI command together instead of leaving a dangling flag on a new line.
         note(
-            "Project-wide, and added on top of this endpoint's own delay. Nothing in this window sets it — mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay does.",
+            "Adds to endpoint delay. Set project-wide with mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay.",
             identifier: "endpointEditor.globalDelay.note"
         )
     }

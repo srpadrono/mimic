@@ -25,10 +25,10 @@ import DesignSystem
 ///   `chevron.up.chevron.down` Xcode puts on its jump-bar segments.
 /// - **The separators are punctuation.** The chevrons between crumbs are 8pt, tertiary, and hidden
 ///   from VoiceOver: they are the `▸` in the path, not something you can press.
-/// - **The bar never widens the window.** Every crumb is single-line and capped, and the trail is
-///   the row's only flexible element, so a long path clips instead of pushing the editor's minimum
-///   width out.
+/// - **The bar never widens the window.** At narrow centre widths, parent locations move into a
+///   menu so the current endpoint and scenario remain readable without losing sideways navigation.
 struct BreadcrumbJumpBar: View {
+    @State private var isEarlierHovered = false
     /// Deliberately shorter than `DSBarHeight.panelHeader`, but tall enough for 11pt crumbs. See the
     /// type's note — `secondaryBar` is the rung that exists for this bar.
     static var height: CGFloat { DSBarHeight.secondaryBar }
@@ -91,6 +91,22 @@ struct BreadcrumbJumpBar: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            barContent(compact: geometry.size.width < 440 && crumbs.count > 2)
+        }
+        .frame(height: Self.height)
+        .background(DSColors.band)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(DSColors.separator)
+                .frame(height: DSStroke.hairline)
+        }
+        .clipped()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("breadcrumb")
+    }
+
+    private func barContent(compact: Bool) -> some View {
         HStack(spacing: DSSpacing.xs) {
             BreadcrumbHistoryButton(
                 systemImage: "chevron.left",
@@ -109,11 +125,14 @@ struct BreadcrumbJumpBar: View {
             )
 
             HStack(spacing: DSSpacing.xs) {
-                ForEach(Array(crumbs.enumerated()), id: \.element.id) { pair in
-                    if pair.offset > 0 {
+                if compact {
+                    earlierLocationsMenu
+                    BreadcrumbSeparator()
+                }
+                ForEach(Array(crumbs.enumerated()).filter { !compact || $0.offset >= crumbs.count - 2 }, id: \.element.id) { pair in
+                    if pair.offset > (compact ? crumbs.count - 2 : 0) {
                         BreadcrumbSeparator()
                     }
-
                     BreadcrumbCrumbView(
                         crumb: pair.element,
                         isLast: pair.offset == crumbs.count - 1,
@@ -121,19 +140,7 @@ struct BreadcrumbJumpBar: View {
                     )
                 }
             }
-
-            // A `Spacer` absorbs the slack so the crumbs hug the leading edge. Note what this is
-            // *not*: the original paired this `Spacer` with `.layoutPriority(-1)` on the trail, and
-            // a `Spacer` claims slack at default priority — so the trail was proposed nothing and
-            // the crumbs collapsed instead of truncating. Replacing that with
-            // `.frame(maxWidth: .infinity)` fixed the collapse and caused the opposite fault: with
-            // the trail greedy, each title's 200pt cap became its actual width and the path rendered
-            // as widely-spaced words.
-            //
-            // Neither element is greedy now. The crumbs size to their content, the cap only bites on
-            // a genuinely long name, and the `Spacer` takes whatever is left — which also keeps a
-            // deep path from reporting a large minimum width and dragging the window wider.
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         // `md`, matching every other bar's inset. At `sm` this one was inset 6 while everything
         // under it was inset 12, which read as the bar being slightly out of true.
@@ -144,27 +151,41 @@ struct BreadcrumbJumpBar: View {
         // shape of the control, not a misalignment to chase.
         .padding(.horizontal, DSSpacing.md)
         .frame(height: Self.height)
-        // `band`, the one surface for a bar that sits inside a pane. This was `secondary.opacity(0.5)`
-        // — a half-wash of the panel-header surface, which is the tone this bar's own note says it
-        // must not be mistaken for. Half of it is still a step towards it, and over the editor canvas
-        // it landed within a hair of `surfaceElevated` for no reason anyone had written down.
-        .background(DSColors.band)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(DSColors.separator)
-                .frame(height: DSStroke.hairline)
+    }
+
+    private var earlierLocationsMenu: some View {
+        Menu {
+            ForEach(crumbs.dropLast(2)) { crumb in
+                if !crumb.options.isEmpty {
+                    Menu(crumb.title) {
+                        ForEach(crumb.options) { option in
+                            Button(option.title) { onSelectOption(crumb.id, option.id) }
+                        }
+                    }
+                } else {
+                    Text(crumb.title)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(DSTypography.label)
+                .foregroundStyle(isEarlierHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+                .frame(width: DSBarHeight.secondaryBar - DSSpacing.xs,
+                       height: DSBarHeight.secondaryBar - DSSpacing.xs)
+                .background {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.sm, style: .continuous)
+                        .fill(isEarlierHovered ? DSColors.accentSubtle : Color.clear)
+                }
+                .contentShape(.rect)
         }
-        .clipped()
-        // The container is declared *before* it is named, and the order is the whole of the rule:
-        // an `.accessibilityIdentifier` applied to a view that is not yet an accessibility element
-        // propagates to everything inside it, so naming the bar first handed "breadcrumb" to every
-        // crumb and both arrows and left nothing under `breadcrumb.*` in the tree at all. This bar
-        // shipped in that order under a comment claiming the pairing kept the crumbs addressable;
-        // it did not, and eight tests in `WorkspaceShellUITests` failed on the locator rather than
-        // on the bar. `sidebar`, `centerPane`, `inspector` and `drawer` in `WorkspaceView` have
-        // always had it this way round, which is why those four keep their descendants' names.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("breadcrumb")
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .onHover { isEarlierHovered = $0 }
+        .animation(.easeOut(duration: DSAnimation.micro), value: isEarlierHovered)
+        .help("Earlier locations")
+        .accessibilityIdentifier("breadcrumb.earlierLocations")
+        .accessibilityLabel("Earlier locations")
     }
 }
 

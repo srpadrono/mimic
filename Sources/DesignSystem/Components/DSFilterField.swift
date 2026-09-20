@@ -1,22 +1,7 @@
 import SwiftUI
 
-/// A filter field with an optional scope selector, sized to sit in a panel's chrome.
-///
-/// Modelled on Xcode's navigator filter bar, and pinned like it: this is a panel's own control, not
-/// the first row of its content. The sidebar learned that distinction the hard way — its search
-/// field used to scroll inside the list, so it left the screen exactly when the list got long
-/// enough to need it.
-///
-/// The scope selector is what makes one field enough. Without it a panel grows a second filter for
-/// "search paths" versus "search bodies"; with it the question of *what* is being matched lives in
-/// the same 20pt row as the text being matched, and a restriction that is switched on announces
-/// itself there instead of hiding behind a closed menu.
-/// **Identifiers, as they actually arrive.** The container is tagged `ds.filterfield.<identifier>`,
-/// and AppKit hands that same name to the text field and the scope menu inside it — pairing the
-/// container with `.accessibilityElement(children: .contain)` does not stop that, because this wraps
-/// a single control rather than a set of them. So a test queries `ds.filterfield.<identifier>` and
-/// separates the two by element type: `app.textFields[…]` for the field, `app.menuButtons[…]` for the
-/// scope. The `<identifier>.field` and `<identifier>.scope` names below are applied, but never win.
+/// A 26-point panel search field with an optional scope selector and keyboard focus ring.
+/// The containing group preserves the field, scope and clear-control accessibility identifiers.
 public struct DSFilterField: View {
     /// One thing the filter can be pointed at. The `id` is what the caller stores; the `title` is
     /// only ever shown.
@@ -69,7 +54,7 @@ public struct DSFilterField: View {
     public var body: some View {
         HStack(spacing: DSSpacing.xs) {
             // Absent rather than disabled when there is nothing to choose between: a dead control
-            // in a 20pt row is worse than no control, because it still costs width.
+            // in a compact row is worse than no control, because it still costs width.
             if !scopes.isEmpty {
                 ScopeMenu(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             }
@@ -79,7 +64,7 @@ public struct DSFilterField: View {
             // repeats what the placeholder already says.
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.label)
                 .focused($isFocused)
                 .accessibilityIdentifier("\(identifier).field")
                 .accessibilityLabel(placeholder)
@@ -99,11 +84,8 @@ public struct DSFilterField: View {
         // the clear button are inside it rather than beside it. Fill, hairline and padding are
         // unchanged, so the row keeps its height and the sidebar keeps its rhythm.
         .padding(.horizontal, DSSpacing.sm)
-        // Pinned, not inferred. The doc above has always claimed a 20pt row, and every sibling
-        // control states its own height — but this one never did, so its height was whatever the
-        // scope `Menu` inside it happened to measure. The one control that promised to match its
-        // neighbours was the only one not measuring itself.
-        .frame(height: DSControlHeight.row)
+        // Match request-log and request-body search fields without changing table row density.
+        .frame(height: DSControlHeight.search)
         .background {
             Capsule()
                 .fill(DSColors.tertiary)
@@ -115,7 +97,7 @@ public struct DSFilterField: View {
                 )
                 // The whole track takes focus, not just the glyph-height strip the text occupies.
                 // AppKit's search field does this from anywhere inside its bezel, and here the
-                // difference is most of the control: the well is 20pt tall around one line of
+                // difference is most of the control: the well is 26pt tall around one line of
                 // `codeSmall`, with `DSSpacing.sm` either side. It sits on the background rather
                 // than on the container so the text field, the scope pill and the clear button all
                 // keep the clicks that reach them — this only catches the ones that would land on
@@ -124,9 +106,8 @@ public struct DSFilterField: View {
                 .onTapGesture { isFocused = true }
         }
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
-        // Paired deliberately: an identifier alone on a container overrides its descendants', and
-        // `…field`, `…scope` and `…clear` would all vanish from the accessibility tree at once.
-        .accessibilityIdentifier("ds.filterfield.\(identifier)")
+        // Keep the child controls distinct. Naming this container can flatten its identifier onto
+        // the text field on one macOS release and hide that field on another.
         .accessibilityElement(children: .contain)
     }
 

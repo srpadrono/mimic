@@ -306,6 +306,24 @@ struct DSComponentRenderingTests {
         #expect(header.height == ruler.height)
         #expect(loadedHeader.height == header.height)
         #expect(strip.height == header.height)
+        for width: CGFloat in [160, 220, 360] {
+            let adaptive = render(
+                DSTabStrip(
+                    tabs: [
+                        .init(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints", title: "Endpoints"),
+                        .init(id: "journeys", systemImage: "arrow.triangle.branch", help: "Show journeys", title: "Journeys")
+                    ],
+                    selection: .constant("endpoints"),
+                    identifier: "adaptive"
+                ) {
+                    DSPanelHeaderButton(systemImage: "plus", help: "Add", identifier: "add") {}
+                },
+                size: CGSize(width: width, height: 120)
+            )
+            #expect(adaptive.height == 30)
+            // fittingSize asks for the ideal width, not the laid-out width. The UI resize test
+            // checks the icon/title transition using the actual button frames instead.
+        }
     }
 
     /// A badge rides the corner of the selection shape as an overlay, so it takes no part in layout.
@@ -347,12 +365,11 @@ struct DSComponentRenderingTests {
     /// number: a well with no pill in it must still stand on the same rung, or a panel's header
     /// changes height depending on whether its filter has anything to be pointed at.
     ///
-    /// Measured against a `Color` fixed to the token rather than against the literal 20, the way
-    /// `panelChromeSharesOneHeight` measures the bar rung.
+    /// Pin the intended 26-point height independently of the production token.
     @Test("A filter field stands on the control rung, with a scope pill and without one")
     func filterFieldStandsOnTheControlRung() {
         let measure = CGSize(width: 240, height: 80)
-        let ruler = render(Color.clear.frame(height: DSControlHeight.row), size: measure)
+        let ruler = render(Color.clear.frame(height: 26), size: measure)
         let scoped = render(
             DSFilterField(
                 text: .constant("/v1/accounts"),

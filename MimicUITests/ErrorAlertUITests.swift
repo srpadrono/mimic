@@ -706,6 +706,8 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         // ERRVALID-15.
         replaceText(in: repeatField, with: "1")
+        stepSheet.reveal(stepSheet.statusField, byScrollingUp: false)
+        XCTAssertTrue(stepSheet.statusField.isHittable, "Status code should scroll back into view")
         replaceText(in: stepSheet.statusField, with: "600")
         stepSheet.saveButton.click()
         XCTAssertTrue(
@@ -724,6 +726,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         // ERRVALID-16.
         XCTAssertTrue(stepSheet.holdField.waitForExistence(timeout: 5), "Time out should offer a hold field")
+        stepSheet.reveal(stepSheet.holdField, byScrollingUp: true)
         replaceText(in: stepSheet.holdField, with: "-5")
         stepSheet.saveButton.click()
         XCTAssertTrue(

@@ -7,44 +7,62 @@ import DesignSystem
 struct BackendSettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = ServerConfiguration.default
+    @State private var draft: ServerConfiguration
     @State private var portText: [String: String] = [:]
     @State private var error: String?
+    @State private var newestBackendID: UUID?
+
+    init(configuration: ServerConfiguration) {
+        _draft = State(initialValue: configuration)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                Text("Server settings").font(DSTypography.title)
+                HStack {
+                    Text("Server settings").font(DSTypography.title)
+                    Spacer()
+                    // Keep the creation action outside the scrolling Form. On a short display,
+                    // a click on its last row can be consumed while dismissing field focus.
+                    DSButton("Add backend", variant: .secondary, size: .small, identifier: "backend.add") {
+                        addBackend()
+                    }
+                    .accessibilityIdentifier("backend.add")
+                    .accessibilityLabel("Add backend")
+                }
                 Text("Point your app to each local URL. Mimic serves your mocks first, then forwards other calls to the real backend.")
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Form {
-                Section("Primary backend") {
-                    fields(name: $draft.primaryName, port: $draft.port, upstream: $draft.upstreamURL,
-                           enabled: $draft.passthroughEnabled, capture: $draft.captureResponses, prefix: "backend.primary")
+            ScrollViewReader { scrollProxy in
+                Form {
+                    Section("Primary backend") {
+                        fields(name: $draft.primaryName, port: $draft.port, upstream: $draft.upstreamURL,
+                               enabled: $draft.passthroughEnabled, capture: $draft.captureResponses, prefix: "backend.primary")
+                    }
+                    ForEach($draft.backends) { $backend in
+                        Section {
+                            fields(name: $backend.name, port: $backend.port, upstream: $backend.upstreamURL,
+                                   enabled: $backend.passthroughEnabled, capture: $backend.captureResponses,
+                                   prefix: "backend.\(backend.id)")
+                            Button("Remove backend", role: .destructive) {
+                                draft.backends.removeAll { $0.id == backend.id }
+                            }
+                            .accessibilityIdentifier("backend.delete.\(backend.id)")
+                            .accessibilityLabel("Remove \(backend.name)")
+                        } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
+                            .id(backend.id)
+                    }
                 }
-                ForEach($draft.backends) { $backend in
-                    Section {
-                        fields(name: $backend.name, port: $backend.port, upstream: $backend.upstreamURL,
-                               enabled: $backend.passthroughEnabled, capture: $backend.captureResponses,
-                               prefix: "backend.\(backend.id)")
-                        Button("Remove backend", role: .destructive) {
-                            draft.backends.removeAll { $0.id == backend.id }
-                        }
-                        .accessibilityIdentifier("backend.delete.\(backend.id)")
-                        .accessibilityLabel("Remove \(backend.name)")
-                    } header: { Text(backend.name.isEmpty ? "New backend" : backend.name) }
+                .formStyle(.grouped)
+                .onChange(of: newestBackendID) { _, id in
+                    guard let id else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        scrollProxy.scrollTo(id, anchor: .top)
+                    }
                 }
-                Button("Add backend", systemImage: "plus") {
-                    let used = Set(draft.listeners.map(\.port))
-                    let port = (8081...65535).first { !used.contains($0) } ?? 8081
-                    draft.backends.append(BackendConfiguration(name: "New backend", port: port))
-                }
-                .accessibilityIdentifier("backend.add")
-                .accessibilityLabel("Add backend")
             }
-            .formStyle(.grouped)
             if let error {
                 Text(error).foregroundStyle(DSColors.destructive)
                     .fixedSize(horizontal: false, vertical: true)
@@ -55,11 +73,13 @@ struct BackendSettingsView: View {
                     .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: DSSpacing.md)
-                Button("Cancel") { dismiss() }
+                DSButton("Cancel", variant: .ghost, size: .medium, identifier: "backend.cancel") {
+                    dismiss()
+                }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("backend.cancel")
                     .accessibilityLabel("Cancel settings changes")
-                Button("Apply") {
+                DSButton("Apply", variant: .primary, size: .medium, identifier: "backend.apply") {
                     if appState.applyServerConfiguration(draft) { dismiss() }
                     else { error = appState.lastCommandError }
                 }
@@ -69,11 +89,26 @@ struct BackendSettingsView: View {
             }
         }
         .padding(DSSpacing.lg)
-        // A settings sheet needs room for a complete URL and two backend cards.
-        .frame(width: BackendSettingsGeometry.width, height: BackendSettingsGeometry.height)
-        .onAppear { draft = appState.serverConfiguration }
+        // One backend should not leave a large empty scroll region. Grow the sheet as listeners
+        // are added, then let the form scroll once the window reaches a practical height.
+        .frame(
+            width: BackendSettingsGeometry.width,
+            height: BackendSettingsGeometry.height(
+                forBackendCount: draft.backends.count,
+                visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900
+            )
+        )
+        // The form's dynamic sections must keep the identifiers on their individual fields.
+        // A parent identifier can flatten onto newly realized rows on compact AppKit forms.
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("backend.settings")
+    }
+
+    private func addBackend() {
+        let used = Set(draft.listeners.map(\.port))
+        let port = (8081...65535).first { !used.contains($0) } ?? 8081
+        let backend = BackendConfiguration(name: "New backend", port: port)
+        draft.backends.append(backend)
+        newestBackendID = backend.id
     }
 
     @ViewBuilder
@@ -112,5 +147,11 @@ struct BackendSettingsView: View {
 
 private enum BackendSettingsGeometry {
     static let width: CGFloat = 640
-    static let height: CGFloat = 650
+
+    static func height(forBackendCount count: Int, visibleScreenHeight: CGFloat) -> CGFloat {
+        // Leave enough room above and below the sheet for macOS chrome. The Form owns scrolling;
+        // the footer must stay on-screen even on the compact CI/display configuration.
+        let screenCap = max(440, visibleScreenHeight - 200)
+        return min(screenCap, 760, 520 + CGFloat(count) * 240)
+    }
 }
