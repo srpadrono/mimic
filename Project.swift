@@ -7,6 +7,13 @@ let sharedSettings: Settings = .settings(
         "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
         "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
         "ENABLE_HARDENED_RUNTIME": "YES",
+        "ENABLE_MODULE_VERIFIER": "YES",
+        "MODULE_VERIFIER_KIND": "builtin",
+        "MODULE_VERIFIER_SUPPORTED_LANGUAGES": "objective-c objective-c++",
+        "MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS": "gnu11 gnu++14",
+        "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
+        "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES",
+        "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
         "MACOSX_DEPLOYMENT_TARGET": "26.0",
         "DEVELOPMENT_TEAM": "KW6369JJL9",
         // Surfaced by `mimic state` as `appVersion`, so a caller can tell which build it is driving.
@@ -312,6 +319,7 @@ let project = Project(
             // that `mimic state` reports cannot disagree.
             infoPlist: .extendingDefault(with: [
                 "NSMainStoryboardFile": "",
+                "LSApplicationCategoryType": "public.app-category.developer-tools",
                 "CFBundleShortVersionString": "$(MARKETING_VERSION)",
                 "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
             ]),

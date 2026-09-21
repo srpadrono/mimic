@@ -220,7 +220,7 @@ final class UpdateService {
         work = Task { [weak self] in
             guard let self else { return }
             do {
-                let file = try await installer.download(release) { fraction in
+                let file = try await installer.download(release) { [weak self] fraction in
                     Task { @MainActor [weak self] in
                         guard let self, case .downloading = phase else { return }
                         phase = .downloading(release, fraction: fraction)

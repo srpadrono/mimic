@@ -22,6 +22,14 @@ needed. Check `tuist version` before generating; with mise not activated in your
 If `xcode-select -p` reports Command Line Tools, prefix the generation command with
 `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (or your installed Xcode path).
 
+Xcode's recommended settings live in the manifests, not the generated projects. Framework module
+verification uses the built-in verifier (shared module cache), script sandboxing is enabled, and
+dependency code targets use `$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)` consistently. When updating
+dependencies, review `dependencyTargets` in `Tuist/Package.swift` for new targets or higher upstream
+deployment requirements. `_RopeModule` also retains its pinned upstream experimental/availability
+flags there, while expressing Swift 5 mode only through `SWIFT_VERSION`; review those flags when
+updating swift-collections. Do not apply Xcode's changes directly to a generated `.xcodeproj`.
+
 Most of the codebase doesn't need Xcode at all:
 
 ```bash
