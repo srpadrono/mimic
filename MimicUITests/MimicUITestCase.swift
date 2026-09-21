@@ -159,6 +159,9 @@ class MimicUITestCase: XCTestCase {
     /// does anything.
     @MainActor
     func createEndpointViaUI(name: String, path: String, method: String = "GET") {
+        // Opening or creating a project can preserve a collapsed navigator. The endpoint action
+        // lives in that navigator, so make the page object restore it before querying the button.
+        workspace.showSidebarIfNeeded()
         XCTAssertTrue(workspace.addEndpointButton.waitForExistence(timeout: 5), "Add endpoint should be reachable")
         workspace.addEndpointButton.click()
         _ = newEndpointSheet.nameField.waitForExistence(timeout: 3)
