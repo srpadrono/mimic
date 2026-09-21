@@ -24,7 +24,7 @@ If `xcode-select -p` reports Command Line Tools, prefix the generation command w
 
 Xcode's recommended settings live in the manifests, not the generated projects. Framework module
 verification uses the built-in verifier (shared module cache), script sandboxing is enabled, and
-dependency code targets use `$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)` consistently. When updating
+dependency code targets use an explicit macOS 14 floor consistently. When updating
 dependencies, review `dependencyTargets` in `Tuist/Package.swift` for new targets or higher upstream
 deployment requirements. `_RopeModule` also retains its pinned upstream experimental/availability
 flags there, while expressing Swift 5 mode only through `SWIFT_VERSION`; review those flags when

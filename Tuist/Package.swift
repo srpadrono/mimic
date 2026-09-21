@@ -25,9 +25,10 @@ let ropeFlags = ["$(inherited)", "-enable-upcoming-feature MemberImportVisibilit
     + ["BuiltinModule", "Lifetimes", "InoutLifetimeDependence", "SuppressedAssociatedTypes",
        "AddressableParameters", "AddressableTypes"].map { "-enable-experimental-feature \($0)" }
 
-// Apply Xcode's recommended floor consistently across the pinned dependency graph. Setting
-// this only on a leaf framework leaves its consumers building against an older deployment
-// target. These dependencies all support macOS 14 or earlier; Mimic itself requires macOS 26.
+// Keep the dependency graph on one explicit floor. Xcode's recommended-target macro is tied to
+// the Xcode version doing the build (CI's Xcode 26 resolves it below the Regex APIs used by
+// CodeEditorView, while Xcode 27 recommends 14), so it is not a reproducible manifest value.
+// These pinned dependencies support macOS 14 or earlier; Mimic itself requires macOS 26.
 let dependencyTargets = [
     "Algorithms", "ArgumentParser", "ArgumentParserToolInfo", "AsyncHTTPClient", "AsyncKit", "Atomics",
     "BitCollections", "CAsyncHTTPClient", "CCryptoBoringSSL", "CCryptoBoringSSLShims", "CNIOAtomics",
@@ -47,7 +48,7 @@ let dependencyTargets = [
 ]
 let dependencySettings: [String: Settings] = Dictionary(uniqueKeysWithValues: dependencyTargets.map { name in
     var settings: SettingsDictionary = [
-        "MACOSX_DEPLOYMENT_TARGET": "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)",
+        "MACOSX_DEPLOYMENT_TARGET": "14.0",
     ]
     if name == "_RopeModule" {
         settings["SWIFT_VERSION"] = "5"
