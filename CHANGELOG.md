@@ -7,8 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The documented workspace generation command repairs legacy dependency deployment targets and
-  generated path casing for Xcode 27, including Tuist's synthesized resource bundles.
+- Pin Tuist 4.209.0 for native Swift 6.4 / Xcode 27 dependency deployment targets, including
+  synthesized resource bundles, without generated-project repair scripts.
 
 - Quit and install dismisses the update sheet before requesting termination, so the modal dialog
   no longer leaves Mimic running after installer handoff. Preparation now shows progress and prevents

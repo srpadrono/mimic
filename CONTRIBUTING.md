@@ -9,16 +9,16 @@ module boundaries, which is what makes the code predictable.
 **Requirements:** macOS 26+, Xcode with the Swift 6.2 toolchain, and [Tuist](https://tuist.io).
 
 ```bash
-./Scripts/generate_workspace.sh
+mise install
+tuist install && tuist generate --no-open
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug build
 ```
 
-Re-run `./Scripts/generate_workspace.sh` after any change to `Project.swift` or `Tuist/Package.swift`.
-It installs and generates through the pinned Tuist, then normalizes generated dependency deployment
-targets below macOS 12 (including synthesized resource bundles) and workspace path capitalization.
-Newer dependency floors and upstream sources are untouched; Mimic still requires macOS 26.
-Plain `tuist generate` bypasses that compatibility step. If already generated, run
-`python3 Scripts/prepare_xcode_dependencies.py` before opening `Mimic.xcworkspace` in Xcode.
+Re-run `tuist install && tuist generate` after any change to `Project.swift` or `Tuist/Package.swift`.
+Use Tuist **4.209.0**, pinned in `mise.toml`: it understands Swift 6.4's macOS 12 deployment floor
+for dependencies, including synthesized resource bundles. No generated-project repair scripts are
+needed. Check `tuist version` before generating; with mise not activated in your shell, use
+`mise exec -- tuist install` and `mise exec -- tuist generate --no-open`.
 If `xcode-select -p` reports Command Line Tools, prefix the generation command with
 `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (or your installed Xcode path).
 
@@ -244,12 +244,12 @@ The version lives in two places and both have to move together:
 `ControlAPI.version` is separate and only moves for a breaking change to the control API.
 
 Bump both, then build the installer. `Scripts/package_release.sh` reads `MARKETING_VERSION` itself,
-so the version is never typed twice — but it builds from the generated project, so `./Scripts/generate_workspace.sh`
+so the version is never typed twice — but it builds from the generated project, so `tuist generate`
 has to run after the bump or the bundle ships the old number.
 
 ```bash
 ./Scripts/ci.sh                                     # everything must be green first
-./Scripts/generate_workspace.sh
+tuist install && tuist generate --no-open
 MIMIC_TEAM_ID=KW6369JJL9 MIMIC_NOTARY_PROFILE=mimic-notary ./Scripts/package_release.sh
 ```
 
