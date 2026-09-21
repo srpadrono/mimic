@@ -82,7 +82,9 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release COD
 ./Scripts/run_cli_e2e.sh
 ```
 
-After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && tuist generate`.
+After changing `Project.swift` or `Tuist/Package.swift`, run `./Scripts/generate_workspace.sh`.
+This runs install/generate and fixes the pinned generator's dependency deployment floors and path
+casing, including synthesized resource bundles. Plain `tuist generate` skips that compatibility step.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant script before changing a gate or
 concluding that a scheme cannot run a test target.

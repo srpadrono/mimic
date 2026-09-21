@@ -62,7 +62,7 @@ if [[ -f Mimic.xcodeproj/project.pbxproj ]]; then
     | sed -E 's/MARKETING_VERSION = //')"
   [[ "$GENERATED_VERSION" == "$VERSION" ]] || fail \
     "the generated Xcode project is stale: it has MARKETING_VERSION $GENERATED_VERSION, Project.swift has $VERSION.
-Run 'tuist install && tuist generate', then this again."
+Run './Scripts/generate_workspace.sh', then this again."
 fi
 
 BUILD_DIR="$ROOT_DIR/.artifacts/package"

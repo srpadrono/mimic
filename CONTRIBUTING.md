@@ -9,11 +9,18 @@ module boundaries, which is what makes the code predictable.
 **Requirements:** macOS 26+, Xcode with the Swift 6.2 toolchain, and [Tuist](https://tuist.io).
 
 ```bash
-tuist install && tuist generate --no-open
+./Scripts/generate_workspace.sh
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug build
 ```
 
-Re-run `tuist install && tuist generate` after any change to `Project.swift` or `Tuist/Package.swift`.
+Re-run `./Scripts/generate_workspace.sh` after any change to `Project.swift` or `Tuist/Package.swift`.
+It installs and generates through the pinned Tuist, then normalizes generated dependency deployment
+targets below macOS 12 (including synthesized resource bundles) and workspace path capitalization.
+Newer dependency floors and upstream sources are untouched; Mimic still requires macOS 26.
+Plain `tuist generate` bypasses that compatibility step. If already generated, run
+`python3 Scripts/prepare_xcode_dependencies.py` before opening `Mimic.xcworkspace` in Xcode.
+If `xcode-select -p` reports Command Line Tools, prefix the generation command with
+`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (or your installed Xcode path).
 
 Most of the codebase doesn't need Xcode at all:
 
@@ -237,12 +244,12 @@ The version lives in two places and both have to move together:
 `ControlAPI.version` is separate and only moves for a breaking change to the control API.
 
 Bump both, then build the installer. `Scripts/package_release.sh` reads `MARKETING_VERSION` itself,
-so the version is never typed twice — but it builds from the generated project, so `tuist generate`
+so the version is never typed twice — but it builds from the generated project, so `./Scripts/generate_workspace.sh`
 has to run after the bump or the bundle ships the old number.
 
 ```bash
 ./Scripts/ci.sh                                     # everything must be green first
-tuist install && tuist generate --no-open
+./Scripts/generate_workspace.sh
 MIMIC_TEAM_ID=KW6369JJL9 MIMIC_NOTARY_PROFILE=mimic-notary ./Scripts/package_release.sh
 ```
 
