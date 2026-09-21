@@ -11,8 +11,7 @@ import DesignSystem
 /// URL — the most-copied string in the app — lived in a 28pt strip along the bottom edge, which is the
 /// part of a window nobody looks at. This puts both where the eye returns.
 ///
-/// Everything rendered here is a function of ``ServerState`` and two counts, so every string it can
-/// show is built by a `nonisolated static` function below. That keeps the wording testable without
+/// The state and backend summaries are built by `nonisolated static` functions below. That keeps the wording testable without
 /// standing up a window, which is how the rest of this module tests view logic.
 struct ServerStatusWell: View {
     let serverState: ServerState
@@ -20,6 +19,8 @@ struct ServerStatusWell: View {
     let requestCount: Int
     let unmatchedCount: Int
     let compact: Bool
+    let configuration: ServerConfiguration?
+    let boundConfiguration: ServerConfiguration?
     /// Filters the request log to unmatched requests. Nil disables the affordance.
     var onShowUnmatched: (() -> Void)?
 
@@ -36,6 +37,8 @@ struct ServerStatusWell: View {
     /// the case they name.
     @State private var isURLHovered = false
     @State private var isUnmatchedHovered = false
+    @State private var showingBackends = false
+    @State private var isPortsHovered = false
 
     init(
         serverState: ServerState,
@@ -43,6 +46,8 @@ struct ServerStatusWell: View {
         requestCount: Int,
         unmatchedCount: Int,
         compact: Bool = false,
+        configuration: ServerConfiguration? = nil,
+        boundConfiguration: ServerConfiguration? = nil,
         onShowUnmatched: (() -> Void)? = nil
     ) {
         self.serverState = serverState
@@ -50,6 +55,8 @@ struct ServerStatusWell: View {
         self.requestCount = requestCount
         self.unmatchedCount = unmatchedCount
         self.compact = compact
+        self.configuration = configuration
+        self.boundConfiguration = boundConfiguration
         self.onShowUnmatched = onShowUnmatched
     }
 
@@ -57,6 +64,9 @@ struct ServerStatusWell: View {
         HStack(spacing: DSSpacing.sm) {
             stateChip
             primaryElement
+            if let configuration, configuration.listeners.count > 1 || restartRequired {
+                backendPopoverButton(configuration)
+            }
 
             // Xcode's arrangement, and the reason the well can afford to be this wide: the activity
             // text sits at the leading edge and the issue counts are pinned to the trailing one, so
@@ -106,6 +116,82 @@ struct ServerStatusWell: View {
     }
 
     // MARK: - Pieces
+
+    private var restartRequired: Bool {
+        isRunning && configuration.map { configured in
+            boundConfiguration.map { !$0.hasSameListeners(as: configured) } ?? false
+        } == true
+    }
+
+    private func backendPopoverButton(_ configuration: ServerConfiguration) -> some View {
+        Button { showingBackends.toggle() } label: {
+            Text("\(configuration.listeners.count) \(configuration.listeners.count == 1 ? "port" : "ports")\(restartRequired ? " !" : "")")
+                .font(DSTypography.caption)
+                .foregroundStyle(isPortsHovered ? DSColors.accent : DSColors.labelSecondary)
+                .fixedSize()
+                .frame(height: DSToolbarGeometry.height)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isPortsHovered = $0 }
+        .help(Self.backendSummary(configuration: configuration, boundConfiguration: boundConfiguration, isRunning: isRunning))
+        .accessibilityIdentifier("serverStatusWell.backends")
+        .accessibilityLabel("Backend ports")
+        .accessibilityValue(Self.backendSummary(configuration: configuration, boundConfiguration: boundConfiguration, isRunning: isRunning))
+        .popover(isPresented: $showingBackends) {
+            VStack(alignment: .leading, spacing: DSSpacing.md) {
+                if isRunning, let boundConfiguration {
+                    Text("Listening — click to copy URL").font(DSTypography.bodyMedium)
+                    ForEach(Self.listeningBackends(configuration: configuration, boundConfiguration: boundConfiguration)) { backend in
+                        DSButton("\(backend.name): \(backend.port)", variant: .ghost, size: .small,
+                                 identifier: "serverStatusWell.copyPort.\(backend.port)") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(backend.localURL, forType: .string)
+                            showingBackends = false
+                        }
+                        .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
+                        .accessibilityLabel("Copy \(backend.name) URL, port \(backend.port)")
+                    }
+                    Divider()
+                }
+                Text(restartRequired ? "Configured — restart required" : "Configured ports")
+                    .font(DSTypography.bodyMedium)
+                ForEach(configuration.listeners) { backend in
+                    Text(verbatim: "\(backend.name): \(backend.port)")
+                        .font(DSTypography.code)
+                        .accessibilityIdentifier("serverStatusWell.configuredPort.\(backend.port)")
+                }
+            }
+            .padding(DSSpacing.lg)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("serverStatusWell.portList")
+        }
+    }
+
+    // Names can change live; ports describe the configuration that actually bound.
+    nonisolated private static func listeningBackends(
+        configuration: ServerConfiguration, boundConfiguration: ServerConfiguration
+    ) -> [BackendConfiguration] {
+        boundConfiguration.listeners.map { backend in
+            var displayed = backend
+            displayed.name = configuration.backend(id: backend.id)?.name ?? backend.name
+            return displayed
+        }
+    }
+
+    nonisolated static func backendSummary(
+        configuration: ServerConfiguration, boundConfiguration: ServerConfiguration?, isRunning: Bool
+    ) -> String {
+        let configured = configuration.listeners.map { "\($0.name): \($0.port)" }.joined(separator: ", ")
+        if isRunning, let boundConfiguration {
+            let listening = listeningBackends(configuration: configuration, boundConfiguration: boundConfiguration).map { "\($0.name): \($0.port)" }.joined(separator: ", ")
+            if !boundConfiguration.hasSameListeners(as: configuration) {
+                return "Listening on \(listening). Configured ports: \(configured). Restart required."
+            }
+            return "\(configuration.listeners.count) ports listening: \(listening)."
+        }
+        return "\(configuration.listeners.count) ports configured: \(configured). Server is not running."
+    }
 
     /// What the server is doing, as a mark on a surface of its own colour.
     ///

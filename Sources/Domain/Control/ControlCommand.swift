@@ -380,7 +380,7 @@ extension JourneyStepSpec {
             statusCode: log.responseStatusCode,
             // `Content-Type` is carried by `contentType`; repeating it as a header would emit it twice.
             headers: carriesRealResponse ? replayableHeaders(log.responseHeaders) : nil,
-            body: carriesRealResponse ? log.responseBody : nil,
+            body: carriesRealResponse ? try ResponseCapture.body(log) : nil,
             contentType: carriesRealResponse ? contentType : nil,
             // A GraphQL call is only distinguishable by its operation, so a step captured from one
             // must carry it or it would match every other call to the same path.

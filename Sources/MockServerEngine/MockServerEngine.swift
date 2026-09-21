@@ -15,13 +15,14 @@ public actor MockServerEngine {
     private var isStopping = false
     private let routeStore = MockRouteStore()
 
-    /// Single-consumer stream of served request logs. Bounded buffer drops the oldest entries if the
-    /// consumer falls behind, so memory stays bounded regardless of request volume.
+    /// Lossless delivery to the single consumer. Automatic response capture consumes this stream,
+    /// so dropping pending events also silently loses persistent mocks. The runtime bounds its
+    /// displayed history after processing each event; that retention limit must not apply here.
     public nonisolated let logStream: AsyncStream<RequestLog>
     private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
 
     public init() {
-        (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .bufferingNewest(1000))
+        (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .unbounded)
     }
 
     public func start(configuration: ServerConfiguration) async throws {

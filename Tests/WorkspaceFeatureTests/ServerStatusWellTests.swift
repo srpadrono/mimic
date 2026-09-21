@@ -6,6 +6,24 @@ import Domain
 @Suite("Server status well")
 struct ServerStatusWellTests {
 
+    @Test("Backend summary distinguishes configured ports from bound listeners")
+    func backendPortsAndPendingRestart() {
+        let configured = ServerConfiguration(port: 8080, globalDelayMs: 0,
+            backends: [.init(name: "Accounts", port: 8081)])
+        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: nil, isRunning: false)
+            == "2 ports configured: Primary: 8080, Accounts: 8081. Server is not running.")
+        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: configured, isRunning: true)
+            == "2 ports listening: Primary: 8080, Accounts: 8081.")
+        var renamed = configured
+        renamed.backends[0].name = "Billing"
+        #expect(ServerStatusWell.backendSummary(configuration: renamed, boundConfiguration: configured, isRunning: true)
+            == "2 ports listening: Primary: 8080, Billing: 8081.")
+        var changed = configured
+        changed.backends[0].port = 9091
+        #expect(ServerStatusWell.backendSummary(configuration: changed, boundConfiguration: configured, isRunning: true)
+            == "Listening on Primary: 8080, Accounts: 8081. Configured ports: Primary: 8080, Accounts: 9091. Restart required.")
+    }
+
     // MARK: - What the well says
 
     @Test("A running server shows its address instead of the project name")

@@ -139,9 +139,10 @@ struct BackendSettingsView: View {
         Toggle("Automatically save responses as mocks", isOn: capture)
             .disabled(!enabled.wrappedValue)
             .accessibilityIdentifier(prefix + ".capture").accessibilityLabel("Automatically save responses as mocks")
-        Text("Capture saves complete text responses up to 64 KB and removes credential headers. Bodies may contain private data. Once saved, a mock answers future matching calls.")
+        Text("Capture saves complete text responses up to 5 MiB (traffic previews stay at 64 KiB) and removes credential headers. Bodies may contain private data. Once saved, a mock answers future matching calls.")
             .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
             .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier(prefix + ".captureHelp")
     }
 }
 

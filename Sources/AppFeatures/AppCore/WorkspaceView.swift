@@ -424,14 +424,18 @@ struct WorkspaceView: View {
                     requestCount: appState.requestLogs.count,
                     unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
                     compact: usesToolbarOverflow,
+                    configuration: appState.currentProject?.serverConfiguration,
+                    boundConfiguration: appState.server.boundConfiguration,
                     onShowUnmatched: {
                         showDrawer = true
                         showUnmatchedOnly = true
                     }
                 )
-                .frame(width: usesToolbarOverflow
+                .frame(width: (usesToolbarOverflow
                     ? DSToolbarGeometry.compactStatusWidth
                     : (appState.requestLogs.isEmpty ? DSToolbarGeometry.statusWidth : DSToolbarGeometry.trafficStatusWidth))
+                    + (appState.serverConfiguration.listeners.count > 1 || appState.server.restartRequired
+                        ? DSToolbarGeometry.height : 0))
 
                 AutosaveStatusIndicator(status: appState.autosaveStatus)
                     .frame(width: DSToolbarGeometry.autosaveWidth, height: DSToolbarGeometry.height, alignment: .leading)

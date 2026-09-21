@@ -1,5 +1,8 @@
 # Pass-through implementation review and verification
 
+See the [21 September concurrent recording and toolbar review](recording-review.md) for the follow-up
+stress tests, delete/re-capture checks, persistence evidence, and port-status fixes.
+
 19 September 2026. Evidence uses synthetic local fixtures, never customer traffic.
 
 ## Review fixes

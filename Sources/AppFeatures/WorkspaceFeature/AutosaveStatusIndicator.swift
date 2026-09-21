@@ -14,7 +14,9 @@ struct AutosaveStatusIndicator: View {
         Group {
             switch status {
             case .idle:
-                EmptyView()
+                // An EmptyView ignores the toolbar's reserved frame. When "Saved" faded out,
+                // the principal item recentered and moved adjacent click targets under the pointer.
+                Color.clear.accessibilityHidden(true)
             case .saving:
                 accessibleStatusView(identifier: "autosaveStatus.saving", label: "Saving") {
                     Text("Saving\u{2026}")
