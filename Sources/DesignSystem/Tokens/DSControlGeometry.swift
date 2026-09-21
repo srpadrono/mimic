@@ -71,7 +71,13 @@ public enum DSStroke {
 
 /// Editor toolbar geometry. Panel toggles keep their own trailing section.
 nonisolated public enum DSToolbarGeometry {
-    public static let expandedCenterWidth: CGFloat = 760
+    /// Matches the native macOS sidebar toggle in the same toolbar.
+    public static let height: CGFloat = 36
+    public static let horizontalInset: CGFloat = 12
+    public static let contentHeight: CGFloat = 16
+    public static let autosaveWidth: CGFloat = 72
+    /// Accommodates a long project title, traffic counters, and the reserved save-status slot.
+    public static let expandedCenterWidth: CGFloat = 840
     public static let projectTitleWidth: CGFloat = 180
     public static let compactStatusWidth: CGFloat = 128
     public static let statusWidth: CGFloat = 220

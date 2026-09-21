@@ -1,5 +1,9 @@
 # Window polish screenshot evidence
 
+The toolbar captures in this historical record are superseded by the
+[toolbar consistency evidence](../toolbar-consistency/README.md), including the restored single
+Run/Stop control and uniform pill sizing.
+
 Captured on 20 September 2026 from the real Mimic app using the isolated, synthetic
 Acme Storefront fixture. These are unedited XCUITest window captures, not mockups.
 Both images are 960 × 540 pixels in light appearance.
