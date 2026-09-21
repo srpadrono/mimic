@@ -82,6 +82,54 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.endpoints.first?.path == "/current")
     }
 
+    @Test("Concurrent automatic captures survive traffic eviction and persist every distinct route")
+    func parallelAutomaticCapture() async throws {
+        let engine = StubEngine()
+        let app = try makeAppState(server: MockServerRuntime(engine: engine))
+        let project = MockProject(name: "Burst", serverConfiguration: .init(
+            port: 8080, globalDelayMs: 0, upstreamURL: "http://localhost:19000", captureResponses: true))
+        app.currentProject = project
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<1100 {
+                group.addTask {
+                    await engine.emit(RequestLog(method: .get, path: "/burst/\(index)", projectID: project.id,
+                        responseStatusCode: 200, responseBody: "reply-\(index)", outcome: .passthrough))
+                }
+            }
+        }
+        try await waitUntil(timeout: .seconds(20)) { app.currentProject?.endpoints.count == 1100 }
+        #expect(app.requestLogs.count == 1000)
+        #expect(Set(app.currentProject?.endpoints.map(\.path) ?? []).count == 1100)
+        app.projects.saveCurrentProject()
+        await app.projects.awaitPendingStoreWrites()
+        let saved = try await app.repository.load(id: project.id)
+        #expect(saved.endpoints.count == 1100)
+    }
+
+    @Test("Automatic capture recreates a deleted route and keeps backend identities separate")
+    func recaptureDeletedRoute() throws {
+        let app = try makeAppState(server: MockServerRuntime(engine: StubEngine()))
+        let backendID = UUID()
+        let project = MockProject(name: "Recapture", serverConfiguration: .init(
+            port: 8080, globalDelayMs: 0, upstreamURL: "http://localhost:19000",
+            backends: [.init(id: backendID, name: "Accounts", port: 8081,
+                             upstreamURL: "http://localhost:19001", captureResponses: true)], captureResponses: true))
+        app.currentProject = project
+        for backend in [nil, Optional(backendID)] {
+            for attempt in 0..<3 {
+                let log = RequestLog(method: .get, path: "/profile", backendID: backend,
+                    projectID: project.id, responseStatusCode: 200,
+                    responseBody: "reply-\(attempt)", outcome: .passthrough)
+                app.requestLogs.append(log)
+                app.server.onLog?(log)
+                let endpoint = try #require(app.currentProject?.endpoints.first { $0.backendID == backend })
+                #expect(endpoint.scenarios.first?.body == "reply-\(attempt)")
+                if attempt < 2 { app.deleteEndpoint(id: endpoint.id) }
+            }
+        }
+        #expect(app.currentProject?.endpoints.count == 2)
+    }
+
     @Test("Retry changes the conflicting secondary backend and skips occupied project ports")
     func secondaryPortConflictRecovery() async throws {
         let engine = StubEngine()
@@ -111,6 +159,8 @@ struct AppStateAndViewTests {
         deinit {
             logContinuation.finish()
         }
+
+        func emit(_ log: RequestLog) { logContinuation.yield(log) }
 
         func start(configuration: ServerConfiguration) async throws {
             startConfigurations.append(configuration)

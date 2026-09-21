@@ -16,6 +16,45 @@ struct PassthroughTests {
         return Endpoint(name: path, path: path, scenarios: [scenario], activeScenarioID: scenario.id, backendID: backendID)
     }
 
+    @Test("A delayed log consumer receives every request from a parallel burst")
+    func burstDoesNotDropLogs() async throws {
+        let proxy = MockServerEngine(), upstream = MockServerEngine()
+        let local = try Self.port(), real = try Self.port()
+        await upstream.updateConfiguration(endpoints: [Self.endpoint("/burst/:id", body: "complete reply")])
+        try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
+        try await proxy.start(configuration: .init(port: local, globalDelayMs: 0,
+            upstreamURL: "http://127.0.0.1:\(real)"))
+        defer { Task { try? await proxy.stop(); try? await upstream.stop() } }
+        // No consumer runs until all 1,100 requests finish. This deterministically fills
+        // the old 1,000-entry delivery buffer, independent of scheduler speed.
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        for batch in 0..<22 {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for offset in 0..<50 {
+                    let index = batch * 50 + offset
+                    group.addTask {
+                        let (_, response) = try await session.data(from: URL(string: "http://127.0.0.1:\(local)/burst/\(index)")!)
+                        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+                    }
+                }
+                try await group.waitForAll()
+            }
+        }
+        // The sentinel terminates the drain even on the broken implementation.
+        _ = try await session.data(from: URL(string: "http://127.0.0.1:\(local)/sentinel")!)
+        var paths = Set<String>()
+        for await log in proxy.logStream {
+            if log.path == "/sentinel" { break }
+            #expect(log.outcome == .passthrough)
+            #expect(log.responseBody == "complete reply")
+            paths.insert(log.path)
+        }
+        #expect(paths.count == 1100)
+        #expect(paths.contains("/burst/0"))
+        #expect(paths.contains("/burst/1099"))
+    }
+
     @Test("Each local port uses its own mocks and real backend")
     func twoBackendTraffic() async throws {
         let upstreamA = MockServerEngine()

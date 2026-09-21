@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import XCTest
 
@@ -13,6 +14,11 @@ struct BackendSettingsPage {
     var add: XCUIElement { app.buttons["backend.add"].firstMatch }
     var apply: XCUIElement { app.buttons["backend.apply"].firstMatch }
     var cancel: XCUIElement { app.buttons["backend.cancel"].firstMatch }
+    func portMenuItem(_ port: Int, copying: Bool = false) -> XCUIElement {
+        app.descendants(matching: .any)["serverStatusWell.\(copying ? "copyPort" : "configuredPort").\(port)"].firstMatch
+    }
+    var portsDescription: String { "\(ports.label) \(ports.value.map { String(describing: $0) } ?? "")" }
+    var ports: XCUIElement { app.buttons["serverStatusWell.backends"].firstMatch }
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
     func additional(_ suffix: String) -> XCUIElement {
         app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
@@ -64,6 +70,22 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.additional("port"), with: "18081")
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.ports.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.portsDescription.contains("2 ports configured"), "\(page.portsDescription)\n\(app.debugDescription)")
+        XCTAssertTrue(page.portsDescription.contains("Accounts: 18081"))
+        app.activate()
+        page.ports.click()
+        XCTAssertTrue(page.portMenuItem(18081).waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(page.portMenuItem(18081).value as? String, "Accounts: 18081")
+        let portListShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        portListShot.name = "Configured port list"
+        portListShot.lifetime = .keepAlways
+        add(portListShot)
+        app.typeKey(.escape, modifierFlags: [])
+        let toolbarShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        toolbarShot.name = "Toolbar — two configured ports"
+        toolbarShot.lifetime = .keepAlways
+        add(toolbarShot)
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
         XCTAssertEqual(page.primaryName.value as? String, "Catalog")
@@ -73,6 +95,77 @@ final class BackendSettingsUITests: MimicUITestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         page.cancel.click()
+    }
+
+    @MainActor
+    func testToolbarDistinguishesListeningAndPendingPorts() throws {
+        func freePort() throws -> Int {
+            let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+            guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            defer { Darwin.close(descriptor) }
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            try withUnsafeMutablePointer(to: &address) { pointer in
+                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                    guard Darwin.bind(descriptor, socketAddress, length) == 0,
+                          getsockname(descriptor, socketAddress, &length) == 0 else {
+                        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                    }
+                }
+            }
+            return Int(UInt16(bigEndian: address.sin_port))
+        }
+        let primary = try freePort(), secondary = try freePort(), replacement = try freePort()
+        launchApp()
+        createProjectViaUI(name: "Listening ports")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.replace(page.primaryPort, with: String(primary))
+        page.add.click()
+        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        page.replace(page.additional("name"), with: "Accounts")
+        page.replace(page.additional("port"), with: String(secondary))
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerURL(port: primary))
+        XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
+        workspace.compactWindow()
+        XCTAssertTrue(page.ports.isHittable)
+        XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
+        page.ports.click()
+        let copy = page.portMenuItem(secondary, copying: true)
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.click()
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "http://localhost:\(secondary)")
+        let compactShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        compactShot.name = "Toolbar — two ports in a compact window"
+        compactShot.lifetime = .keepAlways
+        add(compactShot)
+        workspace.fillWindow()
+        page.open.click()
+        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        page.replace(page.additional("port"), with: String(replacement))
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.portsDescription.contains("Restart required"))
+        XCTAssertTrue(page.portsDescription.contains("Accounts: \(secondary)"))
+        XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "Toolbar — running ports with restart required"
+        shot.lifetime = .keepAlways
+        add(shot)
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerURL(port: primary))
+        XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
+        XCTAssertFalse(page.portsDescription.contains("Restart required"))
+        workspace.serverToggleButton.click()
     }
 
     @MainActor

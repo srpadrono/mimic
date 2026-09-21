@@ -7,6 +7,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Do not capture cache-only 304, partial 206/Content-Range, or unexpectedly empty JSON replies as
+  complete mocks. Explain compressed JSON capture refusals with guidance to request an uncompressed reply.
+
+- Preserve pending request records during concurrent bursts so automatic pass-through capture does
+  not silently miss endpoints. The visible traffic history still retains the latest 1,000 calls.
+- Show multiple backend ports in the toolbar, with named listeners, per-port URL copying, and
+  a distinction between running ports and configuration changes that require a restart. Keep the
+  toolbar in place when the autosave indicator clears, so click targets do not move.
+
 - Pin Tuist 4.209.0 for native Swift 6.4 / Xcode 27 dependency deployment targets, including
   synthesized resource bundles, without generated-project repair scripts.
 

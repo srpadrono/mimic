@@ -264,9 +264,19 @@ mimic server configure --file server-settings.json # atomically apply a ServerCo
 ```
 
 Automatic capture saves the first complete supported reply per backend, method, path, and GraphQL
-operation. Subsequent calls use that mock. Query parameters are forwarded but are not mock match
+operation. Deleting the mock makes the route eligible for capture again when another complete
+passed-through response arrives. Capture and live engine updates are asynchronous. Once the captured endpoint
+appears in the project, automation can call `mimic state` to await its pending engine update before
+checking replay. Pending request delivery
+is lossless during bursts, while the visible traffic history retains only its latest 1,000 records.
+The pending delivery queue can grow when processing falls behind incoming traffic. Subsequent calls
+use the captured mock. Query parameters are forwarded but are not mock match
 criteria. Capture removes credential and transport headers; inspect bodies before sharing. Binary,
-compressed, truncated (over 64 KiB), and failed responses are never saved as text fixtures. A
+compressed, truncated (over 64 KiB), and failed responses are never saved as text fixtures.
+Cache-only 304 and partial 206/Content-Range replies are refused, as are missing or empty JSON bodies
+unless the HTTP method/status deliberately has no body (HEAD, 204, 205). They must not become a mock
+that hides a later complete response. For compressed JSON, request `Accept-Encoding: identity` from
+the client and capture the uncompressed reply; forwarding does not change this header for you. A
 truncated request preview is also refused because it could lose GraphQL operation identity. Binary
 and compressed replies are still forwarded byte-for-byte. Large responses and event streams are
 forwarded with backpressure and only a bounded preview is logged after completion. Incoming request
