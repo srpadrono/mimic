@@ -1025,10 +1025,9 @@ final class ErrorAlertUITests: MimicUITestCase {
         element(identifier: "autosaveStatus.failed")
     }
 
-    /// The navigator's tabs, by the label `DSTabStrip` speaks — their own identifiers do not survive
-    /// the strip, which stamps `ds.tabstrip.navigator` over every descendant.
-    @MainActor private var journeysTab: XCUIElement { app.buttons["Show journeys"].firstMatch }
-    @MainActor private var endpointsTab: XCUIElement { app.buttons["Show endpoints"].firstMatch }
+    /// Shared queries for the navigator's native segments.
+    @MainActor private var journeysTab: XCUIElement { WorkspaceShellPage(app: app).journeysTab }
+    @MainActor private var endpointsTab: XCUIElement { WorkspaceShellPage(app: app).endpointsTab }
 
     /// The editor's "Add" action for response headers. Inside a `DSSectionHeader`, which is paired
     /// with `.contain` — so the identifier may or may not land, and the label is the fallback the

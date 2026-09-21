@@ -152,70 +152,11 @@ extension JourneysNavigatorPage {
             .firstMatch
     }
 
-    /// The activation ring inside a row — the control that starts a journey *without* selecting it.
-    /// Its label flips with the state, which is the whole assertion in `JRN-07`/`JRN-08`.
-    func activationRing(activateNamed name: String) -> XCUIElement {
-        app.buttons["Activate \(name)"].firstMatch
+    /// The footer indicates the active journey and opens it without changing the run.
+    var activeJourneyIndicator: XCUIElement {
+        app.buttons["navigator.activeJourney"].firstMatch
     }
 
-    func activationRing(deactivateNamed name: String) -> XCUIElement {
-        app.buttons["Deactivate \(name)"].firstMatch
-    }
-
-    // MARK: Navigator run strip
-
-    /// The "a journey is answering" banner above the list.
-    var runStrip: XCUIElement {
-        let byIdentifier = app.descendants(matching: .any)
-            .matching(identifier: "journeys.runControls")
-            .firstMatch
-        if byIdentifier.exists { return byIdentifier }
-        return app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "Running journey "))
-            .firstMatch
-    }
-
-    /// A button inside the run strip.
-    ///
-    /// **Scoped on purpose.** `journeys.deactivateButton`'s label is "Deactivate journey" and so is
-    /// `JourneyRunControls`' — two controls, same words, both on screen whenever a journey is
-    /// running with its editor open, which is the state of every test that adds a journey from a
-    /// template. Searching inside the strip is the disambiguation; the identifier fallback is the
-    /// second one, and the two identifiers *are* distinct (`journeys.deactivateButton` versus
-    /// `journeyRun.deactivateButton`) even though the labels are not.
-    func runStripButton(identifier: String, label: String) -> XCUIElement {
-        let scoped = runStrip.descendants(matching: .button)
-            .matching(NSPredicate(format: "label == %@", label))
-            .firstMatch
-        if scoped.exists { return scoped }
-        return app.descendants(matching: .button).matching(identifier: identifier).firstMatch
-    }
-
-    var runStripRestartButton: XCUIElement {
-        runStripButton(identifier: "journeys.restartButton", label: "Restart journey")
-    }
-
-    var runStripAdvanceButton: XCUIElement {
-        runStripButton(identifier: "journeys.advanceButton", label: "Advance journey")
-    }
-
-    var runStripDeactivateButton: XCUIElement {
-        runStripButton(identifier: "journeys.deactivateButton", label: "Deactivate journey")
-    }
-
-    /// The strip's progress line, when it kept its own identifier through the strip's `.contain`.
-    var runStripProgress: XCUIElement {
-        runStrip.descendants(matching: .staticText)
-            .matching(identifier: "journeys.runStrip.progress")
-            .firstMatch
-    }
-
-    /// The strip's journey name, on the same terms as ``runStripProgress``.
-    var runStripName: XCUIElement {
-        runStrip.descendants(matching: .staticText)
-            .matching(identifier: "journeys.runStrip.name")
-            .firstMatch
-    }
 }
 
 extension JourneyStepSheetPage {
@@ -694,19 +635,9 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
     }
 
-    /// Everything the sidebar says about the run: the strip's composed label, plus the name and
-    /// progress leaves when those kept identifiers of their own through the strip's `.contain`.
-    ///
-    /// Read together rather than one or the other, because which of them survives is a property of
-    /// how SwiftUI collapsed that subtree — the fact under test is that the sidebar says where the
-    /// run is, not which element ends up saying it.
     @MainActor
     private func sidebarRunText() -> String {
-        [
-            spokenText(of: journeys.runStrip),
-            spokenText(of: journeys.runStripName),
-            spokenText(of: journeys.runStripProgress),
-        ].joined(separator: " ")
+        spokenText(of: journeys.activeJourneyIndicator)
     }
 
     // MARK: - 1. The editor's behaviour band  (JRNEDIT)
@@ -1387,90 +1318,36 @@ final class JourneyEditorUITests: MimicUITestCase {
 
     // MARK: - 10. Driving the run from the navigator  (JRNBAR, JRN-07/08)
 
-    /// The sidebar's run strip, which exists only while a journey is answering.
-    ///
-    /// Every query into the strip is scoped to it. `journeys.deactivateButton` and
-    /// `JourneyRunControls`' own button both answer to the label "Deactivate journey", and with a
-    /// template journey selected they are both on screen — an unscoped query would resolve to
-    /// whichever AppKit happened to enumerate first, which is a coin toss the test would pass half
-    /// the time. The final assertions prove the scoping picked the right one: the strip goes away
-    /// *and* the editor swings back to offering Activate.
+    /// Activating stays in the editor, and the navigator only indicates and reveals the run.
     @MainActor
-    func testNavigatorRunStripDrivesTheRun() throws {
+    func testNavigatorIndicatorRevealsTheActiveJourneyWithoutChangingTheRun() throws {
         launchWithProject()
         showJourneysNavigator()
         addTemplate("session-expiry", activate: false)
-
         let name = "Session expires mid-flow"
-        XCTAssertTrue(
-            journeys.row(named: name).waitForExistence(timeout: 10),
-            "The journey should be listed"
-        )
-        XCTAssertFalse(journeys.runStrip.exists, "No journey is answering, so there should be no strip")
-
-        // JRN-07 — the row's ring activates without selecting.
-        let ring = journeys.activationRing(activateNamed: name)
-        XCTAssertTrue(ring.waitForExistence(timeout: 5), "The row should offer its activation ring")
-        ring.click()
-
-        // JRNBAR-01/02 — the strip, its journey name and its position.
-        XCTAssertTrue(
-            journeys.runStrip.waitForExistence(timeout: 10),
-            "Activating should raise the run strip"
-        )
-        assertSpeaks(
-            journeys.runStrip,
-            contains: "Running journey \(name)",
-            "The strip should name the journey that is answering"
-        )
-        // The leaf keeps its identifier only when SwiftUI does not flatten it through the strip's
-        // `.contain`; either it or the strip's composed label has to carry the position, and
-        // `sidebarRunText()` reads both so the assertion is about the sidebar rather than about
-        // which of the two the tree happened to keep.
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") },
-            "The strip should report where the run is; saw \"\(self.sidebarRunText())\""
-        )
-
-        // JRNBAR-04.
-        journeys.runStripAdvanceButton.click()
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 2 of 5") },
-            "Advancing from the sidebar should move the run on; saw \"\(self.sidebarRunText())\""
-        )
-
-        // JRNBAR-03.
-        journeys.runStripRestartButton.click()
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") },
-            "Restarting from the sidebar should rewind the run; saw \"\(self.sidebarRunText())\""
-        )
-
-        // JRN-08 — the same ring, with its label flipped, ends the run.
-        let stopRing = journeys.activationRing(deactivateNamed: name)
-        XCTAssertTrue(stopRing.waitForExistence(timeout: 5), "The ring should now offer to deactivate")
-        stopRing.click()
-        XCTAssertTrue(
-            journeys.runStrip.waitForNonExistence(timeout: 10),
-            "Deactivating from the row should take the strip away"
-        )
-
-        // JRNBAR-05 — and the strip's own way out.
-        journeys.activationRing(activateNamed: name).click()
-        XCTAssertTrue(
-            journeys.runStrip.waitForExistence(timeout: 10),
-            "The journey should be answering again"
-        )
-        journeys.runStripDeactivateButton.click()
-        XCTAssertTrue(
-            journeys.runStrip.waitForNonExistence(timeout: 10),
-            "The strip's stop control should end the run"
-        )
-        XCTAssertTrue(
-            journeys.activateButton.waitForExistence(timeout: 10),
-            "The editor should offer to activate again — which is how we know the strip's button was "
-                + "the one that was clicked, and not the editor's identically labelled one"
-        )
+        let row = journeys.row(named: name)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let initialFrame = row.frame
+        row.click()
+        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(journeys.activeJourneyIndicator.exists, "Selecting must not activate")
+        journeys.activateButton.click()
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitForExistence(timeout: 10))
+        XCTAssertEqual(row.frame.minY, initialFrame.minY, accuracy: 1, "Activation must not move the list")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") })
+        journeys.advanceButton.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 2 of 5") })
+        let shell = WorkspaceShellPage(app: app)
+        shell.endpointsTab.click()
+        XCTAssertTrue(journeys.activeJourneyIndicator.exists, "The endpoint view also identifies an override")
+        journeys.activeJourneyIndicator.click()
+        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebarRunText().contains("Step 2 of 5"), "Revealing the journey must not restart it")
+        journeys.restartButton.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") })
+        journeys.deactivateButton.click()
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5))
     }
 
     // MARK: - 11. Duplicating a journey  (JRN-09, JRNDUP)
@@ -1683,7 +1560,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             "An inert journey offers to be activated"
         )
         XCTAssertFalse(journeys.activeBadge.exists, "An inert journey should not read as active")
-        XCTAssertFalse(journeys.runStrip.exists, "Nothing is answering, so there should be no run strip")
+        XCTAssertFalse(journeys.activeJourneyIndicator.exists, "Nothing is answering, so there should be no active journey indicator")
         assertSpeaks(
             journeys.row(named: "MFA required after login"),
             contains: "not active",
@@ -1701,13 +1578,13 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The editor should offer to stop it"
         )
         XCTAssertTrue(
-            journeys.runStrip.waitForExistence(timeout: 10),
-            "The navigator should raise its run strip"
+            journeys.activeJourneyIndicator.waitForExistence(timeout: 10),
+            "The navigator should show the active journey indicator"
         )
         assertSpeaks(
-            journeys.runStrip,
-            contains: "Running journey Payment succeeds on retry",
-            "The strip should name the journey that is answering"
+            journeys.activeJourneyIndicator,
+            contains: "Payment succeeds on retry",
+            "The indicator should name the journey that is answering"
         )
         assertSpeaks(
             journeys.row(named: "MFA required after login"),

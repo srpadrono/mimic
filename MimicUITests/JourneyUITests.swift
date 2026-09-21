@@ -18,7 +18,7 @@ struct JourneysNavigatorPage {
     /// The navigator's tab, matched by **label**.
     ///
     /// The label comes from `NavigatorTab.journeys.help`.
-    var tab: XCUIElement { app.buttons["Show journeys"].firstMatch }
+    var tab: XCUIElement { WorkspaceShellPage(app: app).journeysTab }
 
     /// Prefer the menu's identifier. The label fallback tolerates native menu representations
     /// while remaining distinct from the empty state's "Add journey" action.

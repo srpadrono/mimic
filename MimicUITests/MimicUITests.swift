@@ -139,20 +139,7 @@ struct WorkspacePage {
     var legacyServerStartButton: XCUIElement { app.buttons["serverStartButton"].firstMatch }
     var legacyServerStopButton: XCUIElement { app.buttons["serverStopButton"].firstMatch }
     var serverSettingsToolbarButton: XCUIElement { app.toolbars.buttons["backend.settingsButton"].firstMatch }
-    /// The navigator's add action — matched by **label**, because its identifier does not survive.
-    ///
-    /// `sidebar.addEndpointButton` is set on the button and never reaches the tree: it lives in
-    /// `DSTabStrip`'s accessory slot, and the strip's own `ds.tabstrip.navigator` is stamped over
-    /// every descendant. Pairing the container's identifier with `.accessibilityElement(children:
-    /// .contain)` does *not* prevent that for a leaf control — it keeps the child as its own element
-    /// with its own label and value, which is a different thing, and the distinction is what the
-    /// suite kept getting wrong. Dumped from `app.debugDescription`, all three of the strip's buttons
-    /// report `ds.tabstrip.navigator` and differ only by label.
-    ///
-    /// `firstMatch` across both copies is deliberate. When the project is empty, `DSEmptyState` also
-    /// offers "Add endpoint" and both call the same action, so either is a correct answer to "open
-    /// the new-endpoint sheet". Pinning this to the strip's copy would make every test that adds the
-    /// *first* endpoint depend on which of two identical buttons the tree happened to list first.
+    /// Both the navigator header and the empty state offer the same creation action.
     var addEndpointButton: XCUIElement {
         app.buttons.matching(NSPredicate(format: "label == %@", "Add endpoint")).firstMatch
     }
@@ -479,26 +466,15 @@ struct CaptureJourneySheetPage {
 struct RequestDetailPage {
     let app: XCUIApplication
 
-    /// The inspector's header title, matched by the container's identifier and the text it carries.
-    ///
-    /// `DSPanelHeader` sets `ds.panelheader.title.inspector` on the title `Text` and
-    /// `ds.panelheader.inspector` on the row around it, and the row's name wins: dumped from
-    /// `app.debugDescription`, the header arrives as a single `StaticText` with
-    /// `identifier: 'ds.panelheader.inspector', value: Overview`. Pairing the container identifier
-    /// with `.accessibilityElement(children: .contain)` does not stop that for a leaf `Text` — it
-    /// keeps children as their own elements carrying their own labels and values, which is not the
-    /// same as keeping their identifiers. The title's own name never reaches the tree, so a query for
-    /// it has no candidates at all. Both are matched anyway, because which one lands is a SwiftUI
-    /// implementation detail that has already changed once.
-    ///
-    /// The text has to be checked as well as the identifier: the identifier is fixed, but this waits
-    /// for the panel to *change modes*, and the only thing that distinguishes "Request" from
-    /// "Scenarios" is the string.
+    /// Endpoint modes use selected segments; the other modes have a named text title.
     func panelTitle(_ title: String) -> XCUIElement {
-        app.staticTexts.matching(
+        if title == "Scenarios" || title == "Traffic" {
+            return InspectorPage(app: app).tab(title.lowercased())
+        }
+        return app.staticTexts.matching(
             NSPredicate(
-                format: "(identifier == %@ OR identifier == %@) AND (value == %@ OR label == %@)",
-                "ds.panelheader.inspector", "ds.panelheader.title.inspector", title, title
+                format: "identifier == %@ AND (value == %@ OR label == %@)",
+                "ds.panelheader.title.inspector", title, title
             )
         ).firstMatch
     }
@@ -522,11 +498,9 @@ struct RequestDetailPage {
     var status: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.status").firstMatch
     }
-    /// Targeted by label, not identifier: the button lives inside `DSPanelHeader`, which stamps its
-    /// own identifier over its children's, so `inspector.closeRequestDetailButton` never reaches the
-    /// accessibility tree. The label is the stable handle here.
+    /// The inspector's back action returns to the previous selection context.
     var closeButton: XCUIElement {
-        app.buttons["Close request details"].firstMatch
+        app.buttons["inspector.closeRequestDetailButton"].firstMatch
     }
     var bodySearchField: XCUIElement {
         app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch
@@ -560,7 +534,13 @@ struct RequestDetailPage {
     /// Waits for the inspector's header to read `title` — the signal that the panel switched modes.
     @discardableResult
     func waitForPanelTitle(_ title: String, timeout: TimeInterval = 5) -> Bool {
-        panelTitle(title).waitForExistence(timeout: timeout)
+        let element = panelTitle(title)
+        if title == "Scenarios" || title == "Traffic" {
+            return UITestApp.waitUntil(timeout: timeout) {
+                element.exists && (element.isSelected || element.value.map { String(describing: $0) } == "1")
+            }
+        }
+        return element.waitForExistence(timeout: timeout)
     }
 }
 
@@ -568,6 +548,26 @@ struct RequestDetailPage {
 @MainActor
 struct InspectorPage {
     let app: XCUIApplication
+
+    func element(_ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+    var header: XCUIElement { element("inspector.header") }
+    func tab(_ name: String) -> XCUIElement {
+        let identified = element("inspector.tab.\(name)")
+        if identified.exists { return identified }
+        let label = name == "traffic" ? "Show the requests this endpoint answered" : "Show this endpoint's scenarios"
+        return app.radioButtons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+    }
+    var trafficList: XCUIElement { element("endpointTraffic.list") }
+    var trafficRows: XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "endpointTraffic.row."))
+    }
+    func journeyRow(_ name: String) -> XCUIElement { element("inspector.journey.\(name)") }
+    func spoken(_ element: XCUIElement) -> String {
+        guard element.exists else { return "" }
+        return "\(element.label) \(element.value.map(String.init(describing:)) ?? "")"
+    }
 
     var addScenarioButton: XCUIElement {
         // Inspector content on macOS may be in a separate accessibility container.

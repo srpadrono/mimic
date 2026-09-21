@@ -81,8 +81,8 @@ public final class PanelLayoutStore: @unchecked Sendable {
         /// The inspector's floor and preferred width, handed to `.inspectorColumnWidth`. They are
         /// constants rather than stored values because AppKit restores that column's width with the
         /// window — see the note on `PanelLayout`.
-        public static let minimumInspectorWidth: CGFloat = 220
-        public static let idealInspectorWidth: CGFloat = 280
+        public static let minimumInspectorWidth: CGFloat = 260
+        public static let idealInspectorWidth: CGFloat = 300
 
         /// A last-resort sanity ceiling for a stored value, guarding against a hand-edited plist
         /// rather than against a normal drag. Layout does the real clamping.

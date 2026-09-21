@@ -601,6 +601,12 @@ struct WorkspaceFeatureLogicTests {
         #expect(
             InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: false, hasOverview: false) == .empty
         )
+        #expect(InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: false,
+                                        hasOverview: true, hasJourney: true) == .journey)
+        #expect(InspectorPanelView.mode(hasRequestDetail: true, hasEndpoint: false,
+                                        hasOverview: true, hasJourney: true) == .request)
+        #expect(InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: true,
+                                        hasOverview: true, selectedRequestCount: 2) == .selection)
         #expect(InspectorPanelView.Mode.request.title == "Request")
     }
 }

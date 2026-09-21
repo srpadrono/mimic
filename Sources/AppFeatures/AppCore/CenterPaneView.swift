@@ -30,7 +30,8 @@ struct CenterPaneView: View {
         //
         // Stated once here, so every branch of the switch above lands on the same surface and a
         // future third branch cannot forget to.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Keep the leading edge visible when a form's fixed controls exceed a narrow pane.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(DSColors.dominant)
     }
 

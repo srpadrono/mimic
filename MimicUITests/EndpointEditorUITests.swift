@@ -239,35 +239,18 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.waitUntil(timeout: timeout) { self.sidebarEndpointRows().count == count }
     }
 
-    /// The empty state's own "Add endpoint", separated from the navigator strip's by the identifier
-    /// each one *is* wearing rather than by list order.
-    ///
-    /// `WorkspacePage.addEndpointButton` is `app.buttons["Add endpoint"].firstMatch` and matches
-    /// either, on purpose — for a helper that just wants the sheet open, either is a correct answer.
-    /// It is the wrong query for a test whose subject is *which* button was pressed. `DSTabStrip`
-    /// stamps `ds.tabstrip.navigator` over every descendant, so the strip's copy is the one that
-    /// reports that name and the empty state's copy is the one that does not.
+    /// Distinguish the empty-state action from the header's separate creation button.
     @MainActor
     private var emptyStateAddEndpointButton: XCUIElement {
-        app.buttons.matching(
-            NSPredicate(
-                format: "label == %@ AND identifier != %@",
-                "Add endpoint", "ds.tabstrip.navigator"
-            )
-        ).firstMatch
+        app.buttons.matching(NSPredicate(
+            format: "label == %@ AND identifier != %@",
+            "Add endpoint", "sidebar.addEndpointButton"
+        )).firstMatch
     }
 
     @MainActor
     private var navigatorAddEndpointButton: XCUIElement {
-        let flattened = app.buttons.matching(
-            NSPredicate(
-                format: "label == %@ AND identifier == %@",
-                "Add endpoint", "ds.tabstrip.navigator"
-            )
-        ).firstMatch
-        if flattened.exists { return flattened }
-        // If SwiftUI ever stops flattening the strip, the button keeps its own name.
-        return app.buttons["sidebar.addEndpointButton"].firstMatch
+        app.buttons["sidebar.addEndpointButton"].firstMatch
     }
 
     @MainActor

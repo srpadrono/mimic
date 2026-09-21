@@ -270,24 +270,16 @@ struct WorkspaceShellPage {
     var endpointsTab: XCUIElement { navigatorTab(labelled: "Show endpoints") }
     var journeysTab: XCUIElement { navigatorTab(labelled: "Show journeys") }
 
-    /// A navigator tab, matched by label **and** pinned to the strip.
-    ///
-    /// The label alone is what `JourneysNavigatorPage.tab` uses, and it is enough right up until the
-    /// inspector's overview offers its own "Show journeys" button — then `firstMatch` picks whichever
-    /// the tree listed first. The identifier half removes that coin flip: `DSTabStrip` stamps
-    /// `ds.tabstrip.navigator` over its buttons, and the per-tab name it passes down is kept as an
-    /// alternative in case a future SwiftUI stops flattening it.
+    /// Native segmented pickers expose radio buttons; keep the query scoped to the header.
     private func navigatorTab(labelled label: String) -> XCUIElement {
-        app.buttons.matching(
-            NSPredicate(
-                format: "label == %@ AND (identifier == %@ OR identifier == %@ OR identifier == %@)",
-                label,
-                "ds.tabstrip.navigator",
-                "navigator.tab.endpoints",
-                "navigator.tab.journeys"
-            )
-        ).firstMatch
+        let id = label == "Show endpoints" ? "navigator.tab.endpoints" : "navigator.tab.journeys"
+        let named = app.descendants(matching: .any).matching(identifier: id).firstMatch
+        if named.exists { return named }
+        return panel("navigator.header").descendants(matching: .radioButton)
+            .matching(NSPredicate(format: "label == %@ OR label == %@", label,
+                label == "Show endpoints" ? "Endpoints" : "Journeys")).firstMatch
     }
+
 }
 
 /// Page object for the menu bar.
@@ -520,11 +512,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// collapsed split item publishes no children — the same fact
     /// `testUnmatchedBadgeOpensTheLogFilteredToUnmatched` leans on for the request log.
     @MainActor
-    private var inspectorHeader: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(identifier: "ds.panelheader.inspector")
-            .firstMatch
-    }
+    private var inspectorHeader: XCUIElement { InspectorPage(app: app).header }
 
     /// Gives the centre pane the width the drawer's header needs, before one of its controls is
     /// clicked.
@@ -749,8 +737,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createProjectViaUI(name: "Tab Strip")
 
         XCTAssertTrue(shell.journeysTab.waitForExistence(timeout: 5), "The strip should offer both tabs")
-        XCTAssertEqual(shell.journeysTab.frame.height, 26, accuracy: 1)
-        XCTAssertEqual(shell.endpointsTab.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(shell.journeysTab.frame.height, shell.endpointsTab.frame.height, accuracy: 1)
+        XCTAssertEqual(shell.journeysTab.frame.midY, shell.endpointsTab.frame.midY, accuracy: 1)
         shell.journeysTab.click()
 
         // `DSEmptyState` flattens its leaves, so the heading's own identifier never lands — the
@@ -1184,16 +1172,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     /// INSPOV-07, INSPOV-16, INSPOV-17, SRVWELL-08, SRVWELL-09.
     ///
-    /// A project with no endpoints at all, so every request is unmatched *and* nothing is selected —
-    /// which is the only state in which the inspector's multi-selection fallback is observable. With
-    /// an endpoint selected the panel falls back to that endpoint's scenarios instead, and a test
-    /// that asserted "Overview" there would be asserting the wrong rule.
+    /// A project with no endpoints makes the unmatched overview and explicit request selection
+    /// states observable without an endpoint selection taking precedence.
     @MainActor
     func testOverviewReportsUnmatchedTrafficAndSurvivesAMultiRowSelection() async throws {
         let port = 62112
 
         launchShell()
         createProjectViaUI(name: "Unmatched", port: port)
+        workspace.fillWindow()
         startServer(onPort: port)
 
         await sendRequest(port: port, path: "/api/missing", method: "GET", body: nil)
@@ -1248,8 +1235,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
             rows[1].click()
         }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Overview"),
-            "A selection of several requests is not one request, so the panel falls back"
+            requestDetail.waitForPanelTitle("Requests"),
+            "A multiple selection reports its scope instead of showing an unrelated overview"
         )
 
         // INSPOV-17 — clearing the log takes the detail with it.
@@ -1298,7 +1285,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         showInspectorIfHidden()
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Overview"),
-            "A cleared log should not leave the inspector showing a request that is gone"
+            "A cleared log should show Overview; header: "
+                + InspectorPage(app: app).spoken(InspectorPage(app: app).element("ds.panelheader.title.inspector"))
         )
     }
 
@@ -1310,8 +1298,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         showJourneysNavigator()
         addTemplate("retry-after-failure", activate: true)
 
-        // Nothing is selected in the endpoints navigator, so the inspector is still the overview —
-        // the mode the active-journey rows live in.
+        shell.endpointsTab.click()
+        // With no endpoint selected, the overview describes the active journey.
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Overview"),
             "The inspector should still be showing the project overview"
@@ -1330,16 +1318,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "…and count the journeys the project now has — \(overview.rowDescription("journeys"))"
         )
 
-        // SHELL-09 — the tab badges the running journey. `DSTabStrip` puts the count in the button's
-        // accessibility value, not in a separate element.
-        let journeysTab = shell.journeysTab
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 8) { (journeysTab.value as? String) == "1" },
-            "The Journeys tab should badge the active journey"
+            NavigatorPage(app: app).activeJourney.waitForExistence(timeout: 5),
+            "The footer should expose the running journey from either navigator mode"
         )
 
-        // INSPOV-06 — from the other tab, the overview's button is the way back.
-        shell.endpointsTab.click()
+        // INSPOV-06 — the overview offers a path back to journeys.
         XCTAssertTrue(
             workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
             "The navigator should be showing endpoints again"
@@ -1365,6 +1349,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         launchShell()
         createProjectViaUI(name: "Endpoint Traffic", port: port)
+        workspace.fillWindow()
         createEndpointViaUI(name: "Users", path: "/api/users")
         startServer(onPort: port)
 
@@ -1377,18 +1362,18 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
 
         // The label is stable across the icon-only and icon-and-title presentations.
-        let trafficTab = app.buttons["Show the requests this endpoint answered"].firstMatch
+        let trafficTab = InspectorPage(app: app).tab("traffic")
         XCTAssertTrue(
             trafficTab.waitForExistence(timeout: 5),
             "The inspector should offer a Traffic tab for the selected endpoint"
         )
-        XCTAssertEqual(trafficTab.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(InspectorPage(app: app).header.frame.midY, shell.panel("navigator.header").frame.midY, accuracy: 1)
         let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         evidence.name = "inspector-adaptive-controls"
         evidence.lifetime = .keepAlways
         add(evidence)
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 10) { (trafficTab.value as? String) == "2" },
+            UITestApp.waitUntil(timeout: 10) { trafficTab.label.contains("2 requests") },
             "The tab should badge how many requests this endpoint answered"
         )
 

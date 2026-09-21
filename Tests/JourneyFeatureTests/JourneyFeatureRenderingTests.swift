@@ -90,20 +90,16 @@ struct JourneyFeatureRenderingTests {
     }
 
     private func emptyNavigator(
-        activeJourneyID: UUID?,
-        activeProgress: String?
+        activeJourneyID: UUID?
     ) -> JourneyNavigatorList {
         JourneyNavigatorList(
             journeys: [],
             activeJourneyID: activeJourneyID,
-            activeProgress: activeProgress,
             selectedJourneyID: .constant(nil),
             onActivate: { _ in },
             onAdd: {},
             onDuplicate: { _ in },
-            onDelete: { _ in },
-            onRestart: {},
-            onAdvance: {}
+            onDelete: { _ in }
         )
     }
 
@@ -126,66 +122,28 @@ struct JourneyFeatureRenderingTests {
         ) { _, _ in }
     }
 
-    // MARK: - The run strip
-
-    /// The strip is one rung tall whether or not the run has reported where it is.
-    ///
-    /// `activeProgress` is nil until the engine's cursor has been read back, and that read is a
-    /// `Task` — so every activation renders this bar twice, once without the progress line and once
-    /// with it. Under a `minHeight` it measured 30 and then 36, which stepped the entire journey list
-    /// down six points at the moment a run started.
-    ///
-    /// Asserted against each other *and* against the rung, because a strip that is stable at the
-    /// wrong height is a bar that has quietly left `DSBarHeight` behind. The rung arrives as a bare
-    /// `Color` fixed to the token — the way `panelChromeSharesOneHeight` measures panel chrome — so
-    /// the comparison cannot drift from the ladder and cannot be broken by anything the hosting layer
-    /// adds to both sides equally.
-    @Test("The run strip keeps one height whether or not it has progress to show")
-    func runStripKeepsOneHeightWithAndWithoutProgress() {
-        let measure = CGSize(width: 260, height: 120)
-        let rung = render(Color.clear.frame(height: DSBarHeight.controlRow), size: measure)
-        let withoutProgress = render(
-            JourneyNavigatorRunStrip(
-                journeyName: "Retry after failure",
-                progress: nil,
-                onRestart: {},
-                onAdvance: {},
-                onDeactivate: {}
-            ),
-            size: measure
-        )
-        let withProgress = render(
-            JourneyNavigatorRunStrip(
-                journeyName: "Retry after failure",
-                progress: "Step 2 of 3",
-                onRestart: {},
-                onAdvance: {},
-                onDeactivate: {}
-            ),
-            size: measure
-        )
-
-        #expect(withProgress.height == withoutProgress.height)
-        #expect(withProgress.height == rung.height)
+    @Test("The shared bottom filter keeps its height with scope and active-state controls")
+    func navigatorFooterKeepsOneHeightAcrossModes() {
+        let endpoints = render(DSNavigatorFooter(
+            text: .constant(""), scopeID: .constant("any"),
+            scopes: [.init(id: "any", title: "Any"), .init(id: "GET", title: "GET")],
+            placeholder: "Filter endpoints", identifier: "test.endpoints"
+        ) { Color.clear }, size: CGSize(width: 240, height: 100))
+        let journeys = render(DSNavigatorFooter(
+            text: .constant("Retry"), scopeID: .constant("any"), scopes: [],
+            placeholder: "Filter journeys", identifier: "test.journeys"
+        ) { Image(systemName: "play.circle.fill") }, size: CGSize(width: 240, height: 100))
+        #expect(endpoints.height == 42)
+        #expect(journeys.height == 42)
     }
 
-    /// A journey id this list does not hold draws no strip.
-    ///
-    /// The banner's whole meaning is "something is overriding *these* endpoints", so it is keyed on
-    /// finding the active journey among the ones on screen rather than on `activeJourneyID != nil`.
-    /// The two renders differ only in an id that names nothing and a progress string that belongs to
-    /// it, and they have to measure the same: anything else means the sidebar announces a run that
-    /// this project is not having.
-    ///
-    /// The empty branch is what is measured, because it is the one that draws no `List` — a
-    /// scroll-backed view reports a fitting size of its own choosing, which is why the populated
-    /// navigator is hosted in the smoke test below rather than measured here.
-    @Test("An active journey the navigator does not hold draws no run strip")
-    func unheldActiveJourneyDrawsNoRunStrip() {
+    /// An unrelated active identifier must not change an empty navigator.
+    @Test("An unknown active journey leaves the empty navigator unchanged")
+    func unknownActiveJourneyLeavesEmptyNavigatorUnchanged() {
         let measure = CGSize(width: 260, height: 340)
-        let idle = render(emptyNavigator(activeJourneyID: nil, activeProgress: nil), size: measure)
+        let idle = render(emptyNavigator(activeJourneyID: nil), size: measure)
         let stranger = render(
-            emptyNavigator(activeJourneyID: UUID(), activeProgress: "Step 2 of 3"),
+            emptyNavigator(activeJourneyID: UUID()),
             size: measure
         )
 
@@ -194,24 +152,11 @@ struct JourneyFeatureRenderingTests {
 
     // MARK: - The navigator row
 
-    /// Activating a journey must not resize its row.
-    ///
-    /// The row redraws with its name at medium weight and its ring filled, and the list around it
-    /// holds still — a sidebar whose rows changed height as you started and stopped a run would
-    /// shuffle every other journey under the pointer that just clicked one.
-    ///
-    /// The floor is the other half: the ring is a 14pt circle inside a `DSControlHeight.row` hit
-    /// target, and that target is the only reason this indicator is a control you can hit rather than
-    /// a dot you can see. With `DSSpacing.xs` of padding above and below it, a row measuring less
-    /// than the two together has lost the target — the 13pt name alone would still fit.
+    /// Activation changes the icon, while the row and its neighbours keep their geometry.
     @Test("A journey row is one height whether or not it is the active one")
     func journeyRowKeepsOneHeightWhenActivated() {
         let measure = CGSize(width: 260, height: 60)
         let journey = makeJourney()
-        let target = render(
-            Color.clear.frame(height: DSControlHeight.row + DSSpacing.xs * 2),
-            size: measure
-        )
         let inactive = render(
             JourneyNavigatorRow(
                 journey: journey,
@@ -219,7 +164,7 @@ struct JourneyFeatureRenderingTests {
                 onToggleActivation: {},
                 onDuplicate: {},
                 onDelete: {}
-            ),
+            ).dsNavigatorRow(),
             size: measure
         )
         let active = render(
@@ -229,12 +174,12 @@ struct JourneyFeatureRenderingTests {
                 onToggleActivation: {},
                 onDuplicate: {},
                 onDelete: {}
-            ),
+            ).dsNavigatorRow(),
             size: measure
         )
 
         #expect(active.height == inactive.height)
-        #expect(inactive.height >= target.height)
+        #expect(inactive.height == 26)
     }
 
     // MARK: - The step row
@@ -393,14 +338,11 @@ struct JourneyFeatureRenderingTests {
             JourneyNavigatorList(
                 journeys: [journey, empty],
                 activeJourneyID: journey.id,
-                activeProgress: "Step 2 of 3",
                 selectedJourneyID: .constant(journey.id),
                 onActivate: { _ in },
                 onAdd: {},
                 onDuplicate: { _ in },
-                onDelete: { _ in },
-                onRestart: {},
-                onAdvance: {}
+                onDelete: { _ in }
             ),
             size: CGSize(width: 260, height: 340)
         )

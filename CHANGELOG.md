@@ -7,6 +7,17 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Improved
 
+- Give Endpoints and Journeys a shared native navigator: a segmented mode picker, aligned Add
+  actions, uniform 26-point rows, compact endpoint disclosure groups, and a pinned bottom filter.
+  Preserve each mode's filter while switching; retain names for duplicate routes and show full
+  identities in tooltips. Journey execution controls live in the editor, with an active-journey
+  indicator in either navigator that reveals the current run without restarting it. Group and step
+  counts sit beside their names, with gentle separation between endpoint groups.
+- Unify the inspector's spacing and sections, simplify scenario activation to one checkmark, and
+  use native Scenarios/Traffic tabs. Returning from request details preserves the traffic list.
+  Show the selected journey's settings separately from the active run; identify multi-request
+  selections explicitly. The inspector now defaults to 300 points and resizes down to 260.
+
 - Keep project identity and a two-line server summary together, separated by a padded vertical
   divider. Show a computer icon and Local mock subtitle below the project name, using the same
   space for save feedback.

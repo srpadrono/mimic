@@ -13,10 +13,10 @@ struct SidebarView: View {
     let onAddEndpoint: () -> Void
 
     @State private var deleteTarget: EndpointDeleteTarget?
-    @State private var searchText = ""
+    @Binding private var searchText: String
     /// Which HTTP method the list is restricted to. `Self.anyMethodScopeID` means no restriction.
-    @State private var methodScopeID = SidebarView.anyMethodScopeID
-    @State private var collapsedSections: Set<String> = []
+    @Binding private var methodScopeID: String
+    @Binding private var collapsedSections: Set<String>
     @State private var groupedSections: [EndpointGroup] = []
     @State private var ungroupedEndpoints: [Endpoint] = []
     @State private var searchDebounceTask: Task<Void, Never>?
@@ -32,7 +32,10 @@ struct SidebarView: View {
         selectedEndpointID: Binding<UUID?>,
         onDeleteEndpoint: @escaping (UUID) -> Void,
         onDuplicateEndpoint: @escaping (UUID) -> UUID?,
-        onAddEndpoint: @escaping () -> Void
+        onAddEndpoint: @escaping () -> Void,
+        searchText: Binding<String> = .constant(""),
+        methodScopeID: Binding<String> = .constant(SidebarView.anyMethodScopeID),
+        collapsedSections: Binding<Set<String>> = .constant([])
     ) {
         self.init(
             projectName: projectName,
@@ -44,6 +47,9 @@ struct SidebarView: View {
             initialSearchText: "",
             initialCollapsedSections: []
         )
+        self._searchText = searchText
+        self._methodScopeID = methodScopeID
+        self._collapsedSections = collapsedSections
     }
 
     init(
@@ -62,28 +68,13 @@ struct SidebarView: View {
         self.onDeleteEndpoint = onDeleteEndpoint
         self.onDuplicateEndpoint = onDuplicateEndpoint
         self.onAddEndpoint = onAddEndpoint
-        _searchText = State(initialValue: initialSearchText)
-        _collapsedSections = State(initialValue: initialCollapsedSections)
+        _searchText = .constant(initialSearchText)
+        _methodScopeID = .constant(Self.anyMethodScopeID)
+        _collapsedSections = .constant(initialCollapsedSections)
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            if !endpoints.isEmpty {
-                // Pinned above the list, never inside it. It used to be the list's first row, so it
-                // scrolled away exactly when a long list made it useful. The scope selector is the
-                // other half of Xcode's filter bar: filtering is more useful when you can also say
-                // what you are filtering by.
-                DSFilterField(
-                    text: $searchText,
-                    scopeID: $methodScopeID,
-                    scopes: Self.methodScopes,
-                    placeholder: "Filter endpoints",
-                    identifier: "sidebar.filter"
-                )
-                .padding(.horizontal, DSSpacing.sm)
-                .padding(.vertical, DSSpacing.sm)
-            }
-
             if endpoints.isEmpty {
                 DSEmptyState(
                     systemImage: NavigatorTab.endpoints.systemImage,
@@ -102,7 +93,7 @@ struct SidebarView: View {
             }
         }
         .navigationTitle(projectName ?? "Mimic")
-        .frame(minWidth: 240)
+        .frame(minWidth: DSNavigatorMetrics.minimumWidth)
         .onAppear { updateSections() }
         .onChange(of: searchText) { _, _ in updateSections(debounce: true) }
         .onChange(of: methodScopeID) { _, _ in updateSections() }
@@ -145,86 +136,76 @@ struct SidebarView: View {
     @ViewBuilder
     private var endpointList: some View {
         List(selection: $selectedEndpointID) {
-            // Gated on the *result*, not on the query. Filtering by method scope alone — pick DELETE
-            // in a project with no DELETE routes — empties both arrays while `searchText` is still
-            // "", so the old condition fell through to the `else` and rendered a list with nothing
-            // in it: no heading, no explanation, just a blank panel that reads as a broken app.
             if groupedSections.isEmpty && ungroupedEndpoints.isEmpty {
-                Section {
-                    Text(noMatchesMessage)
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .accessibilityIdentifier("sidebar.noMatches")
-                }
+                Text(noMatchesMessage)
+                    .lineLimit(1)
+                    .help(noMatchesMessage)
+                    .font(DSTypography.label)
+                    .foregroundStyle(.secondary)
+                    .dsNavigatorRow()
+                    .selectionDisabled()
+                    .accessibilityIdentifier("sidebar.noMatches")
             } else {
                 ForEach(groupedSections, id: \.name) { section in
-                    Section {
-                        if !collapsedSections.contains(section.name) {
-                            ForEach(section.endpoints) { endpoint in
-                                EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
-                                    .tag(endpoint.id)
-                                    .badge("")
-                                    .contextMenu { endpointContextMenu(endpoint) }
-                            }
+                    groupRow(section)
+                        .padding(.top, section.name == groupedSections.first?.name ? 0 : DSSpacing.smPlus)
+                    if !collapsedSections.contains(section.name) {
+                        ForEach(section.endpoints) { endpoint in
+                            endpointRow(endpoint, indented: true)
                         }
-                    } header: {
-                        Button {
-                            toggleSection(section.name)
-                        } label: {
-                            HStack(spacing: DSSpacing.xs) {
-                                Image(systemName: collapsedSections.contains(section.name) ? "chevron.right" : "chevron.down")
-                                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                                    .frame(width: DSGlyph.control)
-                                    .accessibilityHidden(true)
-                                Image(systemName: "folder.fill")
-                                    .font(.system(size: DSGlyph.inline))
-                                    .accessibilityHidden(true)
-                                Text(section.name)
-                                    .font(DSTypography.label)
-                                    .lineLimit(1)
-                                Spacer(minLength: DSSpacing.xs)
-                                Text("\(section.endpoints.count)")
-                                    .font(DSTypography.caption)
-                            }
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.dsPlain)
-                        .accessibilityIdentifier("sidebar.group.\(section.name)")
-                        .accessibilityLabel("\(collapsedSections.contains(section.name) ? "Expand" : "Collapse") \(section.name)")
-                        .accessibilityValue("\(section.endpoints.count) endpoints")
                     }
                 }
-
-                if !ungroupedEndpoints.isEmpty {
-                    if groupedSections.isEmpty {
-                        ForEach(ungroupedEndpoints) { endpoint in
-                            EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
-                                .tag(endpoint.id)
-                                .badge("")
-                                .contextMenu { endpointContextMenu(endpoint) }
-                        }
-                    } else {
-                        // The header spelled out rather than `Section("Ungrouped")`, which builds
-                        // exactly this `Text` and gives it nowhere to hang an identifier. The name
-                        // matches the grouped headers above — `sidebar.group.<name>` — because to a
-                        // test this is the same kind of thing: the heading over a run of rows.
-                        Section {
-                            ForEach(ungroupedEndpoints) { endpoint in
-                                EndpointSidebarRow(endpoint: endpoint, isSelected: endpoint.id == selectedEndpointID)
-                                    .tag(endpoint.id)
-                                    .badge("")
-                                    .contextMenu { endpointContextMenu(endpoint) }
-                            }
-                        } header: {
-                            Text("Ungrouped")
-                                .accessibilityIdentifier("sidebar.group.ungrouped")
-                        }
-                    }
+                ForEach(ungroupedEndpoints) { endpoint in
+                    endpointRow(endpoint, indented: false)
                 }
             }
         }
-        .listStyle(.sidebar)
+        .dsNavigatorList()
+        .accessibilityIdentifier("sidebar.endpointList")
+    }
+
+    private func endpointRow(_ endpoint: Endpoint, indented: Bool) -> some View {
+        EndpointSidebarRow(
+            endpoint: endpoint,
+            isSelected: endpoint.id == selectedEndpointID,
+            showsName: endpoints.contains {
+                $0.id != endpoint.id && $0.method == endpoint.method && $0.path == endpoint.path
+                    && $0.graphqlOperation == endpoint.graphqlOperation
+            }
+        )
+        .dsNavigatorRow(indented: indented)
+        .tag(endpoint.id)
+        .contextMenu { endpointContextMenu(endpoint) }
+    }
+
+    private func groupRow(_ section: EndpointGroup) -> some View {
+        Button { toggleSection(section.name) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
+                Image(systemName: collapsedSections.contains(section.name) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                    .frame(width: DSNavigatorMetrics.iconSlot)
+                Image(systemName: "folder")
+                    .font(.system(size: DSGlyph.controlProminent))
+                    .frame(width: DSNavigatorMetrics.iconSlot)
+                Text(section.name)
+                    .font(DSTypography.controlLabelQuiet)
+                    .lineLimit(1)
+                Text("· \(section.endpoints.count)")
+                    .font(DSTypography.label)
+                    .monospacedDigit()
+                    .fixedSize()
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPlain)
+        .dsNavigatorRow()
+        .selectionDisabled()
+        .help(section.name)
+        .accessibilityIdentifier("sidebar.group.\(section.name)")
+        .accessibilityLabel("\(collapsedSections.contains(section.name) ? "Expand" : "Collapse") \(section.name)")
+        .accessibilityValue("\(section.endpoints.count) endpoints")
     }
 
     @ViewBuilder
@@ -330,7 +311,7 @@ extension SidebarView {
     /// Scope options for the filter bar. Only the methods an endpoint can actually be, plus "Any".
     static var methodScopes: [DSFilterField.Scope] {
         [DSFilterField.Scope(id: anyMethodScopeID, title: "Any")]
-            + [HTTPMethod.get, .post, .put, .patch, .delete].map {
+            + HTTPMethod.allCases.map {
                 DSFilterField.Scope(id: $0.rawValue, title: $0.rawValue)
             }
     }
@@ -376,36 +357,12 @@ enum SidebarQuery {
     }
 }
 
-/// Sidebar row — inline method badge + path, single line.
+/// Compact method and route, with names shown when otherwise identical routes need disambiguation.
 struct EndpointSidebarRow: View {
     let endpoint: Endpoint
-
-    /// Whether this row is the selected one.
-    ///
-    /// **A `List` row is not told.** Selection lives in `List(selection:)` and AppKit draws the fill,
-    /// but the content inside never learns about it — so this row's path stayed `labelPrimary` and
-    /// its trailing name stayed `labelSecondary` *over* the selection fill, and a selected row read
-    /// as unselected content with colour painted underneath it. A Mac list feels solid because the
-    /// whole row's foreground flips; flipping it is what this flag is for.
     var isSelected: Bool = false
+    var showsName: Bool = false
 
-    /// The path's colour. `.primary` when selected, so SwiftUI resolves it against whatever the
-    /// selection fill actually is — including the *unfocused* grey one, which a hard-coded white
-    /// would get wrong the moment focus moved to the editor.
-    private var pathColour: Color { isSelected ? .primary : DSColors.labelPrimary }
-
-    /// The trailing name, one step quieter, by the same mechanism.
-    private var subtitleColour: Color { isSelected ? .secondary : DSColors.labelSecondary }
-
-    /// The method badge keeps its own hue when selected, deliberately. Xcode does the same with the
-    /// file icons in its navigator: the badge is a token you recognise by colour, not prose whose
-    /// legibility depends on the bed under it.
-
-    /// The endpoint's name, when it adds something the path above it has not already said.
-    ///
-    /// Names created from a logged request read "POST /api/orders", and the sidebar's own creation
-    /// flow suggests the same shape — so for most rows the name is the line above it with a method
-    /// glued on. Printing that twice is noise; printing a name someone actually chose is not.
     nonisolated static func subtitle(for endpoint: Endpoint) -> String? {
         let name = endpoint.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
@@ -422,53 +379,33 @@ struct EndpointSidebarRow: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            DSMethodBadge(method: endpoint.method.rawValue, size: .compact, identifier: endpoint.id.uuidString)
-                .frame(width: 58)
+            Text(endpoint.method.rawValue)
+                .font(DSTypography.codeSmall)
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .frame(width: DSNavigatorMetrics.methodWidth, alignment: .leading)
+                .accessibilityLabel("\(endpoint.method.rawValue) method")
 
-            // One line, with the secondary fact trailing — Xcode's shape, and measured against it.
-            // Stacking the name under the path doubled the row to 34pt against Xcode's 17, halving
-            // how many endpoints fit. A trailing column costs nothing vertically and yields first
-            // when a path is long, which is exactly what Xcode's own status column does.
-            //
-            // The name has to be *somewhere*, though: a realistic project has two endpoints on
-            // `/api/v2/orders` and two on `/api/v2/orders/{id}`, so without it half the rows differ
-            // only by their method badge.
-            Text(endpoint.path)
+            Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : $0 } ?? endpoint.path)
                 .font(DSTypography.code)
-                .foregroundStyle(pathColour)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                // The path outranks the name, stated on the path rather than as a negative priority
-                // on the name — see the note there.
-                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let operation = endpoint.graphqlOperation, !operation.isEmpty {
-                // Every GraphQL mock shares one path; without the operation the sidebar would be a
-                // column of identical rows, so this one never yields.
-                Text(operation)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.accentText)
-                    .lineLimit(1)
-            } else if let name = Self.subtitle(for: endpoint) {
-                Spacer(minLength: DSSpacing.sm)
-
+            if showsName, let name = Self.subtitle(for: endpoint) {
                 Text(name)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(subtitleColour)
+                    .font(DSTypography.label)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                    // Yields before the path does — but *not* via `.layoutPriority(-1)`, which was
-                    // here and does not do that. The `Spacer` above sits at default priority, so it
-                    // claims the slack first and the name is proposed nothing: it disappeared
-                    // instead of truncating, in the rows the comment above says need it most. The
-                    // path carries `.layoutPriority(1)` instead, and this cap keeps a long name from
-                    // crowding it.
-                    .frame(maxWidth: 120, alignment: .trailing)
+                    .frame(maxWidth: DSNavigatorMetrics.metadataWidth, alignment: .trailing)
+                    .layoutPriority(1)
             }
         }
-        .padding(.vertical, 3)
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
-        .accessibilityElement(children: .contain)
+        .help("\(endpoint.method.rawValue) \(endpoint.path)\n\(endpoint.name)"
+            + (endpoint.graphqlOperation.map { "\n\($0)" } ?? ""))
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("endpoint-\(endpoint.id.uuidString)")
+        .accessibilityLabel("\(endpoint.method.rawValue) \(endpoint.path), \(endpoint.name)"
+            + (endpoint.graphqlOperation.map { ", \($0)" } ?? ""))
     }
 }

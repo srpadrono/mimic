@@ -141,15 +141,10 @@ struct RequestDetailInspector: View {
                     }
                 }
             }
-            .background(DSColors.dominant)
 
             copyBar
         }
-        // No surface of its own. `InspectorPanelView` paints `secondary` for every mode now, so
-        // painting it again here would be a fill over an identical fill — and while this view was
-        // the *only* one painting it, the inspector changed colour depending on what you had
-        // clicked. If this view is ever hosted somewhere that is not the inspector, that host paints
-        // the surface, the same way the inspector does.
+        // Every inspector mode inherits the same native column material.
         // The tab is per-request state: carrying "Body" over to the next request you click is right,
         // but carrying a search term for a payload you are no longer looking at is not.
         .onChange(of: log.id) { _, _ in searchText = "" }
@@ -190,7 +185,10 @@ struct RequestDetailInspector: View {
     private var requestLine: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             HStack(spacing: DSSpacing.sm) {
-                DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: "requestDetail.method")
+                Text(log.method.rawValue)
+                    .font(DSTypography.codeSmall)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("requestDetail.method")
                 statusPill
                 Spacer(minLength: 0)
                 Text(log.timestamp, style: .time)
@@ -216,33 +214,16 @@ struct RequestDetailInspector: View {
         .padding(.horizontal, DSSpacing.md)
         .padding(.vertical, DSSpacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Off the `DSBarHeight` ladder on purpose, and the only bar in the window that is. Two lines
-        // of path at 10pt monospaced plus the badge line comes to 46pt with a short path and 59 with
-        // a wrapped one — higher than every rung, because this is the one bar carrying a value rather
-        // than labelling something. Pinning it to 32 would cost it the second line, which is the line
-        // that tells two calls to the same route apart.
-        //
-        // `band`, not `secondary`. The panel header directly above is `secondary` and closes with a
-        // 12% hairline; against an identical tone that rule was doing nothing, and the header and this
-        // row read as one three-line block rather than as a header above the thing it names. A step
-        // off the panel surface gives the hairline two tones to sit between.
-        .background(DSColors.band)
     }
 
-    /// `DSStatusPill` carries the convention this view used to hand-draw twice over: the failure
-    /// arm ("drop", "timeout" — `destructiveText` on a tint of itself, always filled, because the
-    /// base red reads 4.07:1 on a panel and 3.95 on the `band` this row actually is), and the
-    /// `>= 400` fill gate for codes (`accentText`, the 3xx, is the arm that cannot survive its own
-    /// fill: 4.35:1 on this `band`). A log with neither a failure label nor a code — nothing came
-    /// back at all — takes the component's em-dash failure arm; it used to render `?? 0` here, a
-    /// status no server ever sent, in secondary grey.
+    /// Error text keeps its semantic color; successful responses do not need a colored badge.
     @ViewBuilder
     private var statusPill: some View {
         if let failureLabel = log.failureLabel {
-            DSStatusPill(failureLabel: failureLabel)
+            DSInspectorStatus(statusCode: nil, failure: failureLabel)
                 .accessibilityIdentifier("requestDetail.failure")
         } else {
-            DSStatusPill(statusCode: log.responseStatusCode)
+            DSInspectorStatus(statusCode: log.responseStatusCode)
                 .accessibilityIdentifier("requestDetail.status")
         }
     }
@@ -252,7 +233,7 @@ struct RequestDetailInspector: View {
     @ViewBuilder
     private var summaryContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DSSectionHeader("Answered by", identifier: "requestDetail.answeredBy")
+            DSInspectorSectionHeader("Answered by", identifier: "requestDetail.answeredBy")
 
             summaryRow("Outcome", value: log.outcome.label, valueColor: outcomeColor)
             if let name = log.backendName { summaryRow("Backend", value: name) }
@@ -262,7 +243,7 @@ struct RequestDetailInspector: View {
             summaryRow("Endpoint", value: endpointName ?? "\u{2014}")
             summaryRow("Scenario", value: scenarioName ?? "\u{2014}", valueColor: scenarioName != nil ? DSColors.accentText : nil)
 
-            DSSectionHeader("Sizes", identifier: "requestDetail.sizes")
+            DSInspectorSectionHeader("Sizes", identifier: "requestDetail.sizes")
 
             summaryRow("Request body", value: Self.byteSummary(log.requestBody))
             summaryRow(
@@ -288,35 +269,11 @@ struct RequestDetailInspector: View {
         }
     }
 
-    /// Label right-aligned in `InspectorRowMetrics.detailLabelColumn`, value flush left in the rest — the
-    /// same seam the overview draws, so the panel does not re-lay itself out when you click a logged
-    /// request. The `Spacer` this replaces pushed the two halves to opposite edges of a 280pt panel
-    /// and left the values with a ragged right edge.
+    /// Summary, journey and project fields share the same label/value alignment.
     @ViewBuilder
     private func summaryRow(_ label: String, value: String, valueColor: Color? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
-            Text(label)
-                .font(DSTypography.caption)
-                // `labelSecondary`. These are read, not glanced past — at 36% alpha they measure
-                // 2.5:1, and `labelTertiary` is for timestamps and separators.
-                .foregroundStyle(DSColors.labelSecondary)
-                .frame(width: InspectorRowMetrics.detailLabelColumn, alignment: .trailing)
-            Text(value)
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(valueColor ?? DSColors.labelPrimary)
-                .textSelection(.enabled)
-                // An endpoint or scenario name is arbitrary length; wrap it rather than clip it.
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.xs + 1)
-        // Selectable AppKit text can hide its value when SwiftUI combines the row.
-        // Give assistive technology one stable label/value representation.
-        .accessibilityRepresentation {
-            Text("\(label): \(value)")
-                .accessibilityIdentifier("requestDetail.summary.\(label.lowercased())")
-        }
+        DSInspectorValueRow(label, value: value, color: valueColor ?? .primary,
+                            identifier: "requestDetail.summary.\(label.lowercased())")
     }
 
     private var outcomeColor: Color {
@@ -368,7 +325,7 @@ struct RequestDetailInspector: View {
         headers: [String: String],
         emptyMessage: String
     ) -> some View {
-        DSSectionHeader(title, identifier: "requestDetail.headers.\(identifier)")
+        DSInspectorSectionHeader(title, identifier: "requestDetail.headers.\(identifier)")
 
         if headers.isEmpty {
             emptyNote(emptyMessage, identifier: "requestDetail.headers.\(identifier).empty")
@@ -452,7 +409,7 @@ struct RequestDetailInspector: View {
         // Two sections, so laziness would only add the risk of one of them not appearing. The
         // expensive part of a body is its formatting, and that is already off the main actor.
         VStack(alignment: .leading, spacing: 0) {
-            DSSectionHeader("Request body", identifier: "requestDetail.body.request")
+            DSInspectorSectionHeader("Request body", identifier: "requestDetail.body.request")
 
             if let requestBody = log.requestBody, !requestBody.isEmpty {
                 RequestBodyView(payload: requestBody, searchText: searchText, identifier: "request")
@@ -460,7 +417,7 @@ struct RequestDetailInspector: View {
                 emptyNote("No request body", identifier: "requestDetail.body.request.empty")
             }
 
-            DSSectionHeader(responseSectionTitle("body"), identifier: "requestDetail.body.response")
+            DSInspectorSectionHeader(responseSectionTitle("body"), identifier: "requestDetail.body.response")
 
             if let responseBody = log.responseBody, !responseBody.isEmpty {
                 RequestBodyView(payload: responseBody, searchText: searchText, identifier: "response")
@@ -552,12 +509,7 @@ struct RequestDetailInspector: View {
                 }
             }
             .padding(.horizontal, DSSpacing.md)
-            // The panel-header rung, so the bar that closes the inspector carries the weight of the
-            // bars that open every other panel. Not, as this note used to say, so that it lines up
-            // with the status bar beneath it — that bar is gone, and the copy bar is now the bottom
-            // edge of the inspector column.
-            .frame(height: DSBarHeight.panelHeader)
-            .background(DSColors.secondary)
+            .frame(height: DSInspectorMetrics.footerHeight)
         }
     }
 

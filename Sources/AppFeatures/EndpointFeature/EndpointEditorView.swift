@@ -241,7 +241,7 @@ struct EndpointEditorView: View {
         // carry fixed field widths that a narrow centre pane can be smaller than, and without this
         // the whole editor would grow past the pane's trailing edge instead of letting the cards
         // truncate inside it.
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
         .onChange(of: endpoint.activeScenarioID) { syncFromModel() }

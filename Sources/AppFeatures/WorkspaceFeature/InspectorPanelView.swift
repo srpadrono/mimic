@@ -2,16 +2,14 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Inspector panel — request detail, an endpoint's scenarios, or the project overview.
-///
-/// Three modes, in that precedence order. A selected request wins because selecting one is the more
-/// recent, more specific act: you clicked a row in the log expecting to see it, and the endpoint
-/// selection that was already there has not gone anywhere. Clearing the log selection puts the
-/// endpoint back.
+/// Inspector for the current selection. Request details temporarily cover the selected endpoint
+/// or journey; returning restores that context. With no selection the project overview is shown.
 struct InspectorPanelView: View {
     /// The logged request to show. Takes precedence over `endpoint` and `overview` when set.
     let requestDetail: RequestDetailInspector.Context?
     let endpoint: Endpoint?
+    let journey: JourneyInspector.Context?
+    let selectedRequestCount: Int
     /// Project-level facts, shown when nothing is selected so the panel is never dead space.
     let overview: InspectorOverview.Summary?
     let onSaveAsMock: ((UUID) -> Void)?
@@ -83,6 +81,8 @@ struct InspectorPanelView: View {
         endpoint: Endpoint?,
         requestDetail: RequestDetailInspector.Context? = nil,
         overview: InspectorOverview.Summary? = nil,
+        journey: JourneyInspector.Context? = nil,
+        selectedRequestCount: Int = 0,
         endpointTraffic: [RequestLog] = [],
         onShowJourneys: @escaping () -> Void = {},
         onCloseRequestDetail: @escaping () -> Void = {},
@@ -98,6 +98,8 @@ struct InspectorPanelView: View {
         self.endpoint = endpoint
         self.requestDetail = requestDetail
         self.overview = overview
+        self.journey = journey
+        self.selectedRequestCount = selectedRequestCount
         self.endpointTraffic = endpointTraffic
         self.onShowJourneys = onShowJourneys
         self.onCloseRequestDetail = onCloseRequestDetail
@@ -113,6 +115,8 @@ struct InspectorPanelView: View {
     enum Mode: Equatable {
         case request
         case scenarios
+        case journey
+        case selection
         case overview
         case empty
 
@@ -120,6 +124,8 @@ struct InspectorPanelView: View {
             switch self {
             case .request: "Request"
             case .scenarios: "Scenarios"
+            case .journey: "Journey"
+            case .selection: "Requests"
             case .overview: "Overview"
             case .empty: "Inspector"
             }
@@ -129,10 +135,14 @@ struct InspectorPanelView: View {
     static func mode(
         hasRequestDetail: Bool,
         hasEndpoint: Bool,
-        hasOverview: Bool
+        hasOverview: Bool,
+        hasJourney: Bool = false,
+        selectedRequestCount: Int = 0
     ) -> Mode {
         if hasRequestDetail { return .request }
+        if selectedRequestCount > 1 { return .selection }
         if hasEndpoint { return .scenarios }
+        if hasJourney { return .journey }
         if hasOverview { return .overview }
         return .empty
     }
@@ -141,191 +151,128 @@ struct InspectorPanelView: View {
         Self.mode(
             hasRequestDetail: requestDetail != nil,
             hasEndpoint: endpoint != nil,
-            hasOverview: overview != nil
+            hasOverview: overview != nil,
+            hasJourney: journey != nil,
+            selectedRequestCount: selectedRequestCount
         )
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The header is present whether or not something is selected, so the panel keeps its
-            // identity and stays aligned with the sidebar and the request log. Chrome that vanishes
-            // with its content reads as a rendering glitch, and it made the three panels line up
-            // differently depending on what you had clicked.
-            DSPanelHeader(
-                headerTitle,
-                subtitle: headerSubtitle,
-                identifier: "inspector"
-            ) {
-                switch mode {
-                case .request:
-                    // Close this detail, keeping the inspector open on the current navigator's context.
-                    DSPanelHeaderButton(
-                        systemImage: "xmark",
-                        help: "Close request details",
-                        identifier: "inspector.closeRequestDetailButton",
-                        action: onCloseRequestDetail
-                    )
-                case .scenarios:
-                    // The tabs ride in the header rather than in a row of their own. A second 30pt
-                    // strip under the title would have cost the inspector a tenth of its height to
-                    // say something the title already says.
-                    HStack(spacing: DSSpacing.xs) {
-                        DSTabStrip(
-                            tabs: EndpointTab.allCases.map { tab in
-                                DSTabStrip.Tab(
-                                    id: tab.id,
-                                    systemImage: tab.systemImage,
-                                    help: tab.help,
-                                    // The count answers "did anything actually call this?" without
-                                    // making you switch tabs to find out.
-                                    badge: tab == .traffic && !endpointTraffic.isEmpty
-                                        ? endpointTraffic.count
-                                        : nil,
-                                    title: tab.title
-                                )
-                            },
-                            selection: endpointTabBinding,
-                            identifier: "inspector",
-                            // No chrome: this strip sits inside a `DSPanelHeader`, which already
-                            // draws the bar, the `secondary` surface and the 0.5pt bottom rule.
-                            // Drawing them twice composites the hairline with itself — whatever
-                            // `DSColors.separator` is, two of it read roughly twice as dark — so the
-                            // header's bottom edge was visibly heavier under the tabs than under the
-                            // title, with a hard edge at the strip's boundary.
-                            drawsChrome: false
-                        )
-                        // Let the strip receive the header's remaining width so it can collapse
-                        // labels. Embedded strips have no spacer, keeping the Add action nearby.
-
-                        // Only on the tab it acts on — a "+" above a traffic list would have
-                        // nothing to add to.
-                        if endpointTab == .scenarios, let endpoint {
-                            DSPanelHeaderButton(
-                                systemImage: "plus",
-                                help: "Add scenario",
-                                identifier: "inspector.addScenarioButton"
-                            ) {
-                                addScenarioTarget = ScenarioTarget(id: endpoint.id)
-                            }
+            DSInspectorHeader {
+                if mode == .scenarios {
+                    Picker("Endpoint inspector", selection: $endpointTab) {
+                        ForEach(EndpointTab.allCases) { tab in
+                            Text(tab == .traffic && !endpointTraffic.isEmpty ? "Traffic · \(endpointTraffic.count)" : tab.title).tag(tab)
+                                .help(tab.help)
+                                .accessibilityIdentifier("inspector.tab.\(tab.id)")
+                                .accessibilityLabel(tab == .traffic ? "\(tab.help), \(endpointTraffic.count) requests" : tab.help)
                         }
                     }
-                case .overview, .empty:
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .accessibilityIdentifier("inspector.mode")
+                    .accessibilityLabel("Endpoint inspector")
+                    Spacer(minLength: 0)
+                    Group {
+                        if endpointTab == .scenarios, let endpoint {
+                            DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
+                                                identifier: "inspector.addScenarioButton") {
+                                addScenarioTarget = ScenarioTarget(id: endpoint.id)
+                            }
+                        } else { Color.clear }
+                    }
+                    .frame(width: DSControlHeight.field, height: DSControlHeight.field)
+                } else {
+                    if mode == .request {
+                        DSPanelHeaderButton(
+                            systemImage: "chevron.left",
+                            help: endpoint != nil && endpointTab == .traffic ? "Back to traffic" : "Back to selection",
+                            identifier: "inspector.closeRequestDetailButton",
+                            action: onCloseRequestDetail
+                        )
+                    }
+                    Text(mode.title)
+                        .font(DSTypography.controlLabel)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("ds.panelheader.title.inspector")
+                    Spacer(minLength: 0)
+                }
+            }
+
+            // Keep endpoint content mounted under request details. Returning to Traffic restores
+            // the same scroll position instead of constructing a new list at its first request.
+            ZStack(alignment: .topLeading) {
+                if let endpoint {
+                    endpointContent(endpoint)
+                        .opacity(mode == .scenarios ? 1 : 0)
+                        .allowsHitTesting(mode == .scenarios)
+                        .accessibilityHidden(mode != .scenarios)
+                }
+                switch mode {
+                case .request:
+                    if let requestDetail {
+                        RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
+                    }
+                case .journey:
+                    if let journey { JourneyInspector(context: journey).id(journey.selected.id) }
+                case .selection:
+                    DSEmptyState(
+                        heading: "\(selectedRequestCount) requests selected",
+                        message: "Select one request to inspect its headers and body.",
+                        identifier: "inspector.multipleRequests"
+                    )
+                case .overview:
+                    if let overview { InspectorOverview(summary: overview, onShowJourneys: onShowJourneys) }
+                case .empty:
+                    DSEmptyState(heading: "No selection", message: "Select an endpoint or journey to inspect it.",
+                                 identifier: "inspector.empty")
+                case .scenarios:
                     EmptyView()
                 }
             }
-            // The subtitle is an endpoint path and the panel is narrow, so it truncates. Hovering is
-            // how the dropped middle is read back.
-            .help(headerSubtitleHelp ?? "")
-
-            switch mode {
-            case .request:
-                if let requestDetail {
-                    RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
-                }
-            case .scenarios:
-                if let endpoint {
-                    switch endpointTab {
-                    case .scenarios:
-                        ScenarioListView(
-                            endpoint: endpoint,
-                            onSetActive: onSetActiveScenario,
-                            onDuplicate: onDuplicateScenario,
-                            onDelete: onDeleteScenario
-                        )
-                    case .traffic:
-                        EndpointTrafficList(
-                            logs: endpointTraffic,
-                            onSelect: onSelectTrafficLog
-                        )
-                    }
-                }
-            case .overview:
-                if let overview {
-                    InspectorOverview(summary: overview, onShowJourneys: onShowJourneys)
-                }
-            case .empty:
-                DSEmptyState(
-                    heading: "No selection",
-                    message: "Select an endpoint to view its details and scenarios.",
-                    identifier: "inspector.empty"
-                )
-            }
+            .frame(minHeight: 0, maxHeight: .infinity)
         }
-        // **No fill. The inspector column is a system material and the OS owns it.**
-        //
-        // This was measured rather than assumed. Painting `DSColors.secondary` here — nominally
-        // rgb(44,44,46) in dark — reaches the screen as rgb(28,28,28), because `.inspector`
-        // composites a material over whatever the content draws. A probe fill of pure red rendered
-        // as rgb(255,84,84), which is what proves the background is drawn at all and then blended;
-        // the material samples what is behind the *window*, so any value picked to survive that
-        // blend would be a different colour over a different wallpaper.
-        //
-        // So the panel takes no fill, the same way the navigator does not, and for the reason
-        // `docs/redesign/decisions.md` §3 gives: on macOS 26 the sidebar and inspector take the
-        // material on recompile whether or not the app opts in, and fighting the framework to paint
-        // a flat colour under a translucent surface is work with no payoff.
-        //
-        // The frame stays. It is what makes the panel fill its column so its own chrome is laid out
-        // against the full height rather than hugging its content.
-        //
-        // `RequestDetailInspector` used to paint `secondary` on its own root, which is why the
-        // inspector looked slightly different when you had a log row selected than when you had an
-        // endpoint selected. That fill is gone too — every mode now sits on the same material.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $addScenarioTarget) { target in
-            NewScenarioSheet { name in
-                onAddScenario(target.id, name)
-            }
+            NewScenarioSheet { name in onAddScenario(target.id, name) }
         }
     }
 
-    /// What the header calls the panel. With an endpoint selected the tab is the more specific
-    /// answer, so it wins — a header reading "Scenarios" above a list of requests would be a lie.
-    private var headerTitle: String {
-        mode == .scenarios ? endpointTab.title : mode.title
-    }
-
-    /// `DSTabStrip` speaks in raw ids so it can live in the design system without knowing what an
-    /// inspector is; the enum stays on this side of that boundary.
-    private var endpointTabBinding: Binding<String> {
-        Binding(
-            get: { endpointTab.id },
-            set: { endpointTab = EndpointTab(rawValue: $0) ?? .scenarios }
-        )
-    }
-
-    /// The path of whatever the panel is describing — but only where the panel does not already say
-    /// it.
-    ///
-    /// `.request` carries none. `RequestDetailInspector` opens with an identity row — method badge,
-    /// status, time, then the path in code voice — and a subtitle of "GET /health" put that same
-    /// string on screen twice inside 40pt, the second time directly beneath the first. Repetition
-    /// that close reads as a rendering fault rather than as emphasis.
-    ///
-    /// `.scenarios` keeps its path: the scenario rows below it name scenarios, not the endpoint, so
-    /// the subtitle is the only thing saying which endpoint they belong to.
-    /// The full path, for the header's tooltip. The subtitle truncates in the middle when the panel
-    /// is narrow — both ends of a route carry meaning, so that is the right mode — and hovering is
-    /// how you read the part it dropped.
-    private var headerSubtitleHelp: String? {
-        mode == .scenarios ? endpoint?.path : nil
-    }
-
-    /// **No subtitle in `.scenarios` mode, and the reason is arithmetic.**
-    ///
-    /// This used to be the endpoint's path, and it rendered as "/accoun...ummary" — a middle
-    /// truncation that saved four characters and read as a rendering fault. The header is about
-    /// 200pt at the inspector's floor and has to seat the title, a three-item tab strip and an add
-    /// button; the path was competing for roughly fifty points and losing. Raising the title to
-    /// 12pt semibold, which is what made it legible as a title, took more still.
-    ///
-    /// Widening the panel to fit it is the wrong trade — the path is already on screen three times:
-    /// the selected row in the navigator, the crumb in the jump bar, and the editor's own identity
-    /// row. A fourth copy, truncated past recognition, is noise in the one slot this component
-    /// documents for a count. The title carries a tooltip with the full path for the case where the
-    /// inspector is the only thing you are looking at.
-    private var headerSubtitle: String? {
-        nil
+    private func endpointContent(_ endpoint: Endpoint) -> some View {
+        VStack(spacing: 0) {
+            Text("\(endpoint.method.rawValue) \(endpoint.path)")
+                .font(DSTypography.codeSmall)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .help("\(endpoint.name) — \(endpoint.method.rawValue) \(endpoint.path)")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DSInspectorMetrics.inset)
+                .frame(height: DSBarHeight.controlRow)
+                .accessibilityIdentifier("inspector.endpointIdentity")
+            switch endpointTab {
+            case .scenarios:
+                ScenarioListView(endpoint: endpoint, onSetActive: onSetActiveScenario,
+                                 onDuplicate: onDuplicateScenario, onDelete: onDeleteScenario)
+                HStack {
+                    Text("\(endpoint.scenarios.count) \(endpoint.scenarios.count == 1 ? "scenario" : "scenarios")")
+                    Spacer(minLength: DSSpacing.sm)
+                    Text("Click a row to activate")
+                }
+                .font(DSTypography.label)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, DSInspectorMetrics.inset)
+                .frame(height: DSInspectorMetrics.footerHeight)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+                }
+            case .traffic:
+                EndpointTrafficList(logs: endpointTraffic, onSelect: onSelectTrafficLog)
+            }
+        }
     }
 }
 
@@ -346,13 +293,17 @@ struct ScenarioListView: View {
                 onDuplicate: { onDuplicate(endpoint.id, scenario.id) },
                 onDelete: { onDelete(endpoint.id, scenario.id) }
             )
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, DSInspectorMetrics.rowHeight)
+        .contentMargins(.all, 0, for: .scrollContent)
         .accessibilityIdentifier("inspector.scenarioList")
     }
 }
 
-/// Single scenario row — active state with accent left border.
+/// One checkmark identifies the active response; status codes share a fixed trailing column.
 struct ScenarioRow: View {
     let scenario: Scenario
     let isActive: Bool
@@ -362,63 +313,30 @@ struct ScenarioRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: DSSpacing.sm) {
-            // Active indicator — accent left border style
-            RoundedRectangle(cornerRadius: 1)
-                .fill(isActive ? DSColors.accent : .clear)
-                .frame(width: 2, height: 20)
-
-            // One symbol rather than a circle, a stroke and a checkmark stacked by hand. That build
-            // put a 7pt glyph inside a 12pt ring — under the 8pt floor, where a checkmark stops
-            // being a checkmark and becomes a smudge — and it re-drew a mark AppKit already ships
-            // optically corrected at this size.
-            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                // `controlProminent`, which is `DSTypography.body`'s size — the font the scenario
-                // name beside it is set in, so the mark sits level with the line rather than a point
-                // proud of it. The 8pt floor the note above invokes is the bottom of this same
-                // ladder, named as `DSGlyph.minimum`.
-                .font(.system(size: DSGlyph.controlProminent, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive ? DSColors.accentText : DSColors.labelSecondary)
-                .accessibilityIdentifier("inspector.scenario.\(scenario.name).indicator")
-
-            Text(scenario.name)
-                .font(isActive ? DSTypography.bodyMedium : DSTypography.body)
-                .foregroundStyle(isActive ? DSColors.labelPrimary : DSColors.labelSecondary)
-
-            Spacer()
-
-            // Coloured text, and a fill only once the code is one you would want to stop on. This
-            // list is a column of scenarios, and most of them answer 200: filling every row put a
-            // block of green down the panel that carried no information, because nothing in it was
-            // any louder than anything else. `DSStatusPill` carries that `>= 400` seam for every
-            // panel at once — this row used to hand-draw it, and was the one site paying the fill's
-            // horizontal inset on unfilled codes too.
-            DSStatusPill(statusCode: scenario.statusCode)
-
-            if isActive {
-                Text("Active")
-                    .font(DSTypography.caption)
+        Button(action: onTap) {
+            HStack(spacing: DSSpacing.sm) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: DSGlyph.control, weight: .semibold))
                     .foregroundStyle(DSColors.accentText)
-                    .accessibilityIdentifier("inspector.scenario.\(scenario.name).activeLabel")
+                    .opacity(isActive ? 1 : 0)
+                    .frame(width: DSInspectorMetrics.iconSlot)
+                    .accessibilityHidden(true)
+                Text(scenario.name)
+                    .font(DSTypography.controlLabelQuiet)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                DSInspectorStatus(statusCode: scenario.statusCode)
+                    .frame(width: DSInspectorMetrics.statusColumn, alignment: .trailing)
             }
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .frame(height: DSInspectorMetrics.rowHeight)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, DSSpacing.xs)
-        // `md`, matching every other row in this panel — the overview's rows, the request detail's
-        // summary rows and its header rows are all inset 12. At `xs` the whole content of the
-        // inspector shifted 8pt left when you switched to Scenarios, under a header that did not
-        // move.
-        .padding(.horizontal, DSSpacing.md)
-        .contentShape(Rectangle())
+        .buttonStyle(.dsPlain)
         .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
-        .onTapGesture(perform: onTap)
-        .accessibilityElement(children: .combine)
-        // After the element is formed, not before it — `EndpointTrafficRow` orders it the same way,
-        // because a trait added to the children is a trait the combine has already passed over.
-        //
-        // The row activates a scenario on tap, but a tap gesture carries no trait, so VoiceOver
-        // announced this as static text with no hint that it could be pressed. `RequestLogTableRow`
-        // and `EndpointTrafficRow` are the same shape and already restore it; this row and the
-        // journey editor's step row were the two that did not.
+        .help(Self.spokenLabel(scenario: scenario, isActive: isActive))
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(rowTraits)
         .contextMenu {
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
@@ -433,12 +351,7 @@ struct ScenarioRow: View {
         .accessibilityValue(isActive ? "active" : "inactive")
     }
 
-    /// `.isButton` always, and `.isSelected` on the scenario that answers.
-    ///
-    /// One scenario per endpoint is active, chosen by clicking a row — a selection, drawn here as an
-    /// accent bar, a filled mark and the word "Active". Three visual statements of it and, until the
-    /// trait, no programmatic one; `RequestLogTableRow.rowTraits` carries the same pair for the same
-    /// reason, so the two rows answer an assistive technology alike.
+    /// The active checkmark also carries a selected trait for assistive technology.
     var rowTraits: AccessibilityTraits {
         isActive ? [.isButton, .isSelected] : .isButton
     }
