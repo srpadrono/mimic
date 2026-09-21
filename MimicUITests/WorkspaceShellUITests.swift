@@ -1439,7 +1439,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         assertToolbarColumnOwnership()
 
         workspace.compactWindow()
-        if !workspace.overflowMenu.exists { workspace.fillWindow() }
+        if !workspace.overflowMenu.exists {
+            workspace.inlineToolbarAction("toggleDrawerButton").click()
+        }
         XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
         XCTAssertTrue(workspace.projectTitle.isHittable)
         XCTAssertTrue(workspace.projectKind.isHittable)
