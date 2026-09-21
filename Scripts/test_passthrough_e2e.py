@@ -48,6 +48,8 @@ class Backend(http.server.BaseHTTPRequestHandler):
             body, media = b"\x89PNG\r\n\x1a\n\xff\x00", "image/png"
         elif self.path == "/large":
             body, media = b"a" * 100_000, "text/plain"
+        elif self.path == "/oversized":
+            body, media = b"a" * 5_242_881, "text/plain"
         elif self.path == "/gzip":
             body = gzip.compress(body, mtime=0)
         self.send_response(200)
@@ -123,7 +125,8 @@ def run(app, cli):
                 assert child.poll() is None, "App exited before discovery"
                 time.sleep(.05)
             primary, secondary = free_port(), free_port()
-            while secondary == primary: secondary = free_port()
+            while secondary == primary:
+                secondary = free_port()
             command("project", "create", "Passthrough evidence", "--port", str(primary))
             url = f"http://127.0.0.1:{upstream.server_port}"
             command("server", "configure", "--name", "Catalog", "--upstream", url)
@@ -131,10 +134,12 @@ def run(app, cli):
             command("server", "start")
             for _ in range(100):
                 status = command("server", "status")["server"]
-                if status["state"] == "running": break
+                if status["state"] == "running":
+                    break
                 assert status["state"] != "error", status
                 time.sleep(.05)
-            else: raise AssertionError("Listeners did not start")
+            else:
+                raise AssertionError("Listeners did not start")
             assert request(primary, "/binary")[2] == b"\x89PNG\r\n\x1a\n\xff\x00"
             command("log", "save-as-mock", logged("/binary")["id"], fail=True)
             print("PASS binary bytes preserved; unsafe capture refused")
@@ -148,8 +153,15 @@ def run(app, cli):
             assert compressed == gzip.compress(b'{"ok":true}', mtime=0)
             command("log", "save-as-mock", logged("/gzip")["id"], fail=True)
             assert len(request(primary, "/large")[2]) == 100_000
-            command("log", "save-as-mock", logged("/large")["id"], fail=True)
-            print("PASS compressed and large replies forwarded exactly; capture stays bounded")
+            large_log = logged("/large")
+            assert len(large_log["responseBody"].encode()) == 65_536
+            assert large_log["responseBodyTruncated"]
+            command("log", "save-as-mock", large_log["id"])
+            command("state")
+            assert request(primary, "/large")[2] == b"a" * 100_000
+            assert len(request(primary, "/oversized")[2]) == 5_242_881
+            command("log", "save-as-mock", logged("/oversized")["id"], fail=True)
+            print("PASS large replies capture completely with bounded previews; compressed and over-5MiB capture refused")
             connection = http.client.HTTPConnection("127.0.0.1", primary, timeout=5)
             start = time.monotonic()
             connection.request("GET", "/stream")

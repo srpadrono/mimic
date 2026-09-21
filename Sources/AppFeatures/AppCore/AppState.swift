@@ -468,7 +468,6 @@ final class AppState {
     @discardableResult
     func savePassedThroughLogAsMock(id: UUID) -> Endpoint? {
         guard let log = requestLogs.first(where: { $0.id == id }), log.outcome == .passthrough,
-              !log.responseBodyTruncated,
               let status = log.responseStatusCode,
               EndpointValidator.serveableStatusCodes.contains(status),
               var project = currentProject else {
@@ -497,7 +496,7 @@ final class AppState {
                 spec: ScenarioSpec(
                     statusCode: status,
                     headers: ResponseCapture.headers(log.responseHeaders),
-                    body: log.responseBody,
+                    body: try ResponseCapture.body(log),
                     contentType: contentType.contains("json") ? .json : .plainText
                 )
             ), to: &project)

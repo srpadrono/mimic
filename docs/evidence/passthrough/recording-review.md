@@ -172,3 +172,43 @@ missing capture, or unexpected empty/`1` body appeared. No production code chang
 Repeat: `recording_review.py --live-mixed --app /absolute/path/to/Mimic.app/Contents/MacOS/Mimic`.
 Evidence: `/tmp/mimic-mixed-live.log`, `/tmp/passthrough-review-d9sftxib/app.log`.
 Python lint and diff whitespace checks passed.
+
+## 5 MiB response capture follow-up
+
+The final implementation raises complete passthrough text capture to **5 MiB (5,242,880 bytes)**;
+traffic previews remain **64 KiB**. This supersedes the 64 KiB capture limit in the earlier evidence
+above. Compressed/binary responses remain excluded. Request previews retain their original limit.
+
+Complete UTF-8 bodies larger than a preview are held in private temporary files owned by in-process
+log handles. Domain defines the storage handle without doing file I/O; the engine owns the files.
+Handles never serialize into JSON or escape through control API log responses. Automatic mock
+capture, manual save, and journey capture read the complete body. A failed read or write cannot
+turn a preview into a saved mock. The temporary file is removed when its last log reference goes
+away; abrupt termination may leave temporary files for OS cleanup. Retained large responses use
+disk space (up to 5 MiB each); forwarding still streams with backpressure.
+
+Validation:
+
+- 301 Domain tests, 76 engine tests (excluding the unrelated temporary audit suite), and 46 app tests
+  passed. Coverage includes exact limit metadata, complete journey-body capture, serialization
+  exclusion, missing-storage refusal, file permissions and file lifetime.
+- Normal-sandbox integration captured/replayed 70,000-byte and exactly 5,242,880-byte JSON with both
+  automatic recording and manual save. Exported log previews stayed at or below 65,536 bytes.
+- A 5,242,881-byte response forwarded but was refused as a mock. Simultaneous 1 MB replies on two
+  backends captured/replayed with the correct backend bodies.
+- All 236 fixtures and the full large response bodies survived quit, relaunch and reopen.
+- Updated existing CLI end-to-end checks passed, including 100 KB manual capture, over-limit
+  refusal, gzip/binary forwarding, and streaming first bytes in 1 ms before a delayed final chunk.
+- The backend settings UI test passed and verifies the displayed 5 MiB capture / 64 KiB preview
+  distinction. Initial assertions read an empty macOS accessibility label; the corrected test reads
+  both label and value. Production wording did not need a change for that test issue.
+- House rules, module edges, tracked-source documentation counts, Python lint and diff checks passed.
+
+Logs: `/tmp/mimic-large-final-tests.log` (unit suites plus initial UI assertion failure),
+`/tmp/mimic-large-ui-final.log` (passing UI rerun), `/tmp/mimic-large-e2e.log`, and
+`/tmp/mimic-large-cli.log`. Isolated normal-sandbox process evidence:
+`/tmp/passthrough-review-y14cpc3y/app.log`.
+
+The settings caption was also visually inspected in the isolated UI run:
+
+![5 MiB capture and 64 KiB preview help](capture-limit.png)

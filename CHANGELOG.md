@@ -7,6 +7,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Capture complete passthrough text responses up to 5 MiB while keeping traffic previews at 64 KiB.
+  Larger captures use private temporary files and support automatic recording, manual mock saving,
+  and journey capture without saving a truncated preview.
+
 - Do not capture cache-only 304, partial 206/Content-Range, or unexpectedly empty JSON replies as
   complete mocks. Explain compressed JSON capture refusals with guidance to request an uncompressed reply.
 

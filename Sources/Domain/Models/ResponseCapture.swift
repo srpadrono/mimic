@@ -2,6 +2,17 @@ import Foundation
 
 /// The shared boundary between observed traffic and persistent, shareable fixtures.
 public enum ResponseCapture {
+    public static let maxBodyBytes = 5 * 1024 * 1024
+
+    public static func body(_ log: RequestLog) throws -> String? {
+        try validate(log)
+        if let captured = log.capturedResponseBody {
+            do { return try captured.text() }
+            catch { throw ControlError.invalid("The complete response is no longer available. Send the request again to capture it.") }
+        }
+        return log.responseBody
+    }
+
     public static func validate(_ log: RequestLog) throws {
         guard log.outcome != .proxyFailure else {
             throw ControlError.invalid("The backend did not return a complete response.")
@@ -9,8 +20,11 @@ public enum ResponseCapture {
         guard log.requestBodyTruncated != true else {
             throw ControlError.invalid("The request preview is incomplete, so its operation cannot be captured safely.")
         }
-        guard !log.responseBodyTruncated else {
-            throw ControlError.invalid("This response exceeds the capture limit. Save a complete response instead.")
+        guard !log.responseBodyTruncated || log.capturedResponseBody != nil else {
+            throw ControlError.invalid("The complete response is unavailable or exceeds the 5 MiB capture limit. Send the request again or save a smaller response.")
+        }
+        guard (log.capturedResponseBody?.byteCount ?? log.responseBody?.utf8.count ?? 0) <= maxBodyBytes else {
+            throw ControlError.invalid("This response exceeds the 5 MiB capture limit.")
         }
         if log.outcome == .passthrough {
             guard log.responseStatusCode != 304 else {
@@ -37,7 +51,7 @@ public enum ResponseCapture {
             let mediaType = type.lowercased().split(separator: ";").first?.trimmingCharacters(in: .whitespaces) ?? ""
             if (mediaType == "application/json" || mediaType.hasSuffix("+json")),
                log.method != .head, log.responseStatusCode != 204, log.responseStatusCode != 205 {
-                guard let body = log.responseBody, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                guard log.capturedResponseBody != nil || !(log.responseBody ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ControlError.invalid("This JSON response has no body. Capture a complete JSON response instead.")
                 }
             }

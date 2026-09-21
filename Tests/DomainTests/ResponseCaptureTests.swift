@@ -4,6 +4,40 @@ import Testing
 
 @Suite("Safe response capture")
 struct ResponseCaptureTests {
+    @Test("Complete capture storage is independent of the 64 KiB preview and never serialized")
+    func completeBodyAndPreviewAreSeparate() throws {
+        let body = "{\"data\":\"" + String(repeating: "a", count: 70000) + "\"}"
+        let captured = CapturedResponseBody(byteCount: body.utf8.count) { body }
+        let log = RequestLog(method: .get, path: "/large", responseStatusCode: 200,
+            responseHeaders: ["Content-Type": "application/json"], responseBody: "{\"data\":\"a",
+            responseBodyTruncated: true, capturedResponseBody: captured, outcome: .passthrough)
+        #expect(try ResponseCapture.body(log) == body)
+        #expect(try JourneyStepSpec.capturing(log).body == body)
+        let encoded = try JSONEncoder().encode(log)
+        #expect(encoded.count < 1000)
+        let decoded = try JSONDecoder().decode(RequestLog.self, from: encoded)
+        #expect(decoded.capturedResponseBody == nil)
+        #expect(log.redactingCredentials().capturedResponseBody == nil)
+        #expect(throws: ControlError.self) { try ResponseCapture.body(decoded) }
+    }
+
+    @Test("The capture boundary is exactly 5 MiB and storage errors cannot save a prefix")
+    func completeBodyBoundary() throws {
+        #expect(ResponseCapture.maxBodyBytes == 5_242_880)
+        for size in [5_242_880, 5_242_881] {
+            let log = RequestLog(method: .get, path: "/large", responseStatusCode: 200,
+                responseBody: "preview", responseBodyTruncated: true,
+                capturedResponseBody: CapturedResponseBody(byteCount: size) { "complete" }, outcome: .passthrough)
+            if size == 5_242_880 { try ResponseCapture.validate(log) }
+            else { #expect(throws: ControlError.self) { try ResponseCapture.validate(log) } }
+        }
+        let unavailable = RequestLog(method: .get, path: "/lost", responseStatusCode: 200,
+            responseBody: "preview", responseBodyTruncated: true,
+            capturedResponseBody: CapturedResponseBody(byteCount: 70000) { throw CocoaError(.fileReadNoSuchFile) },
+            outcome: .passthrough)
+        #expect(throws: ControlError.self) { try ResponseCapture.body(unavailable) }
+    }
+
     @Test("Cache validators, partial bodies and empty JSON cannot become complete mocks")
     func refusesIncompleteRepresentations() {
         let responses = [

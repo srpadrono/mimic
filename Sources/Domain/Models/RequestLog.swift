@@ -80,6 +80,17 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
     /// worth spotting when a client is calling something you have not mocked yet.
     public let outcome: RequestOutcome
 
+    // Process-local storage must never become a filesystem capability in serialized logs.
+    public var capturedResponseBody: CapturedResponseBody? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, method, path, projectID, backendID, backendName, listenerPort
+        case upstreamURL, durationMs, responseBodyIsBinary, requestHeaders, requestBody
+        case requestBodyTruncated, matchedEndpointID, matchedScenarioID, responseStatusCode
+        case responseHeaders, responseBody, responseBodyTruncated, matchedJourneyID
+        case matchedJourneyStepID, failureLabel, outcome
+    }
+
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
@@ -101,6 +112,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         responseHeaders: [String: String] = [:],
         responseBody: String? = nil,
         responseBodyTruncated: Bool = false,
+        capturedResponseBody: CapturedResponseBody? = nil,
         matchedJourneyID: UUID? = nil,
         matchedJourneyStepID: UUID? = nil,
         failureLabel: String? = nil,
@@ -124,6 +136,7 @@ public struct RequestLog: Identifiable, Codable, Sendable, Equatable {
         self.matchedScenarioID = matchedScenarioID
         self.responseStatusCode = responseStatusCode
         self.responseHeaders = responseHeaders
+        self.capturedResponseBody = capturedResponseBody
         self.responseBody = responseBody
         self.responseBodyTruncated = responseBodyTruncated
         self.matchedJourneyID = matchedJourneyID

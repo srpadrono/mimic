@@ -66,7 +66,13 @@ class Upstream(http.server.BaseHTTPRequestHandler):
         body = json.dumps(payload).encode()
         status, kind = 200, "application/json"
         if self.path == "/large":
-            body = b"a" * 70000
+            body = b'{"data":"' + b"a" * 69989 + b'"}'
+        if self.path == "/large-parallel":
+            body = json.dumps({"backend": self.server.tag, "data": "d" * 1000000}).encode()
+        if self.path == "/limit":
+            body = b'{"data":"' + b"b" * (5_242_880 - 11) + b'"}'
+        if self.path == "/over-limit":
+            body = b'{"data":"' + b"c" * (5_242_881 - 11) + b'"}'
         if self.path == "/binary":
             body, kind = b"\xff\x00\x80", "application/octet-stream"
         if self.path == "/gzip":
@@ -283,7 +289,7 @@ try:
         command("state")
         assert call(which, path) == (200, body)
     print("PASS: 16 parallel JSON objects, arrays, booleans, null, numbers, strings and Unicode preserve exact bodies", flush=True)
-    for path in ["/large", "/binary", "/gzip"]:
+    for path in ["/over-limit", "/binary", "/gzip"]:
         status, body = call(0, path)
         assert status == 200
         assert find(0, path) is None
@@ -291,6 +297,54 @@ try:
         "PASS: oversized, binary and compressed responses forward without creating invalid text mocks",
         flush=True,
     )
+    def oversized_log():
+        return next((e for e in command("logList", limit=100)["logs"]
+                     if e["path"] == "/over-limit"), None)
+    oversize = wait(oversized_log)
+    try:
+        command("logSaveAsMock", id=oversize["id"])
+    except AssertionError as error:
+        assert "5 MiB" in str(error), error
+    else:
+        raise AssertionError("5 MiB + 1 byte was captured")
+    large_saved = []
+    for automatic in [True, False]:
+        config["captureResponses"] = automatic
+        command("serverConfigure", configuration=config)
+        for path in ["/large", "/limit"]:
+            existing = find(0, path)
+            if existing:
+                command("endpointDelete", endpoint={"id": existing["id"]})
+                command("state")
+            status, body = call(0, path)
+            assert status == 200 and isinstance(json.loads(body), dict)
+            def observed():
+                return next((e for e in reversed(command("logList", limit=100)["logs"])
+                             if e["path"] == path and e["outcome"] == "passthrough"), None)
+            entry = wait(observed)
+            assert len(entry["responseBody"].encode()) <= 65_536
+            assert entry["responseBodyTruncated"] is True
+            if not automatic:
+                assert find(0, path) is None
+                command("logSaveAsMock", id=entry["id"])
+            wait(lambda: find(0, path))
+            assert find(0, path)["scenarios"][0]["body"] == body.decode()
+            command("state")
+            assert call(0, path) == (status, body)
+            large_saved.append((path, body.decode()))
+        print(f"PASS: {'automatic' if automatic else 'manual'} 70KB and exactly 5MiB capture/replay with 64KiB log previews", flush=True)
+    config["captureResponses"] = True
+    command("serverConfigure", configuration=config)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        large_parallel = list(pool.map(lambda which: call(which, "/large-parallel"), range(2)))
+    for which, (status, body) in enumerate(large_parallel):
+        assert status == 200 and json.loads(body)["backend"] == servers[which].tag
+        wait(lambda: find(which, "/large-parallel"))
+        assert find(which, "/large-parallel")["scenarios"][0]["body"] == body.decode()
+    command("state")
+    for which, reply in enumerate(large_parallel):
+        assert call(which, "/large-parallel") == reply
+    print("PASS: simultaneous 1MB replies on two backends capture/replay without mixing bodies", flush=True)
     assert call(0, "/failure")[0] == 503
     wait(lambda: find(0, "/failure"))
     assert find(0, "/failure")["scenarios"][0]["statusCode"] == 503
@@ -496,6 +550,9 @@ try:
         f"PASS: {expected} captures persisted across close, quit, relaunch and reopen",
         flush=True,
     )
+    for path, body in large_saved:
+        assert find(0, path)["scenarios"][0]["body"] == body
+    print("PASS: large captured bodies persist exactly across app relaunch", flush=True)
     for which, route, body in mixed_saved:
         assert find(which, route)["scenarios"][0]["body"] == body
     if mixed_saved:

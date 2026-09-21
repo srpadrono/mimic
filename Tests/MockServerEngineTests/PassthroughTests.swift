@@ -16,6 +16,18 @@ struct PassthroughTests {
         return Endpoint(name: path, path: path, scenarios: [scenario], activeScenarioID: scenario.id, backendID: backendID)
     }
 
+    @Test("Complete response files are private and removed when their owner is released")
+    func responseFileLifetime() throws {
+        var file: CapturedResponseFile? = try CapturedResponseFile(data: Data("complete".utf8))
+        let directory = try #require(file?.directory)
+        let url = try #require(file?.url)
+        #expect(try String(contentsOf: url, encoding: .utf8) == "complete")
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        file = nil
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
     @Test("A delayed log consumer receives every request from a parallel burst")
     func burstDoesNotDropLogs() async throws {
         let proxy = MockServerEngine(), upstream = MockServerEngine()

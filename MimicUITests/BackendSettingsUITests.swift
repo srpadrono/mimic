@@ -7,6 +7,7 @@ import XCTest
 struct BackendSettingsPage {
     let app: XCUIApplication
     var open: XCUIElement { WorkspacePage(app: app).toolbarAction("backend.settingsButton") }
+    var captureHelp: XCUIElement { app.staticTexts["backend.primary.captureHelp"].firstMatch }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
@@ -42,6 +43,15 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.captureHelp.waitForExistence(timeout: 5))
+        let captureHelp = "\(page.captureHelp.label) \(page.captureHelp.value as? String ?? "")"
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        XCTAssertTrue(captureHelp.contains("5 MiB"), captureHelp)
+        XCTAssertTrue(captureHelp.contains("64 KiB"), captureHelp)
+        let captureHelpImage = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        captureHelpImage.name = "capture-limit-help"
+        captureHelpImage.lifetime = .keepAlways
+        add(captureHelpImage)
         let singleBackendHeight = app.sheets.firstMatch.frame.height
         XCTAssertLessThan(singleBackendHeight, 600, "A single backend should not open a mostly empty sheet")
         page.replace(page.primaryName, with: "Catalog")

@@ -43,6 +43,16 @@ enum ProxyForwarder {
         let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
         @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
             let text = String(data: preview, encoding: .utf8)
+            let (displayBody, displayTruncated) = RequestLog.cappedBody(text)
+            // Only complete UTF-8 text can become a fixture; keep large payloads off the log heap.
+            let captured: CapturedResponseBody?
+            if !truncated, failure == nil, text != nil, preview.count > RequestLog.maxLoggedBodyBytes,
+               ResponseCapture.isTextMediaType(headers.first(name: "content-type") ?? ""),
+               headers["content-encoding"].allSatisfy({ $0.lowercased() == "identity" }) {
+                captured = try? CapturedResponseFile.capture(preview)
+            } else {
+                captured = nil
+            }
             let elapsed = started.duration(to: .now).components
             logContinuation.yield(RequestLog(
                 method: incoming.method, path: request.url.string, backendID: incoming.backendID, projectID: projectID,
@@ -53,7 +63,8 @@ enum ProxyForwarder {
                 requestHeaders: incoming.headers, requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,
                 responseStatusCode: status,
                 responseHeaders: Dictionary(headers.map { ($0.name, $0.value) }, uniquingKeysWith: { first, last in first + ", " + last }),
-                responseBody: text, responseBodyTruncated: truncated,
+                responseBody: displayBody, responseBodyTruncated: truncated || displayTruncated,
+                capturedResponseBody: captured,
                 failureLabel: failure == nil ? nil : "backend-unavailable", outcome: failure == nil ? .passthrough : .proxyFailure
             ))
         }
@@ -89,7 +100,7 @@ enum ProxyForwarder {
                 do {
                     for try await chunk in upstream.body {
                         try Task.checkCancellation()
-                        let available = max(0, RequestLog.maxLoggedBodyBytes - preview.count)
+                        let available = max(0, ResponseCapture.maxBodyBytes - preview.count)
                         preview.append(contentsOf: chunk.readableBytesView.prefix(available))
                         truncated = truncated || chunk.readableBytes > available
                         try await writer.write(.buffer(chunk))
