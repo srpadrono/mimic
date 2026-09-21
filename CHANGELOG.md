@@ -13,6 +13,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Quit and install dismisses the update sheet before requesting termination, so the modal dialog
   no longer leaves Mimic running after installer handoff. Preparation now shows progress and prevents
   duplicate install requests; a failed handoff keeps the app open with an explanation.
+- Toolbar actions and server status share aligned heights and consistent capsule padding. Run and
+  Stop use one animated control again; compact editor actions stay separate from panel toggles.
+- Copying the server address confirms in place without a nested miniature button or layout shift.
 
 ## [0.12.0] — 2026-09-20
 

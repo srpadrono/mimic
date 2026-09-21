@@ -1422,7 +1422,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
         XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
         XCTAssertTrue(workspace.serverToggleButton.isEnabled)
-        XCTAssertFalse(app.buttons["serverStopButton"].isEnabled)
+        XCTAssertEqual(workspace.serverToggleButton.label, "Start server")
+        XCTAssertEqual(workspace.toggleInspectorButton.label, "Hide inspector")
+        XCTAssertEqual(workspace.toggleDrawerButton.label, "Hide request log")
+        XCTAssertFalse(workspace.legacyServerStartButton.exists)
+        XCTAssertFalse(workspace.legacyServerStopButton.exists)
+        assertToolbarGeometry()
         if !workspace.overflowMenu.exists {
             let wide = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
             wide.name = "center-toolbar-expanded"
@@ -1438,6 +1443,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertLessThan(workspace.overflowMenu.frame.maxX, inspectorHeader.frame.minX)
         XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
         XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        assertToolbarGeometry()
         XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
         XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
         let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -1462,9 +1468,19 @@ final class WorkspaceShellUITests: MimicUITestCase {
         settings.cancel.click()
         XCTAssertTrue(settings.cancel.waitForNonExistence(timeout: 5))
 
+        let stoppedFrame = workspace.serverToggleButton.frame
         startServer(onPort: 62118)
-        XCTAssertFalse(app.buttons["serverStartButton"].isEnabled)
         XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
+        XCTAssertFalse(workspace.legacyServerStartButton.exists)
+        XCTAssertFalse(workspace.legacyServerStopButton.exists)
+        XCTAssertEqual(workspace.serverToggleButton.frame.width, stoppedFrame.width, accuracy: 1)
+        XCTAssertEqual(workspace.serverToggleButton.frame.midX, stoppedFrame.midX, accuracy: 1)
+        assertToolbarGeometry()
+        let running = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        running.name = "center-toolbar-compact-running"
+        running.lifetime = .keepAlways
+        add(running)
         workspace.serverToggleButton.click()
         XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
 
@@ -1485,6 +1501,29 @@ final class WorkspaceShellUITests: MimicUITestCase {
         }
     }
 
+    /// Literal dimensions deliberately pin the design contract independently of its implementation.
+    @MainActor
+    private func assertToolbarGeometry(file: StaticString = #filePath, line: UInt = #line) {
+        var controls = [workspace.serverToggleButton, workspace.toggleDrawerButton,
+                        workspace.toggleInspectorButton]
+        if workspace.overflowMenu.exists {
+            controls.append(workspace.overflowMenu)
+        } else {
+            controls += [workspace.importMenuButton, workspace.serverSettingsToolbarButton]
+        }
+        let centerY = workspace.serverToggleButton.frame.midY
+        // AppKit prunes the non-interactive well container when the saving label is idle.
+        // Its rendered outer height is pinned by WorkspaceFeatureRenderingTests; compare the
+        // exposed status content's center here, rather than assuming an invisible AX wrapper.
+        XCTAssertEqual(well.address.frame.midY, centerY, accuracy: 1, file: file, line: line)
+        for control in controls {
+            XCTAssertEqual(control.frame.height, 36, accuracy: 1,
+                           "\(control.identifier) outer height", file: file, line: line)
+            XCTAssertEqual(control.frame.midY, centerY, accuracy: 1,
+                           "\(control.identifier) vertical alignment", file: file, line: line)
+        }
+    }
+
     /// SRVWELL-01, SRVWELL-04.
     @MainActor
     func testServerWellReportsItsStateAndCopiesTheAddress() throws {
@@ -1502,6 +1541,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         _ = NSPasteboard.general.clearContents()
         startServer(onPort: port)
+        workspace.fillWindow()
+        assertToolbarGeometry()
+        XCTAssertEqual(well.address.frame.height, 36, accuracy: 1, "Copy target spans the status pill's height")
+        let running = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        running.name = "center-toolbar-expanded-running"
+        running.lifetime = .keepAlways
+        add(running)
         well.address.click()
 
         // Polled rather than read once: the copy happens on the app's main actor and the pasteboard

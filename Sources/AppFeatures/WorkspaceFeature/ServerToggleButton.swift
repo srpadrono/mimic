@@ -2,8 +2,9 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Stable native Run and Stop controls. State changes availability, never their placement.
+/// Xcode-style Run/Stop control: one target whose symbol changes in place.
 struct ServerToggleButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let serverState: ServerState
     let onStart: () -> Void
     let onStop: () -> Void
@@ -24,30 +25,34 @@ struct ServerToggleButton: View {
         }
     }
 
-    var body: some View {
-        HStack(spacing: DSSpacing.xs) {
-            Button(action: onStart) {
-                Label("Start server", systemImage: "play.fill")
-                    .labelStyle(.iconOnly)
-                    .frame(width: DSControlHeight.prominent, height: DSControlHeight.prominent)
-            }
-            .disabled(!Self.canStart(in: serverState))
-            .help("Start server")
-            .accessibilityLabel("Start server")
-            .accessibilityIdentifier(stopIsCurrentAction ? "serverStartButton" : "serverToggleButton")
-
-            Button(action: onStop) {
-                Label("Stop server", systemImage: "stop.fill")
-                    .labelStyle(.iconOnly)
-                    .frame(width: DSControlHeight.prominent, height: DSControlHeight.prominent)
-            }
-            .disabled(!Self.canStop(in: serverState))
-            .help("Stop server")
-            .accessibilityLabel("Stop server")
-            .accessibilityIdentifier(stopIsCurrentAction ? "serverToggleButton" : "serverStopButton")
+    private var isTransitioning: Bool {
+        switch serverState {
+        case .starting, .stopping: true
+        default: false
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("toolbar.serverControls")
     }
 
+    var body: some View {
+        Button(action: stopIsCurrentAction ? onStop : onStart) {
+            Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
+                .font(.system(size: DSGlyph.controlProminent, weight: .semibold))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.downUp.byLayer))
+                .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
+                .contentShape(.rect)
+                .opacity(isTransitioning ? 0 : 1)
+                .overlay {
+                    if isTransitioning {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .accessibilityHidden(true)
+                    }
+                }
+        }
+        .buttonStyle(DSToolbarButtonStyle())
+        .disabled(isTransitioning)
+        .help(stopIsCurrentAction ? "Stop server" : "Start server")
+        .accessibilityLabel(stopIsCurrentAction ? "Stop server" : "Start server")
+        .accessibilityIdentifier("serverToggleButton")
+        .animation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.micro), value: stopIsCurrentAction)
+    }
 }
