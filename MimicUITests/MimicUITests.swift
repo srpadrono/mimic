@@ -136,6 +136,9 @@ struct WorkspacePage {
 
     // Toolbar
     var serverToggleButton: XCUIElement { app.buttons["serverToggleButton"].firstMatch }
+    var legacyServerStartButton: XCUIElement { app.buttons["serverStartButton"].firstMatch }
+    var legacyServerStopButton: XCUIElement { app.buttons["serverStopButton"].firstMatch }
+    var serverSettingsToolbarButton: XCUIElement { app.toolbars.buttons["backend.settingsButton"].firstMatch }
     /// The navigator's add action — matched by **label**, because its identifier does not survive.
     ///
     /// `sidebar.addEndpointButton` is set on the button and never reaches the tree: it lives in

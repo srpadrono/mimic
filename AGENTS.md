@@ -83,6 +83,7 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release COD
 ```
 
 After changing `Project.swift` or `Tuist/Package.swift`, run `tuist install && tuist generate`.
+Use the Tuist version pinned in `mise.toml` (`mise install`); do not patch generated projects.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant script before changing a gate or
 concluding that a scheme cannot run a test target.

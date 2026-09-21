@@ -14,7 +14,14 @@ import Foundation
 ///
 /// `nonisolated`: everything here is file and network work that must stay off the main actor. The
 /// handoff at the end is the exception and says so.
-nonisolated struct UpdateInstaller: Sendable {
+nonisolated protocol UpdateInstalling: Sendable {
+    func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL
+    func verify(_ fileURL: URL, against release: UpdateRelease) throws
+    func stampQuarantine(on fileURL: URL, from release: UpdateRelease)
+    @MainActor func handOff(_ fileURL: URL) async throws
+}
+
+nonisolated struct UpdateInstaller: UpdateInstalling {
 
     /// The team the installer must be signed by.
     ///

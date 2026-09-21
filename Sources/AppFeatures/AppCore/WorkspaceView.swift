@@ -384,28 +384,40 @@ struct WorkspaceView: View {
 
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            ServerToggleButton(
-                serverState: appState.serverState,
-                onStart: appState.startServer,
-                onStop: appState.stopServer
-            )
-        }
+        ToolbarItem(placement: .navigation) {
+            // One hosted action row prevents AppKit from adding per-item button bezel insets.
+            HStack(spacing: DSSpacing.smPlus) {
+                ServerToggleButton(
+                    serverState: appState.serverState,
+                    onStart: appState.startServer,
+                    onStop: appState.stopServer
+                )
 
-        if !usesToolbarOverflow {
-            ToolbarItem(placement: .navigation) {
-                Text(appState.currentProject?.name ?? "Mimic")
-                    .font(DSTypography.bodyBold)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: DSToolbarGeometry.projectTitleWidth)
-                    .help(appState.currentProject?.name ?? "Mimic")
-                    .accessibilityIdentifier("toolbar.projectName")
+                if usesToolbarOverflow {
+                    overflowMenu.menuStyle(.button).buttonStyle(.plain)
+                } else {
+                    Text(appState.currentProject?.name ?? "Mimic")
+                        .font(DSTypography.bodyBold)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: DSToolbarGeometry.projectTitleWidth)
+                        .frame(height: DSToolbarGeometry.height)
+                        .padding(.horizontal, DSToolbarGeometry.horizontalInset)
+                        .help(appState.currentProject?.name ?? "Mimic")
+                        .accessibilityIdentifier("toolbar.projectName")
+                    importMenu(inToolbar: true).menuStyle(.button).buttonStyle(.plain)
+                    serverSettingsButton
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(DSToolbarButtonStyle())
+                }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("toolbar.editorActions")
         }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(placement: .principal) {
-            VStack(spacing: DSSpacing.xxs) {
+            HStack(spacing: DSSpacing.smPlus) {
                 ServerStatusWell(
                     serverState: appState.serverState,
                     projectName: appState.currentProject?.name,
@@ -422,25 +434,25 @@ struct WorkspaceView: View {
                     : (appState.requestLogs.isEmpty ? DSToolbarGeometry.statusWidth : DSToolbarGeometry.trafficStatusWidth))
 
                 AutosaveStatusIndicator(status: appState.autosaveStatus)
-                    .frame(height: DSBarHeight.columnHeader - DSSpacing.sm)
+                    .frame(width: DSToolbarGeometry.autosaveWidth, height: DSToolbarGeometry.height, alignment: .leading)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("toolbar.statusGroup")
         }
         .sharedBackgroundVisibility(.hidden)
 
-        if usesToolbarOverflow {
-            ToolbarItem(placement: .navigation) {
-                overflowMenu
-            }
-        } else {
-            ToolbarItem(placement: .navigation) { importMenu }
-            ToolbarItem(placement: .navigation) { serverSettingsButton }
-        }
-
         // Above the inspector, in both layouts: never fold these into the editor's menu.
         ToolbarItemGroup(placement: .primaryAction) {
-            drawerToolbarButton
-            inspectorToolbarButton
+            HStack(spacing: DSSpacing.smPlus) {
+                drawerToolbarButton
+                inspectorToolbarButton
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(DSToolbarButtonStyle())
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("toolbar.panelActions")
         }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     private var overflowMenu: some View {
@@ -449,7 +461,7 @@ struct WorkspaceView: View {
         return Menu {
             Text(appState.currentProject?.name ?? "Mimic")
             Divider()
-            importMenu
+            importMenu()
             serverSettingsButton
             if !appState.requestLogs.isEmpty {
                 Divider()
@@ -470,11 +482,13 @@ struct WorkspaceView: View {
                         .monospacedDigit()
                 }
             }
+            .modifier(DSToolbarPill())
         }
         .menuIndicator(.hidden)
         .help(unmatchedCount > 0
             ? "More editor actions; \(unmatchedDescription)"
             : "More editor actions: import and server settings")
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
         .accessibilityValue(unmatchedCount > 0
@@ -525,7 +539,7 @@ struct WorkspaceView: View {
     }
 
     /// Shared by the full toolbar and its compact overflow menu.
-    private var importMenu: some View {
+    private func importMenu(inToolbar: Bool = false) -> some View {
         Menu {
             Button { showHARImport = true } label: {
                 Label("Import HAR file\u{2026}", systemImage: "doc.text")
@@ -539,15 +553,27 @@ struct WorkspaceView: View {
             .accessibilityIdentifier("importOpenAPIMenuItem")
             .accessibilityLabel("Import OpenAPI spec")
         } label: {
-            // `.titleAndIcon` explicitly. A `Label` in a toolbar item takes the window's toolbar
-            // display mode, which on this window is icon-only, so the word was dropped and Import
-            // showed as a glyph and a chevron — an unlabelled pull-down beside a well that is all
-            // words. This is the only content action in the bar; it can afford its own name.
-            Label("Import", systemImage: "square.and.arrow.down")
-                .labelStyle(.titleAndIcon)
+            // Explicit image and text keep the toolbar's icon-only display mode from dropping
+            // the title. The nested menu keeps the ordinary native menu-label presentation.
+            if inToolbar {
+                HStack(spacing: DSSpacing.sm) {
+                    Image(systemName: "square.and.arrow.down")
+                    Text("Import")
+                        .fixedSize(horizontal: true, vertical: false)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                }
+                // This short, fixed label must never negotiate itself down to "Imp…".
+                .fixedSize(horizontal: true, vertical: false)
+                .modifier(DSToolbarPill())
+            } else {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
         }
+        .menuIndicator(.hidden)
         .disabled(appState.currentProject == nil)
         .help("Import a HAR file or an OpenAPI spec")
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("importMenuButton")
         .accessibilityLabel("Import")
     }

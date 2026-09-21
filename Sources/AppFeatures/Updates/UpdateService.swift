@@ -22,6 +22,7 @@ final class UpdateService {
         case available(UpdateRelease)
         case downloading(UpdateRelease, fraction: Double)
         case readyToInstall(UpdateRelease, installer: URL)
+        case installing(UpdateRelease)
         case failed(String)
 
         var release: UpdateRelease? {
@@ -29,14 +30,14 @@ final class UpdateService {
             case .idle, .checking, .upToDate, .failed: nil
             case .available(let release),
                  .downloading(let release, _),
-                 .readyToInstall(let release, _): release
+                 .readyToInstall(let release, _), .installing(let release): release
             }
         }
 
         /// Whether closing the sheet now would abandon work in progress.
         var isBusy: Bool {
             switch self {
-            case .checking, .downloading: true
+            case .checking, .downloading, .installing: true
             case .idle, .upToDate, .available, .readyToInstall, .failed: false
             }
         }
@@ -79,12 +80,15 @@ final class UpdateService {
 
     private let preferences: UpdatePreferences
     private let fetchLatestRelease: @Sendable () async throws -> UpdateRelease
-    private let installer: UpdateInstaller
+    private let installer: any UpdateInstalling
     private let now: @Sendable () -> Date
 
     /// Takes the pre-update snapshot. Given the store's location rather than resolving it, because
     /// resolving it is main-actor work and the copy itself must not be.
     private let makeBackup: @Sendable (URL, String) -> Void
+    private let flushPendingSave: @MainActor () async -> Void
+    private let terminate: @MainActor () -> Void
+    private var quitsAfterSheetDismissal = false
 
     private var work: Task<Void, Never>?
 
@@ -94,9 +98,13 @@ final class UpdateService {
         fetchLatestRelease: @escaping @Sendable () async throws -> UpdateRelease = {
             try await UpdateFeedClient().latestRelease()
         },
-        installer: UpdateInstaller = UpdateInstaller(),
+        installer: any UpdateInstalling = UpdateInstaller(),
         now: @escaping @Sendable () -> Date = { Date() },
-        makeBackup: @escaping @Sendable (URL, String) -> Void = UpdateService.snapshot(of:version:)
+        makeBackup: @escaping @Sendable (URL, String) -> Void = UpdateService.snapshot(of:version:),
+        flushPendingSave: @escaping @MainActor () async -> Void = {
+            await ControlPlaneCoordinator.shared.flushPendingSave()
+        },
+        terminate: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) }
     ) {
         self.resolveInstalledVersion = installedVersion
         self.preferences = preferences
@@ -104,6 +112,8 @@ final class UpdateService {
         self.installer = installer
         self.now = now
         self.makeBackup = makeBackup
+        self.flushPendingSave = flushPendingSave
+        self.terminate = terminate
     }
 
     /// The running version, for the sheet's own prose.
@@ -121,6 +131,7 @@ final class UpdateService {
     /// "You are up to date" is the answer to a question somebody just asked, and swallowing it makes
     /// the menu item look broken.
     func checkForUpdates() {
+        if case .installing = phase { return }
         isShowingSheet = true
         startCheck(announceWhenUpToDate: true)
     }
@@ -180,15 +191,25 @@ final class UpdateService {
 
     /// Never mention this version again. A later one still will be.
     func skipCurrentVersion() {
+        guard case .available = phase else { return }
         if let release = phase.release { preferences.skippedVersion = release.version }
         dismiss()
     }
 
     func dismiss() {
+        if case .installing = phase { return }
         work?.cancel()
         work = nil
         isShowingSheet = false
         phase = .idle
+    }
+
+    /// AppKit refuses termination while this modal sheet is attached. SwiftUI's completion,
+    /// not a timer or a single task yield, tells us when the sheet has really gone away.
+    func sheetDidDismiss() {
+        guard quitsAfterSheetDismissal else { return }
+        quitsAfterSheetDismissal = false
+        terminate()
     }
 
     // MARK: - Downloading
@@ -199,7 +220,7 @@ final class UpdateService {
         work = Task { [weak self] in
             guard let self else { return }
             do {
-                let file = try await installer.download(release) { fraction in
+                let file = try await installer.download(release) { [weak self] fraction in
                     Task { @MainActor [weak self] in
                         guard let self, case .downloading = phase else { return }
                         phase = .downloading(release, fraction: fraction)
@@ -228,13 +249,15 @@ final class UpdateService {
     /// migrations ever run, which is the moment this process ends; and the handoff has to complete
     /// before the app quits, because `Installer.app` reads the file out of this app's container.
     func installNow() {
-        guard case .readyToInstall(_, let file) = phase else { return }
+        guard case .readyToInstall(let release, let file) = phase else { return }
+        // Synchronous so repeated clicks cannot start overlapping installer handoffs.
+        phase = .installing(release)
         let version = installedVersion.description
         work = Task { [weak self] in
             guard let self else { return }
-            // The same drain `⌘Q` performs. Memoized inside the coordinator, so the ordinary
-            // termination that follows does not repeat it.
-            await ControlPlaneCoordinator.shared.flushPendingSave()
+            // Save before taking the backup. Ordinary termination also drains any work that
+            // arrived during the handoff; do not bypass the app delegate's shutdown contract.
+            await flushPendingSave()
 
             // Resolved here, on the main actor, and handed to the copy rather than looked up inside
             // it: `AppState.sessionStoreURL` is main-actor isolated, and a detached task reaching
@@ -250,7 +273,8 @@ final class UpdateService {
                 phase = .failed(error.localizedDescription)
                 return
             }
-            NSApplication.shared.terminate(nil)
+            quitsAfterSheetDismissal = true
+            isShowingSheet = false
         }
     }
 

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Testing
 import Domain
+import DesignSystem
 @testable import AppFeatures
 
 @Suite("WorkspaceFeature Rendering")
@@ -89,7 +90,7 @@ struct WorkspaceFeatureRenderingTests {
 
     /// The app's primary action keeps one footprint through the whole start/stop cycle.
     ///
-    /// Run and Stop remain present in every state; only availability changes. Neither the
+    /// Run and Stop occupy the same button and replace their symbol in place. Neither the
     /// transitioning states nor an error may move the neighbouring project name or status.
     @Test("The server toggle is one size in every server state")
     func serverToggleKeepsOneFootprint() {
@@ -100,10 +101,35 @@ struct WorkspaceFeatureRenderingTests {
         let stopping = render(ServerToggleButton(serverState: .stopping, onStart: {}, onStop: {}), size: measure)
         let errored = render(ServerToggleButton(serverState: .error("Port in use"), onStart: {}, onStop: {}), size: measure)
 
+        #expect(stopped == CGSize(width: 40, height: 36))
         #expect(starting == stopped)
         #expect(running == stopped)
         #expect(stopping == stopped)
         #expect(errored == stopped)
+    }
+
+    @Test("Toolbar pills keep the same height for buttons, menus, and every server status")
+    func toolbarPillsShareTheirOuterHeight() {
+        let button = render(Button("Server settings") {}.buttonStyle(DSToolbarButtonStyle()))
+        let menu = render(
+            Menu { Button("Import HAR file") {} } label: {
+                Text("Import").modifier(DSToolbarPill())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+        )
+        #expect(button.height == 36)
+        #expect(menu.height == 36)
+        let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
+        for compact in [false, true] {
+            for state in states {
+                let well = render(ServerStatusWell(
+                    serverState: state, projectName: "Toolbar Review", requestCount: 12,
+                    unmatchedCount: 2, compact: compact
+                ))
+                #expect(well.height == 36)
+            }
+        }
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.

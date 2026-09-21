@@ -82,15 +82,9 @@ struct ServerStatusWell: View {
                 unmatchedElement
             }
         }
-        // 12 and not the 8 a chip's own inset would suggest, because the well is a capsule: the first
-        // 11pt of it is curve, and a 16pt state chip set 8pt in has its top and bottom corners inside
-        // that curve.
-        .padding(.horizontal, DSSpacing.md)
-        // `DSControlHeight.verticalPadding`, which is what this 3 always was: the inset above and
-        // below a control's own content, half of `DSSpacing.sm` and deliberately off the spacing
-        // scale because it is internal geometry rather than a gap between two things. The request
-        // log's header wells and the endpoint editor's fields take the same rung.
-        .padding(.vertical, DSControlHeight.verticalPadding)
+        // Share the exact outer geometry of the neighboring action pills.
+        .padding(.horizontal, DSToolbarGeometry.horizontalInset)
+        .frame(height: DSToolbarGeometry.height)
         // WorkspaceView proposes a width for the wide or compact window layout. With traffic,
         // the spacer anchors status and counters to opposite edges; without it the capsule hugs
         // its contents. The toolbar's shared background is hidden to avoid nested capsules.
@@ -133,7 +127,7 @@ struct ServerStatusWell: View {
             .scaleEffect(isPulsing ? 1.25 : 1.0)
             .opacity(isPulsing ? 0.45 : 1.0)
             .animation(pulseAnimation, value: isPulsing)
-            .frame(width: Self.stateChipSide, height: Self.stateChipSide)
+            .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
             .background {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm, style: .continuous)
                     .fill(dotColor.opacity(0.25))
@@ -143,17 +137,13 @@ struct ServerStatusWell: View {
             .accessibilityHidden(true)
     }
 
-    /// 16 — the state chip's side, and what sets the well's own height at `DSControlHeight.field`
-    /// once `DSControlHeight.verticalPadding` is paid above and below it. Off the spacing scale for
-    /// the reason that padding is: it is a control's internal geometry rather than a gap between two
-    /// things.
-    private static let stateChipSide: CGFloat = 16
-
     @ViewBuilder
     private var primaryElement: some View {
         if isRunning {
             Button(action: copyURL) {
                 primaryLabel
+                    .frame(height: DSToolbarGeometry.height)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .onHover { isURLHovered = $0 }
@@ -168,66 +158,31 @@ struct ServerStatusWell: View {
         }
     }
 
-    /// The address and the word that says what clicking it does, as one control.
-    ///
-    /// One `Button`, not two. The chip is an affordance on the address rather than a second target
-    /// beside it: splitting them would put a 26pt hit area next to a 90pt one that does the same
-    /// thing, and the suite clicks the address itself (`WorkspaceShellUITests`, SRVWELL). So the
-    /// whole run reads as one control, lights as one control, and answers as one control.
+    /// The address and copy affordance form one control, with a stable confirmation footprint.
     private var primaryLabel: some View {
         HStack(spacing: DSSpacing.sm) {
             primaryTextView
-                // Monospaced only for the address: digits that change as the port changes should not
-                // reflow the row, and a project name in SF Mono reads as a filename. Semibold and
-                // `.monospacedDigit()` come with `Figure.status` — see that token for why a port is
-                // a figure rather than a word.
-                .font(isRunning ? DSTypography.Figure.status : DSTypography.label)
+                // Only the address is monospaced; state descriptions use the toolbar's body face.
+                .font(isRunning ? DSTypography.codeBold.monospacedDigit() : DSTypography.bodyMedium)
                 .foregroundStyle(primaryColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .contentTransition(.opacity)
 
-            if showsCopyChip {
-                copyChip
+            if showsCopyAffordance {
+                copyAffordance
             }
         }
         .contentShape(.rect)
     }
 
-    /// The word "Copy", on a well of its own.
-    ///
-    /// The house rule is that every interactive control answers the pointer, and this one used to
-    /// fail a weaker test than that: at rest it did not exist. The address was clickable and nothing
-    /// said so — the type's own note calls it the most-copied string in the app — so the affordance
-    /// was a tooltip you had to already be hovering to read. A chip is the smallest thing that can
-    /// be there before the pointer is.
-    ///
-    /// It takes a well where the address deliberately does not. That is not the two controls
-    /// disagreeing: the address is *type*, and lighting a rectangle behind a line of type inside a
-    /// container that already has a fill and a hairline is what `DSClearButton` argues against. The
-    /// chip is a chip — a filled rectangle at rest, which is a thing a pointer can be *on*. What
-    /// moves under the pointer is the word rather than the fill, and ``copyChipFill`` records the
-    /// contrast reading that decided that.
-    ///
-    /// The hidden "Copied" underneath is what stops the toolbar re-flowing when you click. The two
-    /// words differ by about twenty points, and without a floor the divider and both counts slide
-    /// right for a second and a half every time the address is copied — a jump the eye reads as the
-    /// well having changed shape rather than as a confirmation.
-    private var copyChip: some View {
-        ZStack {
-            Text("Copied").hidden()
-            Text(showsCopyConfirmation ? "Copied" : "Copy")
-        }
-            .font(DSTypography.caption)
-            .foregroundStyle(copyChipForeground)
-            .padding(.horizontal, DSSpacing.xs)
-            // 2, so the chip stands the same 16pt as the state mark's chip at the other end of the
-            // well and the two read as one family.
-            .padding(.vertical, DSSpacing.xxs)
-            .background {
-                RoundedRectangle(cornerRadius: DSCornerRadius.xs, style: .continuous)
-                    .fill(copyChipFill)
-            }
+    /// A fixed-width copy/checkmark affordance, without a second, undersized pill inside the well.
+    private var copyAffordance: some View {
+        Image(systemName: showsCopyConfirmation ? "checkmark" : "doc.on.doc")
+            .font(.system(size: DSGlyph.control, weight: .medium))
+            .foregroundStyle(showsCopyConfirmation ? DSColors.successText : primaryColor)
+            .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
+            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
             // Not `.fixedSize()`, which the house rules name as a latent clipping bug in a row: it
             // makes the row demand more width than it has and an `HStack` pays for that out of its
             // *leading* edge. Priority says the same thing without the trap — the chip keeps its
@@ -289,6 +244,8 @@ struct ServerStatusWell: View {
         if let onShowUnmatched {
             Button(action: onShowUnmatched) {
                 unmatchedBadge
+                    .frame(height: DSToolbarGeometry.height)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .onHover { isUnmatchedHovered = $0 }
@@ -360,34 +317,8 @@ struct ServerStatusWell: View {
         isRunning ? DSColors.successMuted : DSColors.border
     }
 
-    /// The chip appears only when there is a URL to put on the pasteboard. Offering "Copy" beside
-    /// "Server stopped" would be a button for an address that does not exist.
-    private var showsCopyChip: Bool { isRunning && !compact }
-
-    /// Confirmation is green — the one place in this well where the success colour is a *word* — so
-    /// it takes ``DSColors/successText``, the variant measured on a tint of itself, rather than
-    /// ``DSColors/success``, which is a signal colour and reads 3.94 there.
-    private var copyChipForeground: Color {
-        if showsCopyConfirmation { return DSColors.successText }
-        return isURLHovered ? DSColors.accentText : DSColors.labelSecondary
-    }
-
-    /// One fill, in all three states, and it is the only one of the obvious candidates that a 10pt
-    /// word can be read on.
-    ///
-    /// The chip was first drawn as a 6% ink wash that lit to ``DSColors/accentSubtle`` under the
-    /// pointer, which is the idiom the rest of the window uses for a hover well — and measured on
-    /// the green well it puts "Copy" at 4.27:1 in light and 4.16 in dark at rest, and the hovered
-    /// blue at 4.37 and 4.05. Four readings, four failures, on a control whose entire job is to be
-    /// legible before you have found it. The tint is what does it: `labelSecondary` clears AA on the
-    /// bare toolbar at 4.61 and loses that margin the moment the well goes green.
-    ///
-    /// ``DSColors/tertiary`` is the recess token, opaque, and it steps *away* from the tint in both
-    /// appearances rather than deeper into it. On it the three states read 4.55/4.67 at rest,
-    /// 4.98/4.54 hovered and 5.76/5.61 confirming — measured in
-    /// `DSContrastTests.runningWellTintIsReadable`. So the fill holds still and the *word* carries
-    /// all three states, which is also the quieter animation.
-    private var copyChipFill: Color { DSColors.tertiary }
+    /// Only offer copying when an address exists; compact mode keeps the whole address clickable.
+    private var showsCopyAffordance: Bool { isRunning && !compact }
 
     /// The unmatched badge, and whether the pointer is on it. Same answer as the address above, so
     /// the well's two buttons respond to the pointer the same way rather than inventing one idiom

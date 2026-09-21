@@ -397,6 +397,7 @@ final class RequestLogUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Real backend capture", port: 62130)
         let settings = BackendSettingsPage(app: app)
+        XCTAssertTrue(settings.open.waitForExistence(timeout: 5))
         settings.open.click()
         XCTAssertTrue(settings.primaryName.waitForExistence(timeout: 5))
         settings.replace(settings.primaryName, with: "Catalog")

@@ -45,6 +45,7 @@ struct UpdateSheet: View {
         }
         .padding(DSSpacing.lg)
         .frame(minWidth: 540, idealWidth: 540)
+        .interactiveDismissDisabled(service.phase.isBusy)
     }
 
     private var automaticChecks: Binding<Bool> {
@@ -73,8 +74,10 @@ struct UpdateSheet: View {
             "Downloading Mimic \(release.version)"
         case .readyToInstall(let release, _):
             "Mimic \(release.version) is ready to install"
+        case .installing:
+            "Preparing to quit and install"
         case .failed:
-            "Couldn't check for updates"
+            "Couldn't complete the update"
         }
     }
 
@@ -144,6 +147,15 @@ struct UpdateSheet: View {
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("update.readyNote")
             }
+
+        case .installing:
+            HStack(spacing: DSSpacing.smPlus) {
+                ProgressView().controlSize(.small)
+                Text("Saving your work and opening the installer…")
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.labelSecondary)
+            }
+            .accessibilityIdentifier("update.installing")
 
         case .failed(let message):
             VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
@@ -250,6 +262,12 @@ struct UpdateSheet: View {
             .accessibilityIdentifier("update.installButton")
             .accessibilityLabel("Quit Mimic and install the update")
             .keyboardShortcut(.defaultAction)
+
+        case .installing:
+            Text("Please wait…")
+                .font(DSTypography.meta)
+                .foregroundStyle(DSColors.labelSecondary)
+                .accessibilityIdentifier("update.installingStatus")
 
         case .failed:
             DSButton("Close", variant: .secondary, size: .medium, identifier: "update.closeFailure") {

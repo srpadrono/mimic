@@ -9,11 +9,26 @@ module boundaries, which is what makes the code predictable.
 **Requirements:** macOS 26+, Xcode with the Swift 6.2 toolchain, and [Tuist](https://tuist.io).
 
 ```bash
+mise install
 tuist install && tuist generate --no-open
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug build
 ```
 
 Re-run `tuist install && tuist generate` after any change to `Project.swift` or `Tuist/Package.swift`.
+Use Tuist **4.209.0**, pinned in `mise.toml`: it understands Swift 6.4's macOS 12 deployment floor
+for dependencies, including synthesized resource bundles. No generated-project repair scripts are
+needed. Check `tuist version` before generating; with mise not activated in your shell, use
+`mise exec -- tuist install` and `mise exec -- tuist generate --no-open`.
+If `xcode-select -p` reports Command Line Tools, prefix the generation command with
+`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (or your installed Xcode path).
+
+Xcode's recommended settings live in the manifests, not the generated projects. Framework module
+verification uses the built-in verifier (shared module cache), script sandboxing is enabled, and
+dependency code targets use an explicit macOS 14 floor consistently. When updating
+dependencies, review `dependencyTargets` in `Tuist/Package.swift` for new targets or higher upstream
+deployment requirements. `_RopeModule` also retains its pinned upstream experimental/availability
+flags there, while expressing Swift 5 mode only through `SWIFT_VERSION`; review those flags when
+updating swift-collections. Do not apply Xcode's changes directly to a generated `.xcodeproj`.
 
 Most of the codebase doesn't need Xcode at all:
 
