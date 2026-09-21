@@ -226,11 +226,21 @@ struct ServerStatusWellPage {
     var requestCount: XCUIElement { named("serverStatusWell.requestCount") }
     var unmatchedBadge: XCUIElement { named("serverStatusWell.unmatched") }
 
-    /// Enlarge the editor segment when a test specifically exercises its full status counters.
-    func revealTrafficControlsIfCompact() {
-        let workspace = WorkspacePage(app: app)
-        if workspace.overflowMenu.exists { workspace.fillWindow() }
+    var details: XCUIElement { named("serverStatusWell.portList") }
+    var settings: XCUIElement { named("serverStatusWell.settings") }
+    var traffic: XCUIElement { named("serverStatusWell.traffic") }
+    func copyButton(port: Int) -> XCUIElement { named("serverStatusWell.copyPort.\(port)") }
+    func openDetails() {
+        if !details.exists { address.click() }
+        _ = details.waitForExistence(timeout: 5)
     }
+    func closeDetails() {
+        if details.exists {
+            app.typeKey(.escape, modifierFlags: [])
+            _ = details.waitForNonExistence(timeout: 5)
+        }
+    }
+    func revealTrafficControlsIfCompact() { openDetails() }
 
     func spoken(_ element: XCUIElement) -> String {
         guard element.exists else { return "<absent>" }
@@ -1199,7 +1209,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // SRVWELL-08 / SRVWELL-09 — the well counts what arrived and warns about what nothing
         // answered. Both state their meaning in their accessibility label rather than in the digit
         // they draw.
-        if !workspace.overflowMenu.exists {
+        do {
             XCTAssertTrue(well.requestCount.waitForExistence(timeout: 5), "The well should show a request count")
             XCTAssertTrue(
                 waitForLabel(well.requestCount, toContain: "2 requests logged"),
@@ -1214,6 +1224,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
                 "The badge should say how many — \(well.spoken(well.unmatchedBadge))"
             )
         }
+        well.closeDetails()
 
         // INSPOV-07 — and the overview says the same thing in words.
         XCTAssertTrue(
@@ -1405,122 +1416,103 @@ final class WorkspaceShellUITests: MimicUITestCase {
     // MARK: - 4. The toolbar's server well
 
     @MainActor
-    func testCenterToolbarOverflowKeepsPanelControlsSeparate() throws {
+    func testToolbarPreservesIdentityAndCollapsesSecondaryActions() throws {
         launchShell()
+        workspace.compactWindow()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5), "Opening directly into a compact window must expose editor actions")
         workspace.fillWindow()
-        workspace.showSidebarIfNeeded()
-        createEndpointViaUI(name: "Account summary", path: "/account-summary")
-        // A CI display may be narrower than the expanded toolbar threshold even after Fill.
-        // Assert the wide arrangement when the display supports it; the compact path is below.
-        if !workspace.overflowMenu.exists {
-            XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].waitForExistence(timeout: 5))
-            XCTAssertTrue(workspace.importMenuButton.exists)
-            XCTAssertLessThan(workspace.importMenuButton.frame.maxX, inspectorHeader.frame.minX)
-            XCTAssertLessThan(app.toolbars.buttons["backend.settingsButton"].frame.maxX, inspectorHeader.frame.minX)
-        }
-        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
-        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
-        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
+        XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.projectKind.label == "Local mock" || workspace.projectKind.value as? String == "Local mock")
+        XCTAssertTrue(well.address.isHittable)
         XCTAssertEqual(workspace.serverToggleButton.label, "Start server")
-        XCTAssertEqual(workspace.toggleInspectorButton.label, "Hide inspector")
-        XCTAssertEqual(workspace.toggleDrawerButton.label, "Hide request log")
-        XCTAssertFalse(workspace.legacyServerStartButton.exists)
-        XCTAssertFalse(workspace.legacyServerStopButton.exists)
         assertToolbarGeometry()
-        if !workspace.overflowMenu.exists {
-            let wide = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-            wide.name = "center-toolbar-expanded"
-            wide.lifetime = .keepAlways
-            add(wide)
-        }
+        let expanded = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        expanded.name = "native-toolbar-expanded"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+        assertToolbarColumnOwnership()
 
         workspace.compactWindow()
-        workspace.showSidebarIfNeeded()
         XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.toolbars.buttons["backend.settingsButton"].exists)
-        XCTAssertTrue(workspace.serverToggleButton.isHittable)
-        XCTAssertLessThan(workspace.overflowMenu.frame.maxX, inspectorHeader.frame.minX)
-        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
-        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
+        XCTAssertTrue(workspace.projectTitle.isHittable)
+        XCTAssertTrue(workspace.projectKind.isHittable)
+        XCTAssertTrue(well.address.isHittable)
+        XCTAssertFalse(workspace.inlineToolbarAction("backend.settingsButton").exists)
+        XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
+        XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
         assertToolbarGeometry()
-        XCTAssertGreaterThan(workspace.toggleDrawerButton.frame.minX, inspectorHeader.frame.minX)
-        XCTAssertGreaterThan(workspace.toggleInspectorButton.frame.minX, inspectorHeader.frame.minX)
-        let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        compact.name = "center-toolbar-compact"
-        compact.lifetime = .keepAlways
-        add(compact)
-
+        assertToolbarColumnOwnership()
         workspace.overflowMenu.click()
-        XCTAssertTrue(app.menuItems["backend.settingsButton"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.menuItems["toggleDrawerButton"].exists)
-        XCTAssertFalse(app.menuItems["toggleInspectorButton"].exists)
-        XCTAssertTrue(workspace.importMenuButton.exists)
-        let menu = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        menu.name = "center-toolbar-overflow-menu"
-        menu.lifetime = .keepAlways
-        add(menu)
+        XCTAssertTrue(workspace.overflowAction("backend.settingsButton").waitForExistence(timeout: 5))
+        XCTAssertFalse(workspace.overflowAction("toggleDrawerButton").exists)
+        XCTAssertFalse(workspace.overflowAction("toggleInspectorButton").exists)
         workspace.closeToolbarMenu()
-
-        let settings = BackendSettingsPage(app: app)
-        settings.open.click()
-        XCTAssertTrue(settings.primaryPort.waitForExistence(timeout: 5))
-        settings.cancel.click()
-        XCTAssertTrue(settings.cancel.waitForNonExistence(timeout: 5))
 
         let stoppedFrame = workspace.serverToggleButton.frame
         startServer(onPort: 62118)
-        XCTAssertTrue(workspace.serverToggleButton.isEnabled)
         XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
-        XCTAssertFalse(workspace.legacyServerStartButton.exists)
-        XCTAssertFalse(workspace.legacyServerStopButton.exists)
         XCTAssertEqual(workspace.serverToggleButton.frame.width, stoppedFrame.width, accuracy: 1)
         XCTAssertEqual(workspace.serverToggleButton.frame.midX, stoppedFrame.midX, accuracy: 1)
-        assertToolbarGeometry()
-        let running = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        running.name = "center-toolbar-compact-running"
-        running.lifetime = .keepAlways
-        add(running)
-        workspace.serverToggleButton.click()
-        XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
+        well.openDetails()
+        XCTAssertTrue(well.copyButton(port: 62118).isEnabled)
+        let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        compact.name = "native-toolbar-compact-details"
+        compact.lifetime = .keepAlways
+        add(compact)
+        well.closeDetails()
 
-        // Panel controls remain directly reachable even while the center actions overflow.
         app.typeKey("i", modifierFlags: [.command, .option])
         XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(workspace.toggleDrawerButton.isHittable)
-        XCTAssertTrue(workspace.toggleInspectorButton.isHittable)
-        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
+        XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
+        assertToolbarGeometry()
+        let collapsedInspector = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        collapsedInspector.name = "native-toolbar-inspector-collapsed"
+        collapsedInspector.lifetime = .keepAlways
+        add(collapsedInspector)
+        workspace.inlineToolbarAction("toggleInspectorButton").click()
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
-        workspace.fillWindow()
-        if !workspace.overflowMenu.exists {
-            XCTAssertTrue(app.toolbars.buttons["backend.settingsButton"].exists)
-        } else {
-            // A compact CI display cannot cross the expanded threshold even after Fill.
-            XCTAssertTrue(workspace.overflowMenu.isHittable)
+        assertToolbarColumnOwnership()
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
+    }
+
+    @MainActor
+    private func assertToolbarColumnOwnership(file: StaticString = #filePath, line: UInt = #line) {
+        let center = shell.panel("centerPane").frame
+        let inspector = shell.panel("inspector").frame
+        let editorActions = workspace.overflowMenu.exists
+            ? [workspace.overflowMenu]
+            : [workspace.inlineToolbarAction("importMenuButton"), workspace.inlineToolbarAction("backend.settingsButton")]
+        for action in editorActions {
+            XCTAssertTrue(action.isHittable, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(action.frame.minX, center.minX, file: file, line: line)
+            XCTAssertLessThanOrEqual(action.frame.maxX, center.maxX, "Editor actions must stay above the center panel", file: file, line: line)
+        }
+        if let trailingAction = editorActions.last {
+            XCTAssertLessThanOrEqual(center.maxX - trailingAction.frame.maxX, 24,
+                                     "Editor actions must be pinned to the center panel's right edge", file: file, line: line)
+        }
+        for identifier in ["toggleDrawerButton", "toggleInspectorButton"] {
+            let action = workspace.inlineToolbarAction(identifier)
+            XCTAssertTrue(action.isHittable, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(action.frame.minX, inspector.minX, "Panel controls must stay above the inspector", file: file, line: line)
         }
     }
 
-    /// Literal dimensions deliberately pin the design contract independently of its implementation.
     @MainActor
     private func assertToolbarGeometry(file: StaticString = #filePath, line: UInt = #line) {
-        var controls = [workspace.serverToggleButton, workspace.toggleDrawerButton,
-                        workspace.toggleInspectorButton]
+        let run = workspace.serverToggleButton
+        XCTAssertEqual(well.address.frame.midY, run.frame.midY, accuracy: 2, file: file, line: line)
+        XCTAssertLessThanOrEqual(run.frame.maxX, workspace.projectTitle.frame.minX, file: file, line: line)
+        XCTAssertLessThanOrEqual(workspace.projectTitle.frame.maxX, well.address.frame.minX, file: file, line: line)
+        let identityGap = well.address.frame.minX - workspace.projectIdentity.frame.maxX
+        XCTAssertGreaterThanOrEqual(identityGap, 12, "Leave padding after project identity", file: file, line: line)
+        XCTAssertLessThanOrEqual(identityGap, 25, "Keep the address beside the project with a padded divider, even in a wide window", file: file, line: line)
         if workspace.overflowMenu.exists {
-            controls.append(workspace.overflowMenu)
-        } else {
-            controls += [workspace.importMenuButton, workspace.serverSettingsToolbarButton]
-        }
-        let centerY = workspace.serverToggleButton.frame.midY
-        // AppKit prunes the non-interactive well container when the saving label is idle.
-        // Its rendered outer height is pinned by WorkspaceFeatureRenderingTests; compare the
-        // exposed status content's center here, rather than assuming an invisible AX wrapper.
-        XCTAssertEqual(well.address.frame.midY, centerY, accuracy: 1, file: file, line: line)
-        for control in controls {
-            XCTAssertEqual(control.frame.height, 36, accuracy: 1,
-                           "\(control.identifier) outer height", file: file, line: line)
-            XCTAssertEqual(control.frame.midY, centerY, accuracy: 1,
-                           "\(control.identifier) vertical alignment", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(workspace.overflowMenu.frame.minX, well.address.frame.maxX, file: file, line: line)
         }
     }
 
@@ -1539,16 +1531,22 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Before anything is started the well should say so — \(well.spoken(well.address))"
         )
 
+        well.openDetails()
+        XCTAssertTrue(well.copyButton(port: port).waitForExistence(timeout: 5))
+        XCTAssertFalse(well.copyButton(port: port).isEnabled, "Configured addresses are not advertised as listening")
+        well.closeDetails()
         _ = NSPasteboard.general.clearContents()
         startServer(onPort: port)
         workspace.fillWindow()
         assertToolbarGeometry()
-        XCTAssertEqual(well.address.frame.height, 36, accuracy: 1, "Copy target spans the status pill's height")
+        XCTAssertGreaterThanOrEqual(well.address.frame.height, 36, "Native toolbar margins may enlarge the two-line hit target")
         let running = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         running.name = "center-toolbar-expanded-running"
         running.lifetime = .keepAlways
         add(running)
-        well.address.click()
+        well.openDetails()
+        XCTAssertTrue(well.copyButton(port: port).waitForExistence(timeout: 5))
+        well.copyButton(port: port).click()
 
         // Polled rather than read once: the copy happens on the app's main actor and the pasteboard
         // is a system-wide handoff, so the runner can observe it a moment later. The bounded
@@ -1562,8 +1560,21 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertEqual(
             copied,
             expected,
-            "Clicking the address should copy the base URL, scheme and all"
+            "The per-port Copy URL action should include the scheme"
         )
+
+        well.settings.click()
+        let settings = BackendSettingsPage(app: app)
+        XCTAssertTrue(settings.primaryPort.waitForExistence(timeout: 5))
+        settings.cancel.click()
+        XCTAssertTrue(settings.cancel.waitForNonExistence(timeout: 5))
+
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(shell.panel("drawer").waitForNonExistence(timeout: 5))
+        well.openDetails()
+        well.traffic.click()
+        XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5))
+        XCTAssertTrue(well.details.waitForNonExistence(timeout: 5))
     }
 
     /// SRVWELL-10.
@@ -2077,6 +2088,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             workspace.autosaveSavedIndicator.waitForNonExistence(timeout: 10),
             "The indicator should clear itself once the save has settled"
         )
+        XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5), "Local mock returns after saving")
     }
 
     /// AUTOSAVE-05.

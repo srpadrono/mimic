@@ -185,8 +185,23 @@ struct WorkspacePage {
         let named = app.menuItems["importOpenAPIMenuItem"].firstMatch
         return named.exists ? named : app.menuItems["Import OpenAPI spec…"].firstMatch
     }
-    var toggleInspectorButton: XCUIElement { app.toolbars.buttons["toggleInspectorButton"].firstMatch }
-    var toggleDrawerButton: XCUIElement { app.toolbars.buttons["toggleDrawerButton"].firstMatch }
+    var toggleInspectorButton: XCUIElement { toolbarAction("toggleInspectorButton") }
+    var toggleDrawerButton: XCUIElement { toolbarAction("toggleDrawerButton") }
+    var projectTitle: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "toolbar.projectName").firstMatch
+    }
+    var projectIdentity: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "toolbar.projectIdentity").firstMatch
+    }
+    var projectKind: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "toolbar.projectKind").firstMatch
+    }
+    func inlineToolbarAction(_ identifier: String) -> XCUIElement {
+        app.toolbars.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+    func overflowAction(_ identifier: String) -> XCUIElement {
+        app.menuItems.matching(identifier: identifier).firstMatch
+    }
     var overflowMenu: XCUIElement {
         app.toolbars.descendants(matching: .any).matching(identifier: "toolbar.overflow").firstMatch
     }
@@ -271,8 +286,10 @@ struct WorkspacePage {
     func waitForServerURL(port: Int, timeout: TimeInterval = 10) -> Bool {
         let element = serverURLText(port: port)
         guard element.waitForExistence(timeout: timeout) else { return false }
-        let shown = ((element.value as? String) ?? "") + " " + element.label
-        return shown.contains("localhost:\(port)")
+        return UITestApp.waitUntil(timeout: timeout) {
+            let shown = ((element.value as? String) ?? "") + " " + element.label
+            return shown.contains("localhost:\(port)") && shown.contains("server running")
+        }
     }
 
     /// Waits for the workspace to be visible — by its empty state if the project has no endpoints, by

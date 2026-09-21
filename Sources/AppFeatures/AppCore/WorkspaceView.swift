@@ -47,7 +47,7 @@ struct WorkspaceView: View {
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
 
-    /// Only the editor column owns the adaptive actions; inspector controls remain separate.
+    /// The editor column determines when supporting toolbar actions need overflow.
     @State private var centerToolbarWidth: CGFloat = 0
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
@@ -173,20 +173,21 @@ struct WorkspaceView: View {
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { centerToolbarWidth = $0 }
-                // Measure before the inspector so opening/resizing it reduces the editor's budget.
-                .inspector(isPresented: $showInspector) {
-                    inspectorPanel
-                        .inspectorColumnWidth(
-                            min: PanelLayoutStore.Bounds.minimumInspectorWidth,
-                            ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
-                            max: 640
-                        )
-                        // `.contain` for the same reason the sidebar needs it: a bare identifier on a
-                        // container overrides its descendants', which would make every control inside
-                        // the request detail report "inspector".
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("inspector")
-                }
+                // Editor actions belong to this column, before the inspector divides the toolbar.
+                .toolbar { workspaceToolbar }
+            }
+            // Outside the navigation structure, the inspector owns a full-height column and its
+            // own toolbar section. Nesting it in the detail column merges both action groups.
+            .inspector(isPresented: $showInspector) {
+                inspectorPanel
+                    .inspectorColumnWidth(
+                        min: PanelLayoutStore.Bounds.minimumInspectorWidth,
+                        ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
+                        max: 640
+                    )
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("inspector")
+                    .toolbar { panelToolbar }
             }
         }
     }
@@ -194,7 +195,6 @@ struct WorkspaceView: View {
     private var workspaceWithToolbar: some View {
         workspaceLayout
             .toolbar(removing: .title)
-            .toolbar { workspaceToolbar }
     }
 
     var body: some View {
@@ -373,7 +373,7 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// Only editor actions overflow. The two panel controls keep their own trailing section.
+    /// Preserve project identity and server context; only editor actions move into overflow.
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
         !centerWidth.isFinite || centerWidth < DSToolbarGeometry.expandedCenterWidth
     }
@@ -384,87 +384,112 @@ struct WorkspaceView: View {
 
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            // One hosted action row prevents AppKit from adding per-item button bezel insets.
-            HStack(spacing: DSSpacing.smPlus) {
-                ServerToggleButton(
-                    serverState: appState.serverState,
-                    onStart: appState.startServer,
-                    onStop: appState.stopServer
-                )
-
-                if usesToolbarOverflow {
-                    overflowMenu.menuStyle(.button).buttonStyle(.plain)
-                } else {
-                    Text(appState.currentProject?.name ?? "Mimic")
-                        .font(DSTypography.bodyBold)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: DSToolbarGeometry.projectTitleWidth)
-                        .frame(height: DSToolbarGeometry.height)
-                        .padding(.horizontal, DSToolbarGeometry.horizontalInset)
-                        .help(appState.currentProject?.name ?? "Mimic")
-                        .accessibilityIdentifier("toolbar.projectName")
-                    importMenu(inToolbar: true).menuStyle(.button).buttonStyle(.plain)
-                    serverSettingsButton
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(DSToolbarButtonStyle())
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("toolbar.editorActions")
+        ToolbarItem(id: "workspace.run", placement: .navigation) {
+            ServerToggleButton(
+                serverState: appState.serverState,
+                onStart: appState.startServer,
+                onStop: appState.stopServer
+            )
         }
         .sharedBackgroundVisibility(.hidden)
 
-        ToolbarItem(placement: .principal) {
-            HStack(spacing: DSSpacing.smPlus) {
-                ServerStatusWell(
-                    serverState: appState.serverState,
-                    projectName: appState.currentProject?.name,
-                    requestCount: appState.requestLogs.count,
-                    unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
-                    compact: usesToolbarOverflow,
-                    configuration: appState.currentProject?.serverConfiguration,
-                    boundConfiguration: appState.server.boundConfiguration,
-                    onShowUnmatched: {
-                        showDrawer = true
-                        showUnmatchedOnly = true
-                    }
-                )
-                .frame(width: (usesToolbarOverflow
-                    ? DSToolbarGeometry.compactStatusWidth
-                    : (appState.requestLogs.isEmpty ? DSToolbarGeometry.statusWidth : DSToolbarGeometry.trafficStatusWidth))
-                    + (appState.serverConfiguration.listeners.count > 1 || appState.server.restartRequired
-                        ? DSToolbarGeometry.height : 0))
-
-                AutosaveStatusIndicator(status: appState.autosaveStatus)
-                    .frame(width: DSToolbarGeometry.autosaveWidth, height: DSToolbarGeometry.height, alignment: .leading)
+        ToolbarItem(id: "workspace.identityAndServer", placement: .navigation) {
+            HStack(spacing: usesToolbarOverflow ? DSSpacing.sm : DSSpacing.md) {
+                projectIdentity
+                Rectangle()
+                    .fill(DSColors.border)
+                    .frame(width: DSStroke.seam, height: DSSpacing.xl)
+                    .accessibilityHidden(true)
+                serverSummary
             }
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("toolbar.statusGroup")
         }
         .sharedBackgroundVisibility(.hidden)
 
-        // Above the inspector, in both layouts: never fold these into the editor's menu.
+        ToolbarSpacer(.flexible, placement: .primaryAction)
+        // Keep one native group installed when the workspace first opens in compact mode.
         ToolbarItemGroup(placement: .primaryAction) {
-            HStack(spacing: DSSpacing.smPlus) {
-                drawerToolbarButton
-                inspectorToolbarButton
+            if usesToolbarOverflow {
+                overflowMenu
+            } else {
+                importMenu(inToolbar: true)
+                serverSettingsButton.labelStyle(.iconOnly)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(DSToolbarButtonStyle())
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("toolbar.panelActions")
         }
-        .sharedBackgroundVisibility(.hidden)
+    }
+
+    private var projectIdentity: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+            Text(appState.currentProject?.name ?? "Mimic")
+                .font(DSTypography.bodyBold)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(appState.currentProject?.name ?? "Mimic")
+                .accessibilityIdentifier("toolbar.projectName")
+            ZStack(alignment: .leading) {
+                Label {
+                    Text("Local mock").font(DSTypography.label)
+                } icon: {
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: DSGlyph.inline, weight: .regular))
+                }
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(DSColors.labelSecondary)
+                .opacity(appState.autosaveStatus == .idle ? 1 : 0)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("toolbar.projectKind")
+                .accessibilityLabel("Local mock")
+                .accessibilityHidden(appState.autosaveStatus != .idle)
+                AutosaveStatusIndicator(status: appState.autosaveStatus)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(height: DSToolbarGeometry.metadataHeight, alignment: .leading)
+        }
+        .frame(maxWidth: usesToolbarOverflow
+            ? DSToolbarGeometry.compactProjectTitleWidth : DSToolbarGeometry.projectTitleWidth,
+               alignment: .leading)
+        .frame(height: DSToolbarGeometry.height, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("toolbar.projectIdentity")
+    }
+
+    private var serverSummary: some View {
+        ServerStatusWell(
+            serverState: appState.serverState,
+            projectName: appState.currentProject?.name,
+            requestCount: appState.requestLogs.count,
+            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+            compact: usesToolbarOverflow,
+            configuration: appState.currentProject?.serverConfiguration,
+            boundConfiguration: appState.server.boundConfiguration,
+            onShowUnmatched: {
+                showDrawer = true
+                showUnmatchedOnly = true
+            },
+            onShowSettings: { showBackendSettings = true },
+            onShowTraffic: {
+                showDrawer = true
+                showUnmatchedOnly = false
+            }
+        )
+        .frame(width: usesToolbarOverflow
+            ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth)
+    }
+
+    @ToolbarContentBuilder
+    private var panelToolbar: some ToolbarContent {
+        ToolbarSpacer(.flexible, placement: .primaryAction)
+        ToolbarItemGroup(placement: .primaryAction) {
+            drawerToolbarButton.labelStyle(.iconOnly)
+            inspectorToolbarButton.labelStyle(.iconOnly)
+        }
     }
 
     private var overflowMenu: some View {
         let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
         let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
         return Menu {
-            Text(appState.currentProject?.name ?? "Mimic")
-            Divider()
             importMenu()
             serverSettingsButton
             if !appState.requestLogs.isEmpty {
@@ -477,21 +502,18 @@ struct WorkspaceView: View {
                 .accessibilityLabel("Show unmatched requests")
             }
         } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
-                if unmatchedCount > 0 {
-                    Text("\(unmatchedCount)")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warningText)
-                        .monospacedDigit()
-                }
-            }
-            .modifier(DSToolbarPill())
+            Label("More actions", systemImage: appState.server.restartRequired
+                  ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+                .labelStyle(.iconOnly)
+                .font(.system(size: DSGlyph.toolbar, weight: .regular))
         }
+        .menuStyle(.button)
         .menuIndicator(.hidden)
+        // A native toolbar otherwise measures this menu as zero on the first compact layout.
+        .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
         .help(unmatchedCount > 0
-            ? "More editor actions; \(unmatchedDescription)"
-            : "More editor actions: import and server settings")
+            ? "More actions; \(unmatchedDescription)"
+            : "More actions: import and server settings")
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
@@ -504,9 +526,10 @@ struct WorkspaceView: View {
         Button { showBackendSettings = true } label: {
             Label(
                 appState.server.restartRequired ? "Server settings — restart required" : "Server settings",
-                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "network"
+                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "server.rack"
             )
         }
+        .font(.system(size: DSGlyph.toolbar, weight: .regular))
         .disabled(appState.currentProject == nil)
         .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
         .accessibilityIdentifier("backend.settingsButton")
@@ -526,6 +549,7 @@ struct WorkspaceView: View {
         Button { showDrawer.toggle() } label: {
             Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomhalf.inset.filled")
         }
+        .font(.system(size: DSGlyph.toolbar, weight: .regular))
         .keyboardShortcut("l", modifiers: [.command, .option])
         .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
         .accessibilityIdentifier("toggleDrawerButton")
@@ -536,6 +560,7 @@ struct WorkspaceView: View {
         Button { inspectorPresentation.wrappedValue.toggle() } label: {
             Label(showInspector ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
         }
+        .font(.system(size: DSGlyph.toolbar, weight: .regular))
         .keyboardShortcut("i", modifiers: [.command, .option])
         .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
         .accessibilityIdentifier("toggleInspectorButton")
@@ -557,19 +582,10 @@ struct WorkspaceView: View {
             .accessibilityIdentifier("importOpenAPIMenuItem")
             .accessibilityLabel("Import OpenAPI spec")
         } label: {
-            // Explicit image and text keep the toolbar's icon-only display mode from dropping
-            // the title. The nested menu keeps the ordinary native menu-label presentation.
             if inToolbar {
-                HStack(spacing: DSSpacing.sm) {
-                    Image(systemName: "square.and.arrow.down")
-                    Text("Import")
-                        .fixedSize(horizontal: true, vertical: false)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                }
-                // This short, fixed label must never negotiate itself down to "Imp…".
-                .fixedSize(horizontal: true, vertical: false)
-                .modifier(DSToolbarPill())
+                Label("Import", systemImage: "square.and.arrow.down")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: DSGlyph.toolbar, weight: .regular))
             } else {
                 Label("Import", systemImage: "square.and.arrow.down")
             }

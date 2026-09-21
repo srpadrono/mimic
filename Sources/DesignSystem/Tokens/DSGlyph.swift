@@ -89,11 +89,12 @@ public enum DSGlyph {
     /// tabs, where the icon replaces a word rather than accompanying one, and `DSIconMenu`, which is
     /// what the editor's more menu and the journeys navigator's "+" are.
     ///
-    /// The ceiling is as load-bearing as the floor. A strip of icon-only tabs is only affordable
-    /// because the icons stay legible where two or three text segments would truncate on the first
-    /// long noun, and that trade stops paying the moment a glyph grows past the line of body text it
-    /// stands in for.
+    /// This is the ceiling for dense in-content chrome. Window toolbar actions use the separate
+    /// `toolbar` rung to match native macOS controls.
     public static let controlProminent: CGFloat = 13
+
+    /// 16 — native window toolbar controls, optically balanced with system-provided items.
+    public static let toolbar: CGFloat = 16
 
     /// 8 — the floor the house rule states, named so it can be cited and asserted rather than
     /// remembered. **Not a size to draw at**: reach for ``indicator``, which is the same number

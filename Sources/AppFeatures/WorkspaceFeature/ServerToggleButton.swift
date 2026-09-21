@@ -32,27 +32,27 @@ struct ServerToggleButton: View {
         }
     }
 
+    private var isRunning: Bool { serverState.runningPort != nil }
+
     var body: some View {
         Button(action: stopIsCurrentAction ? onStop : onStart) {
             Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
-                .font(.system(size: DSGlyph.controlProminent, weight: .semibold))
+                .font(.system(size: DSGlyph.toolbar, weight: .semibold))
+                .foregroundStyle(DSColors.labelPrimary)
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.downUp.byLayer))
+                .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
                 .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
-                .contentShape(.rect)
-                .opacity(isTransitioning ? 0 : 1)
-                .overlay {
-                    if isTransitioning {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .accessibilityHidden(true)
-                    }
-                }
+                .opacity(isTransitioning ? 0.6 : 1)
+                .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
+                .contentShape(.circle)
         }
-        .buttonStyle(DSToolbarButtonStyle())
+        // Keep the label hosted in SwiftUI so the symbol replacement can animate in the toolbar.
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(isRunning ? DSColors.success : .clear).interactive(), in: .circle)
         .disabled(isTransitioning)
         .help(stopIsCurrentAction ? "Stop server" : "Start server")
         .accessibilityLabel(stopIsCurrentAction ? "Stop server" : "Start server")
         .accessibilityIdentifier("serverToggleButton")
-        .animation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.micro), value: stopIsCurrentAction)
+        .animation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.normal), value: serverState)
     }
 }

@@ -19,7 +19,7 @@ struct BackendSettingsPage {
         app.descendants(matching: .any)["serverStatusWell.\(copying ? "copyPort" : "configuredPort").\(port)"].firstMatch
     }
     var portsDescription: String { "\(ports.label) \(ports.value.map { String(describing: $0) } ?? "")" }
-    var ports: XCUIElement { app.buttons["serverStatusWell.backends"].firstMatch }
+    var ports: XCUIElement { app.buttons["serverStatusWell.url"].firstMatch }
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
     func additional(_ suffix: String) -> XCUIElement {
         app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
@@ -86,7 +86,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         app.activate()
         page.ports.click()
         XCTAssertTrue(page.portMenuItem(18081).waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(page.portMenuItem(18081).value as? String, "Accounts: 18081")
+        XCTAssertEqual(page.portMenuItem(18081).value as? String, "http://localhost:18081")
         let portListShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         portListShot.name = "Configured port list"
         portListShot.lifetime = .keepAlways
@@ -152,6 +152,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
         copy.click()
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "http://localhost:\(secondary)")
+        ServerStatusWellPage(app: app).closeDetails()
         let compactShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         compactShot.name = "Toolbar — two ports in a compact window"
         compactShot.lifetime = .keepAlways
