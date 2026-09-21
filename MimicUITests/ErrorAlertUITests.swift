@@ -1221,11 +1221,13 @@ final class ErrorAlertUITests: MimicUITestCase {
     ///
     /// Asserted in the negative by the two tests that must prove a *refused* start did not quietly
     /// happen anyway: the well always exists — it reads "Server error" or "Server stopped" — so its
-    /// presence says nothing, and only `localhost:` means something bound.
+    /// presence says nothing. The configured localhost address remains visible while stopped;
+    /// only the running state confirms that the listener bound successfully.
     @MainActor
     private func waitForServerToReportAURL(timeout: TimeInterval) -> Bool {
         UITestApp.waitUntil(timeout: timeout) {
-            self.combinedText(of: self.serverURLWell).contains("localhost:")
+            let status = self.combinedText(of: self.serverURLWell)
+            return status.contains("localhost:") && status.contains("server running")
         }
     }
 

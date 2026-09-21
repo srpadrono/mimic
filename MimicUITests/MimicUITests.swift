@@ -285,6 +285,9 @@ struct WorkspacePage {
     @discardableResult
     func waitForServerURL(port: Int, timeout: TimeInterval = 10) -> Bool {
         let element = serverURLText(port: port)
+        // AppKit can move the whole status group into native toolbar overflow on small displays.
+        // Expand before asserting its visible, two-line presentation.
+        if !element.exists { fillWindow() }
         guard element.waitForExistence(timeout: timeout) else { return false }
         return UITestApp.waitUntil(timeout: timeout) {
             let shown = ((element.value as? String) ?? "") + " " + element.label
