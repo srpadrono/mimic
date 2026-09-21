@@ -272,6 +272,100 @@ struct UpdateServiceTests {
     }
 }
 
+@MainActor
+@Suite("Update installation lifecycle")
+struct UpdateInstallationTests {
+    @MainActor
+    private final class Recorder {
+        var events: [String] = []
+    }
+
+    private nonisolated struct Installer: UpdateInstalling {
+        let recorder: Recorder
+        let fails: Bool
+        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+            URL(fileURLWithPath: "/fixture/Mimic.pkg")
+        }
+        func verify(_ fileURL: URL, against release: UpdateRelease) throws {}
+        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) {}
+        @MainActor func handOff(_ fileURL: URL) async throws {
+            #expect(fileURL.path == "/fixture/Mimic.pkg")
+            recorder.events.append("handoff")
+            if fails { throw UpdateInstaller.InstallError.handoffFailed("Refused") }
+        }
+    }
+
+    private func readyService(fails: Bool = false) async throws -> (UpdateService, Recorder) {
+        let recorder = Recorder()
+        let defaults = try #require(UserDefaults(suiteName: "UpdateInstallationTests.\(UUID())"))
+        let service = UpdateService(
+            installedVersion: { ReleaseVersion(major: 0, minor: 10, patch: 0) },
+            preferences: UpdatePreferences(defaults: defaults),
+            fetchLatestRelease: { UpdateServiceTests.release("0.11.0") },
+            installer: Installer(recorder: recorder, fails: fails),
+            makeBackup: { _, _ in },
+            flushPendingSave: { recorder.events.append("save") },
+            terminate: { recorder.events.append("quit") }
+        )
+        service.checkForUpdates()
+        try await waitUntil { if case .available = service.phase { true } else { false } }
+        service.downloadAndPrepare()
+        try await waitUntil { if case .readyToInstall = service.phase { true } else { false } }
+        return (service, recorder)
+    }
+
+    private func waitUntil(_ predicate: () -> Bool) async throws {
+        for _ in 0..<200 {
+            if predicate() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(predicate(), "Update lifecycle did not settle")
+    }
+
+    @Test("Successful handoff waits for actual sheet dismissal before quitting, exactly once")
+    func quitWaitsForDismissal() async throws {
+        let (service, recorder) = try await readyService()
+        service.sheetDidDismiss()
+        #expect(recorder.events.isEmpty)
+        service.installNow()
+        #expect(service.phase.isBusy)
+        // Re-entrant actions must neither cancel preparation nor launch a second installer.
+        service.installNow()
+        service.dismiss()
+        service.checkForUpdates()
+        service.skipCurrentVersion()
+        #expect(service.isShowingSheet)
+        try await waitUntil { !service.isShowingSheet }
+        #expect(recorder.events == ["save", "handoff"])
+        service.sheetDidDismiss()
+        service.sheetDidDismiss()
+        #expect(recorder.events == ["save", "handoff", "quit"])
+    }
+
+    @Test("A failed handoff never quits or hides the error sheet")
+    func failedHandoffDoesNotQuit() async throws {
+        let (service, recorder) = try await readyService(fails: true)
+        service.installNow()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+        #expect(service.isShowingSheet)
+        #expect(!service.phase.isBusy)
+        service.dismiss()
+        service.sheetDidDismiss()
+        #expect(recorder.events == ["save", "handoff"])
+        #expect(service.phase == .idle)
+    }
+
+    @Test("Dismissing a prepared update for later never launches or quits")
+    func laterDoesNotInstall() async throws {
+        let (service, recorder) = try await readyService()
+        service.dismiss()
+        service.installNow()
+        service.sheetDidDismiss()
+        #expect(recorder.events.isEmpty)
+        #expect(service.phase == .idle)
+    }
+}
+
 // MARK: - Verification
 
 @Suite("Installer verification")

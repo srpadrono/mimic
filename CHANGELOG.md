@@ -5,6 +5,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Quit and install dismisses the update sheet before requesting termination, so the modal dialog
+  no longer leaves Mimic running after installer handoff. Preparation now shows progress and prevents
+  duplicate install requests; a failed handoff keeps the app open with an explanation.
+
 ## [0.12.0] — 2026-09-20
 
 ### Added

@@ -45,7 +45,7 @@ struct ContentView: View {
         // One presenter, for the same reason the new-project sheet has one: the menu item works from
         // the welcome window and from an open project, and the background check can raise it from
         // either.
-        .sheet(isPresented: $updates.isShowingSheet) {
+        .sheet(isPresented: $updates.isShowingSheet, onDismiss: updates.sheetDidDismiss) {
             UpdateSheet(service: appState.updates)
         }
         // The automatic check, once the window is up.

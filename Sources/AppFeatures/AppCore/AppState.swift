@@ -225,6 +225,10 @@ final class AppState {
             environmentSuite: ProcessInfo.processInfo.environment["MIMIC_DEFAULTS_SUITE"],
             isResettingForTests: isResettingForTests
         )
+        var updateInstaller: any UpdateInstalling = UpdateInstaller()
+        #if DEBUG
+        if let fixture = UITestSupport.updateInstaller() { updateInstaller = fixture }
+        #endif
         self.init(
             projectRepository: opened.repository,
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
@@ -235,7 +239,8 @@ final class AppState {
                 // A closure, not a value: resolving it reads the bundle, and `init` must not — see
                 // `UpdateService.resolveInstalledVersion`.
                 installedVersion: { Self.installedReleaseVersion },
-                preferences: UpdatePreferences(defaults: defaults)
+                preferences: UpdatePreferences(defaults: defaults),
+                installer: updateInstaller
             )
         )
         storeFailure = opened.failure

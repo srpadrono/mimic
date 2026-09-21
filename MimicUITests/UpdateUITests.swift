@@ -12,12 +12,50 @@ final class UpdateUITests: MimicUITestCase {
     /// Which fixture this test wants. Set before `launchApp()`, because the environment a process was
     /// launched with cannot be changed once it is running.
     private var feedFixture: String = UpdateFixtures.available
+    private var installFixture: String?
 
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
         app.launchEnvironment["MIMIC_UPDATE_FEED_FIXTURE"] = feedFixture
+        app.launchEnvironment["MIMIC_UPDATE_INSTALL_FIXTURE"] = installFixture
     }
 
     private var updateSheet: UpdateSheetPage { UpdateSheetPage(app: app) }
+
+    @MainActor
+    func testQuitAndInstallTerminatesAfterHandoff() {
+        installFixture = "success"
+        launchApp()
+        updateSheet.openFromMenu()
+        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10))
+        updateSheet.downloadButton.click()
+        XCTAssertTrue(updateSheet.installButton.waitForExistence(timeout: 10))
+        captureUpdateEvidence("Ready to quit — simulated installer")
+        updateSheet.installButton.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Successful handoff must actually quit Mimic")
+    }
+
+    @MainActor
+    func testFailedInstallerHandoffKeepsAppOpenAndExplainsFailure() {
+        installFixture = "failure"
+        launchApp()
+        updateSheet.openFromMenu()
+        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10))
+        updateSheet.downloadButton.click()
+        XCTAssertTrue(updateSheet.installButton.waitForExistence(timeout: 10))
+        updateSheet.installButton.click()
+        XCTAssertTrue(updateSheet.failure.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.text(of: updateSheet.failure).contains("Fixture handoff refused"))
+        XCTAssertNotEqual(app.state, .notRunning)
+        captureUpdateEvidence("Installer handoff failure — app remains open")
+    }
+
+    @MainActor
+    private func captureUpdateEvidence(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 
     // MARK: - The menu item
 
@@ -161,6 +199,7 @@ struct UpdateSheetPage {
     var skipButton: XCUIElement { app.buttons["update.skipButton"] }
     var laterButton: XCUIElement { app.buttons["update.laterButton"] }
     var downloadButton: XCUIElement { app.buttons["update.downloadButton"] }
+    var installButton: XCUIElement { app.buttons["update.installButton"] }
     var doneButton: XCUIElement { app.buttons["update.doneButton"] }
     var automaticToggle: XCUIElement { app.checkBoxes["update.automaticToggle"] }
 

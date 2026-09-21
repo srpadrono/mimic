@@ -13,6 +13,26 @@ import Persistence
 /// Activation is gated on the `-MimicResetForTesting` launch argument or the `MIMIC_DEFAULTS_SUITE`
 /// environment variable, both set only by the UI test harness.
 enum UITestSupport {
+    /// Only replaces external download/Installer work; the sheet and real AppKit quit still run.
+    static func updateInstaller() -> (any UpdateInstalling)? {
+        guard isRunningUITests,
+              let outcome = ProcessInfo.processInfo.environment["MIMIC_UPDATE_INSTALL_FIXTURE"],
+              ["success", "failure"].contains(outcome) else { return nil }
+        return UpdateInstallerFixture(fails: outcome == "failure")
+    }
+
+    private nonisolated struct UpdateInstallerFixture: UpdateInstalling {
+        let fails: Bool
+        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+            URL(fileURLWithPath: "/fixture/not-a-real-installer.pkg")
+        }
+        func verify(_ fileURL: URL, against release: UpdateRelease) throws {}
+        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) {}
+        @MainActor func handOff(_ fileURL: URL) async throws {
+            if fails { throw UpdateInstaller.InstallError.handoffFailed("Fixture handoff refused.") }
+        }
+    }
+
     private static let activationAttempts = 5
     private static let activationRetryDelay = Duration.milliseconds(200)
     private static var hasResetCurrentProcess = false
