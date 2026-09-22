@@ -17,6 +17,8 @@ public struct Journey: Identifiable, Codable, Sendable, Equatable {
     /// Free-form description of the scenario. Surfaced to CLI/AI callers so a journey explains
     /// itself without reading its steps.
     public var summary: String?
+    /// Optional navigator group. An empty group in a command clears membership.
+    public var groupTag: String?
     public var steps: [JourneyStep]
     public var matchMode: JourneyMatchMode
     public var completion: JourneyCompletion
@@ -30,6 +32,7 @@ public struct Journey: Identifiable, Codable, Sendable, Equatable {
         id: UUID = UUID(),
         name: String,
         summary: String? = nil,
+        groupTag: String? = nil,
         steps: [JourneyStep] = [],
         matchMode: JourneyMatchMode = .orderedPerEndpoint,
         completion: JourneyCompletion = .stop,
@@ -39,6 +42,7 @@ public struct Journey: Identifiable, Codable, Sendable, Equatable {
         self.id = id
         self.name = name
         self.summary = summary
+        self.groupTag = groupTag
         self.steps = steps
         self.matchMode = matchMode
         self.completion = completion

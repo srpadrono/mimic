@@ -54,10 +54,10 @@ public enum CommandCatalog {
         // Journeys
         .init(name: "journeyList", summary: "List stored journeys.", parameters: [], cli: "mimic journey list"),
         .init(name: "journeyGet", summary: "Show a journey and its steps.", parameters: ["journey"], cli: "mimic journey get <name>"),
-        .init(name: "journeyCreate", summary: "Create a journey, optionally with all steps.", parameters: ["name", "spec?"], cli: "mimic journey create <name> [--file FILE]"),
+        .init(name: "journeyCreate", summary: "Create a journey, optionally with all steps.", parameters: ["name", "spec?"], cli: "mimic journey create <name> [--group G] [--file FILE]"),
         .init(name: "journeyTemplateList", summary: "List the built-in journey templates.", parameters: [], cli: "mimic journey templates"),
         .init(name: "journeyAddTemplate", summary: "Create a journey from a built-in template.", parameters: ["templateID", "name?"], cli: "mimic journey add-template <template-id> [--name N] [--activate]"),
-        .init(name: "journeyUpdate", summary: "Change journey options or replace its steps.", parameters: ["journey", "spec"], cli: "mimic journey update <name> [--match-mode M] [--completion C] [--file FILE]"),
+        .init(name: "journeyUpdate", summary: "Change journey options or replace its steps.", parameters: ["journey", "spec"], cli: "mimic journey update <name> [--group G] [--match-mode M] [--completion C] [--file FILE]"),
         .init(name: "journeyDelete", summary: "Delete a journey.", parameters: ["journey"], cli: "mimic journey delete <name>"),
         .init(name: "journeyDuplicate", summary: "Copy a journey.", parameters: ["journey"], cli: "mimic journey duplicate <name>"),
         .init(name: "journeyStepAdd", summary: "Append or insert a step.", parameters: ["journey", "step", "atIndex?"], cli: "mimic journey step add <name> <METHOD> <PATH> [--status N] [--fail timeout] [--graphql-operation OP] [--at I]"),

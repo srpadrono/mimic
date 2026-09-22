@@ -272,6 +272,8 @@ public struct ScenarioSpec: Codable, Sendable, Equatable {
 public struct JourneySpec: Codable, Sendable, Equatable {
     public var name: String?
     public var summary: String?
+    /// Optional navigator group. An empty group in a command clears membership.
+    public var groupTag: String?
     public var matchMode: JourneyMatchMode?
     public var completion: JourneyCompletion?
     public var unmatchedBehavior: JourneyUnmatchedBehavior?
@@ -281,6 +283,7 @@ public struct JourneySpec: Codable, Sendable, Equatable {
     public init(
         name: String? = nil,
         summary: String? = nil,
+        groupTag: String? = nil,
         matchMode: JourneyMatchMode? = nil,
         completion: JourneyCompletion? = nil,
         unmatchedBehavior: JourneyUnmatchedBehavior? = nil,
@@ -289,6 +292,7 @@ public struct JourneySpec: Codable, Sendable, Equatable {
     ) {
         self.name = name
         self.summary = summary
+        self.groupTag = groupTag
         self.matchMode = matchMode
         self.completion = completion
         self.unmatchedBehavior = unmatchedBehavior

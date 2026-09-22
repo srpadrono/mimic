@@ -473,6 +473,7 @@ public enum ProjectCommandExecutor {
     static func applyJourneySpec(_ spec: JourneySpec, to journey: inout Journey, backends: [BackendConfiguration] = []) throws {
         if let name = spec.name?.nilIfEmpty { journey.name = name }
         if let summary = spec.summary { journey.summary = summary.nilIfEmpty }
+        if let groupTag = spec.groupTag { journey.groupTag = groupTag.nilIfEmpty }
         if let matchMode = spec.matchMode { journey.matchMode = matchMode }
         if let completion = spec.completion { journey.completion = completion }
         if let unmatched = spec.unmatchedBehavior { journey.unmatchedBehavior = unmatched }

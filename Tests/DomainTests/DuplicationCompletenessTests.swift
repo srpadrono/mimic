@@ -106,6 +106,7 @@ struct DuplicationCompletenessTests {
     static let journey = Journey(
         name: "Retry after failure",
         summary: "The first call fails, the retry succeeds",
+            groupTag: "Checkout",
         steps: [respondingStep, timingOutStep],
         matchMode: .strictSequence,
         completion: .restart,

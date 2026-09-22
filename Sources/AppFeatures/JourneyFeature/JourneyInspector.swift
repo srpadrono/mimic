@@ -36,6 +36,7 @@ struct JourneyInspector: View {
                 .padding(DSInspectorMetrics.inset)
 
                 DSInspectorSectionHeader("Configuration", identifier: "journey.configuration")
+                row("Group", context.selected.groupTag ?? "None", id: "group")
                 row("Steps", "\(context.selected.steps.count)", id: "steps")
                 row("Match", context.selected.matchMode == .orderedPerEndpoint ? "Ordered per route" : "Strict sequence", id: "match")
                 row("Completion", context.selected.completion == .stop ? "Stop" : "Restart", id: "completion")

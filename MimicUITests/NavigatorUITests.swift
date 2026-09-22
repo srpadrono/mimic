@@ -15,6 +15,8 @@ struct NavigatorPage {
     var journeyFilter: XCUIElement { app.textFields["journeys.filter.field"] }
     var noEndpointMatches: XCUIElement { element("sidebar.noMatches") }
     var noJourneyMatches: XCUIElement { element("journeys.noMatches") }
+    var journeyGroupField: XCUIElement { app.textFields["journeyEditor.groupTag"] }
+    func journeyGroup(_ name: String) -> XCUIElement { element("journeys.group.\(name)") }
     var activeJourney: XCUIElement { app.buttons["navigator.activeJourney"] }
     var methodScope: XCUIElement { app.menuButtons["sidebar.filter.scope"].firstMatch }
 
@@ -193,6 +195,64 @@ final class NavigatorUITests: MimicUITestCase {
         navigator.filter(navigator.journeyFilter, text: "")
         XCTAssertTrue(navigator.row(named: "Payment succeeds").isHittable)
         add(navigator.screenshot("navigator-journeys-narrow"))
+    }
+
+    @MainActor
+    func testJourneyGroupsMatchEndpointSpacingAndSupportEditingAndReveal() async throws {
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        let shell = WorkspaceShellPage(app: app)
+        let endpointRowHeight = navigator.rowHeight(named: "Account summary")
+        let groupInset = navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX
+        let groupHeight = navigator.group("Account").frame.height
+        try await command(["journeyUpdate": ["journey": ["name": "Payment succeeds after the second authorization attempt"], "spec": ["groupTag": "Checkout"]]])
+        try await command(["journeyCreate": ["name": "Payment declined", "spec": ["groupTag": "Checkout"]]])
+        try await command(["journeyCreate": ["name": "Session expired", "spec": ["groupTag": "Account"]]])
+        shell.journeysTab.click()
+        XCTAssertTrue(navigator.journeyGroup("Checkout").waitForExistence(timeout: 5))
+        XCTAssertEqual(navigator.journeyGroup("Checkout").value as? String, "2 journeys")
+        XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
+        XCTAssertEqual(navigator.journeyGroup("Account").frame.height, groupHeight, accuracy: 1)
+        XCTAssertEqual(navigator.journeyGroup("Account").frame.minX - shell.panel("sidebar").frame.minX, groupInset, accuracy: 1)
+        XCTAssertEqual(navigator.row(named: "Payment declined").frame.midY - navigator.row(named: "Payment succeeds").frame.midY, endpointRowHeight, accuracy: 1)
+        navigator.journeyGroup("Checkout").click()
+        XCTAssertTrue(navigator.row(named: "Payment declined").waitForNonExistence(timeout: 5))
+        shell.endpointsTab.click()
+        shell.journeysTab.click()
+        XCTAssertFalse(navigator.row(named: "Payment declined").exists, "Collapse survives switching tabs")
+        navigator.filter(navigator.journeyFilter, text: "Checkout")
+        XCTAssertTrue(navigator.row(named: "Payment declined").waitForExistence(timeout: 5), "Filtering reveals matches inside a collapsed group")
+        XCTAssertFalse(navigator.row(named: "Session expired").exists)
+        navigator.filter(navigator.journeyFilter, text: "")
+        navigator.row(named: "Empty journey").click()
+        XCTAssertTrue(navigator.journeyGroupField.waitForExistence(timeout: 5))
+        navigator.filter(navigator.journeyGroupField, text: "Checkout")
+        navigator.journeyGroupField.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { navigator.journeyGroup("Checkout").value as? String == "3 journeys" })
+        navigator.filter(navigator.journeyGroupField, text: "Account")
+        navigator.journeyFilter.click() // Blur commits, as it does for endpoint groups.
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { navigator.journeyGroup("Account").value as? String == "2 journeys" })
+        navigator.filter(navigator.journeyGroupField, text: "")
+        navigator.journeyGroupField.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { navigator.journeyGroup("Account").value as? String == "1 journeys" })
+        navigator.journeyGroup("Account").click()
+        XCTAssertTrue(navigator.row(named: "Empty journey").exists, "Cleared groups become ungrouped rows")
+        navigator.journeyGroup("Account").click()
+        try await command(["journeyActivate": ["journey": ["name": "Payment succeeds after the second authorization attempt"]]])
+        navigator.journeyGroup("Checkout").click()
+        XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForNonExistence(timeout: 5))
+        navigator.activeJourney.click()
+        XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForExistence(timeout: 5))
+        XCTAssertTrue(navigator.row(named: "Payment succeeds").label.contains(", active"))
+        add(navigator.screenshot("navigator-journeys-grouped-wide"))
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
+        XCTAssertTrue(navigator.journeyGroup("Checkout").isHittable)
+        XCTAssertLessThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.maxY,
+                                 navigator.element("journeyRun.deactivateButton").frame.minY,
+                                 "Folded behavior controls must not overlap the run buttons")
+        add(navigator.screenshot("navigator-journeys-grouped-narrow"))
     }
 
     @MainActor

@@ -145,7 +145,7 @@ struct JourneyCommand: AsyncParsableCommand {
 
             guard spec != JourneySpec() else {
                 throw CLIFailure.badArgument(
-                    "Nothing to change. Pass --new-name, --summary, --file, --match-mode, --completion, "
+                    "Nothing to change. Pass --new-name, --summary, --group, --file, --match-mode, --completion, "
                         + "--unmatched, or --auto-advance/--no-auto-advance."
                 )
             }
@@ -588,6 +588,9 @@ struct JourneyCommand: AsyncParsableCommand {
 
 /// Journey-level options shared by `create` and `update`.
 struct JourneyBehaviorOptions: ParsableArguments, Sendable {
+    @Option(name: .long, help: "Navigator group. Pass an empty string to remove the group.")
+    var group: String?
+
     @Option(name: .long, help: "How requests pair with steps: orderedPerEndpoint (default) or strictSequence.")
     var matchMode: String?
 
@@ -611,6 +614,7 @@ struct JourneyBehaviorOptions: ParsableArguments, Sendable {
     /// 0 reporting success. The journey kept whatever mode it already had and the caller was told the
     /// change had been applied. A typo in an enum-valued option is bad usage, and bad usage exits 2.
     func apply(to spec: inout JourneySpec) throws {
+        if let group { spec.groupTag = group }
         if let matchMode { spec.matchMode = try ArgumentParsing.matchMode(matchMode) }
         if let completion { spec.completion = try ArgumentParsing.completion(completion) }
         if let unmatched { spec.unmatchedBehavior = try ArgumentParsing.unmatchedBehavior(unmatched) }
@@ -720,6 +724,7 @@ enum JourneyFile {
         JourneySpec(
             name: journey.name,
             summary: journey.summary,
+            groupTag: journey.groupTag,
             matchMode: journey.matchMode,
             completion: journey.completion,
             unmatchedBehavior: journey.unmatchedBehavior,

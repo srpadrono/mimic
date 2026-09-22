@@ -7,6 +7,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Improved
 
+- Organize journeys into saved groups with the same disclosure rows, spacing, indentation, and
+  inline counts as endpoints. Edit Group in the journey editor or use `journey create/update --group`;
+  filtering and the active-journey shortcut reveal matching grouped journeys.
+
 - Give Endpoints and Journeys a shared native navigator: a segmented mode picker, aligned Add
   actions, uniform 26-point rows, compact endpoint disclosure groups, and a pinned bottom filter.
   Preserve each mode's filter while switching; retain names for duplicate routes and show full

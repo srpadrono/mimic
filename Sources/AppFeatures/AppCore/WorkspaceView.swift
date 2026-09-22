@@ -29,6 +29,7 @@ struct WorkspaceView: View {
     @State private var collapsedEndpointGroups: Set<String> = []
     @State private var endpointMethodScope = SidebarView.anyMethodScopeID
     @State private var journeyFilter = ""
+    @State private var collapsedJourneyGroups: Set<String> = []
     /// Back/forward across endpoints you have looked at.
     @State private var endpointHistory = NavigationHistory<UUID>()
     /// Set while a back/forward move is in flight, so the resulting selection change is not recorded
@@ -822,7 +823,8 @@ struct WorkspaceView: View {
                         },
                         onDuplicate: { _ = appState.duplicateJourney(id: $0) },
                         onDelete: appState.deleteJourney,
-                        searchText: journeyFilter
+                        searchText: journeyFilter,
+                        collapsedGroups: $collapsedJourneyGroups
                     )
                 }
             }
@@ -843,6 +845,7 @@ struct WorkspaceView: View {
                         tint: DSColors.accent
                     ) {
                         journeyFilter = ""
+                        if let group = active.groupTag { collapsedJourneyGroups.remove(group) }
                         navigatorTab = .journeys
                         appState.selectedJourneyID = active.id
                     }

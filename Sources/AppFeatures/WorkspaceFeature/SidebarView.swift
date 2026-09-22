@@ -179,33 +179,11 @@ struct SidebarView: View {
     }
 
     private func groupRow(_ section: EndpointGroup) -> some View {
-        Button { toggleSection(section.name) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
-                Image(systemName: collapsedSections.contains(section.name) ? "chevron.right" : "chevron.down")
-                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                    .frame(width: DSNavigatorMetrics.iconSlot)
-                Image(systemName: "folder")
-                    .font(.system(size: DSGlyph.controlProminent))
-                    .frame(width: DSNavigatorMetrics.iconSlot)
-                Text(section.name)
-                    .font(DSTypography.controlLabelQuiet)
-                    .lineLimit(1)
-                Text("· \(section.endpoints.count)")
-                    .font(DSTypography.label)
-                    .monospacedDigit()
-                    .fixedSize()
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.secondary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.dsPlain)
-        .dsNavigatorRow()
-        .selectionDisabled()
-        .help(section.name)
-        .accessibilityIdentifier("sidebar.group.\(section.name)")
-        .accessibilityLabel("\(collapsedSections.contains(section.name) ? "Expand" : "Collapse") \(section.name)")
-        .accessibilityValue("\(section.endpoints.count) endpoints")
+        DSNavigatorGroup(
+            name: section.name, count: section.endpoints.count, itemName: "endpoints",
+            isCollapsed: collapsedSections.contains(section.name),
+            identifier: "sidebar.group.\(section.name)"
+        ) { toggleSection(section.name) }
     }
 
     @ViewBuilder

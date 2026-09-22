@@ -22,6 +22,22 @@ struct JourneyNavigatorList: View {
     /// context menu that offers the action lives here.
     @State private var deleteTarget: Journey?
     var searchText: String = ""
+    @Binding var collapsedGroups: Set<String>
+
+    init(journeys: [Journey], activeJourneyID: UUID?, selectedJourneyID: Binding<UUID?>,
+         onActivate: @escaping (UUID?) -> Void, onAdd: @escaping () -> Void,
+         onDuplicate: @escaping (UUID) -> Void, onDelete: @escaping (UUID) -> Void,
+         searchText: String = "", collapsedGroups: Binding<Set<String>> = .constant([])) {
+        self.journeys = journeys
+        self.activeJourneyID = activeJourneyID
+        self._selectedJourneyID = selectedJourneyID
+        self.onActivate = onActivate
+        self.onAdd = onAdd
+        self.onDuplicate = onDuplicate
+        self.onDelete = onDelete
+        self.searchText = searchText
+        self._collapsedGroups = collapsedGroups
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,19 +74,24 @@ struct JourneyNavigatorList: View {
                             .selectionDisabled()
                             .accessibilityIdentifier("journeys.noMatches")
                     }
-                    ForEach(filteredJourneys) { journey in
-                        let isActive = journey.id == activeJourneyID
-
-                        JourneyNavigatorRow(
-                            journey: journey,
-                            isActive: isActive,
-                            isSelected: journey.id == selectedJourneyID,
-                            onToggleActivation: { onActivate(isActive ? nil : journey.id) },
-                            onDuplicate: { onDuplicate(journey.id) },
-                            onDelete: { deleteTarget = journey }
-                        )
-                        .dsNavigatorRow()
-                        .tag(journey.id)
+                    ForEach(groupNames, id: \.self) { name in
+                        DSNavigatorGroup(
+                            name: name, count: groupedJourneys[name]?.count ?? 0, itemName: "journeys",
+                            isCollapsed: collapsedGroups.contains(name),
+                            identifier: "journeys.group.\(name)"
+                        ) {
+                            if collapsedGroups.contains(name) { collapsedGroups.remove(name) }
+                            else { collapsedGroups.insert(name) }
+                        }
+                        .padding(.top, name == groupNames.first ? 0 : DSSpacing.smPlus)
+                        if !collapsedGroups.contains(name) {
+                            ForEach(groupedJourneys[name] ?? []) { journey in
+                                journeyRow(journey, indented: true)
+                            }
+                        }
+                    }
+                    ForEach(ungroupedJourneys) { journey in
+                        journeyRow(journey, indented: false)
                     }
                 }
                 .dsNavigatorList()
@@ -78,6 +99,20 @@ struct JourneyNavigatorList: View {
                 // on a container renames every descendant to match it.
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("journeys.list")
+            }
+        }
+        .onChange(of: searchText) { _, text in
+            if !text.isEmpty { collapsedGroups.subtract(groupNames) }
+        }
+        .onChange(of: selectedJourneyID) { _, id in
+            if let group = journeys.first(where: { $0.id == id })?.groupTag {
+                collapsedGroups.remove(group)
+            }
+        }
+        .onChange(of: journeys) { old, new in
+            let oldGroup = old.first(where: { $0.id == selectedJourneyID })?.groupTag
+            if let group = new.first(where: { $0.id == selectedJourneyID })?.groupTag, group != oldGroup {
+                collapsedGroups.remove(group)
             }
         }
         .alert(
@@ -95,10 +130,29 @@ struct JourneyNavigatorList: View {
         }
     }
 
+    private var groupedJourneys: [String: [Journey]] {
+        Dictionary(grouping: filteredJourneys.filter { !($0.groupTag ?? "").isEmpty }) { $0.groupTag! }
+    }
+
+    private var groupNames: [String] { groupedJourneys.keys.sorted() }
+    private var ungroupedJourneys: [Journey] { filteredJourneys.filter { ($0.groupTag ?? "").isEmpty } }
+
+    private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
+        JourneyNavigatorRow(
+            journey: journey, isActive: journey.id == activeJourneyID,
+            isSelected: journey.id == selectedJourneyID,
+            onToggleActivation: { onActivate(journey.id == activeJourneyID ? nil : journey.id) },
+            onDuplicate: { onDuplicate(journey.id) }, onDelete: { deleteTarget = journey }
+        )
+        .dsNavigatorRow(indented: indented)
+        .tag(journey.id)
+    }
+
     private var filteredJourneys: [Journey] {
         guard !searchText.isEmpty else { return journeys }
         return journeys.filter {
             $0.name.localizedCaseInsensitiveContains(searchText)
+                || ($0.groupTag?.localizedCaseInsensitiveContains(searchText) ?? false)
                 || ($0.summary?.localizedCaseInsensitiveContains(searchText) ?? false)
                 || $0.steps.contains { $0.path.localizedCaseInsensitiveContains(searchText) }
         }

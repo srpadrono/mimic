@@ -10,6 +10,7 @@ public struct JourneyRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var projectID: String
     public var name: String
     public var summary: String?
+    public var groupTag: String?
     public var matchMode: String
     public var completion: String
     public var unmatchedBehavior: String
@@ -21,6 +22,7 @@ public struct JourneyRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.projectID = projectID
         self.name = journey.name
         self.summary = journey.summary
+        self.groupTag = journey.groupTag
         self.matchMode = journey.matchMode.rawValue
         self.completion = journey.completion.rawValue
         self.unmatchedBehavior = journey.unmatchedBehavior.rawValue
@@ -35,6 +37,7 @@ public struct JourneyRecord: Codable, FetchableRecord, PersistableRecord, Sendab
             id: UUID(uuidString: id) ?? UUID(),
             name: name,
             summary: summary,
+            groupTag: groupTag,
             steps: steps,
             matchMode: JourneyMatchMode(rawValue: matchMode) ?? .orderedPerEndpoint,
             completion: JourneyCompletion(rawValue: completion) ?? .stop,

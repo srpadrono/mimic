@@ -140,6 +140,7 @@ struct RecordRoundTripTests {
     static let journey = Journey(
         name: "Retry after failure",
         summary: "The first call fails, the retry succeeds",
+        groupTag: "Checkout",
         steps: [respondingStep, timingOutStep, droppingStep],
         matchMode: .strictSequence,
         completion: .restart,

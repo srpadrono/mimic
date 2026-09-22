@@ -29,7 +29,7 @@ struct DocumentShapeTests {
 
     /// The version `recordedKeyPaths` below describes. Bumped with `currentSchemaVersion`, never
     /// before or after it.
-    private static let recordedShapeVersion = 5
+    private static let recordedShapeVersion = 6
 
     /// Every key path `fullyPopulatedProject()` encodes to, as of `recordedShapeVersion`.
     ///
@@ -93,6 +93,7 @@ struct DocumentShapeTests {
         "journeys[].id",
         "journeys[].name",
         "journeys[].summary",
+        "journeys[].groupTag",
         "journeys[].steps",
         "journeys[].matchMode",
         "journeys[].completion",
@@ -248,6 +249,7 @@ struct DocumentShapeTests {
         let journey = Journey(
             name: "Retry after failure",
             summary: "The first call fails, the retry succeeds",
+            groupTag: "Checkout",
             steps: [
                 JourneyStep(
                     name: "Login succeeds",

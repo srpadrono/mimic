@@ -131,3 +131,48 @@ public extension View {
             .contentMargins(.vertical, DSSpacing.xs, for: .scrollContent)
     }
 }
+
+/// Identical disclosure, folder, count placement, and row height in either navigator.
+public struct DSNavigatorGroup: View {
+    public let name: String
+    public let count: Int
+    public let itemName: String
+    public let isCollapsed: Bool
+    public let identifier: String
+    public let toggle: () -> Void
+
+    public init(name: String, count: Int, itemName: String, isCollapsed: Bool,
+                identifier: String, toggle: @escaping () -> Void) {
+        self.name = name
+        self.count = count
+        self.itemName = itemName
+        self.isCollapsed = isCollapsed
+        self.identifier = identifier
+        self.toggle = toggle
+    }
+
+    public var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                    .frame(width: DSNavigatorMetrics.iconSlot)
+                Image(systemName: "folder")
+                    .font(.system(size: DSGlyph.controlProminent))
+                    .frame(width: DSNavigatorMetrics.iconSlot)
+                Text(name).font(DSTypography.controlLabelQuiet).lineLimit(1)
+                Text("· \(count)").font(DSTypography.label).monospacedDigit().fixedSize()
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPlain)
+        .dsNavigatorRow()
+        .selectionDisabled()
+        .help(name)
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel("\(isCollapsed ? "Expand" : "Collapse") \(name)")
+        .accessibilityValue("\(count) \(itemName)")
+    }
+}

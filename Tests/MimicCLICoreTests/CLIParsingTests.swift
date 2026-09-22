@@ -322,6 +322,21 @@ struct CLIParsingTests {
         #expect(message.contains("MIMIC_CONTROL_URL"))
     }
 
+    @Test("Journey group flags preserve, set, and clear membership")
+    func journeyGroupOptions() throws {
+        let options = try JourneyBehaviorOptions.parse(["--group", "Checkout"])
+        var spec = JourneySpec()
+        try options.apply(to: &spec)
+        #expect(spec.groupTag == "Checkout")
+        try JourneyBehaviorOptions.parse([]).apply(to: &spec)
+        #expect(spec.groupTag == "Checkout")
+        try JourneyBehaviorOptions.parse(["--group", ""]).apply(to: &spec)
+        #expect(spec.groupTag == "")
+        _ = try MimicCommand.parseAsRoot(["journey", "create", "Retry", "--group", "Checkout"])
+        _ = try MimicCommand.parseAsRoot(["journey", "update", "Retry", "--group", ""])
+        #expect(JourneyFile.spec(from: Journey(name: "Retry", groupTag: "Checkout")).groupTag == "Checkout")
+    }
+
     /// `JourneyBehaviorOptions.apply` used `try?`, so a misremembered value parsed to `nil`, was
     /// written over the field, and the command exited 0 reporting a change it had not made. These are
     /// the spellings someone actually reaches for.
