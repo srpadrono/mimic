@@ -47,8 +47,7 @@ struct JourneyStepRow: View {
             // can most afford it.
             VStack(alignment: .leading, spacing: 0) {
                 Text(step.path)
-                    .font(DSTypography.code)
-                    .fontWeight(isCurrent ? .semibold : .regular)
+                    .font(isCurrent ? DSTypography.codeBold : DSTypography.code)
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)

@@ -479,11 +479,7 @@ report \
     let alert = SwiftUI . Alert (title: Text("Delete endpoint?"))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
 
-# The one house-rule bullet that publishes the command it wants run — "`grep -rn
-# '\.font(\.system(size: [0-9]' Sources` prints exactly those two; a third means somebody hand-wrote
-# a rung" — and until this rule nothing ran it. `DSGlyph`'s own doc comment ends on the same
-# sentence, calling that grep "the whole check". A check that exists only as a string in two files
-# is not a check.
+# The glyph-size rule is mechanical: a raw font size at a call site bypasses DSGlyph.
 #
 # The pattern is a *call site* applying a bare number, not a `.system(size:)` anywhere: `DSTypography`
 # declares the type scale with thirteen of them and is the right place for a literal. Requiring the
@@ -492,22 +488,40 @@ report \
 # call. A size named symbolically (`DSGlyph.inline`, `size.glyphSize`) never matches, because the
 # rung after `size:` has to be a digit.
 #
-# Two exemptions, and they are the two the bullet itself names, pinned to their exact spellings the
-# way the sleep rule below pins its one: the welcome window's 26pt first-run clock, which is an
-# illustration rather than a glyph, and its 14pt action glyph, which sits a point above the ladder's
-# ceiling on a stated visual judgement. Both say which they are at the call site. Anything else,
-# including anything below `DSGlyph.minimum`, is caught here — a separate floor rule would have
-# nothing left to catch, since a bare `size: 7` is already a bare literal and the exemptions name
-# only 26 and 14.
+# Illustrations size their symbols inside DesignSystem components. AppFeatures has no exemption.
 report \
     'AGENTS.md "Non-negotiable patterns": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
     "${DOT}font${WS}\([^)]*${DOT}system${WS}\(${WS}size:${WS}[0-9]" \
-    'WelcomeWindow\.swift:[0-9]+:.*\.font\(\.system\(size: (26, weight: \.regular|14)\)\)' \
+    '' \
     'Image(systemName: "gear").font(.system(size: 7))
     Image(systemName: "gear").font(.system (size: 7))
     Image(systemName: "gear") . font ( . system ( size: 7 ) )
     Image(systemName: "gear").font(SwiftUI.Font.system(size: 7))' \
     "${PRODUCTION_SOURCES[@]}" "${UNIT_TESTS[@]}" "${UI_TESTS[@]}"
+
+# A system primary/secondary foreground ignores the palette's measured ink and contrast roles.
+# The panel materials and selection fills have their own DSColors labels; choosing one is a design
+# decision and cannot be delegated to whichever environment happens to host the Text.
+report \
+    'Design-system foreground roles: use DSColors.labelPrimary or labelSecondary rather than the system foreground shortcuts.' \
+    "${DOT}foregroundStyle${WS}\\(${WS}${DOT}(primary|secondary|tertiary|quaternary)([^A-Za-z]|$)" \
+    '' \
+    '.foregroundStyle(.secondary)
+    . foregroundStyle ( . primary )
+    .foregroundStyle(.tertiary)' \
+    "${PRODUCTION_SOURCES[@]}"
+
+# A platform rounded-border field is a different control family from DSTextField and DSFieldWell.
+# A form may still use a native Picker or Toggle when its interaction is macOS-specific; text inputs
+# have shared geometry and focus treatment.
+report \
+    'Design-system inputs: use DSTextField or DSFieldWell instead of the native rounded-border field.' \
+    "${DOT}textFieldStyle${WS}\\(${WS}${DOT}roundedBorder${WS}\\)" \
+    '' \
+    '.textFieldStyle(.roundedBorder)
+    . textFieldStyle ( . roundedBorder )
+    .textFieldStyle ( .roundedBorder )' \
+    "${PRODUCTION_SOURCES[@]}"
 
 # The rule the comment above `STRIP_COMMENTS` predicted this file would grow into — "a house rule can
 # legitimately be about a literal", and this is the literal it named.

@@ -58,7 +58,7 @@ struct InspectorOverview: View {
                     row("Journeys", value: "\(summary.journeyCount)")
                 }
 
-                section("Active journey") {
+                section(summary.serverState.runningPort == nil ? "Selected journey" : "Active journey") {
                     if let name = summary.activeJourneyName {
                         row("Name", value: name, valueColor: DSColors.accentText)
                         if let progress = summary.activeJourneyProgress {

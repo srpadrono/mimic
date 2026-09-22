@@ -88,12 +88,16 @@ final class WelcomeProjectUITests: MimicUITestCase {
             "An empty recents pane should show no count at all, not a zero"
         )
 
-        let hint = app.staticTexts["noRecentProjectsHint"]
+        let hint = app.staticTexts["ds.empty.welcome.recents.message"]
         XCTAssertTrue(hint.waitForExistence(timeout: 3), "The empty state should say how the list gets filled")
         XCTAssertTrue(
             shownText(of: hint).contains("Create one"),
             "The empty-state hint should tell the user to create a project, got '\(shownText(of: hint))'"
         )
+        let screenshot = XCTAttachment(screenshot: app.windows["Mimic"].firstMatch.screenshot())
+        screenshot.name = "welcome-empty"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     /// WELC-06 — the count in the panel header's subtitle slot tracks the list.

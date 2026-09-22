@@ -1017,6 +1017,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.bodyField.click()
         stepSheet.bodyField.typeText("{\"error\":\"card_declined\"}")
 
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "journey-step-response-sheet"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
         stepSheet.saveButton.click()
         XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5), "The sheet should close on save")
 

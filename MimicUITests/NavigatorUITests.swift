@@ -218,7 +218,7 @@ final class NavigatorUITests: MimicUITestCase {
         let endpointRowHeight = navigator.rowHeight(named: "Account summary")
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.endpointFilter.frame.maxX, 20, accuracy: 1,
                        "Inactive journey controls must not leave an empty slot beside the filter")
-        XCTAssertEqual(endpointRowHeight, 26, accuracy: 1)
+        XCTAssertEqual(endpointRowHeight, 30, accuracy: 1)
         XCTAssertEqual(navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.element("sidebar.addEndpointButton").frame.maxX, 12, accuracy: 1)
         XCTAssertTrue(navigator.row(named: "Current orders").exists)
@@ -325,10 +325,41 @@ final class NavigatorUITests: MimicUITestCase {
         workspace.showSidebarIfNeeded()
         XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
         XCTAssertTrue(navigator.journeyGroup("Checkout").isHittable)
+        let settings = navigator.element("journeyEditor.settingsDisclosure")
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "Narrow editors disclose secondary settings")
+        XCTAssertEqual(settings.value as? String, "Collapsed")
+        let firstStep = navigator.element("journeyStep-0")
+        XCTAssertTrue(firstStep.isHittable, "The first step must be visible in the initial narrow viewport")
+        XCTAssertLessThan(firstStep.frame.minY, shell.panel("centerPane").frame.maxY)
+        settings.click()
+        XCTAssertEqual(settings.value as? String, "Expanded")
         XCTAssertLessThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.maxY,
                                  navigator.element("journeyRun.deactivateButton").frame.minY,
-                                 "Folded behavior controls must not overlap the run buttons")
+                                 "Expanded behavior controls must not overlap the run buttons")
+        settings.click()
+        XCTAssertTrue(firstStep.isHittable)
         add(navigator.screenshot("navigator-journeys-grouped-narrow"))
+    }
+
+    @MainActor
+    func testLightJourneyEditorShowsStepsBeforeSettingsAtBothWidths() async throws {
+        usesLightAppearance = true
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        let shell = WorkspaceShellPage(app: app)
+        shell.journeysTab.click()
+        navigator.row(named: "Payment succeeds").click()
+        let firstStep = navigator.element("journeyStep-0")
+        XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
+        add(navigator.screenshot("journey-editor-light-wide"))
+
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        let settings = navigator.element("journeyEditor.settingsDisclosure")
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertEqual(settings.value as? String, "Collapsed")
+        XCTAssertTrue(firstStep.isHittable, "The first step should remain visible in light mode at narrow width")
+        add(navigator.screenshot("journey-editor-light-narrow"))
     }
 
     @MainActor
@@ -439,6 +470,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(panel.tab("traffic").isHittable)
         XCTAssertTrue(panel.addScenarioButton.isHittable)
         XCTAssertEqual(scenario.frame.height, 26, accuracy: 1)
+        for column in ["method", "path", "status", "timestamp"] {
+            let header = app.buttons["drawer.columnHeader.\(column)"].firstMatch
+            XCTAssertTrue(header.isHittable, "\(column) must stay visible in the compact request log")
+        }
         add(navigator.screenshot("inspector-scenarios-narrow"))
         panel.tab("traffic").click()
         panel.trafficRows.allElementsBoundByIndex.first(where: \.isHittable)?.click()
@@ -461,6 +496,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(panel.spoken(panel.journeyRow("state")).contains("Inactive"))
         XCTAssertTrue(panel.journeyRow("noActiveRun").exists)
         try await command(["journeyActivate": ["journey": ["name": activeName]]])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            panel.spoken(panel.journeyRow("state")).contains("Selected for next server run")
+        })
+        XCTAssertTrue(app.staticTexts["Ready when server starts"].waitForExistence(timeout: 5))
         try await command(["journeyAdvance": [:]])
         navigator.row(named: "Empty journey").click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {

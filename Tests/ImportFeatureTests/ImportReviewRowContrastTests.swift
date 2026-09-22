@@ -254,9 +254,8 @@ struct ImportReviewRowContrastTests {
     /// the problem; the larger is that the strongest statement a row can make was being spent on the
     /// pointer passing over, in a list where selection is the entire point of the screen.
     ///
-    /// It also cost contrast. The "Duplicate" flag draws its ink on a 12% tint of itself, and on a
-    /// dark sheet that composite read 4.43 over the full-strength wash — the one bed in this sweep
-    /// that failed. At 60% it reads 4.64.
+    /// The duplicate flag uses the shared semantic badge. Its lighter tint also clears AA on the
+    /// selected-strength wash, while the hover wash still communicates a weaker state.
     @Test("The pointer's wash is the weaker of the app's two, and the duplicate flag needs it to be")
     func hoverWashIsTheWeakerOfTheTwoWashes() throws {
         for appearance in Appearance.allCases {
@@ -280,10 +279,7 @@ struct ImportReviewRowContrastTests {
             #expect(isClose(stripe.alpha, token.alpha, within: componentTolerance))
         }
 
-        // The flag's fill is hand-drawn here rather than reached for from `DSStatusPill`, because a
-        // word in a `Label` is not a status pill. Held to the component's number anyway, so the two
-        // copies of one composite cannot drift.
-        #expect(ImportRow.flagFillOpacity == DSStatusPill.fillOpacity)
+        #expect(ImportRow.flagFillOpacity == DSStateBadge.fillOpacity)
 
         var worst = Double.greatestFiniteMagnitude
         for appearance in Appearance.allCases {
@@ -298,14 +294,12 @@ struct ImportReviewRowContrastTests {
                 }
             }
         }
-        // Dark, on the sheet token, under the pointer — the same bed that is worst for a plain flag.
-        #expect(isClose(worst, 4.64, within: ratioTolerance))
+        #expect(worst >= 4.5)
 
-        // And that bed under the wash this row used to paint, which is where it missed.
+        // Even the stronger selected-strength wash keeps the semantic badge readable.
         let darkSheet = try resolve(DSColors.surfaceElevated, in: .dark)
         let oldWash = try resolve(DSColors.accentSubtle, in: .dark).composited(over: darkSheet)
         let onTheOldWash = try selfTintedReading(ImportRow.warningInk, on: oldWash, in: .dark)
-        #expect(isClose(onTheOldWash, 4.43, within: ratioTolerance))
-        #expect(onTheOldWash < 4.5)
+        #expect(onTheOldWash >= 4.5)
     }
 }

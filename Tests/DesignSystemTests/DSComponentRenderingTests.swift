@@ -477,7 +477,7 @@ struct DSComponentRenderingTests {
 
         #expect(DSControlHeight.row == 20)
         #expect(DSControlHeight.field == 22)
-        #expect(DSControlHeight.denseRow == 26)
+        #expect(DSRowHeight.importRow == 26)
         #expect(DSControlHeight.prominent == 28)
         #expect(DSControlHeight.verticalPadding == 3)
 
@@ -616,8 +616,8 @@ struct DSComponentRenderingTests {
         #expect(DSAnimation.fast < DSAnimation.normal)
         #expect(DSAnimation.normal < DSAnimation.slow)
 
-        #expect(DSColors.methodColor(for: "HEAD") != .secondary)
-        #expect(DSColors.methodColor(for: "OPTIONS") != .secondary)
-        #expect(DSColors.methodColor(for: "TRACE") == .secondary)
+        #expect(DSColors.methodColor(for: "HEAD") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "OPTIONS") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "TRACE") == DSColors.labelSecondary)
     }
 }

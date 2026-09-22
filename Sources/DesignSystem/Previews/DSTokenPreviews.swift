@@ -60,7 +60,7 @@ import SwiftUI
         colorRow("Border", DSColors.border)
         colorRow("Separator", DSColors.separator)
         Divider()
-        Text("HTTP Method Colors").font(DSTypography.label).foregroundStyle(.secondary)
+        Text("HTTP Method Colors").font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
         HStack(spacing: DSSpacing.sm) {
             methodColorDot("GET")
             methodColorDot("POST")
@@ -86,7 +86,7 @@ private func spacingRow(_ name: String, _ value: CGFloat) -> some View {
     HStack {
         Text(name).font(DSTypography.code).frame(width: 40, alignment: .leading)
         Rectangle().fill(Color.accentColor).frame(width: value, height: 16)
-        Text("\(Int(value))pt").font(DSTypography.label).foregroundStyle(.secondary)
+        Text("\(Int(value))pt").font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
     }
 }
 
@@ -113,7 +113,7 @@ private func methodColorDot(_ method: String) -> some View {
 private func animRow(_ name: String, _ value: Double) -> some View {
     HStack {
         Text(name).font(DSTypography.code).frame(width: 60, alignment: .leading)
-        Text(String(format: "%.2fs", value)).font(DSTypography.label).foregroundStyle(.secondary)
+        Text(String(format: "%.2fs", value)).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
     }
 }
 #endif

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Domain
 import SpecImport
+import DesignSystem
 
 /// Import flow for a given source kind: file picker -> background parse -> review screen -> commit.
 ///
@@ -55,7 +56,7 @@ struct ImportView: View {
         )
         // Keep the footer on screen even on a compact display. The review list owns scrolling;
         // a 560pt minimum on the whole sheet made the actions impossible to reach on a 540pt screen.
-        .frame(minWidth: 760, minHeight: 360, idealHeight: preferredHeight, maxHeight: preferredHeight)
+        .frame(minWidth: DSSheetWidth.review, minHeight: 360, idealHeight: preferredHeight, maxHeight: preferredHeight)
     }
 
     private var preferredHeight: CGFloat {

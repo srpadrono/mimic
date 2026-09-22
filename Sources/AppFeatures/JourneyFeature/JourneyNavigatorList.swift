@@ -69,7 +69,7 @@ struct JourneyNavigatorList: View {
                     if filteredJourneys.isEmpty {
                         Text("No journeys match your filter")
                             .font(DSTypography.label)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(DSColors.labelSecondary)
                             .dsNavigatorRow()
                             .selectionDisabled()
                             .accessibilityIdentifier("journeys.noMatches")
@@ -90,8 +90,24 @@ struct JourneyNavigatorList: View {
                             }
                         }
                     }
-                    ForEach(ungroupedJourneys) { journey in
-                        journeyRow(journey, indented: false)
+                    if !groupNames.isEmpty && !ungroupedJourneys.isEmpty {
+                        DSNavigatorGroup(
+                            name: "Ungrouped", count: ungroupedJourneys.count, itemName: "journeys",
+                            isCollapsed: collapsedGroups.contains(Self.ungroupedSectionKey),
+                            identifier: "journeys.group.ungrouped"
+                        ) {
+                            if collapsedGroups.contains(Self.ungroupedSectionKey) {
+                                collapsedGroups.remove(Self.ungroupedSectionKey)
+                            } else {
+                                collapsedGroups.insert(Self.ungroupedSectionKey)
+                            }
+                        }
+                        .padding(.top, DSSpacing.smPlus)
+                    }
+                    if groupNames.isEmpty || !collapsedGroups.contains(Self.ungroupedSectionKey) {
+                        ForEach(ungroupedJourneys) { journey in
+                            journeyRow(journey, indented: !groupNames.isEmpty)
+                        }
                     }
                 }
                 .dsNavigatorList()
@@ -102,7 +118,7 @@ struct JourneyNavigatorList: View {
             }
         }
         .onChange(of: searchText) { _, text in
-            if !text.isEmpty { collapsedGroups.subtract(groupNames) }
+            if !text.isEmpty { collapsedGroups.subtract(groupNames + [Self.ungroupedSectionKey]) }
         }
         .onChange(of: selectedJourneyID) { _, id in
             if let group = journeys.first(where: { $0.id == id })?.groupTag {
@@ -135,6 +151,7 @@ struct JourneyNavigatorList: View {
     }
 
     private var groupNames: [String] { groupedJourneys.keys.sorted() }
+    private static let ungroupedSectionKey = "__ungrouped__"
     private var ungroupedJourneys: [Journey] { filteredJourneys.filter { ($0.groupTag ?? "").isEmpty } }
 
     private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
@@ -171,7 +188,7 @@ struct JourneyNavigatorRow: View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
             Image(systemName: isActive ? "play.circle.fill" : NavigatorTab.journeys.systemImage)
                 .font(.system(size: DSGlyph.controlProminent))
-                .foregroundStyle(isActive && !isSelected ? DSColors.accent : .secondary)
+                .foregroundStyle(isActive && !isSelected ? DSColors.accentText : DSColors.labelSecondary)
                 .frame(width: DSNavigatorMetrics.iconSlot)
                 .accessibilityHidden(true)
 
@@ -179,12 +196,12 @@ struct JourneyNavigatorRow: View {
             // the list to mark one row would make the other journeys harder to read for no reason.
             Text(journey.name)
                 .font(DSTypography.controlLabelQuiet)
-                .foregroundStyle(.primary)
+                .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
 
             Text("· \(stepCountText)")
                 .font(DSTypography.label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DSColors.labelSecondary)
                 .monospacedDigit()
                 .fixedSize()
             Spacer(minLength: 0)

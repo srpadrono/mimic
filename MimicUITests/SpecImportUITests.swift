@@ -1155,6 +1155,10 @@ final class SpecImportUITests: MimicUITestCase {
         assertExists(sheet.duplicateNote, "The \"Duplicates are deselected by default\" note")
         assertAbsent(sheet.bodySizeWarning, "The body-size footer warning")
         assertAbsent(sheet.binaryBodyWarning, "The binary-body footer warning")
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "har-review-with-duplicate"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     /// Select all, deselect all, one checkbox, one row click — each read back off the count.

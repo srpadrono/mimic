@@ -547,7 +547,7 @@ public nonisolated enum DSColors {
                                        dark: .init(red: 1.0, green: 0.624, blue: 0.624))
         case "HEAD", "OPTIONS":  Color(light: .init(red: 0.330, green: 0.330, blue: 0.343),
                                        dark: .init(red: 0.737, green: 0.737, blue: 0.753))
-        default:                 .secondary
+        default:                 labelSecondary
         }
     }
 
@@ -679,7 +679,7 @@ public nonisolated enum DSColors {
         case 300..<400: accentText
         case 400..<500: warningText
         case 500..<600: destructiveText
-        default: .secondary
+        default: labelSecondary
         }
     }
 }

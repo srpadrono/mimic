@@ -2,6 +2,11 @@ import DesignSystem
 import Domain
 import SwiftUI
 
+private enum JourneyEditorLayout {
+    /// Below this centre-pane width, permanent settings displace the step sequence.
+    static let compactWidth: CGFloat = 420
+}
+
 /// Scripts one journey and shows its run in the same list.
 ///
 /// The step list is the editor *and* the progress view. A journey is defined by its order, so the
@@ -21,34 +26,27 @@ struct JourneyEditorView: View {
 
     @State private var editingStepID: UUID?
     @State private var showNewStepSheet = false
+    @State private var settingsExpanded = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            JourneyGroupField(journey: journey).id(journey.id)
-            DSSectionHeader("Behavior", identifier: "journeyEditor.behavior")
-            behaviorControls
-                .fixedSize(horizontal: false, vertical: true)
-            // `.standard`, matching the rule below the run strip. The band was bracketed by a 9% rule
-            // above and a 12% one below, so its two edges did not read as a pair.
-            DSDivider(style: .standard, identifier: "journeyEditor.behavior")
-            JourneyRunControls(journey: journey, isActive: isActive, status: status)
-                .fixedSize(horizontal: false, vertical: true)
-            DSDivider(identifier: "journeyEditor.run")
-            // Allowed to compress to nothing, and that is the whole point.
-            //
-            // Everything above this is a fixed height — the name row carrying "Add step", the
-            // behaviour controls, the run strip. The step area is not: with no steps it draws a
-            // `DSEmptyState`, which is tall and, without this, refuses to give any of it back. In a
-            // short window the stack then needed more room than the pane had and SwiftUI centred the
-            // overflow, which pushes the *top* row out of sight under the toolbar. "Add step" was
-            // drawn nowhere and could not be clicked, on CI and on any small window alike.
-            //
-            // Yielding here means the fixed rows keep their space and the step area takes what is
-            // left, which is the order that matters: you can always scroll a list, and you cannot
-            // reach a button that is not on screen.
-            stepList
-                .frame(minHeight: 0, maxHeight: .infinity)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                header
+                if geometry.size.width < JourneyEditorLayout.compactWidth {
+                    compactSettingsDisclosure
+                    if settingsExpanded { settingsContent }
+                } else {
+                    settingsContent
+                }
+                JourneyRunControls(journey: journey, isActive: isActive, status: status)
+                    .fixedSize(horizontal: false, vertical: true)
+                DSDivider(identifier: "journeyEditor.run")
+                // In the narrow centre pane, settings begin collapsed so the first step remains
+                // visible. The sequence is the primary content of this editor; the disclosure keeps
+                // every setting reachable without giving it permanent claim to the viewport.
+                stepList
+                    .frame(minHeight: 0, maxHeight: .infinity)
+            }
         }
         // The centre pane tags this view with an identifier of its own, and a bare
         // `.accessibilityIdentifier` on a container renames every descendant to match it — which
@@ -65,6 +63,43 @@ struct JourneyEditorView: View {
                 appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
             }
         }
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        JourneyGroupField(journey: journey).id(journey.id)
+        DSSectionHeader("Behavior", identifier: "journeyEditor.behavior")
+        behaviorControls
+            .fixedSize(horizontal: false, vertical: true)
+        DSDivider(style: .standard, identifier: "journeyEditor.behavior")
+    }
+
+    private var compactSettingsDisclosure: some View {
+        Button {
+            settingsExpanded.toggle()
+        } label: {
+            HStack(spacing: DSSpacing.sm) {
+                Text("Journey settings")
+                    .font(DSTypography.controlLabel)
+                Spacer(minLength: DSSpacing.sm)
+                Image(systemName: settingsExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                    .frame(width: DSGlyph.control)
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(DSColors.labelSecondary)
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: DSBarHeight.secondaryBar)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPlain)
+        .background(DSColors.band)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+        }
+        .accessibilityIdentifier("journeyEditor.settingsDisclosure")
+        .accessibilityLabel("Journey settings")
+        .accessibilityValue(settingsExpanded ? "Expanded" : "Collapsed")
     }
 
     /// Binding shim so a step can be presented as a sheet item by id.
@@ -86,7 +121,7 @@ struct JourneyEditorView: View {
     /// limit, so a long journey name wrapped and pushed everything below it down.
     @ViewBuilder
     private var header: some View {
-        HStack(spacing: DSSpacing.sm) {
+        DSEditorHeader(identifier: "journey") {
             // 13, matching the endpoint editor's header in the same slot at the same 30pt height.
             // This was `subheading` (14 medium) against that one's `codeLarge` (13 regular), so
             // switching navigator tabs changed the size *and* the weight of the title in the same
@@ -111,14 +146,8 @@ struct JourneyEditorView: View {
                 // `.fixedSize()` is safe on this one and only this one: the string is a literal, so
                 // it cannot grow the way a name or a summary can. The two variable strings either
                 // side of it are the ones that have to stay compressible — see below.
-                Text("Active")
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.accentText)
-                    .padding(.horizontal, DSSpacing.xs + 1)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(DSColors.accentSubtle))
-                    .fixedSize()
-                    .accessibilityIdentifier("journeyEditor.activeBadge")
+                DSStateBadge(appState.serverState.runningPort == nil ? "Selected" : "Active",
+                             tone: .accent, identifier: "journeyEditor.activeBadge")
             }
 
             if let summary = journey.summary, !summary.isEmpty {
@@ -133,8 +162,7 @@ struct JourneyEditorView: View {
                     .accessibilityIdentifier("journeyEditor.summary")
             }
 
-            Spacer(minLength: DSSpacing.sm)
-
+        } action: {
             // `DSButton`, like the import review's header actions — the app's other worded action in
             // a 30pt header. As a bordered *system* button this drew AppKit's shape at ≈19pt beside
             // 20pt and 22pt siblings elsewhere, and picked up the system accent rather than
@@ -160,17 +188,6 @@ struct JourneyEditorView: View {
             .accessibilityLabel("Add step")
             .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, DSSpacing.md)
-        // The shared panel-header height, so this bar lines up with the sidebar's and the
-        // inspector's across the window instead of being a private number.
-        .frame(height: DSBarHeight.panelHeader)
-        .background(DSColors.secondary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(DSColors.separator)
-                .frame(height: DSStroke.hairline)
-        }
-        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Behaviour
@@ -428,10 +445,11 @@ private struct JourneyGroupField: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            Text("Group").foregroundStyle(.secondary)
+            Text("Group").foregroundStyle(DSColors.labelSecondary)
             TextField("None", text: $draft)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
+                .textFieldStyle(.plain)
+                .font(DSTypography.label)
+                .dsFieldWell()
                 .focused($isFocused)
                 .onSubmit { commit() }
                 .onChange(of: isFocused) { _, focused in if !focused { commit() } }

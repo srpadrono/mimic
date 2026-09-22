@@ -19,6 +19,7 @@ import DesignSystem
 /// reader scans rather than reads to the end.
 enum LogColumns {
     static let method: CGFloat = 62
+    static let compactMethod: CGFloat = 58
 
     /// Up from 110. Holds an endpoint's name, which is prose rather than a token.
     static let endpoint: CGFloat = 130
@@ -27,6 +28,7 @@ enum LogColumns {
     static let scenario: CGFloat = 100
 
     static let status: CGFloat = 52
+    static let compactStatus: CGFloat = 44
 
     /// Up from 58, which fitted "9:41 AM" and does not fit "9:41:33 AM". Sized for a 12-hour locale,
     /// the wider of the two, at `Figure.small`: "11:41:33 PM" is eleven characters and SF Mono
@@ -41,67 +43,14 @@ enum LogColumns {
 
 /// One traffic row's geometry.
 ///
-/// 26 is `DSControlHeight.denseRow`, a rung of its own rather than one of `row` (20) or `field`
-/// (22): neither of those holds a `compact` method badge above a line of `codeSmall`. A dense table
-/// row is a fourth thing, and `ImportReviewList`'s candidate row stands on the same rung — through
-/// the token now, where the two used to be a pair of literals coupled by a sentence in each file
-/// naming the other.
+/// Traffic has its own 28pt content-row rung. It carries a method badge and six other columns, so
+/// the import review's denser 26pt candidate row is not a useful source of geometry here.
 private enum LogRow {
-    static let height = DSControlHeight.denseRow
+    static let height = DSRowHeight.logRow
 }
 
 enum SortField: String {
     case method, path, endpoint, scenario, status, timestamp
-}
-
-// MARK: - Header Control Geometry
-
-/// The one shape every control in this panel's header wears.
-///
-/// The row used to carry four controls in three shapes at three heights, because each was written on
-/// its own: a system popup, a bordered pill, a filled well and a bare icon. Xcode's equivalent bars
-/// run a single control idiom end to end, and the only way to keep that true here past the next edit
-/// is to have the numbers live in one place rather than be matched by hand.
-///
-/// The numbers are read from the design system rather than restated here. This enum used to hold
-/// four literals and a comment promising they matched `DSFilterField` — a coupling across a module
-/// boundary, asserted in prose and verified by nobody. `DSControlHeight` and `DSStroke` are where
-/// that promise now lives, so adopting the component later cannot change this row's shape.
-private enum HeaderControl {
-    static let verticalPadding = DSControlHeight.verticalPadding
-    static let height = DSControlHeight.search
-    static let cornerRadius = DSCornerRadius.sm
-    static let borderWidth = DSStroke.hairline
-}
-
-private extension View {
-    /// Wraps a header control in the panel's shared well: same height, radius and padding as every
-    /// sibling, so the row reads as one set of controls instead of four strangers.
-    ///
-    /// A caller varies the line only where the line carries state — the unmatched filter goes amber
-    /// when it is on, and a field being typed into wears `DSStroke.focusRing`, which is a point
-    /// heavier than a hairline for exactly that reason (`DSStroke` names the two separately because
-    /// one is a boundary and the other is a state). Height, radius and padding are not negotiable.
-    func headerControlWell(
-        fill: Color,
-        stroke: Color,
-        strokeWidth: CGFloat = HeaderControl.borderWidth,
-        minWidth: CGFloat? = nil,
-        idealWidth: CGFloat? = nil
-    ) -> some View {
-        padding(.horizontal, DSSpacing.sm)
-            .padding(.vertical, HeaderControl.verticalPadding)
-            .frame(minWidth: minWidth, idealWidth: idealWidth)
-            .frame(height: HeaderControl.height)
-            .background {
-                RoundedRectangle(cornerRadius: HeaderControl.cornerRadius)
-                    .fill(fill)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: HeaderControl.cornerRadius)
-                    .stroke(stroke, lineWidth: strokeWidth)
-            }
-    }
 }
 
 enum RequestLogQuery {
@@ -434,11 +383,12 @@ struct RequestLogDrawerView: View {
                 GeometryReader { table in
                     ScrollView(.horizontal) {
                         VStack(spacing: 0) {
-                            tableHeader
+                            tableHeader(compact: narrow)
                             DSDivider(style: .standard, identifier: "drawer.table.header")
-                            tableBody
+                            tableBody(compact: narrow)
                         }
-                        .frame(width: max(table.size.width, LogColumns.minimumTableWidth), height: table.size.height)
+                        .frame(width: narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth),
+                               height: table.size.height)
                     }
                 }
             }
@@ -541,10 +491,11 @@ struct RequestLogDrawerView: View {
                     // one of the two hand-rolled ones that component's own note names; it keeps its
                     // shape here rather than adopting the component, because the component is a
                     // capsule with a scope pill and this row is four rectangular wells.
-        .headerControlWell(
+        .dsControlWell(
+            height: DSControlHeight.search,
             fill: DSColors.tertiary,
             stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
-            strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : HeaderControl.borderWidth,
+            strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : DSStroke.hairline,
             minWidth: LogColumns.time,
             idealWidth: 160
         )
@@ -562,13 +513,17 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Header
 
     @ViewBuilder
-    private var tableHeader: some View {
+    private func tableHeader(compact: Bool) -> some View {
         HStack(spacing: 0) {
-            columnHeader("Method", field: .method, width: LogColumns.method)
+            columnHeader("Method", field: .method,
+                         width: compact ? LogColumns.compactMethod : LogColumns.method)
             columnHeader("Path", field: .path, width: nil)
-            columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
-            columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
-            columnHeader("Status", field: .status, width: LogColumns.status)
+            if !compact {
+                columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
+                columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
+            }
+            columnHeader("Status", field: .status,
+                         width: compact ? LogColumns.compactStatus : LogColumns.status)
             columnHeader("Time", field: .timestamp, width: LogColumns.time)
         }
         .padding(.horizontal, DSSpacing.md)
@@ -603,7 +558,7 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Body
 
     @ViewBuilder
-    private var tableBody: some View {
+    private func tableBody(compact: Bool) -> some View {
         // Both resolved once for the whole table. A row's context menu has to know the entire
         // selection, and working that out inside the row would be O(rows²) on a log that holds a
         // thousand of them.
@@ -621,6 +576,7 @@ struct RequestLogDrawerView: View {
                             log: log,
                             rowIndex: index,
                             isSelected: selectedLogIDs.contains(log.id),
+                            compact: compact,
                             onCreateEndpoint: onCreateEndpoint,
                             onSaveAsMock: onSaveAsMock,
                             journeys: journeys,
@@ -1076,7 +1032,7 @@ private struct UnmatchedFilterToggle: View {
             // The same well as the filter field beside it — one height, one radius, one hairline.
             // These two were written independently and drifted by a couple of points, which is
             // exactly the kind of difference nobody can name and everybody can see.
-            .headerControlWell(fill: fill, stroke: stroke)
+            .dsControlWell(height: DSControlHeight.search, fill: fill, stroke: stroke)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1212,6 +1168,7 @@ struct RequestLogTableRow: View {
     let log: RequestLog
     let rowIndex: Int
     let isSelected: Bool
+    var compact = false
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
     var onSaveAsMock: ((UUID) -> Void)? = nil
     @State private var showingSaveConfirmation = false
@@ -1241,7 +1198,7 @@ struct RequestLogTableRow: View {
             // Keyed by the log entry, not by the method: every GET row shared one identifier when the
             // badge defaulted to the method name, so a query for it resolved to an arbitrary row.
             DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: log.id.uuidString)
-                .frame(width: LogColumns.method, alignment: .leading)
+                .frame(width: compact ? LogColumns.compactMethod : LogColumns.method, alignment: .leading)
 
             // Path
             Text(log.path)
@@ -1258,19 +1215,21 @@ struct RequestLogTableRow: View {
             // composes with `.accessibilityElement(children: .ignore)`, which swallows its children
             // whole, so an identifier down here names an element nothing can ever find. What those
             // two cells say is in `spokenLabel` instead, where a reader can hear it.
-            endpointCell
-                .frame(width: LogColumns.endpoint, alignment: .leading)
+            if !compact {
+                endpointCell
+                    .frame(width: LogColumns.endpoint, alignment: .leading)
 
             // Scenario
-            Text(scenarioName ?? "\u{2014}")
-                .font(DSTypography.caption)
-                .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
-                .lineLimit(1)
-                .frame(width: LogColumns.scenario, alignment: .leading)
+                Text(scenarioName ?? "\u{2014}")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
+                    .lineLimit(1)
+                    .frame(width: LogColumns.scenario, alignment: .leading)
+            }
 
             // Status code pill
             statusPill
-                .frame(width: LogColumns.status, alignment: .leading)
+                .frame(width: compact ? LogColumns.compactStatus : LogColumns.status, alignment: .leading)
 
             // Time
             // Seconds, and monospaced digits.

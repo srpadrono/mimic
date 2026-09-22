@@ -1,3 +1,4 @@
+import AppKit
 import DesignSystem
 import Domain
 import SwiftUI
@@ -9,9 +10,8 @@ import SwiftUI
 ///
 /// The chrome follows the shared sheet convention: a sentence-case heading inside the sheet,
 /// `DSSpacing.lg` between the heading, the form and the button row, `DSSpacing.lg` of outer padding,
-/// and a trailing button row with cancel to the left of the confirm action. This is the one sheet
-/// that keeps a grouped `Form` — it is the only multi-section one — so it declares a wider ideal
-/// width while sharing the same minimum as the rest.
+/// and a trailing button row with cancel to the left of the confirm action. The request, response
+/// and playback sections use the same field and section surfaces as server settings.
 struct JourneyStepSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -80,154 +80,132 @@ struct JourneyStepSheet: View {
                 // step" and "Save step": which of the two is showing is what the label says.
                 .accessibilityIdentifier("stepSheet.title")
 
-            Form {
-                Section {
-                    TextField("Name", text: $name, prompt: Text("Optional — defaults to the route"))
-                        .focused($focusedField, equals: .name)
-                        .accessibilityIdentifier("stepSheet.nameField")
-                        .accessibilityLabel("Step name")
+            ScrollView {
+                VStack(alignment: .leading, spacing: DSSpacing.md) {
+                    DSFormSection("Request", identifier: "stepSheet.request") {
+                        DSTextField("Name", text: $name, placeholder: "Optional — defaults to the route",
+                                    identifier: "stepSheet.nameField")
+                            .focused($focusedField, equals: .name)
+                            .accessibilityIdentifier("stepSheet.nameField")
+                            .accessibilityLabel("Step name")
 
-                    Picker("Method", selection: $method) {
-                        ForEach(HTTPMethod.allCases, id: \.self) { method in
-                            Text(method.rawValue).tag(method)
+                        HStack(alignment: .top, spacing: DSSpacing.md) {
+                            DSFormPicker("Method", selection: $method, identifier: "stepSheet.methodPicker") {
+                                ForEach(HTTPMethod.allCases, id: \.self) { method in
+                                    Text(method.rawValue).tag(method)
+                                }
+                            }
+                            DSFormPicker("Backend", selection: $selectedBackend, identifier: "stepSheet.backendPicker") {
+                                Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
+                                ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
+                                    Text(backend.name).tag(backend.id.uuidString)
+                                }
+                            }
                         }
+
+                        DSTextField("Path", text: $path, placeholder: "/account-summary",
+                                    identifier: "stepSheet.pathField")
+                            .focused($focusedField, equals: .path)
+                            .accessibilityIdentifier("stepSheet.pathField")
+                            .accessibilityLabel("Path")
+                            .onChange(of: path) { clearValidation(for: .path) }
+
+                        validationMessage(under: .path)
                     }
-                    .accessibilityIdentifier("stepSheet.methodPicker")
-                    .accessibilityLabel("HTTP method")
 
-                    Picker("Backend", selection: $selectedBackend) {
-                        Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
-                        ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
-                            Text(backend.name).tag(backend.id.uuidString)
-                        }
-                    }
-                    .accessibilityIdentifier("stepSheet.backendPicker")
-                    .accessibilityLabel("Backend")
-
-                    TextField("Path", text: $path, prompt: Text("/account-summary"))
-                        .focused($focusedField, equals: .path)
-                        .accessibilityIdentifier("stepSheet.pathField")
-                        .accessibilityLabel("Path")
-                        .onChange(of: path) { clearValidation(for: .path) }
-
-                    validationMessage(under: .path)
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                        Text("Outcome")
-                            .font(DSTypography.label)
-                            .foregroundStyle(DSColors.labelSecondary)
-                        Picker("Outcome", selection: $kind) {
+                    DSFormSection("Response", identifier: "stepSheet.response") {
+                        DSFormPicker("Outcome", selection: $kind, identifier: "stepSheet.outcomePicker") {
                             ForEach(Kind.allCases) { kind in
                                 Text(kind.title).tag(kind)
                             }
                         }
-                        .labelsHidden()
                         .pickerStyle(.segmented)
-                        .accessibilityIdentifier("stepSheet.outcomePicker")
-                        .accessibilityLabel("Outcome")
-                    }
-                    // Switching outcome hides the field a message was pointing at, and a complaint
-                    // with nothing to point at reads as a bug in the sheet.
-                    .onChange(of: kind) { validation = nil }
+                        // Switching outcome hides the field a message was pointing at, and a complaint
+                        // with nothing to point at reads as a bug in the sheet.
+                        .onChange(of: kind) { validation = nil }
 
-                    switch kind {
-                    case .respond:
-                        TextField("Status code", text: $statusCode)
-                            .focused($focusedField, equals: .statusCode)
-                            .accessibilityIdentifier("stepSheet.statusField")
-                            .accessibilityLabel("Status code")
-                            .onChange(of: statusCode) { clearValidation(for: .statusCode) }
+                        switch kind {
+                        case .respond:
+                            DSTextField("Status code", text: $statusCode, identifier: "stepSheet.statusField")
+                                .focused($focusedField, equals: .statusCode)
+                                .accessibilityIdentifier("stepSheet.statusField")
+                                .accessibilityLabel("Status code")
+                                .onChange(of: statusCode) { clearValidation(for: .statusCode) }
 
-                        validationMessage(under: .statusCode)
+                            validationMessage(under: .statusCode)
 
-                        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                            Text("Headers")
-                                .font(DSTypography.label)
-                                .foregroundStyle(DSColors.labelSecondary)
-                            TextEditor(text: $headerText)
-                                .frame(height: DSControlHeight.field * 2)
-                                .font(DSTypography.code)
-                                .scrollContentBackground(.hidden)
-                                .background(DSColors.surfaceElevated)
+                            DSMultilineField("Headers", text: $headerText,
+                                             height: DSControlHeight.field * 2,
+                                             identifier: "stepSheet.headersField")
                                 .focused($focusedField, equals: .headers)
-                                .accessibilityIdentifier("stepSheet.headersField")
                                 .accessibilityLabel("Response headers, one per line")
-                        }
 
-                        // The multiline editor accepts Return directly; its former TextField
-                        // required Option-Return and needed a longer instruction here.
-                        Text("One per line. Press Return to add another.")
-                            .font(DSTypography.caption)
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .accessibilityIdentifier("stepSheet.headersHint")
-
-                        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                            Text("Body")
+                            // The multiline editor accepts Return directly; its former TextField
+                            // required Option-Return and needed a longer instruction here.
+                            Text("One per line. Press Return to add another.")
                                 .font(DSTypography.label)
                                 .foregroundStyle(DSColors.labelSecondary)
-                            TextEditor(text: $responseBody)
-                                .frame(height: DSControlHeight.field * 4)
-                                .font(DSTypography.code)
-                                .scrollContentBackground(.hidden)
-                                .background(DSColors.surfaceElevated)
+                                .accessibilityIdentifier("stepSheet.headersHint")
+
+                            DSMultilineField("Body", text: $responseBody,
+                                             height: DSControlHeight.field * 4,
+                                             identifier: "stepSheet.bodyField")
                                 .focused($focusedField, equals: .body)
-                                .accessibilityIdentifier("stepSheet.bodyField")
-                                .accessibilityLabel("Response body")
+
+                        case .drop:
+                            Text("The connection is torn down mid-response. The client sees a network "
+                                + "failure rather than a status code.")
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("stepSheet.dropHint")
+
+                        case .timeout:
+                            DSTextField("Hold for (ms)", text: $holdMs, identifier: "stepSheet.holdField")
+                                .focused($focusedField, equals: .hold)
+                                .accessibilityIdentifier("stepSheet.holdField")
+                                .accessibilityLabel("Hold duration in milliseconds")
+                                .onChange(of: holdMs) { clearValidation(for: .hold) }
+
+                            validationMessage(under: .hold)
+
+                            Text("Nothing is sent for this long, so the client's own timeout fires first.")
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("stepSheet.timeoutHint")
                         }
+                    }
 
-                    case .drop:
-                        Text("The connection is torn down mid-response. The client sees a network "
-                            + "failure rather than a status code.")
-                            .font(DSTypography.caption)
+                    DSFormSection("Playback", identifier: "stepSheet.playback") {
+                        DSTextField("Delay before answering (ms)", text: $delayMs,
+                                    identifier: "stepSheet.delayField")
+                            .focused($focusedField, equals: .delay)
+                            .onChange(of: delayMs) { clearValidation(for: .delay) }
+                            .accessibilityIdentifier("stepSheet.delayField")
+                            .accessibilityLabel("Delay in milliseconds")
+
+                        validationMessage(under: .delay)
+
+                        DSTextField("Serve this many times", text: $repeatCount,
+                                    identifier: "stepSheet.repeatField")
+                            .focused($focusedField, equals: .repeatCount)
+                            .onChange(of: repeatCount) { clearValidation(for: .repeatCount) }
+                            .accessibilityIdentifier("stepSheet.repeatField")
+                            .accessibilityLabel("Repeat count")
+
+                        validationMessage(under: .repeatCount)
+
+                        Text("A repeat above 1 keeps the step current across several requests — how a poll "
+                            + "stays pending before it completes.")
+                            .font(DSTypography.label)
+                            // Matches the two identical captions above it in this sheet.
                             .foregroundStyle(DSColors.labelSecondary)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("stepSheet.dropHint")
-
-                    case .timeout:
-                        TextField("Hold for (ms)", text: $holdMs)
-                            .focused($focusedField, equals: .hold)
-                            .accessibilityIdentifier("stepSheet.holdField")
-                            .accessibilityLabel("Hold duration in milliseconds")
-                            .onChange(of: holdMs) { clearValidation(for: .hold) }
-
-                        validationMessage(under: .hold)
-
-                        Text("Nothing is sent for this long, so the client's own timeout fires first.")
-                            .font(DSTypography.caption)
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("stepSheet.timeoutHint")
                     }
                 }
-
-                Section {
-                    TextField("Delay before answering (ms)", text: $delayMs)
-                        .focused($focusedField, equals: .delay)
-                        .onChange(of: delayMs) { clearValidation(for: .delay) }
-                        .accessibilityIdentifier("stepSheet.delayField")
-                        .accessibilityLabel("Delay in milliseconds")
-
-                    validationMessage(under: .delay)
-
-                    TextField("Serve this many times", text: $repeatCount)
-                        .focused($focusedField, equals: .repeatCount)
-                        .onChange(of: repeatCount) { clearValidation(for: .repeatCount) }
-                        .accessibilityIdentifier("stepSheet.repeatField")
-                        .accessibilityLabel("Repeat count")
-
-                    validationMessage(under: .repeatCount)
-
-                    Text("A repeat above 1 keeps the step current across several requests — how a poll "
-                        + "stays pending before it completes.")
-                        .font(DSTypography.caption)
-                        // Matches the two identical captions above it in this sheet.
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .padding(.vertical, DSSpacing.xxs)
             }
-            .formStyle(.grouped)
 
             HStack(spacing: DSSpacing.md) {
                 Spacer()
@@ -259,7 +237,10 @@ struct JourneyStepSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(width: 560)
+        .frame(width: DSFormMetrics.multiSectionWidth,
+               height: max(DSFormMetrics.minimumTallSheetHeight,
+                           min(DSFormMetrics.maximumTallSheetHeight,
+                               (NSScreen.main?.visibleFrame.height ?? 900) - DSFormMetrics.screenVerticalAllowance)))
         .defaultFocus($focusedField, .name)
         .onAppear(perform: loadExistingStep)
     }

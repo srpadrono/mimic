@@ -156,8 +156,8 @@ public struct DSEmptyState: View {
         // Paired deliberately. A bare identifier on a container makes every descendant report the
         // container's name instead of its own, which left `…heading`, `…message` and the call to
         // action — a real button — with no addressable identity of their own.
-        .accessibilityIdentifier("ds.empty.\(identifier)")
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.empty.\(identifier)")
     }
 
     /// Decoration, and hidden from the accessibility tree accordingly — the heading beneath it says

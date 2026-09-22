@@ -155,6 +155,7 @@ struct JourneyRunControls: View {
 
     private var progressText: String {
         guard isActive else { return "Not active — endpoints answer directly" }
+        guard appState.serverState.runningPort != nil else { return "Ready when server starts" }
         guard let status else { return "Not started" }
         if status.isComplete {
             return "Complete — \(status.totalServed) served"

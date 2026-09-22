@@ -16,48 +16,6 @@ private enum EditorBody {
     static let minHeight: CGFloat = 180
 }
 
-private enum EditorField {
-    static let verticalPadding = DSControlHeight.verticalPadding
-    static let height = DSControlHeight.field
-    static let cornerRadius = DSCornerRadius.sm
-    static let borderWidth = DSStroke.hairline
-}
-
-private extension View {
-    /// Wraps a field in the editor's shared well. Only the width varies, because width is the only
-    /// part of the geometry that carries meaning — a status code is not as wide as a group tag.
-    ///
-    /// `maxWidth` rather than `width` for a field that shares its row with another: a hard 200pt name
-    /// column took half of a narrow editor and left the value it describes with less room than the
-    /// name, where a ceiling caps the column when there is room and yields when there is not.
-    ///
-    /// `isInvalid` recolours the hairline and nothing else, which is the rule `DSTextField` follows:
-    /// the well differs from its neighbours by *state*, not by weight. The colour is never the only
-    /// channel — a field that turns its border red always has the message underneath it too.
-    func editorFieldWell(
-        width: CGFloat? = nil,
-        maxWidth: CGFloat? = nil,
-        isInvalid: Bool = false
-    ) -> some View {
-        padding(.horizontal, DSSpacing.sm)
-            .padding(.vertical, EditorField.verticalPadding)
-            .frame(width: width)
-            .frame(maxWidth: maxWidth)
-            .frame(height: EditorField.height)
-            .background {
-                RoundedRectangle(cornerRadius: EditorField.cornerRadius)
-                    .fill(DSColors.tertiary)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: EditorField.cornerRadius)
-                    .stroke(
-                        isInvalid ? DSColors.destructive : DSColors.border,
-                        lineWidth: EditorField.borderWidth
-                    )
-            }
-    }
-}
-
 /// Center pane endpoint editor — method, path, response config, headers, body, and settings.
 struct EndpointEditorView: View {
     let endpoint: Endpoint
@@ -194,7 +152,7 @@ struct EndpointEditorView: View {
     /// bar now, where it is also a menu you can steer with.
     @ViewBuilder
     private var endpointHeader: some View {
-        HStack(spacing: DSSpacing.sm) {
+        DSEditorHeader(identifier: "endpoint") {
             DSMethodBadge(method: endpoint.method.rawValue, identifier: "editor.method")
 
             // `.lineLimit(1)` and `.truncationMode(.middle)`, and no layout priority. A negative one
@@ -210,23 +168,9 @@ struct EndpointEditorView: View {
                 .help(endpoint.path)
                 .accessibilityIdentifier("endpointEditor.path")
 
-            Spacer(minLength: DSSpacing.sm)
-
+        } action: {
             moreMenu
         }
-        .padding(.horizontal, DSSpacing.md)
-        // Fixed, not padded. With vertical padding the row grew to whatever its tallest control was,
-        // so giving the menu a real hit target would have silently made the header 34pt.
-        .frame(height: DSBarHeight.panelHeader)
-        .background(DSColors.secondary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                // `separator`, the weight every horizontal bar in this window ends with.
-                // `panelSeparator` is heavier and reserved for the seam *between* panels.
-                .fill(DSColors.separator)
-                .frame(height: DSStroke.hairline)
-        }
-        .accessibilityElement(children: .contain)
     }
 
     /// The endpoint's own actions.
@@ -295,7 +239,7 @@ struct EndpointEditorView: View {
                 TextField("200", text: $statusCodeString)
                     .textFieldStyle(.plain)
                     .font(DSTypography.code)
-                    .editorFieldWell(
+                    .dsFieldWell(
                         width: EditorRowMetrics.numericFieldWidth,
                         isInvalid: statusCodeError != nil
                     )
@@ -342,7 +286,7 @@ struct EndpointEditorView: View {
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.accentText)
                         .padding(.horizontal, DSSpacing.xs)
-                        .frame(height: EditorField.height)
+                        .frame(height: DSControlHeight.field)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.dsPlain)
@@ -382,7 +326,7 @@ struct EndpointEditorView: View {
             TextField("Name", text: header.key)
                 .textFieldStyle(.plain)
                 .font(DSTypography.code)
-                .editorFieldWell(maxWidth: EditorRowMetrics.headerKeyWidth)
+                .dsFieldWell(maxWidth: EditorRowMetrics.headerKeyWidth)
                 .accessibilityIdentifier("endpointEditor.headerKey.\(index)")
                 .accessibilityLabel("Header name")
                 .onSubmit { commitHeaders() }
@@ -390,7 +334,7 @@ struct EndpointEditorView: View {
             TextField("Value", text: header.value)
                 .textFieldStyle(.plain)
                 .font(DSTypography.code)
-                .editorFieldWell()
+                .dsFieldWell()
                 .accessibilityIdentifier("endpointEditor.headerValue.\(index)")
                 .accessibilityLabel("Header value")
                 .onSubmit { commitHeaders() }
@@ -404,7 +348,7 @@ struct EndpointEditorView: View {
                 Image(systemName: "minus.circle")
                     .font(.system(size: DSGlyph.controlLarge))
                     .foregroundStyle(DSColors.labelSecondary)
-                    .frame(width: EditorField.height, height: EditorField.height)
+                    .frame(width: DSControlHeight.field, height: DSControlHeight.field)
                     .contentShape(Rectangle())
             }
             // The same well the two section-header actions above it wear, and now the same pressed
@@ -447,7 +391,7 @@ struct EndpointEditorView: View {
                         .font(DSTypography.label)
                         .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
                         .padding(.horizontal, DSSpacing.xs)
-                        .frame(height: EditorField.height)
+                        .frame(height: DSControlHeight.field)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.dsPlain)
@@ -519,7 +463,7 @@ struct EndpointEditorView: View {
             TextField("e.g. Users, Auth", text: $groupTag)
                 .textFieldStyle(.plain)
                 .font(DSTypography.code)
-                .editorFieldWell(maxWidth: EditorRowMetrics.textFieldWidth)
+                .dsFieldWell(maxWidth: EditorRowMetrics.textFieldWidth)
                 .accessibilityIdentifier("endpointEditor.groupTag")
                 // Committed when focus leaves, not only on Return. Typing a value and clicking
                 // somewhere else is the ordinary way to fill a form; without this the edit was
@@ -537,7 +481,7 @@ struct EndpointEditorView: View {
             TextField("0", text: $delayString)
                 .textFieldStyle(.plain)
                 .font(DSTypography.code)
-                .editorFieldWell(width: EditorRowMetrics.numericFieldWidth)
+                .dsFieldWell(width: EditorRowMetrics.numericFieldWidth)
                 .accessibilityIdentifier("endpointEditor.delay")
                 .onChange(of: delayString) { delayError = nil }
                 .onChange(of: isDelayFocused) { _, focused in
@@ -602,7 +546,7 @@ struct EndpointEditorView: View {
                 Text(title).font(DSTypography.metaBold)
             }
             .foregroundStyle(DSColors.labelSecondary)
-            .frame(height: EditorField.height)
+            .frame(height: DSControlHeight.field)
             .contentShape(Rectangle())
         }
         .buttonStyle(.dsPlain)
@@ -636,7 +580,7 @@ struct EndpointEditorView: View {
         .padding(.horizontal, DSSpacing.md)
         // At least a control tall, so a row whose value is text keeps the rhythm of one holding a
         // field.
-        .frame(minHeight: EditorField.height)
+        .frame(minHeight: DSControlHeight.field)
     }
 
     /// The unit a number is in, beside the value rather than inside the label. "Delay (ms)" spent

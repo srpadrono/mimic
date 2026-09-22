@@ -774,6 +774,20 @@ struct DSContrastTests {
         return try contrast(token, on: fill, in: appearance)
     }
 
+    @Test("An active state badge remains readable on the editor header in both appearances")
+    func activeStateBadgeClearsAA() throws {
+        for appearance in Appearance.allCases {
+            let header = try resolve(DSColors.secondary, in: appearance)
+            let reading = try selfTintedReading(
+                DSColors.accentText,
+                on: header,
+                alpha: DSStateBadge.fillOpacity,
+                in: appearance
+            )
+            #expect(reading >= 4.5, "Active badge on editor header, \(appearance): \(reading)")
+        }
+    }
+
     /// **The failure this suite shipped, and the assertion that would have caught it.**
     ///
     /// `httpStatusColor(for:)`'s result is used twice at every call site that draws a status pill:
@@ -1644,7 +1658,7 @@ struct DSContrastTests {
     /// The mapping under that rule, asserted by resolved colour rather than by `Color` equality — two
     /// dynamic colours built from different providers are not `==` even when they resolve identically,
     /// so an equality test would pass or fail for reasons unrelated to the palette. The one case that
-    /// *is* written as equality is the fallback, because `.secondary` is a single shared system token
+    /// *is* written as equality is the fallback, because `labelSecondary` is a single shared token
     /// on both sides and `DSComponentRenderingTests` already compares it that way.
     ///
     /// **Every arm is a text variant**, and that is load-bearing rather than cosmetic: the result is
@@ -1674,10 +1688,11 @@ struct DSContrastTests {
             }
         }
 
-        // Outside 200..<600 a code carries no semantic weight, so it takes the system's secondary
+        // Outside 200..<600 a code carries no semantic weight, so it takes the design system's
+        // secondary label
         // rather than borrowing a colour that means something.
-        #expect(DSColors.httpStatusColor(for: 100) == .secondary)
-        #expect(DSColors.httpStatusColor(for: 0) == .secondary)
+        #expect(DSColors.httpStatusColor(for: 100) == DSColors.labelSecondary)
+        #expect(DSColors.httpStatusColor(for: 0) == DSColors.labelSecondary)
     }
 
     // MARK: - successSubtle

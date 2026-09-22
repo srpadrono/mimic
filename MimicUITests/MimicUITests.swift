@@ -13,7 +13,9 @@ struct WelcomePage {
     private var heroTitleByLabel: XCUIElement { app.staticTexts["Mimic"].firstMatch }
     private var windowByTitle: XCUIElement { app.windows["Mimic"].firstMatch }
     var newProjectButton: XCUIElement { app.buttons["newProjectButton"] }
-    private var noRecentProjectsLabelByIdentifier: XCUIElement { app.staticTexts["noRecentProjectsLabel"] }
+    private var noRecentProjectsLabelByIdentifier: XCUIElement {
+        app.staticTexts["ds.empty.welcome.recents.heading"]
+    }
     private var noRecentProjectsLabelByLabel: XCUIElement { app.staticTexts["No projects yet"].firstMatch }
 
     /// All three of these poll their candidates together rather than chaining

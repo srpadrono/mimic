@@ -4,7 +4,7 @@ import SwiftUI
 public enum DSInspectorMetrics {
     public static let headerHeight = DSNavigatorMetrics.headerHeight
     public static let footerHeight = DSNavigatorMetrics.footerHeight
-    public static let rowHeight = DSNavigatorMetrics.rowHeight
+    public static let rowHeight = DSRowHeight.compactRow
     public static let inset = DSNavigatorMetrics.inset
     public static let iconSlot = DSNavigatorMetrics.iconSlot
     public static let labelColumn: CGFloat = 104
@@ -37,9 +37,8 @@ public struct DSInspectorSectionHeader: View {
     }
     public var body: some View {
         Text(title)
-            .font(DSTypography.label)
-            .fontWeight(.medium)
-            .foregroundStyle(.secondary)
+            .font(DSTypography.labelMedium)
+            .foregroundStyle(DSColors.labelSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, DSSpacing.smPlus)
             .padding(.bottom, DSSpacing.xs)
@@ -56,7 +55,7 @@ public struct DSInspectorValueRow: View {
     private let value: String
     private let color: Color
     private let identifier: String
-    public init(_ label: String, value: String, color: Color = .primary, identifier: String) {
+    public init(_ label: String, value: String, color: Color = DSColors.labelPrimary, identifier: String) {
         self.label = label
         self.value = value
         self.color = color
@@ -65,8 +64,8 @@ public struct DSInspectorValueRow: View {
     public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.smPlus) {
             Text(label)
-                .font(DSTypography.label)
-                .foregroundStyle(.secondary)
+                .font(DSTypography.labelMedium)
+                .foregroundStyle(DSColors.labelSecondary)
                 .frame(width: DSInspectorMetrics.labelColumn, alignment: .trailing)
             Text(value)
                 .font(DSTypography.label)
@@ -94,6 +93,9 @@ public struct DSInspectorStatus: View {
     public var body: some View {
         Text(failure ?? statusCode.map(String.init) ?? "—")
             .font(DSTypography.codeSmall)
-            .foregroundStyle(failure != nil || (statusCode ?? 0) >= 400 ? DSColors.destructiveText : .secondary)
+            .foregroundStyle(
+                failure != nil ? DSColors.destructiveText
+                    : statusCode.map(DSColors.httpStatusColor(for:)) ?? DSColors.labelSecondary
+            )
     }
 }

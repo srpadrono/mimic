@@ -10,6 +10,11 @@ struct BackendSettingsPage {
     var captureHelp: XCUIElement { app.staticTexts["backend.primary.captureHelp"].firstMatch }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
+    var primaryPortError: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Use 1–65535")).firstMatch
+    }
+    var primaryCopy: XCUIElement { app.buttons["backend.primary.copy"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
     var primaryEnabled: XCUIElement { app.descendants(matching: .any)["backend.primary.enabled"].firstMatch }
     var add: XCUIElement { app.buttons["backend.add"].firstMatch }
@@ -23,6 +28,9 @@ struct BackendSettingsPage {
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
     func additional(_ suffix: String) -> XCUIElement {
         app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
+    }
+    func additionalState(_ suffix: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
     }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
@@ -43,6 +51,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["http://localhost:8080"].exists,
+                      "The displayed URL must use the literal port without grouping separators")
         XCTAssertTrue(page.captureHelp.waitForExistence(timeout: 5))
         let captureHelp = "\(page.captureHelp.label) \(page.captureHelp.value as? String ?? "")"
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -108,6 +118,29 @@ final class BackendSettingsUITests: MimicUITestCase {
     }
 
     @MainActor
+    func testInvalidPortCannotBeAppliedOrCopied() {
+        launchApp()
+        createProjectViaUI(name: "Port validation")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.replace(page.primaryPort, with: "abc")
+        XCTAssertTrue(page.primaryPortError.waitForExistence(timeout: 5))
+        XCTAssertFalse(page.apply.isEnabled)
+        XCTAssertFalse(page.primaryCopy.isEnabled)
+        XCTAssertFalse(app.staticTexts["http://localhost:0"].exists)
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "Backend settings — invalid local port"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        page.replace(page.primaryPort, with: "18081")
+        XCTAssertFalse(page.primaryPortError.exists)
+        XCTAssertTrue(page.apply.isEnabled)
+        XCTAssertTrue(page.primaryCopy.isEnabled)
+        page.cancel.click()
+    }
+
+    @MainActor
     func testToolbarDistinguishesListeningAndPendingPorts() throws {
         func freePort() throws -> Int {
             let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
@@ -165,6 +198,11 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.open.click()
         XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
         page.replace(page.additional("port"), with: String(replacement))
+        XCTAssertTrue(page.additionalState("pendingRestart").waitForExistence(timeout: 5))
+        let pendingShot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        pendingShot.name = "Backend settings — listener pending restart"
+        pendingShot.lifetime = .keepAlways
+        add(pendingShot)
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
         XCTAssertTrue(page.portsDescription.contains("Restart required"))

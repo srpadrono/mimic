@@ -44,7 +44,7 @@ struct UpdateSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(minWidth: 540, idealWidth: 540)
+        .frame(minWidth: DSSheetWidth.medium, idealWidth: DSSheetWidth.medium)
         .interactiveDismissDisabled(service.phase.isBusy)
     }
 
@@ -111,8 +111,8 @@ struct UpdateSheet: View {
 
                 releaseNotes(release)
 
-                Text("Installing quits Mimic and updates the `mimic` command line tool too. "
-                    + "Your projects are not touched.")
+                Text("Installing quits Mimic and updates the mimic command-line tool. "
+                    + "Your projects are preserved.")
                     .font(DSTypography.meta)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("update.installNote")

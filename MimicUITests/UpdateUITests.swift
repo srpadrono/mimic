@@ -85,6 +85,10 @@ final class UpdateUITests: MimicUITestCase {
         XCTAssertTrue(updateSheet.skipButton.exists)
         XCTAssertTrue(updateSheet.laterButton.exists)
         XCTAssertTrue(updateSheet.notes.exists, "the release notes should be shown")
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "update-available-sheet"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     /// The control label that was truncated to "Skip this versi…" the first time this sheet was

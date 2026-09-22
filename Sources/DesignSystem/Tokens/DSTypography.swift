@@ -26,6 +26,8 @@ public enum DSTypography {
 
     /// SF Pro 11px regular — labels, captions
     public static let label: Font = .system(size: 11, weight: .regular)
+    /// SF Pro 11px medium — section labels and emphasized compact metadata
+    public static let labelMedium: Font = .system(size: 11, weight: .medium)
     /// SF Pro 10px medium — timestamps, footnotes, tertiary labels
     public static let caption: Font = .system(size: 10, weight: .medium)
 
@@ -81,6 +83,10 @@ public enum DSTypography {
     /// The smallest type in the window, and it is allowed to be because it is three uppercase
     /// letters on a tinted pill with generous tracking — not prose. Nothing else may use it.
     public static let codeBadge: Font = .system(size: 9.5, weight: .semibold, design: .monospaced)
+    /// SF Mono 11px semibold — compact HTTP method pills in navigators and lists.
+    public static let codeBadgeCompact: Font = .system(size: 11, weight: .semibold, design: .monospaced)
+    /// SF Mono 12px semibold — HTTP method pills beside editor routes.
+    public static let codeBadgeStandard: Font = .system(size: 12, weight: .semibold, design: .monospaced)
 
     /// SF Mono 11px regular — compact code in sidebar rows, log timestamps
     public static let codeSmall: Font = .system(size: 11, weight: .regular, design: .monospaced)

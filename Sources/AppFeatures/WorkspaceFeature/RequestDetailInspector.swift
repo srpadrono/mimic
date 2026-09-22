@@ -185,10 +185,8 @@ struct RequestDetailInspector: View {
     private var requestLine: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             HStack(spacing: DSSpacing.sm) {
-                Text(log.method.rawValue)
-                    .font(DSTypography.codeSmall)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("requestDetail.method")
+                DSMethodBadge(method: log.method.rawValue, size: .compact,
+                              identifier: "requestDetail.method")
                 statusPill
                 Spacer(minLength: 0)
                 Text(log.timestamp, style: .time)
@@ -272,7 +270,7 @@ struct RequestDetailInspector: View {
     /// Summary, journey and project fields share the same label/value alignment.
     @ViewBuilder
     private func summaryRow(_ label: String, value: String, valueColor: Color? = nil) -> some View {
-        DSInspectorValueRow(label, value: value, color: valueColor ?? .primary,
+        DSInspectorValueRow(label, value: value, color: valueColor ?? DSColors.labelPrimary,
                             identifier: "requestDetail.summary.\(label.lowercased())")
     }
 

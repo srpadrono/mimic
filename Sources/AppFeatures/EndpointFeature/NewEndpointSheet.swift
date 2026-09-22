@@ -56,33 +56,15 @@ struct NewEndpointSheet: View {
 
                 // Method and path share a row: the two of them are one answer to "which request?".
                 HStack(alignment: .top, spacing: DSSpacing.md) {
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        Text("Method")
-                            .font(DSTypography.label)
-                            .foregroundStyle(DSColors.labelSecondary)
-                        Picker("Method", selection: $method) {
-                            ForEach(HTTPMethod.allCases, id: \.self) { method in
-                                Text(method.rawValue).tag(method)
-                            }
+                    DSFormPicker("Method", selection: $method, identifier: "newEndpoint.methodPicker") {
+                        ForEach(HTTPMethod.allCases, id: \.self) { method in
+                            Text(method.rawValue).tag(method)
                         }
-                        .labelsHidden()
-                        // Left at AppKit's own height on purpose, and it does not match the field
-                        // beside it. Rendered and measured in sRGB, a `Picker` stands **24pt** at
-                        // `.regular`, 20 at `.small` and 16 at `.mini`; `DSTextField` is 22. There is
-                        // no size that lines up, so this row's two controls end two points apart at
-                        // the bottom and that is the smallest available mismatch.
-                        //
-                        // `.frame(height: 22)` looks like the fix and is not: an `NSPopUpButton` has
-                        // a minimum intrinsic height, so the frame only *centres* a 24pt control in a
-                        // 22pt slot — the picker then overhangs the row by a point at the top as well
-                        // as at the bottom, which is strictly worse than being flush at the top.
-                        // `.controlSize(.small)` reaches 20 but takes the label down to 11pt, so
-                        // "GET" would be smaller than the path it qualifies.
-                        //
-                        // Stated here so the next audit does not re-flag it.
-                        .accessibilityIdentifier("newEndpoint.methodPicker")
-                        .accessibilityLabel("HTTP method")
                     }
+                    // AppKit's regular picker is 24pt beside the field's 22pt well. Pinning its
+                    // frame to 22 would centre the 24pt control and misalign both edges; keeping
+                    // their top edges aligned is the cleaner native arrangement.
+                    .accessibilityLabel("HTTP method")
 
                     DSTextField(
                         "Path",
@@ -127,7 +109,7 @@ struct NewEndpointSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(minWidth: 420, idealWidth: 420)
+        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .defaultFocus($focusedField, .name)
     }
 

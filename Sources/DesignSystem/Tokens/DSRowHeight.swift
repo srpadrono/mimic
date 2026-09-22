@@ -27,6 +27,9 @@ public enum DSRowHeight {
     /// at the drawer's default height.
     public static let logRow: CGFloat = 28
 
+    /// 26 — a compact import candidate with a method, path, status and flag.
+    public static let importRow: CGFloat = 26
+
     /// 18 — a group-tag header in the navigator.
     ///
     /// Deliberately short. It names a section rather than being one, so it takes the smallest height

@@ -141,8 +141,7 @@ struct EndpointTrafficList: View {
 
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(EndpointTrafficQuery.summary(for: logs))
-                .font(DSTypography.label)
-                .fontWeight(.medium)
+                .font(DSTypography.labelMedium)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
                 .accessibilityIdentifier("endpointTraffic.summary")
@@ -174,7 +173,7 @@ struct EndpointTrafficList: View {
     private func statusChip(code: Int, count: Int) -> some View {
         HStack(spacing: DSSpacing.xs) {
             DSInspectorStatus(statusCode: code)
-            Text("×\(count)").font(DSTypography.label).foregroundStyle(.secondary)
+            Text("×\(count)").font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
         }
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("endpointTraffic.status.\(code)")
@@ -216,7 +215,7 @@ private struct EndpointTrafficRow: View {
                 HStack(spacing: DSSpacing.smPlus) {
                     Text(log.path)
                         .font(DSTypography.codeSmall)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(DSColors.labelPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,7 +227,7 @@ private struct EndpointTrafficRow: View {
                     if let duration = log.durationMs { Text("\(duration) ms").monospacedDigit() }
                 }
                 .font(DSTypography.label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DSColors.labelSecondary)
             }
             .padding(.horizontal, DSInspectorMetrics.inset)
             .padding(.vertical, DSSpacing.sm)

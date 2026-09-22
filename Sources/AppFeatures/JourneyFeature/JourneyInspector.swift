@@ -22,14 +22,16 @@ struct JourneyInspector: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("inspector.journey.name")
-                    Text(context.selected.id == context.active?.id ? "Active journey" : "Inactive journey")
+                    Text(context.selected.id == context.active?.id
+                         ? (context.serverState.runningPort == nil ? "Selected for next server run" : "Active journey")
+                         : "Inactive journey")
                         .font(DSTypography.label)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(DSColors.labelSecondary)
                         .accessibilityIdentifier("inspector.journey.state")
                     if let summary = context.selected.summary, !summary.isEmpty {
                         Text(summary)
                             .font(DSTypography.label)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(DSColors.labelSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -43,14 +45,15 @@ struct JourneyInspector: View {
                 row("Unscripted", context.selected.unmatchedBehavior == .fallThroughToEndpoints ? "Fall through" : "404", id: "unmatched")
                 row("Auto-advance", context.selected.autoAdvance ? "On" : "Off", id: "autoAdvance")
 
-                DSInspectorSectionHeader("Active journey", identifier: "journey.active")
+                DSInspectorSectionHeader(context.serverState.runningPort == nil ? "Selected journey" : "Active journey",
+                                         identifier: "journey.active")
                 if let active = context.active {
                     row("Name", active.name, id: "activeName")
                     if let progress = context.progress { row("Progress", progress, id: "progress") }
                 } else {
                     Text("None — endpoints answer directly.")
                         .font(DSTypography.label)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(DSColors.labelSecondary)
                         .padding(DSInspectorMetrics.inset)
                         .accessibilityIdentifier("inspector.journey.noActiveRun")
                 }

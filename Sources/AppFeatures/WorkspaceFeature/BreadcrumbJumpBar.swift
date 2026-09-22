@@ -272,8 +272,7 @@ private struct BreadcrumbCrumbView: View {
             // crumb you are on carries medium weight so the end of the path is the part that reads
             // first — the one place in this file `fontWeight` earns itself.
             Text(crumb.title)
-                .font(DSTypography.label)
-                .fontWeight(isLast ? .medium : .regular)
+                .font(isLast ? DSTypography.labelMedium : DSTypography.label)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 // No `.frame(maxWidth:)`. `maxWidth` caps *and* expands: given a row with slack it
