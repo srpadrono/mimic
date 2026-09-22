@@ -143,6 +143,7 @@ public struct DSPanelHeaderButton: View {
     private let help: String
     private let identifier: String
     private let role: ButtonRole?
+    private let tint: Color?
     private let action: () -> Void
 
     @State private var isHovered = false
@@ -152,12 +153,14 @@ public struct DSPanelHeaderButton: View {
         help: String,
         identifier: String,
         role: ButtonRole? = nil,
+        tint: Color? = nil,
         action: @escaping () -> Void
     ) {
         self.systemImage = systemImage
         self.help = help
         self.identifier = identifier
         self.role = role
+        self.tint = tint
         self.action = action
     }
 
@@ -171,7 +174,7 @@ public struct DSPanelHeaderButton: View {
                 // "clear log" buttons were nearly invisible until the pointer found them — a control
                 // you have to hunt for is one most people never discover. Same correction
                 // `DSTabStrip` made for its unselected tabs.
-                .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+                .foregroundStyle(tint ?? (isHovered ? DSColors.labelPrimary : DSColors.labelSecondary))
                 // `field`, the rung a single prominent control in a header stands on. This was a bare
                 // `22` in the module that declares the ladder, which is the one place a literal has no
                 // excuse: `DSTabStrip` wrote the same number for the same target a file away.

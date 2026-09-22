@@ -147,13 +147,14 @@ extension Journey {
 
     /// This journey with a new id and new step ids, in the same order.
     ///
-    /// Field list to track: of ``Journey``'s eight stored properties, `id` and `steps` are reminted;
-    /// `name`, `summary`, `matchMode`, `completion`, `unmatchedBehavior` and `autoAdvance` are carried
-    /// across unchanged.
+    /// Field list to track: of ``Journey``'s nine stored properties, `id` and `steps` are reminted;
+    /// `name`, `summary`, `groupTag`, `matchMode`, `completion`, `unmatchedBehavior` and
+    /// `autoAdvance` are carried across unchanged.
     public func copyingWithFreshIdentifiers() -> Journey {
         Journey(
             name: name,
             summary: summary,
+            groupTag: groupTag,
             steps: steps.map { $0.copyingWithFreshIdentifiers() },
             matchMode: matchMode,
             completion: completion,

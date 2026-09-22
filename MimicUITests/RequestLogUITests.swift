@@ -167,11 +167,7 @@ final class RequestLogUITests: MimicUITestCase {
     /// *contents* change with the selection, its header does not. Same handle
     /// `WorkspaceShellUITests` uses for PANEL-04.
     @MainActor
-    private var inspectorHeader: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(identifier: "ds.panelheader.inspector")
-            .firstMatch
-    }
+    private var inspectorHeader: XCUIElement { InspectorPage(app: app).header }
 
     /// Gives the drawer's header the width its own controls need, before one of them is clicked.
     ///
@@ -367,12 +363,10 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - Traffic tab
 
-    /// The inspector's Traffic tab. Unreachable by identifier — `DSTabStrip` stamps
-    /// `ds.tabstrip.inspector` on every tab and the surrounding `DSPanelHeader` flattens again — so
-    /// this matches the tab's help text, which `DSTabStrip` uses as the button's label.
+    /// The native inspector segment, queried through the shared page object.
     @MainActor
     private var trafficTab: XCUIElement {
-        app.buttons["Show the requests this endpoint answered"].firstMatch
+        InspectorPage(app: app).tab("traffic")
     }
 
     // MARK: - Shared arrangement
@@ -381,6 +375,7 @@ final class RequestLogUITests: MimicUITestCase {
     @MainActor
     private func startServer(projectNamed name: String, port: Int) {
         createProjectViaUI(name: name, port: port)
+        workspace.fillWindow()
         workspace.serverToggleButton.click()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
@@ -396,6 +391,7 @@ final class RequestLogUITests: MimicUITestCase {
         await fulfillment(of: [ready], timeout: 5)
         launchApp()
         createProjectViaUI(name: "Real backend capture", port: 62130)
+        workspace.fillWindow()
         let settings = BackendSettingsPage(app: app)
         XCTAssertTrue(settings.open.waitForExistence(timeout: 5))
         settings.open.click()
@@ -1286,11 +1282,7 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - TRAFFIC
 
-    /// The inspector's second tab for a selected endpoint: what has actually called it.
-    ///
-    /// The tab itself is unreachable by identifier — a `DSTabStrip` button inside a `DSPanelHeader`,
-    /// flattened twice — so it is clicked by its help text, and the badge count is read from the same
-    /// element's value, which is the only place the dot's number is stated.
+    /// The inspector's second segment shows the selected endpoint's actual traffic.
     @MainActor
     func testEndpointTrafficTabListsWhatTheEndpointAnswered() async throws {
         let port = 62109
@@ -1350,7 +1342,7 @@ final class RequestLogUITests: MimicUITestCase {
             "The chip should say how many responses carried the code — it read \(speech(of: statusChip))"
         )
 
-        // The badge rides the tab as a dot, so the count exists only in the tab's value.
+        // The segment's accessible label includes its request count.
         XCTAssertTrue(
             poll { self.text(of: self.trafficTab).contains("2") },
             "The tab should announce how many requests it has to show — it read \(text(of: trafficTab))"

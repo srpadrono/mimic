@@ -519,3 +519,9 @@ reach a loopback port, so the token and the `Origin`/`Host` checks are what actu
   written once, so the window and the script cannot drift.
 - **Operations are data.** A command is a value (`ControlCommand`), which is what makes it replayable,
   diffable, and self-describing.
+
+### Journey groups
+
+`mimic journey create "Payment retry" --group Checkout` assigns a navigator group.
+Use `mimic journey update "Payment retry" --group Payments` to move it, or `--group ""`
+to leave it ungrouped. Journey JSON uses `groupTag`; omitting it on update preserves the group.

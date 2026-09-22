@@ -25,12 +25,15 @@ struct JourneyEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            JourneyGroupField(journey: journey).id(journey.id)
             DSSectionHeader("Behavior", identifier: "journeyEditor.behavior")
             behaviorControls
+                .fixedSize(horizontal: false, vertical: true)
             // `.standard`, matching the rule below the run strip. The band was bracketed by a 9% rule
             // above and a 12% one below, so its two edges did not read as a pair.
             DSDivider(style: .standard, identifier: "journeyEditor.behavior")
             JourneyRunControls(journey: journey, isActive: isActive, status: status)
+                .fixedSize(horizontal: false, vertical: true)
             DSDivider(identifier: "journeyEditor.run")
             // Allowed to compress to nothing, and that is the whole point.
             //
@@ -409,5 +412,45 @@ private extension View {
                 content(value)
             }
         }
+    }
+}
+
+private struct JourneyGroupField: View {
+    @Environment(AppState.self) private var appState
+    let journey: Journey
+    @State private var draft: String
+    @FocusState private var isFocused: Bool
+
+    init(journey: Journey) {
+        self.journey = journey
+        _draft = State(initialValue: journey.groupTag ?? "")
+    }
+
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text("Group").foregroundStyle(.secondary)
+            TextField("None", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .focused($isFocused)
+                .onSubmit { commit() }
+                .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+                .accessibilityIdentifier("journeyEditor.groupTag")
+                .accessibilityLabel("Journey group")
+                .help("Journeys with the same group appear together. Clear to leave ungrouped.")
+        }
+        .font(DSTypography.label)
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: DSBarHeight.controlRow)
+        .onChange(of: journey.groupTag) { _, value in
+            if !isFocused { draft = value ?? "" }
+        }
+        .onDisappear { commit() }
+    }
+
+    private func commit() {
+        let group = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard group != (journey.groupTag ?? ""), appState.journeys.contains(where: { $0.id == journey.id }) else { return }
+        appState.updateJourney(id: journey.id, spec: JourneySpec(groupTag: group))
     }
 }

@@ -184,5 +184,10 @@ enum AppMigrations {
             }
             try db.execute(sql: "UPDATE project SET passthroughEnabled = (upstreamURL IS NOT NULL)")
         }
+        migrator.registerMigration("v7_journey_groups") { db in
+            try db.alter(table: "journey") { t in
+                t.add(column: "groupTag", .text)
+            }
+        }
     }
 }

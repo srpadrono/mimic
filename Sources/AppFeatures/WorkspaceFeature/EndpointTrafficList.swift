@@ -134,21 +134,12 @@ struct EndpointTrafficList: View {
 
     // MARK: - Header
 
-    /// The summary and the status mix, pinned above the scroll view rather than scrolling with it —
-    /// a panel's own chrome is not part of its content.
-    ///
-    /// Two lines rather than a `DSSectionHeader`: at 220pt the summary and the pills do not fit on
-    /// one row, and `DSSectionHeader`'s title has no line limit, so a narrow panel would wrap it and
-    /// change the header's height under you. The metrics and the hairline are `DSSectionHeader`'s, so
-    /// it still reads as the same system.
+    /// The summary and status distribution remain above the scrolling request list.
     @ViewBuilder
     private var header: some View {
         let breakdown = EndpointTrafficQuery.statusBreakdown(for: logs)
 
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            // 11pt medium, `DSSectionHeader`'s exact type. This header borrows that component's
-            // metrics and hairline already; at regular weight it borrowed everything but the one
-            // property that makes a header read as a header.
             Text(EndpointTrafficQuery.summary(for: logs))
                 .font(DSTypography.label)
                 .fontWeight(.medium)
@@ -157,8 +148,7 @@ struct EndpointTrafficList: View {
                 .accessibilityIdentifier("endpointTraffic.summary")
 
             if breakdown.isEmpty == false {
-                // Horizontally scrollable so an endpoint with many distinct codes degrades into a
-                // scroll rather than silently clipping its last pill.
+                // Keep every status reachable when the distribution exceeds the panel width.
                 ScrollView(.horizontal) {
                     HStack(spacing: DSSpacing.xs) {
                         ForEach(breakdown, id: \.code) { entry in
@@ -169,22 +159,10 @@ struct EndpointTrafficList: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .padding(.horizontal, DSSpacing.md)
+        .padding(.horizontal, DSInspectorMetrics.inset)
         .padding(.vertical, DSSpacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // No `DSBarHeight` rung, and it should not be given one. This block is one line when an
-        // endpoint has answered a single class of response and two when the status chips appear —
-        // it measured 26 or 45 when the chips were 10pt `caption`, and the second line is a point
-        // or so taller now that they are `DSStatusPill`'s 11pt `codeSmall`. Either state sits off
-        // every rung, and the taller one is the one that carries the distribution; a fixed height
-        // would have to clip one of the two.
-        //
-        // It does take the band, though. It was the only bar in the window with no background at all,
-        // which left it on the inspector's system material while every other strip stated a surface —
-        // so this one alone changed tone with the platform rather than with the design.
-        .background(DSColors.band)
-        // The rows start immediately below this block, so the header needs a stated edge — without
-        // it the summary reads as the first row rather than as the panel's own chrome.
+        // The summary grows with its status distribution and inherits the inspector material.
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(DSColors.separator)
@@ -192,23 +170,13 @@ struct EndpointTrafficList: View {
         }
     }
 
-    /// `DSStatusPill` carries the fill gate — only a 4xx or 5xx is filled, which is the house rule
-    /// (skill `mimic-window-design`: "a filled colour swatch is for something that needs attention … a column of
-    /// filled pills is a wall of colour that says nothing, because everything in it is shouting
-    /// equally"). This chip and the row pill below used to be two hand-drawn spellings of the same
-    /// convention, sitting in this one file disagreeing until the gate was copied between them.
-    ///
-    /// The gate is also the reading. A fill is a 12% tint of the label's own colour, so it moves the
-    /// surface toward the ink and costs the label 13–18% of its contrast ratio. The three text
-    /// tokens `httpStatusColor(for:)` returns absorb that; ``DSColors/accentText`` — the 3xx — does
-    /// not, reading 4.48:1 on a panel and 4.35 on the `band` this header is, against a 4.5 floor. No
-    /// blue fixes it, because the fill is derived from the label. Not filling a redirect is what
-    /// fixes it, and a redirect is not something to stop on.
-    ///
-    /// The `HStack` carries `DSSpacing.xs` of its own, so an unfilled chip — whose pill pays no
-    /// horizontal inset — still clears its neighbour.
+    /// Keep the distribution available with the same quiet status text used in traffic rows.
     private func statusChip(code: Int, count: Int) -> some View {
-        DSStatusPill(statusCode: code, detail: "\u{00D7}\(count)")
+        HStack(spacing: DSSpacing.xs) {
+            DSInspectorStatus(statusCode: code)
+            Text("×\(count)").font(DSTypography.label).foregroundStyle(.secondary)
+        }
+            .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("endpointTraffic.status.\(code)")
             .accessibilityLabel("\(count) \(count == 1 ? "response" : "responses") with status \(code)")
     }
@@ -222,83 +190,58 @@ struct EndpointTrafficList: View {
     private var rows: some View {
         ScrollView {
             VStack(spacing: 0) {
-                ForEach(Array(logs.enumerated()), id: \.element.id) { index, log in
+                ForEach(logs) { log in
                     EndpointTrafficRow(
                         log: log,
-                        rowIndex: index,
                         onSelect: { onSelect(log.id) }
                     )
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("endpointTraffic.list")
     }
 }
 
 // MARK: - Row
 
-/// One answered request: status and time on the first line, path on the second.
+/// One answered request: path and status, followed by time and duration.
 private struct EndpointTrafficRow: View {
     let log: RequestLog
-    let rowIndex: Int
     let onSelect: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        // 2pt between the two lines, 6pt above and below the pair: at 4pt the rows ran together
-        // into a single striped block, and this list is read by scanning down it.
-        VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-            HStack(spacing: DSSpacing.xs) {
-                statusPill
-
-                Spacer(minLength: DSSpacing.xs)
-
-                Text(log.timestamp, style: .time)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelTertiary)
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                HStack(spacing: DSSpacing.smPlus) {
+                    Text(log.path)
+                        .font(DSTypography.codeSmall)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DSInspectorStatus(statusCode: log.responseStatusCode, failure: log.failureLabel)
+                }
+                HStack {
+                    Text(log.timestamp, style: .time)
+                    Spacer(minLength: DSSpacing.sm)
+                    if let duration = log.durationMs { Text("\(duration) ms").monospacedDigit() }
+                }
+                .font(DSTypography.label)
+                .foregroundStyle(.secondary)
             }
-
-            // Truncated from the head: the tail of a path is what differs between one call to this
-            // endpoint and the next, so cutting the front keeps the informative half.
-            Text(log.path)
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.labelPrimary)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .padding(.vertical, DSSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackground)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
-        .onHover { isHovered = $0 }
-        // One element with one spoken label, rather than three fragments VoiceOver would read as
-        // "200", "14:32", "/api/users". `.isButton` restores the trait the tap gesture does not
-        // carry.
+        .buttonStyle(.dsPlain)
+        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+        .help(spokenLabel)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("endpointTraffic.row.\(log.id.uuidString)")
         .accessibilityLabel(spokenLabel)
-    }
-
-    private var rowBackground: Color {
-        if isHovered { return DSColors.accentSubtle.opacity(0.6) }
-        return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
-    }
-
-    /// The status the server returned, or — for a request that was failed rather than answered —
-    /// `DSStatusPill`'s filled destructive em dash. That arm was defended in this row while
-    /// `RequestLogTableRow` still drew the same log as a bare grey `0`; the component now carries
-    /// it, so the two panels cannot disagree about it again.
-    ///
-    /// Only failures wear the filled pill. Every row in this panel is a request to the *same*
-    /// endpoint, so a filled swatch on each one stacked into a column of colour that said nothing —
-    /// and the 500 you were looking for sat in it at the same volume as forty 200s. The colour still
-    /// carries the class of the code, it just stops shouting it.
-    private var statusPill: some View {
-        DSStatusPill(statusCode: log.responseStatusCode)
     }
 
     /// What VoiceOver reads for the row. Named `spokenLabel` rather than `accessibilityLabel` so it

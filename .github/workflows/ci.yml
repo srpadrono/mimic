@@ -888,6 +888,7 @@ jobs:
             only: >-
               -only-testing:MimicUITests/BackendSettingsUITests
               -only-testing:MimicUITests/WorkspaceShellUITests
+              -only-testing:MimicUITests/NavigatorUITests
               -only-testing:MimicUITests/WelcomeProjectUITests
               -only-testing:MimicUITests/RequestLogUITests
 

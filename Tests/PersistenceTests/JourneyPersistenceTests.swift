@@ -7,6 +7,43 @@ import Testing
 @Suite("Journey persistence")
 struct JourneyPersistenceTests {
 
+    @Test func journeyGroupsSurviveClosingAndReopeningAStore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("groups.sqlite").path
+        let project = MockProject(name: "Groups", journeys: [
+            Journey(name: "Retry", groupTag: "Checkout"), Journey(name: "Scratch")
+        ])
+        do {
+            let queue = try DatabaseQueue(path: path)
+            try AppMigrations.migrator.migrate(queue)
+            try await GRDBProjectRepository(dbQueue: queue).save(project)
+        }
+        let reopened = try DatabaseQueue(path: path)
+        let repository = GRDBProjectRepository(dbQueue: reopened)
+        let loaded = try await repository.load(id: project.id)
+        #expect(loaded.journeys.map(\.groupTag) == ["Checkout", nil])
+        var cleared = loaded
+        cleared.journeys[0].groupTag = nil
+        try await repository.save(cleared)
+        #expect(try await repository.load(id: project.id).journeys[0].groupTag == nil)
+    }
+
+    @Test func journeyGroupMigrationPreservesExistingRows() throws {
+        let queue = try DatabaseQueue()
+        try AppMigrations.migrator.migrate(queue, upTo: "v6_backend_controls")
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO project (id, name, serverPort, globalDelayMs, schemaVersion, createdAt, modifiedAt) VALUES ('project', 'Legacy', 8080, 0, 5, 0, 0)")
+            try db.execute(sql: "INSERT INTO journey (id, projectID, name, matchMode, completion, unmatchedBehavior, autoAdvance, sortOrder) VALUES ('journey', 'project', 'Legacy flow', 'orderedPerEndpoint', 'stop', 'fallThroughToEndpoints', 1, 0)")
+        }
+        try AppMigrations.migrator.migrate(queue)
+        let row = try queue.read { db in try Row.fetchOne(db, sql: "SELECT name, groupTag FROM journey WHERE id = 'journey'") }
+        let stored = try #require(row)
+        #expect(stored["name"] as String == "Legacy flow")
+        #expect(stored["groupTag"] as String? == nil)
+    }
+
     static func makeRepository() throws -> (GRDBProjectRepository, DatabaseQueue) {
         let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
         return (GRDBProjectRepository(dbQueue: queue), queue)

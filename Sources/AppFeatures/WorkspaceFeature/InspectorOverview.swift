@@ -10,25 +10,9 @@ import DesignSystem
 /// and the request detail are the *same* 280pt column, and a seam that shifted when you clicked a
 /// logged request would read as the panel re-laying itself out.
 enum InspectorRowMetrics {
-    /// Width of the right-aligned label column in the request detail.
-    ///
-    /// Sized for "Response headers", its longest label, which measures 90.7pt at
-    /// `DSTypography.caption` (SF Pro 10pt medium). Anything longer must raise this rather than wrap:
-    /// a two-line label breaks the baseline alignment with its value.
-    static let detailLabelColumn: CGFloat = 92
-
-    /// Width of the right-aligned label column in the overview.
-    ///
-    /// Deliberately narrower than the detail's. The two panels are never on screen together — one
-    /// replaces the other — so a shared seam buys nothing, and forcing the overview to 92pt for a
-    /// label set whose longest member is "Unmatched" (about 58pt) left its rows floating in the
-    /// middle of the panel while the section headings stayed flush left. A right-aligned column only
-    /// reads as a column when it is roughly the width of its contents.
-    static let overviewLabelColumn: CGFloat = 66
-
-    /// Where the overview's value column starts, measured from the panel's leading edge. Anything
-    /// belonging to a value rather than to the row as a whole lines up here.
-    static let overviewValueInset: CGFloat = DSSpacing.md + overviewLabelColumn + DSSpacing.sm
+    static let detailLabelColumn = DSInspectorMetrics.labelColumn
+    static let overviewLabelColumn = DSInspectorMetrics.labelColumn
+    static let overviewValueInset = DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.smPlus
 }
 
 /// What the inspector shows when no endpoint is selected.
@@ -161,7 +145,7 @@ struct InspectorOverview: View {
             // one band, in the *same panel*: the overview drew one and the request detail drew the
             // real component, so any edit to `DSSectionHeader` would have desynchronised the two
             // halves of the inspector. It also had no `ds.sectionheader.*` identifier.
-            DSSectionHeader(title, identifier: "overview.\(title.lowercased())")
+            DSInspectorSectionHeader(title, identifier: "overview.\(title.lowercased())")
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -176,25 +160,7 @@ struct InspectorOverview: View {
         value: String,
         valueColor: Color = DSColors.labelSecondary
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
-            Text(label)
-                .font(DSTypography.caption)
-                // `labelSecondary`. These are read, not glanced past — at 36% alpha they measure
-                // 2.5:1, and `labelTertiary` is for timestamps and separators.
-                .foregroundStyle(DSColors.labelSecondary)
-                .frame(width: InspectorRowMetrics.overviewLabelColumn, alignment: .trailing)
-            Text(value)
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(valueColor)
-                // Wrap rather than truncate: a journey name is the one value here long enough to
-                // need it, and a middle-truncated name is unreadable.
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.xs + 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("inspector.overview.\(label.lowercased())")
+        DSInspectorValueRow(label, value: value, color: valueColor, identifier: "inspector.overview.\(label.lowercased())")
     }
 
     /// Explanatory prose under a section's rows. Full width rather than in the value column: these

@@ -8,6 +8,27 @@ That difference is the whole feature. A response that depends on where the reque
 lets a UI test drive a complete application scenario deterministically, instead of stubbing one route
 at a time and hoping the ordering works out.
 
+## Organizing journeys
+
+Set **Group** beneath the journey name to organize it into a collapsible navigator folder, using
+exactly the same row spacing, indentation, and count placement as endpoint groups. Press Return
+or leave the field to save; clear it to keep the journey ungrouped. Groups are sorted by name;
+journeys retain their order within each group. Filtering matches group names as well as journeys
+and reveals matching collapsed groups. The active-journey indicator expands its group without
+restarting or activating another journey.
+
+Groups are stored with the project and retained when duplicating or exporting journeys. The CLI
+and HTTP control API use the same optional `groupTag` field:
+
+```sh
+mimic journey create "Payment retry" --group Checkout
+mimic journey update "Payment retry" --group Payments
+mimic journey update "Payment retry" --group ""
+```
+
+Omitting `groupTag` on update leaves membership unchanged; an empty string clears it. Older
+projects open with their existing journeys ungrouped.
+
 ## The canonical example
 
 ```

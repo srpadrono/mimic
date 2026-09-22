@@ -38,7 +38,7 @@ enum ControlCommandSamples {
         .journeyList, .journeyGet(journey: .name("J")),
         .journeyCreate(name: "J", spec: JourneySpec(steps: [JourneyStepSpec(method: .get, path: "/a", statusCode: 200)])),
         .journeyTemplateList, .journeyAddTemplate(templateID: "session-expiry", name: nil),
-        .journeyUpdate(journey: .name("J"), spec: JourneySpec(matchMode: .strictSequence)),
+        .journeyUpdate(journey: .name("J"), spec: JourneySpec(groupTag: "Checkout", matchMode: .strictSequence)),
         .journeyDelete(journey: .name("J")), .journeyDuplicate(journey: .name("J")),
         .journeyStepAdd(journey: .name("J"), step: JourneyStepSpec(method: .get, path: "/a", failure: .connectionDrop), atIndex: 2),
         .journeyStepsAdd(

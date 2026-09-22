@@ -25,6 +25,11 @@ struct WorkspaceView: View {
     @State private var showUnmatchedOnly = false
     /// Which navigator the sidebar is showing, and therefore what the centre pane edits.
     @State private var navigatorTab: NavigatorTab = .endpoints
+    @State private var endpointFilter = ""
+    @State private var collapsedEndpointGroups: Set<String> = []
+    @State private var endpointMethodScope = SidebarView.anyMethodScopeID
+    @State private var journeyFilter = ""
+    @State private var collapsedJourneyGroups: Set<String> = []
     /// Back/forward across endpoints you have looked at.
     @State private var endpointHistory = NavigationHistory<UUID>()
     /// Set while a back/forward move is in flight, so the resulting selection change is not recorded
@@ -93,6 +98,11 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 navigator
+                    .navigationSplitViewColumnWidth(
+                        min: DSNavigatorMetrics.minimumWidth,
+                        ideal: DSNavigatorMetrics.idealWidth,
+                        max: DSNavigatorMetrics.maximumWidth
+                    )
                     // `.contain` matters: a bare `.accessibilityIdentifier` on a container *overrides*
                     // its descendants' identifiers. The search field survived this only because it used
                     // to live inside a `List`, whose rows form their own accessibility elements; once it
@@ -176,6 +186,7 @@ struct WorkspaceView: View {
                 // Editor actions belong to this column, before the inspector divides the toolbar.
                 .toolbar { workspaceToolbar }
             }
+            .navigationSplitViewStyle(.balanced)
             // Outside the navigation structure, the inspector owns a full-height column and its
             // own toolbar section. Nesting it in the detail column merges both action groups.
             .inspector(isPresented: $showInspector) {
@@ -755,30 +766,17 @@ struct WorkspaceView: View {
         }
     }
 
-    /// One panel, two lists, an icon strip to switch them — Xcode's navigator, at Mimic's scale.
+    /// One navigator shell with a native mode picker, shared row geometry, and a pinned filter.
     @ViewBuilder
     private var navigator: some View {
         @Bindable var appState = appState
 
         VStack(spacing: 0) {
-            // The strip *is* the navigator's chrome — there is no title row under it. The selected
-            // tab already says which list you are in, so a header repeating it would cost a second
-            // 30pt row before a sidebar showed its first endpoint.
-            DSTabStrip(
-                tabs: NavigatorTab.allCases.map { tab in
-                    DSTabStrip.Tab(
-                        id: tab.id,
-                        systemImage: tab.systemImage,
-                        help: tab.help,
-                        // The badge is the point of putting journeys here: a running journey is
-                        // overriding every endpoint you look at, and you should not have to open a
-                        // window to find that out.
-                        badge: tab == .journeys && appState.activeJourney != nil ? 1 : nil,
-                        title: tab.title
-                    )
+            DSNavigatorHeader(
+                modes: NavigatorTab.allCases.map {
+                    DSNavigatorMode(id: $0.id, title: $0.title, help: $0.help)
                 },
-                selection: navigatorTabBinding,
-                identifier: "navigator"
+                selection: navigatorTabBinding
             ) {
                 switch navigatorTab {
                 case .endpoints:
@@ -798,38 +796,67 @@ struct WorkspaceView: View {
                 }
             }
 
-            switch navigatorTab {
-            case .endpoints:
-                SidebarView(
-                    projectName: appState.currentProject?.name,
-                    endpoints: currentEndpoints,
-                    selectedEndpointID: $selectedEndpointID,
-                    onDeleteEndpoint: appState.deleteEndpoint,
-                    onDuplicateEndpoint: { appState.duplicateEndpoint(id: $0)?.id },
-                    onAddEndpoint: { appState.showNewEndpointSheet = true }
-                )
-            case .journeys:
-                JourneyNavigatorList(
-                    journeys: appState.journeys,
-                    activeJourneyID: appState.activeJourney?.id,
-                    activeProgress: activeJourneyProgress,
-                    selectedJourneyID: $appState.selectedJourneyID,
-                    onActivate: appState.activateJourney,
-                    onAdd: {
-                        if let journey = appState.addJourney(name: "New journey") {
-                            appState.selectedJourneyID = journey.id
-                        }
-                    },
-                    onDuplicate: { _ = appState.duplicateJourney(id: $0) },
-                    onDelete: appState.deleteJourney,
-                    onRestart: appState.restartActiveJourney,
-                    onAdvance: appState.advanceActiveJourney
-                )
+            Group {
+                switch navigatorTab {
+                case .endpoints:
+                    SidebarView(
+                        projectName: appState.currentProject?.name,
+                        endpoints: currentEndpoints,
+                        selectedEndpointID: $selectedEndpointID,
+                        onDeleteEndpoint: appState.deleteEndpoint,
+                        onDuplicateEndpoint: { appState.duplicateEndpoint(id: $0)?.id },
+                        onAddEndpoint: { appState.showNewEndpointSheet = true },
+                        searchText: $endpointFilter,
+                        methodScopeID: $endpointMethodScope,
+                        collapsedSections: $collapsedEndpointGroups
+                    )
+                case .journeys:
+                    JourneyNavigatorList(
+                        journeys: appState.journeys,
+                        activeJourneyID: appState.activeJourney?.id,
+                        selectedJourneyID: $appState.selectedJourneyID,
+                        onActivate: appState.activateJourney,
+                        onAdd: {
+                            if let journey = appState.addJourney(name: "New journey") {
+                                appState.selectedJourneyID = journey.id
+                            }
+                        },
+                        onDuplicate: { _ = appState.duplicateJourney(id: $0) },
+                        onDelete: appState.deleteJourney,
+                        searchText: journeyFilter,
+                        collapsedGroups: $collapsedJourneyGroups
+                    )
+                }
+            }
+            .frame(minHeight: 0, maxHeight: .infinity)
+
+            DSNavigatorFooter(
+                text: navigatorTab == .endpoints ? $endpointFilter : $journeyFilter,
+                scopeID: $endpointMethodScope,
+                scopes: navigatorTab == .endpoints ? SidebarView.methodScopes : [],
+                placeholder: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
+                identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
+                showsStatus: appState.activeJourney != nil
+            ) {
+                if let active = appState.activeJourney {
+                    DSPanelHeaderButton(
+                        systemImage: "play.circle.fill",
+                        help: "Show active journey: \(active.name)",
+                        identifier: "navigator.activeJourney",
+                        tint: DSColors.accent
+                    ) {
+                        journeyFilter = ""
+                        if let group = active.groupTag { collapsedJourneyGroups.remove(group) }
+                        navigatorTab = .journeys
+                        appState.selectedJourneyID = active.id
+                    }
+                    .accessibilityValue("\(active.name), \(activeJourneyProgress ?? "Active")")
+                }
             }
         }
     }
 
-    /// `DSTabStrip` speaks in raw ids so it can stay in the design system without knowing what a
+    /// The navigator picker speaks in raw ids so it can stay in the design system without knowing what a
     /// navigator is; this keeps the enum on this side of that boundary.
     private var navigatorTabBinding: Binding<String> {
         Binding(
@@ -900,11 +927,18 @@ struct WorkspaceView: View {
             return appState.currentProject?.endpoints.first { $0.id == id }
         }()
         let detail = requestDetailContext
+        let selectedJourney = navigatorTab == .journeys
+            ? appState.journeys.first { $0.id == appState.selectedJourneyID } : nil
 
         InspectorPanelView(
             endpoint: endpoint,
             requestDetail: detail,
             overview: endpoint == nil && detail == nil ? inspectorOverview : nil,
+            journey: selectedJourney.map {
+                JourneyInspector.Context(selected: $0, active: appState.activeJourney,
+                                         progress: activeJourneyProgress, serverState: appState.serverState)
+            },
+            selectedRequestCount: selectedLogIDs.count,
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],

@@ -163,7 +163,7 @@ final class DocScreenshotTests: MimicUITestCase {
         try capture(named: "workspace-\(appearanceName).png")
 
         // Journeys. The navigator tab, not a menu item — the same route a reader of the docs takes.
-        let journeys = app.buttons["Show journeys"].firstMatch
+        let journeys = WorkspaceShellPage(app: app).journeysTab
         XCTAssertTrue(journeys.waitForExistence(timeout: 5), "The navigator should offer a Journeys tab")
         journeys.click()
 
@@ -223,6 +223,7 @@ final class DocScreenshotTests: MimicUITestCase {
     /// sidebar.
     @MainActor
     private func setGroupTag(_ tag: String) {
+        endpointEditor.showOptions()
         let field = endpointEditor.groupTagField
         XCTAssertTrue(field.waitForExistence(timeout: 5), "The editor should offer a group tag field")
         field.click()
