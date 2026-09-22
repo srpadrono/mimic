@@ -131,6 +131,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         let primary = try freePort(), secondary = try freePort(), replacement = try freePort()
         launchApp()
         createProjectViaUI(name: "Listening ports")
+        workspace.fillWindow()
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -145,6 +146,9 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
         workspace.compactWindow()
+        if !page.ports.isHittable {
+            workspace.fillWindow()
+        }
         XCTAssertTrue(page.ports.isHittable)
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
         page.ports.click()

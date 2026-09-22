@@ -272,6 +272,9 @@ struct WorkspacePage {
     @discardableResult
     func waitForServerURL(port: Int, timeout: TimeInterval = 10) -> Bool {
         let element = serverURLText(port: port)
+        // AppKit can move the whole status group into native toolbar overflow on small displays.
+        // Expand before asserting its visible, two-line presentation.
+        if !element.exists { fillWindow() }
         guard element.waitForExistence(timeout: timeout) else { return false }
         return UITestApp.waitUntil(timeout: timeout) {
             let shown = ((element.value as? String) ?? "") + " " + element.label
@@ -1491,12 +1494,15 @@ final class MimicUITests: XCTestCase {
         launchApp()
         createProjectViaUI(name: "Traffic Detail Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
+        // A small CI display can put the entire server summary in AppKit's native toolbar overflow.
+        // Make the status visible before asserting on its address and starting traffic.
+        workspace.fillWindow()
 
         workspace.serverToggleButton.click()
-        XCTAssertTrue(
-            workspace.waitForServerURL(port: port),
-            "Server should report its base URL once running"
-        )
+        guard workspace.waitForServerURL(port: port) else {
+            XCTFail("Server should report its base URL once running")
+            return
+        }
 
         await sendRequest(port: port, path: "/api/users", method: "POST", body: payload)
 
@@ -1649,6 +1655,10 @@ final class MimicUITests: XCTestCase {
         launchApp()
         createProjectViaUI(name: "HAR Import Test")
         workspace.compactWindow()
+        // At the smallest CI window size AppKit moves the whole editor group into its own
+        // toolbar overflow. Expand enough to test the app's Import action rather than that
+        // system overflow's presentation.
+        if !workspace.overflowMenu.exists { workspace.fillWindow() }
 
         // Import menu button should exist in toolbar
         XCTAssertTrue(workspace.importMenuButton.waitForExistence(timeout: 5),
@@ -1680,6 +1690,7 @@ final class MimicUITests: XCTestCase {
         launchApp()
         createProjectViaUI(name: "OpenAPI Import Test")
         workspace.compactWindow()
+        if !workspace.overflowMenu.exists { workspace.fillWindow() }
 
         workspace.importMenuButton.click()
 
