@@ -147,7 +147,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
         workspace.compactWindow()
         if !page.ports.isHittable {
-            workspace.inlineToolbarAction("toggleDrawerButton").click()
+            workspace.fillWindow()
         }
         XCTAssertTrue(page.ports.isHittable)
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)

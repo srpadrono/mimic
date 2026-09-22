@@ -1439,23 +1439,25 @@ final class WorkspaceShellUITests: MimicUITestCase {
         assertToolbarColumnOwnership()
 
         workspace.compactWindow()
-        if !workspace.overflowMenu.exists {
-            workspace.inlineToolbarAction("toggleDrawerButton").click()
+        if workspace.overflowMenu.exists {
+            XCTAssertTrue(workspace.projectTitle.isHittable)
+            XCTAssertTrue(workspace.projectKind.isHittable)
+            XCTAssertTrue(well.address.isHittable)
+            XCTAssertFalse(workspace.inlineToolbarAction("backend.settingsButton").exists)
+            XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
+            XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
+            assertToolbarGeometry()
+            assertToolbarColumnOwnership()
+            workspace.overflowMenu.click()
+            XCTAssertTrue(workspace.overflowAction("backend.settingsButton").waitForExistence(timeout: 5))
+            XCTAssertFalse(workspace.overflowAction("toggleDrawerButton").exists)
+            XCTAssertFalse(workspace.overflowAction("toggleInspectorButton").exists)
+            workspace.closeToolbarMenu()
+        } else {
+            // The smallest CI display uses AppKit's native overflow for the whole center group.
+            XCTAssertTrue(app.toolbars.popUpButtons["more toolbar items"].exists)
+            workspace.fillWindow()
         }
-        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.projectTitle.isHittable)
-        XCTAssertTrue(workspace.projectKind.isHittable)
-        XCTAssertTrue(well.address.isHittable)
-        XCTAssertFalse(workspace.inlineToolbarAction("backend.settingsButton").exists)
-        XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
-        XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
-        assertToolbarGeometry()
-        assertToolbarColumnOwnership()
-        workspace.overflowMenu.click()
-        XCTAssertTrue(workspace.overflowAction("backend.settingsButton").waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.overflowAction("toggleDrawerButton").exists)
-        XCTAssertFalse(workspace.overflowAction("toggleInspectorButton").exists)
-        workspace.closeToolbarMenu()
 
         let stoppedFrame = workspace.serverToggleButton.frame
         startServer(onPort: 62118)
