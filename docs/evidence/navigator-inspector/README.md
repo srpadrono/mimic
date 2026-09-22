@@ -14,6 +14,12 @@ actual endpoint/journey row heights, header insets, consecutive-row spacing, col
 filter reveal, group creation/moving/clearing, and non-overlapping compact controls. Persistence
 checks cover migrating an existing store and saving/reopening group membership.
 
+Filter and method-pill follow-up: endpoint rows now use the same compact colored method badges
+as journey steps. The filter has balanced eight-point inner padding, a larger scope control, and
+no empty active-journey slot. The follow-up passed 72 design-system and four workspace rendering
+tests plus three focused UI flows (geometry/filter retention, method scope/active-journey reveal,
+and scenario/traffic navigation). Endpoint and traffic captures below were refreshed after this change.
+
 ## Endpoints, wide
 
 ![Endpoints, wide](navigator-endpoints-wide.png)

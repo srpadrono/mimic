@@ -7,6 +7,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Improved
 
+- Use the same colored HTTP method pills in endpoint navigation and journey steps. Balance filter
+  padding and center its controls; reclaim the empty footer slot when no journey is active.
+
 - Organize journeys into saved groups with the same disclosure rows, spacing, indentation, and
   inline counts as endpoints. Edit Group in the journey editor or use `journey create/update --group`;
   filtering and the active-journey shortcut reveal matching grouped journeys.

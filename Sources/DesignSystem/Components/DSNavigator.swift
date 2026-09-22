@@ -7,7 +7,6 @@ public enum DSNavigatorMetrics {
     public static let inset: CGFloat = 12
     public static let indentation: CGFloat = 16
     public static let iconSlot: CGFloat = 16
-    public static let methodWidth: CGFloat = 48
     public static let metadataWidth: CGFloat = 88
     public static let headerHeight: CGFloat = 38
     public static let footerHeight: CGFloat = 42
@@ -77,10 +76,11 @@ public struct DSNavigatorFooter<Status: View>: View {
     private let placeholder: String
     private let identifier: String
     private let status: Status
+    private let showsStatus: Bool
 
     public init(
         text: Binding<String>, scopeID: Binding<String>, scopes: [DSFilterField.Scope],
-        placeholder: String, identifier: String, @ViewBuilder status: () -> Status
+        placeholder: String, identifier: String, showsStatus: Bool = true, @ViewBuilder status: () -> Status
     ) {
         self._text = text
         self._scopeID = scopeID
@@ -88,6 +88,7 @@ public struct DSNavigatorFooter<Status: View>: View {
         self.placeholder = placeholder
         self.identifier = identifier
         self.status = status()
+        self.showsStatus = showsStatus
     }
 
     public var body: some View {
@@ -96,7 +97,9 @@ public struct DSNavigatorFooter<Status: View>: View {
                 text: $text, scopeID: $scopeID, scopes: scopes,
                 placeholder: placeholder, identifier: identifier
             )
-            status.frame(width: DSControlHeight.field, height: DSControlHeight.field)
+            if showsStatus {
+                status.frame(width: DSControlHeight.field, height: DSControlHeight.field)
+            }
         }
         .padding(.horizontal, DSNavigatorMetrics.inset)
         .frame(height: DSNavigatorMetrics.footerHeight)

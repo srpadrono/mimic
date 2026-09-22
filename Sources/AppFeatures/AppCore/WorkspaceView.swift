@@ -835,7 +835,8 @@ struct WorkspaceView: View {
                 scopeID: $endpointMethodScope,
                 scopes: navigatorTab == .endpoints ? SidebarView.methodScopes : [],
                 placeholder: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
-                identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter"
+                identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
+                showsStatus: appState.activeJourney != nil
             ) {
                 if let active = appState.activeJourney {
                     DSPanelHeaderButton(
@@ -850,8 +851,6 @@ struct WorkspaceView: View {
                         appState.selectedJourneyID = active.id
                     }
                     .accessibilityValue("\(active.name), \(activeJourneyProgress ?? "Active")")
-                } else {
-                    Color.clear.accessibilityHidden(true)
                 }
             }
         }

@@ -357,11 +357,10 @@ struct EndpointSidebarRow: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            Text(endpoint.method.rawValue)
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .frame(width: DSNavigatorMetrics.methodWidth, alignment: .leading)
-                .accessibilityLabel("\(endpoint.method.rawValue) method")
+            DSMethodBadge(
+                method: endpoint.method.rawValue, size: .compact,
+                identifier: "navigator.\(endpoint.id.uuidString)"
+            )
 
             Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : $0 } ?? endpoint.path)
                 .font(DSTypography.code)

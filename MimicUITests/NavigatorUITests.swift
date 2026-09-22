@@ -142,8 +142,11 @@ final class NavigatorUITests: MimicUITestCase {
         let shell = WorkspaceShellPage(app: app)
         workspace.fillWindow()
         let endpointFooter = navigator.footer.frame
+        let endpointFilterMidY = navigator.endpointFilter.frame.midY
         let endpointHeader = navigator.header.frame
         let endpointRowHeight = navigator.rowHeight(named: "Account summary")
+        XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.endpointFilter.frame.maxX, 20, accuracy: 1,
+                       "Inactive journey controls must not leave an empty slot beside the filter")
         XCTAssertEqual(endpointRowHeight, 26, accuracy: 1)
         XCTAssertEqual(navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.element("sidebar.addEndpointButton").frame.maxX, 12, accuracy: 1)
@@ -166,7 +169,9 @@ final class NavigatorUITests: MimicUITestCase {
         shell.journeysTab.click()
         XCTAssertTrue(navigator.journeyFilter.waitForExistence(timeout: 5))
         XCTAssertEqual(navigator.header.frame.midY, endpointHeader.midY, accuracy: 1)
-        XCTAssertEqual(navigator.footer.frame.midY, endpointFooter.midY, accuracy: 1)
+        XCTAssertEqual(navigator.journeyFilter.frame.midY, endpointFilterMidY, accuracy: 1)
+        XCTAssertEqual(navigator.journeyFilter.frame.minX - shell.panel("sidebar").frame.minX, 20, accuracy: 1)
+        XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.journeyFilter.frame.maxX, 20, accuracy: 1)
         XCTAssertEqual(navigator.rowHeight(named: "Empty journey"), endpointRowHeight, accuracy: 1)
         navigator.filter(navigator.journeyFilter, text: "authorization")
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForExistence(timeout: 5))
