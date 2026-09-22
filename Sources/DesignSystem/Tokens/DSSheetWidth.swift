@@ -9,6 +9,8 @@ public enum DSSheetWidth {
     public static let medium: CGFloat = 540
     /// A multi-section configuration form with aligned columns.
     public static let wide: CGFloat = 640
+    /// A compact backend list beside a single settings detail pane.
+    public static let backendSettings: CGFloat = 760
     /// A review table that needs several readable columns.
     public static let review: CGFloat = 760
 }

@@ -1,8 +1,8 @@
 # Design-system conformance review
 
-Captured from the Debug macOS app on 2026-09-22 with isolated XCUITest projects. The final focused run passed all 12 UI flows; 75 design-system and import-row contrast tests and all 11 house rules also passed.
+Captured from the Debug macOS app on 2026-09-22 with isolated XCUITest projects. The original review passed 12 UI flows, and the corrected server-settings sheet passed all five backend UI flows. The 75 design-system and import-row contrast tests and all 11 house rules also passed.
 
-An independent design review checked hierarchy, spacing, color meaning, and narrow-window behavior. The follow-up aligned editor and panel headers, navigator rows, form sections, status badges, and request-log controls. It also made pending listener ports and stopped journeys read honestly, and kept Method, Path, Status, and Time visible in the compact log.
+An independent design review checked hierarchy, spacing, color meaning, and narrow-window behavior. The follow-up aligned editor and panel headers, navigator rows, form sections, status badges, and request-log controls. The server-settings sheet now shows a compact listener list beside one editable listener, with controls that align across the detail pane and a sheet height that follows its content. Pending listener ports and stopped journeys read honestly, and Method, Path, Status, and Time remain visible in the compact log.
 
 ## Workspace and navigator
 
@@ -21,6 +21,8 @@ An independent design review checked hierarchy, spacing, color meaning, and narr
 ## Editing sheets
 
 ![Two-backend server settings](server-settings.png)
+
+![Primary listener with pass-through and response capture](server-settings-passthrough.png)
 
 ![Invalid local port with Apply and Copy URL unavailable](server-settings-invalid-port.png)
 
