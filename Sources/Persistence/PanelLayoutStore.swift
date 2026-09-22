@@ -67,16 +67,16 @@ public final class PanelLayoutStore: @unchecked Sendable {
         /// The request log's floor. Handed to `NSSplitViewItem.minimumThickness`, so a drag stops
         /// here and a further drag collapses the pane — AppKit's behaviour, not a threshold this
         /// codebase compares against.
-        public static let minimumRequestLogHeight: CGFloat = 120
+        public static let minimumRequestLogHeight: CGFloat = 100
 
         /// What the centre pane keeps no matter how far the request log is dragged. Enough for the
-        /// editor's header and a few rows — it scrolls, so it does not need room for a whole form.
+        /// editor's header and the first journey steps; longer editors scroll inside their pane.
         ///
         /// This is the *other* item's `minimumThickness`, which is why there is no longer a
         /// `maximumRequestLogHeight` beside it: a panel's ceiling is whatever leaves this much
         /// behind, and expressing it as the neighbour's floor means the split view enforces it
         /// during the drag instead of a view recomputing it from a measured container one frame late.
-        public static let minimumCentreHeight: CGFloat = 240
+        public static let minimumCentreHeight: CGFloat = 330
 
         /// The inspector's floor and preferred width, handed to `.inspectorColumnWidth`. They are
         /// constants rather than stored values because AppKit restores that column's width with the

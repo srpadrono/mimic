@@ -39,4 +39,7 @@ public enum DSRowHeight {
     /// 26 — a scenario row in the inspector, and any list row that is a name plus a status rather
     /// than a badge plus a path.
     public static let compactRow: CGFloat = 26
+
+    /// 52 — a two-line journey step: its name above the method and route, with room for an outcome.
+    public static let journeyStep: CGFloat = 52
 }

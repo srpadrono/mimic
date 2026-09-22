@@ -38,6 +38,10 @@ private func resolveJourneyControl(
 
 extension JourneysNavigatorPage {
 
+    var settingsDisclosure: XCUIElement {
+        app.buttons["journeyEditor.settingsDisclosure"].firstMatch
+    }
+
     /// The journey's one-line summary in the editor header, beside its name.
     var editorSummary: XCUIElement {
         let byStaticText = app.staticTexts["journeyEditor.summary"].firstMatch
@@ -93,29 +97,6 @@ extension JourneysNavigatorPage {
         app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "ds.empty.journeyEditor.steps"))
             .firstMatch
-    }
-
-    /// The steps empty state's own call to action.
-    ///
-    /// "Add step\u{2026}", with the ellipsis, which is what separates it from the header's button:
-    /// that one carries an explicit `.accessibilityLabel("Add step")` with no ellipsis, so the two
-    /// controls that open the identical sheet have two distinct spoken names. It is matched by that
-    /// label rather than by an identifier because `DSEmptyState` stamps `ds.empty.journeyEditor.steps`
-    /// over the `ds.button.empty.journeyEditor.steps.cta` its `DSButton` sets — rule 8, and neither
-    /// spelling is dependable.
-    ///
-    /// **Scoped to the empty state**, which is the part that was missing. `app.buttons[…].firstMatch`
-    /// searches the whole window and takes the first element in tree order, and a container comes
-    /// before the leaves it lends its name to: the query resolved to a wrapper whose frame is the
-    /// whole block, so the synthesized click landed in the middle of the message text, reported no
-    /// error, and opened nothing — the failure read "The step sheet should open". `descendants`
-    /// starts *below* the element it is asked of, so this resolves to the button or to nothing.
-    var stepsEmptyStateAddButton: XCUIElement {
-        let scoped = stepsEmptyState.descendants(matching: .button)
-            .matching(NSPredicate(format: "label == %@", "Add step\u{2026}"))
-            .firstMatch
-        if scoped.exists { return scoped }
-        return app.buttons["Add step\u{2026}"].firstMatch
     }
 
     /// The centre pane when the journeys navigator has nothing selected.
@@ -674,6 +655,9 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The editor should show the journey's one-line summary"
         )
 
+        XCTAssertEqual(journeys.settingsDisclosure.value as? String, "Collapsed")
+        journeys.settingsDisclosure.click()
+
         // JRNEDIT-05/06/07 — the three pickers.
         assertSpeaks(
             journeys.matchModePicker,
@@ -725,6 +709,9 @@ final class JourneyEditorUITests: MimicUITestCase {
             "Clicking the row should reopen the template journey"
         )
 
+        XCTAssertEqual(journeys.settingsDisclosure.value as? String, "Collapsed")
+        journeys.settingsDisclosure.click()
+
         assertSpeaks(
             journeys.matchModePicker,
             contains: "Strict sequence",
@@ -748,8 +735,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
     // MARK: - 2. The steps empty state  (JRNEDIT-09/10, JRNRUN-02)
 
-    /// The second of the two controls that open `JourneyStepSheet` — the one inside the empty state,
-    /// which no test has ever clicked because both used to be spelled the same way.
+    /// The Steps header remains the single creation action when the list is empty.
     @MainActor
     func testStepsEmptyStateAddsTheFirstStep() throws {
         launchWithProject()
@@ -790,12 +776,12 @@ final class JourneyEditorUITests: MimicUITestCase {
             "Activating a journey with no steps would serve nothing, so it should be refused"
         )
 
-        // JRNEDIT-10 — the empty state's own call to action.
+        // JRNEDIT-10 — the Steps header carries the one creation action even when empty.
         XCTAssertTrue(
-            journeys.stepsEmptyStateAddButton.waitForExistence(timeout: 5),
-            "The steps empty state should offer to add the first step"
+            journeys.addStepButton.waitForExistence(timeout: 5),
+            "The Steps header should offer to add the first step"
         )
-        journeys.stepsEmptyStateAddButton.click()
+        journeys.addStepButton.click()
 
         // The assertion is that clicking it opens the sheet, and the geometry rides along in the
         // message rather than in an assertion of its own.
@@ -810,8 +796,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         // squeezed pane from a mis-targeted query.
         XCTAssertTrue(
             stepSheet.pathField.waitForExistence(timeout: 5),
-            "The step sheet should open when the empty state's call to action is clicked — "
-                + "the call to action is \(describe(journeys.stepsEmptyStateAddButton)) "
+            "The step sheet should open when the Steps action is clicked — "
+                + "the call to action is \(describe(journeys.addStepButton)) "
                 + "inside \(describe(journeys.stepsEmptyState))"
         )
         assertSpeaks(stepSheet.title, contains: "Add step", "The sheet should be headed for adding")
@@ -1262,13 +1248,14 @@ final class JourneyEditorUITests: MimicUITestCase {
             "Activating should offer to stop"
         )
 
-        // JRNRUN-05 — the arithmetic reaching the window.
+        // JRNRUN-05 — with the server stopped, the cursor prepares the next run.
         assertSpeaks(
             journeys.runProgressReadout,
-            contains: "Step 1 of 2",
-            "A fresh run should sit on the first of the journey's two steps"
+            contains: "Next run",
+            "The readout should say that the stopped server is preparing its next run"
         )
-        assertSpeaks(journeys.runProgressReadout, contains: "0 served", "Nothing has been served yet")
+        assertSpeaks(journeys.runProgressReadout, contains: "step 1 of 2",
+                     "The next run should start on the first step")
 
         // JRNRUN-10 — the run is marked in the list you edit.
         assertSpeaks(
@@ -1281,8 +1268,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         journeys.advanceButton.click()
         assertSpeaks(
             journeys.runProgressReadout,
-            contains: "Step 2 of 2",
-            "Advancing should retire the current step and move the cursor on"
+            contains: "step 2 of 2",
+            "Advancing should prepare the next run to start at the second step"
         )
         assertSpeaks(
             journeys.step(at: 0),
@@ -1295,8 +1282,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         journeys.advanceButton.click()
         assertSpeaks(
             journeys.runProgressReadout,
-            contains: "Complete",
-            "Advancing past the last step should complete the run"
+            contains: "Next run complete",
+            "Advancing past the last step should leave nothing to serve"
         )
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) { !self.journeys.advanceButton.isEnabled },
@@ -1307,8 +1294,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         journeys.restartButton.click()
         assertSpeaks(
             journeys.runProgressReadout,
-            contains: "Step 1 of 2",
-            "Restarting should rewind the run to its first step"
+            contains: "step 1 of 2",
+            "Restarting should prepare the next run from its first step"
         )
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 10) { self.journeys.advanceButton.isEnabled },

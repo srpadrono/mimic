@@ -17,61 +17,45 @@ struct JourneyStepRow: View {
     /// Run progress for this step, when a run is in flight.
     let progress: JourneyStepProgress?
 
-    /// The method column. Sized for `OPTIONS`, the widest method there is — the previous 58pt was
-    /// sized for `DELETE` and let the longest badge spill over the path beside it. Matches the
-    /// request log's method column, so the two lists line up when both are on screen.
-    private static let methodColumnWidth: CGFloat = 62
-
     var body: some View {
-        HStack(spacing: DSSpacing.sm) {
-            marker
-                .frame(width: 16)
-
-            Text("\(index + 1)")
-                .font(DSTypography.caption)
-                .fontWeight(isCurrent ? .semibold : .medium)
-                .foregroundStyle(isCurrent ? DSColors.accentText : DSColors.labelSecondary)
-                .lineLimit(1)
-                // `minWidth`, not `width`: the column aligns at one and two digits and simply grows
-                // at three, rather than clipping a journey with a hundred steps in it.
-                .frame(minWidth: 18, alignment: .trailing)
-
-            DSMethodBadge(method: step.method.rawValue, size: .compact, identifier: step.id.uuidString)
-                .frame(width: Self.methodColumnWidth, alignment: .leading)
-
-            // A GraphQL route repeats for every operation, so the operation is the informative part.
-            //
-            // This column takes the slack the fixed ones leave, which is what makes the row survive
-            // centre-pane width: everything trailing it is short and rigid, so the path is the only
-            // thing that ever has to give up characters, and it truncates in the middle where a path
-            // can most afford it.
-            VStack(alignment: .leading, spacing: 0) {
-                Text(step.path)
-                    .font(isCurrent ? DSTypography.codeBold : DSTypography.code)
-                    .foregroundStyle(DSColors.labelPrimary)
+        HStack(alignment: .center, spacing: DSSpacing.md) {
+            VStack(spacing: DSSpacing.xs) {
+                marker
+                Text("\(index + 1)")
+                    .font(DSTypography.caption)
+                    .fontWeight(isCurrent ? .semibold : .medium)
+                    .foregroundStyle(isCurrent ? DSColors.accentText : DSColors.labelSecondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+            }
+            .frame(width: DSSpacing.xl)
 
-                if let operation = step.graphqlOperation, !operation.isEmpty {
-                    Text(operation)
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.accentText)
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                HStack(spacing: DSSpacing.sm) {
+                    Text(step.name)
+                        .font(DSTypography.bodyMedium)
+                        .foregroundStyle(DSColors.labelPrimary)
+                        .lineLimit(1)
+                        .help(step.name)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    outcomeLabel
+                }
+                HStack(spacing: DSSpacing.sm) {
+                    DSMethodBadge(method: step.method.rawValue, size: .compact, identifier: step.id.uuidString)
+                    Text(routeLabel)
+                        .font(isCurrent ? DSTypography.codeBold : DSTypography.code)
+                        .foregroundStyle(DSColors.labelSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(routeHelp)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if step.delayMs > 0 { annotation("+\(step.delayMs)ms") }
+                    if step.repeatCount > 1 { annotation(servedAnnotation) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            outcomeLabel
-
-            if step.delayMs > 0 {
-                annotation("+\(step.delayMs)ms")
-            }
-            if step.repeatCount > 1 {
-                annotation(servedAnnotation)
-            }
         }
-        .padding(.vertical, DSSpacing.xs)
+        .padding(.horizontal, DSSpacing.smPlus)
+        .padding(.vertical, DSSpacing.smPlus)
+        .frame(minHeight: DSRowHeight.journeyStep)
         // The row opens the step editor on tap, so it says so on hover like every other tappable
         // row — the sidebar's, the journeys navigator's, the scenario list's. It was the one
         // clickable row in the app with no pointer feedback at all.
@@ -87,6 +71,14 @@ struct JourneyStepRow: View {
 
     private var isCurrent: Bool { progress?.isCurrent == true }
     private var isExhausted: Bool { progress?.isExhausted == true }
+    private var routeLabel: String {
+        guard let operation = step.graphqlOperation, !operation.isEmpty else { return step.path }
+        return operation
+    }
+    private var routeHelp: String {
+        guard let operation = step.graphqlOperation, !operation.isEmpty else { return step.path }
+        return "\(operation) · \(step.path)"
+    }
 
     @ViewBuilder
     private var marker: some View {
@@ -183,7 +175,7 @@ struct JourneyStepRow: View {
     }
 
     private var accessibilityDescription: String {
-        var parts = ["Step \(index + 1)", step.method.rawValue, step.path]
+        var parts = ["Step \(index + 1)", step.name, step.method.rawValue, step.path]
         if let operation = step.graphqlOperation, !operation.isEmpty {
             parts.append("operation \(operation)")
         }

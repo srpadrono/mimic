@@ -1041,7 +1041,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         expand.click()
         XCTAssertTrue(workspace.endpointPathText("/api/health").waitForExistence(timeout: 5))
 
-        let healthPath = app.staticTexts["/api/health"]
+        let healthPath = workspace.endpointPathText("/api/health")
         XCTAssertTrue(healthPath.waitForExistence(timeout: 5),
                       "The grouped endpoint should still be listed under its section while its "
                           + "ungrouped sibling is the one being edited")
@@ -1450,7 +1450,9 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(waitForSidebarRowCount(2),
                       "Duplicating should add a second row to the sidebar")
-        XCTAssertTrue(app.staticTexts["Orders (Copy)"].waitForExistence(timeout: 5),
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.sidebarEndpointRows().contains { $0.label.contains("Orders (Copy)") }
+        },
                       "The copy should be listed under its own name")
     }
 
@@ -1535,7 +1537,9 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(waitForSidebarRowCount(2),
                       "Duplicating from the editor should add a row to the sidebar")
-        XCTAssertTrue(app.staticTexts["Orders (Copy)"].waitForExistence(timeout: 5),
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.sidebarEndpointRows().contains { $0.label.contains("Orders (Copy)") }
+        },
                       "The copy should be listed under its own name")
     }
 

@@ -788,9 +788,8 @@ final class ErrorAlertUITests: MimicUITestCase {
             "An endpoint with no response headers should say so"
         )
 
-        // ERRDEAD-08. The inspector's tab strip flattens its children's identifiers, so the tab is
-        // targeted by the label `DSTabStrip` speaks — which is `EndpointTab.traffic.help`.
-        app.buttons["Show the requests this endpoint answered"].firstMatch.click()
+        // ERRDEAD-08. The page object handles the tab's label and request-count suffix.
+        InspectorPage(app: app).tab("traffic").click()
         XCTAssertTrue(
             waitForEmptyState(identifier: "endpointTraffic.empty", heading: "No traffic yet"),
             "An endpoint nothing has called should say so in the Traffic tab"

@@ -2,7 +2,7 @@ import DesignSystem
 import Domain
 import SwiftUI
 
-/// Selection describes the journey being edited; the live run may belong to another journey.
+/// Context for the selected journey's run; editing controls stay with the script in the centre pane.
 struct JourneyInspector: View {
     struct Context {
         let selected: Journey
@@ -17,56 +17,90 @@ struct JourneyInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                    Text(context.selected.name)
-                        .font(DSTypography.controlLabel)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("inspector.journey.name")
-                    Text(context.selected.id == context.active?.id
-                         ? (context.serverState.runningPort == nil ? "Selected for next server run" : "Active journey")
-                         : "Inactive journey")
+                    Text("\(context.selected.steps.count) \(context.selected.steps.count == 1 ? "step" : "steps")")
+                        .font(DSTypography.heading)
+                        .foregroundStyle(DSColors.labelPrimary)
+                        .accessibilityIdentifier("inspector.journey.steps")
+                    Text(context.selected.groupTag.map { "In \($0)" } ?? "Ungrouped journey")
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.labelSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(DSInspectorMetrics.inset)
+
+                DSInspectorSectionHeader("Run", identifier: "journey.run")
+                VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
+                    Text(runState)
+                        .font(DSTypography.bodyMedium)
+                        .foregroundStyle(context.selected.id == context.active?.id
+                                         ? DSColors.accentText : DSColors.labelPrimary)
                         .accessibilityIdentifier("inspector.journey.state")
-                    if let summary = context.selected.summary, !summary.isEmpty {
-                        Text(summary)
+                    if let active = context.active {
+                        if active.id != context.selected.id {
+                            Text("Active journey: \(active.name)")
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("inspector.journey.activeName")
+                        }
+                        if let progress = context.progress {
+                            Text(progress)
+                                .font(DSTypography.label)
+                                .foregroundStyle(DSColors.labelPrimary)
+                                .accessibilityIdentifier("inspector.journey.progress")
+                        }
+                    } else {
+                        Text("No journey active. Endpoints answer directly.")
+                            .font(DSTypography.label)
+                            .foregroundStyle(DSColors.labelSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("inspector.journey.noActiveRun")
+                    }
+                    Text("Server: \(serverStatus)")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .accessibilityIdentifier("inspector.journey.server")
+                    if context.selected.id == context.active?.id,
+                       context.serverState.runningPort == nil {
+                        Text("Restart and Advance set the step for the next server run.")
                             .font(DSTypography.label)
                             .foregroundStyle(DSColors.labelSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(DSInspectorMetrics.inset)
 
-                DSInspectorSectionHeader("Configuration", identifier: "journey.configuration")
-                row("Group", context.selected.groupTag ?? "None", id: "group")
-                row("Steps", "\(context.selected.steps.count)", id: "steps")
-                row("Match", context.selected.matchMode == .orderedPerEndpoint ? "Ordered per route" : "Strict sequence", id: "match")
-                row("Completion", context.selected.completion == .stop ? "Stop" : "Restart", id: "completion")
-                row("Unscripted", context.selected.unmatchedBehavior == .fallThroughToEndpoints ? "Fall through" : "404", id: "unmatched")
-                row("Auto-advance", context.selected.autoAdvance ? "On" : "Off", id: "autoAdvance")
-
-                DSInspectorSectionHeader(context.serverState.runningPort == nil ? "Selected journey" : "Active journey",
-                                         identifier: "journey.active")
-                if let active = context.active {
-                    row("Name", active.name, id: "activeName")
-                    if let progress = context.progress { row("Progress", progress, id: "progress") }
-                } else {
-                    Text("None — endpoints answer directly.")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .padding(DSInspectorMetrics.inset)
-                        .accessibilityIdentifier("inspector.journey.noActiveRun")
+                DSInspectorSectionHeader("Matching", identifier: "journey.matching")
+                VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
+                    Text(matchExplanation)
+                    Text(context.selected.unmatchedBehavior == .fallThroughToEndpoints
+                         ? "Other requests use endpoint mocks."
+                         : "Other requests return 404.")
                 }
-                row("Server", serverStatus, id: "server")
+                .font(DSTypography.label)
+                .foregroundStyle(DSColors.labelSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(DSInspectorMetrics.inset)
             }
             .padding(.bottom, DSSpacing.md)
         }
         .accessibilityElement(children: .contain)
+        .accessibilityLabel("Inspector for \(context.selected.name)")
         .accessibilityIdentifier("inspector.journey")
     }
 
-    private func row(_ label: String, _ value: String, id: String) -> some View {
-        DSInspectorValueRow(label, value: value, identifier: "inspector.journey.\(id)")
+    private var runState: String {
+        guard context.selected.id == context.active?.id else { return "Inactive journey" }
+        return context.serverState.runningPort == nil ? "Prepared for next server run" : "Active journey"
+    }
+
+    private var matchExplanation: String {
+        switch context.selected.matchMode {
+        case .orderedPerEndpoint: "The next available step for each route can answer."
+        case .strictSequence: "Only the current step can answer."
+        }
     }
 
     private var serverStatus: String {

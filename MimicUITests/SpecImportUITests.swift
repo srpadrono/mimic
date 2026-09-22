@@ -1087,13 +1087,11 @@ final class SpecImportUITests: MimicUITestCase {
         )
     }
 
-    /// A sidebar row showing `text`, matched on content because `EndpointSidebarRow`'s own cells are
-    /// unnamed. Only used once the import sheet is gone, so nothing else in the window is showing the
-    /// same path.
+    /// A sidebar row showing `text`. Its method, route, and name are one accessible element.
     @MainActor
     private func sidebarText(_ text: String) -> XCUIElement {
-        app.staticTexts.matching(
-            NSPredicate(format: "label == %@ OR value == %@", text, text)
+        app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", text)
         ).firstMatch
     }
 

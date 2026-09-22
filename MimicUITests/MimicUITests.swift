@@ -1332,9 +1332,9 @@ final class MimicUITests: XCTestCase {
         createEndpointViaUI(name: "Get Users", path: "/api/users")
         createEndpointViaUI(name: "Get Posts", path: "/api/posts")
 
-        // Both endpoints should exist — count matching path texts (sidebar + editor may both show)
-        let usersPath = app.staticTexts["/api/users"]
-        let postsPath = app.staticTexts["/api/posts"]
+        // Navigator rows expose method, path and name as one accessible element.
+        let usersPath = workspace.endpointPathText("/api/users")
+        let postsPath = workspace.endpointPathText("/api/posts")
         XCTAssertTrue(usersPath.waitForExistence(timeout: 5),
                       "Get Users endpoint should be visible")
         XCTAssertTrue(postsPath.waitForExistence(timeout: 5),
