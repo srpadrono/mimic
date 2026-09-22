@@ -248,7 +248,10 @@ struct WorkspacePage {
     var drawerEmptyHeading: XCUIElement { app.staticTexts["No requests yet"] }
 
     func endpointPathText(_ path: String) -> XCUIElement {
-        app.staticTexts[path].firstMatch
+        // Navigator rows expose method, path and name as one accessible element.
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", " \(path), "
+        )).firstMatch
     }
 
     /// The base URL element in the toolbar's status well.
@@ -325,6 +328,19 @@ struct EndpointEditorPage {
     let app: XCUIApplication
 
     var statusCodeField: XCUIElement { app.textFields["endpointEditor.statusCode"] }
+    var optionsToggle: XCUIElement { app.buttons["endpointEditor.toggleOptions"] }
+    var headersToggle: XCUIElement { app.buttons["endpointEditor.toggleHeaders"] }
+    var statusDescription: XCUIElement { app.staticTexts["endpointEditor.statusDescription"] }
+    var globalDelayNote: XCUIElement { app.staticTexts["endpointEditor.globalDelay.note"] }
+    var bodyEditor: XCUIElement {
+        app.scrollViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
+    }
+
+    func showOptions(file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(optionsToggle.waitForExistence(timeout: 5), file: file, line: line)
+        if optionsToggle.value as? String == "Collapsed" { optionsToggle.click() }
+    }
+
     var delayField: XCUIElement { app.textFields["endpointEditor.delay"] }
     var groupTagField: XCUIElement { app.textFields["endpointEditor.groupTag"] }
     var moreMenu: XCUIElement {

@@ -130,9 +130,8 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// Brings an editor control into view before it is clicked.
     ///
-    /// The editor is four stacked cards — Response, Response headers, Response body, Settings — and
-    /// the body editor alone is 240pt tall, so on a default-sized window the Settings card starts
-    /// below the fold. An element scrolled out of a clip view still *exists* in the accessibility
+    /// Expanded endpoint options can extend below the viewport in a short window. An element
+    /// scrolled out of a clip view still *exists* in the accessibility
     /// tree, so `waitForExistence` says yes and `click()` then lands on whatever is actually at that
     /// screen point. `isHittable` is the question that distinguishes the two.
     ///
@@ -158,7 +157,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// Gives the editor the drawer's height back.
     ///
     /// Cheaper and far more reliable than scrolling: the request log occupies the bottom of the
-    /// window and hiding it is one toolbar click, after which all four editor cards usually fit.
+    /// window and hiding it is one toolbar click, after which expanded endpoint options usually fit.
     /// `revealInEditor` stays as the backstop for a small screen.
     @MainActor
     private func hideRequestLogDrawer() {
@@ -968,6 +967,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Health", path: "/api/health")
         hideRequestLogDrawer()
 
+        endpointEditor.showOptions()
         let groupTag = endpointEditor.groupTagField
         XCTAssertTrue(groupTag.waitForExistence(timeout: 5),
                       "The Settings section should show the group tag field")
@@ -1012,6 +1012,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Health", path: "/api/health")
         hideRequestLogDrawer()
 
+        endpointEditor.showOptions()
         let groupTag = endpointEditor.groupTagField
         typeIntoEditorField(groupTag, "Ops", "The Settings card's group tag field")
         app.typeKey(.tab, modifierFlags: [])
@@ -1060,6 +1061,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Slow EP", path: "/api/slow")
         hideRequestLogDrawer()
 
+        endpointEditor.showOptions()
         let delay = endpointEditor.delayField
         XCTAssertTrue(delay.waitForExistence(timeout: 5),
                       "The Settings section should show the per-endpoint delay field")
@@ -1085,6 +1087,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(path.waitForExistence(timeout: 5))
         path.click()
 
+        endpointEditor.showOptions()
         let reopenedDelay = endpointEditor.delayField
         XCTAssertTrue(reopenedDelay.waitForExistence(timeout: 5))
         XCTAssertEqual(reopenedDelay.value as? String, "250",
@@ -1128,6 +1131,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Any EP", path: "/api/any")
         hideRequestLogDrawer()
 
+        endpointEditor.showOptions()
         XCTAssertTrue(globalDelayValue.waitForExistence(timeout: 5),
                       "The Settings section should show the project-wide delay")
         let globalDelayText = shownText(of: globalDelayValue)
@@ -1139,8 +1143,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(globalDelayNote.waitForExistence(timeout: 5),
                       "The row should carry the note explaining where the global delay comes from")
         let noteText = shownText(of: globalDelayNote)
-        XCTAssertTrue(noteText.contains("--delay"),
-                      "The note should name the command that sets it — it reads \(noteText)")
+        XCTAssertTrue(noteText.contains("Project delay"),
+                      "The note should explain how the delays combine — it reads \(noteText)")
     }
 
     // MARK: - 14. Adding a scenario from the inspector

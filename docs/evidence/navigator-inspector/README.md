@@ -1,4 +1,4 @@
-# Navigator and inspector review
+# Navigator, endpoint editor, and inspector review
 
 Captured on 2026-09-22 from the actual Debug app with isolated XCUITest demo projects. These are screenshots, not mockups.
 
@@ -20,6 +20,18 @@ no empty active-journey slot. The follow-up passed 72 design-system and four wor
 tests plus three focused UI flows (geometry/filter retention, method scope/active-journey reveal,
 and scenario/traffic navigation). Endpoint and traffic captures below were refreshed after this change.
 
+Endpoint editor follow-up: a compact status row replaces the Response card, headers expand into
+editable rows, and the response body fills the center pane with consistent 12-point side insets.
+Endpoint options are collapsed below the editor. Short windows can scroll to the last option;
+collapsing options commits a focused field. The unexplained status dot and CLI-only delay hint
+have been replaced with a status description and a plain-language explanation. Nine endpoint
+rendering/pending-edit tests and eight distinct focused UI flows passed across the follow-up runs.
+The UI checks cover header add/remove and reopen, JSON formatting and reopen, invalid JSON,
+status validation, delay blur/reopen and invalid input, read-only project delay, full-width geometry,
+disclosures, focused-field commit on collapse, and scrolling to the final option in a short window.
+The initial reopen selectors were updated to target the combined accessible navigator rows.
+Endpoint captures below are refreshed; journey and inspector captures retain their earlier verified states.
+
 ## Endpoints, wide
 
 ![Endpoints, wide](navigator-endpoints-wide.png)
@@ -27,6 +39,14 @@ and scenario/traffic navigation). Endpoint and traffic captures below were refre
 ## Endpoints, narrow
 
 ![Endpoints, narrow](navigator-endpoints-narrow.png)
+
+## Endpoint headers and options, expanded
+
+![Endpoint headers and options](endpoint-editor-options-wide.png)
+
+## Endpoint options, short window scrolled to the bottom
+
+![Endpoint options in a short window](endpoint-editor-options-narrow-scrolled.png)
 
 ## Grouped journeys, wide
 

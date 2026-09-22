@@ -569,6 +569,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         )
 
         // ERRVALID-08. The delay commits on blur, so the complaint arrives when focus leaves.
+        endpointEditor.showOptions()
         replaceText(in: endpointEditor.delayField, with: "abc")
         endpointEditor.groupTagField.click()
         XCTAssertTrue(

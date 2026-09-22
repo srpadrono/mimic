@@ -2,97 +2,18 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Geometry shared by every labelled row in the editor.
-///
-/// Xcode's inspectors right-align a row's label in a fixed column and start every value at the same
-/// x, so a form reads as one vertical seam rather than as labels ending wherever their own text
-/// happens to stop. `InspectorRowMetrics` says that for the 280pt inspector; the editor needs its own
-/// numbers because it is as wide as the window and its labels are different ones.
-///
-/// The part that matters is that the seam is shared across *both* cards. "Status code" lives in one
-/// and "Group tag" in another, but the eye reads them as a single form, and a seam that shifted
-/// between two cards 16pt apart would look like a mistake rather than a grouping.
+/// Shared columns for endpoint options and the editable header table.
 private enum EditorRowMetrics {
-    /// Width of the right-aligned label column. Sized for "Global delay", the longest label, which
-    /// measures 64.6pt at `DSTypography.label` (SF Pro 11pt regular). A longer label has to raise
-    /// this rather than wrap — a two-line label loses its alignment with the control beside it.
     static let labelColumn: CGFloat = 68
-
-    /// Width of a field holding a number: a status code, or a millisecond count. Both are at most
-    /// four characters, and one width means the numeric rows share a right edge as well as a left.
     static let numericFieldWidth: CGFloat = 72
-
-    /// Width of the group tag field. Bounded rather than flexible: stretched across a full-width
-    /// editor, a field for the word "Users" reads as a text area.
     static let textFieldWidth: CGFloat = 240
-
-    /// Width of the header name column. A response header's name is short and its value is not, so
-    /// the two do not deserve equal halves of the row.
     static let headerKeyWidth: CGFloat = 200
-
-    /// Where a value starts, measured from the card's leading edge. Prose that explains a row lines
-    /// up here rather than at the card edge, so it reads as belonging to the row above it.
     static let valueInset: CGFloat = DSSpacing.md + labelColumn + DSSpacing.sm
-
-    /// How wide a card is allowed to get.
-    ///
-    /// The widest row this has to hold is a response header: a 200pt name column, a gap, and a value
-    /// field that should still be worth typing into — plus the card's own 12pt insets on both sides.
-    /// 640 seats that with room to spare and keeps the form readable along one edge instead of
-    /// stretching a 68pt label away from its control.
-    ///
-    /// A cap, not a width: a centre pane narrower than this still gets a card that fits it.
-    static let cardMaxWidth: CGFloat = 640
 }
 
-/// The well every editable field in this pane wears.
-///
-/// One height, one radius, one hairline — the rule the request log states for its own control row,
-/// applied here for the same reason: fields that differ by a couple of points read as unrelated
-/// controls that happen to be near each other.
-///
-/// Read from the design system rather than restated, so this row and the request log's cannot drift
-/// apart by a point the way four independently written literals eventually do. `field` is the rung a
-/// control a user types into stands on; it is also the minimum height of a row, so a row whose value
-/// is plain text keeps the rhythm of one holding a field.
-/// How tall the response-body well stands.
-///
-/// Bounded rather than free: below the floor a one-line body collapses the card and leaves nowhere
-/// to type, and above the ceiling a 500-line payload runs off the window instead of scrolling inside
-/// the well that owns it.
 private enum EditorBody {
-    /// Twelve lines. The floor is the only thing standing between a *wrapped* body and a slit:
-    /// `wrapText` is on, so a minified payload is one logical line that fills the pane, and
-    /// `lineCount` counts logical lines and reports 1.
-    ///
-    /// It was briefly 100, which is 6.6 visible lines — less than the 240 the same body used to get,
-    /// so the change meant to give the pane back to its content took it away from the one body that
-    /// needs it most. 180 is what that case had before and is the number to keep until the wrap is
-    /// actually estimated.
+    /// Keep a usable text viewport when a short window requires the whole form to scroll.
     static let minHeight: CGFloat = 180
-
-    /// Unchanged. Past this the payload scrolls within its own well rather than pushing the cards
-    /// below it off the pane.
-    static let maxHeight: CGFloat = 420
-
-    /// The well's natural height for this text, before the bounds are applied.
-    ///
-    /// `DSJSONEditor` owns the arithmetic because it owns the font.
-    ///
-    /// The frame wraps the editor *and* the validation row it draws underneath itself when the JSON
-    /// does not parse, so that row's height has to be added rather than borrowed. It was borrowed —
-    /// as "one more editor line" — and an editor line is 15pt where the row measures 18: an 11pt
-    /// `Text` laying out at 14, plus `DSSpacing.xs` of top padding. The fixed row takes its height
-    /// first, so the three-point shortfall came off the editor and clipped the descenders on its
-    /// last line.
-    static func height(for text: String) -> CGFloat {
-        DSJSONEditor.height(forLines: DSJSONEditor.lineCount(of: text)) + validationRowHeight
-    }
-
-    /// The validation row `DSJSONEditor` draws under itself: an 11pt `Text` at 14pt of layout, plus
-    /// `DSSpacing.xs` above it. Reserved unconditionally — a well that changes height when the JSON
-    /// stops parsing would move every card below it while you are typing.
-    static let validationRowHeight: CGFloat = 14 + DSSpacing.xs
 }
 
 private enum EditorField {
@@ -150,6 +71,11 @@ struct EndpointEditorView: View {
     @State private var delayString = ""
     @State private var groupTag = ""
     @State private var headers: [HeaderEntry] = []
+    @State private var headersExpanded = false
+    @State private var optionsExpanded = false
+    @State private var responseHeight = DSBarHeight.controlRow
+    @State private var headersHeight = DSBarHeight.controlRow
+    @State private var optionsHeight = DSBarHeight.controlRow
     /// The message under the status code field, or `nil` when there is nothing to say.
     ///
     /// Written only when a value has *settled* — see `debounceStatusCode()`. A status code is typed
@@ -226,21 +152,28 @@ struct EndpointEditorView: View {
                     identifier: "editor.noActiveScenario"
                 )
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                        editorCard { responseSection }
-                        editorCard { headersSection }
-                        editorCard { bodySection }
-                        editorCard { settingsSection }
+                // Measure the controls, then give the body all remaining height. The outer scroll
+                // view keeps every option reachable when a short window hits the body’s minimum.
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            responseSection
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { responseHeight = $0 }
+                            headersSection
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headersHeight = $0 }
+                            bodySection(height: max(
+                                EditorBody.minHeight,
+                                geometry.size.height - responseHeight - headersHeight - optionsHeight
+                                    - DSBarHeight.controlRow - DSSpacing.md
+                            ))
+                            settingsSection
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { optionsHeight = $0 }
+                        }
                     }
-                    .padding(DSSpacing.md)
                 }
             }
         }
-        // Clamped to the pane, so the stack cannot size itself to its widest child: the editor cards
-        // carry fixed field widths that a narrow centre pane can be smaller than, and without this
-        // the whole editor would grow past the pane's trailing edge instead of letting the cards
-        // truncate inside it.
+        // A narrow split pane must compress the fields rather than grow past its leading edge.
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
@@ -353,106 +286,85 @@ struct EndpointEditorView: View {
 
     // MARK: - Sections
 
-    @ViewBuilder
     private var responseSection: some View {
-        DSSectionHeader("Response", identifier: "editor.response")
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            HStack(spacing: DSSpacing.sm) {
+                Text("Status")
+                    .font(DSTypography.label)
+                    .foregroundStyle(DSColors.labelSecondary)
+                TextField("200", text: $statusCodeString)
+                    .textFieldStyle(.plain)
+                    .font(DSTypography.code)
+                    .editorFieldWell(
+                        width: EditorRowMetrics.numericFieldWidth,
+                        isInvalid: statusCodeError != nil
+                    )
+                    .accessibilityIdentifier("endpointEditor.statusCode")
+                    .accessibilityLabel("Status code")
+                    .onSubmit { commitStatusCode() }
+                if let code = Self.statusCodeValue(from: statusCodeString) {
+                    Text(code == 200 ? "OK" : HTTPURLResponse.localizedString(forStatusCode: code).localizedCapitalized)
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.httpStatusColor(for: code))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("endpointEditor.statusDescription")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: DSBarHeight.controlRow)
 
-        formRow("Status code") {
-            TextField("200", text: $statusCodeString)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .editorFieldWell(
-                    width: EditorRowMetrics.numericFieldWidth,
-                    isInvalid: statusCodeError != nil
-                )
-                .accessibilityIdentifier("endpointEditor.statusCode")
-                .accessibilityLabel("Status code")
-                .onSubmit { commitStatusCode() }
-
-            // After the field, not before it. In front, the dot pushed the value off the seam the
-            // other rows hang from — and it was drawn only when the text already parsed, so the field
-            // slid sideways as you typed the first digit. `httpStatusColor` answers "no class" with
-            // grey, so the dot can simply always be there.
-            Circle()
-                .fill(DSColors.httpStatusColor(for: Int(statusCodeString) ?? 0))
-                .frame(width: 8, height: 8)
-                .accessibilityHidden(true)
+            if let statusCodeError {
+                validationNote(statusCodeError, identifier: "endpointEditor.statusCode.error", leadingInset: DSSpacing.md)
+                    .padding(.bottom, DSSpacing.sm)
+            }
         }
-
-        // A rejected status code used to be rejected in silence: the field went on showing 600 while
-        // the endpoint went on serving the code it had before. The row below is the whole of the
-        // feedback, so it has to appear whenever the commit does not.
-        if let statusCodeError {
-            validationNote(statusCodeError, identifier: "endpointEditor.statusCode.error")
-        }
+        .overlay(alignment: .bottom) { sectionDivider }
     }
 
-    @ViewBuilder
     private var headersSection: some View {
-        DSSectionHeader("Response headers", identifier: "editor.headers") {
-            Button {
-                headers.append(HeaderEntry(key: "", value: ""))
-            } label: {
-                Label("Add", systemImage: "plus")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.accentText)
-                    // A real target and a hover well. `.plain` with no frame made the clickable
-                    // area the glyph box of the words themselves — about 34×13pt, with nothing
-                    // responding to the pointer. That is verbatim the shape `DSPanelHeaderButton`
-                    // exists to fix; these two section-header actions are the call sites that never
-                    // adopted it.
-                    .padding(.horizontal, DSSpacing.xs)
-                    .frame(height: EditorField.height)
-                    .contentShape(Rectangle())
-            }
-            // `.dsPlain` rather than `.plain` plus a hover modifier: same hover, and a pressed
-            // state the pair could not provide, because a modifier cannot see the press.
-            .buttonStyle(.dsPlain)
-            .help("Add a response header")
-            .accessibilityIdentifier("endpointEditor.addHeaderButton")
-            .accessibilityLabel("Add header")
-        }
-
-        VStack(spacing: DSSpacing.xs) {
-            // Bound by identity, labelled by position. `ForEach($headers)` hands each row a
-            // `Binding<HeaderEntry>` derived from the entry's `id`, so a row can outlive a removal
-            // somewhere above it; the previous form iterated `enumerated()` and passed
-            // `$headers[index]`, which meant every surviving row held an index that the row calling
-            // `remove(at:)` had just invalidated — the classic way to read one element past the end.
-            ForEach($headers) { header in
-                headerRow(header)
-            }
-
-            if headers.isEmpty {
-                HStack(spacing: DSSpacing.xs) {
-                    Image(systemName: "tray")
-                        // The rung that matches the line of type beside it: `DSGlyph.control` is 11,
-                        // which is `DSTypography.label`'s size, so the glyph sits level with the
-                        // sentence rather than a point proud of it.
-                        .font(.system(size: DSGlyph.control))
-                        .foregroundStyle(DSColors.labelTertiary)
-                        .accessibilityHidden(true)
-
-                    // `labelSecondary`. 36% is an alpha for a glyph that decorates a sentence, not
-                    // for the sentence.
-                    Text("No custom headers")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        // On the `Text`, not on the `HStack` around it. The glyph beside it is
-                        // `.accessibilityHidden`, so there is exactly one element here worth
-                        // naming, and naming the wrapper instead risks the identifier landing on a
-                        // group that a `staticTexts` query never reaches.
-                        .accessibilityIdentifier("endpointEditor.headers.empty")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                sectionDisclosure("Headers", isExpanded: headersExpanded, identifier: "endpointEditor.toggleHeaders") {
+                    headersExpanded.toggle()
                 }
-                .padding(.horizontal, DSSpacing.sm)
-                .frame(maxWidth: .infinity, minHeight: EditorField.height, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: EditorField.cornerRadius)
-                        .fill(DSColors.tertiary.opacity(0.5))
-                )
+                Text(headers.isEmpty ? "No custom headers" : "\(headers.count)")
+                    .font(DSTypography.label)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier(headers.isEmpty ? "endpointEditor.headers.empty" : "endpointEditor.headers.count")
+                Spacer(minLength: DSSpacing.sm)
+                Button {
+                    headersExpanded = true
+                    headers.append(HeaderEntry(key: "", value: ""))
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.accentText)
+                        .padding(.horizontal, DSSpacing.xs)
+                        .frame(height: EditorField.height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.dsPlain)
+                .help("Add a response header")
+                .accessibilityIdentifier("endpointEditor.addHeaderButton")
+                .accessibilityLabel("Add header")
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: DSBarHeight.controlRow)
+
+            if headersExpanded && !headers.isEmpty {
+                VStack(spacing: DSSpacing.sm) {
+                    // Bind by identity so removing an earlier row never leaves a stale index.
+                    ForEach($headers) { header in
+                        headerRow(header)
+                    }
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.bottom, DSSpacing.sm)
             }
         }
-        .padding(.horizontal, DSSpacing.md)
+        .overlay(alignment: .bottom) { sectionDivider }
         .onChange(of: headers) { debounceHeaders() }
     }
 
@@ -518,74 +430,76 @@ struct EndpointEditorView: View {
         commitHeaders()
     }
 
-    @ViewBuilder
-    private var bodySection: some View {
-        DSSectionHeader("Response body", identifier: "editor.body") {
-            Button {
-                if let pretty = DSJSONEditor.prettyPrint(responseBody) {
-                    responseBody = pretty
-                    commitBody()
+    private func bodySection(height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Response body")
+                    .font(DSTypography.metaBold)
+                    .foregroundStyle(DSColors.labelSecondary)
+                Spacer(minLength: DSSpacing.sm)
+                Button {
+                    if let pretty = DSJSONEditor.prettyPrint(responseBody) {
+                        responseBody = pretty
+                        commitBody()
+                    }
+                } label: {
+                    Label("Format", systemImage: "text.alignleft")
+                        .font(DSTypography.label)
+                        .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
+                        .padding(.horizontal, DSSpacing.xs)
+                        .frame(height: EditorField.height)
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                // Worded, not a lone `text.alignleft`. The glyph is the one control in this pane
-                // nobody can name on sight, and a tooltip is only discoverable once you have already
-                // pointed at the thing you were trying to find.
-                Label("Format", systemImage: "text.alignleft")
-                    .font(DSTypography.label)
-                    // Explicit, because a `.plain` button keeps its foreground when disabled: with no
-                    // body to format the control still sat there in full accent blue, reading as
-                    // pressable.
-                    .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
-                    // Same target and well as the "Add" action above it — see the note there.
-                    .padding(.horizontal, DSSpacing.xs)
-                    .frame(height: EditorField.height)
-                    .contentShape(Rectangle())
+                .buttonStyle(.dsPlain)
+                .disabled(!canFormatBody)
+                .help("Pretty-print the JSON body")
+                .accessibilityIdentifier("endpointEditor.prettyPrintButton")
+                .accessibilityLabel("Pretty-print JSON")
             }
-            // `.dsPlain` rather than `.plain` plus a hover modifier: same hover, and a pressed
-            // state the pair could not provide, because a modifier cannot see the press.
-            .buttonStyle(.dsPlain)
-            .disabled(!canFormatBody)
-            .help("Pretty-print the JSON body")
-            .accessibilityIdentifier("endpointEditor.prettyPrintButton")
-            .accessibilityLabel("Pretty-print JSON")
-        }
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: DSBarHeight.controlRow)
 
-        DSJSONEditor(text: $responseBody, identifier: "editor.body") { valid in
-            isJSONValid = valid
+            // Fill the available workspace regardless of payload length. Formatting a long payload
+            // changes the document, never the height of the editor or the position of its options.
+            DSJSONEditor(text: $responseBody, identifier: "editor.body") { valid in
+                isJSONValid = valid
+            }
+            .frame(height: height)
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.bottom, DSSpacing.md)
+            .onChange(of: responseBody) { debounceBody() }
         }
-        // A `CodeEditor` has no opinion about its own height and a `ScrollView` proposes none, so
-        // `minHeight` alone handed the decision to whatever the representable reported — either
-        // nothing, or the whole payload. The fix used to be a fixed `idealHeight` of 240, and the
-        // cost of that was the largest object in the window being mostly empty: a five-line body
-        // measures about 72pt and was given 240 regardless, on the one surface in this app that
-        // holds real content.
-        //
-        // `DSJSONEditor.height(forLines:)` measures the face the editor actually draws with. The
-        // floor is what absorbs a *minified* payload, which is one logical line that wraps to many
-        // and so under-reports — see that method's note.
-        // **`maxHeight` does not clamp here, and the ceiling has to be applied to the ideal.**
-        //
-        // `.frame(minHeight:idealHeight:maxHeight:)` clamps against a *proposal*, and the enclosing
-        // `ScrollView` proposes nil height — so the frame resolves to `idealHeight` verbatim and the
-        // ceiling never fires. That was harmless while the ideal was a fixed 240; the moment it
-        // became content-derived, a 200-line body rendered a 3,000pt well and pushed everything under
-        // it that far off the pane. Pressing Format on a minified body did it in one click.
-        //
-        // Clamp the ideal at both ends: an ideal below the minimum is a contradictory SwiftUI
-        // constraint, which occurs for every short response. The bounds also guard finite proposals.
-        .frame(
-            minHeight: EditorBody.minHeight,
-            idealHeight: max(EditorBody.minHeight, min(EditorBody.height(for: responseBody), EditorBody.maxHeight)),
-            maxHeight: EditorBody.maxHeight
-        )
-        .padding(.horizontal, DSSpacing.md)
-        .onChange(of: responseBody) { debounceBody() }
+    }
+
+    private var settingsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                sectionDisclosure("Endpoint options", isExpanded: optionsExpanded, identifier: "endpointEditor.toggleOptions") {
+                    // Commit before removing a focused field from the view hierarchy.
+                    if optionsExpanded {
+                        if isGroupTagFocused { commitGroupTag() }
+                        if isDelayFocused { commitDelay() }
+                        isGroupTagFocused = false
+                        isDelayFocused = false
+                    }
+                    optionsExpanded.toggle()
+                }
+                Spacer(minLength: DSSpacing.sm)
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: DSBarHeight.controlRow)
+            if optionsExpanded {
+                VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                    endpointOptions
+                }
+                .padding(.bottom, DSSpacing.md)
+            }
+        }
+        .overlay(alignment: .top) { sectionDivider }
     }
 
     @ViewBuilder
-    private var settingsSection: some View {
-        DSSectionHeader("Settings", identifier: "editor.settings")
-
+    private var endpointOptions: some View {
         formRow("Backend") {
             Picker("Backend", selection: Binding<UUID?>(
                 get: { endpoint.backendID },
@@ -605,7 +519,7 @@ struct EndpointEditorView: View {
             TextField("e.g. Users, Auth", text: $groupTag)
                 .textFieldStyle(.plain)
                 .font(DSTypography.code)
-                .editorFieldWell(width: EditorRowMetrics.textFieldWidth)
+                .editorFieldWell(maxWidth: EditorRowMetrics.textFieldWidth)
                 .accessibilityIdentifier("endpointEditor.groupTag")
                 // Committed when focus leaves, not only on Return. Typing a value and clicking
                 // somewhere else is the ordinary way to fill a form; without this the edit was
@@ -634,10 +548,9 @@ struct EndpointEditorView: View {
                 .onSubmit { commitDelay() }
 
             unitLabel("ms")
-
-            if let delayError {
-                validationNote(delayError, identifier: "endpointEditor.delay.error")
-            }
+        }
+        if let delayError {
+            validationNote(delayError, identifier: "endpointEditor.delay.error")
         }
 
         formRow("Global delay") {
@@ -664,12 +577,39 @@ struct EndpointEditorView: View {
             unitLabel("ms")
         }
 
-        // Keep the secondary explanation short enough for a narrow editor pane. Non-breaking
-        // spaces keep the CLI command together instead of leaving a dangling flag on a new line.
         note(
-            "Adds to endpoint delay. Set project-wide with mimic\u{00A0}server\u{00A0}configure\u{00A0}--delay.",
+            "Project delay is added to this endpoint’s delay.",
             identifier: "endpointEditor.globalDelay.note"
         )
+    }
+
+    private var sectionDivider: some View {
+        Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+    }
+
+    private func sectionDisclosure(
+        _ title: String,
+        isExpanded: Bool,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: DSSpacing.sm) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                    .frame(width: DSGlyph.control)
+                    .accessibilityHidden(true)
+                Text(title).font(DSTypography.metaBold)
+            }
+            .foregroundStyle(DSColors.labelSecondary)
+            .frame(height: EditorField.height)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPlain)
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel(title)
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .help(isExpanded ? "Collapse \(title.lowercased())" : "Expand \(title.lowercased())")
     }
 
     // MARK: - Row furniture
@@ -719,7 +659,7 @@ struct EndpointEditorView: View {
     /// deficiency, a complaint and a hint look identical. It sits at the value seam like `note()`,
     /// so it reads as belonging to the field it is about rather than to the section.
     @ViewBuilder
-    private func validationNote(_ message: String, identifier: String) -> some View {
+    private func validationNote(_ message: String, identifier: String, leadingInset: CGFloat = EditorRowMetrics.valueInset) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
                 // `inline`, the rung `DSTextField` and `DSJSONEditor` draw their validation marks at
@@ -733,7 +673,7 @@ struct EndpointEditorView: View {
         }
         .font(DSTypography.label)
         .foregroundStyle(DSColors.destructive)
-        .padding(.leading, EditorRowMetrics.valueInset)
+        .padding(.leading, leadingInset)
         .padding(.trailing, DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         // One reading, not a glyph and a sentence read separately.
@@ -760,41 +700,6 @@ struct EndpointEditorView: View {
             .padding(.trailing, DSSpacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier(identifier)
-    }
-
-    // MARK: - Card wrapper
-
-    /// A titled group box, in the shape Xcode's Signing & Capabilities editor uses: the section's
-    /// banded header *is* the card's top edge.
-    ///
-    /// `DSSectionHeader` grew a tinted band and a hairline this session. With the card's old 6pt of
-    /// top padding the band floated inside the card with a stripe of card above it and square corners
-    /// poking at the rounded ones — which reads as a rendering seam, not as a header. Clipping to the
-    /// card's shape lets the band reach the edges and take the corner radius with it.
-    @ViewBuilder
-    private func editorCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-            content()
-        }
-        .padding(.bottom, DSSpacing.md)
-        // Capped, not `.infinity`. `formRow` is a 68pt label column, a fixed field and a
-        // `Spacer(minLength: 0)` — so whatever width the card is given, the spacer swallows it, and
-        // a 68pt label with a 72pt field beside it was spanning the better part of 900pt. A form is
-        // read along its leading edge; the rest of that width was carrying nothing.
-        //
-        // Leading-aligned rather than centred: the cards hang off the same edge as the section
-        // headers above them and the identity row above those.
-        .frame(maxWidth: EditorRowMetrics.cardMaxWidth, alignment: .leading)
-        .background(DSColors.secondary.opacity(0.35))
-        .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.lg))
-        .overlay(
-            RoundedRectangle(cornerRadius: DSCornerRadius.lg)
-                .stroke(DSColors.border, lineWidth: DSStroke.hairline)
-        )
-        // After the fill and the stroke, never before. This frame is what pins the capped card to
-        // the pane's leading edge; applied first, the background would paint *it* rather than the
-        // card, and the cap above would draw nothing.
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Derived state
@@ -859,6 +764,8 @@ struct EndpointEditorView: View {
         delayString = synced.delayString
         groupTag = synced.groupTag
         headers = synced.headers.map { HeaderEntry(key: $0.0, value: $0.1) }
+        headersExpanded = !headers.isEmpty
+        delayError = nil
         // A complaint about the endpoint you just navigated away from is not about anything on
         // screen any more.
         statusCodeError = nil

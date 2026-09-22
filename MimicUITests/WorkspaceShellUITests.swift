@@ -628,6 +628,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// only typed would assert against a value the endpoint never received.
     @MainActor
     private func setGroupTag(_ tag: String) {
+        endpointEditor.showOptions()
         let field = endpointEditor.groupTagField
         XCTAssertTrue(field.waitForExistence(timeout: 5), "The editor should offer a group tag field")
         field.click()

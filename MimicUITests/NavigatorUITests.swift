@@ -136,6 +136,77 @@ final class NavigatorUITests: MimicUITestCase {
     }
 
     @MainActor
+    func testEndpointEditorUsesTheWorkspaceAndKeepsOptionsAccessibleAtBothWidths() async throws {
+        try await launchFixture()
+        try await command(["scenarioUpdate": [
+            "endpoint": ["name": "Account summary"], "scenario": ["name": "Default"],
+            "spec": ["body": "{\n  \"id\": \"account-001\",\n  \"name\": \"Demo account\",\n  \"plan\": \"Pro\"\n}"]
+        ]])
+        let navigator = NavigatorPage(app: app)
+        let shell = WorkspaceShellPage(app: app)
+        navigator.row(named: "Account summary").click()
+        if requestLogDrawer.emptyHeading.exists { workspace.toggleDrawerButton.click() }
+        XCTAssertTrue(endpointEditor.bodyEditor.waitForExistence(timeout: 5))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.endpointEditor.bodyEditor.frame.width > 640 && self.endpointEditor.bodyEditor.frame.height > 300
+        }, "The body should use the full workspace instead of a capped form card")
+        XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - shell.panel("centerPane").frame.minX, 12, accuracy: 1)
+        XCTAssertEqual(shell.panel("centerPane").frame.maxX - endpointEditor.bodyEditor.frame.maxX, 12, accuracy: 1)
+        XCTAssertEqual(endpointEditor.optionsToggle.value as? String, "Collapsed")
+        XCTAssertEqual(endpointEditor.headersToggle.value as? String, "Collapsed")
+        XCTAssertFalse(endpointEditor.groupTagField.exists)
+        XCTAssertTrue(endpointEditor.statusDescription.label.contains("OK") ||
+                      (endpointEditor.statusDescription.value as? String)?.contains("OK") == true)
+        navigator.row(named: "Account summary").click()
+        add(navigator.screenshot("endpoint-editor-wide"))
+
+        let bodyHeight = endpointEditor.bodyEditor.frame.height
+        endpointEditor.showOptions()
+        XCTAssertTrue(endpointEditor.groupTagField.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.delayField.isHittable)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.endpointEditor.bodyEditor.frame.height < bodyHeight })
+        endpointEditor.addHeaderButton.click()
+        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForExistence(timeout: 5))
+        XCTAssertEqual(endpointEditor.headersToggle.value as? String, "Expanded")
+        endpointEditor.headerKeyField(at: 0).click()
+        endpointEditor.headerKeyField(at: 0).typeText("X-Request-Source")
+        endpointEditor.headerValueField(at: 0).click()
+        endpointEditor.headerValueField(at: 0).typeText("Mimic")
+        endpointEditor.headerValueField(at: 0).typeKey(.return, modifierFlags: [])
+        add(navigator.screenshot("endpoint-editor-options-wide"))
+
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        XCTAssertTrue(endpointEditor.optionsToggle.isHittable)
+        XCTAssertTrue(endpointEditor.delayField.isHittable)
+        XCTAssertTrue(endpointEditor.groupTagField.isHittable)
+        XCTAssertGreaterThanOrEqual(endpointEditor.headerKeyField(at: 0).frame.minX, shell.panel("centerPane").frame.minX)
+        XCTAssertLessThanOrEqual(endpointEditor.groupTagField.frame.maxX, shell.panel("centerPane").frame.maxX)
+        XCTAssertLessThanOrEqual(endpointEditor.headerValueField(at: 0).frame.maxX, shell.panel("centerPane").frame.maxX)
+        XCTAssertGreaterThanOrEqual(endpointEditor.bodyEditor.frame.height, 180)
+        add(navigator.screenshot("endpoint-editor-narrow"))
+        // Scroll over the options bar so the nested code editor cannot consume the wheel event.
+        endpointEditor.optionsToggle.scroll(byDeltaX: 0, deltaY: -300)
+        XCTAssertTrue(endpointEditor.globalDelayNote.isHittable, "Short windows must allow the last option to scroll into view")
+        add(navigator.screenshot("endpoint-editor-options-narrow-scrolled"))
+        endpointEditor.optionsToggle.scroll(byDeltaX: 0, deltaY: 300)
+        endpointEditor.headersToggle.click()
+        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForNonExistence(timeout: 5))
+        endpointEditor.delayField.click()
+        endpointEditor.delayField.typeKey("a", modifierFlags: .command)
+        endpointEditor.delayField.typeText("250")
+        endpointEditor.optionsToggle.click()
+        XCTAssertTrue(endpointEditor.groupTagField.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.prettyPrintButton.isHittable)
+        add(navigator.screenshot("endpoint-editor-narrow-collapsed"))
+        navigator.row(named: "Current orders").click()
+        navigator.row(named: "Account summary").click()
+        endpointEditor.showOptions()
+        XCTAssertEqual(endpointEditor.delayField.value as? String, "250", "Collapsing options commits its focused field")
+        XCTAssertEqual(endpointEditor.headerValueField(at: 0).value as? String, "Mimic", "Existing headers reopen as a table")
+    }
+
+    @MainActor
     func testSharedGeometryFilteringAndDisclosureAtWideAndNarrowWidths() async throws {
         try await launchFixture()
         let navigator = NavigatorPage(app: app)
