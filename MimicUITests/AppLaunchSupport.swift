@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 import XCTest
 
@@ -210,43 +211,23 @@ enum UITestApp {
         return false
     }
 
-    static var launchedApps: [NSRunningApplication] {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+    /// Activation is scoped to the process created by this launch. Other builds can share the
+    /// bundle identifier, including the developer's normal session.
+    static func activateLaunchedApp(processIdentifier: pid_t) {
+        guard let runningApp = NSRunningApplication(processIdentifier: processIdentifier),
+              !runningApp.isTerminated else { return }
+        runningApp.unhide()
+        runningApp.activate(from: NSRunningApplication.current, options: [.activateAllWindows])
     }
 
-    static func activateLaunchedApp() {
-        // The app may still be starting; wait for it to exist rather than sleeping a guessed interval.
-        guard waitUntil(timeout: 2, { launchedApps.isEmpty == false }) else { return }
-
-        for runningApp in launchedApps {
-            runningApp.unhide()
-            runningApp.activate(
-                from: NSRunningApplication.current,
-                options: [.activateAllWindows]
-            )
-        }
-    }
-
-    static func reopenLaunchedApp() {
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-            return
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        configuration.createsNewApplicationInstance = false
-
-        let semaphore = DispatchSemaphore(value: 0)
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in
-            semaphore.signal()
-        }
-        _ = semaphore.wait(timeout: .now() + 2)
-
-        // Wait for the app to actually be frontmost rather than pausing and hoping. `openApplication`
-        // signals when the request was accepted, not when the window is up.
-        waitUntil(timeout: 2) {
-            launchedApps.contains { $0.isActive }
-        }
+    /// Ask this process to reopen its window without launching another copy through Launch Services.
+    static func reopenLaunchedApp(processIdentifier: pid_t) {
+        let event = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
+            targetDescriptor: NSAppleEventDescriptor(processIdentifier: processIdentifier),
+            returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID)
+        )
+        _ = try? event.sendEvent(options: .noReply, timeout: 2)
     }
 
     /// Launches `app` and drives it to the foreground until `isReady` holds.
@@ -264,17 +245,24 @@ enum UITestApp {
         isReady: () -> Bool
     ) -> Bool {
         isolateControlPlaneDiscovery(for: app)
+        let existingProcesses = Set(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .map(\.processIdentifier))
         app.launch()
+        var launchedProcess: pid_t?
+        guard waitUntil(timeout: 5, {
+            launchedProcess = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+                .first { !existingProcesses.contains($0.processIdentifier) }?.processIdentifier
+            return launchedProcess != nil
+        }), let launchedProcess else { return false }
+        activateLaunchedApp(processIdentifier: launchedProcess)
         guard app.wait(for: .runningForeground, timeout: 15) else { return false }
 
         for attempt in 0..<attempts {
             if isReady() { return true }
 
-            activateLaunchedApp()
             app.activate()
-            if attempt > 0 {
-                reopenLaunchedApp()
-            }
+            activateLaunchedApp(processIdentifier: launchedProcess)
+            if attempt > 0 { reopenLaunchedApp(processIdentifier: launchedProcess) }
 
             guard attempt < attempts - 1 else { break }
             // Give the window server a moment before the next attempt, but stop as soon as the app is

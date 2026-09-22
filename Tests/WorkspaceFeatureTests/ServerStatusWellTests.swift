@@ -1,186 +1,121 @@
-import SwiftUI
+import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
 
-@Suite("Server status well")
+@Suite("Server toolbar presentation")
 struct ServerStatusWellTests {
+    private let accountsID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
 
-    @Test("Backend summary distinguishes configured ports from bound listeners")
-    func backendPortsAndPendingRestart() {
-        let configured = ServerConfiguration(port: 8080, globalDelayMs: 0,
-            backends: [.init(name: "Accounts", port: 8081)])
-        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: nil, isRunning: false)
-            == "2 ports configured: Primary: 8080, Accounts: 8081. Server is not running.")
-        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: configured, isRunning: true)
-            == "2 ports listening: Primary: 8080, Accounts: 8081.")
-        var renamed = configured
-        renamed.backends[0].name = "Billing"
-        #expect(ServerStatusWell.backendSummary(configuration: renamed, boundConfiguration: configured, isRunning: true)
-            == "2 ports listening: Primary: 8080, Billing: 8081.")
-        var changed = configured
-        changed.backends[0].port = 9091
-        #expect(ServerStatusWell.backendSummary(configuration: changed, boundConfiguration: configured, isRunning: true)
-            == "Listening on Primary: 8080, Accounts: 8081. Configured ports: Primary: 8080, Accounts: 9091. Restart required.")
-    }
-
-    // MARK: - What the well says
-
-    @Test("A running server shows its address instead of the project name")
-    func showsAddressWhileRunning() {
-        // No scheme: the well is toolbar-width, and `http://` is seven characters that never vary.
-        #expect(
-            ServerStatusWell.primaryText(serverState: .running(port: 8080), projectName: "Payments API")
-                == "localhost:8080"
-        )
-    }
-
-    @Test("A server that is not running says so, rather than repeating the window title")
-    func namesTheServerStateWhileNotRunning() {
-        // The project name is already in the title bar a centimetre away. Echoing it here read as a
-        // rendering fault and answered none of the questions the well exists to answer.
-        func text(_ state: ServerState) -> String {
-            ServerStatusWell.primaryText(serverState: state, projectName: "Payments API")
+    @Test("One configured address remains visible through every lifecycle state")
+    func stableSinglePortTitle() {
+        let configuration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+        for state: ServerState in [.stopped, .starting, .running(port: 8080), .stopping, .error("Port occupied")] {
+            #expect(ServerStatusWell.summaryTitle(serverState: state, configuration: configuration,
+                boundConfiguration: configuration, compact: false) == "localhost:8080")
+            #expect(ServerStatusWell.summaryTitle(serverState: state, configuration: configuration,
+                boundConfiguration: configuration, compact: true) == "Port 8080")
         }
-
-        #expect(text(.stopped) == "Server stopped")
-        #expect(text(.starting) == "Starting\u{2026}")
-        #expect(text(.stopping) == "Stopping\u{2026}")
-        #expect(text(.error("Port 8080 in use")) == "Server error")
     }
 
-    @Test("Compact toolbar wording preserves the state or listening port")
-    func compactWordingFitsTheWell() {
-        #expect(ServerStatusWell.compactPrimaryText(serverState: .stopped, projectName: "Payments API") == "Stopped")
-        #expect(ServerStatusWell.compactPrimaryText(serverState: .starting, projectName: "Payments API") == "Starting")
-        #expect(ServerStatusWell.compactPrimaryText(serverState: .stopping, projectName: "Payments API") == "Stopping")
-        #expect(ServerStatusWell.compactPrimaryText(serverState: .error("Port in use"), projectName: "Payments API") == "Error")
-        #expect(ServerStatusWell.compactPrimaryText(serverState: .running(port: 8080), projectName: "Payments API") == "8080")
+    @Test("The active port count excludes configured listeners awaiting restart")
+    func boundListenersOwnTheSummary() {
+        let bound = ServerConfiguration(port: 8080, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Accounts", port: 8081)
+        ])
+        let configured = ServerConfiguration(port: 9090, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Billing", port: 9091),
+            .init(name: "Search", port: 9092)
+        ])
+        let listeners = ServerStatusWell.displayedBackends(serverState: .running(port: 8080),
+            configuration: configured, boundConfiguration: bound)
+        #expect(listeners.map(\.name) == ["Primary", "Billing"])
+        #expect(listeners.map(\.localURL) == ["http://localhost:8080", "http://localhost:8081"])
+        #expect(ServerStatusWell.summaryTitle(serverState: .running(port: 8080), configuration: configured,
+            boundConfiguration: bound, compact: false) == "localhost · 2 ports")
+        #expect(ServerStatusWell.summaryTitle(serverState: .running(port: 8080), configuration: configured,
+            boundConfiguration: bound, compact: true) == "2 ports")
+        #expect(ServerStatusWell.summaryTitle(serverState: .stopped, configuration: configured,
+            boundConfiguration: bound, compact: true) == "3 ports")
+        #expect(ServerStatusWell.requiresRestart(serverState: .running(port: 8080),
+            configuration: configured, boundConfiguration: bound))
+        #expect(!ServerStatusWell.requiresRestart(serverState: .stopped,
+            configuration: configured, boundConfiguration: bound))
     }
 
-    @Test("With no project the well says so rather than going blank")
-    func namesTheAbsenceOfAProject() {
-        #expect(ServerStatusWell.primaryText(serverState: .stopped, projectName: nil) == "No project")
-        // A name that is only whitespace would render as an empty capsule, which reads as a glitch.
-        #expect(ServerStatusWell.primaryText(serverState: .stopped, projectName: "   ") == "No project")
-        #expect(ServerStatusWell.primaryText(serverState: .stopped, projectName: "") == "No project")
+    @Test("Removing a configured backend does not hide a listener that is still running")
+    func removedBackendRemainsCopyableUntilRestart() {
+        let bound = ServerConfiguration(port: 8080, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Accounts", port: 8081)
+        ])
+        let configured = ServerConfiguration(port: 8080, globalDelayMs: 0)
+        let listeners = ServerStatusWell.displayedBackends(serverState: .running(port: 8080),
+            configuration: configured, boundConfiguration: bound)
+        #expect(listeners.map(\.name) == ["Primary", "Accounts"])
+        #expect(listeners.map(\.port) == [8080, 8081])
     }
 
-    // MARK: - What a click copies
-
-    @Test("The copied URL keeps the scheme the display drops")
-    func copiesAFullURL() {
-        #expect(ServerStatusWell.copyableURL(serverState: .running(port: 3000)) == "http://localhost:3000")
-        #expect(ServerStatusWell.primaryText(serverState: .running(port: 3000), projectName: nil)
-            == "localhost:3000")
+    @Test("Without a bound snapshot only the confirmed primary listener is advertised")
+    func doesNotInventActiveListeners() {
+        let configured = ServerConfiguration(port: 9090, globalDelayMs: 0, backends: [
+            .init(name: "Accounts", port: 9091)
+        ])
+        #expect(ServerStatusWell.displayedBackends(serverState: .running(port: 8080),
+            configuration: configured, boundConfiguration: nil).map(\.localURL) == ["http://localhost:8080"])
     }
 
-    @Test("Nothing is copyable unless a port is actually listening")
-    func hasNothingToCopyWhenNotRunning() {
-        // The affordance is driven off this being nil, so a stopped server cannot hand out an address
-        // that answers nothing.
-        #expect(ServerStatusWell.copyableURL(serverState: .stopped) == nil)
-        #expect(ServerStatusWell.copyableURL(serverState: .starting) == nil)
-        #expect(ServerStatusWell.copyableURL(serverState: .stopping) == nil)
-        #expect(ServerStatusWell.copyableURL(serverState: .error("Port 8080 in use")) == nil)
+    @Test("No project is explicit and contains no invented address")
+    func noProject() {
+        #expect(ServerStatusWell.summaryTitle(serverState: .stopped, configuration: nil,
+            boundConfiguration: nil, compact: false) == "No project")
+        #expect(ServerStatusWell.displayedBackends(serverState: .stopped,
+            configuration: nil, boundConfiguration: nil).isEmpty)
     }
 
-    // MARK: - What VoiceOver hears
-
-    @Test("Each server state has a spoken description")
-    func describesEveryState() {
-        #expect(ServerStatusWell.stateDescription(.stopped) == "server stopped")
-        #expect(ServerStatusWell.stateDescription(.starting) == "server starting")
-        #expect(ServerStatusWell.stateDescription(.running(port: 8080)) == "server running")
-        #expect(ServerStatusWell.stateDescription(.stopping) == "server stopping")
-        #expect(ServerStatusWell.stateDescription(.error("Port 8080 in use"))
-            == "server error: Port 8080 in use")
+    @Test("Attention takes priority over routine request counts, including compact windows")
+    func statusPriority() {
+        #expect(ServerStatusWell.summarySubtitle(serverState: .running(port: 8080), restartRequired: false,
+            requestCount: 24, unmatchedCount: 0, compact: false) == "Running · 24 requests")
+        #expect(ServerStatusWell.summarySubtitle(serverState: .running(port: 8080), restartRequired: false,
+            requestCount: 1, unmatchedCount: 0, compact: false) == "Running · 1 request")
+        #expect(ServerStatusWell.summarySubtitle(serverState: .running(port: 8080), restartRequired: false,
+            requestCount: 24, unmatchedCount: 0, compact: true) == "Running")
+        for compact in [true, false] {
+            #expect(ServerStatusWell.summarySubtitle(serverState: .running(port: 8080), restartRequired: false,
+                requestCount: 24, unmatchedCount: 2, compact: compact) == "Running · 2 unmatched")
+            #expect(ServerStatusWell.summarySubtitle(serverState: .running(port: 8080), restartRequired: true,
+                requestCount: 24, unmatchedCount: 2, compact: compact) == "Restart required")
+            #expect(ServerStatusWell.summarySubtitle(serverState: .error("Port occupied"), restartRequired: false,
+                requestCount: 24, unmatchedCount: 2, compact: compact) == "Server error")
+        }
     }
 
-    @Test("A running well announces the address and that it can be copied")
-    func announcesTheCopyAffordance() {
-        #expect(
-            ServerStatusWell.primaryAccessibilityLabel(
-                serverState: .running(port: 8080),
-                projectName: "Payments API"
-            ) == "Server base URL http://localhost:8080, click to copy"
-        )
+    @Test("Lifecycle wording stays distinct")
+    func lifecycleStates() {
+        #expect(ServerStatusWell.shortState(.stopped) == "Stopped")
+        #expect(ServerStatusWell.shortState(.starting) == "Starting…")
+        #expect(ServerStatusWell.shortState(.stopping) == "Stopping…")
+        #expect(ServerStatusWell.stateDescription(.error("Port occupied")) == "server error: Port occupied")
     }
 
-    @Test("A stopped well announces the project and the state, not a copy affordance")
-    func announcesProjectAndStateWhenStopped() {
-        #expect(
-            ServerStatusWell.primaryAccessibilityLabel(serverState: .stopped, projectName: "Payments API")
-                == "Payments API, server stopped"
-        )
-        #expect(
-            ServerStatusWell.primaryAccessibilityLabel(serverState: .starting, projectName: nil)
-                == "No project, server starting"
-        )
-        #expect(
-            ServerStatusWell.primaryAccessibilityLabel(
-                serverState: .error("Port 8080 in use"),
-                projectName: "Payments API"
-            ) == "Payments API, server error: Port 8080 in use"
-        )
+    @Test("Accessible details distinguish active and pending addresses")
+    func pendingDetails() {
+        let bound = ServerConfiguration(port: 8080, globalDelayMs: 0)
+        let configured = ServerConfiguration(port: 9090, globalDelayMs: 0)
+        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: bound, isRunning: true)
+            == "Listening on Primary: 8080. Configured ports: Primary: 9090. Restart required.")
+        #expect(ServerStatusWell.backendSummary(configuration: bound, boundConfiguration: bound, isRunning: true)
+            == "1 port listening: Primary: 8080.")
+        #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: nil, isRunning: false)
+            == "1 port configured: Primary: 9090. Server is not running.")
     }
 
-    @Test("Request counts are spoken as sentences rather than as a bare number")
-    func speaksRequestCounts() {
+    @Test("Traffic labels retain their subject and describe available actions")
+    func trafficLabels() {
         #expect(ServerStatusWell.requestCountLabel(0) == "No requests logged")
         #expect(ServerStatusWell.requestCountLabel(1) == "1 request logged")
-        #expect(ServerStatusWell.requestCountLabel(12) == "12 requests logged")
-    }
-
-    @Test("The unmatched badge only promises a jump when one is wired up")
-    func speaksUnmatchedCounts() {
-        // `onShowUnmatched` is optional, so the label has to stop offering "show them" when nothing
-        // will happen on click.
-        #expect(ServerStatusWell.unmatchedLabel(3, actionable: true) == "3 unmatched requests, show them")
+        #expect(ServerStatusWell.requestCountLabel(24) == "24 requests logged")
         #expect(ServerStatusWell.unmatchedLabel(1, actionable: true) == "1 unmatched request, show it")
-        #expect(ServerStatusWell.unmatchedLabel(3, actionable: false) == "3 unmatched requests")
-        #expect(ServerStatusWell.unmatchedLabel(1, actionable: false) == "1 unmatched request")
-    }
-
-    // MARK: - The tooltip
-
-    @Test("The tooltip explains the address, the traffic, and the warning")
-    func explainsARunningWell() {
-        let help = ServerStatusWell.helpText(
-            serverState: .running(port: 8080),
-            projectName: "Payments API",
-            requestCount: 12,
-            unmatchedCount: 3
-        )
-
-        #expect(help == """
-        Server running at http://localhost:8080. Click the address to copy it. \
-        12 requests logged. 3 matched no endpoint or journey.
-        """)
-    }
-
-    @Test("The tooltip drops the unmatched sentence when nothing is unmatched")
-    func explainsAStoppedWell() {
-        let help = ServerStatusWell.helpText(
-            serverState: .stopped,
-            projectName: "Payments API",
-            requestCount: 0,
-            unmatchedCount: 0
-        )
-
-        #expect(help == "Payments API — server stopped. No requests logged.")
-        #expect(help.contains("unmatched") == false)
-    }
-
-    @Test("The tooltip still names the state when there is no project and no traffic")
-    func explainsAnEmptyWell() {
-        #expect(
-            ServerStatusWell.helpText(
-                serverState: .error("Port 8080 in use"),
-                projectName: nil,
-                requestCount: 0,
-                unmatchedCount: 0
-            ) == "No project — server error: Port 8080 in use. No requests logged."
-        )
+        #expect(ServerStatusWell.unmatchedLabel(2, actionable: false) == "2 unmatched requests")
     }
 }

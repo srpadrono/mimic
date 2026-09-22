@@ -5,6 +5,19 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Improved
+
+- Keep project identity and a two-line server summary together, separated by a padded vertical
+  divider. Show a computer icon and Local mock subtitle below the project name, using the same
+  space for save feedback.
+- Pin native Import and Server Settings icon actions to the editor's right edge, with panel controls
+  grouped separately above the inspector. Narrow windows move supporting editor actions into overflow.
+- Show one or many named listeners through a consistent details popover with per-port URL copying,
+  traffic, and pending port changes that need a restart.
+- Animate the Play/Stop symbol through server transitions, with a green running button. The status
+  below the localhost port is green when running and red when stopped; Local mock stays neutral.
+  Reduce Motion disables the symbol animation.
+
 ### Fixed
 
 - Capture complete passthrough text responses up to 5 MiB while keeping traffic previews at 64 KiB.

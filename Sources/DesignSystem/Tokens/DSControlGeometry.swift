@@ -69,17 +69,19 @@ public enum DSStroke {
     public static let focusRing: CGFloat = 1
 }
 
-/// Editor toolbar geometry. Panel toggles keep their own trailing section.
+/// Stable summary geometry; native toolbar groups own their action surfaces.
 nonisolated public enum DSToolbarGeometry {
     /// Matches the native macOS sidebar toggle in the same toolbar.
     public static let height: CGFloat = 36
-    public static let horizontalInset: CGFloat = 12
     public static let contentHeight: CGFloat = 16
-    public static let autosaveWidth: CGFloat = 72
-    /// Accommodates a long project title, traffic counters, and the reserved save-status slot.
+    /// Room for the project, summary, and the editor's native icon actions.
     public static let expandedCenterWidth: CGFloat = 840
-    public static let projectTitleWidth: CGFloat = 180
-    public static let compactStatusWidth: CGFloat = 128
+    public static let projectTitleWidth: CGFloat = 160
+    public static let compactProjectTitleWidth: CGFloat = 100
+    public static let metadataHeight: CGFloat = 12
+    public static let detailsWidth: CGFloat = 340
+    public static let detailsListHeight: CGFloat = 320
+    public static let copyButtonWidth: CGFloat = 80
+    public static let compactStatusWidth: CGFloat = 104
     public static let statusWidth: CGFloat = 220
-    public static let trafficStatusWidth: CGFloat = 320
 }

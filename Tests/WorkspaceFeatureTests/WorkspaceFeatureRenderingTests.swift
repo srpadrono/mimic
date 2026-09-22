@@ -101,25 +101,14 @@ struct WorkspaceFeatureRenderingTests {
         let stopping = render(ServerToggleButton(serverState: .stopping, onStart: {}, onStop: {}), size: measure)
         let errored = render(ServerToggleButton(serverState: .error("Port in use"), onStart: {}, onStop: {}), size: measure)
 
-        #expect(stopped == CGSize(width: 40, height: 36))
         #expect(starting == stopped)
         #expect(running == stopped)
         #expect(stopping == stopped)
         #expect(errored == stopped)
     }
 
-    @Test("Toolbar pills keep the same height for buttons, menus, and every server status")
-    func toolbarPillsShareTheirOuterHeight() {
-        let button = render(Button("Server settings") {}.buttonStyle(DSToolbarButtonStyle()))
-        let menu = render(
-            Menu { Button("Import HAR file") {} } label: {
-                Text("Import").modifier(DSToolbarPill())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-        )
-        #expect(button.height == 36)
-        #expect(menu.height == 36)
+    @Test("Two-line server summaries retain their height across lifecycle and compact states")
+    func serverSummaryKeepsItsHeight() {
         let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
         for compact in [false, true] {
             for state in states {
