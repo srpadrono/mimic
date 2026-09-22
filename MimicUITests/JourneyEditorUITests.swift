@@ -172,6 +172,9 @@ extension JourneyStepSheetPage {
         app.descendants(matching: .any).matching(identifier: "stepSheet.headersHint").firstMatch
     }
 
+    var headersDisclosure: XCUIElement { app.buttons["stepSheet.headersDisclosure"] }
+    var timingDisclosure: XCUIElement { app.buttons["stepSheet.timingDisclosure"] }
+
     var bodyField: XCUIElement {
         let byTextField = app.textFields["stepSheet.bodyField"].firstMatch
         if byTextField.exists { return byTextField }
@@ -913,6 +916,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-16 — the delay. This is the coercion regression: "abc" used to become a step that
         // answered instantly, with nothing said.
         replaceText(in: stepSheet.statusField, with: "201")
+        stepSheet.timingDisclosure.click()
+        stepSheet.reveal(stepSheet.delayField, byScrollingUp: true)
         replaceText(in: stepSheet.delayField, with: "abc")
         stepSheet.saveButton.click()
         assertSpeaks(
@@ -974,6 +979,15 @@ final class JourneyEditorUITests: MimicUITestCase {
         createEmptyJourney(named: "Payments")
         openStepSheet()
 
+        XCTAssertTrue(stepSheet.headersDisclosure.exists, "Optional headers should be discoverable")
+        XCTAssertTrue(stepSheet.timingDisclosure.exists, "Timing should be discoverable without scrolling")
+        XCTAssertFalse(stepSheet.headersField.exists, "A new step should keep optional headers collapsed")
+        XCTAssertFalse(stepSheet.delayField.exists, "A new step should keep optional timing collapsed")
+        let defaultScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        defaultScreenshot.name = "journey-step-default-sheet"
+        defaultScreenshot.lifetime = .keepAlways
+        add(defaultScreenshot)
+
         stepSheet.nameField.click()
         stepSheet.nameField.typeText("Charge declined")
 
@@ -985,19 +999,32 @@ final class JourneyEditorUITests: MimicUITestCase {
         replaceText(in: stepSheet.statusField, with: "402")
 
         // JRNSTEP-10 — the hint that says how to get a second line, which is not guessable.
+        stepSheet.headersDisclosure.click()
         XCTAssertTrue(
             stepSheet.headersHint.waitForExistence(timeout: 5),
             "The headers field should explain how to add another line"
         )
         assertSpeaks(
             stepSheet.headersHint,
-            contains: "One per line",
-            "The hint should say headers go one per line"
+            contains: "Name: Value",
+            "The hint should show the required header format"
         )
 
         // JRNSTEP-09 / JRNSTEP-11.
         stepSheet.headersField.click()
-        stepSheet.headersField.typeText("Retry-After: 30")
+        stepSheet.headersField.typeText("Retry-After 30")
+        stepSheet.saveButton.click()
+        assertSpeaks(stepSheet.validationMessage, contains: "Name: Value",
+                     "A malformed header must not disappear silently")
+        // `typeText(":")` is dropped on the British test keyboard. Shift-semicolon enters the
+        // actual colon on both British and US layouts, so exercise the repaired value explicitly.
+        stepSheet.headersField.click()
+        stepSheet.headersField.typeKey("a", modifierFlags: .command)
+        stepSheet.headersField.typeText("Retry-After")
+        stepSheet.headersField.typeKey(";", modifierFlags: .shift)
+        stepSheet.headersField.typeText(" 30")
+        assertSpeaks(stepSheet.headersField, contains: "Retry-After: 30",
+                     "The corrected header must contain a colon before saving")
         stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
         XCTAssertTrue(stepSheet.bodyField.isHittable, "The response body should scroll into view")
         stepSheet.bodyField.click()

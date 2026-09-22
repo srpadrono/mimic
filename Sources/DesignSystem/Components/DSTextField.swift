@@ -26,6 +26,9 @@ public struct DSTextField: View {
     @Binding private var text: String
     private let placeholder: String
     private let validation: String?
+    private let validationIdentifier: String?
+    private let controlWidth: CGFloat?
+    private let inputIdentifier: String?
     private let identifier: String
     @FocusState private var isFocused: Bool
 
@@ -34,21 +37,28 @@ public struct DSTextField: View {
         text: Binding<String>,
         placeholder: String = "",
         validation: String? = nil,
+        validationIdentifier: String? = nil,
+        controlWidth: CGFloat? = nil,
+        inputIdentifier: String? = nil,
         identifier: String
     ) {
         self.label = label
         self._text = text
         self.placeholder = placeholder
         self.validation = validation
+        self.validationIdentifier = validationIdentifier
+        self.controlWidth = controlWidth
+        self.inputIdentifier = inputIdentifier
         self.identifier = identifier
     }
 
     public var body: some View {
         // Deliberately *not* an accessibility container. This view carries no identifier of its own,
-        // and callers stamp theirs on the whole field — `NewProjectSheet` tags it `serverPortField`,
-        // which the UI suite then looks up as `app.textFields[…]`. Making the stack a container
-        // would move that identifier onto a group element and the text-field lookup would find
-        // nothing.
+        // and callers may stamp theirs on the whole field — `NewProjectSheet` tags it
+        // `serverPortField`, which the UI suite then looks up as `app.textFields[…]`. A field with
+        // inline validation can instead put `inputIdentifier` directly on the input, leaving its
+        // separately identified error reachable too. Making the stack a container would move the
+        // identifier onto a group element and hide both descendants.
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(label)
                 .font(DSTypography.label)
@@ -61,6 +71,7 @@ public struct DSTextField: View {
                 .padding(.horizontal, DSSpacing.sm)
                 .padding(.vertical, Self.verticalPadding)
                 .frame(height: Self.controlHeight)
+                .frame(width: controlWidth)
                 .focused($isFocused)
                 .background {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
@@ -71,7 +82,7 @@ public struct DSTextField: View {
                         .stroke(borderColor, lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
                 }
                 .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
-                .accessibilityIdentifier("ds.textfield.\(identifier)")
+                .accessibilityIdentifier(inputIdentifier ?? "ds.textfield.\(identifier)")
                 .accessibilityLabel(label)
 
             if let validation {
@@ -104,7 +115,8 @@ public struct DSTextField: View {
         // One reading, not a glyph and a sentence read separately.
         .accessibilityElement()
         .accessibilityLabel(message)
-        .accessibilityIdentifier("ds.textfield.\(identifier).error")
+        .accessibilityIdentifier(validationIdentifier ?? "ds.textfield.\(identifier).error")
+        .accessibilityValue(message)
     }
 
     private var borderColor: Color {

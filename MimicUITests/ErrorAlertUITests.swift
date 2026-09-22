@@ -680,6 +680,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         let disabledWithoutAPath = waitForEnabled(stepSheet.saveButton, isEnabled: false)
         XCTAssertTrue(disabledWithoutAPath, "Clearing the path should disable Add step again")
         replaceText(in: stepSheet.pathField, with: "/ok")
+        stepSheet.timingDisclosure.click()
+        stepSheet.reveal(delayField, byScrollingUp: true)
 
         // ERRVALID-13. Checked, not coerced: `Int(delayMs) ?? 0` used to turn "abc" into a step that
         // answers instantly, silently.

@@ -6,6 +6,8 @@ An independent design review checked hierarchy, spacing, color meaning, and narr
 
 The journey editor now gives the title room to wrap, names each step above its method and route, and keeps matching settings in a disclosure. Both short steps remain visible above the request log in the compact window. The inspector separates the selected journey from the active run; when the server is stopped, the run controls and inspector explain how Restart and Advance prepare the next start. Focused journey editing, grouping, inspector, breadcrumb, and compact-window UI flows passed.
 
+The Add step sheet now keeps the route, outcome and response body together in a flat form. Optional headers and timing stay visible as summary rows and open on demand; invalid header lines are explained before saving instead of being dropped silently. The screenshots below show the default form and a filled response with its headers expanded.
+
 ## Workspace and navigator
 
 ![Welcome empty state](welcome.png)
@@ -30,7 +32,9 @@ The journey editor now gives the title room to wrap, names each step above its m
 
 ![Changed local port pending a server restart](server-settings-pending-restart.png)
 
-![Journey step editor](journey-step-sheet.png)
+![Add step sheet with common fields and optional settings](journey-step-sheet.png)
+
+![Add step sheet with response headers expanded](journey-step-response-sheet.png)
 
 ![HAR import review with a duplicate route](import-review.png)
 

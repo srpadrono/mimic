@@ -113,7 +113,9 @@ struct JourneyStepSheetPage {
     var outcomePicker: XCUIElement { app.radioGroups["stepSheet.outcomePicker"].firstMatch }
     var saveButton: XCUIElement { app.buttons["stepSheet.saveButton"] }
     var cancelButton: XCUIElement { app.buttons["stepSheet.cancelButton"] }
-    var validationMessage: XCUIElement { app.staticTexts["stepSheet.validationMessage"] }
+    var validationMessage: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "stepSheet.validationMessage").firstMatch
+    }
 }
 
 // MARK: - Tests

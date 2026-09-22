@@ -32,9 +32,8 @@ struct JourneyFeatureLogicTests {
 
     /// The field is free text in a sheet, so every one of these lines is something a user will type.
     ///
-    /// A line with no colon and a line with an empty name are both dropped rather than stored under
-    /// `""`: a header named nothing is not a header, and the alternative is a step that serves a
-    /// response with a nameless field in it.
+    /// The parser is tolerant for callers that use it directly. The sheet checks
+    /// `firstInvalidHeaderLine` before parsing so user-entered lines are never silently lost.
     @Test("Blank lines, lines with no colon, and lines with no name are dropped")
     func ignoresLinesThatAreNotHeaders() {
         let headers = JourneyStepSheet.parseHeaders("""
@@ -47,6 +46,13 @@ struct JourneyFeatureLogicTests {
 
         #expect(headers == ["X-Trace": "abc", "Retry-After": "30"])
         #expect(JourneyStepSheet.parseHeaders("") == [:])
+    }
+
+    @Test("The sheet identifies the first malformed header instead of silently losing it")
+    func findsMalformedHeaderLine() {
+        #expect(JourneyStepSheet.firstInvalidHeaderLine("X-Trace: abc\nRetry-After 30") == 2)
+        #expect(JourneyStepSheet.firstInvalidHeaderLine("\n: 30\nX-Trace: abc") == 2)
+        #expect(JourneyStepSheet.firstInvalidHeaderLine("\nX-Trace: abc\nLocation: https://example.com:8443") == nil)
     }
 
     /// A dictionary, so the same name twice keeps the last one — worth stating because it is a real

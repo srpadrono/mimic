@@ -8,6 +8,10 @@ public enum DSFormMetrics {
     public static let minimumTallSheetHeight: CGFloat = 500
     public static let maximumTallSheetHeight: CGFloat = 720
     public static let screenVerticalAllowance: CGFloat = 160
+    /// The journey step editor shows its common fields without a full-height settings sheet.
+    public static let journeyStepHeight: CGFloat = 640
+    /// Short controls beside a route or a longer value.
+    public static let compactFieldWidth: CGFloat = 112
 }
 
 /// A section of editable settings on a sheet. The title, inset, surface and rule stay the same
