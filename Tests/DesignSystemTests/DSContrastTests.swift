@@ -776,12 +776,15 @@ struct DSContrastTests {
 
     @Test("An active state badge remains readable on the editor header in both appearances")
     func activeStateBadgeClearsAA() throws {
+        // Pin the expected tint independently of the component, so changing the shared
+        // opacity cannot move the fixture and its assertion together.
+        #expect(DSStateBadge.fillOpacity == 0.10)
         for appearance in Appearance.allCases {
             let header = try resolve(DSColors.secondary, in: appearance)
             let reading = try selfTintedReading(
                 DSColors.accentText,
                 on: header,
-                alpha: DSStateBadge.fillOpacity,
+                alpha: 0.10,
                 in: appearance
             )
             #expect(reading >= 4.5, "Active badge on editor header, \(appearance): \(reading)")

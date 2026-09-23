@@ -58,10 +58,6 @@ enum ImportRow {
     /// beneath them, which is the plain word on a plain surface that token is measured for.
     static let warningInk = DSColors.warningText
 
-    /// The duplicate flag uses the shared semantic badge tint, kept lighter than a status pill so
-    /// its word stays readable on both sheet appearances.
-    static let flagFillOpacity: Double = DSStateBadge.fillOpacity
-
     /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing.
     ///
     /// Striped like the request log — at this density the eye needs help tracking one row across six

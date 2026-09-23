@@ -134,13 +134,13 @@ struct ImportReviewRowContrastTests {
     }
 
     /// A label read against a fill that is a wash of the label's own colour — the "Duplicate" flag,
-    /// which draws `warningInk` over `warningInk` at `flagFillOpacity`.
+    /// which draws `warningInk` over `warningInk` at the badge's pinned 10% tint.
     private func selfTintedReading(
         _ token: Color,
         on surface: RGBA,
         in appearance: Appearance
     ) throws -> Double {
-        let fill = try resolve(token.opacity(ImportRow.flagFillOpacity), in: appearance)
+        let fill = try resolve(token.opacity(0.10), in: appearance)
             .composited(over: surface)
         return try contrast(token, on: fill, in: appearance)
     }
@@ -279,7 +279,7 @@ struct ImportReviewRowContrastTests {
             #expect(isClose(stripe.alpha, token.alpha, within: componentTolerance))
         }
 
-        #expect(ImportRow.flagFillOpacity == DSStateBadge.fillOpacity)
+        #expect(DSStateBadge.fillOpacity == 0.10)
 
         var worst = Double.greatestFiniteMagnitude
         for appearance in Appearance.allCases {

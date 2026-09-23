@@ -121,14 +121,15 @@ struct JourneyNavigatorList: View {
             if !text.isEmpty { collapsedGroups.subtract(groupNames + [Self.ungroupedSectionKey]) }
         }
         .onChange(of: selectedJourneyID) { _, id in
-            if let group = journeys.first(where: { $0.id == id })?.groupTag {
-                collapsedGroups.remove(group)
+            if let journey = journeys.first(where: { $0.id == id }) {
+                collapsedGroups.remove(sectionKey(for: journey))
             }
         }
         .onChange(of: journeys) { old, new in
-            let oldGroup = old.first(where: { $0.id == selectedJourneyID })?.groupTag
-            if let group = new.first(where: { $0.id == selectedJourneyID })?.groupTag, group != oldGroup {
-                collapsedGroups.remove(group)
+            let oldSelection = old.first(where: { $0.id == selectedJourneyID })
+            if let newSelection = new.first(where: { $0.id == selectedJourneyID }),
+               oldSelection == nil || newSelection.groupTag != oldSelection?.groupTag {
+                collapsedGroups.remove(sectionKey(for: newSelection))
             }
         }
         .alert(
@@ -153,6 +154,11 @@ struct JourneyNavigatorList: View {
     private var groupNames: [String] { groupedJourneys.keys.sorted() }
     private static let ungroupedSectionKey = "__ungrouped__"
     private var ungroupedJourneys: [Journey] { filteredJourneys.filter { ($0.groupTag ?? "").isEmpty } }
+
+    private func sectionKey(for journey: Journey) -> String {
+        guard let group = journey.groupTag, !group.isEmpty else { return Self.ungroupedSectionKey }
+        return group
+    }
 
     private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
         JourneyNavigatorRow(
