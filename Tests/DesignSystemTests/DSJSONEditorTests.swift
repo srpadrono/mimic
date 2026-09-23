@@ -288,22 +288,22 @@ struct DSColorsTests {
         #expect(DSColors.httpStatusColor(for: 599) == expected)
     }
 
-    @Test("httpStatusColor returns secondary for other codes")
+    @Test("httpStatusColor returns the secondary label for other codes")
     func httpStatusOther() {
-        #expect(DSColors.httpStatusColor(for: 100) == .secondary)
-        #expect(DSColors.httpStatusColor(for: 600) == .secondary)
+        #expect(DSColors.httpStatusColor(for: 100) == DSColors.labelSecondary)
+        #expect(DSColors.httpStatusColor(for: 600) == DSColors.labelSecondary)
     }
 
     @Test("methodColor maps common HTTP verbs and falls back for unknown values")
     func methodColors() {
-        #expect(DSColors.methodColor(for: "GET") != .secondary)
-        #expect(DSColors.methodColor(for: "post") != .secondary)
-        #expect(DSColors.methodColor(for: "PUT") != .secondary)
-        #expect(DSColors.methodColor(for: "PATCH") != .secondary)
-        #expect(DSColors.methodColor(for: "DELETE") != .secondary)
-        #expect(DSColors.methodColor(for: "HEAD") != .secondary)
-        #expect(DSColors.methodColor(for: "OPTIONS") != .secondary)
-        #expect(DSColors.methodColor(for: "TRACE") == .secondary)
+        #expect(DSColors.methodColor(for: "GET") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "post") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "PUT") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "PATCH") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "DELETE") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "HEAD") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "OPTIONS") != DSColors.labelSecondary)
+        #expect(DSColors.methodColor(for: "TRACE") == DSColors.labelSecondary)
     }
 }
 

@@ -32,8 +32,7 @@ public struct DSSectionHeader<Trailing: View>: View {
     public var body: some View {
         HStack {
             Text(title)
-                .font(DSTypography.label)
-                .fontWeight(.medium)
+                .font(DSTypography.labelMedium)
                 .foregroundStyle(DSColors.labelSecondary)
 
             Spacer()

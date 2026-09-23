@@ -1087,13 +1087,11 @@ final class SpecImportUITests: MimicUITestCase {
         )
     }
 
-    /// A sidebar row showing `text`, matched on content because `EndpointSidebarRow`'s own cells are
-    /// unnamed. Only used once the import sheet is gone, so nothing else in the window is showing the
-    /// same path.
+    /// A sidebar row showing `text`. Its method, route, and name are one accessible element.
     @MainActor
     private func sidebarText(_ text: String) -> XCUIElement {
-        app.staticTexts.matching(
-            NSPredicate(format: "label == %@ OR value == %@", text, text)
+        app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", text)
         ).firstMatch
     }
 
@@ -1155,6 +1153,10 @@ final class SpecImportUITests: MimicUITestCase {
         assertExists(sheet.duplicateNote, "The \"Duplicates are deselected by default\" note")
         assertAbsent(sheet.bodySizeWarning, "The body-size footer warning")
         assertAbsent(sheet.binaryBodyWarning, "The binary-body footer warning")
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "har-review-with-duplicate"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     /// Select all, deselect all, one checkbox, one row click — each read back off the count.

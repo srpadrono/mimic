@@ -24,7 +24,7 @@ private enum ImportColumns {
     // path is flexible — takes the remaining space
 }
 
-/// One row of a dense table — ``DSControlHeight/denseRow`` — and the fills and the ink that row
+/// One row of a dense table — ``DSRowHeight/importRow`` — and the fills and the ink that row
 /// draws.
 ///
 /// The token is what makes this row and the request log's match, rather than a sentence in each
@@ -34,7 +34,7 @@ private enum ImportColumns {
 /// than a copy of it. A bed list written out inside a test is the blind spot every contrast failure
 /// in this repository has come through, and both values below are load-bearing.
 enum ImportRow {
-    static let height = DSControlHeight.denseRow
+    static let height = DSRowHeight.importRow
 
     /// The ink every warning on a candidate row is drawn in: the "Duplicate" pill, the "Binary body"
     /// and "Body dropped" flags, and the size of a body that will be dropped.
@@ -57,12 +57,6 @@ enum ImportRow {
     /// The footer's two summary labels keep the base ``DSColors/warning``: nothing stripes or washes
     /// beneath them, which is the plain word on a plain surface that token is measured for.
     static let warningInk = DSColors.warningText
-
-    /// The tint the "Duplicate" flag fills itself with — the same 12% `DSStatusPill` draws, written
-    /// here because this flag is a word in a `Label` rather than a status pill. The tests assert the
-    /// two numbers agree, which is what keeps a hand-drawn composite from drifting off the component
-    /// that owns it.
-    static let flagFillOpacity: Double = 0.12
 
     /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing.
     ///
@@ -408,19 +402,8 @@ private struct ImportCandidateRow: View {
     @ViewBuilder
     private var flag: some View {
         if candidate.isDuplicate {
-            Label("Duplicate", systemImage: "doc.on.doc")
-                .font(DSTypography.caption)
-                // The 12% tint of its own colour is the hardest bed on the row, and the first reason
-                // the flags take a text variant: base amber reads 3.96:1 on that composite over a
-                // panel and 4.11 over the elevated surface. The other three warnings on the row take
-                // the same ink — see ``ImportRow/warningInk`` for the beds that decided it.
-                .foregroundStyle(ImportRow.warningInk)
-                .padding(.horizontal, DSSpacing.xs)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-                        .fill(ImportRow.warningInk.opacity(ImportRow.flagFillOpacity))
-                )
+            DSStateBadge("Duplicate", tone: .warning, systemImage: "doc.on.doc",
+                         identifier: "import.candidate.index.\(rowIndex).flag.duplicate")
                 // "Already covered", not "already exists": since `ImportRouteLedger`, a repeat is
                 // flagged whether the cover is an endpoint the project holds or an earlier row of
                 // this same import — and for a capture of real traffic the second is the common case.
@@ -428,7 +411,6 @@ private struct ImportCandidateRow: View {
                 .accessibilityLabel("Duplicate — this method and path is already covered")
                 // A name per branch rather than one shared `…flag`: the branches are mutually
                 // exclusive, so which identifier is present *is* the assertion a test wants.
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.duplicate")
         } else if candidate.bodyIsBinary {
             // Before the size branch, deliberately: a binary body's recorded size can also exceed
             // the limit, and binary is the more specific reason there is no body.

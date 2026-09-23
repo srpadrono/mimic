@@ -141,7 +141,7 @@ struct SidebarView: View {
                     .lineLimit(1)
                     .help(noMatchesMessage)
                     .font(DSTypography.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DSColors.labelSecondary)
                     .dsNavigatorRow()
                     .selectionDisabled()
                     .accessibilityIdentifier("sidebar.noMatches")
@@ -155,8 +155,18 @@ struct SidebarView: View {
                         }
                     }
                 }
-                ForEach(ungroupedEndpoints) { endpoint in
-                    endpointRow(endpoint, indented: false)
+                if !groupedSections.isEmpty && !ungroupedEndpoints.isEmpty {
+                    DSNavigatorGroup(
+                        name: "Ungrouped", count: ungroupedEndpoints.count, itemName: "endpoints",
+                        isCollapsed: collapsedSections.contains(Self.ungroupedSectionKey),
+                        identifier: "sidebar.group.ungrouped"
+                    ) { toggleSection(Self.ungroupedSectionKey) }
+                    .padding(.top, DSSpacing.smPlus)
+                }
+                if groupedSections.isEmpty || !collapsedSections.contains(Self.ungroupedSectionKey) {
+                    ForEach(ungroupedEndpoints) { endpoint in
+                        endpointRow(endpoint, indented: !groupedSections.isEmpty)
+                    }
                 }
             }
         }
@@ -185,6 +195,8 @@ struct SidebarView: View {
             identifier: "sidebar.group.\(section.name)"
         ) { toggleSection(section.name) }
     }
+
+    private static let ungroupedSectionKey = "__ungrouped__"
 
     @ViewBuilder
     private func endpointContextMenu(_ endpoint: Endpoint) -> some View {
@@ -364,7 +376,7 @@ struct EndpointSidebarRow: View {
 
             Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : $0 } ?? endpoint.path)
                 .font(DSTypography.code)
-                .foregroundStyle(.primary)
+                .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -372,7 +384,7 @@ struct EndpointSidebarRow: View {
             if showsName, let name = Self.subtitle(for: endpoint) {
                 Text(name)
                     .font(DSTypography.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
                     .frame(maxWidth: DSNavigatorMetrics.metadataWidth, alignment: .trailing)
                     .layoutPriority(1)

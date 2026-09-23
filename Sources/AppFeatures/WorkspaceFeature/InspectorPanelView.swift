@@ -36,6 +36,7 @@ struct InspectorPanelView: View {
     /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
     @State private var endpointTab: EndpointTab = .scenarios
+    @State private var requestDetailTab: RequestDetailTab = .summary
 
     /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
@@ -213,7 +214,13 @@ struct InspectorPanelView: View {
                 switch mode {
                 case .request:
                     if let requestDetail {
-                        RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
+                        // Rebuild for a different log while keeping the inspector's chosen tab.
+                        RequestDetailInspector(
+                            context: requestDetail,
+                            onSaveAsMock: onSaveAsMock,
+                            tabSelection: $requestDetailTab
+                        )
+                            .id(requestDetail.log.id)
                     }
                 case .journey:
                     if let journey { JourneyInspector(context: journey).id(journey.selected.id) }
@@ -242,17 +249,22 @@ struct InspectorPanelView: View {
 
     private func endpointContent(_ endpoint: Endpoint) -> some View {
         VStack(spacing: 0) {
-            Text("\(endpoint.method.rawValue) \(endpoint.path)")
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .help("\(endpoint.name) — \(endpoint.method.rawValue) \(endpoint.path)")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DSInspectorMetrics.inset)
-                .frame(height: DSBarHeight.controlRow)
-                .accessibilityIdentifier("inspector.endpointIdentity")
+            HStack(spacing: DSSpacing.sm) {
+                DSMethodBadge(method: endpoint.method.rawValue, size: .compact,
+                              identifier: "inspector.endpointMethod")
+                Text(endpoint.path)
+                    .font(DSTypography.codeSmall)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            .help("\(endpoint.name) — \(endpoint.method.rawValue) \(endpoint.path)")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .frame(height: DSBarHeight.controlRow)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inspector.endpointIdentity")
             switch endpointTab {
             case .scenarios:
                 ScenarioListView(endpoint: endpoint, onSetActive: onSetActiveScenario,
@@ -263,7 +275,7 @@ struct InspectorPanelView: View {
                     Text("Click a row to activate")
                 }
                 .font(DSTypography.label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DSColors.labelSecondary)
                 .padding(.horizontal, DSInspectorMetrics.inset)
                 .frame(height: DSInspectorMetrics.footerHeight)
                 .overlay(alignment: .top) {
@@ -323,7 +335,7 @@ struct ScenarioRow: View {
                     .accessibilityHidden(true)
                 Text(scenario.name)
                     .font(DSTypography.controlLabelQuiet)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 DSInspectorStatus(statusCode: scenario.statusCode)
@@ -432,7 +444,7 @@ struct NewScenarioSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(minWidth: 420, idealWidth: 420)
+        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .defaultFocus($focusedField, .name)
     }
 

@@ -680,6 +680,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         let disabledWithoutAPath = waitForEnabled(stepSheet.saveButton, isEnabled: false)
         XCTAssertTrue(disabledWithoutAPath, "Clearing the path should disable Add step again")
         replaceText(in: stepSheet.pathField, with: "/ok")
+        stepSheet.timingDisclosure.click()
+        stepSheet.reveal(delayField, byScrollingUp: true)
 
         // ERRVALID-13. Checked, not coerced: `Int(delayMs) ?? 0` used to turn "abc" into a step that
         // answers instantly, silently.
@@ -788,9 +790,8 @@ final class ErrorAlertUITests: MimicUITestCase {
             "An endpoint with no response headers should say so"
         )
 
-        // ERRDEAD-08. The inspector's tab strip flattens its children's identifiers, so the tab is
-        // targeted by the label `DSTabStrip` speaks — which is `EndpointTab.traffic.help`.
-        app.buttons["Show the requests this endpoint answered"].firstMatch.click()
+        // ERRDEAD-08. The page object handles the tab's label and request-count suffix.
+        InspectorPage(app: app).tab("traffic").click()
         XCTAssertTrue(
             waitForEmptyState(identifier: "endpointTraffic.empty", heading: "No traffic yet"),
             "An endpoint nothing has called should say so in the Traffic tab"

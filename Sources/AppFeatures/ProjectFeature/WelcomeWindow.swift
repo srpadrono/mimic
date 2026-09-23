@@ -240,46 +240,12 @@ struct WelcomeWindow: View {
     }
 
     private var emptyRecents: some View {
-        // Spacing, type scale and width cap all match `DSEmptyState`, which every other empty
-        // state in the app uses. This one kept its own smaller scale — a 13pt heading against 16
-        // and an 11pt message against 13, with no 320pt cap — so the first screen a new user sees
-        // read a size smaller than the rest of the window. The structure stays hand-rolled only
-        // because the UI suite asserts on these identifiers.
-        VStack(spacing: DSSpacing.md) {
-            // `.regular` at `labelSecondary`, matching `DSEmptyState.icon`. This was 24pt at `.light`
-            // in `labelTertiary` — the combination `DSEmptyState` records having already fixed once:
-            // a large, thin shape at 36% alpha reads as a smudge rather than as a symbol, and this
-            // one greets every first-run user.
-            //
-            // Off the `DSGlyph` ladder on purpose, and the ladder says so itself: an illustration is
-            // not a glyph. 26 is `DSEmptyState.glyphSize`, which this matches deliberately — folding
-            // it in would turn a scale with a defensible top rung at 13 into an open-ended one.
-            Image(systemName: "clock")
-                .font(.system(size: 26, weight: .regular))
-                .foregroundStyle(DSColors.labelSecondary)
-                .accessibilityHidden(true)
-
-            // Sentence case. "No Recent Projects" was the only headline in the app still in title
-            // case, and it is the one sentence a first-run user reads.
-            Text("No projects yet")
-                .font(DSTypography.heading)
-                .foregroundStyle(DSColors.labelPrimary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-                .accessibilityIdentifier("noRecentProjectsLabel")
-
-            // The empty state used to say only what was missing. Saying how it gets filled costs
-            // one line and answers the question the previous version left open.
-            Text("Create one to define mock endpoints and start a server.")
-                .font(DSTypography.body)
-                .foregroundStyle(DSColors.labelSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-                .accessibilityIdentifier("noRecentProjectsHint")
-        }
-        .padding(.horizontal, DSSpacing.lg)
-        .padding(.vertical, DSSpacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        DSEmptyState(
+            systemImage: "clock",
+            heading: "No projects yet",
+            message: "Create one to define mock endpoints and start a server.",
+            identifier: "welcome.recents"
+        )
     }
 
     private var recentsList: some View {
@@ -379,16 +345,10 @@ private struct ActionRow: View {
             action()
         } label: {
             HStack(spacing: DSSpacing.md) {
-                // A point above `DSGlyph.controlProminent` (13), the ladder's ceiling — so this is
-                // off the ladder rather than exempt from it, and `DSGlyph`'s own note names these
-                // welcome-window action glyphs as the one site in that position. Left at 14 because
-                // dropping it to the ceiling is a visual decision about the first screen a new user
-                // sees, not a mechanical substitution: unlike every other glyph on the ladder these
-                // stand in a padded action row rather than in a panel's chrome.
                 Image(systemName: icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: DSGlyph.controlProminent))
                     .foregroundStyle(DSColors.accentText)
-                    .frame(width: 20)
+                    .frame(width: DSControlHeight.row)
 
                 Text(title)
                     .font(DSTypography.body)
@@ -397,7 +357,7 @@ private struct ActionRow: View {
                 Spacer()
             }
             .padding(.horizontal, DSSpacing.md)
-            .padding(.vertical, DSSpacing.sm + 2)
+            .padding(.vertical, DSSpacing.smPlus)
             .background(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                     .fill(isHovered ? DSColors.accentSubtle : .clear)

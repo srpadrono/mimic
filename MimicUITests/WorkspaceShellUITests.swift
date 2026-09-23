@@ -78,7 +78,7 @@ struct BreadcrumbPage {
         let element = crumb(level, titled: title)
         guard element.exists else { return "<absent>" }
         let value = element.value.map { String(describing: $0) } ?? ""
-        return "label: \(element.label), value: \(value)"
+        return "label: \(element.label), title: \(element.title), value: \(value)"
     }
 
     /// Waits for a crumb to read `title`, watching both spellings at once.
@@ -92,7 +92,7 @@ struct BreadcrumbPage {
         let candidates = crumbCandidates(level, titled: title)
         return UITestApp.waitUntil(timeout: timeout) {
             candidates.contains { element in
-                element.exists && (element.label == title || (element.value as? String) == title)
+                element.exists && (element.label == title || element.title == title || (element.value as? String) == title)
             }
         }
     }
@@ -996,21 +996,22 @@ final class WorkspaceShellUITests: MimicUITestCase {
         addTemplate("payment-retry", activate: false)
 
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("journey", toRead: "Payment succeeds on retry"),
-            "On the Journeys tab the path names the selected journey — "
-                + breadcrumb.crumbDescription("journey", titled: "Payment succeeds on retry")
+            breadcrumb.waitForCrumb("journey", toRead: "Journeys"),
+            "The jump bar should keep a short journey switcher above the full editor title — "
+                + breadcrumb.crumbDescription("journey", titled: "Journeys")
         )
 
-        breadcrumb.jump(
-            from: "journey",
-            to: "Retry after failure",
-            currentlyReading: "Payment succeeds on retry"
-        )
+        // The native popup is visible on macOS 27 but XCTest does not expose its options as app
+        // menu items on this runner. Exercise its keyboard type selection instead: these two
+        // fixtures start with distinct letters, so R unambiguously picks Retry after failure.
+        breadcrumb.crumb("journey", titled: "Journeys").click()
+        app.typeKey("r", modifierFlags: [])
+        app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("journey", toRead: "Retry after failure"),
-            "The journey crumb should move the selection — "
-                + breadcrumb.crumbDescription("journey", titled: "Retry after failure")
+            breadcrumb.waitForCrumb("journey", toRead: "Journeys"),
+            "The journey switcher should remain short after selection — "
+                + breadcrumb.crumbDescription("journey", titled: "Journeys")
         )
         let editorName = journeys.editorName
         XCTAssertTrue(

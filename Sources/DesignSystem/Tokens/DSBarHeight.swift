@@ -11,6 +11,12 @@ import CoreGraphics
 /// Naming them does not change a single pixel. It makes the ladder legible, and it means the next
 /// bar starts from a list of four rungs rather than from whatever its neighbour happened to be.
 public enum DSBarHeight {
+    /// 38 — navigator mode switch and creation control.
+    public static let navigatorHeader: CGFloat = 38
+
+    /// 42 — navigator filter and status controls.
+    public static let navigatorFooter: CGFloat = 42
+
     /// 30 — the panel header tier. Sidebar chrome, panel headers, editor headers, the copy bar.
     ///
     /// The number lives here rather than on `DSPanelHeader`, which now reads it back. A component

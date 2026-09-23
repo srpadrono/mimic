@@ -216,7 +216,7 @@ import SwiftUI
     VStack(spacing: DSSpacing.sm) {
         Text("Hover over these rows")
             .font(DSTypography.label)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DSColors.labelSecondary)
 
         ForEach(0..<3) { i in
             HStack {

@@ -10,9 +10,28 @@ struct BackendSettingsPage {
     var captureHelp: XCUIElement { app.staticTexts["backend.primary.captureHelp"].firstMatch }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
+    var primaryPortError: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Use 1–65535")).firstMatch
+    }
+    var primaryCopy: XCUIElement { app.buttons["backend.primary.copy"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
+    var primaryCapture: XCUIElement { app.descendants(matching: .any)["backend.primary.capture"].firstMatch }
+    var primarySelection: XCUIElement { app.buttons["backend.select.00000000-0000-0000-0000-000000000000"].firstMatch }
+    var additionalSelection: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier != %@",
+                                         "backend.select.", "backend.select.00000000-0000-0000-0000-000000000000")).firstMatch
+    }
+    var additionalPortError: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "This port is used by another backend")).firstMatch
+    }
     var primaryEnabled: XCUIElement { app.descendants(matching: .any)["backend.primary.enabled"].firstMatch }
     var add: XCUIElement { app.buttons["backend.add"].firstMatch }
+    var removeSelected: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier != %@",
+                                         "backend.delete.", "backend.delete.00000000-0000-0000-0000-000000000000")).firstMatch
+    }
     var apply: XCUIElement { app.buttons["backend.apply"].firstMatch }
     var cancel: XCUIElement { app.buttons["backend.cancel"].firstMatch }
     func portMenuItem(_ port: Int, copying: Bool = false) -> XCUIElement {
@@ -23,6 +42,9 @@ struct BackendSettingsPage {
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
     func additional(_ suffix: String) -> XCUIElement {
         app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
+    }
+    func additionalState(_ suffix: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
     }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
@@ -43,30 +65,23 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
-        XCTAssertTrue(page.captureHelp.waitForExistence(timeout: 5))
-        let captureHelp = "\(page.captureHelp.label) \(page.captureHelp.value as? String ?? "")"
-            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        XCTAssertTrue(captureHelp.contains("5 MiB"), captureHelp)
-        XCTAssertTrue(captureHelp.contains("64 KiB"), captureHelp)
-        let captureHelpImage = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        captureHelpImage.name = "capture-limit-help"
-        captureHelpImage.lifetime = .keepAlways
-        add(captureHelpImage)
+        XCTAssertTrue(app.staticTexts["http://localhost:8080"].exists,
+                      "The displayed URL must use the literal port without grouping separators")
+        XCTAssertFalse(page.primaryUpstream.exists, "Pass-through fields should stay hidden until enabled")
         let singleBackendHeight = app.sheets.firstMatch.frame.height
         XCTAssertLessThan(singleBackendHeight, 600, "A single backend should not open a mostly empty sheet")
         page.replace(page.primaryName, with: "Catalog")
         page.primaryEnabled.click()
         page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
+        page.primaryCapture.click()
+        XCTAssertTrue(page.captureHelp.waitForExistence(timeout: 5))
+        let captureHelp = "\(page.captureHelp.label) \(page.captureHelp.value as? String ?? "")"
+        XCTAssertTrue(captureHelp.contains("5 MiB"), captureHelp)
+        XCTAssertTrue(captureHelp.contains("64 KiB"), captureHelp)
         page.add.click()
-        // Grouped Form lazily realizes the new card below the viewport on a short display.
-        // Scroll the form, not the sheet's fixed action row, before addressing its fields.
-        let form = app.sheets.firstMatch.scrollViews.firstMatch
-        for _ in 0..<4 where !page.additional("name").exists {
-            form.swipeUp()
-        }
         XCTAssertTrue(
             page.additional("name").waitForExistence(timeout: 5),
-            "Added backend name is absent after scrolling: \(app.debugDescription)"
+            "Added backend detail is absent after selection: \(app.debugDescription)"
         )
         XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
         XCTAssertGreaterThanOrEqual(
@@ -76,7 +91,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: "8080")
         page.apply.click()
-        XCTAssertTrue(page.error.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additionalPortError.waitForExistence(timeout: 5))
         page.replace(page.additional("port"), with: "18081")
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
@@ -99,11 +114,66 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.open.click()
         XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
         XCTAssertEqual(page.primaryName.value as? String, "Catalog")
+        XCTAssertTrue(page.additionalSelection.waitForExistence(timeout: 5))
+        page.additionalSelection.click()
         XCTAssertEqual(page.additional("port").value as? String, "18081")
         let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         screenshot.name = "Backend settings — saved configuration"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        page.primarySelection.click()
+        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        let passthroughScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        passthroughScreenshot.name = "Backend settings — pass-through and capture"
+        passthroughScreenshot.lifetime = .keepAlways
+        add(passthroughScreenshot)
+        page.cancel.click()
+    }
+
+    @MainActor
+    func testBackendListSelectionAndRemoval() {
+        launchApp()
+        createProjectViaUI(name: "Backend selection")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primarySelection.waitForExistence(timeout: 5))
+        page.add.click()
+        XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        page.replace(page.additional("name"), with: "Accounts")
+        page.primarySelection.click()
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertFalse(page.additional("name").exists, "Only the selected listener's fields should be shown")
+        page.additionalSelection.click()
+        XCTAssertEqual(page.additional("name").value as? String, "Accounts")
+        XCTAssertTrue(page.removeSelected.isEnabled)
+        page.removeSelected.click()
+        XCTAssertFalse(page.additionalSelection.exists)
+        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(page.portsDescription.contains("2 ports configured"))
+    }
+
+    @MainActor
+    func testInvalidPortCannotBeAppliedOrCopied() {
+        launchApp()
+        createProjectViaUI(name: "Port validation")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.replace(page.primaryPort, with: "abc")
+        XCTAssertTrue(page.primaryPortError.waitForExistence(timeout: 5))
+        XCTAssertFalse(page.apply.isEnabled)
+        XCTAssertFalse(page.primaryCopy.isEnabled)
+        XCTAssertFalse(app.staticTexts["http://localhost:0"].exists)
+        let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        screenshot.name = "Backend settings — invalid local port"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        page.replace(page.primaryPort, with: "18081")
+        XCTAssertFalse(page.primaryPortError.exists)
+        XCTAssertTrue(page.apply.isEnabled)
+        XCTAssertTrue(page.primaryCopy.isEnabled)
         page.cancel.click()
     }
 
@@ -163,8 +233,15 @@ final class BackendSettingsUITests: MimicUITestCase {
         add(compactShot)
         workspace.fillWindow()
         page.open.click()
+        XCTAssertTrue(page.additionalSelection.waitForExistence(timeout: 5))
+        page.additionalSelection.click()
         XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
         page.replace(page.additional("port"), with: String(replacement))
+        XCTAssertTrue(page.additionalState("pendingRestart").waitForExistence(timeout: 5))
+        let pendingShot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
+        pendingShot.name = "Backend settings — listener pending restart"
+        pendingShot.lifetime = .keepAlways
+        add(pendingShot)
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
         XCTAssertTrue(page.portsDescription.contains("Restart required"))
@@ -205,9 +282,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
         page.open.click()
+        XCTAssertFalse(page.primaryUpstream.exists)
+        page.primaryEnabled.click()
         XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
         XCTAssertEqual(page.primaryUpstream.value as? String, "https://api.example.com")
-        XCTAssertFalse(page.primaryUpstream.isEnabled)
         page.cancel.click()
     }
 }

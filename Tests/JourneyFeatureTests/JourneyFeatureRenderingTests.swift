@@ -179,21 +179,16 @@ struct JourneyFeatureRenderingTests {
         )
 
         #expect(active.height == inactive.height)
-        #expect(inactive.height == 26)
+        #expect(inactive.height == DSRowHeight.listRow)
     }
 
     // MARK: - The step row
 
-    /// Only a code you would stop on wears a fill.
-    ///
-    /// `200` and `503` are both three digits of `DSTypography.codeSmall`, which is monospaced, so the
-    /// two rows are identical in every glyph they draw and the only thing that can move the width is
-    /// the well behind the failing one — `DSSpacing.xs` either side of it. A column of filled pills
-    /// says nothing because everything in it shouts equally; withholding the fill at 500 would be the
-    /// opposite mistake, and this pins the seam between them at exactly one padding pair.
-    @Test("A failing status code wears a fill and a succeeding one does not")
-    func failingStatusCodeIsTheOnlyOneWithAFill() {
-        let measure = CGSize(width: 640, height: 60)
+    /// Changing the outcome must not shift the two-line step sequence vertically. The status pill's
+    /// fill and padding are covered by DesignSystem tests; this tests the composed journey row.
+    @Test("A step row keeps its height across successful and failing outcomes")
+    func stepRowKeepsHeightAcrossOutcomes() {
+        let measure = CGSize(width: 300, height: 60)
         let succeeding = render(
             JourneyStepRow(
                 step: makeStep(outcome: .respond(JourneyResponse(statusCode: 200))),
@@ -211,8 +206,8 @@ struct JourneyFeatureRenderingTests {
             size: measure
         )
 
-        #expect(failing.width == succeeding.width + DSSpacing.xs * 2)
         #expect(failing.height == succeeding.height)
+        #expect(failing.height >= DSRowHeight.journeyStep)
     }
 
     /// A run moving through the list does not change the list.
@@ -255,7 +250,7 @@ struct JourneyFeatureRenderingTests {
     /// That convention — sentence-case heading, `DSSpacing.lg` between the blocks, cancel to the left
     /// of the confirm action — ends in a `.frame(minWidth:idealWidth:)` written out separately in
     /// every file. `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 420
-    /// floor. The template picker needs 520 for its list; the step editor needs 560 so the multiline
+    /// floor. The template picker needs 520 for its list; the step editor uses the 540 medium width so the multiline
     /// headers and body fields retain useful width. Equalizing those two would either squeeze the
     /// editor again or add empty width to the picker.
     @Test("Every journey sheet opens at the width its convention gives it")
@@ -269,7 +264,7 @@ struct JourneyFeatureRenderingTests {
         #expect(newJourney.width >= 420)
 
         #expect(templatePicker.width == 520)
-        #expect(stepSheet.width == 560)
+        #expect(stepSheet.width == 540)
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)

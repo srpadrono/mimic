@@ -125,7 +125,7 @@ struct NewProjectSheet: View {
             }
         }
         .padding(DSSpacing.lg)
-        .frame(minWidth: 420, idealWidth: 420)
+        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .defaultFocus($focusedField, .name)
     }
 

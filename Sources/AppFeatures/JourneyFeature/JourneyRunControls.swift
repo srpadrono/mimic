@@ -9,9 +9,8 @@ import SwiftUI
 ///
 /// **The row assumes no particular width.** It renders in the journeys window's detail pane and in
 /// the main window's centre pane, which a user can drag down to around 300pt. Nothing here is given a
-/// fixed size: while the controls and the readout fit on one line the readout holds the trailing
-/// edge, and when they stop fitting it drops underneath them rather than being crushed into an
-/// ellipsis or pushing the buttons off the leading edge.
+/// fixed size: the full readout gives way to a shorter label in a narrow pane. Only a width too
+/// small for that compact label stacks the readout below the buttons.
 struct JourneyRunControls: View {
     @Environment(AppState.self) private var appState
 
@@ -33,6 +32,18 @@ struct JourneyRunControls: View {
                 progressReadout
             }
 
+            HStack(spacing: DSSpacing.sm) {
+                runButtons
+                Spacer(minLength: DSSpacing.md)
+                Text(compactProgressText)
+                    .font(DSTypography.label)
+                    .foregroundStyle(isActive ? DSColors.labelPrimary : DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .help(progressText)
+                    .accessibilityLabel(progressText)
+                    .accessibilityIdentifier("journeyRun.progress")
+            }
+
             VStack(alignment: .leading, spacing: DSSpacing.sm) {
                 HStack(spacing: DSSpacing.sm) {
                     runButtons
@@ -50,9 +61,8 @@ struct JourneyRunControls: View {
         // measures 20 — and that one-point drift is the smaller half of why they are `DSButton`s now:
         // a row's height should not depend on which kind of control somebody reached for.
         //
-        // A floor rather than a fixed height, because of the `ViewThatFits` above. The stacked
-        // candidate is two rows and needs about 52; pinning the frame would hold it at one row's worth
-        // of space and let it draw over whatever is underneath.
+        // A floor rather than a fixed height, because of the `ViewThatFits` above. The last
+        // candidate is two rows; pinning the frame would let it draw over the next section.
         .frame(minHeight: DSBarHeight.controlRow)
     }
 
@@ -117,9 +127,12 @@ struct JourneyRunControls: View {
             appState.restartActiveJourney()
         }
         .disabled(!isActive)
-        .help("Rewind the run to the first step.")
+        .help(appState.serverState.runningPort == nil
+              ? "Set the next run to start at the first step."
+              : "Rewind the run to the first step.")
         .accessibilityIdentifier("journeyRun.restartButton")
-        .accessibilityLabel("Restart journey")
+        .accessibilityLabel(appState.serverState.runningPort == nil
+                            ? "Restart next journey run" : "Restart journey")
 
         DSButton(
             "Advance",
@@ -130,9 +143,12 @@ struct JourneyRunControls: View {
             appState.advanceActiveJourney()
         }
         .disabled(!isActive || status?.isComplete == true)
-        .help("Retire the current step without serving it.")
+        .help(appState.serverState.runningPort == nil
+              ? "Set the next run to start at the following step."
+              : "Retire the current step without serving it.")
         .accessibilityIdentifier("journeyRun.advanceButton")
-        .accessibilityLabel("Advance journey")
+        .accessibilityLabel(appState.serverState.runningPort == nil
+                            ? "Advance next journey run" : "Advance journey")
     }
 
     // MARK: - Readout
@@ -155,6 +171,12 @@ struct JourneyRunControls: View {
 
     private var progressText: String {
         guard isActive else { return "Not active — endpoints answer directly" }
+        guard appState.serverState.runningPort != nil else {
+            guard let status else { return "Ready for next server run" }
+            if status.isComplete { return "Next run complete — restart to serve" }
+            guard let index = status.currentStepIndex else { return "Ready for next server run" }
+            return "Next run starts at step \(index + 1) of \(status.totalSteps)"
+        }
         guard let status else { return "Not started" }
         if status.isComplete {
             return "Complete — \(status.totalServed) served"
@@ -163,6 +185,20 @@ struct JourneyRunControls: View {
             return "\(status.totalServed) served"
         }
         return "Step \(index + 1) of \(status.totalSteps) — \(status.totalServed) served"
+    }
+
+    private var compactProgressText: String {
+        guard isActive else { return "Inactive" }
+        guard appState.serverState.runningPort != nil else {
+            guard let status else { return "Next run ready" }
+            if status.isComplete { return "Restart to serve" }
+            guard let index = status.currentStepIndex else { return "Next run ready" }
+            return "Next run: \(index + 1)/\(status.totalSteps)"
+        }
+        guard let status else { return "Not started" }
+        if status.isComplete { return "Complete" }
+        guard let index = status.currentStepIndex else { return "\(status.totalServed) served" }
+        return "Step \(index + 1) of \(status.totalSteps)"
     }
 }
 

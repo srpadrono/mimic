@@ -3,13 +3,13 @@ import SwiftUI
 /// Shared geometry for both navigator modes. List rows supply their own insets so native
 /// selection, focus, and keyboard navigation remain owned by List.
 public enum DSNavigatorMetrics {
-    public static let rowHeight: CGFloat = 26
-    public static let inset: CGFloat = 12
-    public static let indentation: CGFloat = 16
-    public static let iconSlot: CGFloat = 16
+    public static let rowHeight = DSRowHeight.listRow
+    public static let inset = DSSpacing.md
+    public static let indentation = DSSpacing.lg
+    public static let iconSlot = DSSpacing.lg
     public static let metadataWidth: CGFloat = 88
-    public static let headerHeight: CGFloat = 38
-    public static let footerHeight: CGFloat = 42
+    public static let headerHeight = DSBarHeight.navigatorHeader
+    public static let footerHeight = DSBarHeight.navigatorFooter
     public static let minimumWidth: CGFloat = 240
     public static let idealWidth: CGFloat = 260
     public static let maximumWidth: CGFloat = 360
@@ -167,7 +167,7 @@ public struct DSNavigatorGroup: View {
                 Text("· \(count)").font(DSTypography.label).monospacedDigit().fixedSize()
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DSColors.labelSecondary)
             .contentShape(Rectangle())
         }
         .buttonStyle(.dsPlain)

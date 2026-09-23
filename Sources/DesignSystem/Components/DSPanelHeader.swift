@@ -104,19 +104,7 @@ public struct DSPanelHeader<Accessory: View>: View {
                 accessory
             }
         }
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: Self.height)
-        .background(DSColors.secondary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                // `separator`, not `panelSeparator`. One rule for the whole window: a horizontal
-                // bar closes at 12%, and `panelSeparator` is reserved for the seam *between*
-                // panels. Bar bottoms were split 14% / 12% depending on whether the author reached
-                // for an overlay or for `DSDivider`, and the split tracked nothing — the request
-                // detail's identity row closed lighter than a section header inside it.
-                .fill(DSColors.separator)
-                .frame(height: DSStroke.hairline)
-        }
+        .dsHeaderChrome()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ds.panelheader.\(identifier)")
     }

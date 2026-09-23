@@ -27,6 +27,9 @@ public enum DSRowHeight {
     /// at the drawer's default height.
     public static let logRow: CGFloat = 28
 
+    /// 26 — a compact import candidate with a method, path, status and flag.
+    public static let importRow: CGFloat = 26
+
     /// 18 — a group-tag header in the navigator.
     ///
     /// Deliberately short. It names a section rather than being one, so it takes the smallest height
@@ -36,4 +39,7 @@ public enum DSRowHeight {
     /// 26 — a scenario row in the inspector, and any list row that is a name plus a status rather
     /// than a badge plus a path.
     public static let compactRow: CGFloat = 26
+
+    /// 52 — a two-line journey step: its name above the method and route, with room for an outcome.
+    public static let journeyStep: CGFloat = 52
 }

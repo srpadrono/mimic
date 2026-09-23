@@ -13,7 +13,9 @@ struct WelcomePage {
     private var heroTitleByLabel: XCUIElement { app.staticTexts["Mimic"].firstMatch }
     private var windowByTitle: XCUIElement { app.windows["Mimic"].firstMatch }
     var newProjectButton: XCUIElement { app.buttons["newProjectButton"] }
-    private var noRecentProjectsLabelByIdentifier: XCUIElement { app.staticTexts["noRecentProjectsLabel"] }
+    private var noRecentProjectsLabelByIdentifier: XCUIElement {
+        app.staticTexts["ds.empty.welcome.recents.heading"]
+    }
     private var noRecentProjectsLabelByLabel: XCUIElement { app.staticTexts["No projects yet"].firstMatch }
 
     /// All three of these poll their candidates together rather than chaining
@@ -336,6 +338,34 @@ struct EndpointEditorPage {
         app.scrollViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
     }
 
+    /// The form's scroll surface, outside the nested response-body editor.
+    var formScrollView: XCUIElement {
+        let pane = app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.frame
+        let form = app.scrollViews.allElementsBoundByIndex
+            .filter { scrollView in
+                let center = CGPoint(x: scrollView.frame.midX, y: scrollView.frame.midY)
+                return pane.contains(center)
+                    && scrollView.identifier != "ds.jsoneditor.editor.body"
+            }
+            .max { $0.frame.height < $1.frame.height }
+        if let form { return form }
+        XCTFail("No endpoint form scroll view was found inside the center pane")
+        return app.scrollViews.firstMatch
+    }
+
+    /// Short windows can place options below the clip even though the controls exist in the tree.
+    func reveal(_ control: XCUIElement) -> Bool {
+        if control.isHittable { return true }
+        let scroller = formScrollView
+        guard scroller.exists else { return control.isHittable }
+        for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0,
+                      90.0, 90.0, 90.0, 90.0] {
+            scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
+            if control.isHittable { return true }
+        }
+        return control.isHittable
+    }
+
     func showOptions(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(optionsToggle.waitForExistence(timeout: 5), file: file, line: line)
         if optionsToggle.value as? String == "Collapsed" { optionsToggle.click() }
@@ -377,6 +407,24 @@ struct EndpointEditorPage {
 @MainActor
 struct RequestLogDrawerPage {
     let app: XCUIApplication
+
+    /// At the drawer's minimum height, rows can exist in accessibility outside the clipped table.
+    /// Scroll the table itself until the row's click point is inside its viewport.
+    func reveal(_ row: XCUIElement) -> Bool {
+        let drawer = app.descendants(matching: .any).matching(identifier: "drawer").firstMatch
+        guard drawer.exists, row.exists else { return false }
+        guard let table = drawer.scrollViews.allElementsBoundByIndex
+            .filter({ $0.frame.height > 0 })
+            .min(by: { $0.frame.height < $1.frame.height }) else { return false }
+        for _ in 0..<4 {
+            let viewport = table.frame
+            let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+            if viewport.contains(center) && row.isHittable { return true }
+            table.scroll(byDeltaX: 0, deltaY: center.y < viewport.minY ? -30 : 30)
+        }
+        let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+        return table.frame.contains(center) && row.isHittable
+    }
 
     var filterField: XCUIElement {
         app.descendants(matching: .textField).matching(identifier: "drawer.filterField").firstMatch
@@ -1330,9 +1378,9 @@ final class MimicUITests: XCTestCase {
         createEndpointViaUI(name: "Get Users", path: "/api/users")
         createEndpointViaUI(name: "Get Posts", path: "/api/posts")
 
-        // Both endpoints should exist — count matching path texts (sidebar + editor may both show)
-        let usersPath = app.staticTexts["/api/users"]
-        let postsPath = app.staticTexts["/api/posts"]
+        // Navigator rows expose method, path and name as one accessible element.
+        let usersPath = workspace.endpointPathText("/api/users")
+        let postsPath = workspace.endpointPathText("/api/posts")
         XCTAssertTrue(usersPath.waitForExistence(timeout: 5),
                       "Get Users endpoint should be visible")
         XCTAssertTrue(postsPath.waitForExistence(timeout: 5),

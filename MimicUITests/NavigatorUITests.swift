@@ -26,6 +26,12 @@ struct NavigatorPage {
             "endpoint-", "journeys.row.", name
         )).firstMatch
     }
+    func endpointRow(named name: String, path: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND label CONTAINS %@",
+            "endpoint-", name, path
+        )).firstMatch
+    }
     func rowHeight(named name: String) -> CGFloat {
         app.descendants(matching: .outlineRow)
             .containing(.any, identifier: row(named: name).identifier).firstMatch.frame.height
@@ -148,8 +154,9 @@ final class NavigatorUITests: MimicUITestCase {
         if requestLogDrawer.emptyHeading.exists { workspace.toggleDrawerButton.click() }
         XCTAssertTrue(endpointEditor.bodyEditor.waitForExistence(timeout: 5))
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            self.endpointEditor.bodyEditor.frame.width > 640 && self.endpointEditor.bodyEditor.frame.height > 300
-        }, "The body should use the full workspace instead of a capped form card")
+            self.endpointEditor.bodyEditor.frame.width >= shell.panel("centerPane").frame.width - 26
+                && self.endpointEditor.bodyEditor.frame.height > 200
+        }, "The body should fill the available centre pane instead of using a capped form card")
         XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - shell.panel("centerPane").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("centerPane").frame.maxX - endpointEditor.bodyEditor.frame.maxX, 12, accuracy: 1)
         XCTAssertEqual(endpointEditor.optionsToggle.value as? String, "Collapsed")
@@ -177,19 +184,19 @@ final class NavigatorUITests: MimicUITestCase {
 
         workspace.compactWindow()
         workspace.showSidebarIfNeeded()
-        XCTAssertTrue(endpointEditor.optionsToggle.isHittable)
-        XCTAssertTrue(endpointEditor.delayField.isHittable)
-        XCTAssertTrue(endpointEditor.groupTagField.isHittable)
+        XCTAssertTrue(endpointEditor.reveal(endpointEditor.optionsToggle))
+        XCTAssertTrue(endpointEditor.reveal(endpointEditor.delayField))
+        XCTAssertTrue(endpointEditor.reveal(endpointEditor.groupTagField))
         XCTAssertGreaterThanOrEqual(endpointEditor.headerKeyField(at: 0).frame.minX, shell.panel("centerPane").frame.minX)
         XCTAssertLessThanOrEqual(endpointEditor.groupTagField.frame.maxX, shell.panel("centerPane").frame.maxX)
         XCTAssertLessThanOrEqual(endpointEditor.headerValueField(at: 0).frame.maxX, shell.panel("centerPane").frame.maxX)
         XCTAssertGreaterThanOrEqual(endpointEditor.bodyEditor.frame.height, 180)
         add(navigator.screenshot("endpoint-editor-narrow"))
         // Scroll over the options bar so the nested code editor cannot consume the wheel event.
-        endpointEditor.optionsToggle.scroll(byDeltaX: 0, deltaY: -300)
+        endpointEditor.formScrollView.scroll(byDeltaX: 0, deltaY: -300)
         XCTAssertTrue(endpointEditor.globalDelayNote.isHittable, "Short windows must allow the last option to scroll into view")
         add(navigator.screenshot("endpoint-editor-options-narrow-scrolled"))
-        endpointEditor.optionsToggle.scroll(byDeltaX: 0, deltaY: 300)
+        endpointEditor.formScrollView.scroll(byDeltaX: 0, deltaY: 300)
         endpointEditor.headersToggle.click()
         XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForNonExistence(timeout: 5))
         endpointEditor.delayField.click()
@@ -218,7 +225,7 @@ final class NavigatorUITests: MimicUITestCase {
         let endpointRowHeight = navigator.rowHeight(named: "Account summary")
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.endpointFilter.frame.maxX, 20, accuracy: 1,
                        "Inactive journey controls must not leave an empty slot beside the filter")
-        XCTAssertEqual(endpointRowHeight, 26, accuracy: 1)
+        XCTAssertEqual(endpointRowHeight, 30, accuracy: 1)
         XCTAssertEqual(navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.element("sidebar.addEndpointButton").frame.maxX, 12, accuracy: 1)
         XCTAssertTrue(navigator.row(named: "Current orders").exists)
@@ -301,6 +308,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertFalse(navigator.row(named: "Session expired").exists)
         navigator.filter(navigator.journeyFilter, text: "")
         navigator.row(named: "Empty journey").click()
+        navigator.element("journeyEditor.settingsDisclosure").click()
         XCTAssertTrue(navigator.journeyGroupField.waitForExistence(timeout: 5))
         navigator.filter(navigator.journeyGroupField, text: "Checkout")
         navigator.journeyGroupField.typeKey(.return, modifierFlags: [])
@@ -314,6 +322,24 @@ final class NavigatorUITests: MimicUITestCase {
         navigator.journeyGroup("Account").click()
         XCTAssertTrue(navigator.row(named: "Empty journey").exists, "Cleared groups become ungrouped rows")
         navigator.journeyGroup("Account").click()
+        navigator.journeyGroup("ungrouped").click()
+        XCTAssertTrue(navigator.row(named: "Empty journey").waitForNonExistence(timeout: 5))
+        let journeys = JourneysNavigatorPage(app: app)
+        journeys.addButton.click()
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        journeys.newEmptyMenuItem.click()
+        let newJourney = NewJourneySheetPage(app: app)
+        XCTAssertTrue(newJourney.nameField.waitForExistence(timeout: 5))
+        newJourney.nameField.click()
+        newJourney.nameField.typeText("New ungrouped journey")
+        newJourney.createButton.click()
+        XCTAssertTrue(navigator.row(named: "New ungrouped journey").waitForExistence(timeout: 5),
+                      "Creating a selected journey must reveal its collapsed Ungrouped section")
+        XCTAssertTrue(navigator.row(named: "New ungrouped journey").isHittable)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            journeys.editorName.label.contains("New ungrouped journey")
+                || (journeys.editorName.value as? String)?.contains("New ungrouped journey") == true
+        }, "The centre pane should edit the newly selected journey")
         try await command(["journeyActivate": ["journey": ["name": "Payment succeeds after the second authorization attempt"]]])
         navigator.journeyGroup("Checkout").click()
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForNonExistence(timeout: 5))
@@ -325,10 +351,47 @@ final class NavigatorUITests: MimicUITestCase {
         workspace.showSidebarIfNeeded()
         XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
         XCTAssertTrue(navigator.journeyGroup("Checkout").isHittable)
-        XCTAssertLessThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.maxY,
-                                 navigator.element("journeyRun.deactivateButton").frame.minY,
-                                 "Folded behavior controls must not overlap the run buttons")
+        let settings = navigator.element("journeyEditor.settingsDisclosure")
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "Narrow editors disclose secondary settings")
+        XCTAssertEqual(settings.value as? String, "Collapsed")
+        let firstStep = navigator.element("journeyStep-0")
+        XCTAssertTrue(firstStep.isHittable, "The first step must be visible in the initial narrow viewport")
+        XCTAssertLessThan(firstStep.frame.minY, shell.panel("centerPane").frame.maxY)
+        settings.click()
+        XCTAssertEqual(settings.value as? String, "Expanded")
+        XCTAssertGreaterThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.minY,
+                                    navigator.element("journeyRun.deactivateButton").frame.maxY,
+                                    "Expanded behavior controls must follow the run buttons")
+        settings.click()
+        XCTAssertTrue(firstStep.isHittable)
         add(navigator.screenshot("navigator-journeys-grouped-narrow"))
+    }
+
+    @MainActor
+    func testLightJourneyEditorShowsStepsBeforeSettingsAtBothWidths() async throws {
+        usesLightAppearance = true
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        let shell = WorkspaceShellPage(app: app)
+        shell.journeysTab.click()
+        navigator.row(named: "Payment succeeds").click()
+        let firstStep = navigator.element("journeyStep-0")
+        XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstStep.label.contains("First charge declined"), firstStep.label)
+        XCTAssertTrue(navigator.element("journeyStep-1").label.contains("Retry accepted"))
+        let settingsWide = navigator.element("journeyEditor.settingsDisclosure")
+        XCTAssertEqual(settingsWide.value as? String, "Collapsed")
+        add(navigator.screenshot("journey-editor-light-wide"))
+
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        let settings = navigator.element("journeyEditor.settingsDisclosure")
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertEqual(settings.value as? String, "Collapsed")
+        XCTAssertTrue(firstStep.isHittable, "The first step should remain visible in light mode at narrow width")
+        XCTAssertTrue(navigator.element("journeyStep-1").isHittable,
+                      "Both short journey steps should fit above the compact request log")
+        add(navigator.screenshot("journey-editor-light-narrow"))
     }
 
     @MainActor
@@ -439,6 +502,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(panel.tab("traffic").isHittable)
         XCTAssertTrue(panel.addScenarioButton.isHittable)
         XCTAssertEqual(scenario.frame.height, 26, accuracy: 1)
+        for column in ["method", "path", "status", "timestamp"] {
+            let header = app.buttons["drawer.columnHeader.\(column)"].firstMatch
+            XCTAssertTrue(header.isHittable, "\(column) must stay visible in the compact request log")
+        }
         add(navigator.screenshot("inspector-scenarios-narrow"))
         panel.tab("traffic").click()
         panel.trafficRows.allElementsBoundByIndex.first(where: \.isHittable)?.click()
@@ -456,15 +523,20 @@ final class NavigatorUITests: MimicUITestCase {
         shell.journeysTab.click()
         let activeName = "Payment succeeds after the second authorization attempt"
         navigator.row(named: activeName).click()
-        XCTAssertTrue(panel.journeyRow("name").waitForExistence(timeout: 5))
-        XCTAssertTrue(panel.spoken(panel.journeyRow("name")).contains(activeName))
+        XCTAssertTrue(panel.journeyRow("steps").waitForExistence(timeout: 5))
+        XCTAssertTrue(panel.spoken(panel.journeyRow("steps")).contains("2"))
         XCTAssertTrue(panel.spoken(panel.journeyRow("state")).contains("Inactive"))
         XCTAssertTrue(panel.journeyRow("noActiveRun").exists)
         try await command(["journeyActivate": ["journey": ["name": activeName]]])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            panel.spoken(panel.journeyRow("state")).contains("Prepared for next server run")
+        })
+        XCTAssertTrue(navigator.element("journeyRun.progress").waitForExistence(timeout: 5))
+        XCTAssertTrue(panel.spoken(navigator.element("journeyRun.progress")).contains("Next run"))
         try await command(["journeyAdvance": [:]])
         navigator.row(named: "Empty journey").click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            panel.spoken(panel.journeyRow("name")).contains("Empty journey")
+            panel.spoken(panel.journeyRow("steps")).contains("0")
                 && panel.spoken(panel.journeyRow("activeName")).contains(activeName)
         })
         XCTAssertTrue(panel.spoken(panel.journeyRow("state")).contains("Inactive"))
@@ -472,7 +544,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(panel.spoken(panel.journeyRow("steps")).contains("0"))
         add(navigator.screenshot("inspector-journey-selection-and-run"))
         workspace.compactWindow()
-        XCTAssertTrue(app.windows.firstMatch.frame.contains(panel.journeyRow("name").frame))
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(panel.journeyRow("steps").frame))
         XCTAssertTrue(app.windows.firstMatch.frame.contains(panel.journeyRow("activeName").frame))
         add(navigator.screenshot("inspector-journey-narrow"))
         try await command(["journeyActivate": [:]])

@@ -76,11 +76,11 @@ struct PanelLayoutStoreTests {
     @Test("Both panes keep a usable floor, and the two floors cannot exceed a real window")
     func floorsLeaveRoomForBothPanes() {
         // These two are the split view items' `minimumThickness` values, so together they are the
-        // shortest editor column the layout can produce. A pair that did not fit a small window would
-        // make the divider undraggable rather than merely tight.
+        // shortest editor column the layout can produce. The compact 960×540 window leaves about
+        // 430pt below its toolbar and jump bar; a larger sum would make the divider undraggable.
         let combined = PanelLayoutStore.Bounds.minimumCentreHeight
             + PanelLayoutStore.Bounds.minimumRequestLogHeight
-        #expect(combined <= 400)
+        #expect(combined <= 430)
         #expect(PanelLayoutStore.Bounds.minimumRequestLogHeight > 0)
         #expect(PanelLayoutStore.Bounds.minimumCentreHeight > 0)
     }

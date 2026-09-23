@@ -28,16 +28,6 @@ public enum DSControlHeight {
     public static let search: CGFloat = 26
     public static let navigation: CGFloat = 26
 
-    /// 26 — one row of a dense table, which is a different thing from a control and is here because
-    /// nothing else names heights. `row` is 20 and `field` 22, and neither holds a `compact`
-    /// `DSMethodBadge` above a line of `codeSmall`; a table row is not something a user aims at, so
-    /// it is not measured against the controls it happens to sit near.
-    ///
-    /// Two rows in two modules stand on this number — the request log's traffic row and the import
-    /// review's candidate row — and until now they were two literals coupled by a sentence in each
-    /// file naming the other. `RequestLogDrawerView.LogRow`'s own comment asks for this rung by name.
-    public static let denseRow: CGFloat = 26
-
     /// 28 — the one-per-sheet primary action.
     public static let prominent: CGFloat = 28
 

@@ -42,10 +42,6 @@ public struct DSMethodBadge: View {
     public var body: some View {
         Text(method)
             .font(size.font)
-            // Both sizes, not just the large one. The compact badge was the *lighter* of the two at
-            // `.medium` weight, which is backwards: 11pt of saturated colour on a 16% tint of itself
-            // needs more weight to hold its edges, not less.
-            .fontWeight(.semibold)
             // A method that somehow does not fit truncates; it does not grow the row.
             .lineLimit(1)
             .foregroundStyle(color)
@@ -78,8 +74,8 @@ public struct DSMethodBadge: View {
 private extension DSMethodBadgeSize {
     var font: Font {
         switch self {
-        case .standard: DSTypography.codeBold
-        case .compact: DSTypography.codeSmall
+        case .standard: DSTypography.codeBadgeStandard
+        case .compact: DSTypography.codeBadgeCompact
         }
     }
 

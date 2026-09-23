@@ -630,7 +630,9 @@ struct WorkspaceView: View {
             crumbs.append(
                 BreadcrumbJumpBar.Crumb(
                     id: "journey",
-                    title: journeys.first { $0.id == appState.selectedJourneyID }?.name ?? "No journey",
+                    // The centre editor gives the selected journey its full title. Keep this jump
+                    // control short so it does not repeat and truncate that title above the editor.
+                    title: "Journeys",
                     // From `NavigatorTab`, not spelled out here: this crumb sits one bar below the
                     // tab whose glyph it is repeating, and a literal is how the five empty states
                     // `NavigatorTab.systemImage` was extracted for came to disagree with it in the
