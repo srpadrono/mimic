@@ -272,19 +272,7 @@ step "UI shards cover every UI test class"
 python3 Scripts/check_ui_shards.py --self-test
 python3 Scripts/check_ui_shards.py
 
-# The end-to-end check, which used to be listed here as deliberately *not* run.
-#
-# What kept it out was plumbing rather than safety: it resolves the CLI with
-# `find "$ROOT_DIR" … -path '*Build/Products*'` and the app through
-# `AppLauncher.resolveExecutable` (`MIMIC_APP_PATH`, `/Applications/Mimic.app`,
-# `~/Applications/Mimic.app`), so with no `-derivedDataPath` anywhere it found neither and fell back
-# to whatever `mimic` was on PATH — an installed build, about which a green run says nothing.
-# `DERIVED_DATA` above answers both, and both are named here so this run drives what this run built.
-#
-# It is the only thing in this script that exercises process launch, the discovery file and real
-# sockets, and it is safe to run beside a developer's own Mimic: it signals only the pid
-# `mimic app start` reported, and `MIMIC_CONTROL_FILE` keeps its discovery file inside its own
-# temporary directory rather than overwriting the shared one.
+# Exercise the built CLI and a temporary app copy through process launch and real sockets.
 step "CLI end-to-end (launch, discovery, real sockets)"
 PRODUCTS="$ROOT_DIR/$DERIVED_DATA/Build/Products/Debug"
 if [[ ! -x "$PRODUCTS/mimic" || ! -d "$PRODUCTS/Mimic.app" ]]; then
@@ -292,9 +280,6 @@ if [[ ! -x "$PRODUCTS/mimic" || ! -d "$PRODUCTS/Mimic.app" ]]; then
     printf 'The Mimic scheme builds Mimic.app and mimic together, so this is a -derivedDataPath problem rather than a failure of the check.\n'
     exit 1
 fi
-# Through `run_step` like every other step, so its output lands in "$LOG_DIR" with the rest and the
-# closing "Full output" line points at something. A step that writes its log nowhere is a step whose
-# failure you have to reproduce before you can read it.
 run_step cli-e2e 'error|fail|== ' \
     env MIMIC_BIN="$PRODUCTS/mimic" MIMIC_APP_PATH="$PRODUCTS/Mimic.app" Scripts/run_cli_e2e.sh
 

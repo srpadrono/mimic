@@ -566,51 +566,9 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-      # The seam nothing else in this workflow reaches: a real process launch, the discovery file on
-      # disk, a real control socket, and `mimic` as a binary rather than `MimicCommand.run(arguments:)`
-      # called in-process. AGENTS.md and CONTRIBUTING.md each carried a section explaining why no
-      # gate ran it, and no runner ever had.
-      #
-      # It now runs about eighty minutes earlier than it used to, because it no longer waits behind
-      # XCUITest for a build it needed before the suite started.
-      #
-      # What kept it out was never safety, it was that it could not find what the job built. The
-      # script resolves the CLI with `find … -path '*Build/Products*'`, which matches nothing while
-      # DerivedData sits under `$HOME`, and then falls through to `command -v mimic` — an *installed*
-      # build, which would have made a green run say nothing about the working tree. The app is
-      # resolved separately again, by `AppLauncher.resolveExecutable`, from `MIMIC_APP_PATH` then
-      # `/Applications/Mimic.app` then `~/Applications/Mimic.app`, none of which a hosted runner has.
-      # `DERIVED_DATA` at the top of this job answers the first and `MIMIC_APP_PATH` here answers the
-      # second; both point at the Debug products this job produced, which is why this runs before
-      # `Build (Release)` writes a second set beside them.
-      #
-      # Still non-gating, and the flag below now has a reason rather than a countdown.
-      #
-      # It passed its first round and was promoted on that evidence; the next round failed, with
-      # every other step in the job green. What failed is the discovery-file assertion: the script
-      # waits two seconds for the instance to advertise itself at `MIMIC_CONTROL_FILE` and the file
-      # was not there. `ControlServer.start` binds the socket *before* it writes that file, so
-      # `mimic app start` can report the instance reachable while the advertisement has not landed —
-      # and when the write fails, it is deliberately non-fatal: the error goes to the application's
-      # own logger, and `AppLauncher.launch` hands the child `FileHandle.nullDevice` for stdout and
-      # stderr on every launch, headless or not, so that logger writes into nothing. So this
-      # assertion can fail with no evidence anywhere of why, which is precisely what makes it unfit
-      # to gate today.
-      #
-      # Two candidate causes, and the script now prints which: a sandboxed app cannot write into the
-      # `mktemp -d` directory outside its container, or the override never reached the child and it
-      # advertised at the shared path instead. Fix the cause — most likely by having the app report
-      # an advertise failure the way it now reports an ephemeral store, so the condition is
-      # observable — and then gate. Not before: a gate whose failures cannot be explained is the
-      # "red that means nothing" this repository has spent several waves removing.
-      #
-      # One thing it inherits from a laptop run rather than from this runner: the launched app is
-      # sandboxed (`App/Mimic.entitlements`), and everything this script hands it — the store, the
-      # discovery file — lives in a `mktemp -d` directory outside the app's container. The script's
-      # own failure messages name that as a possible cause, which is what a first red run here would
-      # be read against.
+      # This gate uses a temporary, unsandboxed copy of the built app so the CLI and
+      # app can share a disposable database and discovery file.
       - name: CLI end-to-end (launch, discovery, real sockets)
-        continue-on-error: true
         run: |
           products="$PWD/$DERIVED_DATA/Build/Products/Debug"
           # Named rather than searched for, and checked before the script starts, so "the products
