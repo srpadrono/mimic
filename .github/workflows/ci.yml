@@ -1,200 +1,18 @@
 name: CI
 
-# Split by what actually needs a Mac, and then — on the Mac — by what can be run at the same time as
-# what.
-#
-# The domain rules, the mock engine, persistence, the control plane, spec import and the CLI are
-# plain Swift — Vapor's native home is Linux — so `Package.swift` builds them on a Linux runner and
-# most of the suite reports back in a couple of minutes. The app bundle, SwiftUI, the app-level
-# suites, the Release gate and XCUITest need Xcode, so they run on macOS.
-#
-# Both are free: GitHub does not meter standard hosted runners on public repositories, macOS
-# included. That was not always true here — while this repo was private, every run died in about two
-# seconds with zero steps executed, which is why the automatic triggers used to be commented out and
-# the macOS job was `if: false`. Making the repo public resolved it.
-#
-# ## Why there are four macOS jobs and not one
-#
-# There used to be one, and it ran strictly in sequence: setup, Debug build, unit suites, coverage,
-# **XCUITest**, CLI end-to-end, Release. Run #87 (green, 6aeff91) measured it at about **96 minutes**
-# end to end, of which the UI suite alone was about **80**. So four fifths of every pull request's
-# feedback was one step, and the Release gate and the end-to-end check — neither of which the UI
-# suite has anything to do with — sat behind it waiting their turn. A reviewer learned that Release
-# still compiles about ninety minutes after learning that the unit suites pass.
-#
-# Two changes, and they are independent:
-#
-#   1. **The non-UI macOS work moved into its own job** (`macos-checks`), so the Debug build, the
-#      unit suites with their coverage measurement, the CLI end-to-end check and the Release gate all
-#      report in around twenty minutes instead of ninety-six — 19m43 measured on run #89.
-#   2. **The UI suite is sharded across three runners** (`macos-ui`), each running a named subset of
-#      the test classes with `-only-testing:`.
-#
-# ## Why sharding, and never `-parallel-testing-enabled`
-#
-# The obvious cheaper move is to let one runner run the suite in parallel workers. It is not
-# available here, for two reasons that hold independently — fix either one and the other still
-# stands.
-#
-#   - **The suites share one store and one defaults domain.** `UITestSupport.databaseURL` resolves to
-#     the fixed name `mimic-uitests.sqlite`, `MIMIC_DEFAULTS_SUITE` is the fixed
-#     `com.devxa.Mimic.UITests`, `resetApp` deletes that store on every app launch, and
-#     `setUpWithError` wipes that domain before every test. Two workers on one machine therefore
-#     destroy each other's state mid-test — not flakily, by construction.
-#   - **This is a macOS app, not a simulator.** Parallel workers share one window server and one
-#     frontmost application, and these suites lean on `typeText`, `typeKey` and ⌘-click, all of which
-#     go to whichever app has focus. There is no simulator-clone equivalent to isolate them with.
-#
-# Sharding across runners dissolves both: each shard is its own machine, with its own store, its own
-# defaults domain and its own window server. Nothing in the tests changed to make this work, and
-# nothing needed to — the suites already use disjoint port ranges (21311–21613, 62084–62118,
-# 62311–62314) and already suffix `MIMIC_CONTROL_FILE` with the runner's pid, so two shards running
-# at the same moment cannot collide on a socket or on a discovery file either.
-#
-# ## Why exactly four macOS jobs — the cap is four here, whatever the documentation says
-#
-# **Read this before adding a macOS job.** GitHub documents the concurrent-macOS-job limit as **five**
-# on Free, Pro and Team plans — a separate, much smaller cap than the 20/40/60 on standard runners,
-# shared across standard and larger runners, with Enterprise Cloud at 50. This file was first written
-# against that documented five: one `macos-checks` plus four shards.
-#
-# **What run #89 actually did was four.** That run (green, 62b80e7) requested five macOS jobs at once.
-# Four of them — `macos-checks` and shards 1, 2 and 3 — started together at 22:01:49. Shard 4 did not
-# start until 22:21:15, **19m26 after the other four**, and two seconds after shard 2 finished and
-# freed a slot. That is not a slow start, it is a queue: the fifth job waited for the first completion
-# and then began, which cost the run the length of a whole shard. Real wall clock was **~43 minutes**
-# against the ~29 this header and the pull request both predicted.
-#
-# The honest form of the claim is therefore an observation and not a rule: **the documented figure is
-# five, the observed concurrency on this repository was four, and a fifth macOS job queued for
-# roughly the length of a shard.** The documentation may well be right in general and wrong for this
-# account, this plan or this runner pool; what is not in doubt is what happened on run #89. Anyone who
-# wants a fifth macOS job — another shard, or the Release gate split out of `macos-checks` — should
-# expect it to queue, and should say so with a measurement rather than with the documented number.
-# One run is enough evidence to design against and not enough to call the documentation wrong.
-#
-# Going over the cap does not fail, it queues — and a queued shard is the worst outcome available,
-# because it starts only when another finishes and so lands at roughly *twice* the shard time. Four
-# jobs is therefore a budget, measured rather than estimated:
-#
-#     macos-checks   1 slot    Debug build, unit suites, coverage, CLI e2e, Release
-#     macos-ui       3 slots   the XCUITest suite, in three shards
-#     ────────────────────────
-#                    4 slots
-#
-# There is a **fifth** macOS job — `coverage`, near the bottom of this file — and it is outside that
-# budget rather than an exception to it. The cap is on jobs running *at the same time*, and that one
-# declares `needs: [macos-checks, macos-ui]`, so it cannot start until all four above have finished
-# and given their slots back. It asks for a slot that is free by construction. What it costs is wall
-# clock on pushes to `main`, after the last shard reports, and nothing at all on a pull request.
-#
-# The rule the paragraph above is really stating, then: **a fifth *concurrent* macOS job queues for
-# about the length of a shard.** A fifth job downstream of the other four does not. Before adding
-# one, ask which kind it is.
-#
-# Fewer, larger shards is the right trade under an observed cap of four. Three shards of ~53 tests
-# each are longer than four of ~40, but nothing queues, and a shard that runs is worth more than a
-# shard that waits: the four-shard split spent 19m26 of wall clock on a slot that did not exist.
-#
-# That is also why the non-UI work is *one* job rather than three. Splitting the Release gate and the
-# end-to-end check into jobs of their own would buy about eight minutes on a path the UI shards
-# already dominate, and it would cost two shard slots — pushing the shards from three to one and the
-# whole run past eighty minutes. The arithmetic runs the other way from the intuition, and the cap is
-# why.
-#
-# One consequence worth knowing: `cancel-in-progress` is deliberately off for pushes to `main` (see
-# `concurrency` below), so two overlapping pushes there put eight macOS jobs against a cap of four and
-# the second run's shards queue behind the first's. That is accepted. It is the same trade the
-# concurrency comment already makes — on `main`, a completed run per commit is worth more than a fast
-# one — and pull requests, where the feedback loop actually matters, still cancel.
-#
-# ## Why each shard builds for itself instead of downloading one build
-#
-# The textbook shape for this is `xcodebuild build-for-testing` in one job, then
-# `test-without-building -xctestrun …` in each shard, with the products passed between them as an
-# artifact. It was considered and deliberately not taken, for a reason that is arithmetic before it
-# is risk.
-#
-# Building once removes the ~5-minute Debug build from each shard's clock — but the shards run *at
-# the same time*, so that build was never on the critical path more than once to begin with. What
-# building once actually does is take that build off four parallel clocks and put it on one serial
-# one, ahead of every shard, and then add a tar, an upload and three downloads of a macOS `.app` on
-# top. Measured against the timings below it is a wash at best and slower at worst. Build-once
-# saves *runner minutes*, which are the thing this repository is not billed for.
-#
-# And it is the riskier of the two. A macOS `.app` moved through `actions/upload-artifact` loses
-# symlinks and permissions unless it is tarred first, an `.xctestrun` carries paths that must land
-# where it expects them, and a code signature that does not survive the round trip means every shard
-# fails to launch the app — which presents as a broken suite, not as a broken artifact. Paying four
-# concurrent builds to avoid all of that is the trade this file takes. A slower CI that works beats a
-# faster one that is flaky.
-#
-# The four builds are not from cold: `Tuist/.build` and `~/.cache/tuist` are restored from the same
-# cache key in all four jobs, so what each shard compiles is this repository's own sources against
-# already-resolved dependencies. Caching **DerivedData** itself would cut the shard build further and
-# is also deliberately not done — a restored Xcode module cache that disagrees with the toolchain
-# fails as "module compiled with Swift X cannot be imported by Swift Y", which reads as a source
-# problem and reproduces nowhere locally. The Linux job's cache key carries the compiler version for
-# exactly that reason; until someone is prepared to key DerivedData as carefully, four honest builds
-# is the cheaper mistake.
-#
-# ## Shape of a run, measured
-#
-# Run #89 (62b80e7), the first real run of the sharded workflow, with four shards against a cap that
-# turned out to be four:
-#
-#     linux                    2m20   measured
-#     macos-checks            19m43   measured
-#     macos-ui shard 2 (38)   19m23   measured
-#     macos-ui shard 1 (40)   21m18   measured
-#     macos-ui shard 3 (39)   23m49   measured
-#     macos-ui shard 4 (41)   19m26 queued, then ~22m   ← the job there was no slot for
-#     ────────────────────────────────
-#     wall clock              ~43m
-#
-# Those shard times give the constant everything below is derived from: shard 3 ran 39 tests in a
-# 22m42 step that also contains the Debug build and the test-target compile, so a UI test costs
-# **about 26 seconds**.
-#
-# With three shards and nothing queueing:
-#
-#     linux                   ~2m20   unchanged
-#     macos-checks           ~19m43   unchanged; comfortably inside the shards
-#     macos-ui  (51/53/54)    ~30m    ~1m setup + ~5m Debug + ~1m30 test-target compile
-#                                     + 54 × 26s ≈ 23m24 of tests on the heaviest shard
-#     ui-suite                 ~0m    Linux; rolls the three shard results into one status check
-#     coverage           pushes only  macOS; downloads four result bundles, merges them, publishes
-#                                     the figures. Downstream of everything above, so it adds to a
-#                                     push to `main` and nothing to a pull request.
-#
-# So: **96 minutes originally, 43 measured with four shards, about 30 expected with three.** The
-# saving is not from running less — it is the same 158 tests either way — it is from stopping asking
-# for a fifth concurrent macOS job that does not exist. The first red is faster still: a compile
-# break or a unit failure lands in `macos-checks` inside ten minutes.
+# Portable Swift runs on Linux. macOS builds the app and runs unit, CLI, Release, and UI gates.
+# UI tests use three separate runners because they share a database, defaults, and window server.
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
-# Read-only by default. Nothing here publishes anything, and a public repository runs this workflow
-# against code from strangers, so the token it hands them should be able to do as little as possible.
 permissions:
   contents: read
 
-# Every third-party action is pinned to a commit, not a tag. A tag is a moving pointer its owner can
-# repoint at any time, and these run with repository context on pull requests — including forks. The
-# trailing comment is the human-readable version; the SHA is what actually runs.
-#
-# `./.github/actions/macos-setup` is not third-party and takes no SHA: a local action referenced by
-# path is read out of the same commit that is being tested, which is the strongest pin there is.
-
 concurrency:
-  # A newer push makes an in-flight run irrelevant *on a pull request*, where only the tip matters.
-  # On `main` it does not: every commit there is an artefact someone may bisect to, and `github.ref`
-  # is `refs/heads/main` for pushes and manual runs alike, so they all shared one group. That has
-  # already happened — a `workflow_dispatch` on main was cancelled by the next push, leaving the
-  # commit before it with no completed run and no red X to say so. Both runners are free here.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -208,142 +26,41 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # First, and before anything is installed, because it is the cheapest thing in the workflow: a
-      # few greps over the Swift sources, no toolchain, under a second. It decides the house rules
-      # that are literal enough for a grep to settle — casing, `@AppStorage`, `asyncAfter`, the
-      # deprecated `Alert()`, and the two XCUITest waiting rules. Each had been broken at least once
-      # and caught only by somebody happening to read the diff, which is not a mechanism.
-      #
-      # It runs here rather than on macOS because it needs nothing a Mac has: it reads
-      # `MimicUITests/` as text, so the one job that never builds the UI suite is still the right
-      # place to check how it is written.
-      #
-      # `--self-test` first, and it is not ceremony. The scanner blanked comments with
-      # `sed 's|//.*||'`, which cut at the `//` in every URL, so any line carrying one defeated all
-      # six rules: a planted `Text("see https://example.com").textCase(.uppercase)` reported "no
-      # violations" and exited 0. That survived review of the script itself, so the scanner now
-      # plants each rule's pattern behind a URL in a string literal and asserts it is still caught,
-      # before it is trusted to say anything about the tree.
       - name: House rules
         run: |
           ./Scripts/check_house_rules.sh --self-test
           ./Scripts/check_house_rules.sh
 
-      # GRDB compiles against SQLite's C headers, which the Swift image does not ship. Without this
-      # the build fails with "'sqlite3.h' file not found" — verified by running this container locally.
-      #
-      # `python3` is here for the same reason and was found the same way: `swift:6.2` is a slim
-      # Ubuntu with no interpreter, so the two manifest checks below — plain stdlib Python — exited
-      # 127 with "python3: not found" on this workflow's first ever run. They had never executed
-      # before: the automatic triggers were disabled while the repository was private, and until this
-      # branch the checks did not exist. `python3-minimal` is the smallest thing that runs them;
-      # neither script imports anything outside the standard library, which is a constraint their own
-      # headers state so that this stays true.
       - name: Install SQLite headers and Python
         run: |
           apt-get update
           apt-get install -y libsqlite3-dev python3-minimal
 
-      # Recorded, and then used in the cache key below. `container: swift:6.2` is a tag its owner
-      # repoints at each patch release, so `runner.os` alone keys a `.build` full of .swiftmodules at
-      # whatever compiler produced them — and restoring those into a newer one fails with "module
-      # compiled with Swift X cannot be imported by Swift Y", which reads as a source problem and
-      # reproduces nowhere locally.
       - name: Swift version
         id: swift
         run: |
           swift --version
           echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-' | tr -s '-')" >> "$GITHUB_OUTPUT"
 
-      # The two manifests declare the same dependency ranges from the same directories, and then
-      # resolve them into two separate lockfiles. That is a drift generator: 21 packages had already
-      # diverged, including Vapor, NIO and GRDB — so this job's socket-binding suites were passing
-      # against versions the shipped .pkg does not contain. Nothing detected it, because the claim
-      # that the manifests "cannot drift" was written in prose rather than checked.
-      #
-      # The program explains the rest: why it compares the union rather than the intersection, and
-      # which two packages are legitimately one-sided. It is a file, not a heredoc, because this step
-      # and the matching one in `Scripts/ci.sh` used to hold a pasted copy each under a comment
-      # claiming they were character-for-character identical. They were not — the compiler-settings
-      # pair below had drifted — and a claim of that kind is worth exactly as much as whatever
-      # enforces it.
       - name: Lockfiles agree
         run: python3 Scripts/check_lockfiles.py
 
-      # The other half of the same drift, and it is now two checks with two different verdicts.
-      #
-      # The **deployment floor fails**: `MACOSX_DEPLOYMENT_TARGET` in Project.swift against
-      # `platforms:` in Package.swift. They are the same fact written twice, they have already come
-      # apart — `platforms:` said `.v15`, eleven majors below everything else, and nothing caught it
-      # because no job builds that manifest on a Mac and Linux ignores `platforms:` entirely — and
-      # comparing two literals needs no toolchain, so there is no reason to be gentle about it.
-      #
-      # The **Swift settings warn**: Project.swift sets four in its shared base, Package.swift sets
-      # none, and this job is therefore the looser gate — it accepts an implicit transitive import
-      # that Xcode rejects, because member-import visibility is enforced there and not here. Turning
-      # the setting on would light up every portable module at once, and this workflow is the only
-      # place a Linux compiler runs on this code, so those errors could only be fixed by pushing at a
-      # red pipeline and reading what came back. Warning keeps the gap on every run and in the job
-      # summary without blocking anyone; the step goes quiet on its own the day
-      # `swiftSettings: [.enableUpcomingFeature(...)]` lands.
       - name: Compiler settings
         run: python3 Scripts/check_compiler_settings.py
 
-      # Check dependency reachability in both manifests, including transitive edges.
       - name: Module edges
         run: python3 Scripts/check_module_edges.py
 
-      # Check local links and test target membership; report counts from source.
       - name: Documentation and test targets
         run: |
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
 
-      # The gate the sharded UI job needs and could not have needed before it existed.
-      #
-      # `macos-ui` below runs the XCUITest suite as three shards, and it splits them by naming test
-      # classes: each shard passes a list of `-only-testing:MimicUITests/<Class>` flags. A class that
-      # no shard names therefore never runs — and every shard goes green, because each ran exactly
-      # what it was asked for. Add a suite tomorrow, write twenty tests in it, and CI reports the
-      # window covered.
-      #
-      # That is the same shape as the `buildableFolders` line naming a `Tests/JourneyFeatureTests`
-      # that did not exist, which Tuist tolerated in silence, and the same shape the suite-folder
-      # check above exists to close: on a green pipeline, a suite nobody runs
-      # is indistinguishable from one that passed. It is checked rather than remembered.
-      #
-      # Three verdicts — a class in no shard, a class in two, and a shard naming a class that is not
-      # there (which `xcodebuild` reports as "no tests to run" and exits 0 for). `--self-test` first,
-      # as the two checks around it do: its fixtures are a workflow and a suite tree invented inside
-      # the script, so a parser that has stopped recognising either would fail here rather than
-      # reporting that every class is covered.
-      #
-      # On Linux with the other cheap gates: it reads the workflow as text and `MimicUITests/` as
-      # text, imports nothing outside the standard library, and takes about a tenth of a second.
       - name: UI shards cover every UI test class
         run: |
           python3 Scripts/check_ui_shards.py --self-test
           python3 Scripts/check_ui_shards.py
 
-      # `Scripts/update_readme_coverage.py` builds the badge payloads `record-coverage` publishes
-      # and rewrites the README's generated table, and until this line it had no automated check of
-      # any kind. Half of it needs `xcrun xccov` and a real `.xcresult`, so only the macOS job can
-      # exercise that half — everything else is pure string work and runs anywhere. `--self-test`
-      # covers it against fixtures written out longhand in the script: the two shields.io endpoint
-      # URLs, the two payload documents whole, the colour ladder at every boundary, the JSON round
-      # trip, the generated block, prose outside the markers surviving, and the refusals (a partial
-      # target list, a malformed payload, a payload with no modules, a README with no badges, a
-      # README still carrying the old static ones).
-      #
-      # Two properties it pins that live outside the script. The badge URLs are literals here *and*
-      # in README.md, so moving the `badges` branch fails this step instead of turning both badges
-      # into shields.io's "invalid" placeholder. And rewriting with unchanged figures still has to
-      # produce byte-identical output — the recording job no longer needs that, since it force-pushes
-      # one commit either way, but a human commits the README block and a full-suite run must not
-      # dirty the tree over an unchanged measurement.
-      #
-      # Here rather than on macOS for the same reason as the house rules above: it needs nothing a
-      # Mac has, and it is a tenth of a second.
       - name: Coverage writer self-test
         run: python3 Scripts/update_readme_coverage.py --self-test
 
@@ -357,18 +74,6 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      # `Lockfiles agree` above compares the two lockfiles with each other, before anything runs.
-      # This compares one of them with what the build just did to it, and the two catch different
-      # things: that check fails on drift a human committed, and this one fails on drift the runner
-      # itself introduced. `swift build` re-resolves and rewrites `Package.resolved` whenever a
-      # declared range resolves differently here than it did on the machine that committed it — and
-      # it does so silently, so the `Test` step below would be reporting on versions no reviewer
-      # ever saw, which is the exact failure the pre-flight check was added for.
-      #
-      # `safe.directory` first because this job is a container running as root over a workspace git
-      # may decline to treat as its own; without it the step could fail for ownership rather than
-      # for drift, which is a red X that teaches nothing. It cannot hide a real diff — the
-      # `git diff` still has to run and still has to come back clean.
       - name: Package.resolved unchanged by the build
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -377,68 +82,22 @@ jobs:
             exit 1
           }
 
-      # Domain, Persistence, MockServerEngine, ControlPlane, SpecImport and MimicCLICore — including
-      # the tests that bind real sockets and serve real HTTP.
       - name: Test
         run: swift test --skip-build
 
-  # Everything that needs Xcode and does *not* need the window: the Debug build, the app-level unit
-  # suites with the coverage measurement, the CLI end-to-end check, and the Release gate.
-  #
-  # This is the old `macos` job with the UI step lifted out of the middle of it. The rename is not
-  # cosmetic — it is what stops "the macOS job" meaning two unrelated things — but it does have one
-  # consequence outside this file: **required status checks in branch protection are configured by
-  # job name.** `Build and test (macOS)` no longer exists as a check; the branch rules were updated
-  # to require `Build, unit suites, Release, CLI e2e (macOS)` and `UI suite` instead. The `UI suite`
-  # job further down exists partly so that the second of those names never has to change again when
-  # the shard count does.
-  #
-  # Neither `coverage` nor `Publish coverage badges` belongs in that list, and adding one would be a
-  # mistake of the kind this file argues against everywhere else: they run only on pushes to `main`,
-  # so on a pull request they never report at all — a required check that never reports blocks the
-  # merge forever — and a coverage measurement is not a verdict on a commit.
   macos-checks:
     name: Build, unit suites, Release, CLI e2e (macOS)
     runs-on: macos-26
-    # It was 120 when this job also carried the ~80-minute UI suite. What is left measured 19m43 on
-    # run #89, so this is generous by more than twofold and still tight enough that a wedged runner
-    # is cut loose within the hour.
     timeout-minutes: 45
 
-    # DerivedData inside the checkout, and **every** xcodebuild step below passes it.
-    #
-    # Not tidiness. `Scripts/run_cli_e2e.sh` finds the binary it drives with
-    # `find "$ROOT_DIR" … -path '*Build/Products*'`, so products under
-    # `~/Library/Developer/Xcode/DerivedData` are products it cannot see — which is why that script
-    # ran under no gate at all until this line existed, and why the step at the bottom of this job
-    # can now name what it just built.
-    #
-    # Every step, because the builds are shared: point one of them here and the rest re-resolve and
-    # rebuild the whole workspace into the default location instead of reusing this one. The two
-    # places that *read* DerivedData — the failure dump and the artifact upload — read it from here
-    # for the same reason.
-    #
-    # `.artifacts/` is in `.gitignore`, and so is any directory named `DerivedData`, so nothing here
-    # can dirty the checkout.
     env:
       DERIVED_DATA: .artifacts/DerivedData
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Xcode and Swift versions, UI automation pre-authorised, Tuist at the pinned version, its
-      # cache restored, `Tuist/Package.resolved` held to the commit, and `tuist generate`. One copy,
-      # shared by this job and the three shards below — see the action's own header for why it is a
-      # file rather than seven steps pasted four times.
       - uses: ./.github/actions/macos-setup
 
-      # Ad-hoc signing throughout. The project carries a DEVELOPMENT_TEAM for local builds, but a
-      # hosted runner has none of that team's certificates — and none are needed, because a macOS app
-      # only has to be signed *somehow* to launch, which is what `-` means.
-      #
-      # The `Mimic` scheme builds the app **and** the `mimic` CLI — `Project.swift` puts both in its
-      # build action, because the CLI ships with the app — so this one step produces everything the
-      # end-to-end step at the bottom of this job drives.
       - name: Build (Debug)
         run: |
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
@@ -446,47 +105,10 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGN_IDENTITY=- build
 
-      # Everything that needs Xcode but not a window: the app-level suites and the DesignSystem
-      # rendering tests. The rest of the suite already ran on Linux, and XCUITest runs in the sharded
-      # job below — `-skip-testing:MimicUITests` is what keeps the two from overlapping.
-      #
-      # This step *measures* how much of this code the tests reach, rather than reading the tree and
-      # reasoning about it. Until it carried `-enableCodeCoverage YES`, both README badges said
-      # `not measured` and meant it: every claim in this repository about what is and is not tested
-      # rested on grep. `Scripts/run_full_test_suite.sh` passes the flag too, but it needs a Mac and
-      # a human who remembers to run it, and no CI step passed it at all.
-      #
-      # It is no longer the *only* such step. The three UI shards carry the flag too, and the
-      # `coverage` job near the bottom of this file merges all four bundles into the union the badges
-      # publish. This one is still the half that runs on every pull request, and its table is what a
-      # reviewer reads on a run that publishes nothing.
-      #
-      # `-resultBundlePath` is what makes the bundle findable afterwards. Without it xcodebuild
-      # writes to `$DERIVED_DATA/Logs/Test/`, and the coverage step below would have to find its
-      # bundle by globbing a directory whose contents depend on which steps have run so far. Naming
-      # the path removes the guess, and the artifact step names the same path so a red run is still
-      # downloadable. `.artifacts/` is already in `.gitignore`, so nothing here can dirty the
-      # checkout.
-      #
-      # Two things this step does NOT do, deliberately:
-      #
-      #   - **No coverage floor.** Nobody has seen the number yet. A threshold set before a baseline
-      #     exists is either so low it never fires or so high it is red on arrival, and both teach
-      #     people to ignore it. The floor is the next step, once a few runs have published numbers
-      #     and somebody can pick one that means something.
-      #   - **No writing of any kind.** This step measures and hands the numbers on. The badges are
-      #     published by `record-coverage` at the bottom of this file, to a branch that carries
-      #     nothing else; the README's detailed block is written only by
-      #     `Scripts/run_full_test_suite.sh` on a Mac. This job runs with `contents: read` on pull
-      #     requests from forks, and has no business holding anything wider.
       - name: Test (unit suites)
         run: |
           rm -rf .artifacts/coverage
           mkdir -p .artifacts/coverage
-          # Kept on disk for the failure step below. A *compile* failure in a test target produces
-          # no test results at all — the xcresult comes back with `totalTestCount: 0` — so the step
-          # built to name the failing assertion has nothing to read, and the errors exist only in
-          # this output. `pipefail` so `tee` cannot swallow xcodebuild's status.
           set -o pipefail
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
             test -destination 'platform=macOS' -skip-testing:MimicUITests \
@@ -495,20 +117,6 @@ jobs:
             -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
             CODE_SIGN_IDENTITY=- 2>&1 | tee .artifacts/unit-tests.log
 
-      # (b) of the same change: the numbers go in the job summary, so a reviewer reads them on the
-      # run page instead of downloading an artifact and installing Xcode to open it.
-      #
-      # `continue-on-error`, and it is the whole reason this is a separate step rather than three
-      # more lines on the one above. Reading a result bundle is not a gate on anything: `xcrun
-      # xccov` is the one tool in this job whose behaviour could not be checked before this landed,
-      # and an unreadable bundle, a `--json` that a future Xcode spells differently, or a sandboxed
-      # app target that never wrote its `.profraw` must all show up as a warning on this step and a
-      # note in the summary — never as a red X on a commit whose tests passed. The script prints its
-      # reason to stdout for that reason: it lands in the summary next to where the table would be.
-      #
-      # `pipefail` because the pipe to `tee` would otherwise report `tee`'s status and this step
-      # could never warn at all — the same mistake `Scripts/ci.sh` documents at length about
-      # `pipestatus`.
       - name: Coverage report
         continue-on-error: true
         run: |
@@ -518,33 +126,6 @@ jobs:
             --title 'Code coverage (unit suites, XCUITest excluded)' \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # (c): the bundle itself, tarred and handed to the `coverage` job at the bottom of this file,
-      # which merges it with the three UI shards' bundles and emits the badge figures from the union.
-      #
-      # **This used to be nine numbers in a job output, and that was wrong.** The comment here argued
-      # that moving several hundred megabytes between runners so the other end could re-read nine
-      # numbers was waste, and about the cost it was right. About the requirement it was not.
-      # Coverage is a **set union over executed lines, not a sum**: a line the unit suites reach and
-      # a UI test also reaches is one covered line, not two. Four sets of nine numbers therefore
-      # cannot be combined into one set of nine by any arithmetic — not by adding, not by taking the
-      # maximum — because the numbers have thrown away *which* lines. Only the line-level data can be
-      # merged, and that lives in the bundle. So the bundle travels, tarred.
-      #
-      # Tarred, and not handed to `upload-artifact` as a directory. An `.xcresult` is thousands of
-      # small files; the uploader walks and posts each one, which turns a bundle into a step measured
-      # in tens of minutes. One `.tar.gz` is one file, and a bundle is mostly JSON, so it compresses
-      # hard. `retention-days: 1` because nothing reads it after the job three below.
-      #
-      # Only on a push to `main`, for the reason the emit step gave: on a pull request there is
-      # nowhere to record the result, and the numbers describe the merged commit anyway. Keeping it
-      # off pull requests is also what keeps this change off the feedback path the sharding bought.
-      #
-      # **No `if: always()`, deliberately, and this differs from the UI shards.** A step with no
-      # condition is skipped when an earlier one failed, so a genuinely failing unit suite publishes
-      # no coverage — which is right, because the badge should not move for a commit whose tests are
-      # red. The shards below *do* carry `!cancelled()`, because that suite is documented to end red
-      # on a test that passed on its retry, and a flake must not be what decides whether the figures
-      # are recorded.
       - name: Package the coverage bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -552,11 +133,6 @@ jobs:
           tar -C .artifacts/coverage -czf .artifacts/UnitTests.xcresult.tar.gz UnitTests.xcresult
           ls -lh .artifacts/UnitTests.xcresult.tar.gz
 
-      # `if-no-files-found: warn` rather than `error`, for the rule this file applies to every
-      # coverage step: a measurement never reddens a commit whose tests passed. A bundle that did not
-      # arrive is caught at the other end instead — the `coverage` job counts what it downloaded
-      # against `EXPECTED_COVERAGE_BUNDLES` and publishes nothing if the count is short, so the
-      # badges go visibly stale rather than quietly dropping whatever the missing job covered.
       - name: Upload the coverage bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -566,13 +142,9 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-      # This gate uses a temporary, unsandboxed copy of the built app so the CLI and
-      # app can share a disposable database and discovery file.
       - name: CLI end-to-end (launch, discovery, real sockets)
         run: |
           products="$PWD/$DERIVED_DATA/Build/Products/Debug"
-          # Named rather than searched for, and checked before the script starts, so "the products
-          # are not where this job thinks" cannot arrive later disguised as a failed assertion.
           if [ ! -x "$products/mimic" ] || [ ! -d "$products/Mimic.app" ]; then
             echo "::error::Debug products are not in $products — the Mimic scheme builds both Mimic.app and mimic, so this is a -derivedDataPath problem, not a test failure."
             ls -l "$products" || true
@@ -587,30 +159,6 @@ jobs:
           products="$PWD/$DERIVED_DATA/Build/Products/Debug"
           python3 Scripts/test_passthrough_e2e.py --app "$products/Mimic.app" --cli "$products/mimic"
 
-      # Run after the tests so a compile-only failure does not hide a test result.
-      #
-      # This step's comment used to claim Release compiles with "different warnings-as-errors, so it
-      # catches things Debug does not". No build setting in this repository turns a warning into an
-      # error: neither manifest names a `*_TREAT_WARNINGS_AS_ERRORS` setting anywhere (the only two
-      # occurrences of that string in the tree are in this comment), and `Project.swift` declares its
-      # two configurations as bare `.debug(name: "Debug")` / `.release(name: "Release")` with no
-      # settings attached to either. Whatever differs between them comes from the defaults Tuist
-      # writes into the generated project, not from a choice made here — and a warning is a warning
-      # in both.
-      #
-      # Turning it on is worth doing and is deliberately *not* done from this file. An
-      # `xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` on the command line applies to every target
-      # in the workspace, Vapor, GRDB, NIO, OpenAPIKit, ArgumentParser and CodeEditorView included,
-      # and this repository does not get to decide whether those compile clean. The setting belongs
-      # per-target in `Project.swift` — on the eight `.staticFramework` targets plus the app and the
-      # `mimic` tool — and it cannot land until somebody has seen the warning inventory, which is
-      # what the step below now publishes on every run. Same order the coverage steps above follow:
-      # measure first, gate second.
-      #
-      # It stays in this job rather than becoming a fifth, for the reason argued in the header: run
-      # #89 measured the concurrent-macOS-job cap at four, not the documented five, so a job of its
-      # own would have to come out of the shards — and trading a shard for eight minutes lengthens
-      # the run rather than shortening it. A fifth job would simply queue, as shard 4 did for 19m26.
       - name: Build (Release)
         run: |
           set -o pipefail
@@ -620,19 +168,6 @@ jobs:
             CODE_SIGN_IDENTITY=- build \
             | tee .artifacts/release-build.log
 
-      # The baseline the paragraph above needs, and nothing more: it reports, it does not gate.
-      #
-      # `continue-on-error` is the whole point rather than caution. A warning count is not a verdict
-      # on a commit, and a step that reddens a run over one teaches people to ignore red — the same
-      # argument the coverage step makes for itself. Compiler output is also the one thing here whose
-      # exact shape could not be checked before this landed, so a diagnostic line spelled differently
-      # by a future Xcode must show up as an empty table, never as a failure on a commit whose tests
-      # passed.
-      #
-      # Dependency warnings are filtered out because they are not actionable here: SwiftPM checkouts
-      # live under `SourcePackages/`, and Tuist's own resolve under `Tuist/.build`. What is left is
-      # this repository's code, which is exactly the set a per-target setting in `Project.swift`
-      # would have to make clean first.
       - name: Release warnings (reported, never a gate)
         continue-on-error: true
         run: |
@@ -653,29 +188,6 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The failing assertion, in the job log, where a person can read it — compile errors out of the
-      # log first, because an xcresult cannot carry one, then every failure with its message, file
-      # and line out of whichever bundle is newest. The logic moved into
-      # `Scripts/print_test_failures.sh` when the UI suite was sharded: four test-running jobs would
-      # otherwise hold four pasted copies of the same forty-line walker, and a copy that has quietly
-      # stopped printing failures looks exactly like a run that had none.
-      #
-      # Both bundle locations are named. This used to look only under `$DERIVED_DATA`, which is where
-      # a plain `xcodebuild test` writes — so on a *unit* failure, whose bundle the step above puts in
-      # `.artifacts/coverage`, the step that exists to name the assertion printed "no xcresult found"
-      # and the assertion had to be read out of the raw log instead. The globs are expanded by this
-      # shell and the script skips whatever did not match, so a run that failed before a given
-      # artifact existed simply passes a path that is not there.
-      #
-      # It sits at the end of the job rather than immediately after the test step, which is where its
-      # ancestor sat. That is what puts a failing **Release** build in its scope: the release log is
-      # named below, so a compile error in the Release configuration now gets its `error:` lines
-      # pulled into the job log too, instead of the run going red with the reason a thousand lines up.
-      # Nothing else changes — a step with `if: failure()` runs when any earlier step failed, and
-      # every step between the failure and this one is skipped either way.
-      #
-      # `continue-on-error` on top of `if: failure()`: a diagnostic that can redden a run it was
-      # reading is worse than none.
       - name: Test failure details
         if: failure()
         continue-on-error: true
@@ -686,14 +198,6 @@ jobs:
             "$DERIVED_DATA"/Logs/Test/*.xcresult \
             .artifacts/coverage/*.xcresult
 
-      # The result bundle is where per-file coverage lives, for anyone who wants more than the
-      # per-target table in the summary, and on a red run it is the only place the failure detail
-      # survives in full.
-      #
-      # Named `xcresult-unit` rather than `xcresult`, because artifact names must be unique within a
-      # run and the three UI shards below each upload one of their own. Still `if: failure()` — a
-      # coverage-instrumented bundle is large, and uploading one on every green run buys a reviewer
-      # nothing the summary has not already shown them.
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -705,16 +209,12 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # Run disjoint UI test classes on separate macOS runners. The shard checker below
-  # catches classes missing from the matrix, duplicates, and stale class names.
   macos-ui:
     name: UI tests (${{ matrix.name }})
     runs-on: macos-26
-    # Allow time for app builds and UI test retries.
     timeout-minutes: 60
 
     strategy:
-      # Keep all shard results when one fails.
       fail-fast: false
       matrix:
         include:
@@ -743,8 +243,6 @@ jobs:
               -only-testing:MimicUITests/ErrorAlertUITests
               -only-testing:MimicUITests/JourneyEditorUITests
 
-    # Same reasoning as the job above: DerivedData inside the checkout, `.artifacts/` is gitignored,
-    # and the steps that read it read it from here.
     env:
       DERIVED_DATA: .artifacts/DerivedData
 
@@ -753,59 +251,6 @@ jobs:
 
       - uses: ./.github/actions/macos-setup
 
-      # No separate `Build (Debug)` step: `xcodebuild test` builds what the test action needs, and a
-      # shard needs nothing else. The build is not free — it is about five minutes of this shard's
-      # thirty — but it runs on three machines at once, so it costs the *run* five minutes rather
-      # than fifteen. That is the whole build-once-versus-build-per-shard argument, and it is made in
-      # full in this file's header.
-      #
-      # `-retry-tests-on-failure` is not papering over flakiness in the app: this suite launches the
-      # real app once per test, and a hosted runner under memory pressure will SIGKILL a random one.
-      # A retry distinguishes that from a genuine assertion failure, which fails again on the retry.
-      #
-      # What the retry does NOT do — observed on this suite, 2026-08-14 — is turn the step green: a
-      # test that failed once and passed on the rerun (`testCapturingSelectedRequestsAsJourney`,
-      # final summary "Executed 28 tests, with 0 failures") still ended the step with "Failing
-      # tests:" naming it and exit 65. So red here means "failed at least once", not "failed".
-      # Before treating a red shard as a hard break, read the tail: a listed failing test above a
-      # passing final suite summary is the retry having already told you it was transient — the
-      # step's value in that case is the flake's name, not the verdict.
-      #
-      # `$ONLY_TESTING` is deliberately unquoted: it carries several `-only-testing:` flags and the
-      # shell must split them into separate arguments. It reaches the shell through `env:` rather
-      # than as a `${{ }}` inside the script, which is the habit `record-coverage` explains at the
-      # bottom of this file — an expression interpolated into a `run:` is substituted before the
-      # shell sees it and is therefore parsed as script, while an environment variable can only ever
-      # be data. This value is written three inches above in the same file; the habit is the point.
-      #
-      # `-resultBundlePath` for the same reason the unit step names one, and with the shard id in the
-      # path so the three uploads below cannot collide. `tee` for the reason that step documents: a
-      # compile failure in the test target produces a bundle with `totalTestCount: 0`, so the errors
-      # exist only in this output.
-      #
-      # `-enableCodeCoverage YES` here is what the `coverage` job at the bottom of this file exists
-      # to use, and it closes the gap that made the first published figure meaningless. The badge
-      # read `Mimic.app coverage 46.67%` and `modules at or above 95% 5/8`, with `AppFeatures` — the
-      # 14,990-line SwiftUI and workflow layer, and the only module these 158 tests touch — measured
-      # at 85.32%. It was measured with `-skip-testing:MimicUITests`, so the entire XCUITest suite
-      # contributed nothing to the number that was published about how well this window is tested.
-      #
-      # It is on for every run, not just the pushes that publish. What CI measures should be what CI
-      # ran, and a flag that is set on `main` and clear on pull requests is a flag whose effect on
-      # this suite nobody sees until it is too late to attribute. Instrumentation costs a few per
-      # cent of a step dominated by app launches and `waitForExistence`, against a 60-minute timeout
-      # the heaviest shard uses 33 of.
-      #
-      # **One thing could make this contribute nothing, and it is worth knowing before reading a
-      # result.** The app under test is sandboxed (`App/Mimic.entitlements`), and an instrumented
-      # binary writes its `.profraw` to a path baked in at build time, under DerivedData and outside
-      # the app's container. If the sandbox refuses that write, this shard's bundle carries coverage
-      # for the *test* target and nothing for the app or the frameworks it links — which is where
-      # `AppFeatures` lives. That would show up as the merged `AppFeatures` figure sitting on 85.32%,
-      # unmoved, which is why the `coverage` job prints the unit-only table beside the merged one
-      # instead of only the number it publishes. The merge cannot make a figure *wrong* either way —
-      # a union with an empty set is the same set — so the failure mode here is "no gain", never "bad
-      # number".
       - name: Test (UI)
         env:
           ONLY_TESTING: ${{ matrix.only }}
@@ -815,7 +260,6 @@ jobs:
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
           mkdir -p .artifacts/ui
-          # shellcheck disable=SC2086
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
             test -destination 'platform=macOS' \
             $ONLY_TESTING \
@@ -825,16 +269,9 @@ jobs:
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=- 2>&1 | tee "$BUILD_LOG"
 
-      # The same diagnostic the non-UI job runs, over this shard's own log and bundle. It matters
-      # more here than there: the xcresult a UI failure leaves behind holds the failure screenshots
-      # and the automatic UI hierarchy captures, it is hundreds of megabytes, and reading it needs a
-      # Mac and an Xcode — so in practice the assertion this step prints is the only account of the
-      # failure anybody reads.
       - name: Test failure details
         if: failure()
         continue-on-error: true
-        # Restated rather than inherited: `env:` on a step does not carry to the next one, and the
-        # two paths are the shard-numbered ones the step above wrote.
         env:
           RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
           BUILD_LOG: .artifacts/ui-tests-${{ matrix.id }}.log
@@ -844,12 +281,6 @@ jobs:
             "$RESULT_BUNDLE" \
             "$DERIVED_DATA"/Logs/Test/*.xcresult
 
-      # One artifact per shard, named by shard id — `upload-artifact` refuses a duplicate name within
-      # a run, and three shards uploading `xcresult` would be three collisions. The name is also how
-      # a reader gets from "shard 3 is red" to the screenshots for shard 3 without downloading the
-      # other two.
-      #
-      # `if: failure()`, as before: these bundles are large and a green run's is worth nothing.
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -861,22 +292,6 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      # This shard's half of the merged measurement — see `Package the coverage bundle` in
-      # `macos-checks` for why the bundle travels rather than a handful of numbers, and why it is
-      # tarred first.
-      #
-      # A second upload of the same bundle on a red push to `main`, and knowingly. Folding the two
-      # together would mean one artifact serving two readers with two retentions, two conditions and
-      # two shapes — the diagnostic one is a bundle a human opens in Xcode and keeps for a week, this
-      # one is a tarball a job untars and nothing keeps. A red push to `main` is rare enough that
-      # paying for it twice is cheaper than the step that has to be right for both.
-      #
-      # **`!cancelled()` rather than no condition, and this is the asymmetry with the unit job.**
-      # `-retry-tests-on-failure` leaves this step red for a test that failed once and passed on its
-      # rerun — the workflow documents that at `Test (UI)` and it has been observed on this suite. A
-      # shard that ends red for a flake still ran everything and its bundle still holds every line
-      # those tests reached; letting that decide whether the figures are recorded would publish
-      # coverage only on the runs where no flake happened to fire.
       - name: Package the coverage bundle
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         env:
@@ -899,28 +314,6 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-  # One status check standing for all three shards.
-  #
-  # Each shard already fails the run on its own, so this job changes no verdict. What it buys is a
-  # **stable name**: branch protection requires checks by name, and `UI tests (core window and
-  # journeys)` is a name that changes the day somebody rebalances the matrix — at which point the
-  # required check silently refers to a job that no longer runs, and `main` starts accepting commits
-  # whose UI suite nobody looked at. Requiring `UI suite` instead survives any reshuffle of the
-  # shards, including changing how many there are — which is exactly what the rebalance from four
-  # shards to three did, and this job's name did not move.
-  #
-  # It runs on Linux and does nothing but read a result, so it costs no macOS slot and no measurable
-  # time.
-  #
-  # It reports *that* something is red, not *which* — deliberately. Telling a reader which shard
-  # failed would mean each shard publishing a marker and this job collecting them with
-  # `download-artifact`, which this workflow has never pinned and a SHA is not a thing to guess at.
-  # The run page already answers it: the three shards are named for the parts of the window they
-  # cover, and the red one is the red one.
-  #
-  # `!cancelled()` rather than `always()`. With `always()` this job would run after a pull request
-  # cancelled its own shards on a new push and report a failure caused by nothing, which is exactly
-  # the red-that-means-nothing this workflow keeps removing. A cancelled run skips it instead.
   ui-suite:
     name: UI suite
     needs: macos-ui
@@ -929,8 +322,6 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      # `needs.<job>.result` over a matrix job is the roll-up of every leg: `success` only when all
-      # three passed, `failure` when any failed, `skipped` when the matrix never ran.
       - name: Verdict
         env:
           RESULT: ${{ needs.macos-ui.result }}
@@ -951,102 +342,22 @@ jobs:
               ;;
           esac
 
-  # The union of what the unit suites and the window between them actually execute, which is the
-  # figure the badges publish.
-  #
-  # ## Why this is a job, and why it is not a fifth concurrent Mac
-  #
-  # It is the **fifth** macOS job in this workflow, against a concurrency this repository was
-  # observed to get four of — and it does not queue, because it never asks for a slot while the
-  # other four hold one. `needs: [macos-checks, macos-ui]` means it starts after all four have
-  # finished and released theirs. The cap in this file's header is about jobs running *at the same
-  # time*; a strictly downstream job is outside it. What it does cost is wall clock, on pushes to
-  # `main` only: a download, a merge and two `xccov` reads, after the last shard reports.
-  #
-  # It has to be a Mac. `xcrun xcresulttool` and `xcrun xccov` are Xcode, and no Xcode runs on the
-  # Linux runner — which is also why this cannot be folded into `record-coverage` below.
-  #
-  # It cannot be folded into `macos-checks` either, for a plainer reason: that job finishes around
-  # nineteen minutes and the heaviest shard around thirty-three, so anything that reads all four
-  # bundles has to start after the shards, and a step cannot wait for a job.
-  #
-  # ## Why the bundles are merged rather than the numbers
-  #
-  # Coverage is a **set union over executed lines**. A line the unit suites reach and a UI test also
-  # reaches is one covered line in the union, not two — so four sets of nine numbers cannot be
-  # combined into one set of nine by any arithmetic, because the numbers have already thrown away
-  # *which* lines. Adding them double-counts and can exceed the denominator; taking the maximum
-  # per target discards everything one suite reached that the other did not. Only the line-level data
-  # merges, and that lives in the `.xcresult`, so the four bundles travel here as tarballs and
-  # `xcresulttool merge` does the union.
-  #
-  # ## What this job will not do
-  #
-  # It will not publish a number it cannot stand behind. Two refusals, both ending in "the badges go
-  # on showing the last figures that were published":
-  #
-  #   - **Fewer bundles than `EXPECTED_COVERAGE_BUNDLES`.** A shard that died before writing one
-  #     leaves a union missing everything that shard covered, which is a *lower* number published
-  #     with no sign that anything is missing — the one outcome this whole design is against. The
-  #     count is `1 + the number of legs in macos-ui`, and it is written down here rather than
-  #     derived because a job cannot read another job's matrix; `Scripts/check_ui_shards.py` fails
-  #     the Linux job if this number and that matrix disagree, so it is checked rather than
-  #     remembered.
-  #   - **A merge that fails.** `xcresulttool merge` is the one command in this job whose behaviour
-  #     could not be checked before this landed — no Mac, no Xcode — so a future Xcode that spells it
-  #     differently must show up as a warning and a note in the summary, never as a red X on a commit
-  #     whose tests passed.
-  #
-  # Both are `continue-on-error` for that last reason, which is the rule every coverage step in this
-  # file follows: a measurement is not a verdict on a commit.
-  #
-  # ## Two tables, not one
-  #
-  # The summary carries the unit-only figures beside the merged ones, and the second is not
-  # decoration. Whether XCUITest can contribute coverage *at all* here is an open question with a
-  # specific answer waiting in it: the app under test is sandboxed, and an instrumented binary writes
-  # its `.profraw` under DerivedData, outside the app's container. If the sandbox refuses that write,
-  # the shards' bundles hold coverage for the test target and none for the app or the frameworks it
-  # links, and the merged `AppFeatures` figure comes back exactly equal to the unit-only one. Printed
-  # side by side, that reads as an answer. Printed alone, it reads as a number.
   coverage:
     name: Coverage (unit suites + XCUITest)
     needs: [macos-checks, macos-ui]
-    # `!cancelled()` rather than `always()`, and the same reasoning `ui-suite` gives above: a pull
-    # request that cancelled its own jobs on a new push must not wake this one up to report on
-    # bundles nobody produced. `success()` is too strong in the other direction — a shard red on a
-    # retried flake still ran everything, and `macos-ui` rolls up to `failure` for it.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: macos-26
-    # Download, untar, one merge, two `xccov` reads. Generous by several times over, and short enough
-    # that a wedged runner does not hold a slot for an hour.
     timeout-minutes: 30
 
     outputs:
       coverage: ${{ steps.figures.outputs.json }}
 
     env:
-      # 1 for `macos-checks` + 3 for the legs of `macos-ui`. Checked against the matrix by
-      # `Scripts/check_ui_shards.py` in the Linux job, so adding a shard and forgetting this line
-      # fails there rather than silently publishing a union with a hole in it.
       EXPECTED_COVERAGE_BUNDLES: 4
 
     steps:
-      # For `Scripts/update_readme_coverage.py`, which is the only thing this job runs out of the
-      # repository. No build, no test, no `macos-setup` — that action installs Tuist and generates
-      # the workspace, and nothing here compiles anything. `xcrun` finds `xccov` and `xcresulttool`
-      # in whichever Xcode the image selects by default, which is the same Xcode the four jobs
-      # upstream used, because none of them selects one either.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # `merge-multiple` flattens the four artifacts into one directory, which is what lets the step
-      # below glob for tarballs instead of naming each job's artifact — so a shard added to the
-      # matrix needs nothing changed here beyond `EXPECTED_COVERAGE_BUNDLES`.
-      #
-      # Pinned by commit like every other third-party action in this file. This workflow had never
-      # used `download-artifact` before, and two of its comments said so as a reason not to move
-      # bundles between jobs; the pin below is v7.0.0, the same major as the `upload-artifact` v7.0.1
-      # the four uploading steps use.
       - name: Download the four result bundles
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1054,10 +365,6 @@ jobs:
           merge-multiple: true
           path: .artifacts/download
 
-      # Each tarball is deleted as it is expanded. A hosted runner's disk is finite, four
-      # coverage-instrumented bundles are not small, and the merged bundle is a fifth copy of most of
-      # it — keeping the tarballs alongside all of that buys nothing, since a failure here republishes
-      # nothing rather than retrying.
       - name: Merge the result bundles
         id: merge
         continue-on-error: true
@@ -1090,9 +397,6 @@ jobs:
             exit 0
           fi
 
-          # Unquoted on purpose: `$found` is newline-separated and the shell must split it into one
-          # argument per bundle. Every path in it is written by this workflow and contains no spaces.
-          # shellcheck disable=SC2086
           if ! xcrun xcresulttool merge $found --output-path .artifacts/merged/Coverage.xcresult; then
             {
               echo '### Coverage not published on this commit'
@@ -1107,16 +411,9 @@ jobs:
             exit 0
           fi
 
-          # The three UI bundles are spent — the merged one holds everything they carried. The unit
-          # bundle stays, because the comparison table in the next step reads it.
           find .artifacts/bundles -maxdepth 1 -name 'UITests-*.xcresult' -exec rm -rf {} +
           echo "state=ready" >> "$GITHUB_OUTPUT"
 
-      # The comparison, and the reason it is here is in this job's header: the unit-only figures are
-      # what says whether XCUITest contributed anything at all. `AppFeatures` identical in the two
-      # tables means the sandbox refused the app's `.profraw` and the 158 UI tests are still invisible
-      # to the measurement — which is a finding, and one that is unreadable from the merged table on
-      # its own.
       - name: Coverage report (unit suites only, for comparison)
         if: steps.merge.outputs.state == 'ready'
         continue-on-error: true
@@ -1137,16 +434,6 @@ jobs:
             --title 'Code coverage — unit suites and XCUITest, merged (what the badges publish)' \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # The nine numbers, as a job output for `record-coverage` below. A few hundred bytes, which is
-      # all that needs to reach a Linux runner — the bundles came here rather than there because
-      # merging them needs Xcode, and the merging is done.
-      #
-      # `--emit-json` refuses to write a partial table, all nine targets or none, rather than
-      # shrinking the badge's denominator into a pass. That refusal is safe to leave
-      # loud-but-not-fatal because its failure announces itself: no figures means nothing is
-      # published, and the badges go on showing the figures from the last push that did measure —
-      # visibly stale rather than quietly wrong. A silent wrong number is the outcome worth
-      # engineering against; an old one is not.
       - name: Emit coverage figures
         id: figures
         if: steps.merge.outputs.state == 'ready'
@@ -1163,71 +450,6 @@ jobs:
             echo 'COVERAGE_JSON_EOF'
           } >> "$GITHUB_OUTPUT"
 
-  # The one job in this workflow that writes to the repository. It publishes the coverage the
-  # `coverage` job measured as the two shields.io endpoint payloads README.md's badges read — the
-  # thing both badges spent this repository's whole history saying `not measured` for while the
-  # number was being computed on every run and thrown away with the runner.
-  #
-  # ## Why an orphan branch and not a commit on `main`
-  #
-  # This job used to rewrite README.md and push it to `main`. **Every push it ever made was refused**,
-  # for six merges, while the job itself went green:
-  #
-  #     remote: error: GH006: Protected branch update failed for refs/heads/main.
-  #     remote: - Changes must be made through a pull request.
-  #
-  # That is a rule rather than a lost race — `main` takes changes only through a pull request, the
-  # Actions bot is not exempt, and the retry-after-rebase the old step did could never have helped.
-  # The two ways out were to let the bot bypass the rule, which weakens `main`'s protection for a
-  # badge, or to put the figures somewhere the rule does not apply. The owner chose the second.
-  #
-  # So the payloads go to **`badges`, an orphan branch**: no history from `main`, no source, nothing
-  # to review, a few hundred bytes forever. `Scripts/update_readme_coverage.py --print-badge-branch`
-  # is what names it, so the branch is written down once — in the same file that builds the badge
-  # URLs README.md has to carry — instead of once here and once in Markdown.
-  #
-  # Three properties the old path needed, and where each of them stands now:
-  #
-  #   - **`[skip ci]` on the commit.** It was load-bearing: a commit on `main` triggers the workflow
-  #     that wrote it, and without the marker this job fed itself forever. The hazard is *gone*
-  #     rather than handled — this workflow's `push:` trigger names `branches: [main]`, and nothing
-  #     pushed to `badges` matches it. Restore a push to `main` here and the marker has to come back
-  #     with it.
-  #   - **"Commit only when the numbers moved."** The old step ran `git diff --quiet` first, because
-  #     `main` would otherwise collect one commit per push forever — which is also why nothing this
-  #     script generates carries a timestamp, a run number or a run URL. The branch below is
-  #     force-pushed to a single parentless commit every time, so it cannot accumulate history
-  #     whatever the payload says, and the check is dead here. **The no-timestamp rule is not**: the
-  #     README's detailed block is still a pure function of the figures, because a human commits that
-  #     one and a full-suite run must not dirty the tree on an unchanged measurement.
-  #   - **It records; it never gates.** Unchanged, and the reason is unchanged: a coverage
-  #     measurement is not a verdict on a commit. The step is `continue-on-error`, and it writes the
-  #     payloads into the job summary *before* it tries to publish them, so a failed push leaves the
-  #     figures visible on the run page rather than lost with the runner.
-  #
-  # Why this is a separate job on Linux rather than three more lines on the `coverage` job above:
-  # `contents: write` must not sit on a job that runs on the same runner image as the ones
-  # compiling code out of a pull request, and the merged bundles have no reason to be near a write
-  # token. What runs here is one stdlib Python script and some git. No build, no test, no
-  # repository code executes.
-  #
-  # **`needs: coverage`, and the shards are upstream of it now.** This used to say `needs:
-  # macos-checks` and argue, at length, that the UI shards must *not* be upstream: coverage was
-  # measured two steps before XCUITest started, and this repository's UI suite is documented as
-  # ending red on a test that passed on its retry, so letting that decide whether the number is
-  # recorded would mean the badges updating only on runs where a flake happened not to fire.
-  #
-  # The first half of that no longer holds — the measurement is the union of the unit bundle and the
-  # three shards', so the shards are upstream of it by construction. The second half still does, and
-  # it moved rather than went away: the `coverage` job takes `!cancelled()` instead of `success()`,
-  # and each shard uploads its bundle under `!cancelled()` too, so a shard red for a flake still
-  # contributes everything it covered. What is *not* tolerated is a shard that produced no bundle at
-  # all — that job counts and refuses. The flake argument is answered by the condition, not by
-  # cutting the shards out of the graph.
-  #
-  # `always()` is kept for the case it always covered — a `coverage` job that died before emitting
-  # leaves the output empty, which the first step below reports and stops on, rather than skipping
-  # this job with no explanation.
   record-coverage:
     name: Publish coverage badges
     needs: coverage
@@ -1237,18 +459,8 @@ jobs:
       contents: write
 
     steps:
-      # The pushed SHA at depth 1, which is the default and is all this job needs. It used to ask
-      # for `ref: main` and `fetch-depth: 0`, because it committed to `main` and the push at the end
-      # might have had to rebase onto a tip that moved while the macOS job ran. Neither applies to a
-      # parentless commit on a branch nothing else writes to, and taking the pushed SHA is the more
-      # honest of the two anyway: the payloads are produced by the version of
-      # `Scripts/update_readme_coverage.py` that belongs to the commit being measured.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The job output goes through `env:` rather than straight into `run:`. A `${{ }}` interpolated
-      # into a shell line is substituted before the shell ever sees it, so its content is parsed as
-      # script; through the environment it can only ever be data. This particular value is a number
-      # this workflow computed rather than anything a stranger wrote — the habit is the point.
       - name: Write the figures out
         id: figures
         env:
@@ -1264,26 +476,14 @@ jobs:
           printf '%s\n' "$COVERAGE_JSON" > .artifacts/coverage/coverage.json
           echo "state=ready" >> "$GITHUB_OUTPUT"
 
-      # Two shields.io endpoint payloads, force-pushed as a single parentless commit onto the
-      # `badges` branch. See this job's header for why they do not go into README.md on `main`.
-      #
-      # `continue-on-error`, and the figures reach `$GITHUB_STEP_SUMMARY` before any git runs, so
-      # every way this can fail — the payload malformed, the branch protected after all, the token
-      # refused — leaves the numbers on the run page and the badges showing whatever was last
-      # published. A coverage measurement never reddens a commit whose tests passed.
       - name: Publish the badge payloads
         if: steps.figures.outputs.state == 'ready'
         continue-on-error: true
         run: |
           set -euo pipefail
 
-          # The script owns the branch name, beside the URLs it builds for README.md. Asking it
-          # keeps this file from being a second place the name is written down.
           branch="$(python3 Scripts/update_readme_coverage.py --print-badge-branch)"
 
-          # Outside the checkout, because `.artifacts/` is gitignored and `git add` would refuse
-          # these paths, and because the orphan branch below is built by clearing the index — the
-          # payloads have to survive that.
           badges="$(mktemp -d)"
           python3 Scripts/update_readme_coverage.py \
             --from-json .artifacts/coverage/coverage.json \
@@ -1309,23 +509,11 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # `--orphan` starts a branch with no parent commit, so none of `main`'s history comes with
-          # it. It does keep `main`'s files staged, which is the one surprise in this recipe:
-          # `git rm --cached` clears the index without deleting anything from disk, leaving a commit
-          # that contains the two payloads and nothing else.
           git checkout --quiet --orphan "$branch"
           git rm -r --quiet --cached .
           cp "$badges"/*.json .
           git add app-coverage.json module-coverage.json
           git commit --quiet -m 'chore: publish measured coverage as badge endpoints'
 
-          # `--force`, always. The branch must never accumulate history: each run replaces its one
-          # commit, the previous one becomes unreachable, and the branch stays a few hundred bytes
-          # for the life of the repository. It also creates the branch on the first run, so nothing
-          # has to exist beforehand.
-          #
-          # No `[skip ci]` on the commit above, and its absence is deliberate rather than an
-          # oversight. The marker was load-bearing when this pushed to `main`; the `push:` trigger at
-          # the top of this file names `branches: [main]`, so a push here cannot trigger anything.
           git push --force origin "HEAD:refs/heads/$branch"
           echo "Published to $branch."
