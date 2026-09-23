@@ -338,6 +338,26 @@ struct EndpointEditorPage {
         app.scrollViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
     }
 
+    /// The form's scroll surface, outside the nested response-body editor.
+    var formScrollView: XCUIElement {
+        let editor = app.descendants(matching: .any).matching(identifier: "endpointEditor").firstMatch
+        let form = editor.descendants(matching: .scrollView).firstMatch
+        return form.exists ? form : app.scrollViews.firstMatch
+    }
+
+    /// Short windows can place options below the clip even though the controls exist in the tree.
+    func reveal(_ control: XCUIElement) -> Bool {
+        if control.isHittable { return true }
+        let scroller = formScrollView
+        guard scroller.exists else { return control.isHittable }
+        for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0,
+                      90.0, 90.0, 90.0, 90.0] {
+            scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
+            if control.isHittable { return true }
+        }
+        return control.isHittable
+    }
+
     func showOptions(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(optionsToggle.waitForExistence(timeout: 5), file: file, line: line)
         if optionsToggle.value as? String == "Collapsed" { optionsToggle.click() }

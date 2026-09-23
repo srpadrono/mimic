@@ -51,6 +51,7 @@ struct RequestDetailInspector: View {
     }
 
     @State private var selectedTab: RequestDetailTab
+    private let tabSelection: Binding<RequestDetailTab>?
     @State private var searchText: String
     @State private var copyConfirmation: String?
     @State private var copyConfirmationTask: Task<Void, Never>?
@@ -67,7 +68,8 @@ struct RequestDetailInspector: View {
         port: Int? = nil,
         onSaveAsMock: ((UUID) -> Void)? = nil,
         initialTab: RequestDetailTab = .summary,
-        initialSearchText: String = ""
+        initialSearchText: String = "",
+        tabSelection: Binding<RequestDetailTab>? = nil
     ) {
         self.onSaveAsMock = onSaveAsMock
         self.log = log
@@ -75,10 +77,11 @@ struct RequestDetailInspector: View {
         self.scenarioName = scenarioName
         self.port = port
         _selectedTab = State(initialValue: initialTab)
+        self.tabSelection = tabSelection
         _searchText = State(initialValue: initialSearchText)
     }
 
-    init(context: Context, onSaveAsMock: ((UUID) -> Void)? = nil, initialTab: RequestDetailTab = .summary, initialSearchText: String = "") {
+    init(context: Context, onSaveAsMock: ((UUID) -> Void)? = nil, initialTab: RequestDetailTab = .summary, initialSearchText: String = "", tabSelection: Binding<RequestDetailTab>? = nil) {
         self.init(
             log: context.log,
             endpointName: context.endpointName,
@@ -86,9 +89,13 @@ struct RequestDetailInspector: View {
             port: context.port,
             onSaveAsMock: onSaveAsMock,
             initialTab: initialTab,
-            initialSearchText: initialSearchText
+            initialSearchText: initialSearchText,
+            tabSelection: tabSelection
         )
     }
+
+    private var activeTab: RequestDetailTab { tabSelection?.wrappedValue ?? selectedTab }
+    private var activeTabBinding: Binding<RequestDetailTab> { tabSelection ?? $selectedTab }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -100,7 +107,7 @@ struct RequestDetailInspector: View {
             // some barely did.
             DSDivider(style: .standard, identifier: "requestDetail.requestLine")
 
-            Picker("View", selection: $selectedTab) {
+            Picker("View", selection: activeTabBinding) {
                 ForEach(RequestDetailTab.allCases) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
@@ -127,14 +134,14 @@ struct RequestDetailInspector: View {
             .accessibilityIdentifier("requestDetail.tabs")
             .accessibilityLabel("Request detail section")
 
-            if selectedTab == .body {
+            if activeTab == .body {
                 bodySearchField
             }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     captureControls
-                    switch selectedTab {
+                    switch activeTab {
                     case .summary: summaryContent
                     case .headers: headersContent
                     case .body: bodyContent
@@ -145,8 +152,8 @@ struct RequestDetailInspector: View {
             copyBar
         }
         // Every inspector mode inherits the same native column material.
-        // The tab is per-request state: carrying "Body" over to the next request you click is right,
-        // but carrying a search term for a payload you are no longer looking at is not.
+        // The tab follows the inspector across requests so a user can compare the same section.
+        // A search term belongs to one payload and clears when the selected request changes.
         .onChange(of: log.id) { _, _ in searchText = "" }
         .onDisappear {
             copyConfirmationTask?.cancel()

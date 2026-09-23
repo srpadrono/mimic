@@ -36,6 +36,7 @@ struct InspectorPanelView: View {
     /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
     @State private var endpointTab: EndpointTab = .scenarios
+    @State private var requestDetailTab: RequestDetailTab = .summary
 
     /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
@@ -213,8 +214,12 @@ struct InspectorPanelView: View {
                 switch mode {
                 case .request:
                     if let requestDetail {
-                        RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
-                            // Arrow-key selection stays in request mode; each log needs fresh detail state.
+                        // Rebuild for a different log while keeping the inspector's chosen tab.
+                        RequestDetailInspector(
+                            context: requestDetail,
+                            onSaveAsMock: onSaveAsMock,
+                            tabSelection: $requestDetailTab
+                        )
                             .id(requestDetail.log.id)
                     }
                 case .journey:

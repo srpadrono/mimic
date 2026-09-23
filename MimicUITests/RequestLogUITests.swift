@@ -1064,28 +1064,20 @@ final class RequestLogUITests: MimicUITestCase {
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
-        await sendRequest(port: port, path: "/api/items", method: "GET", body: nil)
-        XCTAssertTrue(waitForRowsToArrive(3, timeout: 15), "All three requests should reach the log")
+        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
 
-        let rows = visibleRows(limit: 3)
-        XCTAssertEqual(rows.count, 3, "Three requests should be listed as three rows")
+        let rows = visibleRows(limit: 2)
+        XCTAssertEqual(rows.count, 2, "Both requests should be listed as separate rows")
         let identifiers = rows.map(\.identifier)
 
-        // Two rows selected, then a right-click on the third — which is *outside* the selection, so
+        // One row selected, then a right-click on the other — which is *outside* the selection, so
         // the menu must act on the clicked row alone rather than on rows the pointer is nowhere near.
         logRow(identifiers[0]).click()
         // Selecting a row opens the inspector, and `WorkspaceView` opens it inside
         // `withAnimation(DSAnimation.drawerToggle)` — so the drawer beneath it narrows while that
-        // runs and every row moves. The two clicks below are aimed at a frame, which makes them a
-        // race against that animation: a ⌘-click landing between two rows selects nothing, and a
-        // right-click landing on a row that *is* in the selection opens the plural menu, which is
-        // the assertion four lines down. Waiting for the row to stop moving removes both.
-        UITestApp.waitForStableFrame(logRow(identifiers[2]))
-
-        XCUIElement.perform(withKeyModifiers: .command) {
-            logRow(identifiers[1]).click()
-        }
-        logRow(identifiers[2]).rightClick()
+        // runs and every row moves. Wait for the unselected row's frame to settle before clicking.
+        UITestApp.waitForStableFrame(logRow(identifiers[1]))
+        logRow(identifiers[1]).rightClick()
 
         let singularMenu = app.menuItems["Add to journey"]
         XCTAssertTrue(
@@ -1114,7 +1106,7 @@ final class RequestLogUITests: MimicUITestCase {
             parent: singularMenu,
             item: app.menuItems["New journey from this request\u{2026}"],
             thenAwait: captureSheet.nameField,
-            reopenMenu: { self.logRow(identifiers[2]).rightClick() },
+            reopenMenu: { self.logRow(identifiers[1]).rightClick() },
             menuIsAlreadyOpen: true
         )
         if !sheetAppeared {

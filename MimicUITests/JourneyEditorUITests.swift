@@ -199,7 +199,7 @@ extension JourneyStepSheetPage {
             if viewport.contains(fieldCenter) && field.isHittable { return }
             form.scroll(byDeltaX: 0, deltaY: byScrollingUp ? -90 : 90)
         }
-        XCTFail("\(field.identifier) did not scroll into the form's visible area")
+        XCTFail("The step form did not reveal the requested field after scrolling")
     }
 
     var delayField: XCUIElement { app.textFields["stepSheet.delayField"] }
@@ -1008,6 +1008,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         replaceText(in: stepSheet.statusField, with: "402")
 
         // JRNSTEP-10 — the hint that says how to get a second line, which is not guessable.
+        stepSheet.reveal(stepSheet.headersDisclosure, byScrollingUp: true)
         stepSheet.headersDisclosure.click()
         stepSheet.reveal(stepSheet.headersHint, byScrollingUp: true)
         XCTAssertTrue(
