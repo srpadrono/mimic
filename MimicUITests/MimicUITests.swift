@@ -340,9 +340,17 @@ struct EndpointEditorPage {
 
     /// The form's scroll surface, outside the nested response-body editor.
     var formScrollView: XCUIElement {
-        let editor = app.descendants(matching: .any).matching(identifier: "endpointEditor").firstMatch
-        let form = editor.descendants(matching: .scrollView).firstMatch
-        return form.exists ? form : app.scrollViews.firstMatch
+        let pane = app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.frame
+        let form = app.scrollViews.allElementsBoundByIndex
+            .filter { scrollView in
+                let center = CGPoint(x: scrollView.frame.midX, y: scrollView.frame.midY)
+                return pane.contains(center)
+                    && scrollView.identifier != "ds.jsoneditor.editor.body"
+            }
+            .max { $0.frame.height < $1.frame.height }
+        if let form { return form }
+        XCTFail("No endpoint form scroll view was found inside the center pane")
+        return app.scrollViews.firstMatch
     }
 
     /// Short windows can place options below the clip even though the controls exist in the tree.
@@ -399,6 +407,24 @@ struct EndpointEditorPage {
 @MainActor
 struct RequestLogDrawerPage {
     let app: XCUIApplication
+
+    /// At the drawer's minimum height, rows can exist in accessibility outside the clipped table.
+    /// Scroll the table itself until the row's click point is inside its viewport.
+    func reveal(_ row: XCUIElement) -> Bool {
+        let drawer = app.descendants(matching: .any).matching(identifier: "drawer").firstMatch
+        guard drawer.exists, row.exists else { return false }
+        guard let table = drawer.scrollViews.allElementsBoundByIndex
+            .filter({ $0.frame.height > 0 })
+            .min(by: { $0.frame.height < $1.frame.height }) else { return false }
+        for _ in 0..<4 {
+            let viewport = table.frame
+            let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+            if viewport.contains(center) && row.isHittable { return true }
+            table.scroll(byDeltaX: 0, deltaY: center.y < viewport.minY ? -30 : 30)
+        }
+        let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+        return table.frame.contains(center) && row.isHittable
+    }
 
     var filterField: XCUIElement {
         app.descendants(matching: .textField).matching(identifier: "drawer.filterField").firstMatch

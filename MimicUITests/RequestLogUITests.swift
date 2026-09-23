@@ -1072,11 +1072,13 @@ final class RequestLogUITests: MimicUITestCase {
 
         // One row selected, then a right-click on the other — which is *outside* the selection, so
         // the menu must act on the clicked row alone rather than on rows the pointer is nowhere near.
+        XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[0])), "The first request must be visible")
         logRow(identifiers[0]).click()
         // Selecting a row opens the inspector, and `WorkspaceView` opens it inside
         // `withAnimation(DSAnimation.drawerToggle)` — so the drawer beneath it narrows while that
         // runs and every row moves. Wait for the unselected row's frame to settle before clicking.
         UITestApp.waitForStableFrame(logRow(identifiers[1]))
+        XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[1])), "The second request must be visible")
         logRow(identifiers[1]).rightClick()
 
         let singularMenu = app.menuItems["Add to journey"]
@@ -1142,6 +1144,8 @@ final class RequestLogUITests: MimicUITestCase {
 
         // Now the half nothing covered: appending to a journey that already exists, chosen by name
         // from the submenu.
+        XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[0])),
+                      "The drawer must reveal the row before its context menu is opened")
         logRow(identifiers[0]).click()
         UITestApp.waitForStableFrame(logRow(identifiers[0]))
 
@@ -1154,7 +1158,11 @@ final class RequestLogUITests: MimicUITestCase {
             parent: appendMenu,
             item: app.menuItems["Checkout"],
             thenAwait: element(identifiedBy: "journeyStep-1"),
-            reopenMenu: { self.logRow(identifiers[0]).rightClick() },
+            reopenMenu: {
+                XCTAssertTrue(self.requestLogDrawer.reveal(self.logRow(identifiers[0])),
+                              "The row must remain visible when reopening its context menu")
+                self.logRow(identifiers[0]).rightClick()
+            },
             outcomeTimeout: 10
         )
         if !appended {

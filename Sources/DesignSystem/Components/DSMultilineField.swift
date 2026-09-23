@@ -51,6 +51,7 @@ public struct DSMultilineField: View {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                         .stroke(isFocused ? DSColors.borderFocused : DSColors.border,
                                 lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
+                        .allowsHitTesting(false)
                 }
                 .accessibilityIdentifier(identifier)
                 .accessibilityLabel(title)
