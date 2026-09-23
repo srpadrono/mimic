@@ -8,6 +8,7 @@ import Darwin
 import Glibc
 #endif
 import Testing
+import Domain
 @testable import MimicCLICore
 
 @Suite("Control client redirects")
