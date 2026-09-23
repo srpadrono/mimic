@@ -12,7 +12,7 @@ import Persistence
 /// because the tree carried two `ControlHost` conformances: `AppControlHost` over the live session,
 /// and `MimicControlService`, a self-contained service that owned its own repository and engine —
 /// built, tested, and constructed by nothing in production. The owner resolved that fork by deleting
-/// the service (see "One host" in AGENTS.md), which turned every parity comparison into a tautology:
+/// the service (see "One rule and one host" in docs/ARCHITECTURE.md), which turned every parity comparison into a tautology:
 /// there is nothing left to agree with. What parity was really guarding survives here in a stronger
 /// form — the assertions that compared host A to host B now pin host A to the *literal* answer, so a
 /// regression fails against a recorded value instead of against a second copy that might have

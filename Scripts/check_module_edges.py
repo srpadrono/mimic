@@ -1,35 +1,10 @@
 #!/usr/bin/env python3
-"""Checks the module dependency edges that six documents state and nothing enforced.
+"""Check transitive module boundaries in both SwiftPM and Tuist manifests.
 
-Two claims are repeated across the documentation, and both are facts about the two manifests:
-
-  1. **`SpecImport` is not reachable from `ControlPlane` or from the CLI**, in either manifest.
-     That is the whole reason there is no `mimic import` and no import command on the HTTP API.
-     Stated in AGENTS.md (twice — the opening section and the module list), README.md,
-     docs/ARCHITECTURE.md, docs/CLI.md, docs/GRAPHQL.md and docs/ROADMAP.md.
-  2. **The CLI links neither Vapor nor GRDB** — "a client, never a host". Stated in AGENTS.md,
-     README.md, docs/CLI.md and in a comment above the target in Project.swift itself.
-
-Adding one line to either manifest falsifies all of that, and until this program existed every gate
-in the repository stayed green while it happened: the other checks here count things, compare
-literals and forbid a handful of strings, and not one of them read an edge. `docs/GRAPHQL.md` used
-to publish `grep -n SpecImport Package.swift Project.swift` for the reader to run by hand, which is
-an admission that nothing ran it for them; that line now points here instead.
-
-**Reachability, not adjacency.** The closure is transitive because the cheap version of this check
-is the one that fails to fire: adding `SpecImport` to `Domain` — a target everything depends on —
-would put the parsers in the CLI while a direct-edge check reported nothing. Every path is walked,
-and a violation prints the path it found.
-
-**A check that finds nothing must fail too.** An absence is only evidence if presence was possible,
-so `REQUIRED_EDGES` below asserts the edges that *are* supposed to exist — including one edge onto
-each of `SpecImport`, `Vapor` and `GRDB`, so a parser that silently stopped recognising those names
-goes red instead of reporting a clean tree. That is the failure this repository keeps producing:
-an assertion whose subject it can no longer see.
-
-Runs before anything is compiled, so: stdlib only, no arguments, nonzero exit on failure. Paths are
-resolved from this file's location rather than the working directory, so it answers the same from
-anywhere.
+The CLI must remain a client without Vapor, GRDB, or SpecImport. ControlPlane
+must not acquire SpecImport, Persistence, or MockServerEngine. Required edges
+make a parser that has stopped seeing dependencies fail instead of passing.
+Print the path of any forbidden reachability. Stdlib only.
 """
 
 import pathlib
@@ -58,7 +33,7 @@ FORBIDDEN = [
     # the module's only users of a store and an engine. ControlPlane is the HTTP layer and the
     # discovery file over the `ControlHost` protocol; the host is supplied by the app. An edge onto
     # either module reappearing means a second host is growing back, which is a decision to argue
-    # (AGENTS.md, "One host"), not a dependency to add in passing.
+    # (docs/ARCHITECTURE.md, "One rule and one host"), not a dependency to add in passing.
     ("Package.swift", "ControlPlane", "Persistence", "ControlPlane holds no host of its own"),
     ("Package.swift", "ControlPlane", "MockServerEngine", "ControlPlane holds no host of its own"),
     ("Project.swift", "ControlPlane", "Persistence", "ControlPlane holds no host of its own"),
@@ -256,8 +231,8 @@ def main():
     for line in problems:
         print(line)
     if problems:
-        sys.exit(f"{len(problems)} module-edge problem(s) — see AGENTS.md \"Architecture\" and "
-                 "docs/ROADMAP.md \"Known gaps\", which are the prose this enforces")
+        sys.exit(f"{len(problems)} module-edge problem(s) — see "
+                 "docs/ARCHITECTURE.md \"Modules\" for the boundaries this enforces")
 
     print(f"{len(FORBIDDEN)} forbidden edges absent, {len(REQUIRED_EDGES)} required edges present, "
           f"across {len(graphs['Package.swift'])} SwiftPM and {len(graphs['Project.swift'])} Tuist targets")

@@ -13,7 +13,7 @@ import Testing
 /// The host behind the server is ``LoopbackTestHost``, a fixture at the bottom of this file — not a
 /// production host. These tests used to stand `ControlServer` on `MimicControlService`, the
 /// self-contained headless service, until the owner resolved the two-host fork by deleting it (see
-/// "One host" in AGENTS.md). What this suite covers is `ControlServer` itself — authentication,
+/// "One rule and one host" in docs/ARCHITECTURE.md). This suite covers `ControlServer` itself — authentication,
 /// Host pinning, error→status mapping, body limits, loopback binding, the wire encoding — and for
 /// that it needs *a* host, not *the* host: the shipped host's behaviour has its own suite in
 /// `MimicTests`, driven directly rather than over a socket.

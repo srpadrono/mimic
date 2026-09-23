@@ -1,80 +1,12 @@
-# Roadmap
+# Current limits
 
-What Mimic does today, where it stops, and what's being considered next. Nothing below is a
-commitment or a date.
+This page describes behavior that callers need to plan around. It is not a release schedule; see [CHANGELOG.md](../CHANGELOG.md) for shipped versions.
 
-## Shipped
+- **Spec import requires the window.** HAR and OpenAPI/Swagger parsing plus review have no control command. `mimic project import` loads a Mimic project export instead. A script can parse a spec itself and create endpoints and scenarios through the CLI.
+- **Update installation requires the window.** `mimic app update-check` reports availability; macOS Installer asks a person to approve installation.
+- **Matching uses method, path, and GraphQL operation.** Headers, query parameters, and request bodies are not match criteria. GraphQL batch and persisted-query limits are in [GraphQL](GRAPHQL.md#known-limits).
+- **Responses are static.** There is no request-value templating or general counter; journey repeat counts provide fixed sequences.
+- **One journey runs per project.** Its live cursor belongs to the server run, not to each client.
+- **Port changes require a restart.** `mimic server status` distinguishes configured backends from active listeners when a restart is pending. Upstream URL and pass-through changes apply live.
 
-| Area | State |
-|------|-------|
-| Projects | Create, open, duplicate, rename, delete, recents, autosave, JSON export/import. |
-| Endpoints | `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`/`OPTIONS`, `:param` wildcards, most-specific-route resolution, group tags. |
-| Scenarios | Multiple responses per endpoint, one active, switchable live. |
-| Journeys | Ordered response sequences, two match modes, transport failures, held/automatic progression, restart and loop, nine templates. |
-| Latency | Additive global and per-endpoint (or per-step) delays, applied before responding. |
-| Request log | Live, with request *and* response, outcome labelling, and an unmatched filter. |
-| Import | HAR captures and OpenAPI/Swagger specs, reviewed before commit. **Window only** — see the gaps below. |
-| GraphQL | Matching by operation, with fallback for anonymous queries; import splits per operation. |
-| Automation | `mimic` CLI and a loopback HTTP control API covering 51 operations: every project, server, endpoint, scenario, journey and request-log operation the window has, plus the update check. |
-| Pass-through | One project can bind multiple local ports, each with an optional real backend. Unmatched calls forward; observed text responses can be saved as mocks explicitly. |
-| Headless | `mimic daemon start` for CI and agents — the app, windowless. |
-| Updates | Checks GitHub Releases daily and on demand; downloads the installer, verifies its published SHA-256 and Developer ID, and hands it to macOS's Installer. Checking is also `mimic app update-check`; **installing is window-only** — see the gaps below. |
-
-## Known gaps
-
-Real limitations, not planned work:
-
-- **Spec import is the one workflow a script cannot reach.** Everything else the window does is a
-  `ControlCommand`; parsing a HAR or an OpenAPI/Swagger document into endpoints is not, because
-  `SpecImport` is linked by `AppFeatures` and the app bundle alone — neither `ControlPlane` nor
-  `MimicCLICore` depends on it, in either manifest, which
-  [`Scripts/check_module_edges.py`](../Scripts/check_module_edges.py) checks on every CI run rather
-  than leaving to review. An agent that wants a spec's routes parses the file itself and issues
-  `endpointCreate` + `scenarioUpdate` per route, which is what the window's own review sheet does on
-  commit, so nothing about the resulting project differs. What is missing is the parse and the
-  review, and closing the gap means a command that carries a document and returns candidates — a
-  larger change than it looks, because it would give `ControlPlane` a dependency it has deliberately
-  never had. Note that `mimic project import` is a different operation: it reads a Mimic project
-  export.
-- **Installing an update is window-only, and deliberately.** `mimic app update-check` reports
-  whether a newer release exists; there is no command that installs one. Installing quits the app and
-  runs macOS's `Installer.app` against a signed package, which asks for an admin password at a GUI
-  prompt — not something a headless caller can consent to for somebody, and a command that returned
-  before the prompt would report a success that had not happened. The check is the automatable half
-  and it is automated; the consent is not.
-
-- **`mimic daemon start` runs the app, not a daemon — by decision now, not by accident.** It sets
-  `--headless` on `mimic app start`, which launches `Mimic.app` with `MIMIC_HEADLESS=1`; the app
-  hides its Dock icon and serves the control API through `AppControlHost`, the same code path the
-  window uses. The windowless composition root that used to sit unreachable beside it
-  (`MimicDaemon` + `MimicControlService`) was deleted by the owner rather than wired up, so a
-  headless Mimic keeps needing the app bundle — the accepted cost — and every rule is implemented
-  once. Revisiting that trade means bringing the pair back from git history *and* giving it a real
-  binary; `Scripts/check_module_edges.py` fails CI on the store/engine edges it would need, so the
-  revisit is a visible argument rather than an accretion. Detail in
-  [ARCHITECTURE.md](ARCHITECTURE.md#one-host).
-- **Matching ignores headers and body.** A request is routed by method, path, and — for GraphQL —
-  operation. Two calls that differ only in their body or in an auth header cannot be told apart. The
-  matcher already receives both, so this is a feature that hasn't been built rather than a design
-  wall.
-- **No dynamic responses.** Bodies are static text: no templating, no echoing request values back,
-  no counters beyond a journey step's `repeatCount`.
-- **Beta, and versioned below 1.0.** The interface and the stored project format may still change
-  between releases.
-- **One active journey per project.** Enough for a test case; not enough to model two independent
-  clients against one server.
-
-## Under consideration
-
-Roughly ordered by how often the gap gets hit:
-
-1. **Header and body matching** — the largest gap, and the matcher already has the inputs.
-2. **Response templating** — echo path params and request fields into the body.
-3. **Journey assertions** — let a journey declare the calls it *expects*, so a test can fail on a
-   missing call and not only on a wrong response.
-
-## History
-
-Version-by-version detail is in [CHANGELOG.md](../CHANGELOG.md). The phase-by-phase build log that
-used to live here, and the original product requirements document, were removed once they stopped
-matching the code — both remain in git history.
+Ideas under consideration include header and body matching, response templating, and journey assertions. None has a promised release date.

@@ -9,7 +9,7 @@
 #
 # Each message below cites where its rule is *explained*, and those citations are load-bearing: a
 # developer meeting one of these for the first time needs an explanation, not the prohibition alone.
-# AGENTS.md carries the current "Non-negotiable patterns" section. No count is written here on
+# AGENTS.md carries the current "Project rules" section. No count is written here on
 # purpose — a tally beside a list the reader can see is another hand-maintained mirror.
 #
 # bash, not zsh like the other scripts in this directory: the Linux CI job runs inside the `swift:6.2`
@@ -285,7 +285,7 @@ selftest_rule() {
     local found
     found="$(printf '%s\n' "$hits" | grep -v '^[[:space:]]*$' | cut -d: -f1,2 | tr '\n' ' ' || true)"
 
-    # The pattern, not just the rule's heading: three rules cite "Non-negotiable patterns" and a list
+    # The pattern, not just the rule's heading: several rules cite "Project rules" and a list
     # that names them all identically says nothing about which one just went quiet.
     if [ "$found" = "$expected" ] && (( planted >= 3 )); then
         printf '  ok   %s — %d spellings — %s\n' "${reason%%:*}" "$planted" "$pattern"
@@ -404,7 +404,7 @@ WS='[[:space:]]*'
 DOT='[[:space:]]*\.[[:space:]]*'
 
 report \
-    'AGENTS.md "Non-negotiable patterns": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodBadge, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
+    'AGENTS.md "Project rules": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodBadge, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
     "${DOT}textCase${WS}\(" \
     '' \
     'Text("Response headers").textCase(.uppercase)
@@ -437,7 +437,7 @@ report \
 #
 # No occurrence of any of the three exists in any scanned tree, so this starts green and stays cheap.
 report \
-    'AGENTS.md "Non-negotiable patterns": @Observable for new code — @StateObject/@ObservedObject/@EnvironmentObject need ObservableObject, and going back to it trades property-level invalidation for a view that re-renders on every published field.' \
+    'AGENTS.md "Project rules": @Observable for new code — @StateObject/@ObservedObject/@EnvironmentObject need ObservableObject, and going back to it trades property-level invalidation for a view that re-renders on every published field.' \
     "@${WS}([A-Za-z_][A-Za-z0-9_]*${DOT})?(StateObject|ObservedObject|EnvironmentObject)" \
     '' \
     '@StateObject private var workspace = ProjectWorkspace()
@@ -451,7 +451,7 @@ report \
 # of it. Still no trailing `\(` — a bare reference to the method is as much a violation as a call, and
 # requiring the parenthesis would narrow a rule that has never needed narrowing.
 report \
-    'AGENTS.md "Non-negotiable patterns": use Task { try? await Task.sleep(for:) } — an asyncAfter block outlives the view that scheduled it and cannot be cancelled.' \
+    'AGENTS.md "Project rules": use Task { try? await Task.sleep(for:) } — an asyncAfter block outlives the view that scheduled it and cannot be cancelled.' \
     "DispatchQueue${DOT}main${DOT}asyncAfter" \
     '' \
     'DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveState = .idle }
@@ -470,7 +470,7 @@ report \
 # `PortConflictAlertData` and `deleteAlertTitle`. A rule a module qualifier walks straight through is
 # worth less than a rule that would flag a nested type nobody has written.
 report \
-    'AGENTS.md "Non-negotiable patterns": the Alert() constructor is deprecated — use the modern .alert(_:isPresented:) modifier.' \
+    'AGENTS.md "Project rules": the Alert() constructor is deprecated — use the modern .alert(_:isPresented:) modifier.' \
     "(^|[^A-Za-z0-9_])Alert${WS}\(" \
     '' \
     'let alert = Alert(title: Text("Delete endpoint?"))
@@ -490,7 +490,7 @@ report \
 #
 # Illustrations size their symbols inside DesignSystem components. AppFeatures has no exemption.
 report \
-    'AGENTS.md "Non-negotiable patterns": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
+    'AGENTS.md "Project rules": no glyph below 8pt, and the size comes from DSGlyph — a hand-written size is how that ladder came to exist only in prose. Six rungs are named in DSGlyph, with DSGlyph.minimum as the floor; DSTypography is where a literal point size belongs.' \
     "${DOT}font${WS}\([^)]*${DOT}system${WS}\(${WS}size:${WS}[0-9]" \
     '' \
     'Image(systemName: "gear").font(.system(size: 7))
@@ -543,7 +543,7 @@ report \
 # should have to come back through here when that line is respaced; this one names a *value*, and a
 # reformat of `ControlServer.swift` turning the tree red would teach only that the check is noise.
 report \
-    'AGENTS.md "Non-negotiable patterns": never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
+    'AGENTS.md "Project rules": never widen the control plane'"'"'s binding beyond 127.0.0.1 — it must stay unreachable from whatever the app under test can route to. The mock server binds the same way for the same reason, and this is the spelling both use.' \
     "hostname${WS}[=(]${WS}\"" \
     'hostname[[:space:]]*[=(][[:space:]]*"127\.0\.0\.1"' \
     'application.http.server.configuration.hostname = "0.0.0.0"
@@ -591,7 +591,7 @@ report \
 # arm — the first arm is unanchored, so it already matches inside `Foundation.Thread.sleep(`, which is
 # what the third probe below pins.
 report \
-    'AGENTS.md "Non-negotiable patterns": tests never sleep — too short and the test is flaky, too long and every run pays for it. Poll with .waitForExistence(timeout:) or UITestApp.waitUntil, and await Task.sleep only where a debounce is the thing under test.' \
+    'AGENTS.md "Project rules": tests never sleep — too short and the test is flaky, too long and every run pays for it. Poll with .waitForExistence(timeout:) or UITestApp.waitUntil, and await Task.sleep only where a debounce is the thing under test.' \
     "(Thread${DOT}sleep${WS}\(|(^|[^A-Za-z0-9_.])u?sleep${WS}\()" \
     'AppLaunchSupport\.swift:[0-9]+:.*Thread\.sleep\(forTimeInterval: pollInterval\)' \
     'Thread.sleep(forTimeInterval: 1)
