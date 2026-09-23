@@ -7,6 +7,10 @@ Mimic is a native macOS app that runs local mock API servers. Define endpoints a
 [![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#testing)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#testing)
 
+![Mimic workspace showing an endpoint response, alternate scenarios, a running local server, and recorded requests](docs/images/mimic-workspace.jpg)
+
+*Example project: configure a response, switch scenarios, and inspect requests in the same window.*
+
 ## Install
 
 Download the [latest release](https://github.com/srpadrono/mimic/releases/latest) and run its signed `.pkg`. It installs `Mimic.app` in `/Applications` and `mimic` in `/usr/local/bin`. To build from source, see [Contributing](CONTRIBUTING.md).
