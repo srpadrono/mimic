@@ -220,9 +220,12 @@ struct JourneyCommand: AsyncParsableCommand {
             guard created.ok else {
                 throw CLIFailure.commandFailed(created.error ?? .internalFailure("Add failed."))
             }
-            guard activate, let journey = created.result?.journey else {
+            guard activate else {
                 try Output(options).emit(created)
                 return
+            }
+            guard let journey = created.result?.journey else {
+                throw CLIFailure.commandFailed(.internalFailure("Add template returned no journey to activate."))
             }
             try Output(options).emit(try await client.send(.journeyActivate(journey: .id(journey.id))))
         }
@@ -362,8 +365,14 @@ struct JourneyCommand: AsyncParsableCommand {
                         "A journey named \"\(resolvedName)\" already exists. Pass --replace to overwrite it."
                     )
                 }
-                response = try await client.send(.journeyUpdate(journey: .name(resolvedName), spec: spec))
+                guard let journey = existing.result?.journey else {
+                    throw CLIFailure.commandFailed(.internalFailure("Journey lookup returned no journey to replace."))
+                }
+                response = try await client.send(.journeyUpdate(journey: .id(journey.id), spec: spec))
             } else {
+                guard existing.error?.code == ControlErrorCode.journeyNotFound.rawValue else {
+                    throw CLIFailure.commandFailed(existing.error ?? .internalFailure("Journey lookup failed."))
+                }
                 response = try await client.send(.journeyCreate(name: resolvedName, spec: spec))
             }
             guard response.ok else {
@@ -374,7 +383,10 @@ struct JourneyCommand: AsyncParsableCommand {
                 try Output(options).emit(response)
                 return
             }
-            try Output(options).emit(try await client.send(.journeyActivate(journey: .name(resolvedName))))
+            guard let journey = response.result?.journey else {
+                throw CLIFailure.commandFailed(.internalFailure("Import returned no journey to activate."))
+            }
+            try Output(options).emit(try await client.send(.journeyActivate(journey: .id(journey.id))))
         }
     }
 

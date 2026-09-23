@@ -9,6 +9,19 @@ import Foundation
 /// anywhere.
 public enum AppLauncher {
 
+    /// A local app should finish starting well within an hour. Bounding the user-supplied value
+    /// also keeps nonfinite and enormous Doubles out of Duration and Int conversions.
+    public static let maximumReadinessWaitSeconds: TimeInterval = 60 * 60
+
+    public static func validatedReadinessTimeout(_ timeout: TimeInterval) throws -> TimeInterval {
+        guard timeout.isFinite, timeout > 0, timeout <= maximumReadinessWaitSeconds else {
+            throw CLIFailure.badArgument(
+                "--wait-seconds must be a finite number greater than 0 and at most \(Int(maximumReadinessWaitSeconds))."
+            )
+        }
+        return timeout
+    }
+
     /// Set this to run against a build that is not installed, e.g. Xcode's products directory.
     public static let appPathEnvironmentKey = "MIMIC_APP_PATH"
     /// Read by the app to suppress its window.
@@ -54,6 +67,7 @@ public enum AppLauncher {
         timeout: TimeInterval,
         pollInterval: Duration = .milliseconds(150)
     ) async throws -> ControlClient {
+        let timeout = try validatedReadinessTimeout(timeout)
         let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
         while ContinuousClock.now < deadline {
             if let client = try? ControlClient.discover(explicitURL: explicitURL, timeout: 5),
