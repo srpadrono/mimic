@@ -250,7 +250,7 @@ struct JourneyFeatureRenderingTests {
     /// That convention — sentence-case heading, `DSSpacing.lg` between the blocks, cancel to the left
     /// of the confirm action — ends in a `.frame(minWidth:idealWidth:)` written out separately in
     /// every file. `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 420
-    /// floor. The template picker needs 520 for its list; the step editor needs 560 so the multiline
+    /// floor. The template picker needs 520 for its list; the step editor uses the 540 medium width so the multiline
     /// headers and body fields retain useful width. Equalizing those two would either squeeze the
     /// editor again or add empty width to the picker.
     @Test("Every journey sheet opens at the width its convention gives it")
@@ -264,7 +264,7 @@ struct JourneyFeatureRenderingTests {
         #expect(newJourney.width >= 420)
 
         #expect(templatePicker.width == 520)
-        #expect(stepSheet.width == 560)
+        #expect(stepSheet.width == 540)
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)

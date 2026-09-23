@@ -214,6 +214,8 @@ struct InspectorPanelView: View {
                 case .request:
                     if let requestDetail {
                         RequestDetailInspector(context: requestDetail, onSaveAsMock: onSaveAsMock)
+                            // Arrow-key selection stays in request mode; each log needs fresh detail state.
+                            .id(requestDetail.log.id)
                     }
                 case .journey:
                     if let journey { JourneyInspector(context: journey).id(journey.selected.id) }

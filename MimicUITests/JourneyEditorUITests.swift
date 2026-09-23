@@ -189,11 +189,15 @@ extension JourneyStepSheetPage {
     /// TextEditor into view before clicking it, so drive the form's visible scroll surface first.
     func reveal(_ field: XCUIElement, byScrollingUp: Bool) {
         let form = app.sheets.firstMatch.scrollViews.firstMatch
-        for _ in 0..<5 {
+        for _ in 0..<8 {
+            guard field.exists else {
+                form.scroll(byDeltaX: 0, deltaY: byScrollingUp ? -90 : 90)
+                continue
+            }
             let viewport = form.frame.insetBy(dx: 8, dy: 8)
             let fieldCenter = CGPoint(x: field.frame.midX, y: field.frame.midY)
             if viewport.contains(fieldCenter) && field.isHittable { return }
-            if byScrollingUp { form.swipeUp() } else { form.swipeDown() }
+            form.scroll(byDeltaX: 0, deltaY: byScrollingUp ? -90 : 90)
         }
         XCTFail("\(field.identifier) did not scroll into the form's visible area")
     }
@@ -918,6 +922,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-16 — the delay. This is the coercion regression: "abc" used to become a step that
         // answered instantly, with nothing said.
         replaceText(in: stepSheet.statusField, with: "201")
+        stepSheet.reveal(stepSheet.timingDisclosure, byScrollingUp: true)
         stepSheet.timingDisclosure.click()
         stepSheet.reveal(stepSheet.delayField, byScrollingUp: true)
         replaceText(in: stepSheet.delayField, with: "abc")
@@ -1004,6 +1009,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // JRNSTEP-10 — the hint that says how to get a second line, which is not guessable.
         stepSheet.headersDisclosure.click()
+        stepSheet.reveal(stepSheet.headersHint, byScrollingUp: true)
         XCTAssertTrue(
             stepSheet.headersHint.waitForExistence(timeout: 5),
             "The headers field should explain how to add another line"
@@ -1015,6 +1021,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
 
         // JRNSTEP-09 / JRNSTEP-11.
+        stepSheet.reveal(stepSheet.headersField, byScrollingUp: false)
         stepSheet.headersField.click()
         stepSheet.headersField.typeText("Retry-After 30")
         stepSheet.saveButton.click()

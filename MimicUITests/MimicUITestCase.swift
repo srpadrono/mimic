@@ -212,7 +212,7 @@ class MimicUITestCase: XCTestCase {
     // compiler in SILGen. Nothing calls it from Objective-C — XCTest only needs runtime visibility
     // for `test*` methods, and this is a helper — so hiding it from the ObjC runtime costs nothing.
     @nonobjc func sendRequest(port: Int, path: String, method: String = "GET", body: String? = nil) async {
-        guard let url = URL(string: "http://localhost:\(port)\(path)") else {
+        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)") else {
             XCTFail("Could not build a request URL for \(path)")
             return
         }
@@ -224,7 +224,11 @@ class MimicUITestCase: XCTestCase {
             request.httpBody = Data(body.utf8)
         }
         request.timeoutInterval = 10
-        _ = try? await URLSession.shared.data(for: request)
+        do {
+            _ = try await URLSession.shared.data(for: request)
+        } catch {
+            XCTFail("Request to \(path) on port \(port) failed: \(error.localizedDescription)")
+        }
     }
 
     /// Waits for the debounced autosave to settle before the test proceeds.

@@ -461,6 +461,14 @@ final class RequestLogUITests: MimicUITestCase {
             waitForRowsToArrive(3, timeout: 15),
             "All three requests should reach the log"
         )
+        // Endpoint and Scenario are intentionally hidden in the compact drawer. Give the table
+        // the wide centre pane before exercising all six sortable columns. The headers only render
+        // once traffic arrives, so this must follow the row-count wait.
+        if !columnHeader("endpoint").exists {
+            workspace.toggleInspectorButton.click()
+        }
+        XCTAssertTrue(columnHeader("endpoint").waitForExistence(timeout: 5),
+                      "The wide request log should expose Endpoint and Scenario")
 
         // The log opens on Time, newest first — the one column that starts active, and the one case
         // `nextSortState` treats specially.
@@ -1082,7 +1090,9 @@ final class RequestLogUITests: MimicUITestCase {
         let singularMenu = app.menuItems["Add to journey"]
         XCTAssertTrue(
             singularMenu.waitForExistence(timeout: 5),
-            "A right-click outside the selection should offer to capture that one row"
+            "A right-click outside the selection should offer to capture that one row; "
+                + "menu items \(app.menuItems.allElementsBoundByIndex.map(\.title)), "
+                + "rows \(identifiers.map { logRow($0).label })"
         )
         XCTAssertFalse(
             app.menuItems["Add 2 requests to journey"].exists,
@@ -1207,14 +1217,16 @@ final class RequestLogUITests: MimicUITestCase {
             "Clicking the only selected row again should clear the selection"
         )
 
-        // Two rows: the inspector cannot claim to describe a selection it is a fraction of.
+        // Two rows: the inspector names the multi-selection instead of showing one request's detail.
         logRow(identifiers[0]).click()
+        UITestApp.waitForStableFrame(logRow(identifiers[1]))
         XCUIElement.perform(withKeyModifiers: .command) {
             logRow(identifiers[1]).click()
         }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Overview"),
-            "With several rows selected the inspector should fall back to the overview"
+            requestDetail.waitForPanelTitle("Requests"),
+            "With several rows selected the inspector should show the selection; "
+                + "rows \(identifiers.map { logRow($0).label })"
         )
 
         // ⌘-clicking a selected row removes it, leaving the other one showing.
@@ -1253,16 +1265,17 @@ final class RequestLogUITests: MimicUITestCase {
         logRow(identifiers[1]).click()
         XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "Clicking a row should show it in the inspector")
         let beforeUp = requestDetail.shownPath()
+        XCTAssertTrue(beforeUp.contains("/api/two"), "The middle row should be selected before pressing Up")
         app.typeKey(.upArrow, modifierFlags: [])
         XCTAssertTrue(
-            poll { self.requestDetail.shownPath() != beforeUp },
-            "The up arrow should move the selection to the previous row"
+            poll { self.requestDetail.shownPath().contains("/api/three") },
+            "The up arrow should move the selection and update the inspector to the previous request"
         )
 
         // ⇧↓ grows the selection a row at a time, so the inspector leaves request mode again.
         app.typeKey(.downArrow, modifierFlags: .shift)
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Overview"),
+            requestDetail.waitForPanelTitle("Requests"),
             "Shift-down should grow the selection past the one row the inspector can show"
         )
 

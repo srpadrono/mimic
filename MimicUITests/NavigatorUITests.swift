@@ -26,6 +26,12 @@ struct NavigatorPage {
             "endpoint-", "journeys.row.", name
         )).firstMatch
     }
+    func endpointRow(named name: String, path: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND label CONTAINS %@",
+            "endpoint-", name, path
+        )).firstMatch
+    }
     func rowHeight(named name: String) -> CGFloat {
         app.descendants(matching: .outlineRow)
             .containing(.any, identifier: row(named: name).identifier).firstMatch.frame.height
@@ -148,8 +154,9 @@ final class NavigatorUITests: MimicUITestCase {
         if requestLogDrawer.emptyHeading.exists { workspace.toggleDrawerButton.click() }
         XCTAssertTrue(endpointEditor.bodyEditor.waitForExistence(timeout: 5))
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            self.endpointEditor.bodyEditor.frame.width > 640 && self.endpointEditor.bodyEditor.frame.height > 300
-        }, "The body should use the full workspace instead of a capped form card")
+            self.endpointEditor.bodyEditor.frame.width >= shell.panel("centerPane").frame.width - 26
+                && self.endpointEditor.bodyEditor.frame.height > 200
+        }, "The body should fill the available centre pane instead of using a capped form card")
         XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - shell.panel("centerPane").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("centerPane").frame.maxX - endpointEditor.bodyEditor.frame.maxX, 12, accuracy: 1)
         XCTAssertEqual(endpointEditor.optionsToggle.value as? String, "Collapsed")

@@ -14,12 +14,9 @@ import XCTest
 ///
 /// Three things about the queries here are worth knowing before changing them.
 ///
-/// **Which project is open is asserted by an endpoint path, not by a window title.** Every project
-/// these tests create gets one endpoint with a unique path, and the sidebar draws that path as a
-/// `Text` — `app.staticTexts["/older"]` is the same query `testSidebarSearchFiltersEndpoints` already
-/// relies on. A window title would be cheaper and is what `WelcomePage` falls back to, but no test in
-/// this repository has ever asserted on one alone, so it is not a query form to build a discrimination
-/// on.
+/// **Which project is open is asserted by its endpoint row, not by a window title.** Every project
+/// these tests create gets one endpoint with a unique path. The redesigned navigator combines the
+/// path and name into the row's accessibility label, so neither appears as a separate static text.
 ///
 /// **The keyboard tests clamp rather than count.** `List` selection starts on the first row
 /// (`WelcomeWindow.validSelection` via `onAppear`), and a click in the list's empty space may or may
@@ -176,12 +173,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            app.staticTexts["/older"].firstMatch.waitForExistence(timeout: 10),
+            openedEndpoint(in: "Arrow Older", path: "/older").waitForExistence(timeout: 10),
             "Return should have opened Arrow Older — the row the arrow keys moved the selection to. "
                 + "If nothing opened, the recents list never took keyboard focus."
         )
         XCTAssertFalse(
-            app.staticTexts["/newer"].firstMatch.exists,
+            openedEndpoint(in: "Arrow Newer", path: "/newer").exists,
             "Return opened Arrow Newer, so the arrow keys did not move the selection"
         )
     }
@@ -208,15 +205,15 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            app.staticTexts["/second"].firstMatch.waitForExistence(timeout: 10),
+            openedEndpoint(in: "Keyboard Second", path: "/second").waitForExistence(timeout: 10),
             "Down to the last row then Up once should select the middle row, Keyboard Second"
         )
         XCTAssertFalse(
-            app.staticTexts["/third"].firstMatch.exists,
+            openedEndpoint(in: "Keyboard Third", path: "/third").exists,
             "Up did not move the selection off the last row"
         )
         XCTAssertFalse(
-            app.staticTexts["/first"].firstMatch.exists,
+            openedEndpoint(in: "Keyboard First", path: "/first").exists,
             "The selection never left the first row, so neither arrow key moved it"
         )
     }
@@ -262,7 +259,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            app.staticTexts["/newer"].firstMatch.waitForExistence(timeout: 10),
+            openedEndpoint(in: "Fallback Newer", path: "/newer").waitForExistence(timeout: 10),
             "After the selected project was deleted the selection should fall back to the first "
                 + "surviving row, so Return opens Fallback Newer rather than doing nothing"
         )
@@ -292,7 +289,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         XCTAssertTrue(workspace.assertVisible(), "Open should have opened the project")
         XCTAssertTrue(
-            app.staticTexts["/menuopen"].firstMatch.waitForExistence(timeout: 10),
+            openedEndpoint(in: "Menu Open", path: "/menuopen").waitForExistence(timeout: 10),
             "The workspace should be showing Menu Open, the project the menu belonged to"
         )
     }
@@ -324,7 +321,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
             "Dismissing the menu should leave the welcome window exactly as it was"
         )
         XCTAssertFalse(
-            app.staticTexts["/escapemenu"].firstMatch.exists,
+            openedEndpoint(in: "Escape Menu", path: "/escapemenu").exists,
             "Escape should not have opened the project the menu belonged to"
         )
     }
@@ -450,7 +447,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         XCTAssertTrue(workspace.assertVisible(), "The copy should open")
         XCTAssertTrue(
-            app.staticTexts["/origin"].firstMatch.waitForExistence(timeout: 10),
+            openedEndpoint(in: "Origin", path: "/origin").waitForExistence(timeout: 10),
             "The copy should carry the original's endpoints"
         )
     }
@@ -648,7 +645,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
             "The workspace should swap to the new, empty project"
         )
         XCTAssertFalse(
-            app.staticTexts["/first"].firstMatch.exists,
+            NavigatorPage(app: app).endpointRow(named: "First EP", path: "/first").exists,
             "The first project's endpoints should not still be on screen"
         )
     }
@@ -680,8 +677,8 @@ final class WelcomeProjectUITests: MimicUITestCase {
     /// Creates a project, gives it one endpoint whose path identifies it, and returns to the welcome
     /// window with everything saved.
     ///
-    /// The endpoint is how a later assertion tells *which* project was opened: the sidebar draws the
-    /// path, so `app.staticTexts[path]` is a positive identification the window title cannot give.
+    /// The endpoint is how a later assertion tells *which* project was opened: its navigator row
+    /// names both the endpoint and path, a positive identification the window title cannot give.
     @MainActor
     private func createProjectWithEndpoint(named name: String, path: String) {
         createProjectViaUI(name: name)
@@ -689,6 +686,11 @@ final class WelcomeProjectUITests: MimicUITestCase {
         waitForAsyncSave()
         closeProjectViaMenu()
         XCTAssertTrue(welcome.assertVisible(), "Closing \(name) should return to the welcome window")
+    }
+
+    @MainActor
+    private func openedEndpoint(in project: String, path: String) -> XCUIElement {
+        NavigatorPage(app: app).endpointRow(named: "\(project) EP", path: path)
     }
 
     /// A recents row, matched by the label it reads out rather than by its identifier.
