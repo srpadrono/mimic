@@ -38,10 +38,10 @@ For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, the
 | `MIMIC_CONTROL_PORT` | Loopback control port; default `8787`. |
 | `MIMIC_CONTROL_TOKEN` | Explicit token for both instance and caller when discovery is unavailable. |
 | `MIMIC_CONTROL_FILE` | Discovery file path used by both instance and CLI; overrides default search. |
-| `MIMIC_DATABASE_PATH` | Project SQLite path; use a disposable location in CI. |
+| `MIMIC_DATABASE_PATH` | Project SQLite path. |
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
-The discovery file contains the instance's port, PID, and token. It is written `0600`, with a `0700` parent directory. An isolated run should set `MIMIC_DATABASE_PATH` and `MIMIC_CONTROL_FILE` before starting the app. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
+The discovery file contains the instance's port, PID, and token. It is written `0600`, with a `0700` parent directory. Set the path variables before starting the app. A signed app is sandboxed and cannot write arbitrary temporary paths outside its container; the [end-to-end harness](../Scripts/run_cli_e2e.sh) uses a disposable ad hoc signed app copy for this purpose. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
 
 ## Command reference
 
@@ -153,18 +153,11 @@ Each entry identifies the outcome (`endpoint`, `journey`, `passthrough`, `unmatc
 
 ## A disposable test run
 
+After building the Debug app and CLI into `.artifacts/DerivedData` (see [Contributing](../CONTRIBUTING.md)), run the repository harness:
+
 ```bash
-export MIMIC_DATABASE_PATH="$PWD/.mimic-ci/store.sqlite"
-export MIMIC_CONTROL_FILE="$PWD/.mimic-ci/control.json"
-export MIMIC_CONTROL_PORT=18787
-export MIMIC_CONTROL_TOKEN="$(uuidgen)"
-mimic daemon start
-mimic project create "CI" --port 8080
-mimic endpoint create GET /settings --status 200 --body '{"theme":"dark"}'
-mimic server start
-# Run the client under test against http://127.0.0.1:8080
-mimic log list --format text
-mimic app stop
+products="$PWD/.artifacts/DerivedData/Build/Products/Debug"
+MIMIC_BIN="$products/mimic" MIMIC_APP_PATH="$products/Mimic.app" ./Scripts/run_cli_e2e.sh
 ```
 
 ## Calling the HTTP API

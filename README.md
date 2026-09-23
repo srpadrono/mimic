@@ -36,7 +36,7 @@ Projects can have multiple named local ports. Each port can optionally forward u
 
 ## Automation
 
-`mimic daemon start` runs the same app without a window. Commands return JSON and meaningful exit codes. `mimic commands` lists the operations supported by the running instance; `mimic state` reports its current state. For an isolated test run, set `MIMIC_DATABASE_PATH` and `MIMIC_CONTROL_FILE` to paths in a temporary directory before starting the app. See [CLI and control API](docs/CLI.md) for discovery, tokens, environment variables, and examples.
+`mimic daemon start` runs the same app without a window. Commands return JSON and meaningful exit codes. `mimic commands` lists the operations supported by the running instance; `mimic state` reports its current state. For isolated automation, use the repository's [CLI end-to-end harness](Scripts/run_cli_e2e.sh), which runs a disposable app copy and store. See [CLI and control API](docs/CLI.md) for discovery, tokens, environment variables, and examples.
 
 HAR and OpenAPI/Swagger **spec import** require the window's review sheet. `mimic project import` instead loads a Mimic project export. An update can be checked from the CLI; installing it requires the macOS installer in the window.
 
