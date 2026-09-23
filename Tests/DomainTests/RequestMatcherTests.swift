@@ -199,6 +199,23 @@ struct RequestMatcherTests {
         #expect(resolved.matchedScenarioID == scenario.id)
     }
 
+    @Test func resolveCapsAnOverflowingEndpointDelay() {
+        let scenario = makeScenario()
+        let endpoint = Endpoint(
+            name: "Slow", method: .get, path: "/slow",
+            scenarios: [scenario], activeScenarioID: scenario.id, delayMs: 1
+        )
+
+        let resolved = RequestMatcher.resolve(
+            request: IncomingRequest(method: .get, path: "/slow"),
+            against: [endpoint],
+            globalDelayMs: Int.max
+        )
+
+        #expect(resolved.delayMs == Int.max)
+        #expect(resolved.matchedEndpointID == endpoint.id)
+    }
+
     @Test func resolveCarriesScenarioHeaders() {
         let scenario = Scenario(name: "OK", statusCode: 201, headers: ["X-Trace": "abc"], body: nil)
         let endpoint = makeEndpoint(path: "/items", activeScenarioID: scenario.id, scenarios: [scenario])

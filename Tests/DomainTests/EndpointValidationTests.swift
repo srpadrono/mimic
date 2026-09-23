@@ -199,6 +199,108 @@ struct ProjectValidatorTests {
         try ProjectValidator.validate(project)
     }
 
+    @Test("An imported negative global delay is refused")
+    func negativeGlobalDelayIsRefused() throws {
+        let project = MockProject(name: "Timing", serverConfiguration: .init(port: 8080, globalDelayMs: -1))
+        let refusal = try Self.refusal(project)
+        #expect(refusal.context == "server configuration")
+        #expect(refusal.reason.contains("Global delay"))
+    }
+
+    @Test("An imported negative endpoint delay is refused with the route named")
+    func negativeEndpointDelayIsRefused() throws {
+        let scenario = Scenario(name: "Success", statusCode: 200)
+        var endpoint = Self.endpoint(scenarios: [scenario], activeScenarioID: scenario.id)
+        endpoint.delayMs = -1
+        let refusal = try Self.refusal(MockProject(name: "Timing", endpoints: [endpoint]))
+        #expect(refusal.context.contains("GET /account-summary"))
+        #expect(refusal.reason.contains("Endpoint delay"))
+    }
+
+    @Test("Imported journey timing values that commands reject are refused")
+    func invalidJourneyTimingIsRefused() throws {
+        let valid = JourneyStep(name: "Poll", path: "/status", outcome: .respond(.init()))
+
+        var negativeDelay = valid
+        negativeDelay.delayMs = -1
+        let delayRefusal = try Self.refusal(MockProject(name: "Timing", journeys: [
+            Journey(name: "Polling", steps: [negativeDelay])
+        ]))
+        #expect(delayRefusal.context.contains("Polling"))
+        #expect(delayRefusal.context.contains("Poll"))
+        #expect(delayRefusal.reason.contains("delay"))
+
+        var negativeHold = valid
+        negativeHold.outcome = .networkFailure(.timeout(holdMs: -1))
+        let holdRefusal = try Self.refusal(MockProject(name: "Timing", journeys: [
+            Journey(name: "Polling", steps: [negativeHold])
+        ]))
+        #expect(holdRefusal.reason.contains("Timeout hold"))
+    }
+
+    @Test("An imported zero repeat count is preserved until validation refuses it")
+    func importedZeroRepeatCountIsRefused() throws {
+        let valid = JourneyStep(name: "Poll", path: "/status", outcome: .respond(.init()))
+        let encoded = try JSONEncoder().encode(valid)
+        var document = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        document["repeatCount"] = 0
+        let imported = try JSONDecoder().decode(
+            JourneyStep.self, from: JSONSerialization.data(withJSONObject: document)
+        )
+        #expect(imported.repeatCount == 0)
+
+        let refusal = try Self.refusal(MockProject(name: "Timing", journeys: [
+            Journey(name: "Polling", steps: [imported])
+        ]))
+        #expect(refusal.context.contains("Poll"))
+        #expect(refusal.reason.contains("repeatCount"))
+    }
+
+    @Test("A valid multi-backend document keeps endpoint and journey ownership")
+    func validMultiBackendDocumentPasses() throws {
+        let backend = BackendConfiguration(name: "Accounts", port: 8081)
+        let scenario = Scenario(name: "Success", statusCode: 200)
+        var endpoint = Self.endpoint(scenarios: [scenario], activeScenarioID: scenario.id)
+        endpoint.backendID = backend.id
+        let step = JourneyStep(name: "Account", path: "/account-summary", outcome: .respond(.init()), backendID: backend.id)
+        let project = MockProject(
+            name: "Accounts",
+            serverConfiguration: .init(port: 8080, globalDelayMs: 0, backends: [backend]),
+            endpoints: [endpoint],
+            journeys: [Journey(name: "Flow", steps: [step])]
+        )
+        try ProjectValidator.validate(project)
+    }
+
+    @Test("An imported duplicate listener port is refused")
+    func duplicateBackendPortIsRefused() throws {
+        let backend = BackendConfiguration(name: "Accounts", port: 8080)
+        let project = MockProject(name: "Accounts", serverConfiguration: .init(
+            port: 8080, globalDelayMs: 0, backends: [backend]
+        ))
+        let refusal = try Self.refusal(project)
+        #expect(refusal.context == "server configuration")
+        #expect(refusal.reason.contains("ports must be unique"))
+    }
+
+    @Test("Imported references to an absent backend are refused")
+    func danglingBackendReferencesAreRefused() throws {
+        let missingID = UUID()
+        let scenario = Scenario(name: "Success", statusCode: 200)
+        var endpoint = Self.endpoint(scenarios: [scenario], activeScenarioID: scenario.id)
+        endpoint.backendID = missingID
+        let endpointRefusal = try Self.refusal(MockProject(name: "Accounts", endpoints: [endpoint]))
+        #expect(endpointRefusal.context.contains("Summary"))
+        #expect(endpointRefusal.reason.contains("Backend does not exist"))
+
+        let step = JourneyStep(name: "Account", path: "/account-summary", outcome: .respond(.init()), backendID: missingID)
+        let stepRefusal = try Self.refusal(MockProject(name: "Accounts", journeys: [
+            Journey(name: "Flow", steps: [step])
+        ]))
+        #expect(stepRefusal.context.contains("Account"))
+        #expect(stepRefusal.reason.contains("Backend does not exist"))
+    }
+
     /// Every editing command maintains this reference as an invariant — `scenarioDelete` repoints
     /// `activeScenarioID` at the first surviving scenario — so a document carrying a dangling one did
     /// not come from this app, which is exactly what an import is.

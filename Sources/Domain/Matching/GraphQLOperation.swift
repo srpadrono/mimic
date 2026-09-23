@@ -41,19 +41,16 @@ public enum GraphQLRequest {
 
     /// The operation a request is asking for, or `nil` when the body is not a single GraphQL request.
     ///
-    /// Returns `nil` for a batched request too — see ``operations(inBody:)``. A batch asks for several
-    /// operations and expects an array back, which no single mock can answer honestly.
+    /// Returns `nil` for any top-level JSON array. Even a one-element batch expects an array back,
+    /// which no single mock can answer honestly.
     public static func operation(inBody body: String?) -> GraphQLOperation? {
-        let found = operations(inBody: body)
-        return found.count == 1 ? found[0] : nil
+        guard let payload = json(inBody: body) as? [String: Any] else { return nil }
+        return operation(inPayload: payload)
     }
 
-    /// Every operation in the body. Empty when it is not GraphQL; more than one for a batched request.
+    /// Every readable operation in the body. An array can yield zero or one operation and still be a batch.
     public static func operations(inBody body: String?) -> [GraphQLOperation] {
-        guard let body, !body.isEmpty,
-              let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data)
-        else { return [] }
+        guard let json = json(inBody: body) else { return [] }
 
         if let batch = json as? [Any] {
             return batch.compactMap { ($0 as? [String: Any]).flatMap(operation(inPayload:)) }
@@ -62,21 +59,14 @@ public enum GraphQLRequest {
         return operation(inPayload: payload).map { [$0] } ?? []
     }
 
-    /// `true` when the body carries more than one operation. Such a request expects an array of
-    /// results, which a single mocked response cannot represent.
-    ///
-    /// Nothing in `Sources` calls this — its only reference is its own test. It used to promise that a
-    /// batch was "worth reporting rather than silently matching one of them", which described a report
-    /// no code makes; the silence is the real behaviour. ``operation(inBody:)`` answers `nil` for a
-    /// batch, `RequestMatcher.operationSpecificity` reads that as "the request is not asking for the
-    /// operation this endpoint declares", and if no catch-all mock covers the route the client gets
-    /// the same bare `404` a typo'd path gets. This is the predicate that would tell those two apart —
-    /// wiring it in means a distinct `ResolvedResponse` carrying the reason, the way
-    /// ``ResolvedResponse/journeyBlocked`` already does, which is a change in `RequestMatcher` rather
-    /// than here. Kept, with the promise corrected to what is true, rather than deleted: it is the
-    /// only place that knows how to ask the question.
+    /// `true` when the body is a top-level JSON array, regardless of how many operations it contains.
     public static func isBatched(body: String?) -> Bool {
-        operations(inBody: body).count > 1
+        json(inBody: body) is [Any]
+    }
+
+    private static func json(inBody body: String?) -> Any? {
+        guard let body, let data = body.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
     }
 
     private static func operation(inPayload payload: [String: Any]) -> GraphQLOperation? {
