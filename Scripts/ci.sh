@@ -253,29 +253,8 @@ step "House rules"
 Scripts/check_house_rules.sh --self-test
 Scripts/check_house_rules.sh
 
-# The other thing a grep can settle, and the only one that is about a document rather than the code.
-# README.md's Tests badge and Testing table are hand-maintained — the README says so — and they have
-# twice claimed a figure the tree did not support. This recounts `@Test` and `func test`
-# declarations per folder and fails if any number README states has drifted, printing the true ones.
-#
-# It settles the operation count the same way, from `CommandKind` rather than from anybody's memory
-# of the five places it is written down; and it fails on a folder under `Tests/` that neither
-# manifest declares, because a suite no build target names is a suite nobody runs and it looks
-# exactly like one that does.
-#
-# Also in .github/workflows/ci.yml, and this comment used to argue at length that it should not be —
-# that a contributor's pull request should go red for a defect in the code, not for a hand count in a
-# document they may not own. That reasoning was wrong about which failure is cheaper. A count that is
-# only checked before pushing is a count nobody checks, and this table has already drifted twice; the
-# fix is one command whose output names the numbers to paste, and it takes seconds on a runner with
-# no Swift involved. The README's coverage section still works the other way because populating it
-# needs `Scripts/run_full_test_suite.sh` and a Mac, which is a different kind of cost.
-step "Documented counts"
-# The self-test first, exactly as the house-rules step two above does it, and for the same reason: a
-# checker whose comparison has quietly stopped comparing reports "every documented count agrees with
-# the tree" and exits 0, which is the shape of every false gate this repository has shipped. Its
-# fixtures are literal sentences and an invented suite set, so it never asks the functions under test
-# what the right answer is.
+# Report live counts, verify local links, and catch test folders missing from manifests.
+step "Documentation and test targets"
 python3 Scripts/check_doc_counts.py --self-test
 python3 Scripts/check_doc_counts.py
 

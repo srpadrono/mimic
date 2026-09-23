@@ -82,7 +82,7 @@ SHARD_SPLIT = r"^\s*- id:\s*"
 CLASS_DECL = re.compile(r"^(?:final\s+|public\s+|open\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 
 # Indented, because a top-level `func test…` is not a test method. The same convention
-# `Scripts/check_doc_counts.py` counts by, and the one README.md documents.
+# `Scripts/check_doc_counts.py` uses the same declaration convention for its live count.
 TEST_FUNC = re.compile(r"^\s+(?:@\w+\s+)*(?:final\s+|public\s+|private\s+|internal\s+)*func\s+test")
 
 

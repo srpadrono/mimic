@@ -97,9 +97,7 @@ public enum DSTypography {
 
     /// SF Mono 12.5px regular — a route in a dense list: the navigator's rows and the request log's.
     ///
-    /// The width arithmetic in `docs/redesign/decisions.md` is taken at this size. Changing it
-    /// changes how many characters of `/api/v1/orders/{id}` survive in a 300pt navigator, so it is
-    /// not a free knob.
+    /// Keep route labels readable in the narrow navigator when adjusting this size.
     public static let codePath: Font = .system(size: 12.5, weight: .regular, design: .monospaced)
 
     /// SF Mono 13px regular — prominent code like base URL

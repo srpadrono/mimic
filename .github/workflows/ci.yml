@@ -289,38 +289,12 @@ jobs:
       - name: Compiler settings
         run: python3 Scripts/check_compiler_settings.py
 
-      # The third manifest check, and the first one in this workflow that reads a *claim* rather than
-      # a count or a literal. Six documents state that `SpecImport` is unreachable from `ControlPlane`
-      # and from the CLI, and four that the CLI links neither Vapor nor GRDB — AGENTS.md, README.md,
-      # docs/ARCHITECTURE.md, docs/CLI.md, docs/GRAPHQL.md, docs/ROADMAP.md and a comment in
-      # Project.swift itself. Every one of them is a fact about two files, one line of either
-      # falsifies all of them, and until this step every gate here stayed green while it happened.
-      # docs/GRAPHQL.md used to print the grep a reader was meant to run by hand — an admission that
-      # nothing ran it for them — and now points at this program instead.
-      #
-      # Reachability rather than adjacency, because the cheap version is the one that fails to fire:
-      # `SpecImport` added to `Domain` would put the parsers in the CLI with every direct edge still
-      # absent. The program also asserts the edges that *are* supposed to exist, so a parser that
-      # stopped recognising `.external(name:)` cannot report a clean tree by seeing nothing.
+      # Check dependency reachability in both manifests, including transitive edges.
       - name: Module edges
         run: python3 Scripts/check_module_edges.py
 
-      # README states a test total, a four-row table and two per-suite breakdowns, and all of them
-      # are hand-written. The repo's own README records that they have drifted twice. This recounts
-      # from the tree and fails on any disagreement, including a suite folder that exists and appears
-      # in none of the groups — which is what a newly added suite looks like before anybody writes it
-      # into the table, and is exactly how the newest one was found.
-      #
-      # Two more hand-maintained facts are settled the same way. The **operation count** is recomputed
-      # from `CommandKind` and checked against every place a document states it — the number
-      # `DomainTests` used to assert with a literal that had to be edited alongside them. And a
-      # **folder under `Tests/` that neither manifest declares** fails here: `Package.swift` names the
-      # portable suites and `Project.swift` names all of them, so a folder in neither is a suite no
-      # runner compiles, which on a green pipeline is indistinguishable from one that passed.
-      - name: Documented counts
-        # The self-test runs first, as the house-rules step does: it holds the port-binding
-        # comparison to fixtures written in the script, so a checker that has stopped comparing
-        # fails here rather than reporting that every document agrees.
+      # Check local links and test target membership; report counts from source.
+      - name: Documentation and test targets
         run: |
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
@@ -335,7 +309,7 @@ jobs:
       #
       # That is the same shape as the `buildableFolders` line naming a `Tests/JourneyFeatureTests`
       # that did not exist, which Tuist tolerated in silence, and the same shape the suite-folder
-      # check in `Documented counts` above exists to close: on a green pipeline, a suite nobody runs
+      # check above exists to close: on a green pipeline, a suite nobody runs
       # is indistinguishable from one that passed. It is checked rather than remembered.
       #
       # Three verdicts — a class in no shard, a class in two, and a shard naming a class that is not
@@ -773,105 +747,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The reason this workflow exists at all, and the reason it used to take ninety-six minutes.
-  # XCUITest is the only thing that exercises the real window — the accessibility tree, the panel
-  # layout, and every flow a user actually takes.
-  #
-  # Three shards, three runners, three disjoint sets of test classes. The header of this file argues
-  # why sharding across machines rather than `-parallel-testing-enabled` on one, and why three rather
-  # than some other number — the observed cap of four concurrent macOS jobs, minus the one
-  # `macos-checks` takes. What follows is how the three were chosen.
-  #
-  # ## How the shards are balanced
-  #
-  # By **test count**, which is a proxy for time rather than time itself, and a defensible one here:
-  # nearly every test in these suites launches the app, so per-test cost is dominated by launch
-  # rather than by what the test then does. Counted from the tree — `grep -cE '^\s*func test'` over
-  # each file, the same convention `Scripts/check_doc_counts.py` uses — the ten classes are
-  #
-  #     MimicUITests               33      ErrorAlertUITests          15
-  #     WorkspaceShellUITests      27      JourneyEditorUITests       15
-  #     EndpointEditorUITests      24      SpecImportUITests          10
-  #     WelcomeProjectUITests      17      RequestLogUITests           9
-  #                                        JourneyUITests              7
-  #                                        ControlPlaneIsolationTests  1
-  #
-  # 158 in total, so a perfect third is 52.7. The split below is **51 / 53 / 54**, within 2.5% of even
-  # and short of optimal by one test: exhaustively searching every way of dealing ten classes onto
-  # three shards, the smallest achievable spread is 2 (52 / 52 / 54) and this one takes 3. What the
-  # extra test buys is a shard whose name a reader can trust — the spread-2 splits pair the workspace
-  # shell with the endpoint editor, and a shard called "workspace shell and endpoint editor" tells
-  # nobody where to look when it goes red. One test is about 26 seconds; the naming is worth more.
-  #
-  # **Whole classes, never individual tests.** `-only-testing:` accepts a method, and using it would
-  # let the shards be balanced to the test — but the split would then have to be rewritten every time
-  # somebody adds a test, and a shard naming a method that has been renamed fails with "no tests to
-  # run" rather than with anything a reader would connect to the rename. A class is a unit that moves
-  # as a whole.
-  #
-  # **Test count is a weaker estimator than it looked, and run #90 is the evidence.** Run #89's four
-  # shards ran 40 / 38 / 39 / 41 tests in 21m18 / 19m23 / 23m49 / ~22m, a spread small enough that
-  # counting seemed sound. Run #90's three ran 51 / 53 / 54 tests in **22m32 / 32m36 / 33m18** — four
-  # per cent more tests on the heaviest shard than the lightest, and forty-eight per cent more time.
-  #
-  # Subtract the build and test-target compile each step also carries (about seven minutes) and the
-  # per-test costs are roughly **17s / 28s / 28s**. The cheap shard is the one holding
-  # `SpecImportUITests`, which reads a bundled fixture and never starts a server, and the bulk of
-  # `MimicUITests`, which is mostly sheets and window state. The expensive shards hold the suites that
-  # bind a port and drive real HTTP — `RequestLogUITests` sends traffic for every assertion,
-  # `ErrorAlertUITests` holds sockets to force conflicts, `WorkspaceShellUITests` starts the server.
-  # **Launch is not the dominant cost after all; a real server is.**
-  #
-  # So the split below is balanced on the wrong axis, and knowingly. Rebalancing on measured time
-  # rather than count would put the worst shard near 28m30 instead of 33m18 — about five minutes,
-  # against a change that has to be re-derived every time a suite's character changes, and a run of
-  # this workflow to measure each attempt. The recipe is below and the data is in every run; take the
-  # five minutes when something else makes it worth a round trip. What must not happen is the next
-  # person reading "balanced by test count" and assuming the count was ever the thing that mattered.
-  #
-  # To do better than counting, the per-test data is already in each shard's own result bundle.
-  # Download a shard's `xcresult-ui-N` artifact and ask
-  #
-  #     xcrun xcresulttool get test-results tests --path UITests.xcresult
-  #
-  # for the per-test durations, sum them by class, and rebalance by editing the `matrix` below —
-  # which is a one-line change per shard and needs nothing else in this file touched.
-  #
-  # ## What each shard needs that a single job did not
-  #
-  # Nothing in `MimicUITests` changed to make this work, and that is the point. The suites already
-  # use disjoint port ranges and already suffix `MIMIC_CONTROL_FILE` with the runner's pid, so shards
-  # cannot collide on a socket or a discovery file — and the shared store and shared defaults domain,
-  # which are what make in-process parallelism impossible, are simply not shared between machines.
-  #
-  # The one thing that must survive is the UI target's entitlements: `MimicUITests.entitlements` sets
-  # `app-sandbox: false` and `network.server`, with `ENABLE_APP_SANDBOX: NO`, and four tests bind a
-  # listening socket from the test process. Nothing here overrides code signing beyond the
-  # `CODE_SIGN_IDENTITY=-` this workflow has always passed, so those entitlements are applied on each
-  # shard exactly as they were on the single job. If a shard reports EPERM on a bind, that is the
-  # first thing to look at.
+  # Run disjoint UI test classes on separate macOS runners. The shard checker below
+  # catches classes missing from the matrix, duplicates, and stale class names.
   macos-ui:
     name: UI tests (${{ matrix.name }})
     runs-on: macos-26
-    # A ~40-test shard of the old four-way split measured 19m23 to 23m49 on run #89. The heaviest here
-    # carries 54, so about 30 minutes: ~1m setup, ~5m for the Debug build, ~1m30 to compile the test
-    # target, and 54 × 26s ≈ 23m24 of tests. Double it and round, so a shard that hits
-    # `-test-iterations 2` on several tests still finishes rather than being cut off mid-retry.
+    # Allow time for app builds and UI test retries.
     timeout-minutes: 60
 
     strategy:
-      # Never `fail-fast`. The default would cancel the other two shards the moment one goes red,
-      # which turns "three independent verdicts" back into "one verdict, chosen by whichever shard
-      # failed first" — and the failure this suite is documented as producing most often is a
-      # SIGKILLed launch under memory pressure, which says nothing about the other two. A red run
-      # should say which parts of the window are broken, all of them, in one pass.
+      # Keep all shard results when one fails.
       fail-fast: false
       matrix:
         include:
-          # 51 tests, and the lightest shard, which is why the one-test isolation class rides here:
-          # `ControlPlaneIsolationTests` launches the app like everything else, so it costs a launch
-          # wherever it lands, and the lightest shard is where a rounding error should go. It is the
-          # one class this shard's name does not mention — one test does not earn a fourth clause.
           - id: 1
             name: core window, journeys, spec import
             only: >-
@@ -879,10 +767,8 @@ jobs:
               -only-testing:MimicUITests/JourneyUITests
               -only-testing:MimicUITests/SpecImportUITests
               -only-testing:MimicUITests/ControlPlaneIsolationTests
-              -only-testing:MimicUITests/DocScreenshotTests
               -only-testing:MimicUITests/UpdateUITests
 
-          # 53 tests.
           - id: 2
             name: workspace shell, welcome, request log
             only: >-
@@ -892,8 +778,6 @@ jobs:
               -only-testing:MimicUITests/WelcomeProjectUITests
               -only-testing:MimicUITests/RequestLogUITests
 
-          # 54 tests, the heaviest, and so the one to watch first if the estimate is wrong — it is
-          # also the shard the 30-minute figure in this job's `timeout-minutes` comment is about.
           - id: 3
             name: endpoint editor, alerts, journey editor
             only: >-

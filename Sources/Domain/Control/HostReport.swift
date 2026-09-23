@@ -9,7 +9,7 @@ import Foundation
 /// the arithmetic and shaping applied to those values afterwards, and this type exists because that
 /// copy demonstrably drifts: while the tree carried two hosts, `makeServerStatus` was the same
 /// switch written twice and `makeState` derived the same three fields from the same project in two
-/// places, and they had come apart. The second host is deleted now (AGENTS.md, "One host"); this
+/// places, and they had come apart. The second host is deleted now (docs/ARCHITECTURE.md, "One rule and one host"); this
 /// split survives it, because it is the same discipline the executor applies to the other side of
 /// the line — the host reads its own state and hands the values over, and everything downstream —
 /// the state string, the loopback URL, the counts, the summary merge, the log's filter and trim —
