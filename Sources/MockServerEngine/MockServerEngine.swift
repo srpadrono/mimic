@@ -14,6 +14,14 @@ public actor MockServerEngine {
     /// `app == nil` is otherwise indistinguishable from "nothing is listening". See `start`.
     private var isStopping = false
     private let routeStore = MockRouteStore()
+    /// Assigned before each configuration call awaits the route store. Actor reentrancy can change
+    /// delivery order; the store uses this revision to keep the newest request-facing settings.
+    private var configurationRevision = 0
+
+    private func nextConfigurationRevision() -> Int {
+        configurationRevision += 1
+        return configurationRevision
+    }
 
     /// Lossless delivery to the single consumer. Automatic response capture consumes this stream,
     /// so dropping pending events also silently loses persistent mocks. The runtime bounds its
@@ -37,7 +45,8 @@ public actor MockServerEngine {
         isStarting = true
         defer { isStarting = false }
 
-        await routeStore.updateServerConfiguration(configuration)
+        let revision = nextConfigurationRevision()
+        await routeStore.updateServerConfiguration(configuration, revision: revision)
         let listeners = configuration.listeners.map { ($0.port, $0.id == ServerConfiguration.primaryID ? nil : Optional($0.id)) }
         let localPorts = Set(listeners.map(\.0))
         guard localPorts.count == listeners.count else {
@@ -76,8 +85,36 @@ public actor MockServerEngine {
         }
     }
 
-    public func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID? = nil) async {
-        await routeStore.updateServerConfiguration(configuration, projectID: projectID)
+    /// Updates listener settings without changing the project attached to live routes.
+    public func updateServerConfiguration(_ configuration: ServerConfiguration) async {
+        let revision = nextConfigurationRevision()
+        await routeStore.updateServerConfiguration(configuration, revision: revision)
+    }
+
+    /// Updates listener settings and explicitly selects or clears the active project.
+    public func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async {
+        let revision = nextConfigurationRevision()
+        await routeStore.updateServerConfiguration(configuration, projectID: projectID, revision: revision)
+    }
+
+    /// Installs the server settings, project attribution, routes, and journey as one live snapshot.
+    /// A request cannot resolve against fields from two different project pushes.
+    public func updateConfiguration(
+        configuration: ServerConfiguration,
+        projectID: UUID?,
+        endpoints: [Endpoint],
+        journey: Journey?,
+        activationEpoch: Int
+    ) async {
+        let revision = nextConfigurationRevision()
+        await routeStore.update(
+            configuration: configuration,
+            projectID: projectID,
+            endpoints: endpoints,
+            journey: journey,
+            activationEpoch: activationEpoch,
+            revision: revision
+        )
     }
 
     public func stop() async throws {
