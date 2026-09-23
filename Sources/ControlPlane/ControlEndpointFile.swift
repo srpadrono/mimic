@@ -137,13 +137,32 @@ public enum ControlEndpointFile {
         }
     }
 
-    /// Removes the file so a stale endpoint never outlives the process that advertised it.
+    /// Removes an advertisement only while it still belongs to the caller.
+    ///
+    /// Two app instances can share the default discovery path. One may publish after the other,
+    /// or fail to bind while the first remains active. A path alone does not identify the file that
+    /// this instance wrote: unconditional cleanup would erase the other instance's advertisement.
+    /// Refuse missing, damaged, or different records. Compare the whole decoded record, including
+    /// the port, pid, and token, so a reused environment token cannot make a different process an
+    /// owner of this file.
+    public static func remove(expected: ControlEndpoint, at url: URL) {
+        guard let data = try? Data(contentsOf: url),
+              let current = try? ControlCoding.decode(ControlEndpoint.self, from: data),
+              current == expected
+        else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Removes the file at a path without an ownership check.
     ///
     /// Takes the same environment as `writeURL`, so a process that advertised itself at
     /// `MIMIC_CONTROL_FILE` removes *that* file on the way out. Computing the default path here
     /// while the write went to an override is how a run would delete the developer's advertisement
     /// and leave its own behind — the exact pair of mistakes `UITestSupport.databaseURL` exists to
     /// prevent for the store, and the reason both paths come from one function here too.
+    /// Retained for older callers and fixture cleanup. Production server and app termination paths
+    /// must use `remove(expected:at:)` instead.
+    @available(*, deprecated, message: "Use remove(expected:at:) for a live discovery file")
     public static func remove(
         at url: URL? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment

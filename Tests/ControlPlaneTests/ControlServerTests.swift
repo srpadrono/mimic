@@ -8,6 +8,31 @@ import Testing
 @testable import ControlPlane
 @testable import Domain
 
+#if DEBUG
+private actor BindingGate {
+    private var didEnter = false
+    private var entryWaiter: CheckedContinuation<Void, Never>?
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func pause() async {
+        didEnter = true
+        entryWaiter?.resume()
+        entryWaiter = nil
+        await withCheckedContinuation { releaseWaiter = $0 }
+    }
+
+    func waitUntilEntered() async {
+        if didEnter { return }
+        await withCheckedContinuation { entryWaiter = $0 }
+    }
+
+    func release() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+#endif
+
 /// The HTTP surface, exercised the way a `curl`-driven script or a non-Swift agent would.
 ///
 /// The host behind the server is ``LoopbackTestHost``, a fixture at the bottom of this file — not a
@@ -262,6 +287,64 @@ struct ControlServerTests {
         }
     }
 
+    #if DEBUG
+    @Test("Stopping during startup prevents a later bind and advertisement")
+    func stopDuringStartClosesThePendingApplication() async throws {
+        let gate = BindingGate()
+        let server = ControlServer(host: LoopbackTestHost(), token: ControlToken.generate())
+        await server.setBeforeBindingForTesting { await gate.pause() }
+        let (stopAcceptedStream, stopAcceptedContinuation) = AsyncStream<Void>.makeStream()
+        await server.setOnStopAcceptedForTesting { _ = stopAcceptedContinuation.yield() }
+
+        let starting = Task { try await server.start(port: 0, advertise: false) }
+        await gate.waitUntilEntered()
+        let stopping = Task { try await server.stop() }
+
+        // The gate holds `start` before its bind, so this observes the actual stop-during-start
+        // ordering rather than hoping two freely running tasks happen to interleave that way. The
+        // timeout turns a lost signal into a test failure instead of a suspended test runner.
+        let stopWasAccepted = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in stopAcceptedStream { return true }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        stopAcceptedContinuation.finish()
+        // Startup is still held at the gate. A third caller sees the accepted stop and gets the
+        // retryable shutdown error, even though the first start has not unwound yet.
+        do {
+            _ = try await server.start(port: 0, advertise: false)
+            Issue.record("a third start was admitted while stop was waiting for startup")
+        } catch {
+            #expect(error as? ControlServerError == .shuttingDown)
+        }
+        await gate.release()
+        #expect(stopWasAccepted, "stop returned or never entered while start was pending")
+
+        do {
+            _ = try await starting.value
+            Issue.record("start bound after stop had accepted a pending startup")
+        } catch {
+            #expect(error as? ControlServerError == .shuttingDown)
+        }
+        try await stopping.value
+        #expect(await server.boundPort == nil)
+
+        // A cancelled startup leaves the same server reusable.
+        await server.setBeforeBindingForTesting { }
+        let port = try await server.start(port: 0, advertise: false)
+        #expect(port > 0)
+        try await server.stop()
+    }
+    #endif
+
     /// The two refusals name different problems, and the difference is what the caller does next:
     /// `alreadyRunning` means "you already have one", `shuttingDown` means "ask again in a moment".
     /// Reporting the second as the first is what sent `ControlPlaneCoordinator` down the
@@ -397,7 +480,11 @@ struct ControlServerTests {
             #expect(ControlServer.isLoopbackAuthority(accepted), "\(accepted) should be accepted")
         }
         // The rebinding shape: an attacker-controlled name resolving to 127.0.0.1.
-        for refused in ["mimic.evil.example", "evil.example:8787", "0.0.0.0", "192.168.1.10:8787", "[2001:db8::1]"] {
+        for refused in [
+            "mimic.evil.example", "evil.example:8787", "0.0.0.0", "192.168.1.10:8787", "[2001:db8::1]",
+            "[::1]evil.example", "[::1]:letters", "[::1]:8787:extra", "127.0.0.1:letters",
+            "localhost:8787:extra", "localhost:",
+        ] {
             #expect(ControlServer.isLoopbackAuthority(refused) == false, "\(refused) should be refused")
         }
     }
