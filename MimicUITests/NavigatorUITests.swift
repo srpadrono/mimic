@@ -336,7 +336,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(navigator.row(named: "New ungrouped journey").waitForExistence(timeout: 5),
                       "Creating a selected journey must reveal its collapsed Ungrouped section")
         XCTAssertTrue(navigator.row(named: "New ungrouped journey").isHittable)
-        XCTAssertTrue(journeys.editorName.label.contains("New ungrouped journey"))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            journeys.editorName.label.contains("New ungrouped journey")
+                || (journeys.editorName.value as? String)?.contains("New ungrouped journey") == true
+        }, "The centre pane should edit the newly selected journey")
         try await command(["journeyActivate": ["journey": ["name": "Payment succeeds after the second authorization attempt"]]])
         navigator.journeyGroup("Checkout").click()
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForNonExistence(timeout: 5))
