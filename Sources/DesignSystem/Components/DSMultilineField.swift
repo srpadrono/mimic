@@ -6,6 +6,7 @@ public struct DSMultilineField: View {
     @Binding private var text: String
     private let height: CGFloat
     private let identifier: String
+    private let accessory: AnyView?
     @FocusState private var isFocused: Bool
 
     public init(_ title: String, text: Binding<String>, height: CGFloat, identifier: String) {
@@ -13,13 +14,30 @@ public struct DSMultilineField: View {
         self._text = text
         self.height = height
         self.identifier = identifier
+        self.accessory = nil
+    }
+
+    /// An action beside the field label, sharing its header row rather than floating over the editor.
+    public init<Accessory: View>(_ title: String, text: Binding<String>, height: CGFloat,
+                                 identifier: String, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self._text = text
+        self.height = height
+        self.identifier = identifier
+        self.accessory = AnyView(accessory())
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            Text(title)
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
+            HStack(spacing: DSSpacing.xs) {
+                Text(title)
+                    .font(DSTypography.label)
+                    .foregroundStyle(DSColors.labelSecondary)
+                if let accessory {
+                    Spacer(minLength: DSSpacing.xs)
+                    accessory
+                }
+            }
 
             TextEditor(text: $text)
                 .font(DSTypography.code)

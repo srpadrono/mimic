@@ -207,8 +207,26 @@ struct JourneyStepSheet: View {
                     .id(Field.statusCode)
                 DSMultilineField("Response body", text: $responseBody,
                                  height: DSControlHeight.field * 5,
-                                 identifier: "stepSheet.bodyField")
-                    .focused($focusedField, equals: .body)
+                                 identifier: "stepSheet.bodyField") {
+                    Button {
+                        if let formatted = DSJSONEditor.prettyPrint(responseBody) {
+                            responseBody = formatted
+                        }
+                    } label: {
+                        Label("Format", systemImage: "text.alignleft")
+                            .font(DSTypography.label)
+                            .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
+                            .padding(.horizontal, DSSpacing.xs)
+                            .frame(height: DSControlHeight.field)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.dsPlain)
+                    .disabled(!canFormatBody)
+                    .help("Pretty-print the JSON body")
+                    .accessibilityIdentifier("stepSheet.prettyPrintButton")
+                    .accessibilityLabel("Pretty-print JSON")
+                }
+                .focused($focusedField, equals: .body)
                 disclosureRow("Response headers", summary: headerText.isEmpty ? "None" : "Custom",
                               expanded: $headersExpanded, identifier: "stepSheet.headersDisclosure")
                 if headersExpanded {
@@ -324,6 +342,10 @@ struct JourneyStepSheet: View {
 
     private var trimmedPath: String {
         path.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canFormatBody: Bool {
+        !responseBody.isEmpty && DSJSONEditor.prettyPrint(responseBody) != nil
     }
 
     private func validationText(for field: Field) -> String? {

@@ -183,6 +183,8 @@ extension JourneyStepSheetPage {
         return app.descendants(matching: .any).matching(identifier: "stepSheet.bodyField").firstMatch
     }
 
+    var prettyPrintButton: XCUIElement { app.buttons["stepSheet.prettyPrintButton"] }
+
     /// The grouped Form scrolls inside a fixed sheet. XCUITest does not scroll an offscreen
     /// TextEditor into view before clicking it, so drive the form's visible scroll surface first.
     func reveal(_ field: XCUIElement, byScrollingUp: Bool) {
@@ -981,6 +983,8 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(stepSheet.headersDisclosure.exists, "Optional headers should be discoverable")
         XCTAssertTrue(stepSheet.timingDisclosure.exists, "Timing should be discoverable without scrolling")
+        XCTAssertTrue(stepSheet.prettyPrintButton.exists, "The response body should offer JSON formatting")
+        XCTAssertFalse(stepSheet.prettyPrintButton.isEnabled, "An empty body cannot be formatted")
         XCTAssertFalse(stepSheet.headersField.exists, "A new step should keep optional headers collapsed")
         XCTAssertFalse(stepSheet.delayField.exists, "A new step should keep optional timing collapsed")
         let defaultScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
@@ -1028,7 +1032,24 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
         XCTAssertTrue(stepSheet.bodyField.isHittable, "The response body should scroll into view")
         stepSheet.bodyField.click()
-        stepSheet.bodyField.typeText("{\"error\":\"card_declined\"}")
+        stepSheet.bodyField.typeText("not JSON")
+        XCTAssertFalse(stepSheet.prettyPrintButton.isEnabled,
+                       "Plain-text responses remain editable but cannot be JSON-formatted")
+        replaceText(in: stepSheet.bodyField, with: "[1,2,3]")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { self.stepSheet.prettyPrintButton.isEnabled },
+            "Format should enable when the body contains valid JSON"
+        )
+        stepSheet.prettyPrintButton.click()
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                (self.stepSheet.bodyField.value as? String)?.contains("\n") == true
+            },
+            "Format should reflow the compact JSON across lines"
+        )
+        let formattedBody = stepSheet.bodyField.value as? String ?? ""
+        XCTAssertTrue(formattedBody.contains("1") && formattedBody.contains("2") && formattedBody.contains("3"),
+                      "Formatting must preserve the response payload")
 
         let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         screenshot.name = "journey-step-response-sheet"
@@ -1046,6 +1067,12 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
         assertSpeaks(journeys.step(at: 0), contains: "/payments", "The step should keep its route")
         assertSpeaks(journeys.step(at: 0), contains: "responds 402", "The step should keep its status code")
+
+        journeys.step(at: 0).click()
+        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "The saved step should reopen")
+        XCTAssertTrue((stepSheet.bodyField.value as? String)?.contains("\n") == true,
+                      "The formatted body should survive saving and reopening")
+        stepSheet.cancelButton.click()
     }
 
     // MARK: - 6. The outcome control  (JRNSTEP-12/13)

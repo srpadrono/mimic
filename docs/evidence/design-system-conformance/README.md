@@ -6,7 +6,7 @@ An independent design review checked hierarchy, spacing, color meaning, and narr
 
 The journey editor now gives the title room to wrap, names each step above its method and route, and keeps matching settings in a disclosure. Both short steps remain visible above the request log in the compact window. The inspector separates the selected journey from the active run; when the server is stopped, the run controls and inspector explain how Restart and Advance prepare the next start. Focused journey editing, grouping, inspector, breadcrumb, and compact-window UI flows passed.
 
-The Add step sheet now keeps the route, outcome and response body together in a flat form. Optional headers and timing stay visible as summary rows and open on demand; invalid header lines are explained before saving instead of being dropped silently. The screenshots below show the default form and a filled response with its headers expanded.
+The Add step sheet now keeps the route, outcome and response body together in a flat form. Optional headers and timing stay visible as summary rows and open on demand; invalid header lines are explained before saving instead of being dropped silently. Its Format action uses the endpoint editor's JSON formatter, becoming available for valid JSON while leaving plain-text responses editable. The screenshots below show the default form and a formatted response with its headers expanded.
 
 ## Workspace and navigator
 
