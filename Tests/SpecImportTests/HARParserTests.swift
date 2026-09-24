@@ -115,30 +115,32 @@ struct HARParserTests {
 
     // MARK: - Body Size Cap
 
-    @Test("Flags entries exceeding body size limit")
+    @Test("Bodies at one MiB survive; bodies one byte larger are flagged and dropped")
     func flagsLargeBody() async throws {
-        let largeBody = String(repeating: "x", count: HARParser.bodySizeLimit + 1)
-        let harJSON = """
-        {
-            "log": {
-                "entries": [
-                    {
+        let oneMiB = String(repeating: "x", count: 1_048_576)
+        for (body, exceedsLimit) in [(oneMiB, false), (oneMiB + "x", true)] {
+            let harJSON = """
+            {
+                "log": {
+                    "entries": [{
                         "request": { "method": "GET", "url": "https://example.com/big" },
-                        "response": {
-                            "status": 200,
-                            "content": { "text": "\(largeBody)" }
-                        }
-                    }
-                ]
+                        "response": { "status": 200, "content": { "text": "\(body)" } }
+                    }]
+                }
+            }
+            """
+            let candidates = try await HARParser.parse(data: Data(harJSON.utf8))
+            let candidate = try #require(candidates.first)
+
+            #expect(candidates.count == 1)
+            #expect(candidate.bodySizeBytes == body.utf8.count)
+            #expect(candidate.bodySizeExceedsLimit == exceedsLimit)
+            if exceedsLimit {
+                #expect(candidate.responseBody == nil)
+            } else {
+                #expect(candidate.responseBody == body)
             }
         }
-        """
-        let data = Data(harJSON.utf8)
-        let candidates = try await HARParser.parse(data: data)
-
-        #expect(candidates.count == 1)
-        #expect(candidates[0].bodySizeExceedsLimit == true)
-        #expect(candidates[0].responseBody == nil) // Body stripped when over limit
     }
 
     // MARK: - Path Extraction
@@ -260,6 +262,60 @@ struct HARParserTests {
         #expect(headers["transfer-encoding"] == nil)
         #expect(headers["date"] == nil)
         #expect(headers["server"] == nil)
+    }
+
+    @Test("A later HAR header replaces an earlier name regardless of casing")
+    func mixedCaseDuplicateResponseHeaders() async throws {
+        let harJSON = """
+        {
+            "log": {
+                "entries": [{
+                    "request": { "method": "GET", "url": "https://example.com/api/test" },
+                    "response": {
+                        "status": 200,
+                        "headers": [
+                            { "name": "ETag", "value": "stale" },
+                            { "name": "Cache-Control", "value": "private" },
+                            { "name": "etag", "value": "current" },
+                            { "name": "cache-control", "value": "public, max-age=60" },
+                            { "name": "Content-Type", "value": "application/json" },
+                            { "name": "CONTENT-LENGTH", "value": "999" }
+                        ],
+                        "content": { "mimeType": "application/json", "text": "{}" }
+                    }
+                }]
+            }
+        }
+        """
+        let candidates = try await HARParser.parse(data: Data(harJSON.utf8))
+        let candidate = try #require(candidates.first)
+        let expected = [
+            "etag": "current",
+            "cache-control": "public, max-age=60",
+            "Content-Type": "application/json",
+        ]
+        #expect(candidate.responseHeaders == expected)
+
+        let scenario = Scenario(
+            name: "Imported",
+            statusCode: candidate.statusCode,
+            headers: candidate.responseHeaders,
+            body: candidate.responseBody,
+            bodyContentType: candidate.responseContentType
+        )
+        let endpoint = Endpoint(
+            name: candidate.suggestedName,
+            method: candidate.method,
+            path: candidate.path,
+            scenarios: [scenario],
+            activeScenarioID: scenario.id
+        )
+        let served = RequestMatcher.resolve(
+            request: IncomingRequest(method: .get, path: "/api/test"),
+            against: [endpoint],
+            globalDelayMs: 0
+        )
+        #expect(served.headers == expected)
     }
 
     @Test("Formats body size labels across thresholds")

@@ -23,6 +23,7 @@ Path segments use endpoint matching rules, including `:param` wildcards. Query s
 ## Step outcomes and progression
 
 A response step specifies status, headers, body, content type, optional delay, and `repeatCount`. Step delay adds to the project's global delay. A transport-failure step instead drops the connection or holds it for `holdMs` before dropping it. An HTTP `500` is still a response, so use a transport failure when testing offline or timeout handling. Clients may retry failed idempotent requests; increase `repeatCount` if the failure must survive those retries.
+Imported projects reject negative delays and timeout holds, and require a repeat count of at least one. Combined delays saturate at the largest supported integer.
 
 Automatic progression retires a step after its repeat count. With `autoAdvance: false`, it keeps answering until `mimic journey advance` is called. Completion can stop or restart the journey. `mimic journey restart` rewinds it, and activation always starts a fresh run. The serving actor reads, resolves, and advances the cursor atomically so concurrent requests do not consume the same step.
 

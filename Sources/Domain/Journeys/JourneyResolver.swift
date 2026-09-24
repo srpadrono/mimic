@@ -107,7 +107,7 @@ public enum JourneyResolver {
         journey: Journey,
         globalDelayMs: Int
     ) -> ResolvedResponse {
-        let delayMs = max(0, globalDelayMs) + max(0, step.delayMs)
+        let delayMs = ResponseDelay.combined(globalMs: globalDelayMs, localMs: step.delayMs)
 
         switch step.outcome {
         case let .respond(scripted):

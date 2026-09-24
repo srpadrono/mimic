@@ -30,18 +30,27 @@ public struct JourneyRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.sortOrder = sortOrder
     }
 
-    /// Unknown enum values fall back to the defaults so a database written by a newer build stays
-    /// loadable by an older one — a journey with an unrecognized mode is still better than no project.
-    public func toDomain(steps: [JourneyStep]) -> Journey {
-        Journey(
-            id: UUID(uuidString: id) ?? UUID(),
+    public func toDomain(steps: [JourneyStep]) throws -> Journey {
+        let journeyID = try PersistenceError.requiredUUID(id, table: Self.databaseTableName, id: id, field: "id")
+        _ = try PersistenceError.requiredUUID(projectID, table: Self.databaseTableName, id: id, field: "projectID")
+        guard let matchMode = JourneyMatchMode(rawValue: matchMode) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "matchMode")
+        }
+        guard let completion = JourneyCompletion(rawValue: completion) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "completion")
+        }
+        guard let unmatchedBehavior = JourneyUnmatchedBehavior(rawValue: unmatchedBehavior) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "unmatchedBehavior")
+        }
+        return Journey(
+            id: journeyID,
             name: name,
             summary: summary,
             groupTag: groupTag,
             steps: steps,
-            matchMode: JourneyMatchMode(rawValue: matchMode) ?? .orderedPerEndpoint,
-            completion: JourneyCompletion(rawValue: completion) ?? .stop,
-            unmatchedBehavior: JourneyUnmatchedBehavior(rawValue: unmatchedBehavior) ?? .fallThroughToEndpoints,
+            matchMode: matchMode,
+            completion: completion,
+            unmatchedBehavior: unmatchedBehavior,
             autoAdvance: autoAdvance
         )
     }
@@ -112,22 +121,34 @@ public struct JourneyStepRecord: Codable, FetchableRecord, PersistableRecord, Se
         }
     }
 
-    public func toDomain() -> JourneyStep {
-        JourneyStep(
-            id: UUID(uuidString: id) ?? UUID(),
+    public func toDomain() throws -> JourneyStep {
+        let stepID = try PersistenceError.requiredUUID(id, table: Self.databaseTableName, id: id, field: "id")
+        _ = try PersistenceError.requiredUUID(journeyID, table: Self.databaseTableName, id: id, field: "journeyID")
+        guard let httpMethod = HTTPMethod(rawValue: method) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "method")
+        }
+        let backend = try PersistenceError.optionalUUID(backendID, table: Self.databaseTableName, id: id, field: "backendID")
+        return try JourneyStep(
+            id: stepID,
             name: name,
-            method: HTTPMethod(rawValue: method) ?? .get,
+            method: httpMethod,
             path: path,
             outcome: decodedOutcome(),
             delayMs: delayMs,
             repeatCount: repeatCount,
             graphqlOperation: graphqlOperation,
-            backendID: backendID.flatMap(UUID.init(uuidString:))
+            backendID: backend
         )
     }
 
-    private func decodedOutcome() -> JourneyStepOutcome {
-        if let failureKind, let kind = FailureKind(rawValue: failureKind) {
+    private func decodedOutcome() throws -> JourneyStepOutcome {
+        if let failureKind {
+            guard statusCode == nil else {
+                throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "outcome")
+            }
+            guard let kind = FailureKind(rawValue: failureKind) else {
+                throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "failureKind")
+            }
             switch kind {
             case .connectionDrop:
                 return .networkFailure(.connectionDrop)
@@ -135,13 +156,17 @@ public struct JourneyStepRecord: Codable, FetchableRecord, PersistableRecord, Se
                 return .networkFailure(.timeout(holdMs: failureHoldMs ?? NetworkFailure.defaultTimeoutHoldMs))
             }
         }
-        return .respond(JourneyResponse(
-            // A row with neither a status nor a recognized failure is malformed; 200 keeps the
-            // project loadable instead of discarding the step.
-            statusCode: statusCode ?? 200,
-            headers: HeaderCoding.decode(headersJSON),
+        guard let statusCode else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "statusCode")
+        }
+        guard let responseContentType = Scenario.ContentType(rawValue: contentType) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "contentType")
+        }
+        return .respond(try JourneyResponse(
+            statusCode: statusCode,
+            headers: HeaderCoding.decode(headersJSON, table: Self.databaseTableName, id: id),
             body: body,
-            contentType: Scenario.ContentType(rawValue: contentType) ?? .json
+            contentType: responseContentType
         ))
     }
 }

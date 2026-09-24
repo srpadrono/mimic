@@ -29,21 +29,29 @@ public struct ScenarioRecord: Codable, FetchableRecord, PersistableRecord, Senda
     }
 
     /// Converts the record back to a domain Scenario, decoding the headers JSON.
-    public func toDomain() -> Scenario {
-        Scenario(
-            id: UUID(uuidString: id) ?? UUID(),
+    public func toDomain() throws -> Scenario {
+        let scenarioID = try PersistenceError.requiredUUID(
+            id, table: Self.databaseTableName, id: id, field: "id"
+        )
+        _ = try PersistenceError.requiredUUID(
+            endpointID, table: Self.databaseTableName, id: id, field: "endpointID"
+        )
+        guard let contentType = Scenario.ContentType(rawValue: bodyContentType) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "bodyContentType")
+        }
+        return try Scenario(
+            id: scenarioID,
             name: name,
             statusCode: statusCode,
-            headers: HeaderCoding.decode(headersJSON),
+            headers: HeaderCoding.decode(headersJSON, table: Self.databaseTableName, id: id),
             body: body,
-            bodyContentType: Scenario.ContentType(rawValue: bodyContentType) ?? .json
+            bodyContentType: contentType
         )
     }
 }
 
 /// Headers are a small string map; storing them as JSON in one column keeps the schema flat and the
-/// round-trip lossless. Decoding never throws — a corrupt cell degrades to no headers rather than
-/// making a whole project unloadable.
+/// round-trip lossless. A corrupt cell must fail a load before an autosave can erase those headers.
 enum HeaderCoding {
     static func encode(_ headers: [String: String]) -> String {
         guard !headers.isEmpty,
@@ -53,10 +61,11 @@ enum HeaderCoding {
         return json
     }
 
-    static func decode(_ json: String) -> [String: String] {
-        guard let data = json.data(using: .utf8),
-              let headers = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return headers
+    static func decode(_ json: String, table: String, id: String) throws -> [String: String] {
+        do {
+            return try JSONDecoder().decode([String: String].self, from: Data(json.utf8))
+        } catch {
+            throw PersistenceError.corruptedRecord(table: table, id: id, field: "headersJSON")
+        }
     }
 }
