@@ -86,6 +86,29 @@ struct UpdatePreferencesTests {
 @Suite("Update service")
 struct UpdateServiceTests {
 
+    private actor HeldFeed {
+        private var fetchContinuation: CheckedContinuation<UpdateRelease, any Error>?
+        private var arrivalContinuation: CheckedContinuation<Void, Never>?
+        private(set) var fetchCount = 0
+
+        func fetch() async throws -> UpdateRelease {
+            fetchCount += 1
+            arrivalContinuation?.resume()
+            arrivalContinuation = nil
+            return try await withCheckedThrowingContinuation { fetchContinuation = $0 }
+        }
+
+        func waitForFetch() async {
+            guard fetchCount == 0 else { return }
+            await withCheckedContinuation { arrivalContinuation = $0 }
+        }
+
+        func complete(with release: UpdateRelease) {
+            fetchContinuation?.resume(returning: release)
+            fetchContinuation = nil
+        }
+    }
+
     /// `nonisolated` because the stub fetch below is a `@Sendable` closure evaluated outside the
     /// main actor, and this suite is `@MainActor`. `UpdateRelease` is a `Sendable` value.
     nonisolated static func release(_ version: String) -> UpdateRelease {
@@ -169,6 +192,24 @@ struct UpdateServiceTests {
         await settle(service) { if case .upToDate = $0 { true } else { false } }
 
         #expect(!service.isShowingSheet)
+    }
+
+    @Test("A manual check during an automatic check receives the result already in flight")
+    func manualCheckPromotesAutomaticCheck() async throws {
+        let feed = HeldFeed()
+        let (service, _) = try makeService(
+            latest: { try await feed.fetch() }
+        )
+
+        service.checkAutomaticallyIfDue()
+        await feed.waitForFetch()
+        service.checkForUpdates()
+        await feed.complete(with: Self.release("0.10.0"))
+        await settle(service) { if case .upToDate = $0 { true } else { false } }
+
+        #expect(service.phase == .upToDate(installed: ReleaseVersion("0.10.0")!))
+        #expect(service.isShowingSheet)
+        #expect(await feed.fetchCount == 1)
     }
 
     @Test("A background check that finds something raises the sheet")
@@ -371,6 +412,30 @@ struct UpdateInstallationTests {
 @Suite("Installer verification")
 struct UpdateInstallerTests {
 
+    private func makeRelease(size: Int, sha256: String) -> UpdateRelease {
+        UpdateRelease(
+            version: ReleaseVersion("0.11.0")!,
+            tag: "v0.11.0",
+            title: "Mimic v0.11.0",
+            notes: "",
+            pageURL: URL(string: "https://example.invalid/releases/v0.11.0")!,
+            publishedAt: Date(timeIntervalSince1970: 1_787_420_565),
+            asset: .init(
+                name: "Mimic-0.11.0.pkg",
+                downloadURL: URL(string: "https://example.invalid/Mimic-0.11.0.pkg")!,
+                sizeInBytes: size,
+                sha256: sha256
+            )
+        )
+    }
+
+    private func makeTinyPackage() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-update-verification-\(UUID().uuidString).pkg")
+        try Data("abc".utf8).write(to: url)
+        return url
+    }
+
     /// Real `pkgutil --check-signature` output, captured from the published Mimic 0.10.0 installer
     /// while running **inside the App Sandbox** — which is where this check actually runs.
     ///
@@ -393,6 +458,41 @@ struct UpdateInstallerTests {
         3. Apple Root CA
     """
 
+    @Test("Verification refuses a package whose byte count differs from the release")
+    func refusesWrongSize() throws {
+        let file = try makeTinyPackage()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let release = makeRelease(
+            size: 4,
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+
+        do {
+            try UpdateInstaller().verify(file, against: release)
+            Issue.record("A 3-byte file was accepted as a 4-byte release")
+        } catch let error as UpdateInstaller.InstallError {
+            #expect(error == .wrongSize(expected: 4, actual: 3))
+        }
+    }
+
+    @Test("Verification refuses a package whose SHA-256 differs from the release")
+    func refusesWrongChecksum() throws {
+        let file = try makeTinyPackage()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let installer = UpdateInstaller()
+        let actual = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        let advertised = String(repeating: "0", count: 64)
+        let release = makeRelease(size: 3, sha256: advertised)
+
+        #expect(try installer.sha256(of: file) == actual)
+        do {
+            try installer.verify(file, against: release)
+            Issue.record("A package with the wrong checksum was accepted")
+        } catch let error as UpdateInstaller.InstallError {
+            #expect(error == .checksumMismatch(expected: advertised, actual: actual))
+        }
+    }
+
     @Test("The real published installer is recognised")
     func acceptsMimicsOwnSignature() {
         #expect(UpdateInstaller.isSignedByMimic(Self.realSandboxedOutput))
@@ -404,6 +504,20 @@ struct UpdateInstallerTests {
     func refusesAnotherDevelopersSignature() {
         let other = Self.realSandboxedOutput
             .replacingOccurrences(of: "DEVXA LTD (KW6369JJL9)", with: "Someone Else Ltd (AB1234CD56)")
+
+        #expect(!UpdateInstaller.isSignedByMimic(other))
+    }
+
+    @Test("The team ID in a package name cannot stand in for the signer's team")
+    func refusesTeamIDSpoofedInPackageName() {
+        let other = """
+        Package "Mimic (KW6369JJL9).pkg":
+           Status: signed by a developer certificate issued by Apple for distribution
+           Certificate Chain:
+            1. Developer ID Installer: Someone Else Ltd (AB1234CD56)
+            2. Developer ID Certification Authority
+            3. Apple Root CA
+        """
 
         #expect(!UpdateInstaller.isSignedByMimic(other))
     }

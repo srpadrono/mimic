@@ -85,6 +85,10 @@ final class MockServerRuntime {
     static let maxRequestLogEntries = 1000
 
     private let engine: any MockServerEngineProtocol
+    private var startTask: Task<Void, Never>?
+    /// Project changes dispatch their configuration synchronously after asking for a stop. Keep
+    /// those pushes off the old listener until its shutdown (including an in-flight bind) settles.
+    private var pendingStop: Task<Void, Never>?
 
     init(engine: any MockServerEngineProtocol = MockServerEngine()) {
         self.engine = engine
@@ -136,7 +140,7 @@ final class MockServerRuntime {
         startFailure = nil
 
         let configuration = serverConfiguration
-        Task { @MainActor [weak self] in
+        startTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await engine.start(configuration: configuration)
@@ -198,12 +202,14 @@ final class MockServerRuntime {
     func stopServer() {
         if serverState == .starting {
             stopRequestedMidStart = true
+            let starting = startTask
+            pendingStop = Task { await starting?.value }
             return
         }
         guard case .running = serverState else { return }
         serverState = .stopping
 
-        Task { @MainActor [weak self] in
+        pendingStop = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await engine.stop()
@@ -308,10 +314,12 @@ final class MockServerRuntime {
         let globalDelayMs = configuration.globalDelayMs
         let activationEpoch = journeyActivationEpoch
         let predecessor = pendingMockUpdate
+        let stopping = pendingStop
         pendingMockUpdate = Task { @MainActor [weak self] in
             // The chain: this push must not reach the engine before the one dispatched ahead of it
             // has landed.
             await predecessor?.value
+            await stopping?.value
             guard let self else { return }
             await engine.updateServerConfiguration(configuration, projectID: projectID)
             await engine.updateConfiguration(

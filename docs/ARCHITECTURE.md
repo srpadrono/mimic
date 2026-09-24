@@ -42,6 +42,8 @@ The app target links each module for bundling, while its source imports `AppFeat
 
 `Scripts/check_module_edges.py` verifies the important dependency boundaries in both manifests.
 
+When the open project changes, `AppState` requests a server stop before publishing the new project. `MockServerRuntime` waits for that stop, including a bind still in progress, before pushing the new project's routes to the engine. The welcome list reads stored projects asynchronously; only its newest refresh may publish rows. `AppControlHost.projectList` reports a store failure if project counts cannot be read, rather than presenting missing counts as zero.
+
 ## One rule and one host
 
 Every project-scoped command is applied by `ProjectCommandExecutor.apply(_:to:)` in Domain. Its optional result declines host-scoped commands; its mutation flag tells the host when to persist and update the engine. The window, CLI, and HTTP API use this rule instead of maintaining separate implementations.

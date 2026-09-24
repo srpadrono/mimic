@@ -86,6 +86,41 @@ struct MockServerRuntimeTests {
         }
     }
 
+    /// Holds shutdown open so a project change can try to push a different configuration while the
+    /// previous project's listener is still bound.
+    actor GatedStopEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private(set) var stopEntered = false
+        private var stopReleased = false
+        private(set) var pushedProjectIDs: [UUID?] = []
+        private(set) var pushedDuringStop = false
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit { logContinuation.finish() }
+
+        func start(configuration: ServerConfiguration) async throws {}
+
+        func stop() async throws {
+            stopEntered = true
+            while !stopReleased {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+
+        func releaseStop() { stopReleased = true }
+
+        func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async {
+            if stopEntered && !stopReleased { pushedDuringStop = true }
+            pushedProjectIDs.append(projectID)
+        }
+
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+    }
+
     /// An engine whose `journeyStatus()` does not answer until it is released.
     ///
     /// That is the whole fixture: it lets a mirror update that was *requested first* come back
@@ -152,6 +187,7 @@ struct MockServerRuntimeTests {
 
         private(set) var startConfigurations: [ServerConfiguration] = []
         private(set) var stopCallCount = 0
+        private(set) var pushedProjectIDs: [UUID?] = []
         private var isHoldingStart = true
         private var startError: Error?
 
@@ -181,6 +217,10 @@ struct MockServerRuntimeTests {
 
         func stop() async throws {
             stopCallCount += 1
+        }
+
+        func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async {
+            pushedProjectIDs.append(projectID)
         }
 
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
@@ -471,6 +511,32 @@ struct MockServerRuntimeTests {
         #expect(await engine.stopCallCount == 1)
     }
 
+    @Test("A project change waits for the old listener to stop before pushing new routes")
+    func projectChangeDoesNotPushToStoppingListener() async throws {
+        let engine = GatedStopEngine()
+        let manager = MockServerRuntime(engine: engine)
+        let original = MockProject(name: "Original")
+        let replacement = MockProject(name: "Replacement")
+
+        manager.applyProject(original)
+        _ = await manager.journeyStatusAfterPendingUpdates()
+        manager.startServer()
+        try await waitUntil { manager.serverState.runningPort != nil }
+
+        manager.stopServer()
+        manager.applyProject(replacement)
+        try await waitUntilAsync { await engine.stopEntered }
+        // The update task has a chance to run while shutdown is held open. Under the old code it
+        // sent the replacement project to the still-bound listener in this interval.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!(await engine.pushedDuringStop))
+
+        await engine.releaseStop()
+        _ = await manager.journeyStatusAfterPendingUpdates()
+        #expect(manager.serverState == .stopped)
+        #expect(await engine.pushedProjectIDs == [original.id, replacement.id])
+    }
+
     /// The bind window is the state *every* stop issued straight after a start arrives in:
     /// `startServer()` publishes `.starting` and returns before the engine has bound. `stopServer()`
     /// used to `guard case .running` and drop that stop on the floor, and the in-flight start then
@@ -498,6 +564,30 @@ struct MockServerRuntimeTests {
             await engine.stopCallCount == 1,
             "the engine itself must be stopped, not just the published state"
         )
+    }
+
+    @Test("A project change during a bind waits until that bind has been stopped to push routes")
+    func projectChangeDuringBindDoesNotPushToOldListener() async throws {
+        let engine = GatedStartEngine()
+        let manager = MockServerRuntime(engine: engine)
+        let original = MockProject(name: "Original")
+        let replacement = MockProject(name: "Replacement")
+
+        manager.applyProject(original)
+        _ = await manager.journeyStatusAfterPendingUpdates()
+        manager.startServer()
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+
+        manager.stopServer()
+        manager.applyProject(replacement)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await engine.pushedProjectIDs == [original.id])
+
+        await engine.release()
+        _ = await manager.journeyStatusAfterPendingUpdates()
+        #expect(manager.serverState == .stopped)
+        #expect(await engine.stopCallCount == 1)
+        #expect(await engine.pushedProjectIDs == [original.id, replacement.id])
     }
 
     /// The failing-bind half of the rule above. A stop remembered during the bind window must leave

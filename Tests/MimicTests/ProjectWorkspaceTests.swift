@@ -76,6 +76,63 @@ struct ProjectWorkspaceTests {
         func delete(id: UUID) async throws { throw Refused() }
     }
 
+    /// Returns the newer snapshot first, then releases the older read. The repository controls
+    /// completion order, so the regression does not depend on a particular scheduler interleaving.
+    private actor GatedListRepository: ProjectRepository {
+        let first: MockProject
+        let second: MockProject
+        private(set) var enteredReads = 0
+        private var firstReadContinuation: CheckedContinuation<Void, Never>?
+
+        init(first: MockProject, second: MockProject) {
+            self.first = first
+            self.second = second
+        }
+
+        func allProjects() async throws -> [MockProject] {
+            enteredReads += 1
+            if enteredReads == 1 {
+                await withCheckedContinuation { continuation in
+                    firstReadContinuation = continuation
+                }
+                return [first]
+            }
+            return [second]
+        }
+
+        func releaseFirstRead() {
+            firstReadContinuation?.resume()
+            firstReadContinuation = nil
+        }
+
+        func load(id: UUID) async throws -> MockProject { throw PersistenceError.projectNotFound(id) }
+        func save(_ project: MockProject) async throws {}
+        func delete(id: UUID) async throws {}
+    }
+
+    @Test("An older welcome-list read cannot overwrite a newer result")
+    func newerProjectListWinsOverSlowOlderRead() async throws {
+        let repository = GatedListRepository(
+            first: MockProject(name: "Old snapshot"),
+            second: MockProject(name: "New snapshot")
+        )
+        let defaults = try #require(UserDefaults(suiteName: "ProjectWorkspaceTests.\(UUID().uuidString)"))
+        let service = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+
+        try await waitUntilAsync { await repository.enteredReads == 1 }
+        service.refreshProjectList()
+        try await waitUntil { service.recentProjects.map(\.name) == ["New snapshot"] }
+
+        await repository.releaseFirstRead()
+        // The older read is now free to return. Give its main-actor continuation time to publish;
+        // without the generation guard this changes the visible list back to "Old snapshot".
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(service.recentProjects.map(\.name) == ["New snapshot"])
+    }
+
     @Test("Project creation persists recents and updates autosave state")
     func projectCreation() async throws {
         let context = try makeContext()

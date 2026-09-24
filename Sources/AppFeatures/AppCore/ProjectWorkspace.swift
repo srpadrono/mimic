@@ -80,6 +80,9 @@ final class ProjectWorkspace {
     /// Which project the newest open is loading, so a settled delete can tell whether the load it
     /// would abandon is the one it just removed the row for. See ``deleteProject(id:)``.
     private var loadingProjectID: UUID?
+    /// Only the newest store listing may replace the welcome window's rows. Reads can finish out
+    /// of order when a refresh overlaps a slow disk operation or another project change.
+    private var projectListGeneration = 0
     /// The most recent store write, so the next one can wait for it.
     ///
     /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` — the
@@ -634,9 +637,12 @@ final class ProjectWorkspace {
     /// So the cache decides **order** and the store decides **membership**. Nothing the store holds
     /// can be unreachable, and nothing the cache remembers outlives the project it names.
     func refreshProjectList() {
-        Task { @MainActor [weak self] in
+        projectListGeneration += 1
+        let generation = projectListGeneration
+        Task { @MainActor [weak self, generation] in
             guard let self else { return }
             guard let stored = try? await projectRepository.allProjects() else { return }
+            guard generation == projectListGeneration else { return }
             recentProjects = Self.reconcile(cached: recentProjectsStore.load(), stored: stored)
         }
     }
