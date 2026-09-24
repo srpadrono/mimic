@@ -81,17 +81,15 @@ enum SchemaExampleGenerator {
 
     /// Convert a generated value to a pretty-printed JSON string.
     static func toJSONString(_ value: Any) -> String? {
-        guard JSONSerialization.isValidJSONObject(value) else {
-            // Primitive value — use JSONEncoder for safe escaping
-            if let str = value as? String {
-                if let data = try? JSONEncoder().encode(str) {
-                    return String(data: data, encoding: .utf8)
-                }
-                return "\"\(str)\""
-            }
-            return "\(value)"
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) else {
+        // A generated example can be a top-level scalar, including NSNull from a Swagger example.
+        // String interpolation turns NSNull into "<null>". Foundation raises an Objective-C
+        // exception for non-finite numbers, so validate the entire value in an array first; this
+        // also accepts scalar roots, unlike isValidJSONObject(value) itself.
+        guard JSONSerialization.isValidJSONObject([value]) else { return nil }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: value,
+            options: [.fragmentsAllowed, .prettyPrinted, .sortedKeys]
+        ) else {
             return nil
         }
         return String(data: data, encoding: .utf8)

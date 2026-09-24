@@ -105,6 +105,10 @@ struct ControlClientTests {
             // loopback interface.
             "http://127.0.0.1:9999",
             "http://localhost:9999",
+            // The control server binds only IPv4 127.0.0.1. These names can resolve to another
+            // listener on IPv6 or a different loopback address at the same numeric port.
+            "http://localhost:8787",
+            "http://[::1]:8787",
         ]
     )
     func aForeignURLCarriesNoToken(explicitURL: String) throws {
@@ -121,7 +125,7 @@ struct ControlClientTests {
     /// `--url` naming the running instance is the same host and the same port the file advertises.
     @Test(
         "A --url naming the discovered instance still carries its token",
-        arguments: ["http://127.0.0.1:8787", "http://localhost:8787"]
+        arguments: ["http://127.0.0.1:8787"]
     )
     func theDiscoveredInstanceCarriesItsToken(explicitURL: String) throws {
         let client = try ControlClient.discover(

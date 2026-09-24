@@ -202,6 +202,34 @@ struct EndpointCommand: AsyncParsableCommand {
                 )
             }
 
+            if endpointSpec != EndpointSpec(), responseSpec != ScenarioSpec() {
+                // This CLI invocation sends two existing control commands. Check response rules
+                // shared with the host and the presence of an active scenario before the first
+                // mutation, so the common refusals do not leave only the endpoint half applied.
+                // The host still decides each command; concurrent edits can change its state
+                // between these requests.
+                do {
+                    if let status = responseSpec.statusCode {
+                        try EndpointValidator.validateStatusCode(status)
+                    }
+                    if let headers = responseSpec.headers {
+                        try EndpointValidator.validateHeaders(headers)
+                    }
+                } catch {
+                    throw CLIFailure.commandFailed(.invalid(error.localizedDescription))
+                }
+                let fetched = try await client.send(.endpointGet(endpoint: ref))
+                guard fetched.ok, let endpoint = fetched.result?.endpoint else {
+                    throw CLIFailure.commandFailed(fetched.error ?? .internalFailure("Endpoint not found."))
+                }
+                guard endpoint.activeScenarioID != nil else {
+                    throw CLIFailure.badArgument(
+                        "\(endpoint.method.rawValue) \(endpoint.path) has no active scenario to edit. "
+                            + "Create one with `mimic scenario create`."
+                    )
+                }
+            }
+
             var stableRef = ref
             if endpointSpec != EndpointSpec() {
                 let result = try await client.send(.endpointUpdate(endpoint: ref, spec: endpointSpec))
