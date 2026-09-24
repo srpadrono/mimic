@@ -899,6 +899,28 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The invalid text must stay in the editor — it is not rejected, only flagged")
     }
 
+    /// A JSON scalar is a valid response body, even though there is no structure to re-indent.
+    /// Start from an invalid value so waiting for the warning to disappear proves validation ran.
+    @MainActor
+    func testScalarJSONBodyClearsWarningWithoutEnablingFormat() throws {
+        launchApp()
+        createProjectViaUI(name: "Body Scalar")
+        createEndpointViaUI(name: "Body EP", path: "/api/scalar")
+        hideRequestLogDrawer()
+
+        setResponseBody("definitely not json", expecting: "definitely not json")
+        let warning = anyElement(identified: "ds.jsoneditor.editor.body.error")
+        XCTAssertTrue(warning.waitForExistence(timeout: 6))
+
+        setResponseBody("42", expecting: "42")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 6) { !warning.exists },
+                      "A top-level JSON number must not show the invalid JSON warning")
+        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(prettyPrintButton.isEnabled,
+                       "A valid JSON scalar has no object or array layout to format")
+        XCTAssertEqual(bodyText(), "42")
+    }
+
     // MARK: - 9. Status code validation notes
 
     /// EPEDIT-06, EPEDIT-07.

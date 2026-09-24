@@ -20,7 +20,7 @@ struct RequestBodyView: View {
     struct Rendered: Sendable, Equatable {
         var text: AttributedString
         var matchCount: Int
-        /// `false` when the body was too large to format and is shown verbatim.
+        /// `false` when formatting would make the body too large, or the input limit was exceeded.
         var isFormatted: Bool
     }
 
@@ -35,7 +35,9 @@ struct RequestBodyView: View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             if let rendered {
                 if !rendered.isFormatted {
-                    Text("Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB.")
+                    Text(payload.utf8.count > JSONFormatter.formattingLimit
+                         ? "Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB."
+                         : "Shown unformatted — body would be too large when indented.")
                         .font(DSTypography.caption)
                         // `labelSecondary`. This is the sentence that explains why the payload below
                         // is a wall of minified JSON rather than the indented view every other body
@@ -109,12 +111,17 @@ struct RequestBodyView: View {
 
     nonisolated static func render(payload: String, searchText: String) -> Rendered {
         let withinLimit = payload.utf8.count <= JSONFormatter.formattingLimit
-        let formatted = withinLimit ? (JSONFormatter.prettyPrinted(payload) ?? payload) : payload
+        let pretty = withinLimit ? JSONFormatter.prettyPrinted(payload) : nil
+        let formatted = pretty ?? payload
+        // A body already laid out across lines is deliberately preserved. A compact JSON-shaped
+        // body whose indentation exceeded the formatter's budget needs an honest fallback label.
+        let expansionRejected = withinLimit && pretty == nil
+            && JSONFormatter.looksLikeJSON(payload) && !payload.contains("\n")
 
         var text = withinLimit ? coloured(formatted) : AttributedString(formatted)
         let matches = highlight(searchText, in: &text)
 
-        return Rendered(text: text, matchCount: matches, isFormatted: withinLimit)
+        return Rendered(text: text, matchCount: matches, isFormatted: withinLimit && !expansionRejected)
     }
 
     nonisolated static func coloured(_ text: String) -> AttributedString {

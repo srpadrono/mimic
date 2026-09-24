@@ -266,12 +266,12 @@ public struct DSJSONEditor: View {
 
     // MARK: - JSON Utilities
 
-    /// Validates whether a string is valid JSON.
+    /// Validates whether a string is valid JSON, including top-level scalar values.
     public nonisolated static func validateJSON(_ string: String) -> Bool {
         guard !string.isEmpty else { return true }
         guard let data = string.data(using: .utf8) else { return false }
         do {
-            _ = try JSONSerialization.jsonObject(with: data)
+            _ = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             return true
         } catch {
             return false
@@ -288,12 +288,15 @@ public struct DSJSONEditor: View {
     ///
     /// It delegates to `JSONFormatter` — the character scanner already written for the traffic log,
     /// and already covered by a `preservesKeyOrder` test — so the editor and the inspector cannot
-    /// format the same body two different ways.
+    /// format the same body two different ways. The scanner also accepts truncated traffic, so an
+    /// editor action must validate first: Format must not rewrite a deliberately malformed response.
+    /// Valid scalars have no object or array structure to reflow and return `nil`.
     public nonisolated static func prettyPrint(_ string: String) -> String? {
+        guard validateJSON(string) else { return nil }
         // `reflow: true` — pressing Format is an instruction, not a hint. Without it the scanner's
         // "do not fight a layout somebody chose" rule applied here too, so the button was enabled,
         // clickable and did nothing for any body already spread across lines.
-        JSONFormatter.prettyPrinted(string, reflow: true)
+        return JSONFormatter.prettyPrinted(string, reflow: true)
     }
 
     static func validationErrorMessage(text: String, isValid: Bool) -> String? {

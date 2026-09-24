@@ -649,7 +649,10 @@ struct EndpointEditorView: View {
     // MARK: - Derived state
 
     private var canFormatBody: Bool {
-        isJSONValid && !responseBody.isEmpty
+        // A top-level JSON scalar is valid but has no object or array layout to reflow. The
+        // editor's Format action validates again, so a debounced stale flag cannot rewrite a
+        // malformed body between keystrokes.
+        isJSONValid && JSONFormatter.looksLikeJSON(responseBody)
     }
 
     // MARK: - Sync & Commit
