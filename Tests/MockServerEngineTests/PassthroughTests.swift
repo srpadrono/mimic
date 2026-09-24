@@ -106,6 +106,60 @@ struct PassthroughTests {
         }
     }
 
+    @Test("Proxy waits for a log slot before contacting its backend or collecting a preview")
+    func proxyReservesBeforeResponsePreview() async throws {
+        let proxy = MockServerEngine(), upstream = MockServerEngine()
+        let local = try Self.port(), real = try Self.port()
+        let largeBody = String(repeating: "x", count: RequestLog.maxLoggedBodyBytes + 1)
+        await upstream.updateConfiguration(endpoints: [Self.endpoint("/live", body: largeBody)])
+        try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
+        defer { Task { try? await proxy.stop(); try? await upstream.stop() } }
+
+        await proxy.updateConfiguration(endpoints: [Self.endpoint("/fill/:id", body: "filled")])
+        try await proxy.start(configuration: .init(port: local, globalDelayMs: 0,
+            upstreamURL: "http://127.0.0.1:\(real)"))
+        let session = JourneyServingTests.session(timeout: 10)
+        defer { session.invalidateAndCancel() }
+        for index in 0..<RequestLogGate.capacity {
+            let url = try #require(URL(string: "http://127.0.0.1:\(local)/fill/\(index)"))
+            _ = try await session.data(from: url)
+        }
+        #expect(await proxy.logGate.outstandingCount == RequestLogGate.capacity)
+
+        let liveURL = try #require(URL(string: "http://127.0.0.1:\(local)/live"))
+        let liveCall = Task { try await session.data(from: liveURL) }
+        defer { liveCall.cancel() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while await proxy.logGate.waitingCount == 0 {
+            try #require(ContinuousClock.now < deadline,
+                "The proxy did not reserve before contacting the backend.")
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(await upstream.logGate.outstandingCount == 0)
+
+        // Processing one old log frees the proxy to contact the upstream. The complete large
+        // response must still be captured once the reserved request finishes.
+        var logs = proxy.logStream.makeAsyncIterator()
+        let first = try #require(await logs.next())
+        #expect(first.path == "/fill/0")
+        await proxy.acknowledgeLog()
+        let (data, response) = try await liveCall.value
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(String(decoding: data, as: UTF8.self) == largeBody)
+
+        for index in 1..<RequestLogGate.capacity {
+            let log = try #require(await logs.next())
+            #expect(log.path == "/fill/\(index)")
+            await proxy.acknowledgeLog()
+        }
+        let captured = try #require(await logs.next())
+        #expect(captured.path == "/live")
+        #expect(captured.outcome == .passthrough)
+        #expect(try captured.capturedResponseBody?.text() == largeBody)
+        await proxy.acknowledgeLog()
+        #expect(await proxy.logGate.outstandingCount == 0)
+    }
+
     @Test("Each local port uses its own mocks and real backend")
     func twoBackendTraffic() async throws {
         let upstreamA = MockServerEngine()

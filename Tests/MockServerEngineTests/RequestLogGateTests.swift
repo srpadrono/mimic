@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
+import Vapor
 @testable import MockServerEngine
 
 @Suite("Request log backpressure", .timeLimit(.minutes(1)))
@@ -45,6 +46,28 @@ struct RequestLogGateTests {
         #expect(await publisher.value == false)
         #expect(await gate.reserve() == false)
         #expect(await gate.waitingCount == 0)
+    }
+
+    @Test("Dropping an unconsumed Vapor response returns its proxy slot")
+    func unconsumedResponseReturnsSlot() async throws {
+        let gate = RequestLogGate()
+        func makeResponse() async throws -> Response {
+            let lease = try #require(await gate.acquireLease())
+            return Response(status: .ok, body: .init(managedAsyncStream: { _ in
+                lease.release()
+            }))
+        }
+
+        var response: Response? = try await makeResponse()
+        #expect(response != nil)
+        #expect(await gate.outstandingCount == 1)
+        response = nil
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await gate.outstandingCount != 0 {
+            try #require(ContinuousClock.now < deadline, "The abandoned response kept its permit.")
+            await Task.yield()
+        }
     }
 }
 
