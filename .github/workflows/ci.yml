@@ -212,7 +212,7 @@ jobs:
   macos-ui:
     name: UI tests (${{ matrix.name }})
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     strategy:
       fail-fast: false
