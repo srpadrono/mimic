@@ -4,7 +4,7 @@ import MockServerEngine
 import Observation
 
 /// Abstraction over the embedded server engine so the runtime can be driven by a fake in tests.
-nonisolated protocol MockServerEngineProtocol: Sendable {
+nonisolated protocol MockServerEngineProtocol: AnyObject, Sendable {
     var logStream: AsyncStream<RequestLog> { get }
     func start(configuration: ServerConfiguration) async throws
     func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?) async
@@ -27,6 +27,7 @@ nonisolated protocol MockServerEngineProtocol: Sendable {
     func restartJourney() async -> JourneyStatus?
     func advanceJourney() async -> JourneyStatus?
     func journeyStatus() async -> JourneyStatus?
+    func acknowledgeLog() async
 }
 
 extension MockServerEngine: MockServerEngineProtocol {}
@@ -73,6 +74,7 @@ extension MockServerEngineProtocol {
     func restartJourney() async -> JourneyStatus? { nil }
     func advanceJourney() async -> JourneyStatus? { nil }
     func journeyStatus() async -> JourneyStatus? { nil }
+    func acknowledgeLog() async {}
 }
 
 /// MainActor-facing controller for the server lifecycle, configuration, the live request log, and
@@ -122,12 +124,17 @@ final class MockServerRuntime {
         // naturally when the engine finishes its stream on deinit, so no explicit cancellation is needed
         // (and `[weak self]` avoids retaining the runtime past its own lifetime).
         let stream = engine.logStream
-        Task { [weak self] in
+        Task { [weak self, weak engine] in
             for await entry in stream {
                 self?.appendLog(entry)
                 // A served request may have advanced the journey, so the mirror is refreshed here
                 // rather than on a timer.
                 self?.refreshJourneyStatus()
+                // The stream cannot discard an entry to free space: that entry may still need
+                // automatic capture. Release its slot only after `onLog` has processed it.
+                // Keep acknowledging if an injected engine outlives this runtime. Capturing it
+                // weakly also lets the engine finish the stream on deinit.
+                await engine?.acknowledgeLog()
             }
         }
     }
@@ -387,6 +394,11 @@ final class MockServerRuntime {
     /// together still race inside the engine — which owns the cursor either way.
     private var journeyStatusTicket = 0
 
+    /// A log burst needs one engine read in progress and, if another log arrives during that read,
+    /// one final read. Keep only the newest trailing ticket instead of creating a task per log.
+    private var journeyStatusRefreshInFlight = false
+    private var trailingJourneyStatusTicket: Int?
+
     /// Restarts the run and reports the fresh cursor the engine produced.
     ///
     /// The primitive, in the same split as ``advanceJourneyReportingStatus()`` and for the same
@@ -448,11 +460,25 @@ final class MockServerRuntime {
 
     func refreshJourneyStatus() {
         let ticket = nextJourneyStatusTicket()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let status = await engine.journeyStatus()
-            setJourneyStatus(status, ticket: ticket)
+        if journeyStatusRefreshInFlight {
+            trailingJourneyStatusTicket = ticket
+            return
         }
+        journeyStatusRefreshInFlight = true
+        Task { @MainActor [weak self] in
+            await self?.drainJourneyStatusRefresh(startingWith: ticket)
+        }
+    }
+
+    private func drainJourneyStatusRefresh(startingWith firstTicket: Int) async {
+        var ticket: Int? = firstTicket
+        while let currentTicket = ticket {
+            let status = await engine.journeyStatus()
+            setJourneyStatus(status, ticket: currentTicket)
+            ticket = trailingJourneyStatusTicket
+            trailingJourneyStatusTicket = nil
+        }
+        journeyStatusRefreshInFlight = false
     }
 
     /// The engine's cursor, read only once the configuration push dispatched most recently has landed.

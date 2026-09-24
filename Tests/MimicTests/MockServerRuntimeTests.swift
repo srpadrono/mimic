@@ -36,6 +36,7 @@ struct MockServerRuntimeTests {
         private(set) var snapshots: [Snapshot] = []
         private(set) var restartCallCount = 0
         private(set) var advanceCallCount = 0
+        private(set) var acknowledgedLogCount = 0
         var startError: Error?
         var stopError: Error?
         var stubbedJourneyStatus: JourneyStatus?
@@ -102,6 +103,10 @@ struct MockServerRuntimeTests {
 
         func journeyStatus() async -> JourneyStatus? {
             stubbedJourneyStatus
+        }
+
+        func acknowledgeLog() async {
+            acknowledgedLogCount += 1
         }
 
         func setStubbedJourneyStatus(_ status: JourneyStatus?) {
@@ -197,6 +202,46 @@ struct MockServerRuntimeTests {
 
         func restartJourney() async -> JourneyStatus? { restartAnswer }
         func advanceJourney() async -> JourneyStatus? { restartAnswer }
+    }
+
+    /// Parks the first status read while a log burst reaches the runtime. Later reads observe the
+    /// final cursor, so both the bounded call count and the published value are independently tested.
+    actor GatedBurstStatusEngine: MockServerEngineProtocol {
+        nonisolated let logStream: AsyncStream<RequestLog>
+        private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+        private var firstStatusContinuation: CheckedContinuation<JourneyStatus?, Never>?
+        private var currentStatus: JourneyStatus?
+        private(set) var statusCallCount = 0
+        private(set) var acknowledgedLogCount = 0
+
+        init() {
+            (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
+        }
+
+        deinit { logContinuation.finish() }
+
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func journeyStatus() async -> JourneyStatus? {
+            statusCallCount += 1
+            if statusCallCount == 1 {
+                return await withCheckedContinuation { firstStatusContinuation = $0 }
+            }
+            return currentStatus
+        }
+
+        func setCurrentStatus(_ status: JourneyStatus?) { currentStatus = status }
+
+        func releaseFirstStatus(with status: JourneyStatus?) {
+            firstStatusContinuation?.resume(returning: status)
+            firstStatusContinuation = nil
+        }
+
+        func acknowledgeLog() async { acknowledgedLogCount += 1 }
+
+        nonisolated func emit(_ log: RequestLog) { logContinuation.yield(log) }
     }
 
     /// An engine whose `start` does not return until it is released.
@@ -815,6 +860,32 @@ struct MockServerRuntimeTests {
         )
     }
 
+    @Test("A log burst coalesces cursor reads and still publishes the final cursor")
+    func logBurstCoalescesJourneyStatusRefreshes() async throws {
+        let engine = GatedBurstStatusEngine()
+        let manager = MockServerRuntime(engine: engine)
+        let stale = JourneyStatus.make(journey: Journey(name: "Stale"), state: nil)
+        let final = JourneyStatus.make(journey: Journey(name: "Final"), state: nil)
+
+        manager.refreshJourneyStatus()
+        try await waitUntilAsync { await engine.statusCallCount == 1 }
+
+        let logCount = 64
+        for index in 0..<logCount {
+            engine.emit(RequestLog(method: .get, path: "/burst/\(index)", responseStatusCode: 200))
+        }
+        try await waitUntilAsync { await engine.acknowledgedLogCount == logCount }
+        #expect(manager.requestLogs.last?.path == "/burst/63")
+        #expect(await engine.statusCallCount == 1,
+                "Logs must not start concurrent cursor reads while the first one is gated")
+
+        await engine.setCurrentStatus(final)
+        await engine.releaseFirstStatus(with: stale)
+        try await waitUntil { manager.journeyStatus?.journeyName == "Final" }
+        #expect(await engine.statusCallCount == 2,
+                "The burst needs exactly one trailing read for its final cursor")
+    }
+
     /// The engine's cursor is only readable once the push that put the journey there has landed.
     ///
     /// `updateMocks` reaches the engine from an unstructured task. A status read issued straight after
@@ -934,6 +1005,7 @@ struct MockServerRuntimeTests {
         // and read like a bug in the rotating buffer rather than in its own predicate.
         let lastPath = "/logs/\(MockServerRuntime.maxRequestLogEntries + 4)"
         try await waitUntil { manager.requestLogs.last?.path == lastPath }
+        try await waitUntilAsync { await engine.acknowledgedLogCount == MockServerRuntime.maxRequestLogEntries + 5 }
 
         #expect(manager.requestLogs.count == MockServerRuntime.maxRequestLogEntries)
         #expect(manager.requestLogs.first?.path == "/logs/5")

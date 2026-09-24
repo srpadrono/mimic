@@ -229,7 +229,7 @@ struct EndpointFeatureRenderingTests {
             actions: actions,
             initialStatusCodeString: "201",
             initialResponseBody: #"{"ok":true}"#,
-            initialDelayString: "125",
+            initialDelayString: "175",
             initialGroupTag: " Users ",
             initialHeaders: [
                 (" Content-Type ", "application/json"),
@@ -247,7 +247,7 @@ struct EndpointFeatureRenderingTests {
         #expect(headers?["Content-Type"] == "application/json")
         #expect(headers?["X-Request-ID"] == "abc-123")
         #expect(body == #"{"ok":true}"#)
-        #expect(delay == 125)
+        #expect(delay == 175)
         #expect(groupTag == "Users")
     }
 }

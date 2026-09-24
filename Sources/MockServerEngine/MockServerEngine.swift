@@ -4,8 +4,10 @@ import Domain
 /// Embedded mock HTTP server. Owns a Vapor `Application`, a `MockRouteStore` snapshot of the live
 /// configuration, and a single `logStream` of request records.
 ///
-/// Logging uses one channel only: every served request is yielded to `logStream`, which a single
-/// consumer drains. The stream spans the engine's whole lifetime (it is *not* finished on `stop`),
+/// Logging uses one channel only: every admitted request with a valid-size, complete body is
+/// yielded to `logStream`, which a single consumer drains. Overload, oversized, and timed-out
+/// request bodies have no log.
+/// The stream spans the engine's whole lifetime (it is *not* finished on `stop`),
 /// so a stop/start cycle keeps delivering logs to the same consumer.
 public actor MockServerEngine {
     private var apps: [Int: Application] = [:]
@@ -24,13 +26,27 @@ public actor MockServerEngine {
     }
 
     /// Lossless delivery to the single consumer. Automatic response capture consumes this stream,
-    /// so dropping pending events also silently loses persistent mocks. The runtime bounds its
-    /// displayed history after processing each event; that retention limit must not apply here.
+    /// so dropping pending events also silently loses persistent mocks. Producers reserve one of
+    /// 32 permits before resolving a route or making a log. Excess requests get a 503 without
+    /// advancing a journey; the runtime returns permits after processing accepted entries.
     public nonisolated let logStream: AsyncStream<RequestLog>
     private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+    nonisolated let logGate: RequestLogGate
 
     public init() {
-        (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .unbounded)
+        let gate = RequestLogGate()
+        let (stream, continuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .unbounded)
+        continuation.onTermination = { _ in
+            Task { await gate.terminate() }
+        }
+        logGate = gate
+        logStream = stream
+        logContinuation = continuation
+    }
+
+    /// Called once for each log after its consumer has handled automatic capture and UI retention.
+    public nonisolated func acknowledgeLog() async {
+        await logGate.acknowledge()
     }
 
     public func start(configuration: ServerConfiguration) async throws {
@@ -64,7 +80,7 @@ public actor MockServerEngine {
                 newApp.http.server.configuration.hostname = "127.0.0.1"
                 newApp.http.server.configuration.port = port
                 VaporConfigurator.registerRoutes(
-                    on: newApp, routeStore: routeStore, logContinuation: logContinuation,
+                    on: newApp, routeStore: routeStore, logContinuation: logContinuation, logGate: logGate,
                     backendID: backendID, listenerPort: port, localPorts: localPorts
                 )
                 do {

@@ -29,6 +29,9 @@ enum ControlCommandSamples {
         .endpointList, .endpointGet(endpoint: .route(.get, "/a")),
         .endpointCreate(name: nil, method: .put, path: "/a", spec: EndpointSpec(delayMs: 5, groupTag: "G")),
         .endpointUpdate(endpoint: .id(UUID()), spec: EndpointSpec(path: "/b")),
+        .endpointUpdateWithActiveScenario(
+            endpoint: .id(UUID()), spec: EndpointSpec(path: "/b"), scenarioSpec: ScenarioSpec(statusCode: 503)
+        ),
         .endpointDelete(endpoint: .name("A")), .endpointDuplicate(endpoint: .route(.get, "/a")),
         .scenarioList(endpoint: .route(.get, "/a")),
         .scenarioCreate(endpoint: .route(.get, "/a"), name: "S", spec: ScenarioSpec(statusCode: 201)),
@@ -232,6 +235,57 @@ struct ControlCommandExecutionTests {
             to: project
         ).project
         #expect(project.endpoints[0].groupTag == nil)
+    }
+
+    @Test("A combined edit changes the endpoint and the scenario active at execution time")
+    func combinedEndpointEditUsesCurrentActiveScenario() throws {
+        let first = Scenario(name: "Default", statusCode: 200)
+        let active = Scenario(name: "Error", statusCode: 500)
+        let endpoint = Endpoint(
+            name: "Original", method: .get, path: "/old",
+            scenarios: [first, active], activeScenarioID: active.id
+        )
+        let project = MockProject(name: "Fixture", endpoints: [endpoint])
+
+        let (updated, outcome) = try Self.apply(
+            .endpointUpdateWithActiveScenario(
+                endpoint: .route(.get, "/old"),
+                spec: EndpointSpec(path: "/new"),
+                scenarioSpec: ScenarioSpec(statusCode: 503)
+            ),
+            to: project
+        )
+
+        #expect(outcome.didMutate)
+        #expect(updated.endpoints[0].path == "/new")
+        #expect(updated.endpoints[0].scenarios.map(\.statusCode) == [200, 503])
+        #expect(outcome.result.endpoint == updated.endpoints[0])
+    }
+
+    @Test("A refused scenario half leaves all endpoint fields untouched")
+    func combinedEndpointEditRefusalIsAtomic() throws {
+        let scenario = Scenario(name: "Default", statusCode: 200)
+        let endpoint = Endpoint(
+            name: "Original", method: .get, path: "/old",
+            scenarios: [scenario], activeScenarioID: scenario.id
+        )
+        var project = MockProject(name: "Fixture", endpoints: [endpoint])
+        let before = project
+
+        do {
+            _ = try ProjectCommandExecutor.apply(
+                .endpointUpdateWithActiveScenario(
+                    endpoint: .route(.get, "/old"),
+                    spec: EndpointSpec(path: "/new"),
+                    scenarioSpec: ScenarioSpec(statusCode: 700)
+                ),
+                to: &project
+            )
+            Issue.record("Expected the invalid status code to be refused")
+        } catch let error as ControlError {
+            #expect(error.code == "request.invalid")
+        }
+        #expect(project == before)
     }
 
     @Test("Invalid paths and status codes are rejected before they reach the server")

@@ -406,7 +406,7 @@ struct JourneyFeatureRenderingTests {
         render(JourneyStepSheet(step: makeStep(outcome: .networkFailure(.connectionDrop))) { _ in })
         render(
             JourneyStepSheet(
-                step: makeStep(outcome: .networkFailure(.timeout(holdMs: 3_600_000)))
+                step: makeStep(outcome: .networkFailure(.timeout(holdMs: 300_000)))
             ) { _ in }
         )
     }

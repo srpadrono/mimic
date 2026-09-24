@@ -1986,32 +1986,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
         row?.click()
         XCTAssertTrue(workspace.assertVisible(), "The project should reopen")
 
-        // Asserted on the panel, not on the toggle's label: the toolbar button publishes its `Label`'s
-        // fixed title rather than the directional `.accessibilityLabel` `WorkspaceView` sets — see
-        // ``inspectorHeader`` for the whole of that finding.
-        //
-        // **This is a defect in the window, and it is left asserted rather than reached around.**
-        // `PanelLayoutStore` is not the half that is wrong: `WorkspaceView` writes the arrangement on
-        // every change of `showDrawer`, and `WorkspaceView.init` reads it back when `ContentView`
-        // rebuilds the workspace for the reopened project. What undoes it is one layer down.
-        // `DSSplitPaneController` is constructed with `isSecondaryCollapsed: true`, sets
-        // `secondaryItem.isCollapsed` in `viewDidLoad` — and then `viewDidLayout` restores the
-        // *thickness* unconditionally, calling `splitView.setPosition(_:ofDividerAt:)` because a
-        // collapsed pane measures 0 and never matches the `want` it is comparing against. Moving a
-        // divider is how AppKit un-collapses a pane, so the restore re-opens the panel it was asked
-        // to leave shut, on the first layout pass after the project reopens. The missing guard is on
-        // `secondaryItem.isCollapsed`, before the restore, not on the thickness that lands.
-        //
-        // `panel.requestLog.visible` is read into the message so the next run distinguishes the two
-        // halves rather than restating the symptom: `0` there is the store having done its job.
+        // Read the saved visibility into the failure message to distinguish a save regression
+        // from a restore regression when this check fails.
         XCTAssertTrue(
             workspace.drawerEmptyHeading.waitForNonExistence(timeout: 5),
-            "The arrangement left behind should be the one restored — the log was hidden when the "
-                + "project closed, and panel.requestLog.visible reads "
+            "The request log should stay hidden after reopening; saved panel.requestLog.visible = "
                 + recordedRequestLogVisibility()
-                + ". With that reading 0 the store is right and the restore is not: "
-                + "DSSplitPaneController.viewDidLayout calls setPosition on a pane it was built "
-                + "collapsed, and setPosition un-collapses it."
         )
 
         // Not a vacuous absence. The chord brings the same empty state straight back, so what was

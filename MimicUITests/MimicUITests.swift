@@ -374,6 +374,8 @@ struct EndpointEditorPage {
     var delayField: XCUIElement { app.textFields["endpointEditor.delay"] }
     var groupTagField: XCUIElement { app.textFields["endpointEditor.groupTag"] }
     var moreMenu: XCUIElement {
+        let byMenuButton = app.menuButtons["endpointEditor.moreMenu"].firstMatch
+        if byMenuButton.exists { return byMenuButton }
         let byButton = app.buttons["endpointEditor.moreMenu"].firstMatch
         if byButton.exists { return byButton }
         let byPopUp = app.popUpButtons["endpointEditor.moreMenu"].firstMatch
@@ -1917,7 +1919,8 @@ final class MimicUITests: XCTestCase {
     // MARK: - 30. Evidence Screenshots
 
     /// Walks the core journey and captures labelled screenshots as verification evidence.
-    /// PNGs are written under `<home>/Desktop/Mimic/.artifacts/screenshots` and attached to the xcresult.
+    /// PNGs are written under the UI runner's temporary `mimic-screenshots` directory and attached
+    /// to the xcresult.
     @MainActor
     func testCaptureEvidenceScreenshots() throws {
         launchApp()

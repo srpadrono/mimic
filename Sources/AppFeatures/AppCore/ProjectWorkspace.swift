@@ -65,10 +65,11 @@ final class ProjectWorkspace {
     /// delete itself runs at its turn in the chain, and `currentProject` still names the doomed
     /// project until that turn comes. An edit arriving in that window enqueued its save *behind* the
     /// delete — in perfect chain order, re-inserting the row the delete had just removed. Checked at
-    /// the three places a save of the open project joins the chain — the debounce's claim, the flush
-    /// and ``saveCurrentProject()`` — and once more in ``setCurrentProject(_:isRestoring:)``, which
+    /// the places a save of the open project joins the chain — the debounce's claim, the flush,
+    /// ``saveCurrentProject()`` and the control mutation save — and once more in
+    /// ``setCurrentProject(_:isRestoring:)``, which
     /// refuses to *open* a doomed project at all: a load parked on the row must not land the window
-    /// on a project whose every save those three are already dropping. Struck when the delete
+    /// on a project whose every save those guards are already dropping. Struck when the delete
     /// settles, on both arms — a refused delete leaves a live project whose edits must keep saving.
     private var pendingDeleteIDs: Set<UUID> = []
     /// Which project the debounce currently waiting in ``autosaveTask`` would write.
@@ -85,9 +86,10 @@ final class ProjectWorkspace {
     private var projectListGeneration = 0
     /// The most recent store write, so the next one can wait for it.
     ///
-    /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` — the
-    /// lifecycle writes (create, duplicate, delete, import) and the content writes (the debounced
-    /// autosave once its debounce fires, ``saveCurrentProject()``, the flush on close and switch)
+    /// **Every write this type makes joins this chain**, through ``enqueueStoreWrite(_:)`` or a
+    /// resultful task wrapper — lifecycle writes (create, duplicate, delete, import) and content
+    /// writes (debounced autosave after its timer fires, ``saveCurrentProject()``, the immediate
+    /// control mutation save, and the flush on close and switch)
     /// alike. One discipline rather than a membership list, because the list is how the chain kept
     /// leaking: it started as "create, duplicate, delete", each later member was argued in
     /// separately, and five write paths were still outside it — so a flush racing a chained delete
@@ -103,13 +105,12 @@ final class ProjectWorkspace {
     /// `mimic project duplicate Foo` in the same position reported "not found" for a project the
     /// caller had just been told was created.
     ///
-    /// A host that saves before it answers never has this problem — the price is that every caller
-    /// waits out the write. Chaining the tasks gives the window the same guarantee without making it
-    /// wait: the writes reach the store in the order they were asked for, whatever order the
-    /// callers' replies arrive in.
+    /// Project-scoped control mutations now save before answering; the window still needs to publish
+    /// create and duplicate immediately. Chaining their tasks gives both paths one write order,
+    /// whatever order the callers' replies arrive in.
     ///
-    /// Two deliberate asymmetries. ``importProject(_:)`` manages its chain link by hand, because it
-    /// is the one member that answers with its own write's result — see the comment inside it. And
+    /// Two deliberate asymmetries. ``importProject(_:)`` and the control mutation save manage their
+    /// chain links by hand, because they answer with their own writes' results. And
     /// the autosave's 500 ms debounce sleeps *outside* the chain, in the cancellable `autosaveTask`;
     /// only the write it then claims is enqueued. A sleep inside the chain would hold every later
     /// write behind a timer that exists only to coalesce edits.
@@ -127,11 +128,11 @@ final class ProjectWorkspace {
         refreshProjectList()
     }
 
-    /// The one door to the store: appends `operation` behind every write already asked for.
+    /// Appends a write that needs no result behind every write already asked for.
     ///
-    /// The chain is a `Task<Void, Never>` because nothing awaiting it wants an answer — a member
-    /// that needs its write's own result (``importProject(_:)``) wraps its own task and joins with a
-    /// wrapper instead. Do not write `Task { try await projectRepository.save(…) }` anywhere in this
+    /// The chain is a `Task<Void, Never>`; a member that needs its own result
+    /// (``importProject(_:)`` or the control mutation save) wraps its task and joins with a wrapper.
+    /// Do not write `Task { try await projectRepository.save(…) }` anywhere in this
     /// type: a write outside this door is a write with no order against the others, which is the
     /// whole class of defect ``storeWrites`` exists to close.
     private func enqueueStoreWrite(_ operation: @escaping @MainActor @Sendable () async -> Void) {
@@ -461,6 +462,47 @@ final class ProjectWorkspace {
     /// still in flight. See ``storeWrites`` for the discipline that makes one await sufficient.
     func awaitPendingStoreWrites() async {
         await storeWrites?.value
+    }
+
+    /// Persists a control mutation before its caller reports success.
+    ///
+    /// Called on the main actor immediately after publishing the edited project, before the host's
+    /// first suspension. The snapshot and its place in the write chain are both fixed here, so a
+    /// second command cannot overtake the first while it waits for SQLite. A pending window debounce
+    /// is superseded: this snapshot already contains that edit, and allowing its older snapshot to
+    /// join the chain later could overwrite the control mutation.
+    func enqueueControlMutationSave(_ project: MockProject) -> Task<Result<Void, ControlError>, Never> {
+        cancelPendingAutosave()
+        guard !pendingDeleteIDs.contains(project.id) else {
+            let error = ControlError.persistenceFailure(PersistenceError.projectNotFound(project.id))
+            autosaveStatus = .failed(error.message)
+            return Task { .failure(error) }
+        }
+
+        autosaveStatus = .saving
+        let previousWrites = storeWrites
+        let write: Task<Result<Void, ControlError>, Never> = Task { @MainActor [weak self] in
+            await previousWrites?.value
+            guard let self else {
+                return .failure(.internalFailure("The Mimic session is no longer available."))
+            }
+            autosaveStatus = .saving
+            do {
+                try await projectRepository.save(project)
+                autosaveStatus = .saved
+                scheduleSavedStatusClear()
+                recordRecentProject(id: project.id, name: project.name)
+                return .success(())
+            } catch {
+                autosaveStatus = .failed(error.localizedDescription)
+                return .failure(ControlError(
+                    code: .persistenceFailure,
+                    message: "The edit is still active in this session but could not be saved: \(error.localizedDescription). Inspect the open project before retrying."
+                ))
+            }
+        }
+        storeWrites = Task { @MainActor in _ = await write.value }
+        return write
     }
 
     func scheduleAutosave() {

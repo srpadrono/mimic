@@ -721,26 +721,13 @@ struct WorkspaceView: View {
 
     /// The navigator's "+" on the Journeys tab.
     ///
-    /// `DSIconMenu` rather than `DSPanelHeaderButton`, because that type is a `Button` and this has
-    /// to be a `Menu`. The geometry used to be *copied* — 22pt target, 13pt glyph, `sm` well,
-    /// `labelSecondary` → `labelPrimary` on hover — and the note here said so, naming
-    /// `EndpointEditorView.moreMenu` as the other block with the same shape. That is a coupling
-    /// asserted in prose across two modules' worth of call sites and checked by nobody, which is the
-    /// thing `DSControlHeight` was extracted to stop. The component is where the agreement lives now.
+    /// `DSIconMenu` shares the 22pt control and hover treatment with the endpoint editor's menu.
     private var addJourneyMenu: some View {
         DSIconMenu(
             systemImage: "plus",
             help: "Add a journey",
-            // Neither the tooltip's words nor the empty state's, and that is the whole point. This
-            // control *opens a chooser* — a new empty journey, or one built from a template — while
-            // `JourneyNavigatorList`'s empty state offers "Add journey" and creates one outright.
-            // Both used to answer to "Add journey": VoiceOver named two different actions
-            // identically, and `JourneyUITests` was left telling them apart by AppKit element type,
-            // a `MenuButton` here against a `Button` there. Element type is not identity — it is a
-            // property of the menu *style* — so modernising `DSIconMenu` off the deprecated
-            // `.menuStyle(.borderlessButton)` would have repointed the suite's query at the empty
-            // state's button, where every wait for a menu item would then time out. Both the label
-            // and the menu's own identifier now remain available to assistive technology and tests.
+            // This chooser offers an empty journey or a template. The empty-state "Add journey"
+            // button creates one directly, so it has a different accessible name.
             label: "Choose how to add a journey",
             identifier: "journeys.addJourneyButton"
         ) {

@@ -38,6 +38,15 @@ import XCTest
 /// pretended otherwise would be green about nothing. The status colour dot (EPEDIT-08) is
 /// `.accessibilityHidden(true)` on purpose; its colour mapping belongs to a `DSColors` unit test.
 final class EndpointEditorUITests: MimicUITestCase {
+    private var usesDarkAppearance = false
+
+    @MainActor
+    override func configureLaunchEnvironment(_ app: XCUIApplication) {
+        if usesDarkAppearance {
+            app.launchArguments += ["-AppleInterfaceStyle", "Dark",
+                                    "-NSRequiresAquaSystemAppearance", "NO"]
+        }
+    }
 
     // MARK: - Shared element resolution
 
@@ -165,6 +174,33 @@ final class EndpointEditorUITests: MimicUITestCase {
         guard workspace.drawerEmptyHeading.exists else { return }
         workspace.toggleDrawerButton.click()
         _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+    }
+
+    /// Check the inspector row's visible click point before asking XCTest to open its context menu.
+    /// A CI run found the row but failed inside XCTest's automatic ScrollView-to-visible gesture.
+    @MainActor
+    private func rightClickScenarioRow(_ row: XCUIElement, named name: String) {
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name) should be in the scenario list")
+        let list = inspector.element("inspector.scenarioList")
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "The inspector should show its scenario list")
+
+        func rowIsVisible() -> Bool {
+            let viewport = list.frame.intersection(app.windows.firstMatch.frame)
+            guard viewport.width > 0, viewport.height > 0 else { return false }
+            let rowCenter = CGPoint(x: row.frame.midX, y: row.frame.midY)
+            return viewport.contains(rowCenter) && row.isHittable
+        }
+
+        if !rowIsVisible() {
+            workspace.fillWindow()
+            UITestApp.waitForStableFrame(list)
+        }
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) { rowIsVisible() },
+            "\(name) needs a visible hit point before its context menu opens; "
+                + "row: \(row.frame), list: \(list.frame), window: \(app.windows.firstMatch.frame)"
+        )
+        row.rightClick()
     }
 
     /// Where an element is and whether the pointer can get to it, for a failure message.
@@ -1160,7 +1196,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(delayValidationNote.waitForExistence(timeout: 5),
                       "A non-numeric delay should say why it was not accepted")
         let delayMessage = shownText(of: delayValidationNote)
-        XCTAssertTrue(delayMessage.contains("whole number of milliseconds"),
+        XCTAssertTrue(delayMessage.contains("Delay must be a whole number from 0 to 300000 ms"),
                       "The note should state the rule — it reads \(delayMessage)")
     }
 
@@ -1363,7 +1399,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         let defaultRow = inspector.scenarioRow(named: "Default")
         XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
-        defaultRow.rightClick()
+        rightClickScenarioRow(defaultRow, named: "Default")
 
         let deleteItem = app.menuItems["Delete scenario"]
         XCTAssertTrue(deleteItem.waitForExistence(timeout: 5),
@@ -1382,7 +1418,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         let addedRow = inspector.scenarioRow(named: "Unauthorized")
         XCTAssertTrue(addedRow.waitForExistence(timeout: 5))
 
-        addedRow.rightClick()
+        rightClickScenarioRow(addedRow, named: "Unauthorized")
         let secondDelete = app.menuItems["Delete scenario"]
         XCTAssertTrue(secondDelete.waitForExistence(timeout: 5))
         XCTAssertTrue(secondDelete.isEnabled,
@@ -1580,11 +1616,23 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5),
                       "The editor header should offer its more-actions menu")
-        endpointEditor.moreMenu.click()
+        XCTAssertEqual(endpointEditor.moreMenu.elementType, .menuButton)
+        UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "More actions for this endpoint")
+        XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
+        XCTAssertLessThanOrEqual(endpointEditor.moreMenu.frame.width, 28)
+        XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
+        // The outer tenth of the square is beyond the centred glyph. It should still respond.
+        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
 
         let duplicate = app.menuItems["Duplicate"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
                       "The more-actions menu should offer Duplicate")
+        XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists,
+                      "The same menu should retain the delete action")
+        let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuEvidence.name = "endpoint-more-menu-edge-click"
+        menuEvidence.lifetime = .keepAlways
+        add(menuEvidence)
         duplicate.click()
 
         XCTAssertTrue(waitForSidebarRowCount(2),
@@ -1593,6 +1641,35 @@ final class EndpointEditorUITests: MimicUITestCase {
             self.sidebarEndpointRows().contains { $0.label.contains("Orders (Copy)") }
         },
                       "The copy should be listed under its own name")
+    }
+
+    /// The compact editor must keep the same actionable square and AX name as the wide
+    /// editor. A click in its outer left edge also catches a glyph-sized AppKit menu target.
+    @MainActor
+    func testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance() throws {
+        usesDarkAppearance = true
+        launchApp()
+        createProjectViaUI(name: "Compact Editor Menu")
+        createEndpointViaUI(name: "Orders", path: "/api/orders")
+        workspace.compactWindow()
+
+        let menu = endpointEditor.moreMenu
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.isHittable)
+        XCTAssertEqual(menu.elementType, .menuButton)
+        UITestApp.assertAccessibleMenuName(menu, equals: "More actions for this endpoint")
+        XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
+        XCTAssertTrue(app.menuItems["Duplicate"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "compact-endpoint-more-menu-dark"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
     // MARK: - 24. The editor's delete confirmation, cancelled

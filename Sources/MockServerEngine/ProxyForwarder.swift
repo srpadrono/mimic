@@ -37,11 +37,16 @@ enum ProxyForwarder {
     static func forward(
         _ request: Request, to upstreamURL: String, localPorts: Set<Int>,
         incoming: IncomingRequest, projectID: UUID?, backendName: String, listenerPort: Int,
-        logContinuation: AsyncStream<RequestLog>.Continuation
+        logContinuation: AsyncStream<RequestLog>.Continuation, logGate: RequestLogGate,
+        lease: RequestLogLease
     ) async -> Response {
         let started = ContinuousClock.now
-        let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
+        // The handler acquired this slot before resolving routes. The response writer retains
+        // it; if the writer never runs, deinit returns the slot.
         @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
+            // A response can publish at most once even if a framework callback is repeated.
+            guard lease.transferToConsumer() else { return }
+            let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
             let text = String(data: preview, encoding: .utf8)
             let (displayBody, displayTruncated) = RequestLog.cappedBody(text)
             // Only complete UTF-8 text can become a fixture; keep large payloads off the log heap.
@@ -54,7 +59,7 @@ enum ProxyForwarder {
                 captured = nil
             }
             let elapsed = started.duration(to: .now).components
-            logContinuation.yield(RequestLog(
+            let result = logContinuation.yield(RequestLog(
                 method: incoming.method, path: request.url.string, backendID: incoming.backendID, projectID: projectID,
                 backendName: backendName, listenerPort: listenerPort,
                 upstreamURL: target(base: upstreamURL, requestURI: request.url.string)?.absoluteString,
@@ -67,6 +72,9 @@ enum ProxyForwarder {
                 capturedResponseBody: captured,
                 failureLabel: failure == nil ? nil : "backend-unavailable", outcome: failure == nil ? .passthrough : .proxyFailure
             ))
+            if case .terminated = result {
+                Task { await logGate.acknowledge() }
+            }
         }
         func failure(_ message: String) -> Response {
             log(status: 502, headers: [:], preview: Data(message.utf8), truncated: false, failure: message)
@@ -95,6 +103,9 @@ enum ProxyForwarder {
                 return Response(status: upstream.status, headers: headers)
             }
             return Response(status: upstream.status, headers: headers, body: .init(managedAsyncStream: { writer in
+                // This closure may never run if the downstream closes before streaming starts;
+                // the captured lease then returns its slot on deinit. Every started writer below
+                // transfers that slot to one complete or failed log.
                 var preview = Data()
                 var truncated = false
                 do {
@@ -107,7 +118,8 @@ enum ProxyForwarder {
                     }
                     log(status: status, headers: headers, preview: preview, truncated: truncated)
                 } catch {
-                    log(status: status, headers: headers, preview: preview, truncated: true, failure: "The backend response did not complete.")
+                    log(status: status, headers: headers, preview: preview, truncated: true,
+                        failure: "The backend response did not complete.")
                     throw error
                 }
             }))

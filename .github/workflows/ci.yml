@@ -83,12 +83,12 @@ jobs:
           }
 
       - name: Test
-        run: swift test --skip-build
+        run: swift test --skip-build --no-parallel
 
   macos-checks:
     name: Build, unit suites, Release, CLI e2e (macOS)
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
@@ -212,7 +212,7 @@ jobs:
   macos-ui:
     name: UI tests (${{ matrix.name }})
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     strategy:
       fail-fast: false

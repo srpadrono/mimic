@@ -129,6 +129,16 @@ public enum ProjectValidator {
     /// ``MockProject/activeJourney`` reads a dangling `activeJourneyID` as `nil`, so the server runs
     /// with no overlay while the document says a journey is active.
     public static func validate(_ project: MockProject) throws {
+        try validate(project, includeTiming: true)
+    }
+
+    /// The executor calls this for listener edits on a stored project. The timing delta is checked
+    /// separately against the previous snapshot so an unchanged legacy delay does not block edits.
+    static func validatePreservingLegacyTiming(_ project: MockProject) throws {
+        try validate(project, includeTiming: false)
+    }
+
+    private static func validate(_ project: MockProject, includeTiming: Bool) throws {
         // A document from a *newer* build, checked first because nothing below can be trusted to mean
         // what it says once the schema has moved. Decoding does not stop one: `MockProject.init(from:)`
         // keeps whatever version the document declares, unknown keys are dropped in silence, and the
@@ -158,6 +168,12 @@ public enum ProjectValidator {
         guard project.serverConfiguration.globalDelayMs >= 0 else {
             throw ValidationError.invalidDocument(
                 context: "server configuration", reason: "Global delay must be zero or greater."
+            )
+        }
+        if includeTiming, !ResponseDelay.isWithinLimit(globalMs: project.serverConfiguration.globalDelayMs) {
+            throw ValidationError.invalidDocument(
+                context: "server configuration",
+                reason: "Global delay must not exceed \(ResponseDelay.maximumDescription)."
             )
         }
         let additional = project.serverConfiguration.backends
@@ -199,6 +215,14 @@ public enum ProjectValidator {
             guard endpoint.delayMs >= 0 else {
                 throw ValidationError.invalidDocument(
                     context: context(for: endpoint), reason: "Endpoint delay must be zero or greater."
+                )
+            }
+            if includeTiming, !ResponseDelay.isWithinLimit(
+                globalMs: project.serverConfiguration.globalDelayMs, localMs: endpoint.delayMs
+            ) {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "Global plus endpoint delay must not exceed \(ResponseDelay.maximumDescription)."
                 )
             }
             do {
@@ -260,6 +284,20 @@ public enum ProjectValidator {
                 if case let .networkFailure(.timeout(holdMs)) = step.outcome, holdMs < 0 {
                     throw ValidationError.invalidDocument(context: stepContext, reason: "Timeout hold must be zero or greater.")
                 }
+                if includeTiming {
+                    let holdMs: Int
+                    if case let .networkFailure(.timeout(value)) = step.outcome { holdMs = value }
+                    else { holdMs = 0 }
+                    guard ResponseDelay.isWithinLimit(
+                        globalMs: project.serverConfiguration.globalDelayMs,
+                        localMs: step.delayMs, holdMs: holdMs
+                    ) else {
+                        throw ValidationError.invalidDocument(
+                            context: stepContext,
+                            reason: "Global delay, step delay, and timeout hold together must not exceed \(ResponseDelay.maximumDescription)."
+                        )
+                    }
+                }
                 do {
                     try EndpointValidator.validatePath(step.path)
                     if case let .respond(response) = step.outcome {
@@ -294,6 +332,83 @@ public enum ProjectValidator {
     /// Shared so a field failure and a reference failure report the same endpoint the same way.
     private static func context(for endpoint: Endpoint) -> String {
         "endpoint \"\(endpoint.name)\" (\(endpoint.method.rawValue) \(endpoint.path))"
+    }
+
+    /// Rejects newly unsafe timing while allowing an older stored project to be opened and
+    /// repaired one field at a time. Unchanged legacy values and monotonic reductions are not
+    /// treated as new unsafe writes; serving still caps them until the project is fully repaired.
+    static func validateTimingChanges(from previous: MockProject, to candidate: MockProject) throws {
+        let oldGlobal = previous.serverConfiguration.globalDelayMs
+        let newGlobal = candidate.serverConfiguration.globalDelayMs
+        let beforeGlobal = Timing(global: oldGlobal)
+        let afterGlobal = Timing(global: newGlobal)
+        if beforeGlobal != afterGlobal, !afterGlobal.isWithinLimit,
+           !afterGlobal.isReduction(from: beforeGlobal) {
+            throw ValidationError.invalidDocument(
+                context: "server configuration",
+                reason: "Global delay must not exceed \(ResponseDelay.maximumDescription)."
+            )
+        }
+
+        var oldEndpoints: [UUID: Endpoint] = [:]
+        for endpoint in previous.endpoints { oldEndpoints[endpoint.id] = endpoint }
+        for endpoint in candidate.endpoints {
+            let before = oldEndpoints[endpoint.id].map { Timing(global: oldGlobal, local: $0.delayMs) }
+            let after = Timing(global: newGlobal, local: endpoint.delayMs)
+            guard before != after else { continue }
+            guard after.isWithinLimit || before.map({ after.isReduction(from: $0) }) == true else {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "Global plus endpoint delay must not exceed \(ResponseDelay.maximumDescription)."
+                )
+            }
+        }
+
+        var oldSteps: [UUID: JourneyStep] = [:]
+        for journey in previous.journeys {
+            for step in journey.steps { oldSteps[step.id] = step }
+        }
+        for journey in candidate.journeys {
+            for step in journey.steps {
+                let before = oldSteps[step.id].map { Timing(global: oldGlobal, step: $0) }
+                let after = Timing(global: newGlobal, step: step)
+                guard before != after else { continue }
+                guard after.isWithinLimit || before.map({ after.isReduction(from: $0) }) == true else {
+                    throw ValidationError.invalidDocument(
+                        context: "journey \"\(journey.name)\", step \"\(step.name)\"",
+                        reason: "Global delay, step delay, and timeout hold together must not exceed \(ResponseDelay.maximumDescription)."
+                    )
+                }
+            }
+        }
+    }
+
+    private struct Timing: Equatable {
+        let global: Int
+        let local: Int
+        let hold: Int
+
+        init(global: Int, local: Int = 0, hold: Int = 0) {
+            self.global = global
+            self.local = local
+            self.hold = hold
+        }
+
+        init(global: Int, step: JourneyStep) {
+            let hold: Int
+            if case let .networkFailure(.timeout(value)) = step.outcome { hold = value }
+            else { hold = 0 }
+            self.init(global: global, local: step.delayMs, hold: hold)
+        }
+
+        var isWithinLimit: Bool {
+            ResponseDelay.isWithinLimit(globalMs: global, localMs: local, holdMs: hold)
+        }
+
+        func isReduction(from old: Timing) -> Bool {
+            global <= old.global && local <= old.local && hold <= old.hold
+                && (global < old.global || local < old.local || hold < old.hold)
+        }
     }
 }
 

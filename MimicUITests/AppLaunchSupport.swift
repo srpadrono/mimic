@@ -88,6 +88,30 @@ enum UITestApp {
 
     // MARK: - Menus
 
+    /// Local macOS exposes the menu name as AX title; CI macOS reports an empty title. Require the
+    /// exact name in title or label on the actionable menu button, never only on a child image.
+    @MainActor
+    static func assertAccessibleMenuName(
+        _ menu: XCUIElement,
+        equals expected: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let title = menu.title
+        let label = menu.label
+        XCTContext.runActivity(
+            named: "Menu AX name '\(expected)': title '\(title)', label '\(label)'"
+        ) { _ in }
+        guard title == expected || label == expected else {
+            XCTFail(
+                "Expected menu name '\(expected)'; AX title '\(title)', label '\(label)'. \(menu.debugDescription)",
+                file: file,
+                line: line
+            )
+            return
+        }
+    }
+
     /// Waits until `element` reports the same non-empty frame twice in a row.
     ///
     /// `waitForExistence` answers "is it in the accessibility tree", which for an AppKit menu happens

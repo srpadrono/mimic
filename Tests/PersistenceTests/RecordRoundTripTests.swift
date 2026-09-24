@@ -201,6 +201,24 @@ struct RecordRoundTripTests {
         )
     }
 
+    @Test("A stored project with older excessive waits still loads unchanged and accepts an edit")
+    func legacyDelayRemainsAccessibleForEdits() async throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+        var legacy = Self.project
+        legacy.serverConfiguration.globalDelayMs = 400_000
+        legacy.endpoints[0].delayMs = 500_000
+        legacy.journeys[0].steps[1].delayMs = 600_000
+        legacy.journeys[0].steps[1].outcome = .networkFailure(.timeout(holdMs: 700_000))
+        try await repository.save(legacy)
+
+        var opened = try await repository.load(id: legacy.id)
+        #expect(opened == legacy)
+        _ = try ProjectCommandExecutor.apply(.projectRename(name: "Legacy open"), to: &opened)
+        #expect(opened.name == "Legacy open")
+        #expect(opened.serverConfiguration.globalDelayMs == 400_000)
+    }
+
     /// `NetworkFailure.timeout(holdMs:)` keeps its payload in an enum case, which is not a stored
     /// property and so is invisible to the `Mirror` walk below. It is stored in its own column
     /// (`failureHoldMs`), and a missing one decodes to `NetworkFailure.defaultTimeoutHoldMs` rather

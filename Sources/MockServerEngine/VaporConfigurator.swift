@@ -1,23 +1,50 @@
+import Foundation
 import Vapor
 import Domain
 
 private typealias DomainHTTPMethod = Domain.HTTPMethod
 
 enum VaporConfigurator {
+    /// Local clients should finish sending a request body promptly. An incomplete upload must not
+    /// occupy one of the engine's admission slots for the lifetime of an open TCP connection.
+    private static let bodyCollectionTimeoutSeconds: Int64 = 10
+
     /// Every request Mimic answers arrives here, whatever its path.
     ///
     /// Registering routes is the *only* thing Vapor decides; what to serve is Domain's answer via
-    /// `MockResolver.plan`, and everything that reaches this closure is logged — including the
-    /// requests nothing is configured for. A path Vapor answers itself is a path Mimic cannot see.
+    /// `MockResolver.plan`, and every admitted request whose body completes within the limits is
+    /// logged — including requests nothing is configured for. Overload, oversized-body, and
+    /// timed-out-body rejections are not logged.
+    /// A path Vapor answers itself is a path Mimic cannot see.
     static func registerRoutes(
         on app: Application,
         routeStore: MockRouteStore,
         logContinuation: AsyncStream<RequestLog>.Continuation,
+        logGate: RequestLogGate,
         backendID: UUID? = nil,
         listenerPort: Int = 8080,
         localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
+            // Reject before resolution: a rejected request must neither advance a journey nor
+            // allocate a pending log or proxy response preview. With a streaming route, the
+            // admission check also happens before Vapor collects a large request body.
+            guard let lease = await logGate.tryAcquireLease() else {
+                return Response(status: .serviceUnavailable,
+                    headers: ["X-Mimic-Rejection": "admission-capacity"])
+            }
+            // Preserve the previous 10 MiB/413 limit, but collect only after admission. If the
+            // peer stalls, answer and close its connection so the underlying NIO body collector
+            // finishes too; canceling a Swift task waiting on its future does not cancel it.
+            guard try await collectBodyBeforeDeadline(req) else {
+                if req.method == .HEAD {
+                    // Vapor skips the response stream writer for HEAD. This timed-out request is
+                    // never resolved or logged, and the response has a zero-length body; changing
+                    // the method here only lets Vapor run the writer that closes the socket.
+                    req.method = .GET
+                }
+                return timedOutBodyResponse(for: req)
+            }
             let incoming = IncomingRequest(
                 method: DomainHTTPMethod(rawValue: req.method.rawValue) ?? .get,
                 path: req.url.path,
@@ -39,13 +66,16 @@ enum VaporConfigurator {
             if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
                 return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
                     incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
-                    logContinuation: logContinuation)
+                    logContinuation: logContinuation, logGate: logGate, lease: lease)
             }
 
-            logContinuation.yield(makeLog(
-                incoming: incoming, resolved: resolved, projectID: projectID,
-                backendName: backend?.name, listenerPort: listenerPort
-            ))
+            if lease.transferToConsumer() {
+                let result = logContinuation.yield(makeLog(
+                    incoming: incoming, resolved: resolved, projectID: projectID,
+                    backendName: backend?.name, listenerPort: listenerPort
+                ))
+                if case .terminated = result { await logGate.acknowledge() }
+            }
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing
@@ -69,9 +99,40 @@ enum VaporConfigurator {
         let methods: [Vapor.HTTPMethod] = [.GET, .POST, .PUT, .PATCH, .DELETE, .OPTIONS, .HEAD]
         for method in methods {
             for path in interceptAllPaths {
-                app.on(method, path, body: .collect(maxSize: "10mb"), use: handler)
+                app.on(method, path, body: .stream, use: handler)
             }
         }
+    }
+
+    /// Races collection against an event-loop timer without awaiting a canceled child task. Both
+    /// callbacks run through one completion gate, so a body finishing at the deadline cannot
+    /// complete the promise twice. The 408 response closes the channel and ends collection.
+    private static func collectBodyBeforeDeadline(_ request: Request) async throws -> Bool {
+        let completion = request.eventLoop.makePromise(of: Bool.self)
+        let race = BodyCollectionRace { completion.completeWith($0) }
+        let deadline = request.eventLoop.scheduleTask(in: .seconds(bodyCollectionTimeoutSeconds)) {
+            race.complete(.success(false))
+        }
+        request.body.collect(max: 10 << 20).whenComplete { result in
+            deadline.cancel()
+            race.complete(result.map { _ in true })
+        }
+        return try await completion.futureResult.get()
+    }
+
+    /// Vapor's HTTP/1 handler bases keep-alive on the *request* and appends its own Connection
+    /// header, even when a response asks to close. An errored response stream is the public route
+    /// to its close-on-error handler. Flush an empty, zero-length 408 body first so clients see a
+    /// complete timeout response before that close tears down the incomplete request collector.
+    private static func timedOutBodyResponse(for request: Request) -> Response {
+        let body = Response.Body(stream: { writer in
+            let flushed = writer.eventLoop.makePromise(of: Void.self)
+            writer.write(.buffer(request.byteBufferAllocator.buffer(capacity: 0)), promise: flushed)
+            flushed.futureResult.whenComplete { _ in
+                writer.write(.error(BodyCollectionTimeout()), promise: nil)
+            }
+        }, count: 0)
+        return Response(status: .requestTimeout, headers: ["Connection": "close"], body: body)
     }
 
     /// The two registrations it takes to see *every* request, root included.
@@ -133,15 +194,13 @@ enum VaporConfigurator {
     ///
     /// A dropped connection is immediate (bar any configured artificial delay); a timeout is
     /// deliberately long, because the behaviour under test is the *client* giving up. Values
-    /// from an invalid or older document are clamped to zero and the sum saturates at `Int.max`.
+    /// from an invalid or older document are clamped to the five-minute serving budget.
     static func holdMilliseconds(for failure: NetworkFailure, delayMs: Int) -> Int {
         switch failure {
         case .connectionDrop:
-            return max(0, delayMs)
+            return ResponseDelay.combined(globalMs: delayMs, localMs: 0)
         case let .timeout(timeoutHoldMs):
-            let delay = max(0, delayMs)
-            let timeoutHold = max(0, timeoutHoldMs)
-            return timeoutHold > Int.max - delay ? Int.max : delay + timeoutHold
+            return ResponseDelay.combined(globalMs: delayMs, localMs: timeoutHoldMs)
         }
     }
 
@@ -271,3 +330,24 @@ enum VaporConfigurator {
         return error
     }
 }
+
+private final class BodyCollectionRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private let finish: @Sendable (Result<Bool, Error>) -> Void
+    private var isFinished = false
+
+    init(finish: @escaping @Sendable (Result<Bool, Error>) -> Void) {
+        self.finish = finish
+    }
+
+    func complete(_ result: Result<Bool, Error>) {
+        let shouldFinish = lock.withLock { () -> Bool in
+            guard !isFinished else { return false }
+            isFinished = true
+            return true
+        }
+        if shouldFinish { finish(result) }
+    }
+}
+
+private struct BodyCollectionTimeout: Error {}

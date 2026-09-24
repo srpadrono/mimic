@@ -23,8 +23,7 @@ struct JourneysNavigatorPage {
     /// Prefer the menu's identifier. The label fallback tolerates native menu representations
     /// while remaining distinct from the empty state's "Add journey" action.
     var addButton: XCUIElement {
-        let byIdentifier = app.descendants(matching: .any)
-            .matching(identifier: "journeys.addJourneyButton").firstMatch
+        let byIdentifier = app.menuButtons["journeys.addJourneyButton"].firstMatch
         if byIdentifier.exists { return byIdentifier }
         let byMenuButton = app.menuButtons["Choose how to add a journey"].firstMatch
         if byMenuButton.exists { return byMenuButton }
@@ -155,13 +154,17 @@ final class JourneyUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchWithProject(named name: String = "Journey Tests") {
+    private func launchWithProject(named name: String = "Journey Tests", lightAppearance: Bool = false) {
         let application = XCUIApplication()
         application.launchArguments = [
             "-MimicResetForTesting",
             "-ApplePersistenceIgnoreState",
             "YES",
         ]
+        if lightAppearance {
+            application.launchArguments += ["-AppleInterfaceStyle", "Light",
+                                            "-NSRequiresAquaSystemAppearance", "YES"]
+        }
         application.launchEnvironment["MIMIC_DEFAULTS_SUITE"] = Self.testSuite
         // Port 0 lets the OS pick, so a test run neither collides with a developer's running instance
         // nor with a second run on the same machine. The discovery-file half of that isolation —
@@ -256,6 +259,64 @@ final class JourneyUITests: XCTestCase {
             journeys.emptyStateAddButton.exists,
             "The empty state should offer its own way to create a journey"
         )
+    }
+
+    /// The add menu is a 22pt icon control. A click just inside its right edge must open the
+    /// chooser, outside the centred glyph's bounds. The menu and the empty-state action also need
+    /// distinct spoken names so either AppKit menu representation remains unambiguous.
+    @MainActor
+    func testNavigatorAddMenuRespondsAtEdgeWithDistinctAccessibleChoices() throws {
+        launchWithProject()
+        showJourneysNavigator()
+
+        let menu = journeys.addButton
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.isHittable)
+        XCTAssertEqual(menu.elementType, .menuButton)
+        UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
+        XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
+        XCTAssertLessThanOrEqual(menu.frame.width, 28)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+        XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")
+
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).click()
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
+        XCTAssertEqual(journeys.newEmptyMenuItem.title, "New empty journey")
+        XCTAssertEqual(journeys.templateMenuItem.title, "Add journey from template")
+        let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuEvidence.name = "journey-add-menu-edge-click"
+        menuEvidence.lifetime = .keepAlways
+        add(menuEvidence)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+
+    /// A compact light window needs the chooser's full hit target and distinct AX name.
+    @MainActor
+    func testCompactNavigatorAddMenuRespondsAtEdgeInLightAppearance() throws {
+        launchWithProject(named: "Compact Light Journeys", lightAppearance: true)
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        showJourneysNavigator()
+
+        let menu = journeys.addButton
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.isHittable)
+        XCTAssertEqual(menu.elementType, .menuButton)
+        UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
+        XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+        XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")
+
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).click()
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "compact-journey-add-menu-light"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
     @MainActor

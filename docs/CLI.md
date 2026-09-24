@@ -2,6 +2,8 @@
 
 `mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, one diagnostic line on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
 
+Project edits (such as rename, endpoint, scenario, journey definition, and `log save-as-mock` changes) report success after the edited project has been saved. If the store refuses a save, the command returns `persistence.failure`; the edited project remains in the open session and the window shows the save failure. Inspect the open project before retrying a create command: repeating it can add a second item to that session. Project create, open, and duplicate retain their asynchronous window workflow; confirm their settled state with a follow-up command.
+
 HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
 
 ## Exit codes
@@ -71,6 +73,8 @@ mimic server backend update <UUID> [--name NAME] [--port N] [--upstream URL]
 mimic server backend delete <UUID>
 ```
 
+The effective wait for a mock response is limited to 300,000 ms (5 minutes). `--delay`, endpoint delays, journey step delays, and timeout holds share that budget: global plus endpoint delay, or global plus step delay plus timeout hold. A command that adds to an excessive wait is rejected. Existing stored projects with longer waits remain editable and are capped while serving; reduce their timing fields to bring them within the limit. Imported project documents must already fit the limit.
+
 One project can listen on several local ports. The original port is the primary backend; additional backends have stable UUIDs. Select a backend for an endpoint or journey step with `--backend <UUID>` or `--backend primary`. A journey step resolves first, then an endpoint on that backend, then an enabled upstream. An explicit journey block is not forwarded. Port edits require a restart; `server status` reports `restartRequired` and both configured and active backends. Upstream and pass-through switches apply live.
 
 Forwarded calls are logged as `passthrough`. `mimic log save-as-mock <log-UUID>` saves a complete supported text response. Automatic capture is opt-in with `--capture-responses true` and saves the first complete reply for a backend, method, path, and GraphQL operation. It skips binary, compressed, truncated, failed, cache-only `304`, partial `206`, and unexpectedly empty JSON responses. Request `Accept-Encoding: identity` to capture an uncompressed JSON reply. Previews are limited to 64 KiB; complete supported responses up to 5 MiB can be saved. Review bodies before sharing projects. Large and event-stream responses pass through without becoming mocks; WebSocket upgrades are unsupported.
@@ -112,7 +116,7 @@ mimic scenario delete GET /account-summary "Server error"
 ```
 
 `--body-file -` reads stdin. `endpoint update --status` changes the active scenario. A scenario selects a standing response; a journey scripts a sequence.
-An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario before sending either edit. The edits are still two control commands; another client changing the project between them can leave only the first edit applied.
+An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario, then applies both edits in one project mutation. The host chooses the active scenario at execution time if another client switched it after the check.
 Endpoint edits require a unique match. If multiple backends contain the same method and path, select the endpoint by UUID with `--id`.
 Scenario create, update, activate, and delete also accept `--id <endpoint-UUID> <scenario-name>` when an endpoint route is shared.
 
