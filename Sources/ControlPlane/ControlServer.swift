@@ -20,7 +20,28 @@ public actor ControlServer {
     /// The other half of the `isStarting` guard. `stop()` clears `app` before it awaits the
     /// shutdown, so `app == nil` does not distinguish "never started" from "still closing".
     private var isStopping = false
+    private var stopRequestedDuringStart = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var endpointFileURL: URL?
+    private var advertisedEndpoint: ControlEndpoint?
+
+    #if DEBUG
+    private var beforeBindingForTesting: (@Sendable () async -> Void)?
+    private var onStopAcceptedForTesting: (@Sendable () -> Void)?
+    private var advertisementURLForTesting: URL?
+
+    func setBeforeBindingForTesting(_ action: @escaping @Sendable () async -> Void) {
+        beforeBindingForTesting = action
+    }
+
+    func setOnStopAcceptedForTesting(_ action: @escaping @Sendable () -> Void) {
+        onStopAcceptedForTesting = action
+    }
+
+    func setAdvertisementURLForTesting(_ url: URL) {
+        advertisementURLForTesting = url
+    }
+    #endif
 
     /// This instance's token. Fresh per process; see ``ControlToken``.
     public let token: String
@@ -53,22 +74,39 @@ public actor ControlServer {
         // discovery file replaced by the second's — a CLI would be pointed at one instance while a
         // stray one held the other port for the life of the process. `MockServerEngine.start`
         // carries this guard for the same reason and in the same shape.
-        guard app == nil, !isStarting else { throw ControlServerError.alreadyRunning }
-        // And `stop()` opens the same window from the other end: it clears `app` and *then* suspends
-        // on the shutdown, so a start arriving mid-stop sees `nil` and binds a port the outgoing
-        // application still holds — the eight lines above, reasoned through only for two starts. A
-        // separate case rather than `.alreadyRunning`: this one is worth retrying in a moment.
+        // `stop()` clears `app` before it awaits shutdown, and can also wait for a pending startup.
+        // In both cases a new start should retry after shutdown, not mistake this for an already
+        // active server.
         guard !isStopping else { throw ControlServerError.shuttingDown }
+        guard app == nil, !isStarting else { throw ControlServerError.alreadyRunning }
         isStarting = true
-        defer { isStarting = false }
+        defer {
+            isStarting = false
+            stopRequestedDuringStart = false
+            let waiters = startWaiters
+            startWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+        }
 
         let env = Environment(name: "production", arguments: ["vapor"])
         let application = try await Application.make(env)
+        if stopRequestedDuringStart {
+            try? await application.asyncShutdown()
+            throw ControlServerError.shuttingDown
+        }
         application.logger.logLevel = .warning
         application.http.server.configuration.hostname = "127.0.0.1"
         application.http.server.configuration.port = port
 
         register(on: application)
+
+        #if DEBUG
+        if let beforeBindingForTesting { await beforeBindingForTesting() }
+        #endif
+        if stopRequestedDuringStart {
+            try? await application.asyncShutdown()
+            throw ControlServerError.shuttingDown
+        }
 
         do {
             try await application.server.start(address: .hostname("127.0.0.1", port: port))
@@ -79,6 +117,12 @@ public actor ControlServer {
                 throw ControlServerError.portInUse(port: port)
             }
             throw error
+        }
+
+        if stopRequestedDuringStart {
+            await application.server.shutdown()
+            try? await application.asyncShutdown()
+            throw ControlServerError.shuttingDown
         }
 
         let boundPort = application.http.server.shared.localAddress?.port ?? port
@@ -106,11 +150,16 @@ public actor ControlServer {
             // says so. It goes to this application's own logger — the one whose level is set to
             // `.warning` where the application is built above, which `.error` clears.
             do {
+                #if DEBUG
+                let url = try advertisementURLForTesting ?? ControlEndpointFile.writeURL()
+                #else
                 let url = try ControlEndpointFile.writeURL()
+                #endif
                 try ControlEndpointFile.write(endpoint, to: url)
-                // Recorded only after the write lands. `stop()` removes whatever this names, and a
-                // path we failed to write is a path something else may own.
+                // Recorded only after the write lands. `stop()` removes this instance's exact
+                // advertisement; a path we failed to write is a path something else may own.
                 endpointFileURL = url
+                advertisedEndpoint = endpoint
             } catch {
                 application.logger.error(
                     """
@@ -127,23 +176,42 @@ public actor ControlServer {
     }
 
     public func stop() async throws {
-        guard let running = app else { return }
-        // Set before anything below can suspend, so an overlapping `start` cannot pass its guard
-        // while this application is still holding the port.
+        guard app != nil || isStarting else { return }
+        guard !isStopping else { return }
+        // This guard also covers the first await in `start`: while it is still making or binding an
+        // application, `app` is nil. Wait for that start to finish after requesting its shutdown,
+        // and reject any new start until the old one has finished closing.
         isStopping = true
-        app = nil
         defer { isStopping = false }
-        // Remove the advertisement first: a CLI must never be pointed at a port that is closing.
-        if let endpointFileURL {
-            ControlEndpointFile.remove(at: endpointFileURL)
-            self.endpointFileURL = nil
+        if isStarting {
+            stopRequestedDuringStart = true
+            #if DEBUG
+            onStopAcceptedForTesting?()
+            #endif
+            await withCheckedContinuation { continuation in
+                startWaiters.append(continuation)
+            }
         }
+        guard let running = app else { return }
+        app = nil
+        // Remove the advertisement first: a CLI must never be pointed at a port that is closing.
+        if let endpointFileURL, let advertisedEndpoint {
+            ControlEndpointFile.remove(expected: advertisedEndpoint, at: endpointFileURL)
+        }
+        endpointFileURL = nil
+        advertisedEndpoint = nil
         await running.server.shutdown()
         try await running.asyncShutdown()
     }
 
     public var boundPort: Int? {
         app?.http.server.shared.localAddress?.port
+    }
+
+    /// The exact discovery record and path this server published, if publication succeeded.
+    public var advertisement: (endpoint: ControlEndpoint, url: URL)? {
+        guard let advertisedEndpoint, let endpointFileURL else { return nil }
+        return (advertisedEndpoint, endpointFileURL)
     }
 
     // MARK: - Routes
@@ -269,26 +337,37 @@ public actor ControlServer {
         return isLoopbackAuthority(host)
     }
 
-    /// `true` for `127.0.0.1`, `[::1]`, `localhost`, with or without a port.
+    /// `true` for `127.0.0.1`, `[::1]`, `localhost`, with or without a numeric port.
     static func isLoopbackAuthority(_ authority: String) -> Bool {
-        var value = authority.trimmingCharacters(in: .whitespaces).lowercased()
+        let value = authority.trimmingCharacters(in: .whitespaces).lowercased()
 
         // `[::1]:8787` — strip the bracketed literal first so the port split below cannot cut inside
         // an IPv6 address.
         if value.hasPrefix("[") {
             guard let end = value.firstIndex(of: "]") else { return false }
             let literal = String(value[value.index(after: value.startIndex)..<end])
-            return literal == "::1" || literal == "0:0:0:0:0:0:0:1"
+            let suffix = value[value.index(after: end)...]
+            return (literal == "::1" || literal == "0:0:0:0:0:0:0:1")
+                && hasValidOptionalPort(suffix)
         }
 
         // A bare IPv6 authority is not legal HTTP, but checking before the port split costs nothing
         // and avoids `::1` being truncated to `:` by it.
         if value == "::1" { return true }
 
-        if let colon = value.lastIndex(of: ":") {
-            value = String(value[value.startIndex..<colon])
-        }
-        return value == "127.0.0.1" || value == "localhost"
+        let host = value.prefix { $0 != ":" }
+        let suffix = value.dropFirst(host.count)
+        return (host == "127.0.0.1" || host == "localhost")
+            && hasValidOptionalPort(suffix)
+    }
+
+    private static func hasValidOptionalPort(_ suffix: Substring) -> Bool {
+        if suffix.isEmpty { return true }
+        guard suffix.first == ":" else { return false }
+        let port = suffix.dropFirst()
+        return !port.isEmpty
+            && port.allSatisfy { $0.isASCII && $0.isNumber }
+            && UInt16(port) != nil
     }
 
     /// Serialises the envelope and maps the error code onto an HTTP status.

@@ -82,6 +82,14 @@ public final class ControlPlaneCoordinator {
 
     private var server: ControlServer?
     private var host: AppControlHost?
+    /// The exact advertisement this coordinator published. A second app instance may use the same
+    /// path, so termination may remove only this record, never whatever happens to be there later.
+    private var discoveryOwnership: (endpoint: ControlEndpoint, url: URL)?
+    /// Startup can still be suspended when a quit or signal arrives. The termination task waits for
+    /// this task before exiting, so no advertisement can be published after cleanup has run.
+    private var controlStartupTask: Task<Void, Never>?
+    private var controlShutdownTask: Task<Void, Never>?
+    private var terminationRequested = false
     private var terminationSignalSources: [DispatchSourceSignal] = []
 
     /// The session a shutdown has to flush, and the store it flushes into.
@@ -126,15 +134,16 @@ public final class ControlPlaneCoordinator {
     /// `handleTerminationSignal` keep its "always ends" promise. A test's replacement returns, and
     /// every call site is written to tolerate that.
     var exitProcess: @MainActor @Sendable (Int32) -> Void = { exit($0) }
-    var removeDiscoveryFile: @MainActor @Sendable () -> Void = { ControlEndpointFile.remove() }
+    /// An observation hook for termination tests. Production cleanup is performed by
+    /// `removeOwnedDiscoveryFile`, with the endpoint and path the server actually published.
+    var removeDiscoveryFile: @MainActor @Sendable () -> Void = {}
 
     func start(appState: AppState, repository: any ProjectRepository) {
-        guard server == nil else { return }
+        guard server == nil, !terminationRequested else { return }
 
         let host = AppControlHost(appState: appState, repository: repository)
         let server = ControlServer(host: host, mode: HeadlessMode.isEnabled ? "headless" : "app")
         self.host = host
-        self.server = server
         // Held for the shutdown flush below, which needs to know what to write and where — and has to
         // know it before the signal arrives, because there is no time to go looking afterwards.
         prepareShutdownFlush(appState: appState, repository: repository)
@@ -153,19 +162,57 @@ public final class ControlPlaneCoordinator {
         // They need `appState` and `repository`, both assigned above, and nothing else.
         installTerminationHandlers()
 
-        let port = Self.resolvePort()
-        Task { @MainActor [weak self] in
+        launchControlServer(server, port: Self.resolvePort())
+    }
+
+    /// The single startup path for the app and for a disposable-server regression test. Returning
+    /// the task lets that test await the exact ordering without polling or installing signal handlers.
+    @discardableResult
+    func launchControlServer(_ server: ControlServer, port: Int) -> Task<Void, Never> {
+        self.server = server
+        let startup = Task { @MainActor [weak self] in
+            guard let self, !self.terminationRequested, self.server === server else { return }
             do {
                 let bound = try await server.start(port: port, advertise: true)
-                self?.boundPort = bound
+                let advertisement = await server.advertisement
+                guard self.server === server, !self.terminationRequested else {
+                    // `stop()` may have discarded this startup while the actor was binding. Do not
+                    // install ownership for a server the coordinator no longer owns. Termination
+                    // also lands here if the server published while its shutdown was requested.
+                    try? await server.stop()
+                    return
+                }
+                self.boundPort = bound
+                self.discoveryOwnership = advertisement
             } catch {
                 // A control plane that cannot bind must not stop the app from working — the window is
                 // still fully usable, so the failure is recorded rather than raised.
-                self?.startupError = error.localizedDescription
-                self?.server = nil
-                self?.host = nil
+                guard self.server === server, !self.terminationRequested else { return }
+                self.startupError = error.localizedDescription
+                self.server = nil
+                self.host = nil
             }
         }
+        controlStartupTask = startup
+        return startup
+    }
+
+    private func removeOwnedDiscoveryFile() {
+        if let discoveryOwnership {
+            ControlEndpointFile.remove(expected: discoveryOwnership.endpoint, at: discoveryOwnership.url)
+        }
+        removeDiscoveryFile()
+    }
+
+    /// Start closing the listener immediately, then let the normal termination drain wait for both
+    /// the pending start and this stop. A stop that reaches the server actor before its start simply
+    /// returns; the coordinator's startup task checks `terminationRequested` on both sides of the
+    /// actor call and closes a listener that appeared in between.
+    private func requestControlShutdown() {
+        terminationRequested = true
+        removeOwnedDiscoveryFile()
+        guard controlShutdownTask == nil, let server else { return }
+        controlShutdownTask = Task.detached { _ = try? await server.stop() }
     }
 
     /// Wires the session and store the shutdown flush reads, and nothing else.
@@ -182,9 +229,9 @@ public final class ControlPlaneCoordinator {
     ///
     /// The file advertises a port *and* this instance's token, and it used to outlive the process that
     /// wrote it: nothing called `ControlServer.stop()` on exit, so every run left one behind. Stale
-    /// entries were survivable — `discover()` skips a dead pid — but leaving credential material on
-    /// disk after the process holding it has gone is not, and with `MIMIC_CONTROL_TOKEN` set the token
-    /// is stable across runs, so a leftover file really does describe a live credential.
+    /// entries are skipped by `discover()` when their pid is dead, but this best-effort cleanup still
+    /// avoids leaving credential material behind in the normal case. The configured
+    /// `MIMIC_CONTROL_TOKEN` may be stable across runs, so a leftover file deserves care.
     ///
     /// Both paths are needed, and neither is where a quit does its real work any more. Quit is
     /// answered in `applicationShouldTerminate` — `MimicAppDelegate` routes it through
@@ -192,7 +239,9 @@ public final class ControlPlaneCoordinator {
     /// `willTerminate` fires on an ordinary quit the store is already drained, and the observer
     /// here is the last chance to drop the file plus a backstop for a termination nothing drained.
     /// It does *not* run for `SIGTERM`, which is exactly how `mimic app stop` asks a headless
-    /// instance to exit; the dispatch sources below cover that.
+    /// instance to exit; the dispatch sources below cover that. This last-resort observer cannot
+    /// await a pending bind while AppKit is terminating. It requests shutdown and removes a known
+    /// matching record, but a stalled startup can leave a record that discovery skips by dead pid.
     private func installTerminationHandlers() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -203,13 +252,11 @@ public final class ControlPlaneCoordinator {
             // that through Foundation's `@Sendable` observer block.
             MainActor.assumeIsolated {
                 guard let self else {
-                    // A deallocated coordinator has no hooks to read; in production this type is a
-                    // process-lifetime singleton, so this arm is about never leaving a token on
-                    // disk, not about testability.
-                    ControlEndpointFile.remove()
+                    // Without the coordinator's recorded owner, deleting a shared discovery path
+                    // could erase another running instance's advertisement.
                     return
                 }
-                self.removeDiscoveryFile()
+                self.requestControlShutdown()
                 self.flushPendingSaveBlocking()
             }
         }
@@ -223,7 +270,8 @@ public final class ControlPlaneCoordinator {
                 // Same reasoning as above: the source's queue is `.main`.
                 MainActor.assumeIsolated {
                     guard let self else {
-                        ControlEndpointFile.remove()
+                        // No ownership information survives this unusual path. Leave the shared
+                        // path untouched; discovery skips a stale pid after this process exits.
                         exit(0)
                     }
                     // `self.` spelled out, not decoration: the `guard let self` above sits inside
@@ -238,7 +286,8 @@ public final class ControlPlaneCoordinator {
         }
     }
 
-    /// The whole of what `mimic app stop` gets: drop the credential, write the pending edit, exit.
+    /// The whole of what `mimic app stop` gets: request credential cleanup, write the pending edit,
+    /// then exit within the deadline.
     ///
     /// The handler used to be two statements — remove the file, `exit(0)` — while
     /// `AppLauncher.terminate` documented `SIGTERM` as the signal that lets the app "flush pending
@@ -251,15 +300,15 @@ public final class ControlPlaneCoordinator {
     /// window that shows "Save failed" is gone by then, and the next launch simply reads an older
     /// project.
     ///
-    /// The file goes first, before the wait. It is credential material, this handler is the only
-    /// thing that can end the process now that the default disposition is ignored, and a flush that
-    /// times out must not be able to leave a live token on disk.
+    /// Cleanup is requested before the data drain, and pending listener startup is asked to stop.
+    /// Both are bounded by the quit deadline: a wedged bind must not prevent the process from ending.
+    /// If it outlasts that deadline, a leftover record is skipped by discovery once its pid is dead.
     ///
     /// Internal rather than private, and ending in the `exitProcess` hook rather than a bare `exit`:
     /// this is the path `mimic app stop` takes, it had shipped data loss with zero automated
     /// coverage, and a test can only drive it if calling it does not end the test runner.
     func handleTerminationSignal() {
-        removeDiscoveryFile()
+        requestControlShutdown()
 
         guard !isTerminating else {
             // Asked twice. Someone who signals again is telling us they are done waiting, and the
@@ -301,13 +350,13 @@ public final class ControlPlaneCoordinator {
     /// drains exactly as `SIGTERM` always has; the old path's constraint dissolves because nothing
     /// is parked any more.
     ///
-    /// The discovery file goes first, exactly as on the signal path: it is credential material, and
-    /// a drain that times out must not be able to leave a live token on disk. The flush itself is
+    /// Discovery cleanup is requested first, exactly as on the signal path. A listener startup that
+    /// outlasts the quit deadline may leave a stale record; discovery skips its dead pid. The flush is
     /// shared with the signal path — one drain per process, whichever door termination came
     /// through — so a quit landing during a `mimic app stop` waits for the drain already running
     /// instead of starting a second one over the same chain.
     public func handleTerminationRequest(reply: @escaping @MainActor @Sendable () -> Void) {
-        removeDiscoveryFile()
+        requestControlShutdown()
         let flush = terminationFlush()
         Task { @MainActor in
             await flush.value
@@ -320,12 +369,30 @@ public final class ControlPlaneCoordinator {
 
     private func terminationFlush() -> Task<Void, Never> {
         if let terminationFlushTask { return terminationFlushTask }
+        let startup = controlStartupTask
+        let shutdown = controlShutdownTask
+        let deadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
+        let listenerFinished = PendingSaveSignal()
+        if startup == nil && shutdown == nil {
+            listenerFinished.markFinished()
+        } else {
+            // A structured task group would wait for a wedged startup even after cancelling it.
+            // This detached waiter lets the process honour the existing quit deadline while both
+            // listener tasks continue cleaning up for as long as the process remains alive.
+            Task.detached {
+                _ = await startup?.value
+                _ = await shutdown?.value
+                listenerFinished.markFinished()
+            }
+        }
         // `guard let`, not an optional chain: `self?.flushPendingSave()` would make the closure's
         // implicit return `()?` and the task infer `Task<()?, Never>`, which does not assign to
         // the memoized handle's declared type.
         let flush = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.flushPendingSave()
+            if let self { await self.flushPendingSave() }
+            while !listenerFinished.hasFinished, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
         }
         terminationFlushTask = flush
         return flush
