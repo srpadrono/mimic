@@ -195,10 +195,12 @@ final class MockServerRuntime {
                 serverState = .error(message)
                 if case let .portInUse(port) = error {
                     startFailure = ControlError.serverPortInUse(port: port)
-                    portConflictAlert = PortConflictAlertData(
-                        conflictingPort: port,
-                        avoiding: Set(serverConfiguration.listeners.map(\.port))
-                    )
+                    // A project command can replace the configuration while the captured bind is
+                    // in flight. Never offer a retry that would edit an unrelated current listener.
+                    let currentPorts = Set(serverConfiguration.listeners.map(\.port))
+                    portConflictAlert = currentPorts.contains(port)
+                        ? PortConflictAlertData(conflictingPort: port, avoiding: currentPorts)
+                        : nil
                 } else {
                     startFailure = ControlError.serverStartFailed(message)
                     genericStartError = message

@@ -707,6 +707,23 @@ struct MockServerRuntimeTests {
         #expect(await engine.stopCallCount == 0, "nothing bound, so there is nothing to stop")
     }
 
+    @Test("A stale bind failure cannot offer to change an unrelated current listener")
+    func stalePortConflictHasNoRetryAlert() async throws {
+        let engine = GatedStartEngine()
+        await engine.setStartError(MockServerError.portInUse(port: 8080))
+        let manager = MockServerRuntime(engine: engine)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+
+        manager.startServer()
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+        manager.serverConfiguration = ServerConfiguration(port: 9090, globalDelayMs: 0)
+        await engine.release()
+
+        try await waitUntil { manager.serverState.isError }
+        #expect(manager.portConflictAlert == nil)
+        #expect(manager.serverConfiguration.port == 9090)
+    }
+
     @Test("Retry start increments port clears alert and restarts")
     func retryStartUsesNextPort() async throws {
         let engine = FakeEngine()
