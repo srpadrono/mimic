@@ -862,6 +862,30 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The body should have been committed to the active scenario — it reads \(reopenedBody)")
     }
 
+    /// The source is only 801 bytes, but 400 nested levels would expand beyond the formatter's
+    /// 256 KiB output budget. The action must not invite a click it cannot complete.
+    @MainActor
+    func testFormatStaysDisabledWhenValidDeepJSONExceedsOutputBudget() throws {
+        launchApp()
+        createProjectViaUI(name: "Body Format Budget")
+        createEndpointViaUI(name: "Body EP", path: "/api/body")
+        hideRequestLogDrawer()
+
+        let depth = 400
+        let deepJSON = String(repeating: "[", count: depth) + "0" + String(repeating: "]", count: depth)
+        setResponseBody(deepJSON, expecting: "[0]")
+
+        XCTAssertEqual(bodyText(), deepJSON, "The editor should hold the complete valid JSON fixture")
+        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(prettyPrintButton.isEnabled,
+                       "Format cannot re-indent this valid body within the 256 KiB output budget")
+
+        setResponseBody("[0]", expecting: "[0]")
+        XCTAssertEqual(bodyText(), "[0]")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 6) { self.prettyPrintButton.isEnabled },
+                      "Format should enable again once the body fits the output budget")
+    }
+
     // MARK: - 8. Response body: invalid JSON
 
     /// EPBODY-04, EPBODY-05 (the invalid half).

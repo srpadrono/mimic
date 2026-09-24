@@ -96,6 +96,15 @@ struct DSJSONEditorTests {
         #expect(DSJSONEditor.prettyPrint("null") == nil)
     }
 
+    @Test("Valid deep JSON cannot be formatted past the output budget")
+    func prettyPrintDeepJSON() {
+        let depth = 400
+        let compact = String(repeating: "[", count: depth) + "0" + String(repeating: "]", count: depth)
+
+        #expect(DSJSONEditor.validateJSON(compact))
+        #expect(DSJSONEditor.prettyPrint(compact) == nil)
+    }
+
     @Test("Pretty-print returns nil for empty string")
     func prettyPrintEmpty() {
         #expect(DSJSONEditor.prettyPrint("") == nil)
