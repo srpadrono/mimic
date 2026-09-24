@@ -37,7 +37,45 @@ struct MockCommandRegressionTests {
         #expect(commands == [
             .endpointGet(endpoint: .route(.get, "/old")),
             .endpointUpdateWithActiveScenario(
-                endpoint: .route(.get, "/old"),
+                endpoint: .id(Self.endpointID),
+                spec: EndpointSpec(path: "/new"),
+                scenarioSpec: ScenarioSpec(statusCode: 503)
+            ),
+        ])
+    }
+
+    @Test("A combined edit keeps the endpoint selected before another client reuses its route")
+    func combinedUpdateKeepsPreflightEndpointID() async throws {
+        let endpoint = Endpoint(
+            id: Self.endpointID,
+            name: "Original",
+            method: .get,
+            path: "/old",
+            scenarios: [Scenario(id: Self.scenarioID, name: "Default", statusCode: 200)],
+            activeScenarioID: Self.scenarioID
+        )
+        let transport = ProjectTransport(
+            project: MockProject(name: "Fixture", endpoints: [endpoint]),
+            replaceRouteOwnerBeforeCombinedEdit: true
+        )
+
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: [
+                "endpoint", "update", "GET", "/old", "--new-path", "/new", "--status", "503",
+            ])
+        }
+
+        #expect(status == 0)
+        let endpoints = await transport.projectSnapshot().endpoints
+        #expect(endpoints.count == 2)
+        #expect(endpoints.first(where: { $0.id == Self.endpointID })?.path == "/new")
+        #expect(endpoints.first(where: { $0.id == Self.endpointID })?.scenarios.first?.statusCode == 503)
+        #expect(endpoints.first(where: { $0.id != Self.endpointID })?.path == "/old")
+        #expect(endpoints.first(where: { $0.id != Self.endpointID })?.scenarios.first?.statusCode == 200)
+        #expect(await transport.commandsSnapshot() == [
+            .endpointGet(endpoint: .route(.get, "/old")),
+            .endpointUpdateWithActiveScenario(
+                endpoint: .id(Self.endpointID),
                 spec: EndpointSpec(path: "/new"),
                 scenarioSpec: ScenarioSpec(statusCode: 503)
             ),
@@ -230,20 +268,37 @@ struct MockCommandRegressionTests {
         private var commands: [ControlCommand] = []
         private var deleteActiveScenarioBeforeEndpointEdit: Bool
         private var deleteEndpointAfterCombinedEdit: Bool
+        private var replaceRouteOwnerBeforeCombinedEdit: Bool
 
         init(
             project: MockProject,
             deleteActiveScenarioBeforeEndpointEdit: Bool = false,
-            deleteEndpointAfterCombinedEdit: Bool = false
+            deleteEndpointAfterCombinedEdit: Bool = false,
+            replaceRouteOwnerBeforeCombinedEdit: Bool = false
         ) {
             self.project = project
             self.deleteActiveScenarioBeforeEndpointEdit = deleteActiveScenarioBeforeEndpointEdit
             self.deleteEndpointAfterCombinedEdit = deleteEndpointAfterCombinedEdit
+            self.replaceRouteOwnerBeforeCombinedEdit = replaceRouteOwnerBeforeCombinedEdit
         }
 
         func send(_ command: ControlCommand) async throws -> ControlResponse {
             commands.append(command)
             do {
+                if replaceRouteOwnerBeforeCombinedEdit, command.kind == .endpointUpdateWithActiveScenario {
+                    replaceRouteOwnerBeforeCombinedEdit = false
+                    _ = try ProjectCommandExecutor.apply(
+                        .endpointUpdate(
+                            endpoint: .id(MockCommandRegressionTests.endpointID),
+                            spec: EndpointSpec(path: "/moved")
+                        ),
+                        to: &project
+                    )
+                    _ = try ProjectCommandExecutor.apply(
+                        .endpointCreate(name: "Replacement", method: .get, path: "/old", spec: nil),
+                        to: &project
+                    )
+                }
                 if deleteActiveScenarioBeforeEndpointEdit,
                    command.kind == .endpointUpdate || command.kind == .endpointUpdateWithActiveScenario {
                     deleteActiveScenarioBeforeEndpointEdit = false
