@@ -42,13 +42,16 @@ enum UITestApp {
     static let controlFileOverridePath = "~/Library/Application Support/devxa.Mimic/"
         + "mimic-uitests-control-\(ProcessInfo.processInfo.processIdentifier).json"
 
-    /// Exports the discovery-file override into `app`'s launch environment, unless the suite has
-    /// already named one — an explicit path is the suite's to keep, the way an explicit
-    /// `MIMIC_DATABASE_PATH` wins over the computed store.
+    /// Exports an isolated discovery file and ephemeral control port unless a suite supplied its
+    /// own. The file avoids overwriting the developer's token; port 0 avoids binding their 8787.
     @MainActor
     static func isolateControlPlaneDiscovery(for app: XCUIApplication) {
-        guard app.launchEnvironment[controlFileEnvironmentKey] == nil else { return }
-        app.launchEnvironment[controlFileEnvironmentKey] = controlFileOverridePath
+        if app.launchEnvironment[controlFileEnvironmentKey] == nil {
+            app.launchEnvironment[controlFileEnvironmentKey] = controlFileOverridePath
+        }
+        if app.launchEnvironment["MIMIC_CONTROL_PORT"] == nil {
+            app.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
+        }
     }
 
     /// Waits for a condition, polling until it holds or the deadline passes.
@@ -270,5 +273,30 @@ enum UITestApp {
             waitUntil(timeout: 0.5) { isReady() }
         }
         return isReady()
+    }
+}
+
+/// Restores the user's clipboard after a UI test pastes fixture text or checks Copy URL.
+/// Preserve each pasteboard flavor, including images and rich text, rather than only its string.
+@MainActor
+struct UITestClipboardSnapshot {
+    private let items: [NSPasteboardItem]
+
+    init() {
+        items = (NSPasteboard.general.pasteboardItems ?? []).map { original in
+            let copy = NSPasteboardItem()
+            for type in original.types {
+                if let data = original.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+    }
+
+    func restore() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if !items.isEmpty { pasteboard.writeObjects(items) }
     }
 }

@@ -546,8 +546,12 @@ final class AppControlHost: ControlHost {
         case let .projectDelete(ref):
             do {
                 let id = try await resolveStoredProjectID(ref, appState: appState)
-                appState.deleteProject(id: id)
-                return .success(.message("Deleted the project."))
+                switch await appState.deleteProjectAndWait(id: id) {
+                case .success:
+                    return .success(.message("Deleted the project."))
+                case .failure(let error):
+                    return .failure(error)
+                }
             } catch {
                 return failureResponse(for: error)
             }

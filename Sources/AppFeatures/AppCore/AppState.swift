@@ -389,15 +389,21 @@ final class AppState {
     /// The port a user accepts here is a setting, not a runtime detail: it only lived on the runtime,
     /// so it was lost the next time the project was opened, and — now that the project is what the
     /// runtime is applied from — it would be overwritten by the next edit of anything else. One
-    /// command puts it where it belongs; the runtime call then clears the alert and starts.
+    /// command puts it where it belongs; the alert is then cleared before starting the runtime.
     func retryStartOnNextPort(from port: Int) {
-        // Only start once the port is stored. A conflict on 65535 makes the next port 65536, which
-        // the validator rejects — and starting anyway would leave the runtime bound to a port the
-        // project does not have, which is the divergence this whole path exists to close. `run` has
-        // already put the reason in `lastCommandError`, so the user is told rather than left with a
-        // server that quietly did not start.
+        // A failed bind can arrive after a CLI changed the configuration. Do not treat its stale
+        // port as the primary listener, or a retry would silently rewrite an unrelated setting.
+        guard serverConfiguration.listeners.contains(where: { $0.port == port }) else {
+            portConflictAlert = nil
+            lastCommandError = "Port \(port) is no longer configured. Start the server again."
+            return
+        }
         let used = Set(serverConfiguration.listeners.map(\.port))
-        guard let next = ((port + 1)...65536).first(where: { !used.contains($0) }) else { return }
+        guard let next = PortConflictAlertData.nextAvailablePort(after: port, avoiding: used) else {
+            portConflictAlert = nil
+            lastCommandError = "No available port remains after \(port). Choose another port in server settings."
+            return
+        }
         let command: ControlCommand
         if let backend = serverConfiguration.backends.first(where: { $0.port == port }) {
             command = .backendUpsert(id: backend.id, name: nil, port: next, upstreamURL: nil)
@@ -405,7 +411,8 @@ final class AppState {
             command = .serverConfigure(port: next, globalDelayMs: nil)
         }
         guard run(command) != nil else { return }
-        server.retryStartOnNextPort(from: port)
+        portConflictAlert = nil
+        server.startServer()
     }
 
     // MARK: - Endpoints
@@ -431,19 +438,16 @@ final class AppState {
         run(.endpointDuplicate(endpoint: .id(id)))?.endpoint
     }
 
-    func updateActiveScenario(
+    func updateScenario(
         endpointID: UUID,
+        scenarioID: UUID,
         statusCode: Int? = nil,
         headers: [String: String]? = nil,
         body: String? = nil
     ) {
-        guard let endpoint = currentProject?.endpoints.first(where: { $0.id == endpointID }),
-              let activeID = endpoint.activeScenarioID
-        else { return }
-
         _ = run(.scenarioUpdate(
             endpoint: .id(endpointID),
-            scenario: .id(activeID),
+            scenario: .id(scenarioID),
             spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body)
         ))
     }
@@ -833,6 +837,12 @@ final class AppState {
             stopServerForProjectChange()
         }
         projects.deleteProject(id: id)
+    }
+    func deleteProjectAndWait(id: UUID) async -> Result<Void, ControlError> {
+        if currentProject?.id == id {
+            stopServerForProjectChange()
+        }
+        return await projects.deleteProjectAndWait(id: id)
     }
     func closeProject() {
         stopServerForProjectChange()

@@ -143,6 +143,60 @@ struct AppStateAndViewTests {
         #expect(await engine.startConfigurations.first?.backends.first?.port == 9003)
     }
 
+    @Test("Retry can use the last valid port without searching past 65535")
+    func portConflictAtUpperBoundary() async throws {
+        let engine = StubEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        appState.currentProject = MockProject(
+            name: "Ports", serverConfiguration: .init(port: 65534, globalDelayMs: 0)
+        )
+        appState.server.serverState = .error("Port 65534 is already in use.")
+        appState.portConflictAlert = PortConflictAlertData(conflictingPort: 65534)
+
+        appState.retryStartOnNextPort(from: 65534)
+        try await waitUntil { await engine.startConfigurations.count == 1 }
+
+        #expect(appState.currentProject?.serverConfiguration.port == 65535)
+        #expect(await engine.startConfigurations.first?.port == 65535)
+        #expect(appState.portConflictAlert == nil)
+    }
+
+    @Test("A stale port conflict cannot rewrite a newly configured listener")
+    func stalePortConflictDoesNotMutateProject() async throws {
+        let engine = StubEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        appState.currentProject = MockProject(
+            name: "Ports", serverConfiguration: .init(port: 9002, globalDelayMs: 0)
+        )
+        appState.server.serverState = .error("Port 9001 is already in use.")
+        appState.portConflictAlert = PortConflictAlertData(conflictingPort: 9001)
+
+        appState.retryStartOnNextPort(from: 9001)
+
+        #expect(appState.currentProject?.serverConfiguration.port == 9002)
+        #expect(await engine.startConfigurations.isEmpty)
+        #expect(appState.portConflictAlert == nil)
+        #expect(appState.lastCommandError?.contains("no longer configured") == true)
+    }
+
+    @Test("Retry from port 65535 reports exhaustion without changing the project")
+    func portConflictAtMaximumHasNoCandidate() async throws {
+        let engine = StubEngine()
+        let appState = try makeAppState(server: MockServerRuntime(engine: engine))
+        appState.currentProject = MockProject(
+            name: "Ports", serverConfiguration: .init(port: 65535, globalDelayMs: 0)
+        )
+        appState.server.serverState = .error("Port 65535 is already in use.")
+        appState.portConflictAlert = PortConflictAlertData(conflictingPort: 65535)
+
+        appState.retryStartOnNextPort(from: 65535)
+
+        #expect(appState.currentProject?.serverConfiguration.port == 65535)
+        #expect(await engine.startConfigurations.isEmpty)
+        #expect(appState.portConflictAlert == nil)
+        #expect(appState.lastCommandError?.contains("No available port") == true)
+    }
+
     actor StubEngine: MockServerEngineProtocol {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
@@ -340,8 +394,10 @@ struct AppStateAndViewTests {
         #expect(appState.serverConfiguration.port == 9000)
 
         let endpoint = try #require(appState.addEndpoint(name: "Get Users", method: .get, path: "/api/v1/users"))
-        appState.updateActiveScenario(
+        let originalScenarioID = try #require(endpoint.activeScenarioID)
+        appState.updateScenario(
             endpointID: endpoint.id,
+            scenarioID: originalScenarioID,
             statusCode: 202,
             headers: ["ETag": "1"],
             body: #"{"queued":true}"#
@@ -352,6 +408,8 @@ struct AppStateAndViewTests {
 
         let addedScenario = try #require(appState.addScenario(endpointID: endpoint.id, name: "Unauthorized", statusCode: 401))
         appState.setActiveScenario(endpointID: endpoint.id, scenarioID: addedScenario.id)
+        // A delayed edit must still target the scenario it was typed into after activation moves.
+        appState.updateScenario(endpointID: endpoint.id, scenarioID: originalScenarioID, body: #"{"late":true}"#)
         let copiedScenario = try #require(appState.duplicateScenario(endpointID: endpoint.id, scenarioID: addedScenario.id))
         appState.renameScenario(endpointID: endpoint.id, scenarioID: copiedScenario.id, name: "Unauthorized Copy")
         appState.deleteScenario(endpointID: endpoint.id, scenarioID: copiedScenario.id)
@@ -363,6 +421,7 @@ struct AppStateAndViewTests {
         #expect(updatedEndpoint.groupTag == "Accounts")
         #expect(appState.serverConfiguration.globalDelayMs == 125)
         #expect(activeScenario.statusCode == 401)
+        #expect(updatedEndpoint.scenarios.first(where: { $0.id == originalScenarioID })?.body == #"{"late":true}"#)
 
         let copiedEndpoint = try #require(appState.duplicateEndpoint(id: endpoint.id))
         #expect(copiedEndpoint.name == "Get Users (Copy)")

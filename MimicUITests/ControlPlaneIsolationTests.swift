@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 
@@ -11,13 +12,35 @@ import XCTest
 /// credential.
 final class ControlPlaneIsolationTests: XCTestCase {
 
-    /// Asserts the mechanism, not the file system: every suite launches through
-    /// `UITestApp.launchAndBringToForeground` (UI DoD rule 6), so one launch here stands in for
-    /// every suite. Watching the shared path itself would race the developer's own instance, which
-    /// is free to rewrite its advertisement mid-run — and the sandboxed runner could not reach the
-    /// unsandboxed copy anyway.
+    /// The signed app's container is not readable by the UI runner, even though `fileExists` can
+    /// see its sidecar. `lsof` identifies the loopback port that process actually bound without
+    /// weakening the sandbox or adding a product-facing test hook.
+    private func listeningPort(of pid: pid_t) -> Int? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n")
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        for line in lines {
+            guard let range = line.range(of: "TCP 127.0.0.1:") else { continue }
+            let digits = line[range.upperBound...].prefix(while: { $0.isNumber })
+            if let port = Int(digits), port > 0 { return port }
+        }
+        return nil
+    }
+
+    /// Every suite launches through `UITestApp.launchAndBringToForeground`. This launch checks the
+    /// exported override, the isolated file's actual existence, and a live authenticated health
+    /// request on the app's assigned loopback port. File permissions are covered by the separate
+    /// `ControlEndpointFileTests`; macOS denies the UI runner read access to the app container.
     @MainActor
-    func testLaunchContractExportsAThrowawayDiscoveryFile() throws {
+    func testLaunchContractExportsAThrowawayDiscoveryFile() async throws {
         let application = XCUIApplication()
         application.launchArguments = [
             "-MimicResetForTesting",
@@ -25,9 +48,11 @@ final class ControlPlaneIsolationTests: XCTestCase {
             "YES",
         ]
         application.launchEnvironment["MIMIC_DEFAULTS_SUITE"] = "com.devxa.Mimic.UITests"
-        // Port 0 for the reason the journeys suite sets it: the OS picks a free port, so this
-        // launch neither collides with a developer's running instance nor with a parallel run.
-        application.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
+        let token = "UITest-\(UUID().uuidString)"
+        application.launchEnvironment["MIMIC_CONTROL_TOKEN"] = token
+        let preexistingPIDs = Set(NSRunningApplication.runningApplications(
+            withBundleIdentifier: UITestApp.bundleIdentifier
+        ).map(\.processIdentifier))
         defer { application.terminate() }
 
         XCTAssertTrue(
@@ -61,7 +86,31 @@ final class ControlPlaneIsolationTests: XCTestCase {
 
         XCTAssertEqual(
             application.launchEnvironment["MIMIC_CONTROL_PORT"], "0",
-            "The isolation must not clobber environment a suite set deliberately"
+            "The shared launch helper must choose an ephemeral port when the suite did not name one"
         )
+
+        // The app's tilde resolves inside its container. The runner can observe this file's
+        // existence but macOS denies reading its contents, which is the boundary the app relies on.
+        let advertisedFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic")
+            .appendingPathComponent(URL(fileURLWithPath: override).lastPathComponent)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) {
+            FileManager.default.fileExists(atPath: advertisedFile.path)
+        }, "The running app should publish its isolated discovery file")
+        let launched = try XCTUnwrap(NSRunningApplication.runningApplications(
+            withBundleIdentifier: UITestApp.bundleIdentifier
+        ).first { !preexistingPIDs.contains($0.processIdentifier) })
+        var assignedPort: Int?
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) {
+            assignedPort = self.listeningPort(of: launched.processIdentifier)
+            return assignedPort != nil
+        }, "The launched app should bind an ephemeral loopback control port")
+        let port = try XCTUnwrap(assignedPort)
+        let healthURL = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/v1/health"))
+        var request = URLRequest(url: healthURL)
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-Mimic-Token")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
     }
 }

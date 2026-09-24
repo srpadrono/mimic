@@ -49,6 +49,8 @@ struct BackendSettingsPage {
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
         app.typeKey("v", modifierFlags: .command)

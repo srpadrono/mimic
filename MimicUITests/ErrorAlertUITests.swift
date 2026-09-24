@@ -1095,6 +1095,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         guard clickIfHittable(editor) else { return false }
 
         editor.typeKey("a", modifierFlags: .command)
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         _ = pasteboard.setString(text, forType: .string)

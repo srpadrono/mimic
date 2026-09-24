@@ -324,11 +324,14 @@ struct UpdateInstallationTests {
     private nonisolated struct Installer: UpdateInstalling {
         let recorder: Recorder
         let fails: Bool
+        var quarantineFails = false
         func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
             URL(fileURLWithPath: "/fixture/Mimic.pkg")
         }
         func verify(_ fileURL: URL, against release: UpdateRelease) throws {}
-        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) {}
+        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws {
+            if quarantineFails { throw UpdateInstaller.InstallError.quarantineFailed("The file is read-only.") }
+        }
         @MainActor func handOff(_ fileURL: URL) async throws {
             #expect(fileURL.path == "/fixture/Mimic.pkg")
             recorder.events.append("handoff")
@@ -394,6 +397,33 @@ struct UpdateInstallationTests {
         service.sheetDidDismiss()
         #expect(recorder.events == ["save", "handoff"])
         #expect(service.phase == .idle)
+    }
+
+    @Test("A failed quarantine stamp never offers the installer as ready")
+    func quarantineFailureStopsPreparation() async throws {
+        let recorder = Recorder()
+        let defaults = try #require(UserDefaults(suiteName: "UpdateQuarantineTests.\(UUID())"))
+        let service = UpdateService(
+            installedVersion: { ReleaseVersion(major: 0, minor: 10, patch: 0) },
+            preferences: UpdatePreferences(defaults: defaults),
+            fetchLatestRelease: { UpdateServiceTests.release("0.11.0") },
+            installer: Installer(recorder: recorder, fails: false, quarantineFails: true),
+            makeBackup: { _, _ in },
+            terminate: { recorder.events.append("quit") }
+        )
+        service.checkForUpdates()
+        try await waitUntil { if case .available = service.phase { true } else { false } }
+        service.downloadAndPrepare()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+
+        if case .failed(let message) = service.phase {
+            #expect(message.contains("macOS security checks"))
+        } else {
+            Issue.record("The failed quarantine stamp did not stop preparation")
+        }
+        #expect(service.isShowingSheet)
+        service.installNow()
+        #expect(recorder.events.isEmpty)
     }
 
     @Test("Dismissing a prepared update for later never launches or quits")

@@ -136,7 +136,7 @@ struct EndpointEditorView: View {
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
-        .onChange(of: endpoint.activeScenarioID) { syncFromModel() }
+        .onChange(of: endpoint.activeScenarioID) { scenarioSelectionChanged() }
         .onChange(of: statusCodeString) { debounceStatusCode() }
         .accessibilityIdentifier("endpointEditor")
         // The mandatory partner to the identifier above. On its own it renames every descendant, so
@@ -678,12 +678,8 @@ struct EndpointEditorView: View {
     /// The `…IsDirty` guards below stop a sync from *scheduling* a write, which is a different half
     /// of the problem and the only half they were ever able to see.
     ///
-    /// Second, because `syncFromModel`'s other two callers must not flush. `onAppear` has nothing to
-    /// finish, and a change of *active scenario* has nowhere correct to put it:
-    /// `EndpointEditorActions.onUpdateScenario` addresses the active scenario of an endpoint rather
-    /// than a scenario by name, so once a different scenario is active the pending text would land on
-    /// one nobody typed it into. Dropping it there is the lesser of two bad answers and is what
-    /// already happens; see the seam note on `commit(body:)`.
+    /// `onAppear` has nothing to finish. A scenario change does have pending edits to finish;
+    /// `scenarioSelectionChanged()` does so through actions captured for the old scenario.
     ///
     /// The scenario modifier usually fires on a selection change too, since a different endpoint
     /// owns different scenarios — though not always: two endpoints that carry no scenarios at all
@@ -693,6 +689,14 @@ struct EndpointEditorView: View {
     /// a sync the scenario modifier performs cannot have cancelled anything by the time this one
     /// flushes.
     func endpointSelectionChanged() {
+        pendingEdits.flush()
+        syncFromModel()
+    }
+
+    /// Finish text typed into the previous scenario before showing the newly active one.
+    /// `CenterPaneView` captures the scenario id in each action closure, so this flush cannot
+    /// redirect an old edit to the scenario that has just become active.
+    func scenarioSelectionChanged() {
         pendingEdits.flush()
         syncFromModel()
     }
@@ -817,13 +821,7 @@ struct EndpointEditorView: View {
         commit(body: responseBody)
     }
 
-    /// The one write that is still addressed loosely, and the seam worth knowing about.
-    ///
-    /// `onUpdateScenario` names an endpoint and lets `AppState` resolve "whichever scenario is
-    /// active", which is why a pending edit survives a change of *selection* — neither endpoint's
-    /// active scenario moves — and cannot survive a change of *active scenario*. Making it survive
-    /// that too means the actions carrying a scenario id, which is a change to `CenterPaneView`'s
-    /// closures and to `AppState.updateActiveScenario`.
+    /// The action was bound to the scenario shown when the text was typed.
     private func commit(body text: String) {
         actions.onUpdateScenario(nil, nil, Self.bodyValue(from: text))
     }

@@ -27,7 +27,7 @@ enum UITestSupport {
             URL(fileURLWithPath: "/fixture/not-a-real-installer.pkg")
         }
         func verify(_ fileURL: URL, against release: UpdateRelease) throws {}
-        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) {}
+        func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws {}
         @MainActor func handOff(_ fileURL: URL) async throws {
             if fails { throw UpdateInstaller.InstallError.handoffFailed("Fixture handoff refused.") }
         }

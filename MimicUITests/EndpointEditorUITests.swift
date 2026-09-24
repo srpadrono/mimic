@@ -464,6 +464,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         editor.click()
         editor.typeKey("a", modifierFlags: .command)
 
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         _ = pasteboard.setString(json, forType: .string)
@@ -1170,15 +1172,8 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// reads as a control that failed — so "there is no field here" is part of what is being
     /// asserted, and the note beside it is the only thing explaining why.
     ///
-    /// **The number itself is not asserted, and that is a production gap rather than a choice.**
-    /// `EndpointEditorView` builds the row as `Text("\(globalDelayMs)")` *and* gives it
-    /// `.accessibilityLabel("Global delay in milliseconds")` — and an explicit label *replaces* what
-    /// a `Text` exposes rather than adding to it. CI read this element as label `""`, value `"Global
-    /// delay in milliseconds"`: the digits are nowhere in the tree, and VoiceOver announces the row
-    /// as a label with no value under it, which is the same defect heard rather than queried. The
-    /// fix is one modifier on that `Text` — `.accessibilityValue("\(globalDelayMs)")` — after which
-    /// this test should assert the row reads `0` for a fresh project. Asserting it before then would
-    /// only be asserting the label back to itself.
+    /// An explicit accessibility label replaces the Text's digits, so the row also supplies the
+    /// number as its accessibility value. Check both the name and the value a reader receives.
     @MainActor
     func testGlobalDelayRowIsReadOnlyAndExplainsItself() throws {
         launchApp()
@@ -1192,6 +1187,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         let globalDelayText = shownText(of: globalDelayValue)
         XCTAssertTrue(globalDelayText.contains("Global delay"),
                       "The row should say which delay it is showing — it reads \(globalDelayText)")
+        XCTAssertEqual(globalDelayValue.value as? String, "0",
+                       "A fresh project's global delay should be exposed as a numeric accessibility value")
         XCTAssertFalse(app.textFields["endpointEditor.globalDelay"].exists,
                        "The global delay is shown, not edited — it must not be a text field")
 

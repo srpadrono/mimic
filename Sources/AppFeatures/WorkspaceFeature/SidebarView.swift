@@ -149,7 +149,7 @@ struct SidebarView: View {
                 ForEach(groupedSections, id: \.name) { section in
                     groupRow(section)
                         .padding(.top, section.name == groupedSections.first?.name ? 0 : DSSpacing.smPlus)
-                    if !collapsedSections.contains(section.name) {
+                    if !collapsedSections.contains(Self.groupSectionKey(section.name)) {
                         ForEach(section.endpoints) { endpoint in
                             endpointRow(endpoint, indented: true)
                         }
@@ -191,12 +191,15 @@ struct SidebarView: View {
     private func groupRow(_ section: EndpointGroup) -> some View {
         DSNavigatorGroup(
             name: section.name, count: section.endpoints.count, itemName: "endpoints",
-            isCollapsed: collapsedSections.contains(section.name),
+            isCollapsed: collapsedSections.contains(Self.groupSectionKey(section.name)),
             identifier: "sidebar.group.\(section.name)"
-        ) { toggleSection(section.name) }
+        ) { toggleSection(Self.groupSectionKey(section.name)) }
     }
 
     private static let ungroupedSectionKey = "__ungrouped__"
+    /// Named groups and the ungrouped section use disjoint keys, including when a person names a
+    /// group `__ungrouped__`.
+    static func groupSectionKey(_ name: String) -> String { "group:\(name)" }
 
     @ViewBuilder
     private func endpointContextMenu(_ endpoint: Endpoint) -> some View {
