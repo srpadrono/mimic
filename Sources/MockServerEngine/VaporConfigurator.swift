@@ -7,8 +7,9 @@ enum VaporConfigurator {
     /// Every request Mimic answers arrives here, whatever its path.
     ///
     /// Registering routes is the *only* thing Vapor decides; what to serve is Domain's answer via
-    /// `MockResolver.plan`, and everything that reaches this closure is logged — including the
-    /// requests nothing is configured for. A path Vapor answers itself is a path Mimic cannot see.
+    /// `MockResolver.plan`, and every admitted request with a valid-size body is logged — including
+    /// requests nothing is configured for. Overload and oversized-body rejections are not logged.
+    /// A path Vapor answers itself is a path Mimic cannot see.
     static func registerRoutes(
         on app: Application,
         routeStore: MockRouteStore,
