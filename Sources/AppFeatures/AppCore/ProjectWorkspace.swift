@@ -495,7 +495,10 @@ final class ProjectWorkspace {
                 return .success(())
             } catch {
                 autosaveStatus = .failed(error.localizedDescription)
-                return .failure(.persistenceFailure(error))
+                return .failure(ControlError(
+                    code: .persistenceFailure,
+                    message: "The edit is still active in this session but could not be saved: \(error.localizedDescription). Inspect the open project before retrying."
+                ))
             }
         }
         storeWrites = Task { @MainActor in _ = await write.value }
