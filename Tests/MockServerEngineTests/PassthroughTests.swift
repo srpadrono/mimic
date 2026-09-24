@@ -43,8 +43,7 @@ struct PassthroughTests {
             upstreamDrain.cancel()
             Task { try? await proxy.stop(); try? await upstream.stop() }
         }
-        // A lossless bounded producer must be drained while traffic continues; otherwise
-        // the HTTP requests correctly wait for the consumer instead of discarding logs.
+        // Drain while traffic continues, with each wave below the admission limit.
         let drain = Task { () -> Set<String> in
             var paths = Set<String>()
             for await log in proxy.logStream {
@@ -59,16 +58,22 @@ struct PassthroughTests {
         defer { drain.cancel() }
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        for batch in 0..<22 {
+        for batch in 0..<69 {
             try await withThrowingTaskGroup(of: Void.self) { group in
-                for offset in 0..<50 {
-                    let index = batch * 50 + offset
+                for offset in 0..<16 {
+                    let index = batch * 16 + offset
+                    guard index < 1100 else { continue }
                     group.addTask {
                         let (_, response) = try await session.data(from: URL(string: "http://127.0.0.1:\(local)/burst/\(index)")!)
                         #expect((response as? HTTPURLResponse)?.statusCode == 200)
                     }
                 }
                 try await group.waitForAll()
+            }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while await proxy.logGate.outstandingCount != 0 {
+                try #require(ContinuousClock.now < deadline, "The consumer fell behind the bounded burst.")
+                await Task.yield()
             }
         }
         // Every batch has completed before the sentinel, so all its logs were submitted.
@@ -106,8 +111,8 @@ struct PassthroughTests {
         }
     }
 
-    @Test("Proxy waits for a log slot before contacting its backend or collecting a preview")
-    func proxyReservesBeforeResponsePreview() async throws {
+    @Test("Proxy rejects at saturation before contacting its backend and captures after recovery")
+    func proxyRejectsBeforeResponsePreview() async throws {
         let proxy = MockServerEngine(), upstream = MockServerEngine()
         let local = try Self.port(), real = try Self.port()
         let largeBody = String(repeating: "x", count: RequestLog.maxLoggedBodyBytes + 1)
@@ -127,23 +132,17 @@ struct PassthroughTests {
         #expect(await proxy.logGate.outstandingCount == RequestLogGate.capacity)
 
         let liveURL = try #require(URL(string: "http://127.0.0.1:\(local)/live"))
-        let liveCall = Task { try await session.data(from: liveURL) }
-        defer { liveCall.cancel() }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while await proxy.logGate.waitingCount == 0 {
-            try #require(ContinuousClock.now < deadline,
-                "The proxy did not reserve before contacting the backend.")
-            try await Task.sleep(for: .milliseconds(2))
-        }
+        let (_, rejected) = try await session.data(from: liveURL)
+        #expect((rejected as? HTTPURLResponse)?.statusCode == 503)
         #expect(await upstream.logGate.outstandingCount == 0)
 
-        // Processing one old log frees the proxy to contact the upstream. The complete large
-        // response must still be captured once the reserved request finishes.
+        // Processing one old log frees the proxy to contact the upstream. The accepted retry's
+        // complete large response must still be captured.
         var logs = proxy.logStream.makeAsyncIterator()
         let first = try #require(await logs.next())
         #expect(first.path == "/fill/0")
         await proxy.acknowledgeLog()
-        let (data, response) = try await liveCall.value
+        let (data, response) = try await session.data(from: liveURL)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect(String(decoding: data, as: UTF8.self) == largeBody)
 

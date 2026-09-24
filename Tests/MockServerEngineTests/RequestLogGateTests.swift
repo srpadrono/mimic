@@ -9,51 +9,49 @@ import Vapor
 
 @Suite("Request log backpressure", .timeLimit(.minutes(1)))
 struct RequestLogGateTests {
-    private func waitForWaiter(_ gate: RequestLogGate) async throws {
+    private func waitForEmpty(_ gate: RequestLogGate) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while await gate.waitingCount == 0 {
-            try #require(ContinuousClock.now < deadline, "The extra publisher never reached the full gate.")
+        while await gate.outstandingCount != 0 {
+            try #require(ContinuousClock.now < deadline, "A released request kept its slot.")
             await Task.yield()
         }
     }
 
-    @Test("A canceled publisher waits for a slot and does not strand it")
-    func cancellationPreservesReservation() async throws {
+    @Test("A full gate rejects immediately and recovers after a log is processed")
+    func saturationAndRecovery() async throws {
         let gate = RequestLogGate()
-        for _ in 0..<RequestLogGate.capacity { #expect(await gate.reserve()) }
+        var leases: [RequestLogLease] = []
+        for _ in 0..<RequestLogGate.capacity {
+            leases.append(try #require(await gate.tryAcquireLease()))
+        }
+        #expect(await gate.outstandingCount == RequestLogGate.capacity)
+        #expect(await gate.tryAcquireLease() == nil)
         #expect(await gate.outstandingCount == RequestLogGate.capacity)
 
-        let publisher = Task { await gate.reserve() }
-        try await waitForWaiter(gate)
-        publisher.cancel()
-        #expect(await gate.waitingCount == 1)
-
+        #expect(leases[0].transferToConsumer())
         await gate.acknowledge()
-        #expect(await publisher.value)
-        #expect(await gate.outstandingCount == RequestLogGate.capacity)
-        for _ in 0..<RequestLogGate.capacity { await gate.acknowledge() }
-        #expect(await gate.outstandingCount == 0)
-        #expect(await gate.reserve())
+        let recovered = try #require(await gate.tryAcquireLease())
+        recovered.release()
+        for lease in leases.dropFirst() { lease.release() }
+        try await waitForEmpty(gate)
     }
 
-    @Test("Stream termination wakes a publisher waiting behind a full gate")
-    func terminationReleasesWaiter() async throws {
+    @Test("A terminated stream rejects new admissions even after slots are returned")
+    func terminationRejectsAdmission() async throws {
         let gate = RequestLogGate()
-        for _ in 0..<RequestLogGate.capacity { #expect(await gate.reserve()) }
-        let publisher = Task { await gate.reserve() }
-        try await waitForWaiter(gate)
-
+        let lease = try #require(await gate.tryAcquireLease())
         await gate.terminate()
-        #expect(await publisher.value == false)
-        #expect(await gate.reserve() == false)
-        #expect(await gate.waitingCount == 0)
+        #expect(await gate.tryAcquireLease() == nil)
+        lease.release()
+        try await waitForEmpty(gate)
+        #expect(await gate.tryAcquireLease() == nil)
     }
 
     @Test("Dropping an unconsumed Vapor response returns its proxy slot")
     func unconsumedResponseReturnsSlot() async throws {
         let gate = RequestLogGate()
         func makeResponse() async throws -> Response {
-            let lease = try #require(await gate.acquireLease())
+            let lease = try #require(await gate.tryAcquireLease())
             return Response(status: .ok, body: .init(managedAsyncStream: { _ in
                 lease.release()
             }))
@@ -64,20 +62,23 @@ struct RequestLogGateTests {
         #expect(await gate.outstandingCount == 1)
         response = nil
 
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while await gate.outstandingCount != 0 {
-            try #require(ContinuousClock.now < deadline, "The abandoned response kept its permit.")
-            await Task.yield()
-        }
+        try await waitForEmpty(gate)
     }
 }
 
 @Suite("Request log wire backpressure", .serialized, .timeLimit(.minutes(1)))
 struct RequestLogBackpressureWireTests {
-    @Test("The 33rd response waits until an earlier log has been processed")
-    func fullQueueBackpressuresWithoutDropping() async throws {
+    @Test("Saturation rejects before journey resolution and recovers without losing accepted logs")
+    func fullQueueRejectsWithoutAdvancingJourney() async throws {
         let port = try #require(PlatformSocket.freePort())
         let engine = MockServerEngine()
+        let fillScenario = Scenario(name: "Fill", statusCode: 200)
+        let fill = Endpoint(name: "Fill", path: "/queued/:id", scenarios: [fillScenario],
+            activeScenarioID: fillScenario.id)
+        let journey = Journey(name: "Admission", steps: [
+            JourneyStep(name: "First", path: "/journey", outcome: .respond(JourneyResponse(statusCode: 201)))
+        ])
+        await engine.updateConfiguration(endpoints: [fill], globalDelayMs: 0, journey: journey)
         try await engine.start(configuration: .init(port: port, globalDelayMs: 0))
         defer { Task { try? await engine.stop() } }
         let session = URLSession(configuration: .ephemeral)
@@ -86,32 +87,33 @@ struct RequestLogBackpressureWireTests {
         for index in 0..<RequestLogGate.capacity {
             let url = try #require(URL(string: "http://127.0.0.1:\(port)/queued/\(index)"))
             let (_, response) = try await session.data(from: url)
-            #expect((response as? HTTPURLResponse)?.statusCode == 404)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
         }
         #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.journeyStatus()?.totalServed == 0)
 
-        let lastURL = try #require(URL(string: "http://127.0.0.1:\(port)/queued/last"))
-        let blocked = Task { try await session.data(from: lastURL) }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while await engine.logGate.waitingCount == 0 {
-            try #require(ContinuousClock.now < deadline, "The extra HTTP request never reached the full log queue.")
-            try await Task.sleep(for: .milliseconds(2))
-        }
+        let journeyURL = try #require(URL(string: "http://127.0.0.1:\(port)/journey"))
+        let (_, rejected) = try await session.data(from: journeyURL)
+        #expect((rejected as? HTTPURLResponse)?.statusCode == 503)
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.journeyStatus()?.totalServed == 0)
 
         var logs = engine.logStream.makeAsyncIterator()
         let first = try #require(await logs.next())
         #expect(first.path == "/queued/0")
         await engine.acknowledgeLog()
 
-        let (_, response) = try await blocked.value
-        #expect((response as? HTTPURLResponse)?.statusCode == 404)
+        let (_, admitted) = try await session.data(from: journeyURL)
+        #expect((admitted as? HTTPURLResponse)?.statusCode == 201)
+        #expect(await engine.journeyStatus()?.totalServed == 1)
         for index in 1..<RequestLogGate.capacity {
             let log = try #require(await logs.next())
             #expect(log.path == "/queued/\(index)")
             await engine.acknowledgeLog()
         }
+        // The rejected attempt did not take a log slot; the next entry is the accepted retry.
         let last = try #require(await logs.next())
-        #expect(last.path == "/queued/last")
+        #expect(last.path == "/journey")
         await engine.acknowledgeLog()
         #expect(await engine.logGate.outstandingCount == 0)
         try await engine.stop()

@@ -19,6 +19,12 @@ enum VaporConfigurator {
         localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
+            // Reject before resolution: a rejected request must neither advance a journey nor
+            // allocate a pending log or proxy response preview. No handler waits with a collected
+            // request body in memory for the consumer to catch up.
+            guard let lease = await logGate.tryAcquireLease() else {
+                return Response(status: .serviceUnavailable)
+            }
             let incoming = IncomingRequest(
                 method: DomainHTTPMethod(rawValue: req.method.rawValue) ?? .get,
                 path: req.url.path,
@@ -40,10 +46,10 @@ enum VaporConfigurator {
             if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
                 return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
                     incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
-                    logContinuation: logContinuation, logGate: logGate)
+                    logContinuation: logContinuation, logGate: logGate, lease: lease)
             }
 
-            if await logGate.reserve() {
+            if lease.transferToConsumer() {
                 let result = logContinuation.yield(makeLog(
                     incoming: incoming, resolved: resolved, projectID: projectID,
                     backendName: backend?.name, listenerPort: listenerPort
