@@ -8,6 +8,14 @@ import MockServerEngine
 @MainActor
 struct MockServerRuntimeTests {
     actor FakeEngine: MockServerEngineProtocol {
+        struct Snapshot: Sendable {
+            let configuration: ServerConfiguration
+            let projectID: UUID?
+            let endpoints: [Endpoint]
+            let journey: Journey?
+            let activationEpoch: Int
+        }
+
         enum EngineFailure: Error, LocalizedError {
             case generic(String)
 
@@ -25,6 +33,7 @@ struct MockServerRuntimeTests {
         private(set) var stopCallCount = 0
         private(set) var updatedEndpoints: [[Endpoint]] = []
         private(set) var updatedJourneys: [Journey?] = []
+        private(set) var snapshots: [Snapshot] = []
         private(set) var restartCallCount = 0
         private(set) var advanceCallCount = 0
         var startError: Error?
@@ -59,6 +68,24 @@ struct MockServerRuntimeTests {
         }
 
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
+            updatedEndpoints.append(endpoints)
+            updatedJourneys.append(journey)
+        }
+
+        func updateConfiguration(
+            configuration: ServerConfiguration,
+            projectID: UUID?,
+            endpoints: [Endpoint],
+            journey: Journey?,
+            activationEpoch: Int
+        ) async {
+            snapshots.append(Snapshot(
+                configuration: configuration,
+                projectID: projectID,
+                endpoints: endpoints,
+                journey: journey,
+                activationEpoch: activationEpoch
+            ))
             updatedEndpoints.append(endpoints)
             updatedJourneys.append(journey)
         }
@@ -151,6 +178,7 @@ struct MockServerRuntimeTests {
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
 
         private(set) var startConfigurations: [ServerConfiguration] = []
+        private(set) var appliedConfigurations: [String] = []
         private(set) var stopCallCount = 0
         private var isHoldingStart = true
         private var startError: Error?
@@ -177,6 +205,7 @@ struct MockServerRuntimeTests {
             if let startError {
                 throw startError
             }
+            appliedConfigurations.append("start:\(configuration.primaryName)")
         }
 
         func stop() async throws {
@@ -184,6 +213,16 @@ struct MockServerRuntimeTests {
         }
 
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        func updateConfiguration(
+            configuration: ServerConfiguration,
+            projectID: UUID?,
+            endpoints: [Endpoint],
+            journey: Journey?,
+            activationEpoch: Int
+        ) async {
+            appliedConfigurations.append("push:\(configuration.primaryName)")
+        }
     }
 
     /// An engine whose *first* configuration push does not land until it is released.
@@ -338,6 +377,33 @@ struct MockServerRuntimeTests {
         )
     }
 
+    @Test("A project switch sends each complete snapshot in one engine call")
+    func projectSwitchUsesAtomicPush() async throws {
+        let engine = FakeEngine()
+        let manager = MockServerRuntime(engine: engine)
+        let firstEndpoint = makeEndpoint(name: "First")
+        let project = MockProject(
+            name: "First",
+            serverConfiguration: .init(port: 8123, globalDelayMs: 125),
+            endpoints: [firstEndpoint]
+        )
+
+        manager.applyProject(project)
+        try await waitUntilAsync { await engine.snapshots.count == 1 }
+        manager.applyProject(nil)
+        try await waitUntilAsync { await engine.snapshots.count == 2 }
+
+        let snapshots = await engine.snapshots
+        #expect(snapshots[0].configuration.port == 8123)
+        #expect(snapshots[0].configuration.globalDelayMs == 125)
+        #expect(snapshots[0].projectID == project.id)
+        #expect(snapshots[0].endpoints.map(\.id) == [firstEndpoint.id])
+        #expect(snapshots[0].activationEpoch == 0)
+        #expect(snapshots[1].configuration == .default)
+        #expect(snapshots[1].projectID == nil)
+        #expect(snapshots[1].endpoints.isEmpty)
+    }
+
     @Test("Start server succeeds and records the configuration")
     func startServerSucceeds() async throws {
         let engine = FakeEngine()
@@ -390,6 +456,28 @@ struct MockServerRuntimeTests {
         )
         let boundPorts = await engine.startConfigurations.map(\.port)
         #expect(boundPorts == [8080])
+    }
+
+    @Test("A project edit dispatched during start applies after the captured start settings")
+    func projectEditDuringStartKeepsTheNewerSettings() async throws {
+        let engine = GatedStartEngine()
+        let manager = MockServerRuntime(engine: engine)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0, primaryName: "Start")
+
+        manager.startServer()
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+
+        let project = MockProject(
+            name: "Edited project",
+            serverConfiguration: ServerConfiguration(port: 9000, globalDelayMs: 0, primaryName: "Edited")
+        )
+        manager.applyProject(project)
+        #expect(await engine.appliedConfigurations.isEmpty)
+
+        await engine.release()
+        try await waitUntilAsync { await engine.appliedConfigurations.count == 2 }
+        #expect(await engine.appliedConfigurations == ["start:Start", "push:Edited"])
+        #expect(manager.serverState == .running(port: 8080))
     }
 
     /// A port conflict is a *failure*, not a stop.
