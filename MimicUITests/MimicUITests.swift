@@ -1860,7 +1860,43 @@ final class MimicUITests: XCTestCase {
                        "Reopened endpoint should preserve the edited 401 status code")
     }
 
-    // MARK: - 29. Evidence Screenshots
+    // MARK: - 29. Project and Endpoint Survive a Fresh App Process
+
+    @MainActor
+    func testProjectAndEndpointSurviveAppRelaunch() throws {
+        let projectName = "Relaunch Persist Test"
+        let endpointPath = "/api/relaunch"
+
+        launchApp()
+        createProjectViaUI(name: projectName)
+        createEndpointViaUI(name: "Relaunch endpoint", path: endpointPath)
+        waitForAsyncSave()
+
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "The first app process should exit")
+
+        // Keep the same MIMIC_DEFAULTS_SUITE and test-owned database. Only remove the reset flag:
+        // a second reset would erase the very project this fresh-process check must recover.
+        app.launchArguments.removeAll { $0 == "-MimicResetForTesting" }
+        XCTAssertTrue(
+            UITestApp.launchAndBringToForeground(app) { self.workspace.assertVisible(timeout: 1) },
+            "A new app process should restore the project from the test database"
+        )
+
+        let title = workspace.projectTitle
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The restored workspace should name its project")
+        XCTAssertTrue(
+            title.label == projectName || (title.value as? String) == projectName,
+            "The restored project should be the one saved before quitting"
+        )
+        workspace.showSidebarIfNeeded()
+        XCTAssertTrue(
+            workspace.endpointPathText(endpointPath).waitForExistence(timeout: 5),
+            "The endpoint should survive closing and reopening the SQLite database"
+        )
+    }
+
+    // MARK: - 30. Evidence Screenshots
 
     /// Walks the core journey and captures labelled screenshots as verification evidence.
     /// PNGs are written under `<home>/Desktop/Mimic/.artifacts/screenshots` and attached to the xcresult.

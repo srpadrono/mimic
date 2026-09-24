@@ -91,6 +91,9 @@ final class UpdateService {
     private var quitsAfterSheetDismissal = false
 
     private var work: Task<Void, Never>?
+    /// A manual request can arrive while an automatic fetch is in flight. Its answer then belongs
+    /// in the visible sheet even though the fetch began as a silent background check.
+    private var announceCurrentCheck = false
 
     init(
         installedVersion: @escaping @Sendable () -> ReleaseVersion,
@@ -143,8 +146,13 @@ final class UpdateService {
     }
 
     private func startCheck(announceWhenUpToDate: Bool) {
+        if case .checking = phase {
+            if announceWhenUpToDate { announceCurrentCheck = true }
+            return
+        }
         guard !phase.isBusy else { return }
         work?.cancel()
+        announceCurrentCheck = announceWhenUpToDate
         phase = .checking
         work = Task { [weak self] in
             guard let self else { return }
@@ -160,13 +168,13 @@ final class UpdateService {
                         latest: release,
                         skipping: preferences.skippedVersion
                     ),
-                    announceWhenUpToDate: announceWhenUpToDate
+                    announceWhenUpToDate: announceCurrentCheck
                 )
             } catch {
                 guard !Task.isCancelled else { return }
                 phase = .failed(error.localizedDescription)
                 // A background failure stays out of the way; a failure somebody asked for is shown.
-                if !announceWhenUpToDate { isShowingSheet = false }
+                if !announceCurrentCheck { isShowingSheet = false }
             }
         }
     }

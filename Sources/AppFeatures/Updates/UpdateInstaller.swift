@@ -219,12 +219,22 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// Separated from the process call so it can be tested against real `pkgutil` output — captured
     /// from the published 0.10.0 installer — without spawning anything.
     static func isSignedByMimic(_ pkgutilOutput: String) -> Bool {
-        // Both halves are required. "Status: signed by a developer certificate issued by Apple"
-        // alone says a signature is valid and says nothing about whose it is, and the team id alone
-        // could appear in a package whose chain does not verify.
-        let statusIsValid = pkgutilOutput.contains("Status: signed by a developer certificate issued by Apple")
-        let isOurTeam = pkgutilOutput.contains("Developer ID Installer:") && pkgutilOutput.contains("(\(expectedTeamID))")
-        return statusIsValid && isOurTeam
+        let lines = pkgutilOutput.split(separator: "\n").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        // The filename is printed before these fields and may itself contain the team ID. Check
+        // the first certificate's identity as one line, rather than finding unrelated fragments
+        // anywhere in the output. The real status and chain follow the filename, so use their last
+        // occurrences if a filename happens to contain a newline and imitation field names.
+        guard let status = lines.last(where: { $0.hasPrefix("Status:") }),
+              status.hasPrefix("Status: signed by a developer certificate issued by Apple"),
+              let chainIndex = lines.lastIndex(of: "Certificate Chain:"),
+              lines.indices.contains(chainIndex + 1)
+        else { return false }
+
+        let signer = lines[chainIndex + 1]
+        return signer.hasPrefix("1. Developer ID Installer: ")
+            && signer.hasSuffix(" (\(expectedTeamID))")
     }
 
     // MARK: - Handoff

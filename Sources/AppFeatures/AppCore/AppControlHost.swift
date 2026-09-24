@@ -497,7 +497,9 @@ final class AppControlHost: ControlHost {
                 // queries. Merging those counts onto the stubs is `HostReport.projectSummaries`,
                 // shared with the service — including that a project with neither child has no row
                 // in `counts` and the stub's own zeroes are already the right answer.
-                let counts = (try? await repository.projectCounts()) ?? [:]
+                // A failed count query is a failed listing. Treating it as an empty result would
+                // report every stored project as having no endpoints or journeys.
+                let counts = try await repository.projectCounts()
                 // The open project is answered from the session rather than from the store, for the
                 // reason `projectExport` is: an edit made a moment ago is still sitting in the
                 // autosave debounce, so the stored row is the one that can be behind. That overlay
