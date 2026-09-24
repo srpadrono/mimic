@@ -68,6 +68,9 @@ struct EndpointReferenceAmbiguityTests {
         let commands: [ControlCommand] = [
             .endpointGet(endpoint: route),
             .endpointUpdate(endpoint: route, spec: EndpointSpec(delayMs: 500)),
+            .endpointUpdateWithActiveScenario(
+                endpoint: route, spec: EndpointSpec(delayMs: 500), scenarioSpec: ScenarioSpec(statusCode: 500)
+            ),
             .endpointDelete(endpoint: route),
             .endpointDuplicate(endpoint: route),
             .scenarioList(endpoint: route),

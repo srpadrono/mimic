@@ -177,22 +177,35 @@ struct RealTrafficTests {
             Self.endpoint(.get, "/a", status: 200, body: "a"),
             Self.endpoint(.get, "/b", status: 201, body: "b"),
             Self.endpoint(.get, "/c", status: 202, body: "c"),
-        ]) { _, baseURL in
+        ]) { engine, baseURL in
             let session = JourneyServingTests.session(timeout: 30)
             let routes = [("a", 200), ("b", 201), ("c", 202)]
+            let drain = Task {
+                for await _ in engine.logStream { await engine.acknowledgeLog() }
+            }
+            defer { drain.cancel() }
 
-            let results = try await withThrowingTaskGroup(of: (String, Int).self) { group in
-                for _ in 0..<40 {
-                    for (path, _) in routes {
-                        group.addTask {
-                            let reply = try await JourneyServingTests.call("GET", path, baseURL: baseURL, session: session)
-                            return (reply.body, reply.status)
+            var results: [(String, Int)] = []
+            for _ in 0..<5 {
+                let wave = try await withThrowingTaskGroup(of: (String, Int).self) { group in
+                    for _ in 0..<8 {
+                        for (path, _) in routes {
+                            group.addTask {
+                                let reply = try await JourneyServingTests.call("GET", path, baseURL: baseURL, session: session)
+                                return (reply.body, reply.status)
+                            }
                         }
                     }
+                    var collected: [(String, Int)] = []
+                    for try await result in group { collected.append(result) }
+                    return collected
                 }
-                var collected: [(String, Int)] = []
-                for try await result in group { collected.append(result) }
-                return collected
+                results.append(contentsOf: wave)
+                let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+                while await engine.logGate.outstandingCount != 0 {
+                    try #require(ContinuousClock.now < deadline, "The log consumer fell behind the request wave.")
+                    await Task.yield()
+                }
             }
 
             #expect(results.count == 120)

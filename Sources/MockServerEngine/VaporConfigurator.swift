@@ -7,17 +7,27 @@ enum VaporConfigurator {
     /// Every request Mimic answers arrives here, whatever its path.
     ///
     /// Registering routes is the *only* thing Vapor decides; what to serve is Domain's answer via
-    /// `MockResolver.plan`, and everything that reaches this closure is logged — including the
-    /// requests nothing is configured for. A path Vapor answers itself is a path Mimic cannot see.
+    /// `MockResolver.plan`, and every admitted request with a valid-size body is logged — including
+    /// requests nothing is configured for. Overload and oversized-body rejections are not logged.
+    /// A path Vapor answers itself is a path Mimic cannot see.
     static func registerRoutes(
         on app: Application,
         routeStore: MockRouteStore,
         logContinuation: AsyncStream<RequestLog>.Continuation,
+        logGate: RequestLogGate,
         backendID: UUID? = nil,
         listenerPort: Int = 8080,
         localPorts: Set<Int> = []
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
+            // Reject before resolution: a rejected request must neither advance a journey nor
+            // allocate a pending log or proxy response preview. With a streaming route, the
+            // admission check also happens before Vapor collects a large request body.
+            guard let lease = await logGate.tryAcquireLease() else {
+                return Response(status: .serviceUnavailable)
+            }
+            // Preserve the previous 10 MiB/413 limit, but collect only after admission.
+            _ = try await req.body.collect(max: 10 << 20).get()
             let incoming = IncomingRequest(
                 method: DomainHTTPMethod(rawValue: req.method.rawValue) ?? .get,
                 path: req.url.path,
@@ -39,13 +49,16 @@ enum VaporConfigurator {
             if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
                 return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
                     incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
-                    logContinuation: logContinuation)
+                    logContinuation: logContinuation, logGate: logGate, lease: lease)
             }
 
-            logContinuation.yield(makeLog(
-                incoming: incoming, resolved: resolved, projectID: projectID,
-                backendName: backend?.name, listenerPort: listenerPort
-            ))
+            if lease.transferToConsumer() {
+                let result = logContinuation.yield(makeLog(
+                    incoming: incoming, resolved: resolved, projectID: projectID,
+                    backendName: backend?.name, listenerPort: listenerPort
+                ))
+                if case .terminated = result { await logGate.acknowledge() }
+            }
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing
@@ -69,7 +82,7 @@ enum VaporConfigurator {
         let methods: [Vapor.HTTPMethod] = [.GET, .POST, .PUT, .PATCH, .DELETE, .OPTIONS, .HEAD]
         for method in methods {
             for path in interceptAllPaths {
-                app.on(method, path, body: .collect(maxSize: "10mb"), use: handler)
+                app.on(method, path, body: .stream, use: handler)
             }
         }
     }

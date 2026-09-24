@@ -36,6 +36,7 @@ struct MockServerRuntimeTests {
         private(set) var snapshots: [Snapshot] = []
         private(set) var restartCallCount = 0
         private(set) var advanceCallCount = 0
+        private(set) var acknowledgedLogCount = 0
         var startError: Error?
         var stopError: Error?
         var stubbedJourneyStatus: JourneyStatus?
@@ -102,6 +103,10 @@ struct MockServerRuntimeTests {
 
         func journeyStatus() async -> JourneyStatus? {
             stubbedJourneyStatus
+        }
+
+        func acknowledgeLog() async {
+            acknowledgedLogCount += 1
         }
 
         func setStubbedJourneyStatus(_ status: JourneyStatus?) {
@@ -934,6 +939,7 @@ struct MockServerRuntimeTests {
         // and read like a bug in the rotating buffer rather than in its own predicate.
         let lastPath = "/logs/\(MockServerRuntime.maxRequestLogEntries + 4)"
         try await waitUntil { manager.requestLogs.last?.path == lastPath }
+        try await waitUntilAsync { await engine.acknowledgedLogCount == MockServerRuntime.maxRequestLogEntries + 5 }
 
         #expect(manager.requestLogs.count == MockServerRuntime.maxRequestLogEntries)
         #expect(manager.requestLogs.first?.path == "/logs/5")

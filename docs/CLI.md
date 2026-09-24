@@ -2,6 +2,8 @@
 
 `mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, one diagnostic line on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
 
+Project edits (such as rename, endpoint, scenario, journey definition, and `log save-as-mock` changes) report success after the edited project has been saved. If the store refuses a save, the command returns `persistence.failure`; the edited project remains in the open session and the window shows the save failure. Inspect the open project before retrying a create command: repeating it can add a second item to that session. Project create, open, and duplicate retain their asynchronous window workflow; confirm their settled state with a follow-up command.
+
 HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
 
 ## Exit codes
@@ -112,7 +114,7 @@ mimic scenario delete GET /account-summary "Server error"
 ```
 
 `--body-file -` reads stdin. `endpoint update --status` changes the active scenario. A scenario selects a standing response; a journey scripts a sequence.
-An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario before sending either edit. The edits are still two control commands; another client changing the project between them can leave only the first edit applied.
+An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario, then applies both edits in one project mutation. The host chooses the active scenario at execution time if another client switched it after the check.
 Endpoint edits require a unique match. If multiple backends contain the same method and path, select the endpoint by UUID with `--id`.
 Scenario create, update, activate, and delete also accept `--id <endpoint-UUID> <scenario-name>` when an endpoint route is shared.
 

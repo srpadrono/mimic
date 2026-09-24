@@ -48,6 +48,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
     case endpointGet
     case endpointCreate
     case endpointUpdate
+    case endpointUpdateWithActiveScenario
     case endpointDelete
     case endpointDuplicate
 
@@ -146,7 +147,8 @@ extension CommandKind {
         case .serverConfigure, .backendUpsert, .backendDelete:
             .project
 
-        case .endpointList, .endpointGet, .endpointCreate, .endpointUpdate, .endpointDelete,
+        case .endpointList, .endpointGet, .endpointCreate, .endpointUpdate,
+             .endpointUpdateWithActiveScenario, .endpointDelete,
              .endpointDuplicate:
             .project
 
@@ -204,6 +206,7 @@ extension ControlCommand {
         case .endpointGet: .endpointGet
         case .endpointCreate: .endpointCreate
         case .endpointUpdate: .endpointUpdate
+        case .endpointUpdateWithActiveScenario: .endpointUpdateWithActiveScenario
         case .endpointDelete: .endpointDelete
         case .endpointDuplicate: .endpointDuplicate
         case .scenarioList: .scenarioList

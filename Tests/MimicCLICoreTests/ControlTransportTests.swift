@@ -177,7 +177,8 @@ struct EmittedCommandTests {
         @Sendable
         static func plausibleAnswer(_ command: ControlCommand) -> ControlResponse {
             switch command.kind {
-            case .endpointCreate, .endpointGet, .endpointUpdate, .endpointDuplicate:
+            case .endpointCreate, .endpointGet, .endpointUpdate,
+                 .endpointUpdateWithActiveScenario, .endpointDuplicate:
                 .success(.init(endpoint: endpoint))
             case .scenarioCreate:
                 .success(.init(scenario: scenario))
@@ -275,9 +276,8 @@ struct EmittedCommandTests {
         #expect(configured[2] == .endpointGet(endpoint: .id(RecordingTransport.endpoint.id)))
     }
 
-    /// `endpoint update` branches twice: on whether anything about the *endpoint* changed, and on
-    /// whether anything about its *response* did. The response half also has to look the endpoint up
-    /// first, because "the endpoint's response" means whichever scenario is active.
+    /// `endpoint update` sends only the requested half, or one combined edit when both halves were
+    /// requested. The response needs a lookup first to give a clear error when none is active.
     @Test("`endpoint update` emits only the halves the invocation asked for")
     func endpointUpdateComposition() async {
         let endpointOnly = await Self.emitted(["endpoint", "update", "GET", "/a", "--delay", "100"])
@@ -289,9 +289,7 @@ struct EmittedCommandTests {
         let both = await Self.emitted(
             ["endpoint", "update", "GET", "/a", "--delay", "100", "--status", "500"]
         )
-        // The combined path preflights the response before changing the endpoint, then uses
-        // the endpoint id after the route changes.
-        #expect(both.map(\.kind) == [.endpointGet, .endpointUpdate, .endpointGet, .scenarioUpdate, .endpointGet])
+        #expect(both.map(\.kind) == [.endpointGet, .endpointUpdateWithActiveScenario])
 
         // Nothing to change is bad usage, and nothing is sent at all.
         let empty = await Self.emitted(["endpoint", "update", "GET", "/a"], exitCode: 2)
@@ -535,7 +533,7 @@ struct EmittedCommandTests {
 
     /// The meta-assertion: every command the catalog advertises is reachable from the CLI.
     ///
-    /// `CommandCatalog` claims a `cli` spelling for all 47 kinds and the suite next door checks each
+    /// `CommandCatalog` claims a `cli` spelling for every kind and the suite next door checks each
     /// one *parses*. This checks the other half — that running it actually emits that command — and it
     /// is `allCases`-driven, so a new `CommandKind` fails here until some invocation below produces
     /// it. That is the failure mode this cannot have: a command added to the surface, advertised by
@@ -566,6 +564,7 @@ struct EmittedCommandTests {
             ["endpoint", "list"], ["endpoint", "get", "GET", "/a"],
             ["endpoint", "create", "POST", "/login", "--status", "201"],
             ["endpoint", "update", "GET", "/a", "--delay", "100"],
+            ["endpoint", "update", "GET", "/a", "--delay", "100", "--status", "201"],
             ["endpoint", "delete", "GET", "/a"], ["endpoint", "duplicate", "GET", "/a"],
             ["scenario", "list", "GET", "/a"],
             ["scenario", "create", "GET", "/a", "Error", "--status", "500", "--activate"],
