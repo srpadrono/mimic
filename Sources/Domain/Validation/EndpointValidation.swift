@@ -155,6 +155,11 @@ public enum ProjectValidator {
         }
 
         try EndpointValidator.validatePort(project.serverConfiguration.port)
+        guard project.serverConfiguration.globalDelayMs >= 0 else {
+            throw ValidationError.invalidDocument(
+                context: "server configuration", reason: "Global delay must be zero or greater."
+            )
+        }
         let additional = project.serverConfiguration.backends
         let allPorts = [project.serverConfiguration.port] + additional.map(\.port)
         guard Set(allPorts).count == allPorts.count else {
@@ -190,6 +195,11 @@ public enum ProjectValidator {
         for endpoint in project.endpoints {
             if let backendID = endpoint.backendID, !backendIDs.contains(backendID) {
                 throw ValidationError.invalidDocument(context: context(for: endpoint), reason: "Backend does not exist.")
+            }
+            guard endpoint.delayMs >= 0 else {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint), reason: "Endpoint delay must be zero or greater."
+                )
             }
             do {
                 try EndpointValidator.validatePath(endpoint.path)
@@ -237,8 +247,18 @@ public enum ProjectValidator {
 
         for journey in project.journeys {
             for step in journey.steps {
+                let stepContext = "journey \"\(journey.name)\", step \"\(step.name)\""
                 if let backendID = step.backendID, !backendIDs.contains(backendID) {
-                    throw ValidationError.invalidDocument(context: "journey \"\(journey.name)\", step \"\(step.name)\"", reason: "Backend does not exist.")
+                    throw ValidationError.invalidDocument(context: stepContext, reason: "Backend does not exist.")
+                }
+                guard step.delayMs >= 0 else {
+                    throw ValidationError.invalidDocument(context: stepContext, reason: "Journey step delay must be zero or greater.")
+                }
+                guard step.repeatCount >= 1 else {
+                    throw ValidationError.invalidDocument(context: stepContext, reason: "Journey step repeatCount must be at least 1.")
+                }
+                if case let .networkFailure(.timeout(holdMs)) = step.outcome, holdMs < 0 {
+                    throw ValidationError.invalidDocument(context: stepContext, reason: "Timeout hold must be zero or greater.")
                 }
                 do {
                     try EndpointValidator.validatePath(step.path)
@@ -248,7 +268,7 @@ public enum ProjectValidator {
                     }
                 } catch let error as ValidationError {
                     throw ValidationError.invalidDocument(
-                        context: "journey \"\(journey.name)\", step \"\(step.name)\"",
+                        context: stepContext,
                         reason: error.errorDescription ?? "invalid"
                     )
                 }
