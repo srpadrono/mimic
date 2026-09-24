@@ -32,6 +32,7 @@ enum RawHTTPClient {
         path: String,
         port: Int,
         additionalHeaders: [(String, String)] = [],
+        bodyPrefix: Data = Data(),
         timeout: TimeInterval = 5
     ) throws -> Response {
         let socketFD = PlatformSocket.make()
@@ -54,6 +55,17 @@ enum RawHTTPClient {
         try request.withCString { pointer in
             var remaining = strlen(pointer)
             var cursor = pointer
+            while remaining > 0 {
+                let written = PlatformSocket.send(socketFD, cursor, remaining)
+                guard written > 0 else { throw Failure.writeFailed(errno) }
+                cursor = cursor.advanced(by: written)
+                remaining -= written
+            }
+        }
+        try bodyPrefix.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var remaining = raw.count
+            var cursor = base
             while remaining > 0 {
                 let written = PlatformSocket.send(socketFD, cursor, remaining)
                 guard written > 0 else { throw Failure.writeFailed(errno) }

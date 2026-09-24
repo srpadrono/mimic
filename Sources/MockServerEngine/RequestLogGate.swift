@@ -1,8 +1,8 @@
 import Foundation
 
-/// Limits active handlers and logs not yet processed by the consumer. Admission never waits:
-/// Vapor has already collected the request body, so suspended handlers would retain unbounded
-/// bodies under load. A rejected request has not resolved a route or advanced a journey.
+/// Limits active handlers and logs not yet processed by the consumer. Admission never waits,
+/// and streamed request bodies are explicitly collected only after taking a slot. A rejected
+/// request has not resolved a route or advanced a journey.
 actor RequestLogGate {
     static let capacity = 32
 
