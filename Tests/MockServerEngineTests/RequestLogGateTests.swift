@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import Domain
 import Testing
 import Vapor
 @testable import MockServerEngine
