@@ -552,8 +552,8 @@ struct MockServerRuntimeTests {
 
     /// A start that succeeds clears whatever the previous one failed with, so a stale code cannot be
     /// reported next to a running server.
-    @Test("A retry after a conflict clears the recorded failure")
-    func retryClearsTheRecordedStartFailure() async throws {
+    @Test("A new start after a conflict clears the recorded failure")
+    func newStartClearsTheRecordedStartFailure() async throws {
         let engine = FakeEngine()
         await engine.setStartError(MockServerError.portInUse(port: 8080))
         let manager = MockServerRuntime(engine: engine)
@@ -562,8 +562,8 @@ struct MockServerRuntimeTests {
         try await waitUntil { manager.startFailure != nil }
 
         await engine.setStartError(nil)
-        manager.retryStartOnNextPort(from: 8080)
-        try await waitUntil { manager.serverState.runningPort == 8081 }
+        manager.startServer()
+        try await waitUntil { manager.serverState.runningPort == 8080 }
 
         #expect(manager.startFailure == nil)
         #expect(manager.portConflictAlert == nil)
@@ -722,40 +722,6 @@ struct MockServerRuntimeTests {
         try await waitUntil { manager.serverState.isError }
         #expect(manager.portConflictAlert == nil)
         #expect(manager.serverConfiguration.port == 9090)
-    }
-
-    @Test("Retry start increments port clears alert and restarts")
-    func retryStartUsesNextPort() async throws {
-        let engine = FakeEngine()
-        let manager = MockServerRuntime(engine: engine)
-        manager.portConflictAlert = PortConflictAlertData(conflictingPort: 8080)
-
-        manager.retryStartOnNextPort(from: 8080)
-        try await waitUntil {
-            if case .running(let port) = manager.serverState {
-                return port == 8081
-            }
-            return false
-        }
-
-        #expect(manager.serverConfiguration.port == 8081)
-        #expect(manager.portConflictAlert == nil)
-        #expect(await engine.startConfigurations.last?.port == 8081)
-    }
-
-    @Test("Retry never starts on an invalid port when 65535 is occupied")
-    func retryAtPortBoundaryLeavesConfigurationUntouched() async {
-        let engine = FakeEngine()
-        let manager = MockServerRuntime(engine: engine)
-        manager.serverConfiguration = ServerConfiguration(port: 65535, globalDelayMs: 0)
-        manager.portConflictAlert = PortConflictAlertData(conflictingPort: 65535)
-
-        manager.retryStartOnNextPort(from: 65535)
-
-        #expect(manager.serverConfiguration.port == 65535)
-        #expect(manager.portConflictAlert?.suggestedPort == nil)
-        #expect(manager.serverState == .stopped)
-        #expect(await engine.startConfigurations.isEmpty)
     }
 
     @Test("Update mocks forwards endpoint lists to the engine")

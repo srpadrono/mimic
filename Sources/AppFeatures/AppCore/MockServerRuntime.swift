@@ -163,6 +163,8 @@ final class MockServerRuntime {
         serverState = .starting
         // A new attempt supersedes whatever the previous one failed with.
         startFailure = nil
+        portConflictAlert = nil
+        genericStartError = nil
 
         let configuration = serverConfiguration
         let predecessor = pendingMockUpdate
@@ -274,19 +276,6 @@ final class MockServerRuntime {
         stopRequestedMidStart = false
         serverState = .stopped
         return true
-    }
-
-    func retryStartOnNextPort(from conflictingPort: Int) {
-        let used = Set(serverConfiguration.listeners.map(\.port))
-        guard let next = PortConflictAlertData.nextAvailablePort(after: conflictingPort, avoiding: used) else {
-            return
-        }
-        if serverConfiguration.port == conflictingPort { serverConfiguration.port = next }
-        else if let index = serverConfiguration.backends.firstIndex(where: { $0.port == conflictingPort }) {
-            serverConfiguration.backends[index].port = next
-        }
-        portConflictAlert = nil
-        startServer()
     }
 
     /// The configuration push most recently dispatched to the engine — the tail of the push chain.
