@@ -24,13 +24,26 @@ public actor MockServerEngine {
     }
 
     /// Lossless delivery to the single consumer. Automatic response capture consumes this stream,
-    /// so dropping pending events also silently loses persistent mocks. The runtime bounds its
-    /// displayed history after processing each event; that retention limit must not apply here.
+    /// so dropping pending events also silently loses persistent mocks. Producers reserve one of
+    /// 32 permits before making a log; the runtime returns it after processing that entry.
     public nonisolated let logStream: AsyncStream<RequestLog>
     private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
+    nonisolated let logGate: RequestLogGate
 
     public init() {
-        (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .unbounded)
+        let gate = RequestLogGate()
+        let (stream, continuation) = AsyncStream<RequestLog>.makeStream(bufferingPolicy: .unbounded)
+        continuation.onTermination = { _ in
+            Task { await gate.terminate() }
+        }
+        logGate = gate
+        logStream = stream
+        logContinuation = continuation
+    }
+
+    /// Called once for each log after its consumer has handled automatic capture and UI retention.
+    public nonisolated func acknowledgeLog() async {
+        await logGate.acknowledge()
     }
 
     public func start(configuration: ServerConfiguration) async throws {
@@ -64,7 +77,7 @@ public actor MockServerEngine {
                 newApp.http.server.configuration.hostname = "127.0.0.1"
                 newApp.http.server.configuration.port = port
                 VaporConfigurator.registerRoutes(
-                    on: newApp, routeStore: routeStore, logContinuation: logContinuation,
+                    on: newApp, routeStore: routeStore, logContinuation: logContinuation, logGate: logGate,
                     backendID: backendID, listenerPort: port, localPorts: localPorts
                 )
                 do {
