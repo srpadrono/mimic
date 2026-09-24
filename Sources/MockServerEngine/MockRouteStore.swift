@@ -1,6 +1,15 @@
 import Foundation
 import Domain
 
+/// The answer and request metadata selected from the same live configuration. The handler can
+/// suspend after resolution without later configuration pushes changing the attribution or upstream
+/// for this request.
+struct RouteResolution: Sendable {
+    let response: ResolvedResponse
+    let projectID: UUID?
+    let backend: BackendConfiguration?
+}
+
 /// Thread-safe holder for the live mock configuration, including the active journey and where its
 /// run currently stands.
 ///
@@ -12,11 +21,31 @@ import Domain
 actor MockRouteStore {
     private(set) var projectID: UUID?
     private var configuration = ServerConfiguration.default
-    func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID? = nil) {
-        self.configuration = configuration
-        if let projectID { self.projectID = projectID }
+    private var latestConfigurationRevision = 0
+
+    /// The engine assigns revisions before awaiting this actor. A late older call must not replace
+    /// a newer configuration, regardless of whether it came from start or a project push.
+    private func acceptConfigurationRevision(_ revision: Int) -> Bool {
+        guard revision > latestConfigurationRevision else { return false }
+        latestConfigurationRevision = revision
+        return true
     }
-    func backend(id: UUID?) -> BackendConfiguration? { configuration.backend(id: id) }
+
+    /// A settings-only update keeps the project and effective delay attached to the live routes.
+    /// `start` uses this path, so a later restart can replace listener settings without rewriting a
+    /// delay installed through the legacy routes API.
+    func updateServerConfiguration(_ configuration: ServerConfiguration, revision: Int) {
+        guard acceptConfigurationRevision(revision) else { return }
+        self.configuration = configuration
+    }
+
+    /// An explicit project selection, including `nil`, replaces request attribution while keeping
+    /// the independently installed route delay.
+    func updateServerConfiguration(_ configuration: ServerConfiguration, projectID: UUID?, revision: Int) {
+        guard acceptConfigurationRevision(revision) else { return }
+        self.configuration = configuration
+        self.projectID = projectID
+    }
 
     private var endpoints: [Endpoint] = []
     private var globalDelayMs: Int = 0
@@ -94,7 +123,28 @@ actor MockRouteStore {
         }
     }
 
-    func resolve(request: IncomingRequest) -> ResolvedResponse {
+    /// Installs all request-facing fields before another actor call can read them. Reuses the same
+    /// journey transition logic as the compatibility overloads above.
+    func update(
+        configuration: ServerConfiguration,
+        projectID: UUID?,
+        endpoints: [Endpoint],
+        journey: Journey?,
+        activationEpoch: Int,
+        revision: Int
+    ) {
+        guard acceptConfigurationRevision(revision) else { return }
+        self.configuration = configuration
+        self.projectID = projectID
+        update(
+            endpoints: endpoints,
+            globalDelayMs: configuration.globalDelayMs,
+            journey: journey,
+            activationEpoch: activationEpoch
+        )
+    }
+
+    func resolve(request: IncomingRequest) -> RouteResolution {
         let plan = MockResolver.plan(
             request: request,
             endpoints: endpoints,
@@ -105,7 +155,11 @@ actor MockRouteStore {
         if let nextState = plan.journeyState {
             runState = nextState
         }
-        return plan.response
+        return RouteResolution(
+            response: plan.response,
+            projectID: projectID,
+            backend: configuration.backend(id: request.backendID)
+        )
     }
 
     // MARK: Journey runtime control

@@ -29,19 +29,23 @@ enum VaporConfigurator {
                 backendID: backendID
             )
 
-            // One actor hop resolves the request *and* advances the journey cursor, so
-            // concurrent requests can never consume the same step.
-            let resolved = await routeStore.resolve(request: incoming)
-
-            let projectID = await routeStore.projectID
-            let backend = await routeStore.backend(id: backendID)
+            // One actor hop resolves the request, advances the journey cursor, and captures the
+            // project and backend used by proxying. Concurrent requests cannot consume the same
+            // step or pair a response with configuration from a later update.
+            let resolution = await routeStore.resolve(request: incoming)
+            let resolved = resolution.response
+            let projectID = resolution.projectID
+            let backend = resolution.backend
             if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
                 return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
                     incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
                     logContinuation: logContinuation)
             }
 
-            logContinuation.yield(makeLog(incoming: incoming, resolved: resolved, backendName: backend?.name, listenerPort: listenerPort))
+            logContinuation.yield(makeLog(
+                incoming: incoming, resolved: resolved, projectID: projectID,
+                backendName: backend?.name, listenerPort: listenerPort
+            ))
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing
@@ -128,13 +132,16 @@ enum VaporConfigurator {
     /// How long to stay silent before tearing the connection down.
     ///
     /// A dropped connection is immediate (bar any configured artificial delay); a timeout is
-    /// deliberately long, because the behaviour under test is the *client* giving up.
+    /// deliberately long, because the behaviour under test is the *client* giving up. Values
+    /// from an invalid or older document are clamped to zero and the sum saturates at `Int.max`.
     static func holdMilliseconds(for failure: NetworkFailure, delayMs: Int) -> Int {
         switch failure {
         case .connectionDrop:
-            max(0, delayMs)
+            return max(0, delayMs)
         case let .timeout(timeoutHoldMs):
-            max(0, delayMs) + max(0, timeoutHoldMs)
+            let delay = max(0, delayMs)
+            let timeoutHold = max(0, timeoutHoldMs)
+            return timeoutHold > Int.max - delay ? Int.max : delay + timeoutHold
         }
     }
 
@@ -173,7 +180,13 @@ enum VaporConfigurator {
 
     // MARK: - Logging
 
-    static func makeLog(incoming: IncomingRequest, resolved: ResolvedResponse, backendName: String? = nil, listenerPort: Int? = nil) -> RequestLog {
+    static func makeLog(
+        incoming: IncomingRequest,
+        resolved: ResolvedResponse,
+        projectID: UUID? = nil,
+        backendName: String? = nil,
+        listenerPort: Int? = nil
+    ) -> RequestLog {
         // A failed request wrote no body, so recording the scenario's would be a fiction.
         let (body, truncated) = resolved.failure == nil
             ? RequestLog.cappedBody(resolved.body)
@@ -188,6 +201,7 @@ enum VaporConfigurator {
             method: incoming.method,
             path: incoming.path,
             backendID: incoming.backendID,
+            projectID: projectID,
             backendName: backendName, listenerPort: listenerPort,
             requestHeaders: incoming.headers,
             requestBody: requestBody, requestBodyTruncated: requestBodyTruncated,

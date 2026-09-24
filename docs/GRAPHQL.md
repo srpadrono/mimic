@@ -17,6 +17,6 @@ The window's HAR importer splits captured GraphQL calls by operation into review
 
 ## Known limits
 
-- A batch of multiple operations does not match an operation-specific mock. A bare catch-all can answer it, but cannot construct a separate reply for each batched operation. Without a catch-all, it is logged as unmatched.
+- A top-level batch array, even with one operation, does not match an operation-specific mock. A bare catch-all can answer it, but cannot construct a separate reply for each batched operation. Without a catch-all, it is logged as unmatched.
 - A persisted query that sends only a hash has no document from which to infer an operation. Use a route-based mock or disable persisted queries in the test client.
 - `GET` queries in URL parameters are not parsed for operation matching; the discriminator is read from the request body.

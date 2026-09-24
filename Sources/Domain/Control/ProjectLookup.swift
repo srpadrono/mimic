@@ -3,11 +3,10 @@ import Foundation
 /// Reference resolution: turning the loose handles callers use (`GET /login`, `"Retry after
 /// failure"`, a UUID) into concrete project members.
 ///
-/// Resolution is deliberately tolerant so a caller never has to round-trip through a list command
-/// just to learn a UUID, and deliberately ordered so it stays deterministic: **id wins, then the
-/// most specific remaining handle, then name**. Names match case-insensitively after trimming; when
-/// several members share a name the first declared wins, matching how the request matcher breaks
-/// ties.
+/// Resolution is deliberately tolerant so a caller usually need not round-trip through a list
+/// command just to learn a UUID. An id wins over the other fields; otherwise the most specific
+/// supplied handle is used. Endpoint editing requires a unique match, even when serving would break
+/// a tie by declaration order. Names match case-insensitively after trimming.
 extension MockProject {
 
     // MARK: Projects
@@ -52,22 +51,26 @@ extension MockProject {
     // MARK: Endpoints
 
     public func endpointIndex(matching ref: EndpointRef) -> Int? {
+        let matches = endpointIndices(matching: ref)
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private func endpointIndices(matching ref: EndpointRef) -> [Int] {
         if let id = ref.id {
-            return endpoints.firstIndex { $0.id == id }
-        }
-        if let method = ref.method, let path = ref.path {
-            let normalizedPath = Self.normalize(path)
-            return endpoints.firstIndex { $0.method == method && Self.normalize($0.path) == normalizedPath }
+            return endpoints.firstIndex { $0.id == id }.map { [$0] } ?? []
         }
         if let path = ref.path {
             let normalizedPath = Self.normalize(path)
-            return endpoints.firstIndex { Self.normalize($0.path) == normalizedPath }
+            return endpoints.indices.filter {
+                (ref.method == nil || endpoints[$0].method == ref.method)
+                    && Self.normalize(endpoints[$0].path) == normalizedPath
+            }
         }
         if let name = ref.name {
             let key = Self.foldName(name)
-            return endpoints.firstIndex { Self.foldName($0.name) == key }
+            return endpoints.indices.filter { Self.foldName(endpoints[$0].name) == key }
         }
-        return nil
+        return []
     }
 
     public func endpoint(matching ref: EndpointRef) -> Endpoint? {
@@ -123,16 +126,22 @@ extension MockProject {
 
 /// Resolution that fails loudly.
 ///
-/// Every project-scoped command starts by turning a handle into a member, and the failure is always
-/// the same sentence: throw the `ControlError` that names what could not be found. Spelled out at
+/// Every project-scoped command starts by turning a handle into a member. Missing members use the
+/// corresponding not-found error; ambiguous endpoint handles ask for a UUID. This was spelled out at
 /// each call site that was `guard let index = … else { throw … }` twenty-four times over — twenty-four
 /// chances to throw the wrong error, or to report a missing scenario as a missing endpoint. Naming
 /// the lookup and its failure together means a caller cannot pair them up incorrectly.
 extension MockProject {
 
     public func requireEndpointIndex(_ ref: EndpointRef) throws -> Int {
-        guard let index = endpointIndex(matching: ref) else {
+        let matches = endpointIndices(matching: ref)
+        guard let index = matches.first else {
             throw ControlError.endpointNotFound(ref)
+        }
+        guard matches.count == 1 else {
+            throw ControlError.invalid(
+                "More than one endpoint matches this reference. Use an endpoint UUID (--id) to select one."
+            )
         }
         return index
     }
