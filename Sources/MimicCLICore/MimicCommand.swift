@@ -171,6 +171,7 @@ struct AppCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
+            let waitSeconds = try AppLauncher.validatedReadinessTimeout(waitSeconds)
             if let existing = try? options.client(), await existing.isReachable() {
                 Output(options).emitMessage("Mimic is already running at \(existing.baseURL.absoluteString).")
                 return
