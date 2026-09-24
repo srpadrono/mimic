@@ -40,9 +40,15 @@ enum ProxyForwarder {
         logContinuation: AsyncStream<RequestLog>.Continuation, logGate: RequestLogGate
     ) async -> Response {
         let started = ContinuousClock.now
-        @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) async {
-            // Reserve before creating either the log or its private captured-response file.
-            guard await logGate.reserve() else { return }
+        // No upstream body exists while this waits, so cancellation cannot race a delayed
+        // AsyncHTTPClient body iterator. The response writer retains the lease; if it never runs,
+        // deinit returns the slot. Vapor has already collected the incoming body before this point.
+        guard let lease = await logGate.acquireLease() else {
+            return Response(status: .serviceUnavailable)
+        }
+        @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
+            // A response can publish at most once even if a framework callback is repeated.
+            guard lease.transferToConsumer() else { return }
             let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)
             let text = String(data: preview, encoding: .utf8)
             let (displayBody, displayTruncated) = RequestLog.cappedBody(text)
@@ -69,19 +75,21 @@ enum ProxyForwarder {
                 capturedResponseBody: captured,
                 failureLabel: failure == nil ? nil : "backend-unavailable", outcome: failure == nil ? .passthrough : .proxyFailure
             ))
-            if case .terminated = result { await logGate.acknowledge() }
+            if case .terminated = result {
+                Task { await logGate.acknowledge() }
+            }
         }
-        func failure(_ message: String) async -> Response {
-            await log(status: 502, headers: [:], preview: Data(message.utf8), truncated: false, failure: message)
+        func failure(_ message: String) -> Response {
+            log(status: 502, headers: [:], preview: Data(message.utf8), truncated: false, failure: message)
             return Response(status: .badGateway, body: .init(string: message))
         }
         guard let url = target(base: upstreamURL, requestURI: request.url.string) else {
-            return await failure("Invalid real backend URL.")
+            return failure("Invalid real backend URL.")
         }
         let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")) ?? ""
         if ["127.0.0.1", "localhost", "::1"].contains(host),
            localPorts.contains(url.port ?? (url.scheme == "https" ? 443 : 80)) {
-            return await failure("The real backend points back to a Mimic listener in this project.")
+            return failure("The real backend points back to a Mimic listener in this project.")
         }
         do {
             var outgoing = HTTPClientRequest(url: url.absoluteString)
@@ -94,10 +102,13 @@ enum ProxyForwarder {
             let headers = endToEndHeaders(upstream.headers)
             let status = Int(upstream.status.code)
             if request.method == .HEAD || status == 204 || status == 304 {
-                await log(status: status, headers: headers, preview: Data(), truncated: false)
+                log(status: status, headers: headers, preview: Data(), truncated: false)
                 return Response(status: upstream.status, headers: headers)
             }
             return Response(status: upstream.status, headers: headers, body: .init(managedAsyncStream: { writer in
+                // This closure may never run if the downstream closes before streaming starts;
+                // the captured lease then returns its slot on deinit. Every started writer below
+                // transfers that slot to one complete or failed log.
                 var preview = Data()
                 var truncated = false
                 do {
@@ -108,14 +119,15 @@ enum ProxyForwarder {
                         truncated = truncated || chunk.readableBytes > available
                         try await writer.write(.buffer(chunk))
                     }
-                    await log(status: status, headers: headers, preview: preview, truncated: truncated)
+                    log(status: status, headers: headers, preview: preview, truncated: truncated)
                 } catch {
-                    await log(status: status, headers: headers, preview: preview, truncated: true, failure: "The backend response did not complete.")
+                    log(status: status, headers: headers, preview: preview, truncated: true,
+                        failure: "The backend response did not complete.")
                     throw error
                 }
             }))
         } catch {
-            return await failure("Could not reach the real backend: \(error.localizedDescription)")
+            return failure("Could not reach the real backend: \(error.localizedDescription)")
         }
     }
 }
