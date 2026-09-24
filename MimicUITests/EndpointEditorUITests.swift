@@ -879,6 +879,15 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "Format cannot re-indent this valid body within the 256 KiB output budget")
+        // The formatter settles after 300 ms. An immediate disabled assertion alone would pass
+        // even if the old validity result enabled the button a moment later.
+        let incorrectlyEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"),
+            object: prettyPrintButton
+        )
+        incorrectlyEnabled.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [incorrectlyEnabled], timeout: 1), .completed,
+                       "Format must stay disabled after the bounded formatter has settled")
 
         setResponseBody("[0]", expecting: "[0]")
         XCTAssertEqual(bodyText(), "[0]")
