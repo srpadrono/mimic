@@ -48,12 +48,14 @@ struct JourneyEditorView: View {
         .accessibilityElement(children: .contain)
         .onChange(of: journey.id) { _, _ in settingsExpanded = false }
         .sheet(isPresented: $showNewStepSheet) {
-            JourneyStepSheet(step: nil, backends: appState.currentProject?.serverConfiguration.listeners ?? []) { spec in
+            JourneyStepSheet(step: nil, backends: appState.currentProject?.serverConfiguration.listeners ?? [],
+                globalDelayMs: appState.serverConfiguration.globalDelayMs) { spec in
                 appState.addJourneyStep(journeyID: journey.id, spec: spec)
             }
         }
         .sheet(item: editingStep) { step in
-            JourneyStepSheet(step: step, backends: appState.currentProject?.serverConfiguration.listeners ?? []) { spec in
+            JourneyStepSheet(step: step, backends: appState.currentProject?.serverConfiguration.listeners ?? [],
+                globalDelayMs: appState.serverConfiguration.globalDelayMs) { spec in
                 appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
             }
         }

@@ -55,4 +55,4 @@ Stateful commands go to `AppControlHost`. `mimic daemon start` launches `Mimic.a
 
 ## Serving order
 
-For each request, Domain resolves an active journey step first, then the best matching endpoint. If neither handles it, the selected backend may pass it to an upstream; otherwise Mimic returns an unmatched `404`. A journey can explicitly block fallthrough. Global and endpoint or step delays are additive. The engine records the actual outcome in the request log. The resolution rules are pure; the actor owns only live state and I/O.
+For each request, Domain resolves an active journey step first, then the best matching endpoint. If neither handles it, the selected backend may pass it to an upstream; otherwise Mimic returns an unmatched `404`. A journey can explicitly block fallthrough. Global and endpoint or step delays are additive, with a 5-minute cap on the effective wait including any timeout hold. The engine records the actual outcome in the request log. The resolution rules are pure; the actor owns only live state and I/O.

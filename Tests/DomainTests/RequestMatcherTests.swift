@@ -212,7 +212,7 @@ struct RequestMatcherTests {
             globalDelayMs: Int.max
         )
 
-        #expect(resolved.delayMs == Int.max)
+        #expect(resolved.delayMs == 300_000)
         #expect(resolved.matchedEndpointID == endpoint.id)
     }
 

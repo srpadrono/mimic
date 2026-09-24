@@ -17,11 +17,12 @@ struct DelaySafetyTests {
         #expect(VaporConfigurator.holdMilliseconds(for: .connectionDrop, delayMs: -100) == 0)
     }
 
-    @Test("A timeout hold that exceeds Int.max saturates instead of trapping")
+    @Test("A timeout hold that exceeds Int.max is capped instead of trapping")
     func timeoutAdditionSaturates() {
         // The previous unchecked addition trapped on the smallest overflowing pair.
-        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: 1), delayMs: Int.max) == Int.max)
-        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: Int.max), delayMs: 1) == Int.max)
-        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: 1), delayMs: Int.max - 1) == Int.max)
+        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: 1), delayMs: Int.max) == 300_000)
+        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: Int.max), delayMs: 1) == 300_000)
+        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: 1), delayMs: Int.max - 1) == 300_000)
+        #expect(VaporConfigurator.holdMilliseconds(for: .timeout(holdMs: 2), delayMs: 299_999) == 300_000)
     }
 }

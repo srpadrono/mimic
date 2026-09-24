@@ -8,6 +8,26 @@ import Domain
 
 @Suite("Route snapshot", .serialized, .timeLimit(.minutes(1)))
 struct RouteSnapshotTests {
+    @Test("An older stored route with an excessive delay is capped in the serving snapshot")
+    func legacyDelayIsCappedAtServingBoundary() async {
+        let store = MockRouteStore()
+        let scenario = Scenario(name: "OK", statusCode: 200)
+        let endpoint = Endpoint(
+            name: "Legacy", path: "/slow", scenarios: [scenario],
+            activeScenarioID: scenario.id, delayMs: Int.max
+        )
+        await store.update(
+            configuration: .init(port: 8080, globalDelayMs: Int.max),
+            projectID: UUID(), endpoints: [endpoint], journey: nil,
+            activationEpoch: 0, revision: 1
+        )
+
+        let plan = await store.resolve(request: .init(method: .get, path: "/slow"))
+        #expect(plan.response.statusCode == 200)
+        #expect(plan.response.delayMs == 300_000)
+        #expect(plan.response.matchedEndpointID == endpoint.id)
+    }
+
     @Test("A resolved response keeps its original project and backend after a later push")
     func resolvedMetadataComesFromTheSameConfiguration() async throws {
         let store = MockRouteStore()

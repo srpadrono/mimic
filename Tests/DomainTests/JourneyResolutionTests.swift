@@ -325,12 +325,12 @@ struct JourneyResolutionTests {
         #expect(observed[0].delayMs == 350)
     }
 
-    @Test("A global delay at Int.max plus a step delay saturates")
+    @Test("A global delay at Int.max plus a step delay is capped to five minutes")
     func stepDelayOverflowSaturates() {
         let journey = Journey(name: "Slow", steps: [Self.step(.get, "/inbox", 200, delayMs: 1)])
         let observed = Self.replay([(.get, "/inbox")], journey: journey, globalDelayMs: Int.max)
 
-        #expect(observed[0].delayMs == Int.max)
+        #expect(observed[0].delayMs == 300_000)
         #expect(observed[0].fromJourney)
     }
 

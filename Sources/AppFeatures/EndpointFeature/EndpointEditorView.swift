@@ -827,8 +827,14 @@ struct EndpointEditorView: View {
     /// that looked accepted had never happened. `statusCodeError` in this same file already had the
     /// answer; the delay field just never got one.
     func commitDelay() {
+        if Int(delayString) == endpoint.delayMs { delayError = nil; return }
         guard let delay = Self.delayValue(from: delayString) else {
-            delayError = "Delay must be a whole number of milliseconds, zero or more"
+            delayError = "Delay must be a whole number from 0 to \(ResponseDelay.maximumMilliseconds) ms"
+            return
+        }
+        guard ResponseDelay.isWithinLimit(globalMs: globalDelayMs, localMs: delay)
+                || delay < endpoint.delayMs else {
+            delayError = "Global plus endpoint delay must not exceed \(ResponseDelay.maximumDescription)"
             return
         }
         delayError = nil
@@ -923,7 +929,7 @@ struct EndpointEditorView: View {
     }
 
     static func delayValue(from text: String) -> Int? {
-        guard let delay = Int(text), delay >= 0 else { return nil }
+        guard let delay = Int(text), (0...ResponseDelay.maximumMilliseconds).contains(delay) else { return nil }
         return delay
     }
 
