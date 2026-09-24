@@ -254,24 +254,10 @@ final class ErrorAlertUITests: MimicUITestCase {
         )
     }
 
-    /// ERRCMD-05 (with ERRPORT-01 / -02 on the way in) — accepting the next port after a conflict on
-    /// 65535 reports the refusal instead of quietly doing nothing.
-    ///
-    /// `AppState.retryStartOnNextPort` runs `.serverConfigure(port: 65536)` *before* it starts, and
-    /// bails when the command declines — so the only evidence the user gets is this alert.
-    ///
-    /// **65535 is the one port in this file that cannot be swapped for a quieter one**, and it is
-    /// worth saying why rather than leaving the next reader to wonder. `PortConflictAlertData`
-    /// computes `conflictingPort + 1` with nothing clamping it, so 65535 is the *only* conflict that
-    /// reaches the refusal — and `conflictingPort` comes from the engine's own `EADDRINUSE`, so
-    /// there is no way to reach it but to genuinely hold 65535. It is also the top of the ephemeral
-    /// range and therefore the likeliest port on the machine to be transiently busy, which is a real
-    /// weakness of the fixture with no alternative available: what it gets instead is a failure that
-    /// prints the `errno`, so a busy machine is distinguishable from a runner that cannot listen at
-    /// all. See the report for the production change — clamping the offer — that would remove the
-    /// need for this fixture altogether.
+    /// At the largest valid port, the alert must give a truthful stopping option and never offer
+    /// port 65536. The runner holds 65535 so this exercises the real bind failure and alert.
     @MainActor
-    func testAcceptingTheNextPortAbove65535ReportsTheRefusal() throws {
+    func testConflictAt65535DoesNotOfferAnInvalidPort() throws {
         let port = try XCTUnwrap(
             holdPort(from: [65535]),
             "The runner should be able to hold port 65535 — \(portHoldDiagnosis)"
@@ -282,32 +268,16 @@ final class ErrorAlertUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
 
         XCTAssertTrue(
-            waitForAlert(messageIdentifier: "portConflict.message", saying: "already in use", timeout: 20),
+            waitForAlert(messageIdentifier: "portConflict.message", saying: "No higher port is available", timeout: 20),
             "Starting on a port the runner holds should report the conflict — the window reads: "
                 + alertText(messageIdentifier: "portConflict.message")
         )
-        alertButton(
-            identifier: "portConflict.tryPortButton",
-            label: "Try port \(port + 1)"
-        ).click()
-
-        XCTAssertTrue(
-            waitForAlert(messageIdentifier: "commandError.message", saying: "65536", timeout: 10),
-            "Port 65536 is out of range, and the refusal must be reported rather than swallowed — "
-                + "the window reads: " + alertText(messageIdentifier: "commandError.message")
-        )
-
-        alertButton(identifier: "commandError.okButton", label: "OK").click()
-        XCTAssertTrue(
-            waitForAlertToClear(
-                messageIdentifier: "commandError.message",
-                saying: "Couldn't apply that change"
-            ),
-            "OK should clear the refusal"
-        )
+        XCTAssertFalse(app.buttons["portConflict.tryPortButton"].exists)
+        alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep server stopped").click()
+        XCTAssertTrue(waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "No higher port is available"))
         XCTAssertFalse(
             waitForServerToReportAURL(timeout: 2),
-            "A refused configuration must not leave a server running on a port the project does not hold"
+            "Dismissal must leave the server stopped"
         )
     }
 

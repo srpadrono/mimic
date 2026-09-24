@@ -26,12 +26,28 @@ public enum MockResolver {
         journey: Journey? = nil,
         journeyState: JourneyRunState? = nil
     ) -> Plan {
+        var operationLookup = RequestOperationLookup(request: request)
+        return plan(
+            request: request, endpoints: endpoints, globalDelayMs: globalDelayMs,
+            journey: journey, journeyState: journeyState, operationLookup: &operationLookup
+        )
+    }
+
+    static func plan(
+        request: IncomingRequest,
+        endpoints: [Endpoint],
+        globalDelayMs: Int,
+        journey: Journey?,
+        journeyState: JourneyRunState?,
+        operationLookup: inout RequestOperationLookup
+    ) -> Plan {
         guard let journey else {
             return Plan(
                 response: RequestMatcher.resolve(
                     request: request,
                     against: endpoints,
-                    globalDelayMs: globalDelayMs
+                    globalDelayMs: globalDelayMs,
+                    operationLookup: &operationLookup
                 ),
                 journeyState: nil
             )
@@ -45,7 +61,8 @@ public enum MockResolver {
             request: request,
             journey: journey,
             state: state,
-            globalDelayMs: globalDelayMs
+            globalDelayMs: globalDelayMs,
+            operationLookup: &operationLookup
         ) {
         case let .served(response, nextState, _, _):
             return Plan(response: response, journeyState: nextState)
@@ -55,7 +72,8 @@ public enum MockResolver {
                 response: RequestMatcher.resolve(
                     request: request,
                     against: endpoints,
-                    globalDelayMs: globalDelayMs
+                    globalDelayMs: globalDelayMs,
+                    operationLookup: &operationLookup
                 ),
                 journeyState: nextState
             )

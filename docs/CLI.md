@@ -31,7 +31,7 @@ mimic app update-check          # returns updateAvailable; does not install
 
 ## Finding an instance
 
-For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, then `MIMIC_CONTROL_PORT` on loopback, then the discovery file. It skips stale discovery files. A token read from that file is sent only to a loopback host on the exact advertised port. Supply `MIMIC_CONTROL_TOKEN` explicitly for a forwarded or remote destination.
+For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, then `MIMIC_CONTROL_PORT` on loopback, then the discovery file. It skips stale discovery files. A token read from that file is sent only to `http://127.0.0.1` on the exact advertised port, because the control server binds that IPv4 address. Supply `MIMIC_CONTROL_TOKEN` explicitly for a `localhost` or IPv6 URL, a forwarded port, or a remote destination.
 
 | Variable | Purpose |
 | --- | --- |

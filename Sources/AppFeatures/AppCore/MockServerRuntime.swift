@@ -195,7 +195,10 @@ final class MockServerRuntime {
                 serverState = .error(message)
                 if case let .portInUse(port) = error {
                     startFailure = ControlError.serverPortInUse(port: port)
-                    portConflictAlert = PortConflictAlertData(conflictingPort: port)
+                    portConflictAlert = PortConflictAlertData(
+                        conflictingPort: port,
+                        avoiding: Set(serverConfiguration.listeners.map(\.port))
+                    )
                 } else {
                     startFailure = ControlError.serverStartFailed(message)
                     genericStartError = message
@@ -273,7 +276,9 @@ final class MockServerRuntime {
 
     func retryStartOnNextPort(from conflictingPort: Int) {
         let used = Set(serverConfiguration.listeners.map(\.port))
-        let next = ((conflictingPort + 1)...65536).first { !used.contains($0) } ?? 65536
+        guard let next = PortConflictAlertData.nextAvailablePort(after: conflictingPort, avoiding: used) else {
+            return
+        }
         if serverConfiguration.port == conflictingPort { serverConfiguration.port = next }
         else if let index = serverConfiguration.backends.firstIndex(where: { $0.port == conflictingPort }) {
             serverConfiguration.backends[index].port = next
