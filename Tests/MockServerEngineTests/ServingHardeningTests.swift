@@ -98,7 +98,10 @@ struct ServingHardeningTests {
             scenarios: [scenario], activeScenarioID: scenario.id
         )
 
-        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { _, baseURL in
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { engine, baseURL in
+            let collector = LogCollector()
+            let drain = Task { for await entry in engine.logStream { await collector.append(entry) } }
+            defer { drain.cancel() }
             let port = try #require(baseURL.port)
             // Each field is tiny. This crosses NIOHTTP1's cumulative field-count limit rather
             // than its older per-field size limit, and would have reached the mock on 2.97.1.
@@ -111,6 +114,10 @@ struct ServingHardeningTests {
             // A malformed peer must not take the embedded server down for the next client.
             let normal = try RawHTTPClient.send(method: "GET", path: "/header-limit", port: port)
             #expect(normal.statusLine.hasPrefix("HTTP/1.1 200"))
+            try await collector.waitForCount(1)
+            let firstLog = try #require(await collector.entries.first)
+            #expect(firstLog.requestHeaders["X-Pad-300"] == nil,
+                    "the excessive-header request reached application logging")
         }
     }
 
