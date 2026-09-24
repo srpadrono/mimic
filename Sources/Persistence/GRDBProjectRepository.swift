@@ -96,8 +96,8 @@ public struct GRDBProjectRepository: ProjectRepository {
                     .filter(Column("endpointID") == endpointRecord.id)
                     .order(Column("sortOrder"))
                     .fetchAll(db)
-                let scenarios = scenarioRecords.map { $0.toDomain() }
-                return endpointRecord.toDomain(scenarios: scenarios)
+                let scenarios = try scenarioRecords.map { try $0.toDomain() }
+                return try endpointRecord.toDomain(scenarios: scenarios)
             }
 
             let journeyRecords = try JourneyRecord
@@ -110,7 +110,8 @@ public struct GRDBProjectRepository: ProjectRepository {
                     .filter(Column("journeyID") == journeyRecord.id)
                     .order(Column("sortOrder"))
                     .fetchAll(db)
-                return journeyRecord.toDomain(steps: stepRecords.map { $0.toDomain() })
+                let steps = try stepRecords.map { try $0.toDomain() }
+                return try journeyRecord.toDomain(steps: steps)
             }
 
             var project = try projectRecord.toDomain()
@@ -132,14 +133,15 @@ public struct GRDBProjectRepository: ProjectRepository {
             let records = try ProjectRecord
                 .order(Column("modifiedAt").desc)
                 .fetchAll(db)
-            // Return lightweight stubs — no endpoints loaded.
+            // Return lightweight stubs from stable listing columns only. A damaged or future-format
+            // backend payload must not hide every project; `load` still decodes it strictly.
             //
             // Deliberately *not* filtered by schema version, unlike `load`. A project this build
             // cannot open is still a project the user has, and hiding it from the listing would look
             // exactly like the symptom this repository has already lost a project to once — "the
             // recents list is empty". So it lists, and `load` refuses it by name with both version
             // numbers if they try to open it.
-            return try records.map { try $0.toDomain() }
+            return try records.map { try $0.toListingDomain() }
         }
     }
 

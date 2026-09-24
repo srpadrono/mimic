@@ -6,6 +6,24 @@ public enum PersistenceError: Error, Sendable, LocalizedError {
     /// Carries both numbers because "update Mimic" is only actionable when the user can see how far
     /// ahead the store is.
     case unsupportedSchemaVersion(name: String, stored: Int, supported: Int)
+    /// A stored value cannot be translated without changing the project's identity or behavior.
+    case corruptedRecord(table: String, id: String, field: String)
+
+    static func requiredUUID(
+        _ value: String, table: String, id: String, field: String
+    ) throws -> UUID {
+        guard let uuid = UUID(uuidString: value) else {
+            throw Self.corruptedRecord(table: table, id: id, field: field)
+        }
+        return uuid
+    }
+
+    static func optionalUUID(
+        _ value: String?, table: String, id: String, field: String
+    ) throws -> UUID? {
+        guard let value else { return nil }
+        return try requiredUUID(value, table: table, id: id, field: field)
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -16,6 +34,8 @@ public enum PersistenceError: Error, Sendable, LocalizedError {
             this build understands up to \(supported)). Update Mimic to open it. \
             Nothing was changed.
             """
+        case let .corruptedRecord(table, id, field):
+            return "Stored \(table) record \(id) has an invalid \(field). Nothing was changed."
         }
     }
 }
