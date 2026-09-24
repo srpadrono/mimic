@@ -929,7 +929,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.saveButton.click()
         assertSpeaks(
             stepSheet.validationMessage,
-            contains: "Delay must be a whole number of milliseconds, zero or more.",
+            contains: "Delay must be a whole number from 0 to 300000 ms.",
             "A non-numeric delay should be refused by name rather than coerced to zero"
         )
 
@@ -958,7 +958,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.saveButton.click()
         assertSpeaks(
             stepSheet.validationMessage,
-            contains: "Hold duration must be zero or greater.",
+            contains: "Hold duration must be from 0 to 300000 ms.",
             "A non-numeric hold should be refused by name"
         )
 

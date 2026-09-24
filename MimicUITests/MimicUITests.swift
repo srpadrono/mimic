@@ -1919,7 +1919,8 @@ final class MimicUITests: XCTestCase {
     // MARK: - 30. Evidence Screenshots
 
     /// Walks the core journey and captures labelled screenshots as verification evidence.
-    /// PNGs are written under `<home>/Desktop/Mimic/.artifacts/screenshots` and attached to the xcresult.
+    /// PNGs are written under the UI runner's temporary `mimic-screenshots` directory and attached
+    /// to the xcresult.
     @MainActor
     func testCaptureEvidenceScreenshots() throws {
         launchApp()

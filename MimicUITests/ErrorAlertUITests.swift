@@ -703,7 +703,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         replaceText(in: stepSheet.holdField, with: "-5")
         stepSheet.saveButton.click()
         XCTAssertTrue(
-            waitForText(stepSheet.validationMessage, containing: "Hold duration must be zero or greater"),
+            waitForText(stepSheet.validationMessage, containing: "Hold duration must be from 0 to 300000 ms"),
             "A negative hold should be refused — read: "
                 + combinedText(of: stepSheet.validationMessage)
         )
