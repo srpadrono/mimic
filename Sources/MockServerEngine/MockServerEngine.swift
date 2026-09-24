@@ -4,8 +4,9 @@ import Domain
 /// Embedded mock HTTP server. Owns a Vapor `Application`, a `MockRouteStore` snapshot of the live
 /// configuration, and a single `logStream` of request records.
 ///
-/// Logging uses one channel only: every admitted request with a valid-size body is yielded to
-/// `logStream`, which a single consumer drains. Overload and oversized-body responses have no log.
+/// Logging uses one channel only: every admitted request with a valid-size, complete body is
+/// yielded to `logStream`, which a single consumer drains. Overload, oversized, and timed-out
+/// request bodies have no log.
 /// The stream spans the engine's whole lifetime (it is *not* finished on `stop`),
 /// so a stop/start cycle keeps delivering logs to the same consumer.
 public actor MockServerEngine {

@@ -78,6 +78,121 @@ struct RequestLogGateTests {
 
 @Suite("Request log wire backpressure", .serialized, .timeLimit(.minutes(1)))
 struct RequestLogBackpressureWireTests {
+    @Test("An incomplete HEAD upload closes despite HEAD suppressing response bodies")
+    func stalledHeadUploadCloses() async throws {
+        let port = try #require(PlatformSocket.freePort())
+        let engine = MockServerEngine()
+        let scenario = Scenario(name: "Healthy", statusCode: 200)
+        let endpoint = Endpoint(name: "Healthy", path: "/healthy", scenarios: [scenario],
+            activeScenarioID: scenario.id)
+        let journey = Journey(name: "HEAD upload", steps: [
+            JourneyStep(name: "First", method: .head, path: "/healthy",
+                outcome: .respond(JourneyResponse(statusCode: 201)))
+        ])
+        await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 0, journey: journey)
+        try await engine.start(configuration: .init(port: port, globalDelayMs: 0))
+        defer { Task { try? await engine.stop() } }
+
+        let upload = try RawHTTPClient.open(method: "HEAD", path: "/healthy", port: port,
+            additionalHeaders: [("Content-Length", String(10 << 20))],
+            bodyPrefix: Data([0x61]))
+        defer { PlatformSocket.close(upload) }
+        let response = RawHTTPClient.receive(on: upload, timeout: 12)
+        #expect(response.statusLine.contains("408"))
+        #expect(response.didClose)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await engine.logGate.activeCount != 0 {
+            try #require(ContinuousClock.now < deadline, "The timed-out HEAD upload kept a slot.")
+            await Task.yield()
+        }
+        #expect(await engine.logGate.outstandingCount == 0)
+        #expect(await engine.journeyStatus()?.totalServed == 0)
+        let recovered = try RawHTTPClient.send(method: "GET", path: "/healthy", port: port)
+        #expect(recovered.statusLine.contains("200"))
+        var logs = engine.logStream.makeAsyncIterator()
+        let firstLog = try #require(await logs.next())
+        #expect(firstLog.path == "/healthy")
+        #expect(firstLog.method == .get)
+        await engine.acknowledgeLog()
+        try await engine.stop()
+    }
+
+    @Test("Incomplete admitted uploads expire, close, and leave journeys and logs untouched")
+    func stalledUploadsCannotHoldAllAdmissionSlots() async throws {
+        let port = try #require(PlatformSocket.freePort())
+        let engine = MockServerEngine()
+        let healthyResponse = Scenario(name: "Healthy", statusCode: 200, body: "ready")
+        let healthy = Endpoint(name: "Healthy", path: "/healthy", scenarios: [healthyResponse],
+            activeScenarioID: healthyResponse.id)
+        let journey = Journey(name: "Upload", steps: [
+            JourneyStep(name: "First", method: .post, path: "/journey",
+                outcome: .respond(JourneyResponse(statusCode: 201)))
+        ])
+        await engine.updateConfiguration(endpoints: [healthy], globalDelayMs: 0, journey: journey)
+        try await engine.start(configuration: .init(port: port, globalDelayMs: 0))
+        defer { Task { try? await engine.stop() } }
+
+        var uploads: [Int32] = []
+        defer { uploads.forEach(PlatformSocket.close) }
+        for _ in 0..<RequestLogGate.capacity {
+            uploads.append(try RawHTTPClient.open(method: "POST", path: "/journey", port: port,
+                additionalHeaders: [("Content-Length", String(10 << 20))],
+                bodyPrefix: Data([0x61])))
+        }
+        let admissionDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await engine.logGate.activeCount < RequestLogGate.capacity {
+            try #require(ContinuousClock.now < admissionDeadline,
+                "The partial uploads did not fill admission.")
+            await Task.yield()
+        }
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.journeyStatus()?.totalServed == 0)
+
+        let rejected = try RawHTTPClient.send(method: "GET", path: "/healthy", port: port,
+            timeout: 2)
+        #expect(rejected.statusLine.contains("503"))
+        #expect(rejected.raw.lowercased().contains("x-mimic-rejection: admission-capacity"))
+
+        // The first read waits for the ten-second deadline. Every connection must then close;
+        // otherwise Vapor can retain its NIO body collector after releasing the admission lease.
+        let first = RawHTTPClient.receive(on: uploads[0], timeout: 12)
+        #expect(first.statusLine.contains("408"))
+        #expect(first.raw.lowercased().contains("content-length: 0"))
+        #expect(first.raw.lowercased().contains("connection: close"))
+        #expect(!first.isTruncated)
+        #expect(first.didClose)
+        for socketFD in uploads.dropFirst() {
+            let response = RawHTTPClient.receive(on: socketFD, timeout: 0.3)
+            #expect(response.statusLine.contains("408"))
+            #expect(response.didClose)
+        }
+        let recoveryDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while true {
+            let active = await engine.logGate.activeCount
+            let pending = await engine.logGate.outstandingCount
+            if active == 0, pending == 0 { break }
+            try #require(ContinuousClock.now < recoveryDeadline,
+                "Expired uploads kept admission or pending-log slots.")
+            await Task.yield()
+        }
+        #expect(await engine.journeyStatus()?.totalServed == 0)
+
+        let recovered = try RawHTTPClient.send(method: "GET", path: "/healthy", port: port)
+        #expect(recovered.statusLine.contains("200"))
+        let journeyResponse = try RawHTTPClient.send(method: "POST", path: "/journey", port: port)
+        #expect(journeyResponse.statusLine.contains("201"))
+        #expect(await engine.journeyStatus()?.totalServed == 1)
+        var logs = engine.logStream.makeAsyncIterator()
+        let firstLog = try #require(await logs.next())
+        #expect(firstLog.path == "/healthy")
+        await engine.acknowledgeLog()
+        let secondLog = try #require(await logs.next())
+        #expect(secondLog.path == "/journey")
+        await engine.acknowledgeLog()
+        #expect(await engine.logGate.outstandingCount == 0)
+        try await engine.stop()
+    }
+
     @Test("Accepted bodies still collect and oversized bodies still return 413")
     func bodyLimitAfterAdmission() async throws {
         let port = try #require(PlatformSocket.freePort())
@@ -186,6 +301,7 @@ struct RequestLogBackpressureWireTests {
             additionalHeaders: [("Content-Length", String(10 << 20))],
             bodyPrefix: Data([0x61]), timeout: 2)
         #expect(slowUpload.statusLine.contains("503"))
+        #expect(slowUpload.raw.lowercased().contains("x-mimic-rejection: admission-capacity"))
         #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
 
         let journeyURL = try #require(URL(string: "http://127.0.0.1:\(port)/journey"))

@@ -20,6 +20,8 @@ enum RawHTTPClient {
         let isTruncated: Bool
         /// Nothing at all arrived before the read deadline.
         let isEmpty: Bool
+        /// Whether the peer actually closed the connection, rather than the read timing out.
+        let didClose: Bool
 
         var statusLine: String {
             raw.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
@@ -35,45 +37,67 @@ enum RawHTTPClient {
         bodyPrefix: Data = Data(),
         timeout: TimeInterval = 5
     ) throws -> Response {
+        let socketFD = try open(method: method, path: path, port: port,
+            additionalHeaders: additionalHeaders, bodyPrefix: bodyPrefix, connection: "close")
+        defer { PlatformSocket.close(socketFD) }
+        return receive(on: socketFD, timeout: timeout)
+    }
+
+    /// Leaves an incomplete upload connected so a wire test can inspect the server's deadline.
+    /// The caller owns and must close the returned descriptor.
+    static func open(
+        method: String,
+        path: String,
+        port: Int,
+        additionalHeaders: [(String, String)] = [],
+        bodyPrefix: Data = Data(),
+        connection: String = "keep-alive"
+    ) throws -> Int32 {
         let socketFD = PlatformSocket.make()
         guard socketFD >= 0 else { throw Failure.socketUnavailable }
-        defer { PlatformSocket.close(socketFD) }
-
-        var address = PlatformSocket.loopbackAddress(port: UInt16(port))
-        let connected = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                PlatformSocket.connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        do {
+            var address = PlatformSocket.loopbackAddress(port: UInt16(port))
+            let connected = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    PlatformSocket.connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
-        }
-        guard connected == 0 else { throw Failure.connectFailed(errno) }
+            guard connected == 0 else { throw Failure.connectFailed(errno) }
 
-        // A receive timeout bounds the read so a stalled server cannot hang the suite.
+            let extraLines = additionalHeaders.map { "\($0.0): \($0.1)\r\n" }.joined()
+            let request = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: \(connection)\r\n\(extraLines)\r\n"
+            try request.withCString { pointer in
+                var remaining = strlen(pointer)
+                var cursor = pointer
+                while remaining > 0 {
+                    let written = PlatformSocket.send(socketFD, cursor, remaining)
+                    guard written > 0 else { throw Failure.writeFailed(errno) }
+                    cursor = cursor.advanced(by: written)
+                    remaining -= written
+                }
+            }
+            try bodyPrefix.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                var remaining = raw.count
+                var cursor = base
+                while remaining > 0 {
+                    let written = PlatformSocket.send(socketFD, cursor, remaining)
+                    guard written > 0 else { throw Failure.writeFailed(errno) }
+                    cursor = cursor.advanced(by: written)
+                    remaining -= written
+                }
+            }
+
+            return socketFD
+        } catch {
+            PlatformSocket.close(socketFD)
+            throw error
+        }
+    }
+
+    /// Reads a response on a socket kept open by `open`. The caller still owns the descriptor.
+    static func receive(on socketFD: Int32, timeout: TimeInterval) -> Response {
         PlatformSocket.setReceiveTimeout(socketFD, seconds: timeout)
-
-        let extraLines = additionalHeaders.map { "\($0.0): \($0.1)\r\n" }.joined()
-        let request = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\(extraLines)\r\n"
-        try request.withCString { pointer in
-            var remaining = strlen(pointer)
-            var cursor = pointer
-            while remaining > 0 {
-                let written = PlatformSocket.send(socketFD, cursor, remaining)
-                guard written > 0 else { throw Failure.writeFailed(errno) }
-                cursor = cursor.advanced(by: written)
-                remaining -= written
-            }
-        }
-        try bodyPrefix.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var remaining = raw.count
-            var cursor = base
-            while remaining > 0 {
-                let written = PlatformSocket.send(socketFD, cursor, remaining)
-                guard written > 0 else { throw Failure.writeFailed(errno) }
-                cursor = cursor.advanced(by: written)
-                remaining -= written
-            }
-        }
-
         var received = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         var closedCleanly = false
@@ -92,7 +116,8 @@ enum RawHTTPClient {
         return Response(
             raw: raw,
             isTruncated: closedCleanly && !isComplete(raw),
-            isEmpty: received.isEmpty
+            isEmpty: received.isEmpty,
+            didClose: closedCleanly
         )
     }
 
