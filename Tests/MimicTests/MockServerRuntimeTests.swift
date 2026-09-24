@@ -224,6 +224,18 @@ struct MockServerRuntimeTests {
         }
 
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+
+        // The engine module's atomic project push uses this overload after integration. Record the
+        // same identity there so the bind-window assertion witnesses the path production takes.
+        func updateConfiguration(
+            configuration: ServerConfiguration,
+            projectID: UUID?,
+            endpoints: [Endpoint],
+            journey: Journey?,
+            activationEpoch: Int
+        ) async {
+            pushedProjectIDs.append(projectID)
+        }
     }
 
     /// An engine whose *first* configuration push does not land until it is released.
