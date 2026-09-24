@@ -35,6 +35,7 @@ struct MockCommandRegressionTests {
         #expect(project.endpoints[0].scenarios[0].statusCode == 503)
         let commands = await transport.commandsSnapshot()
         #expect(commands == [
+            .endpointGet(endpoint: .route(.get, "/old")),
             .endpointUpdate(endpoint: .route(.get, "/old"), spec: EndpointSpec(path: "/new")),
             .endpointGet(endpoint: .id(Self.endpointID)),
             .scenarioUpdate(
@@ -44,6 +45,45 @@ struct MockCommandRegressionTests {
             ),
             .endpointGet(endpoint: .id(Self.endpointID)),
         ])
+    }
+
+    @Test("A refused response does not leave the route half of a combined update applied")
+    func combinedUpdateRejectsInvalidStatusBeforeRouteChange() async throws {
+        let endpoint = Endpoint(
+            id: Self.endpointID,
+            name: "Original",
+            method: .get,
+            path: "/old",
+            scenarios: [Scenario(id: Self.scenarioID, name: "Default", statusCode: 200)],
+            activeScenarioID: Self.scenarioID
+        )
+        let transport = ProjectTransport(project: MockProject(name: "Fixture", endpoints: [endpoint]))
+
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: [
+                "endpoint", "update", "GET", "/old", "--new-path", "/new", "--status", "700",
+            ])
+        }
+
+        #expect(status == 4)
+        #expect(await transport.projectSnapshot().endpoints[0] == endpoint)
+        #expect(await transport.commandsSnapshot().isEmpty)
+    }
+
+    @Test("A missing active scenario is reported before changing endpoint fields")
+    func combinedUpdateRequiresActiveScenarioBeforeRouteChange() async throws {
+        let endpoint = Endpoint(id: Self.endpointID, name: "Original", method: .get, path: "/old")
+        let transport = ProjectTransport(project: MockProject(name: "Fixture", endpoints: [endpoint]))
+
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: [
+                "endpoint", "update", "GET", "/old", "--new-path", "/new", "--status", "503",
+            ])
+        }
+
+        #expect(status == 2)
+        #expect(await transport.projectSnapshot().endpoints[0] == endpoint)
+        #expect(await transport.commandsSnapshot() == [.endpointGet(endpoint: .route(.get, "/old"))])
     }
 
     @Test("Scenario mutations accept an endpoint ID when two endpoints share a route")

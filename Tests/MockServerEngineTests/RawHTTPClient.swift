@@ -31,6 +31,7 @@ enum RawHTTPClient {
         method: String,
         path: String,
         port: Int,
+        additionalHeaders: [(String, String)] = [],
         timeout: TimeInterval = 5
     ) throws -> Response {
         let socketFD = PlatformSocket.make()
@@ -48,7 +49,8 @@ enum RawHTTPClient {
         // A receive timeout bounds the read so a stalled server cannot hang the suite.
         PlatformSocket.setReceiveTimeout(socketFD, seconds: timeout)
 
-        let request = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        let extraLines = additionalHeaders.map { "\($0.0): \($0.1)\r\n" }.joined()
+        let request = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\(extraLines)\r\n"
         try request.withCString { pointer in
             var remaining = strlen(pointer)
             var cursor = pointer

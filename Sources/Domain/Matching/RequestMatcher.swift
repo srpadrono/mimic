@@ -117,32 +117,55 @@ public struct MatchSpecificity: Comparable, Sendable, Equatable {
     }
 }
 
+/// Parses the GraphQL body on demand once per resolved request. A project can have many named
+/// endpoints and journey steps for the same path; each compares against the same operation.
+struct RequestOperationLookup {
+    private let body: String?
+    private let parseOperation: (String?) -> GraphQLOperation?
+    private var parsed = false
+    private var operation: GraphQLOperation?
+
+    init(
+        request: IncomingRequest,
+        parseOperation: @escaping (String?) -> GraphQLOperation? = GraphQLRequest.operation(inBody:)
+    ) {
+        body = request.body
+        self.parseOperation = parseOperation
+    }
+
+    mutating func specificity(declared: String?) -> Bool? {
+        guard let declared, !declared.isEmpty else { return false }
+        if !parsed {
+            operation = parseOperation(body)
+            parsed = true
+        }
+        return operation?.name == declared ? true : nil
+    }
+}
+
 public enum RequestMatcher {
 
-    /// Whether a candidate declaring `graphqlOperation` applies to this request, and how specifically.
-    ///
-    /// Returns `nil` when the candidate names an operation the request is not asking for — that is a
-    /// non-match, not a weak match, so a mock for `GetAccountSummary` never answers a `SendPayment`.
-    static func operationSpecificity(
-        declared: String?,
-        request: IncomingRequest
-    ) -> Bool? {
-        guard let declared, !declared.isEmpty else { return false }
-        guard let operation = GraphQLRequest.operation(inBody: request.body) else { return nil }
-        return operation.name == declared ? true : nil
-    }
     /// Selects the best endpoint for a request. When several endpoints match, the **most specific**
     /// wins — an endpoint with more literal (non-`:wildcard`) segments beats one with fewer, so a
     /// literal route like `/users/me` is preferred over `/users/:id` regardless of declaration order.
     /// Ties (equal specificity) resolve to the first declared endpoint.
     public static func match(request: IncomingRequest, against endpoints: [Endpoint]) -> MatchResult {
+        var operationLookup = RequestOperationLookup(request: request)
+        return match(request: request, against: endpoints, operationLookup: &operationLookup)
+    }
+
+    static func match(
+        request: IncomingRequest,
+        against endpoints: [Endpoint],
+        operationLookup: inout RequestOperationLookup
+    ) -> MatchResult {
         var best: (endpoint: Endpoint, scenario: Scenario, specificity: MatchSpecificity)?
 
         for endpoint in endpoints {
             guard endpoint.backendID == request.backendID else { continue }
             guard endpoint.method == request.method else { continue }
             guard let segments = PathPattern.specificity(requestPath: request.path, pattern: endpoint.path) else { continue }
-            guard let matchedOperation = operationSpecificity(declared: endpoint.graphqlOperation, request: request)
+            guard let matchedOperation = operationLookup.specificity(declared: endpoint.graphqlOperation)
             else { continue }
             guard let activeID = endpoint.activeScenarioID else { continue }
             guard let scenario = endpoint.scenarios.first(where: { $0.id == activeID }) else { continue }
@@ -173,7 +196,20 @@ public enum RequestMatcher {
         against endpoints: [Endpoint],
         globalDelayMs: Int
     ) -> ResolvedResponse {
-        switch match(request: request, against: endpoints) {
+        var operationLookup = RequestOperationLookup(request: request)
+        return resolve(
+            request: request, against: endpoints, globalDelayMs: globalDelayMs,
+            operationLookup: &operationLookup
+        )
+    }
+
+    static func resolve(
+        request: IncomingRequest,
+        against endpoints: [Endpoint],
+        globalDelayMs: Int,
+        operationLookup: inout RequestOperationLookup
+    ) -> ResolvedResponse {
+        switch match(request: request, against: endpoints, operationLookup: &operationLookup) {
         case let .matched(endpoint, scenario):
             return ResolvedResponse(
                 statusCode: scenario.statusCode,

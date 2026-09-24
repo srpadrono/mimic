@@ -369,6 +369,16 @@ final class ProjectWorkspace {
     }
 
     func deleteProject(id: UUID) {
+        _ = enqueueDeleteProject(id: id)
+    }
+
+    /// The control API must answer only after SQLite has accepted or refused the delete. The
+    /// window keeps its existing asynchronous call; both paths join the same ordered write chain.
+    func deleteProjectAndWait(id: UUID) async -> Result<Void, ControlError> {
+        await enqueueDeleteProject(id: id).value
+    }
+
+    private func enqueueDeleteProject(id: UUID) -> Task<Result<Void, ControlError>, Never> {
         // A debounced write for the project being removed has to go with it. The debounce fires
         // 500ms after the last edit, re-reads `currentProject` — still this project until the
         // chained task below nils it — and enqueues its save behind everything already asked for,
@@ -382,8 +392,12 @@ final class ProjectWorkspace {
         // save would otherwise chain in behind the delete — see ``pendingDeleteIDs``.
         pendingDeleteIDs.insert(id)
 
-        enqueueStoreWrite { [weak self] in
-            guard let self else { return }
+        let previousWrites = storeWrites
+        let deletion: Task<Result<Void, ControlError>, Never> = Task { @MainActor [weak self] in
+            await previousWrites?.value
+            guard let self else {
+                return .failure(.internalFailure("The Mimic session is no longer available."))
+            }
             do {
                 try await projectRepository.delete(id: id)
             } catch {
@@ -398,7 +412,7 @@ final class ProjectWorkspace {
                 // telling you about, reintroduced by its own fix.
                 pendingDeleteIDs.remove(id)
                 autosaveStatus = .failed("Could not delete the project.")
-                return
+                return .failure(.persistenceFailure(error))
             }
             pendingDeleteIDs.remove(id)
             // Lifting the tombstone is what makes this necessary: a debounce still counting down
@@ -426,7 +440,10 @@ final class ProjectWorkspace {
                     supersedeInFlightOpens()
                 }
             }
+            return .success(())
         }
+        storeWrites = Task { @MainActor in _ = await deletion.value }
+        return deletion
     }
 
     func closeProject() {

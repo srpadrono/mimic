@@ -238,7 +238,7 @@ final class UpdateService {
                 // Verification is not a step the user can skip and not one they can see fail
                 // halfway: it happens before anything is offered as installable.
                 try installer.verify(file, against: release)
-                installer.stampQuarantine(on: file, from: release)
+                try installer.stampQuarantine(on: file, from: release)
                 guard !Task.isCancelled else { return }
                 phase = .readyToInstall(release, installer: file)
             } catch {

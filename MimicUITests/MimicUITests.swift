@@ -1860,16 +1860,29 @@ final class MimicUITests: XCTestCase {
                        "Reopened endpoint should preserve the edited 401 status code")
     }
 
-    // MARK: - 29. Project and Endpoint Survive a Fresh App Process
+    // MARK: - 29. Project, Endpoint and Journey Survive a Fresh App Process
 
     @MainActor
-    func testProjectAndEndpointSurviveAppRelaunch() throws {
+    func testProjectEndpointAndJourneySurviveAppRelaunch() throws {
         let projectName = "Relaunch Persist Test"
         let endpointPath = "/api/relaunch"
+        let journeyName = "Relaunch journey"
 
         launchApp()
         createProjectViaUI(name: projectName)
         createEndpointViaUI(name: "Relaunch endpoint", path: endpointPath)
+        let journeys = JourneysNavigatorPage(app: app)
+        WorkspaceShellPage(app: app).journeysTab.click()
+        XCTAssertTrue(journeys.addButton.waitForExistence(timeout: 5))
+        journeys.addButton.click()
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        journeys.newEmptyMenuItem.click()
+        let newJourney = NewJourneySheetPage(app: app)
+        XCTAssertTrue(newJourney.nameField.waitForExistence(timeout: 5))
+        newJourney.nameField.click()
+        newJourney.nameField.typeText(journeyName)
+        newJourney.createButton.click()
+        XCTAssertTrue(journeys.journeyRow(named: journeyName).waitForExistence(timeout: 5))
         waitForAsyncSave()
 
         app.terminate()
@@ -1894,6 +1907,11 @@ final class MimicUITests: XCTestCase {
             workspace.endpointPathText(endpointPath).waitForExistence(timeout: 5),
             "The endpoint should survive closing and reopening the SQLite database"
         )
+        WorkspaceShellPage(app: app).journeysTab.click()
+        XCTAssertTrue(
+            journeys.journeyRow(named: journeyName).waitForExistence(timeout: 5),
+            "The journey should survive closing and reopening the SQLite database"
+        )
     }
 
     // MARK: - 30. Evidence Screenshots
@@ -1916,18 +1934,18 @@ final class MimicUITests: XCTestCase {
         endpointEditor.statusCodeField.click()
         endpointEditor.statusCodeField.typeKey("a", modifierFlags: .command)
         endpointEditor.statusCodeField.typeText("200")
-        _ = endpointEditor.waitForStatusCodeValue("200", timeout: 3)
+        XCTAssertTrue(endpointEditor.waitForStatusCodeValue("200", timeout: 3),
+                      "The response edit must be visible before capturing its screenshot")
         captureScreenshot("04-response-configured")
 
-        if workspace.serverToggleButton.waitForExistence(timeout: 5) {
-            workspace.serverToggleButton.click()
-            _ = workspace.waitForServerURL(port: 8472, timeout: 8)
-        }
+        XCTAssertTrue(workspace.serverToggleButton.waitForExistence(timeout: 5))
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerURL(port: 8472, timeout: 8),
+                      "The server must actually bind before its screenshot is labelled running")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
         captureScreenshot("05-server-running")
 
-        if workspace.serverToggleButton.exists {
-            workspace.serverToggleButton.click()
-        }
+        workspace.serverToggleButton.click()
     }
 
     /// Captures a screenshot to the xcresult (always works) and to a guaranteed-writable temp

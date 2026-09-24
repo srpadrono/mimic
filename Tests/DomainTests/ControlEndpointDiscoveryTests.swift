@@ -307,25 +307,26 @@ struct ControlEndpointDiscoveryTests {
         #expect(ControlEndpointDiscovery.resolveToken(environment: [:], discovered: nil) == nil)
     }
 
-    /// The predicate the token pairing turns on. Both conditions have to hold — a loopback host
-    /// *and* the port the file advertised — and a file that was never read names no instance at all.
+    /// The predicate the token pairing turns on. Both conditions have to hold — the exact address
+    /// bound by the server *and* the port the file advertised — and a file that was never read
+    /// names no instance at all.
     /// `ControlClient.discover` in `MimicCLICore` is the caller that pairs it with a destination;
     /// its suite drives the pairing end to end.
-    @Test("Naming the discovered instance means loopback host and advertised port, together")
+    @Test("Naming the discovered instance requires its bound address and advertised port")
     func namesDiscoveredInstanceRequiresBoth() throws {
         let discovered = endpoint(port: 8787)
         func url(_ text: String) throws -> URL { try #require(URL(string: text)) }
 
         #expect(ControlEndpointDiscovery.namesDiscoveredInstance(try url("http://127.0.0.1:8787"), discovered))
-        #expect(ControlEndpointDiscovery.namesDiscoveredInstance(try url("http://LOCALHOST:8787"), discovered))
-        // Written with brackets, because that is the only legal spelling of an IPv6 literal in a URL.
-        // `URL.host` hands back `::1` on some platforms and `[::1]` on others, which is why the
-        // reader's set holds both and why this case is worth having rather than assuming.
+        // localhost may resolve to ::1 first, where another process can hold the same port.
+        #expect(!ControlEndpointDiscovery.namesDiscoveredInstance(try url("http://localhost:8787"), discovered))
+        // IPv6 loopback is a separate listener, and this control server binds IPv4 only.
         let ipv6 = try #require(
             URL(string: "http://[::1]:8787"),
             "this platform's URL parser rejected an IPv6 literal"
         )
-        #expect(ControlEndpointDiscovery.namesDiscoveredInstance(ipv6, discovered))
+        #expect(!ControlEndpointDiscovery.namesDiscoveredInstance(ipv6, discovered))
+        #expect(!ControlEndpointDiscovery.namesDiscoveredInstance(try url("https://127.0.0.1:8787"), discovered))
 
         // Right host, wrong port.
         #expect(

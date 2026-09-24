@@ -552,8 +552,8 @@ struct MockServerRuntimeTests {
 
     /// A start that succeeds clears whatever the previous one failed with, so a stale code cannot be
     /// reported next to a running server.
-    @Test("A retry after a conflict clears the recorded failure")
-    func retryClearsTheRecordedStartFailure() async throws {
+    @Test("A new start after a conflict clears the recorded failure")
+    func newStartClearsTheRecordedStartFailure() async throws {
         let engine = FakeEngine()
         await engine.setStartError(MockServerError.portInUse(port: 8080))
         let manager = MockServerRuntime(engine: engine)
@@ -562,8 +562,8 @@ struct MockServerRuntimeTests {
         try await waitUntil { manager.startFailure != nil }
 
         await engine.setStartError(nil)
-        manager.retryStartOnNextPort(from: 8080)
-        try await waitUntil { manager.serverState.runningPort == 8081 }
+        manager.startServer()
+        try await waitUntil { manager.serverState.runningPort == 8080 }
 
         #expect(manager.startFailure == nil)
         #expect(manager.portConflictAlert == nil)
@@ -707,23 +707,21 @@ struct MockServerRuntimeTests {
         #expect(await engine.stopCallCount == 0, "nothing bound, so there is nothing to stop")
     }
 
-    @Test("Retry start increments port clears alert and restarts")
-    func retryStartUsesNextPort() async throws {
-        let engine = FakeEngine()
+    @Test("A stale bind failure cannot offer to change an unrelated current listener")
+    func stalePortConflictHasNoRetryAlert() async throws {
+        let engine = GatedStartEngine()
+        await engine.setStartError(MockServerError.portInUse(port: 8080))
         let manager = MockServerRuntime(engine: engine)
-        manager.portConflictAlert = PortConflictAlertData(conflictingPort: 8080)
+        manager.serverConfiguration = ServerConfiguration(port: 8080, globalDelayMs: 0)
 
-        manager.retryStartOnNextPort(from: 8080)
-        try await waitUntil {
-            if case .running(let port) = manager.serverState {
-                return port == 8081
-            }
-            return false
-        }
+        manager.startServer()
+        try await waitUntilAsync { await engine.startConfigurations.count == 1 }
+        manager.serverConfiguration = ServerConfiguration(port: 9090, globalDelayMs: 0)
+        await engine.release()
 
-        #expect(manager.serverConfiguration.port == 8081)
+        try await waitUntil { manager.serverState.isError }
         #expect(manager.portConflictAlert == nil)
-        #expect(await engine.startConfigurations.last?.port == 8081)
+        #expect(manager.serverConfiguration.port == 9090)
     }
 
     @Test("Update mocks forwards endpoint lists to the engine")

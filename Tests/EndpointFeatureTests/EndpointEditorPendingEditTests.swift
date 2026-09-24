@@ -233,6 +233,43 @@ struct EndpointEditorPendingEditTests {
         #expect(secondWrites.bodies.isEmpty)
     }
 
+    @Test("Switching scenarios flushes pending edits into the scenario being left")
+    func switchingScenariosPreservesPendingEdits() {
+        let firstScenario = makeFirstScenario()
+        let secondScenario = makeSecondScenario()
+        let firstWrites = ScenarioWrites()
+        let secondWrites = ScenarioWrites()
+        let pendingEdits = EndpointEditorPendingEdits()
+        let first = makeEndpoint(path: "/one", scenario: firstScenario)
+
+        let editingFirst = editor(
+            endpoint: first, scenario: firstScenario, writes: firstWrites,
+            statusCodeField: "404", bodyField: #"{"ok":false}"#,
+            headerFields: [("X-Trace", "old")], sharing: pendingEdits
+        )
+        editingFirst.debounceStatusCode()
+        editingFirst.debounceHeaders()
+        editingFirst.debounceBody()
+
+        let showingSecond = editor(
+            endpoint: Endpoint(
+                id: first.id, name: first.name, method: first.method, path: first.path,
+                scenarios: [firstScenario, secondScenario], activeScenarioID: secondScenario.id
+            ),
+            scenario: secondScenario, writes: secondWrites,
+            statusCodeField: "500", bodyField: #"{"error":"boom"}"#,
+            headerFields: [], sharing: pendingEdits
+        )
+        showingSecond.scenarioSelectionChanged()
+
+        #expect(firstWrites.statusCodes == [404])
+        #expect(firstWrites.headers == [["X-Trace": "old"]])
+        #expect(firstWrites.bodies == [#"{"ok":false}"#])
+        #expect(secondWrites.statusCodes.isEmpty)
+        #expect(secondWrites.headers.isEmpty)
+        #expect(secondWrites.bodies.isEmpty)
+    }
+
     // MARK: - The timer that was there all along
 
     @Test("An edit left alone commits on its own")

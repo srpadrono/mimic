@@ -438,6 +438,38 @@ struct GraphQLJourneyTests {
         #expect(plan.response.outcome == .unmatched)
     }
 
+    @Test("A journey miss and many endpoint candidates parse one GraphQL body once")
+    func journeyFallbackReusesParsedOperation() {
+        let request = Self.request("GetInbox")
+        let journey = Journey(
+            name: "Partial",
+            steps: (1...12).map { Self.step("OtherStep\($0)", 500) }
+        )
+        let scenarios = (1...12).map { Scenario(name: "Candidate \($0)", statusCode: 200) }
+        let endpoints = scenarios.enumerated().map { index, scenario in
+            Endpoint(
+                name: "Candidate \(index)", method: .post, path: "/graphql",
+                scenarios: [scenario], activeScenarioID: scenario.id,
+                graphqlOperation: index == 11 ? "GetInbox" : "OtherEndpoint\(index)"
+            )
+        }
+
+        var parseCount = 0
+        var lookup = RequestOperationLookup(request: request) { body in
+            parseCount += 1
+            return GraphQLRequest.operation(inBody: body)
+        }
+        let plan = MockResolver.plan(
+            request: request, endpoints: endpoints, globalDelayMs: 0,
+            journey: journey, journeyState: JourneyRunState(journeyID: journey.id),
+            operationLookup: &lookup
+        )
+
+        #expect(plan.response.matchedEndpointID == endpoints[11].id)
+        #expect(plan.response.outcome == .endpoint)
+        #expect(parseCount == 1)
+    }
+
     @Test("A step naming no operation still matches any GraphQL call, as a catch-all")
     func stepWithoutOperationIsACatchAll() {
         let journey = Journey(

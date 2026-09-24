@@ -59,7 +59,16 @@ struct CenterPaneView: View {
                 actions: EndpointEditorActions(
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
-                    onUpdateScenario: { appState.updateActiveScenario(endpointID: endpointID, statusCode: $0, headers: $1, body: $2) },
+                    // Capture the scenario shown when the edit was typed. The pending edit closure
+                    // survives a selection change, so resolving "active" at commit time can write
+                    // the old text into the newly selected scenario.
+                    onUpdateScenario: { status, headers, body in
+                        guard let scenarioID = activeScenario?.id else { return }
+                        appState.updateScenario(
+                            endpointID: endpointID, scenarioID: scenarioID,
+                            statusCode: status, headers: headers, body: body
+                        )
+                    },
                     onUpdateDelay: { appState.updateEndpointDelay(id: endpointID, delayMs: $0) },
                     onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) },
                     onUpdateBackend: { appState.updateEndpointBackend(id: endpointID, backendID: $0) }

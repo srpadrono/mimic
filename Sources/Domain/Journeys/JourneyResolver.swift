@@ -23,6 +23,20 @@ public enum JourneyResolver {
         state: JourneyRunState,
         globalDelayMs: Int
     ) -> JourneyOutcome {
+        var operationLookup = RequestOperationLookup(request: request)
+        return resolve(
+            request: request, journey: journey, state: state,
+            globalDelayMs: globalDelayMs, operationLookup: &operationLookup
+        )
+    }
+
+    static func resolve(
+        request: IncomingRequest,
+        journey: Journey,
+        state: JourneyRunState,
+        globalDelayMs: Int,
+        operationLookup: inout RequestOperationLookup
+    ) -> JourneyOutcome {
         // A state left over from a previous journey must not leak progress into this one.
         let runState = state.journeyID == journey.id ? state : JourneyRunState(journeyID: journey.id)
 
@@ -30,7 +44,9 @@ public enum JourneyResolver {
             return unmatched(journey: journey, state: runState)
         }
 
-        guard let hit = matchingStep(request: request, journey: journey, state: runState) else {
+        guard let hit = matchingStep(
+            request: request, journey: journey, state: runState, operationLookup: &operationLookup
+        ) else {
             return unmatched(journey: journey, state: runState)
         }
 
@@ -51,7 +67,8 @@ public enum JourneyResolver {
     private static func matchingStep(
         request: IncomingRequest,
         journey: Journey,
-        state: JourneyRunState
+        state: JourneyRunState,
+        operationLookup: inout RequestOperationLookup
     ) -> Int? {
         // A negative cursor names no step, and both branches below would subscript with it:
         // `strictSequence` builds `-1..<0`, `orderedPerEndpoint` builds `-1..<count`, and each then
@@ -88,7 +105,7 @@ public enum JourneyResolver {
             guard PathPattern.matches(requestPath: request.path, pattern: step.path) else { continue }
             // A step naming an operation answers only that operation, so a GraphQL flow can script
             // several calls that are otherwise identical.
-            guard RequestMatcher.operationSpecificity(declared: step.graphqlOperation, request: request) != nil
+            guard operationLookup.specificity(declared: step.graphqlOperation) != nil
             else { continue }
             return index
         }

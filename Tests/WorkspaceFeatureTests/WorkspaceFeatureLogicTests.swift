@@ -7,6 +7,14 @@ import Domain
 @Suite("WorkspaceFeature Logic")
 @MainActor
 struct WorkspaceFeatureLogicTests {
+    @Test("A named journey group cannot share the ungrouped collapse key")
+    func journeyGroupKeysDoNotCollide() {
+        #expect(JourneyNavigatorList.groupSectionKey("__ungrouped__") != "__ungrouped__")
+        #expect(JourneyNavigatorList.groupSectionKey("Checkout") == "group:Checkout")
+        #expect(SidebarView.groupSectionKey("__ungrouped__") != "__ungrouped__")
+        #expect(SidebarView.groupSectionKey("Users") == "group:Users")
+    }
+
     @discardableResult
     private func render<V: View>(
         _ view: V,
@@ -537,11 +545,11 @@ struct WorkspaceFeatureLogicTests {
         #expect(SidebarView.nextSelectionAfterDeleting(selectedEndpointID: selected, targetID: selected) == nil)
         #expect(SidebarView.nextSelectionAfterDeleting(selectedEndpointID: selected, targetID: untouched) == selected)
 
-        let collapsed = SidebarView.updatedCollapsedSections(["Users"], name: "Users", isExpanded: true)
+        let collapsed = SidebarView.updatedCollapsedSections(["group:Users"], name: "group:Users", isExpanded: true)
         #expect(collapsed.isEmpty)
 
-        let expanded = SidebarView.updatedCollapsedSections([], name: "Admin", isExpanded: false)
-        #expect(expanded == ["Admin"])
+        let expanded = SidebarView.updatedCollapsedSections([], name: "group:Admin", isExpanded: false)
+        #expect(expanded == ["group:Admin"])
 
         let endpoint = makeEndpoint(name: "Accounts", path: "/accounts")
         var deletedID: UUID?
@@ -569,10 +577,11 @@ struct WorkspaceFeatureLogicTests {
         let endpoint = makeEndpoint()
         let log = makeLog(endpoint: endpoint, statusCode: 202, body: #"{"queued":true}"#, timestamp: 1_710_000_000)
 
-        NSPasteboard.general.clearContents()
-        RequestDetailInspector.write(RequestLogQuery.formattedDetails(for: log), to: .general)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("MimicTests.\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        RequestDetailInspector.write(RequestLogQuery.formattedDetails(for: log), to: pasteboard)
 
-        let copied = NSPasteboard.general.string(forType: .string)
+        let copied = pasteboard.string(forType: .string)
         #expect(copied?.contains("Status: 202") == true)
         #expect(copied?.contains(#"{"queued":true}"#) == true)
     }

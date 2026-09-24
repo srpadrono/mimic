@@ -77,14 +77,17 @@ struct JourneyNavigatorList: View {
                     ForEach(groupNames, id: \.self) { name in
                         DSNavigatorGroup(
                             name: name, count: groupedJourneys[name]?.count ?? 0, itemName: "journeys",
-                            isCollapsed: collapsedGroups.contains(name),
+                            isCollapsed: collapsedGroups.contains(Self.groupSectionKey(name)),
                             identifier: "journeys.group.\(name)"
                         ) {
-                            if collapsedGroups.contains(name) { collapsedGroups.remove(name) }
-                            else { collapsedGroups.insert(name) }
+                            if collapsedGroups.contains(Self.groupSectionKey(name)) {
+                                collapsedGroups.remove(Self.groupSectionKey(name))
+                            } else {
+                                collapsedGroups.insert(Self.groupSectionKey(name))
+                            }
                         }
                         .padding(.top, name == groupNames.first ? 0 : DSSpacing.smPlus)
-                        if !collapsedGroups.contains(name) {
+                        if !collapsedGroups.contains(Self.groupSectionKey(name)) {
                             ForEach(groupedJourneys[name] ?? []) { journey in
                                 journeyRow(journey, indented: true)
                             }
@@ -118,7 +121,9 @@ struct JourneyNavigatorList: View {
             }
         }
         .onChange(of: searchText) { _, text in
-            if !text.isEmpty { collapsedGroups.subtract(groupNames + [Self.ungroupedSectionKey]) }
+            if !text.isEmpty {
+                collapsedGroups.subtract(groupNames.map(Self.groupSectionKey) + [Self.ungroupedSectionKey])
+            }
         }
         .onChange(of: selectedJourneyID) { _, id in
             if let journey = journeys.first(where: { $0.id == id }) {
@@ -153,11 +158,14 @@ struct JourneyNavigatorList: View {
 
     private var groupNames: [String] { groupedJourneys.keys.sorted() }
     private static let ungroupedSectionKey = "__ungrouped__"
+    /// Prefixing named groups keeps a user-entered `__ungrouped__` group distinct from the
+    /// ungrouped section's internal collapse state.
+    static func groupSectionKey(_ name: String) -> String { "group:\(name)" }
     private var ungroupedJourneys: [Journey] { filteredJourneys.filter { ($0.groupTag ?? "").isEmpty } }
 
     private func sectionKey(for journey: Journey) -> String {
         guard let group = journey.groupTag, !group.isEmpty else { return Self.ungroupedSectionKey }
-        return group
+        return Self.groupSectionKey(group)
     }
 
     private func journeyRow(_ journey: Journey, indented: Bool) -> some View {

@@ -912,14 +912,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
         setGroupTag("Checkout")
 
         XCTAssertTrue(breadcrumb.crumb("endpoint").waitForExistence(timeout: 5))
-        if breadcrumb.earlierLocations.exists {
-            breadcrumb.earlierLocations.click()
-            XCTAssertTrue(app.menuItems["Checkout"].waitForExistence(timeout: 5))
-            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        } else {
-            // The runner can restore a wider window; that layout must expose the group directly.
-            XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5))
-        }
+        workspace.compactWindow()
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(breadcrumb.earlierLocations.waitForExistence(timeout: 5),
+                      "The compact jump bar should move earlier locations into its menu")
+        breadcrumb.earlierLocations.click()
+        XCTAssertTrue(app.menuItems["Checkout"].waitForExistence(timeout: 5))
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
     /// BREAD-05, INSPOV-13.
@@ -1453,11 +1452,17 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertEqual(workspace.serverToggleButton.frame.midX, stoppedFrame.midX, accuracy: 1)
         well.openDetails()
         XCTAssertTrue(well.copyButton(port: 62118).isEnabled)
+        well.closeDetails()
+        workspace.compactWindow()
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(workspace.serverToggleButton.isHittable,
+                      "Run/Stop must remain usable in the compact toolbar")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
         let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        compact.name = "native-toolbar-compact-details"
+        compact.name = "native-toolbar-compact-running"
         compact.lifetime = .keepAlways
         add(compact)
-        well.closeDetails()
+        workspace.fillWindow()
 
         app.typeKey("i", modifierFlags: [.command, .option])
         XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
@@ -1532,6 +1537,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(well.copyButton(port: port).waitForExistence(timeout: 5))
         XCTAssertFalse(well.copyButton(port: port).isEnabled, "Configured addresses are not advertised as listening")
         well.closeDetails()
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
         _ = NSPasteboard.general.clearContents()
         startServer(onPort: port)
         workspace.fillWindow()

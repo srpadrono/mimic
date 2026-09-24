@@ -10,13 +10,8 @@
 # installer payload is laid down without that flag, and the postinstall below strips it anyway, so
 # the problem cannot reach a user.
 #
-# This paragraph used to attribute that to a measurement on "the v1.7.0 assets", and no release of
-# this project carries that version: the newest entry in CHANGELOG.md is 0.9.3, MARKETING_VERSION in
-# Project.swift is 0.9.3, and `grep -rn '1\.7\.0' .` now finds one line in the whole tree: this one.
-# The first release, 0.9.0, already "ships as a signed and notarised installer", so the two-zip
-# arrangement described above was never a shipped release here at all. The mechanism is real and is
-# what this script defends against; the provenance was not recoverable, so it is gone rather than
-# restated with a different number.
+# This mechanism was once described as a measurement of a version that never shipped. Keep the
+# packaging rationale here without stale release-number claims; CHANGELOG.md is the release record.
 #
 # Signing is opt-in through the environment. With the three variables set the output is signed,
 # notarised and stapled, and opens with no warning at all. Without them it still builds, so the

@@ -8,7 +8,7 @@ Mimic binds its mock server (default port `8080`) and control API (default port 
 
 The control API requires a fresh per-instance token in `X-Mimic-Token` on every route, including health. It rejects requests with an `Origin` header or a non-loopback `Host`. Loopback alone is insufficient protection because local processes and web pages can send requests to it.
 
-The instance writes its token to `control.json` with mode `0600` under the app's Application Support directory (inside the container for the sandboxed app). The `mimic` CLI discovers the instance and token there. It attaches a discovered token only to the advertised loopback port; explicit remote or forwarded destinations need a caller-supplied `MIMIC_CONTROL_TOKEN`. See [CLI discovery](docs/CLI.md#finding-an-instance).
+The instance writes its token to `control.json` with mode `0600` under the app's Application Support directory (inside the container for the sandboxed app). The `mimic` CLI discovers the instance and token there. It attaches a discovered token only to `http://127.0.0.1` on the advertised port, matching the address the server binds. Explicit destinations using `localhost`, IPv6 loopback, remote hosts, or forwarded ports need a caller-supplied `MIMIC_CONTROL_TOKEN`. See [CLI discovery](docs/CLI.md#finding-an-instance).
 
 ## Stored and captured data
 

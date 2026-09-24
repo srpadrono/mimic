@@ -330,7 +330,7 @@ jobs:
           echo "The three UI shards rolled up to: $RESULT"
           case "$RESULT" in
             success)
-              echo "All three shards passed — 158 XCUITest cases across the three runners."
+              echo "All three UI shards passed."
               ;;
             skipped)
               echo "::error::The UI shards did not run, so nothing exercised the window on this commit."

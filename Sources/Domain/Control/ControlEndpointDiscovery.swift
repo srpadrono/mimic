@@ -226,9 +226,9 @@ public enum ControlEndpointDiscovery {
     /// `resolveBaseURL` above, to route on the `baseURL` a file names, for exactly this reason.
     ///
     /// A locally discovered token is a credential *for one instance*, so both halves have to match: a
-    /// loopback host, and the port that instance advertised. Anything else gets no token — a remote
-    /// host, a loopback-shaped name like `127.0.0.1.evil.example`, or another port on this machine,
-    /// which is some other process. The request then either needs none or comes back `401`, which
+    /// exact IPv4 address the control server binds, and the port that instance advertised. Anything
+    /// else gets no token — a remote host, `localhost` (whose IPv6 resolution can reach a different
+    /// listener), `::1`, or another port on this machine. The request then comes back `401`, which
     /// `ControlClient.send` reports with the message that names the header and the file.
     ///
     /// The legitimate local case still works: `--url http://127.0.0.1:<port>` naming the running
@@ -242,18 +242,9 @@ public enum ControlEndpointDiscovery {
     /// loopback host.
     public static func namesDiscoveredInstance(_ url: URL, _ discovered: ControlEndpoint?) -> Bool {
         guard let discovered,
-              let host = url.host?.lowercased(),
-              loopbackHosts.contains(host)
+              url.scheme?.lowercased() == "http",
+              url.host == "127.0.0.1"
         else { return false }
         return url.port == discovered.port
     }
-
-    /// The spellings of "this machine" a control URL can carry: the two loopback literals and the
-    /// name for them a person types. The IPv6 one is listed with and without its brackets so the
-    /// check does not turn on whether `URL.host` strips them.
-    ///
-    /// Deliberately not the whole `127.0.0.0/8` range. Nothing derives an address anywhere else —
-    /// `resolveBaseURL` writes `127.0.0.1` and the control plane binds `127.0.0.1` — so admitting
-    /// the rest would widen where a token may go for no case that exists.
-    private static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "[::1]", "localhost"]
 }

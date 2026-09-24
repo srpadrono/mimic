@@ -224,17 +224,13 @@ struct WorkspaceView: View {
             isPresented: $appState.isShowingPortConflict,
             presenting: appState.portConflictAlert
         ) { alertData in
-            // The title interpolates the suggested port, so it is the one control in this window a
-            // test cannot address by its words: matching the label means hard-coding the result of
-            // the `conflictingPort + 1` arithmetic `PortConflictAlertData` performs, and the test
-            // then goes green or red on the fixture's port rather than on the button. The identifier
-            // is the stable handle. The label stays the visible words so VoiceOver still says which
-            // port is being offered.
-            Button("Try port \(String(alertData.suggestedPort))") {
-                appState.retryStartOnNextPort(from: alertData.conflictingPort)
+            if let suggestedPort = alertData.suggestedPort {
+                Button("Try port \(String(suggestedPort))") {
+                    appState.retryStartOnNextPort(from: alertData.conflictingPort)
+                }
+                .accessibilityIdentifier("portConflict.tryPortButton")
+                .accessibilityLabel("Try port \(String(suggestedPort))")
             }
-            .accessibilityIdentifier("portConflict.tryPortButton")
-            .accessibilityLabel("Try port \(String(alertData.suggestedPort))")
 
             Button("Keep server stopped", role: .cancel) {
                 appState.portConflictAlert = nil
@@ -242,7 +238,9 @@ struct WorkspaceView: View {
             .accessibilityIdentifier("portConflict.keepStoppedButton")
             .accessibilityLabel("Keep server stopped")
         } message: { alertData in
-            Text("Another process is using port \(String(alertData.conflictingPort)). Try port \(String(alertData.suggestedPort)) instead?")
+            Text(verbatim: alertData.suggestedPort.map {
+                "Another process is using port \(alertData.conflictingPort). Try port \($0) instead?"
+            } ?? "Another process is using port \(alertData.conflictingPort). No higher port is available.")
                 // Named, not matched as a substring. The body interpolates two ports, so the only
                 // query that could reach it without an identifier is a `CONTAINS` predicate over the
                 // window's static texts — which is both expensive and satisfied by any other text
@@ -848,7 +846,9 @@ struct WorkspaceView: View {
                         tint: DSColors.accent
                     ) {
                         journeyFilter = ""
-                        if let group = active.groupTag { collapsedJourneyGroups.remove(group) }
+                        if let group = active.groupTag {
+                            collapsedJourneyGroups.remove(JourneyNavigatorList.groupSectionKey(group))
+                        }
                         navigatorTab = .journeys
                         appState.selectedJourneyID = active.id
                     }

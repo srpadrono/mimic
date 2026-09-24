@@ -17,7 +17,7 @@ import Foundation
 nonisolated protocol UpdateInstalling: Sendable {
     func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL
     func verify(_ fileURL: URL, against release: UpdateRelease) throws
-    func stampQuarantine(on fileURL: URL, from release: UpdateRelease)
+    func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws
     @MainActor func handOff(_ fileURL: URL) async throws
 }
 
@@ -37,6 +37,7 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
         case wrongSize(expected: Int, actual: Int)
         case checksumMismatch(expected: String, actual: String)
         case notSignedByMimic(String)
+        case quarantineFailed(String)
         case handoffFailed(String)
 
         var errorDescription: String? {
@@ -57,6 +58,8 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
                 The downloaded installer is not signed by Mimic's developer certificate, so it was \
                 not installed. \(detail)
                 """
+            case .quarantineFailed(let detail):
+                return "Mimic could not prepare the installer for macOS security checks. \(detail)"
             case .handoffFailed(let detail):
                 return "Mimic could not open the installer. \(detail)"
             }
@@ -246,9 +249,9 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// check that this process cannot perform itself never happens either. Setting it puts the OS's
     /// own assessment back in the path, which is the check that cannot be talked out of.
     ///
-    /// Best-effort by design: failing to *add* a restriction is not a reason to refuse an installer
-    /// that has already matched its published checksum and its Developer ID.
-    func stampQuarantine(on fileURL: URL, from release: UpdateRelease) {
+    /// The sandbox cannot read `pkgutil`'s notarisation result, so a failed quarantine stamp must
+    /// stop preparation: offering an unstamped package would skip the Gatekeeper check we rely on.
+    func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws {
         var url = fileURL
         var values = URLResourceValues()
         values.quarantineProperties = [
@@ -257,7 +260,11 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
             kLSQuarantineDataURLKey as String: release.asset.downloadURL.absoluteString,
             kLSQuarantineOriginURLKey as String: release.pageURL.absoluteString,
         ]
-        try? url.setResourceValues(values)
+        do {
+            try url.setResourceValues(values)
+        } catch {
+            throw InstallError.quarantineFailed(error.localizedDescription)
+        }
     }
 
     /// Opens the package in `Installer.app`.

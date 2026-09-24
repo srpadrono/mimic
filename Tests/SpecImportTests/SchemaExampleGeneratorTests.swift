@@ -139,6 +139,14 @@ struct SchemaExampleGeneratorTests {
         #expect(result == "42")
     }
 
+    @Test func toJSONStringHandlesNullAndBooleanFragments() throws {
+        #expect(SchemaExampleGenerator.toJSONString(NSNull()) == "null")
+        #expect(SchemaExampleGenerator.toJSONString(true) == "true")
+        let escaped = try #require(SchemaExampleGenerator.toJSONString("line\n\"two\""))
+        #expect(escaped == #""line\n\"two\"""#)
+        #expect(SchemaExampleGenerator.toJSONString(Double.infinity) == nil)
+    }
+
     // MARK: - Fallback body generation
 
     @Test func fallbackBodyWithDescription() {
