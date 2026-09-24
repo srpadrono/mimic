@@ -290,12 +290,17 @@ public enum HARParser {
 
     /// Flattens HAR's header list, dropping anything ``ImportHeaderPolicy`` says must not be replayed.
     ///
-    /// A HAR may list the same header more than once (`Set-Cookie` typically); last one wins, which
-    /// matches how a client would have seen it.
+    /// A HAR may list the same header more than once, including with different casing. The last
+    /// value wins under HTTP's case-insensitive header-name rule, retaining that entry's spelling.
     static func extractResponseHeaders(_ headers: [HARHeader]?) -> [String: String] {
         guard let headers else { return [:] }
         var dict: [String: String] = [:]
+        var spellingByName: [String: String] = [:]
         for header in headers where !ImportHeaderPolicy.shouldDrop(header.name) {
+            let name = header.name.lowercased()
+            if let previousSpelling = spellingByName.updateValue(header.name, forKey: name) {
+                dict.removeValue(forKey: previousSpelling)
+            }
             dict[header.name] = header.value
         }
         return dict

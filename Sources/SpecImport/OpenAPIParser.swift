@@ -2,6 +2,17 @@ import Foundation
 import Domain
 import OpenAPIKit30
 
+private enum OpenAPIImportError: LocalizedError {
+    case unresolvedResponse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unresolvedResponse(let reference):
+            return "Cannot resolve OpenAPI response reference \(reference)."
+        }
+    }
+}
+
 /// Parses OpenAPI v3 and Swagger v2 specs into import candidates.
 public enum OpenAPIParser {
 
@@ -19,7 +30,7 @@ public enum OpenAPIParser {
             }
             // Default: try OpenAPI 3.x
             let document = try JSONDecoder().decode(OpenAPI.Document.self, from: data)
-            return candidatesFromDocument(
+            return try candidatesFromDocument(
                 document,
                 documentBasePath: openAPI3BasePath(in: data),
                 existingEndpoints: existingEndpoints
@@ -78,11 +89,16 @@ public enum OpenAPIParser {
                 guard let operation else { continue }
                 guard let method = HTTPMethod(rawValue: methodString) else { continue }
 
-                // Content type first, because the response extraction pairs the example it picks
-                // with it — see the examples branch in `extractSwagger2Response`.
-                let contentType = swagger2ContentType(operation: operation, doc: doc)
+                // Choose the response once. When `produces` is absent, its examples can identify
+                // the content type; an example on a different status must not decide it.
+                let selectedResponse = selectedSwagger2Response(from: operation)
+                let contentType = swagger2ContentType(
+                    operation: operation,
+                    doc: doc,
+                    response: selectedResponse?.response
+                )
                 var (statusCode, exampleBody, responseDescription) = extractSwagger2Response(
-                    from: operation,
+                    from: selectedResponse,
                     doc: doc,
                     preferring: contentType
                 )
@@ -122,33 +138,55 @@ public enum OpenAPIParser {
     }
 
     /// The content type an operation actually produces: its own `produces`, then the document's,
-    /// then — when the spec declares neither — JSON.
+    /// preferring a declared representation with an example on the chosen response. When neither
+    /// declared representation has an example, prefer JSON; with no declaration, infer from the
+    /// chosen response's examples and otherwise default to JSON.
     ///
     /// Matched with the same rule the other importers use — a substring test, via
     /// `ImportCandidateBuilder.detectContentType`. The exact `contains("application/json")` this
     /// replaced missed `application/hal+json` and `application/json; charset=utf-8`, both of which
     /// are ordinary things for a real spec to declare.
     ///
-    /// **The default was `.plainText`**, reached through `?? []` and an empty `contains`, and it cost
-    /// the same pair of bugs the document-level `produces` cost: a spec that declares no `produces`
-    /// anywhere — which is legal, and which Swagger 2 gives no default for — imported as plain text,
-    /// and `parseSwagger2` only reaches for the fallback body when the content type is `.json`, so
-    /// those endpoints arrived with no body either. JSON is the answer a mock of an HTTP API is
-    /// almost always right to give, and it is the one that keeps the body.
-    static func swagger2ContentType(operation: SwaggerOperation, doc: SwaggerDocument) -> Scenario.ContentType {
+    /// With no declaration, use a JSON example if present, otherwise a text example. A selected
+    /// response with no supported example defaults to JSON so the metadata fallback can supply a
+    /// body. Mimic has only JSON and plain-text scenario types. A declared non-JSON `produces`
+    /// still maps to plain text for compatibility, but only text examples are copied; XML and
+    /// other unrelated examples cannot be replayed faithfully under that label.
+    static func swagger2ContentType(
+        operation: SwaggerOperation,
+        doc: SwaggerDocument,
+        response: SwaggerResponse?
+    ) -> Scenario.ContentType {
         // An operation's own list wins over the document's; an empty list declares nothing, so it
         // falls through to the document rather than deciding for it.
         let declared = operation.produces?.isEmpty == false ? operation.produces : doc.produces
-        guard let declared, !declared.isEmpty else { return .json }
-        return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json } ? .json : .plainText
+        if let declared, !declared.isEmpty {
+            let exampleTypes = response?.examples?.keys.compactMap(supportedSwaggerExampleType) ?? []
+            // A JSON preference must not discard the selected response's sole text example when
+            // both representations are declared. Keep JSON first only when it has an example too.
+            if declared.contains(where: { supportedSwaggerExampleType($0) == .json }),
+               exampleTypes.contains(.json) {
+                return .json
+            }
+            if declared.contains(where: { supportedSwaggerExampleType($0) == .plainText }),
+               exampleTypes.contains(.plainText) {
+                return .plainText
+            }
+            return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json }
+                ? .json : .plainText
+        }
+        let exampleKeys = response?.examples?.keys.sorted() ?? []
+        if exampleKeys.contains(where: { supportedSwaggerExampleType($0) == .json }) { return .json }
+        if exampleKeys.contains(where: { supportedSwaggerExampleType($0) == .plainText }) {
+            return .plainText
+        }
+        return .json
     }
 
-    private static func extractSwagger2Response(
-        from operation: SwaggerOperation,
-        doc: SwaggerDocument,
-        preferring contentType: Scenario.ContentType
-    ) -> (statusCode: Int, body: String?, responseDescription: String?) {
-        guard let responses = operation.responses else { return (200, nil, nil) }
+    private static func selectedSwagger2Response(
+        from operation: SwaggerOperation
+    ) -> (statusCode: Int, response: SwaggerResponse)? {
+        guard let responses = operation.responses else { return nil }
 
         // Prefer 200, then 201, then first 2xx, then first
         let preferredKeys = ["200", "201"]
@@ -166,41 +204,73 @@ public enum OpenAPIParser {
             } ?? responses.keys.sorted().first
         }
 
-        let statusCode = Int(bestKey ?? "200") ?? 200
+        guard let bestKey, let response = responses[bestKey] else { return nil }
+        return (Int(bestKey) ?? 200, response)
+    }
 
-        guard let response = responses[bestKey ?? "200"] else { return (statusCode, nil, nil) }
+    private static func extractSwagger2Response(
+        from selected: (statusCode: Int, response: SwaggerResponse)?,
+        doc: SwaggerDocument,
+        preferring contentType: Scenario.ContentType
+    ) -> (statusCode: Int, body: String?, responseDescription: String?) {
+        guard let (statusCode, response) = selected else { return (200, nil, nil) }
 
         // The examples map is keyed by MIME type, so the body handed back is the one for the content
         // type the candidate will actually declare. The keys used to be consulted only for an exact
         // `application/json` hit, so `produces: [text/plain]` beside a JSON example served the JSON
         // body under a text/plain label — two halves of one response chosen independently. An exact
         // key wins first, so a map holding both `application/json` and `application/hal+json` under
-        // `produces: [application/json]` serves the body actually named; then the same substring
-        // rule as `produces` itself, sorted so a map with no matching key picks the same fallback on
-        // every import instead of whatever order the hash gave.
+        // `produces: [application/json]` serves the body actually named; then the same content-type
+        // rule as `produces` itself. An unrelated example is not a fallback: importing a JSON body
+        // under `text/plain` would make the mock answer a response the spec never declared.
         if let examples = response.examples, !examples.isEmpty {
             let keys = examples.keys.sorted()
-            let key = keys.first { $0 == contentType.rawValue }
-                ?? keys.first { ImportCandidateBuilder.detectContentType($0) == contentType }
-                ?? keys[0]
-            return (statusCode, examples[key]?.toJSONString(), response.description)
+            if let key = keys.first(where: { $0 == contentType.rawValue })
+                ?? keys.first(where: { supportedSwaggerExampleType($0) == contentType }),
+               let example = examples[key],
+               let body = swaggerExampleBody(example, contentType: contentType) {
+                return (statusCode, body, response.description)
+            }
         }
 
         // Check schema example
         if let schemaExample = response.schema?.example {
-            return (statusCode, schemaExample.toJSONString(), response.description)
+            let body = swaggerExampleBody(schemaExample, contentType: contentType)
+            return (statusCode, body, response.description)
         }
 
         // Generate from schema
         if let schema = response.schema {
             if let generated = SchemaExampleGenerator.generate(from: schema, definitions: doc.definitions) {
-                if let jsonStr = SchemaExampleGenerator.toJSONString(generated) {
-                    return (statusCode, jsonStr, response.description)
+                if contentType == .plainText, let text = generated as? String {
+                    return (statusCode, text, response.description)
+                }
+                if let body = SchemaExampleGenerator.toJSONString(generated) {
+                    return (statusCode, body, response.description)
                 }
             }
         }
 
         return (statusCode, nil, response.description)
+    }
+
+    private static func swaggerExampleBody(
+        _ example: AnyCodableValue,
+        contentType: Scenario.ContentType
+    ) -> String? {
+        if contentType == .plainText, case .string(let text) = example {
+            return text
+        }
+        return example.toJSONString()
+    }
+
+    private static func supportedSwaggerExampleType(_ mimeType: String) -> Scenario.ContentType? {
+        if ImportCandidateBuilder.detectContentType(mimeType) == .json { return .json }
+        let lower = mimeType.lowercased().trimmingCharacters(in: .whitespaces)
+        // Text formats share the one plain-text scenario type. XML is excluded even as `text/xml`:
+        // replaying XML under `text/plain` would advertise the wrong representation.
+        if lower.hasPrefix("text/"), !lower.contains("xml") { return .plainText }
+        return nil
     }
 
     private static func suggestedSwagger2Name(operation: SwaggerOperation) -> String? {
@@ -213,7 +283,7 @@ public enum OpenAPIParser {
         _ document: OpenAPI.Document,
         documentBasePath: String?,
         existingEndpoints: [Endpoint]
-    ) -> [ImportCandidate] {
+    ) throws -> [ImportCandidate] {
         var candidates: [ImportCandidate] = []
         var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
@@ -249,7 +319,7 @@ public enum OpenAPIParser {
                 guard let operation else { continue }
                 guard let method = domainMethod(from: httpMethod) else { continue }
 
-                let (statusCode, exampleBody, contentType, headers) = extractBestResponse(
+                let (statusCode, exampleBody, contentType, headers) = try extractBestResponse(
                     from: operation,
                     document: document
                 )
@@ -277,12 +347,12 @@ public enum OpenAPIParser {
         return candidates
     }
 
-    /// Extract the best response: prefer 200/201, then first 2xx, then first response.
+    /// Extract the best response: prefer 200/201, then the lowest 2xx, then the lowest key.
     /// When no schema or examples are available, auto-generates a placeholder body from operation metadata.
     private static func extractBestResponse(
         from operation: OpenAPI.Operation,
         document: OpenAPI.Document
-    ) -> (statusCode: Int, body: String?, contentType: Scenario.ContentType, headers: [String: String]) {
+    ) throws -> (statusCode: Int, body: String?, contentType: Scenario.ContentType, headers: [String: String]) {
         let responses = operation.responses
 
         // Find best response key
@@ -295,7 +365,8 @@ public enum OpenAPIParser {
             }
         }
         if bestKey == nil {
-            bestKey = responses.keys.first { key in
+            let sortedKeys = responses.keys.sorted { $0.rawValue < $1.rawValue }
+            bestKey = sortedKeys.first { key in
                 switch key.value {
                 case .status(code: let code):
                     return (200..<300).contains(code)
@@ -304,7 +375,7 @@ public enum OpenAPIParser {
                 case .default:
                     return false
                 }
-            } ?? responses.keys.first
+            } ?? sortedKeys.first
         }
 
         guard let statusKey = bestKey else {
@@ -334,11 +405,10 @@ public enum OpenAPIParser {
         let response: OpenAPI.Response
         switch responseEither {
         case .a(let ref):
-            if let resolved = try? document.components.lookup(ref) {
-                response = resolved
-            } else {
-                return (statusCode, nil, .json, [:])
+            guard let resolved = try? document.components.lookup(ref) else {
+                throw OpenAPIImportError.unresolvedResponse(ref.absoluteString)
             }
+            response = resolved
         case .b(let resp):
             response = resp
         }
@@ -347,13 +417,19 @@ public enum OpenAPIParser {
         var exampleBody: String?
         var contentType: Scenario.ContentType = .json
 
-        let jsonKey = OpenAPI.ContentType.json
-        if let jsonContent = response.content[jsonKey] {
-            exampleBody = extractExample(from: jsonContent, document: document)
-            contentType = .json
-        } else if let firstContent = response.content.first {
-            exampleBody = extractExample(from: firstContent.value, document: document)
-            contentType = firstContent.key.rawValue.contains("json") ? .json : .plainText
+        let sortedContentKeys = response.content.keys.sorted { $0.rawValue < $1.rawValue }
+        if let selectedKey = sortedContentKeys.first(where: { $0 == .json })
+            ?? sortedContentKeys.first(where: {
+                ImportCandidateBuilder.detectContentType($0.rawValue) == .json
+            })
+            ?? sortedContentKeys.first,
+           let selectedContent = response.content[selectedKey] {
+            contentType = ImportCandidateBuilder.detectContentType(selectedKey.rawValue)
+            exampleBody = extractExample(
+                from: selectedContent,
+                document: document,
+                contentType: contentType
+            )
         }
 
         // Fallback: auto-generate body from operation metadata when no content/schema
@@ -376,37 +452,40 @@ public enum OpenAPIParser {
 
     private static func extractExample(
         from content: OpenAPI.Content,
-        document: OpenAPI.Document
+        document: OpenAPI.Document,
+        contentType: Scenario.ContentType
     ) -> String? {
-        // 1. Check direct example
-        if let example = content.example {
-            return jsonString(from: example)
-        }
-
-        // 2. Check examples map
+        // OpenAPIKit also populates `example` from the first inline member of `examples`.
+        // Inspect the named map first so its selection is stable across decodes.
         if let examples = content.examples {
-            for (_, exampleRef) in examples {
+            for key in examples.keys.sorted() {
+                guard let exampleRef = examples[key] else { continue }
                 switch exampleRef {
                 case .a(let ref):
                     if let resolved = try? document.components.lookup(ref),
                        let value = resolved.value {
                         switch value {
                         case .a: continue
-                        case .b(let anyCodable): return jsonString(from: anyCodable)
+                        case .b(let anyCodable): return jsonString(from: anyCodable, contentType: contentType)
                         }
                     }
                 case .b(let example):
                     if let value = example.value {
                         switch value {
                         case .a: continue
-                        case .b(let anyCodable): return jsonString(from: anyCodable)
+                        case .b(let anyCodable): return jsonString(from: anyCodable, contentType: contentType)
                         }
                     }
                 }
             }
         }
 
-        // 3. Generate from schema
+        // A single direct example, when there is no usable named one.
+        if let example = content.example {
+            return jsonString(from: example, contentType: contentType)
+        }
+
+        // Generate from schema when no usable example exists.
         if let schemaEither = content.schema {
             let resolvedSchema: JSONSchema?
             switch schemaEither {
@@ -417,6 +496,9 @@ public enum OpenAPIParser {
             }
             if let schema = resolvedSchema,
                let generated = SchemaExampleGenerator.generate(from: schema, in: document) {
+                if contentType == .plainText, let text = generated as? String {
+                    return text
+                }
                 return SchemaExampleGenerator.toJSONString(generated)
             }
         }
@@ -424,7 +506,10 @@ public enum OpenAPIParser {
         return nil
     }
 
-    private static func jsonString(from anyCodable: AnyCodable) -> String? {
+    private static func jsonString(from anyCodable: AnyCodable, contentType: Scenario.ContentType) -> String? {
+        if contentType == .plainText, let text = anyCodable.value as? String {
+            return text
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(anyCodable) else { return nil }
