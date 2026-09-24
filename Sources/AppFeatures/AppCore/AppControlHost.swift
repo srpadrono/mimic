@@ -76,13 +76,11 @@ final class AppControlHost: ControlHost {
     /// being true: the `journeyAdvance` arm awaits the engine, and does so precisely because reading
     /// the runtime's mirror in one hop answered with the cursor from before the command.
     ///
-    /// Eight arms below reach an `await`, and they are the ones named above: `state` and `reset`,
-    /// both through `makeState`; `serverStart`, only when it was given a port; the four journey
-    /// runtime arms — `journeyActivate`, `journeyRestart`, `journeyAdvance` and `journeyStatus`; and
-    /// the single arm that hands the eight project-lifecycle commands to `performProjectCommand`.
-    /// Every other arm is a single-hop read of session state. Do not restate that as a count
-    /// anywhere else — this is the one place it is written down, and the arms are named so a reader
-    /// can check it against the switch rather than against another comment.
+    /// The project-scoped branch now awaits SQLite for mutations; it joins its captured snapshot to
+    /// the workspace write chain before that first suspension. Host-scoped arms that suspend include
+    /// `state` and `reset` through `makeState`, `serverStart` when given a port, the journey runtime
+    /// arms, `logSaveAsMock` after its project edit, and the project-lifecycle handoff. Other
+    /// host-scoped reads remain single-hop.
     ///
     /// It read four while five arms suspended: `journeyRestart` had been awaiting the engine for a
     /// wave without ever being named here. And the three arms whose whole job is *reporting* the
@@ -103,7 +101,10 @@ final class AppControlHost: ControlHost {
                     if outcome.didMutate {
                         project.modifiedAt = Date()
                         appState.currentProject = project
-                        appState.scheduleAutosave()
+                        let save = appState.projects.enqueueControlMutationSave(project)
+                        if case let .failure(error) = await save.value {
+                            return .failure(error)
+                        }
                         _ = await appState.server.journeyStatusAfterPendingUpdates()
                     }
                     return .success(outcome.result)
@@ -402,6 +403,13 @@ final class AppControlHost: ControlHost {
         case let .logSaveAsMock(id):
             guard let endpoint = appState.savePassedThroughLogAsMock(id: id) else {
                 return .failure(.invalid(appState.lastCommandError ?? "Could not save the response as a mock."))
+            }
+            guard let project = appState.currentProject else {
+                return .failure(.internalFailure("The edited project is no longer open."))
+            }
+            let save = appState.projects.enqueueControlMutationSave(project)
+            if case let .failure(error) = await save.value {
+                return .failure(error)
             }
             return .success(.init(message: "Saved passed-through response as a mock.", endpoint: endpoint))
 
