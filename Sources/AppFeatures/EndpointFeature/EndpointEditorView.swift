@@ -41,7 +41,8 @@ struct EndpointEditorView: View {
     /// validating on every keystroke would flash a complaint at someone who is still typing.
     @State private var statusCodeError: String?
     @State private var delayError: String?
-    @State private var isJSONValid = true
+    /// The Format button only enables for the body whose bounded output was checked.
+    @State private var formatCandidate: (source: String, output: String)?
     @State private var showDeleteConfirmation = false
     /// The edits that have been typed and not yet written — one object rather than three more
     /// `@State` values, for the reason in `EndpointEditorPendingEdits`' own note.
@@ -382,8 +383,8 @@ struct EndpointEditorView: View {
                     .foregroundStyle(DSColors.labelSecondary)
                 Spacer(minLength: DSSpacing.sm)
                 Button {
-                    if let pretty = DSJSONEditor.prettyPrint(responseBody) {
-                        responseBody = pretty
+                    if let formatCandidate, formatCandidate.source == responseBody {
+                        responseBody = formatCandidate.output
                         commitBody()
                     }
                 } label: {
@@ -405,13 +406,21 @@ struct EndpointEditorView: View {
 
             // Fill the available workspace regardless of payload length. Formatting a long payload
             // changes the document, never the height of the editor or the position of its options.
-            DSJSONEditor(text: $responseBody, identifier: "editor.body") { valid in
-                isJSONValid = valid
-            }
+            DSJSONEditor(text: $responseBody, identifier: "editor.body")
             .frame(height: height)
             .padding(.horizontal, DSSpacing.md)
             .padding(.bottom, DSSpacing.md)
             .onChange(of: responseBody) { debounceBody() }
+            .task(id: responseBody) {
+                let source = responseBody
+                // Typing cancels this task before it starts a new parse and bounded reflow.
+                do { try await Task.sleep(for: Self.settling) } catch { return }
+                let output = await Task.detached(priority: .userInitiated) {
+                    DSJSONEditor.prettyPrint(source)
+                }.value
+                guard !Task.isCancelled, responseBody == source else { return }
+                formatCandidate = output.map { (source: source, output: $0) }
+            }
         }
     }
 
@@ -649,7 +658,9 @@ struct EndpointEditorView: View {
     // MARK: - Derived state
 
     private var canFormatBody: Bool {
-        isJSONValid && !responseBody.isEmpty
+        // The scanner can reject valid JSON when indentation would exceed its output budget.
+        // Compare the source as well so a result from the previous body cannot enable Format.
+        formatCandidate?.source == responseBody
     }
 
     // MARK: - Sync & Commit

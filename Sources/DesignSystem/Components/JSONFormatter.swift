@@ -37,6 +37,11 @@ public nonisolated enum JSONFormatter {
     /// tens of thousands of `AttributedString` runs, and that cost lands on every body evaluation.
     public static let formattingLimit = 20 * 1024
 
+    /// A compact body can expand quadratically when each nested container adds another indented
+    /// line. Keep one malformed or unusually deep response from allocating an enormous rendered
+    /// body; callers show the original text when formatting returns `nil`.
+    static let maxFormattedBytes = 256 * 1024
+
     /// `true` when the text is worth treating as JSON at all.
     public nonisolated static func looksLikeJSON(_ text: String) -> Bool {
         guard let first = text.first(where: { !$0.isWhitespace }) else { return false }
@@ -44,7 +49,7 @@ public nonisolated enum JSONFormatter {
     }
 
     /// A re-indented copy, or `nil` when the text is not JSON — or, unless `reflow` is set, when it
-    /// is already laid out across lines.
+    /// is already laid out across lines, or when indentation would exceed the output budget.
     ///
     /// `reflow` exists because the two callers want opposite things from the same scanner. The
     /// traffic log *displays* a body it did not write, so text already broken across lines is a
@@ -57,15 +62,30 @@ public nonisolated enum JSONFormatter {
         guard reflow || !text.contains("\n") else { return nil }
 
         var output = ""
-        output.reserveCapacity(text.count + text.count / 2)
+        output.reserveCapacity(min(text.utf8.count, maxFormattedBytes))
+        var outputBytes = 0
 
         let characters = Array(text)
         var depth = 0
         var index = 0
 
-        func appendNewline(indent: Int) {
+        func append(_ fragment: String) -> Bool {
+            let fragmentBytes = fragment.utf8.count
+            guard fragmentBytes <= maxFormattedBytes - outputBytes else { return false }
+            output.append(fragment)
+            outputBytes += fragmentBytes
+            return true
+        }
+
+        func appendNewline(indent: Int) -> Bool {
+            let indent = max(0, indent)
+            let remaining = maxFormattedBytes - outputBytes
+            // Check before multiplying or constructing the indentation string.
+            guard remaining > 0, indent <= (remaining - 1) / 2 else { return false }
             output.append("\n")
-            output.append(String(repeating: "  ", count: max(0, indent)))
+            output.append(String(repeating: "  ", count: indent))
+            outputBytes += 1 + 2 * indent
+            return true
         }
 
         /// The next character that is not whitespace, without consuming it.
@@ -80,41 +100,39 @@ public nonisolated enum JSONFormatter {
 
             if character == "\"" {
                 let (literal, next) = scanString(characters, from: index)
-                output.append(contentsOf: literal)
+                guard append(String(literal)) else { return nil }
                 index = next
                 continue
             }
 
             switch character {
             case "{", "[":
-                output.append(character)
+                guard append(String(character)) else { return nil }
                 // An empty container stays on one line — `{\n}` is noise, not structure.
                 let closing: Character = character == "{" ? "}" : "]"
                 if peekNonWhitespace(from: index + 1) == closing {
                     var probe = index + 1
                     while characters[probe].isWhitespace { probe += 1 }
-                    output.append(closing)
+                    guard append(String(closing)) else { return nil }
                     index = probe + 1
                     continue
                 }
                 depth += 1
-                appendNewline(indent: depth)
+                guard appendNewline(indent: depth) else { return nil }
 
             case "}", "]":
                 depth -= 1
-                appendNewline(indent: depth)
-                output.append(character)
+                guard appendNewline(indent: depth), append(String(character)) else { return nil }
 
             case ",":
-                output.append(character)
-                appendNewline(indent: depth)
+                guard append(String(character)), appendNewline(indent: depth) else { return nil }
 
             case ":":
-                output.append(": ")
+                guard append(": ") else { return nil }
 
             default:
                 guard !character.isWhitespace else { break }
-                output.append(character)
+                guard append(String(character)) else { return nil }
             }
 
             index += 1

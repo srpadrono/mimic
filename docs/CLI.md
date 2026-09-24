@@ -27,6 +27,7 @@ mimic app update-check          # returns updateAvailable; does not install
 ```
 
 `MIMIC_APP_PATH` selects a noninstalled app bundle. A headless run still requires `Mimic.app`; it uses the same `AppControlHost` as a visible run. `app stop` signals only the instance named by the discovery file after confirming its PID and ignores `--url` for that reason. If confirmation fails, stop the process manually after verifying it.
+`app start --wait-seconds` accepts a finite value greater than zero and at most 3600; invalid values fail before the app launches.
 
 ## Finding an instance
 
@@ -42,6 +43,9 @@ For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, the
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
 The discovery file contains the instance's port, PID, and token. It is written `0600`, with a `0700` parent directory. Set the path variables before starting the app. A signed app is sandboxed and cannot write arbitrary temporary paths outside its container; the [end-to-end harness](../Scripts/run_cli_e2e.sh) uses a disposable ad hoc signed app copy for this purpose. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
+The control client refuses HTTP redirects so a listener cannot forward a token to another host or port after the initial destination check.
+
+Shutdown removes the discovery file only when it still contains this instance's record. Publication and cleanup use the same lock, so another instance cannot replace the record between that check and removal. A failed bind has no record to remove, and cleanup leaves an already replaced record alone. The default path advertises one instance at a time; give concurrent runs separate `MIMIC_CONTROL_FILE` paths.
 
 ## Command reference
 
@@ -109,6 +113,7 @@ mimic scenario delete GET /account-summary "Server error"
 
 `--body-file -` reads stdin. `endpoint update --status` changes the active scenario. A scenario selects a standing response; a journey scripts a sequence.
 Endpoint edits require a unique match. If multiple backends contain the same method and path, select the endpoint by UUID with `--id`.
+Scenario create, update, activate, and delete also accept `--id <endpoint-UUID> <scenario-name>` when an endpoint route is shared.
 
 ### Journeys
 
@@ -140,6 +145,7 @@ mimic journey step add-batch "Session expiry" flow.json
 ```
 
 `step update` changes only supplied fields. `step add-batch` appends the exported journey's steps in one project update; `journey update --file` replaces them. Journey exports retain backend UUIDs, which must exist or be mapped in the importing project.
+`journey import` creates only when lookup returns `journey.notFound`; `--replace` updates the looked-up journey ID, and `--activate` uses the ID returned by the write.
 
 ### Request log
 

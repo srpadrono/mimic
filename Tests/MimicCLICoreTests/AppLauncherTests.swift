@@ -113,6 +113,36 @@ private final class RecordedSignals: @unchecked Sendable {
 
 // MARK: - The guard
 
+@Suite("Readiness timeout validation")
+struct ReadinessTimeoutTests {
+    @Test(
+        "Invalid wait times fail before launch or an already-running shortcut",
+        arguments: ["nan", "inf", "-1", "0", "3601"]
+    )
+    func invalidWaitTime(value: String) async {
+        let instance = StubInstance.reporting(pid: 42)
+        let status = await ControlTransportOverride.$current.withValue(instance) {
+            await MimicCommand.run(arguments: ["app", "start", "--wait-seconds", value])
+        }
+        #expect(status == 2)
+        #expect(instance.commands.isEmpty)
+    }
+
+    @Test("Direct readiness API rejects a nonfinite deadline")
+    func directReadinessRejectsNonfiniteDeadline() async {
+        do {
+            _ = try await AppLauncher.waitForReadiness(timeout: .nan)
+            Issue.record("a NaN deadline was accepted")
+        } catch let failure as CLIFailure {
+            #expect(failure.exitCode == 2)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+}
+
+// MARK: - The guard
+
 /// The guard between a pid on disk and a `SIGTERM`.
 ///
 /// `mimic app stop` reads a pid out of `control.json` and signals it, and that file outlives the

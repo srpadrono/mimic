@@ -34,18 +34,33 @@ public struct EndpointRecord: Codable, FetchableRecord, PersistableRecord, Senda
     }
 
     /// Converts the record back to a domain Endpoint with the provided scenarios.
-    public func toDomain(scenarios: [Scenario]) -> Endpoint {
-        Endpoint(
-            id: UUID(uuidString: id) ?? UUID(),
+    public func toDomain(scenarios: [Scenario]) throws -> Endpoint {
+        let endpointID = try PersistenceError.requiredUUID(
+            id, table: Self.databaseTableName, id: id, field: "id"
+        )
+        _ = try PersistenceError.requiredUUID(
+            projectID, table: Self.databaseTableName, id: id, field: "projectID"
+        )
+        guard let httpMethod = HTTPMethod(rawValue: method) else {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "method")
+        }
+        let activeID = try PersistenceError.optionalUUID(
+            activeScenarioID, table: Self.databaseTableName, id: id, field: "activeScenarioID"
+        )
+        let backend = try PersistenceError.optionalUUID(
+            backendID, table: Self.databaseTableName, id: id, field: "backendID"
+        )
+        return Endpoint(
+            id: endpointID,
             name: name,
-            method: HTTPMethod(rawValue: method) ?? .get,
+            method: httpMethod,
             path: path,
             scenarios: scenarios,
-            activeScenarioID: activeScenarioID.flatMap { UUID(uuidString: $0) },
+            activeScenarioID: activeID,
             delayMs: delayMs,
             groupTag: groupTag,
             graphqlOperation: graphqlOperation,
-            backendID: backendID.flatMap(UUID.init(uuidString:))
+            backendID: backend
         )
     }
 }

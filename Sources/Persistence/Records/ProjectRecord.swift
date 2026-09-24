@@ -72,15 +72,22 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     /// that is a migration rather than a relabelling, because `load` calls
     /// `requireSupportedSchemaVersion()` first: nothing from ahead of this build gets that far, and a
     /// row from behind it genuinely *is* the current shape once loaded (v2 added journeys, and a v1
-    /// project has none), which the next save writes back as the current number. `allProjects` calls
-    /// this unguarded on purpose, for listing only — see the note there.
+    /// project has none), which the next save writes back as the current number. `allProjects` uses
+    /// `toListingDomain()` instead, so unreadable backend configuration cannot hide every project.
     ///
     /// Carrying the stored integer through unchanged would need a `schemaVersion:` parameter on
     /// `MockProject.init`, which is a change to Domain rather than to this record.
     public func toDomain() throws -> MockProject {
-        let backends = try JSONDecoder().decode([BackendConfiguration].self, from: Data(backendsJSON.utf8))
+        let projectID = try PersistenceError.requiredUUID(id, table: Self.databaseTableName, id: id, field: "id")
+        let activeID = try PersistenceError.optionalUUID(activeJourneyID, table: Self.databaseTableName, id: id, field: "activeJourneyID")
+        let backends: [BackendConfiguration]
+        do {
+            backends = try JSONDecoder().decode([BackendConfiguration].self, from: Data(backendsJSON.utf8))
+        } catch {
+            throw PersistenceError.corruptedRecord(table: Self.databaseTableName, id: id, field: "backendsJSON")
+        }
         return MockProject(
-            id: UUID(uuidString: id) ?? UUID(),
+            id: projectID,
             name: name,
             serverConfiguration: ServerConfiguration(
                 port: serverPort,
@@ -90,7 +97,30 @@ public struct ProjectRecord: Codable, FetchableRecord, PersistableRecord, Sendab
             ),
             endpoints: [],
             journeys: [],
-            activeJourneyID: activeJourneyID.flatMap { UUID(uuidString: $0) },
+            activeJourneyID: activeID,
+            createdAt: createdAt,
+            modifiedAt: modifiedAt
+        )
+    }
+
+    /// A list entry remains visible even when a backend configuration prevents the full project
+    /// from opening. A malformed active selection is omitted from the listing; the full load still
+    /// refuses it. The returned project is a display stub and must never be saved as a document.
+    public func toListingDomain() throws -> MockProject {
+        let projectID = try PersistenceError.requiredUUID(id, table: Self.databaseTableName, id: id, field: "id")
+        let activeID = activeJourneyID.flatMap(UUID.init(uuidString:))
+        return MockProject(
+            id: projectID,
+            name: name,
+            serverConfiguration: ServerConfiguration(
+                port: serverPort,
+                globalDelayMs: globalDelayMs,
+                upstreamURL: upstreamURL,
+                backends: [], primaryName: primaryName, passthroughEnabled: passthroughEnabled, captureResponses: captureResponses
+            ),
+            endpoints: [],
+            journeys: [],
+            activeJourneyID: activeID,
             createdAt: createdAt,
             modifiedAt: modifiedAt
         )

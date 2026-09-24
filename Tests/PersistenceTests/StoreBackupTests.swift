@@ -58,6 +58,66 @@ struct StoreBackupTests {
         #expect(try projectNames(in: storeURL) == ["Checkout flow", "Payments sandbox"])
     }
 
+    /// A plain copy of the main SQLite file misses committed changes still in `-wal`. Keep the
+    /// source connection open, checkpoint one row, and commit a second row only to WAL so the
+    /// fixture itself proves the difference between copying bytes and taking a SQLite snapshot.
+    @Test("A snapshot includes a committed row that has not been checkpointed from WAL")
+    func snapshotIncludesCommittedWALRows() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        let queue = try DatabaseQueue(path: storeURL.path)
+        try queue.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA journal_mode = WAL")
+            try db.execute(sql: "PRAGMA wal_autocheckpoint = 0")
+            try db.execute(sql: "CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            try db.execute(sql: "INSERT INTO project (id, name) VALUES ('a', 'Before checkpoint')")
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+            try db.execute(sql: "INSERT INTO project (id, name) VALUES ('b', 'Committed in WAL')")
+        }
+
+        let walURL = URL(fileURLWithPath: storeURL.path + "-wal")
+        try #require(FileManager.default.fileExists(atPath: walURL.path),
+                     "the source connection must still hold its WAL sidecar")
+        #expect(try Data(contentsOf: walURL).count > 32, "the WAL must contain committed frames")
+
+        let rawCopy = storeURL.deletingLastPathComponent().appendingPathComponent("main-file-only.sqlite")
+        try FileManager.default.copyItem(at: storeURL, to: rawCopy)
+        #expect(try projectNames(in: rawCopy) == ["Before checkpoint"],
+                "the fixture must distinguish a raw main-file copy from a SQLite snapshot")
+        #expect(try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM project ORDER BY id")
+        } == ["Before checkpoint", "Committed in WAL"])
+
+        let snapshot = try withExtendedLifetime(queue) {
+            try StoreBackup.snapshot(of: storeURL, version: "0.12.0")
+        }
+        #expect(try projectNames(in: snapshot) == ["Before checkpoint", "Committed in WAL"])
+    }
+
+    @Test("A missing source cannot create an empty backup or prune a prior one")
+    func missingSourcePreservesEarlierSnapshots() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        let directory = StoreBackup.directoryURL(for: storeURL)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let prior = directory.appendingPathComponent("mimic-20260101-000000-0.11.0.sqlite")
+        try seed(prior)
+
+        do {
+            _ = try StoreBackup.snapshot(of: storeURL, version: "0.12.0", keeping: 0)
+            Issue.record("a missing source was opened as a new empty SQLite database")
+        } catch let error as StoreBackupError {
+            #expect(error == .sourceMissing(path: storeURL.path))
+        } catch {
+            Issue.record("missing source threw \(error) instead of StoreBackupError")
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: storeURL.path))
+        #expect(StoreBackup.snapshots(for: storeURL).map { $0.resolvingSymlinksInPath() }
+                == [prior.resolvingSymlinksInPath()])
+        #expect(try projectNames(in: prior) == ["Checkout flow", "Payments sandbox"])
+    }
+
     /// The reason `snapshot` opens its own plain connection instead of going through
     /// `DatabaseFactory.makeAppDatabaseQueue`.
     ///
@@ -120,6 +180,26 @@ struct StoreBackupTests {
 
         #expect(StoreBackup.snapshots(for: storeURL).map(\.lastPathComponent)
             == ["mimic-20260101-000000-0.10.0.sqlite"])
+    }
+
+    @Test("An incomplete staging file is neither latest nor pruned as a snapshot")
+    func stagingFileIsOutsideTheSnapshotSet() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        let directory = StoreBackup.directoryURL(for: storeURL)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let complete = directory.appendingPathComponent("mimic-20260101-000000-0.11.0.sqlite")
+        let staging = directory.appendingPathComponent(".mimic-20270101-000000-0.12.0.sqlite.fixed.pending")
+        try seed(complete)
+        try Data("unfinished".utf8).write(to: staging)
+
+        #expect(StoreBackup.latest(for: storeURL)?.resolvingSymlinksInPath()
+                == complete.resolvingSymlinksInPath())
+        try StoreBackup.prune(for: storeURL, keeping: 0)
+        #expect(StoreBackup.snapshots(for: storeURL).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: staging.path),
+                "pruning must not treat a partial staging file as a completed backup")
     }
 
     // MARK: - Pruning

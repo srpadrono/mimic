@@ -1,4 +1,5 @@
 import Foundation
+import Domain
 import Testing
 @testable import Persistence
 
@@ -61,7 +62,9 @@ struct StoreLocationTests {
     @Test("The store path carries no version number")
     func storePathIsVersionIndependent() throws {
         let path = try resolved.path
-        #expect(!path.contains(ControlAPIVersionProbe.releaseVersion), "\(path)")
+        // Use the version this build actually ships. A stale literal can pass after a release even
+        // when the new default path has started putting the current version in a directory name.
+        #expect(!path.contains(ControlAPI.releaseVersion), "\(path)")
         // Resolving twice gives the same answer — no timestamps, no per-launch identifiers.
         #expect(try DatabaseFactory.resolveDatabaseURL(environment: [:]) == (try resolved))
     }
@@ -95,9 +98,4 @@ struct StoreLocationTests {
         )
         #expect(empty == (try resolved))
     }
-}
-
-/// Reads the shipped version without importing Domain into a location test's assertions.
-private enum ControlAPIVersionProbe {
-    static let releaseVersion = "0.10.0"
 }
