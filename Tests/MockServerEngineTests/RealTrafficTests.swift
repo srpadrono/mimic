@@ -177,9 +177,13 @@ struct RealTrafficTests {
             Self.endpoint(.get, "/a", status: 200, body: "a"),
             Self.endpoint(.get, "/b", status: 201, body: "b"),
             Self.endpoint(.get, "/c", status: 202, body: "c"),
-        ]) { _, baseURL in
+        ]) { engine, baseURL in
             let session = JourneyServingTests.session(timeout: 30)
             let routes = [("a", 200), ("b", 201), ("c", 202)]
+            let drain = Task {
+                for await _ in engine.logStream { await engine.acknowledgeLog() }
+            }
+            defer { drain.cancel() }
 
             let results = try await withThrowingTaskGroup(of: (String, Int).self) { group in
                 for _ in 0..<40 {

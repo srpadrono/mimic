@@ -13,6 +13,7 @@ enum VaporConfigurator {
         on app: Application,
         routeStore: MockRouteStore,
         logContinuation: AsyncStream<RequestLog>.Continuation,
+        logGate: RequestLogGate,
         backendID: UUID? = nil,
         listenerPort: Int = 8080,
         localPorts: Set<Int> = []
@@ -39,13 +40,16 @@ enum VaporConfigurator {
             if resolved.outcome == .unmatched, let upstreamURL = backend?.effectiveUpstream {
                 return await ProxyForwarder.forward(req, to: upstreamURL, localPorts: localPorts,
                     incoming: incoming, projectID: projectID, backendName: backend?.name ?? "Primary", listenerPort: listenerPort,
-                    logContinuation: logContinuation)
+                    logContinuation: logContinuation, logGate: logGate)
             }
 
-            logContinuation.yield(makeLog(
-                incoming: incoming, resolved: resolved, projectID: projectID,
-                backendName: backend?.name, listenerPort: listenerPort
-            ))
+            if await logGate.reserve() {
+                let result = logContinuation.yield(makeLog(
+                    incoming: incoming, resolved: resolved, projectID: projectID,
+                    backendName: backend?.name, listenerPort: listenerPort
+                ))
+                if case .terminated = result { await logGate.acknowledge() }
+            }
 
             if let failure = resolved.failure {
                 // Hold *before* anything is written, so a timeout step sends the client nothing

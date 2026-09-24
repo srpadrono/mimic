@@ -28,7 +28,7 @@ struct PassthroughTests {
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
-    @Test("A delayed log consumer receives every request from a parallel burst")
+    @Test("A bounded log consumer receives every request from a parallel burst")
     func burstDoesNotDropLogs() async throws {
         let proxy = MockServerEngine(), upstream = MockServerEngine()
         let local = try Self.port(), real = try Self.port()
@@ -36,9 +36,27 @@ struct PassthroughTests {
         try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
         try await proxy.start(configuration: .init(port: local, globalDelayMs: 0,
             upstreamURL: "http://127.0.0.1:\(real)"))
-        defer { Task { try? await proxy.stop(); try? await upstream.stop() } }
-        // No consumer runs until all 1,100 requests finish. This deterministically fills
-        // the old 1,000-entry delivery buffer, independent of scheduler speed.
+        let upstreamDrain = Task {
+            for await _ in upstream.logStream { await upstream.acknowledgeLog() }
+        }
+        defer {
+            upstreamDrain.cancel()
+            Task { try? await proxy.stop(); try? await upstream.stop() }
+        }
+        // A lossless bounded producer must be drained while traffic continues; otherwise
+        // the HTTP requests correctly wait for the consumer instead of discarding logs.
+        let drain = Task { () -> Set<String> in
+            var paths = Set<String>()
+            for await log in proxy.logStream {
+                await proxy.acknowledgeLog()
+                if log.path == "/sentinel" { break }
+                #expect(log.outcome == .passthrough)
+                #expect(log.responseBody == "complete reply")
+                paths.insert(log.path)
+            }
+            return paths
+        }
+        defer { drain.cancel() }
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         for batch in 0..<22 {
@@ -53,18 +71,39 @@ struct PassthroughTests {
                 try await group.waitForAll()
             }
         }
-        // The sentinel terminates the drain even on the broken implementation.
+        // Every batch has completed before the sentinel, so all its logs were submitted.
         _ = try await session.data(from: URL(string: "http://127.0.0.1:\(local)/sentinel")!)
-        var paths = Set<String>()
-        for await log in proxy.logStream {
-            if log.path == "/sentinel" { break }
-            #expect(log.outcome == .passthrough)
-            #expect(log.responseBody == "complete reply")
-            paths.insert(log.path)
-        }
+        let paths = await drain.value
         #expect(paths.count == 1100)
         #expect(paths.contains("/burst/0"))
         #expect(paths.contains("/burst/1099"))
+    }
+
+    @Test("Proxy logs continue on the same stream after stop and restart")
+    func proxyLogsSurviveRestart() async throws {
+        let proxy = MockServerEngine(), upstream = MockServerEngine()
+        let local = try Self.port(), real = try Self.port()
+        await upstream.updateConfiguration(endpoints: [Self.endpoint("/restarted", body: "upstream reply")])
+        try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
+        defer { Task { try? await proxy.stop(); try? await upstream.stop() } }
+
+        let configuration = ServerConfiguration(port: local, globalDelayMs: 0,
+            upstreamURL: "http://127.0.0.1:\(real)")
+        let url = try #require(URL(string: "http://127.0.0.1:\(local)/restarted"))
+        let session = JourneyServingTests.session()
+        defer { session.invalidateAndCancel() }
+        var logs = proxy.logStream.makeAsyncIterator()
+        for _ in 0..<2 {
+            try await proxy.start(configuration: configuration)
+            let (data, response) = try await session.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(String(decoding: data, as: UTF8.self) == "upstream reply")
+            let log = try #require(await logs.next())
+            #expect(log.path == "/restarted")
+            #expect(log.outcome == .passthrough)
+            await proxy.acknowledgeLog()
+            try await proxy.stop()
+        }
     }
 
     @Test("Each local port uses its own mocks and real backend")
