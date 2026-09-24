@@ -83,7 +83,7 @@ jobs:
           }
 
       - name: Test
-        run: swift test --skip-build
+        run: swift test --skip-build --no-parallel
 
   macos-checks:
     name: Build, unit suites, Release, CLI e2e (macOS)
