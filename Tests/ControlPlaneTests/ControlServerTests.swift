@@ -948,9 +948,14 @@ struct ControlEndpointFileTests {
         )
         #expect(rewritten.int16Value & 0o777 == 0o600)
 
-        // And no temporary file is left beside it.
+        // The stable lock file stays beside the advertisement so another process cannot lock a
+        // replacement inode. No temporary publication file remains after the overwrite.
         let siblings = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        #expect(siblings == ["control.json"], "leftover files: \(siblings)")
+        #expect(Set(siblings) == ["control.json", "control.json.lock"], "unexpected files: \(siblings)")
+        let lockMode = try #require(
+            FileManager.default.attributesOfItem(atPath: url.path + ".lock")[.posixPermissions] as? NSNumber
+        )
+        #expect(lockMode.int16Value & 0o777 == 0o600)
     }
 
     /// A hard link taken before an overwrite is the one thing that can see *how* the new

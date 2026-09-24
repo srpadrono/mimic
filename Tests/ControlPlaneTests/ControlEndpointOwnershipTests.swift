@@ -5,6 +5,44 @@ import Testing
 
 @Suite("Control discovery ownership")
 struct ControlEndpointOwnershipTests {
+    @Test("A replacement waits until owner-checked cleanup finishes")
+    func cleanupAndReplacementShareOneLock() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-discovery-lock-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("control.json")
+        let first = ControlEndpoint(port: 8787, pid: 1111, mode: "app", token: "first-token")
+        let second = ControlEndpoint(port: 8788, pid: 2222, mode: "app", token: "second-token")
+        try ControlEndpointFile.write(first, to: url)
+
+        let startWriter = DispatchSemaphore(value: 0)
+        let writerStarted = DispatchSemaphore(value: 0)
+        let writerFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            startWriter.wait()
+            writerStarted.signal()
+            try? ControlEndpointFile.write(second, to: url)
+            writerFinished.signal()
+        }
+
+        // Without a lock on either side, the second advertisement lands between the read and
+        // unlink, then the older owner deletes it. The writer must remain blocked at this point.
+        ControlEndpointFile.remove(expected: first, at: url, afterOwnershipCheck: {
+            startWriter.signal()
+            #expect(writerStarted.wait(timeout: .now() + 5) == .success)
+            #expect(writerFinished.wait(timeout: .now() + 1) == .timedOut)
+        })
+        #expect(writerFinished.wait(timeout: .now() + 5) == .success)
+        let surviving = try ControlCoding.decode(ControlEndpoint.self, from: Data(contentsOf: url))
+        #expect(surviving == second)
+
+        let lockPath = url.path + ".lock"
+        let mode = try FileManager.default.attributesOfItem(atPath: lockPath)[.posixPermissions] as? NSNumber
+        #expect(mode?.intValue == 0o600)
+    }
+
     @Test("Cleanup does not remove an already replaced advertisement")
     func cleanupKeepsReplacementAdvertisement() throws {
         let directory = FileManager.default.temporaryDirectory

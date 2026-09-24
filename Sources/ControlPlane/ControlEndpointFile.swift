@@ -1,5 +1,10 @@
 import Domain
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Mints the per-instance token.
 ///
@@ -103,7 +108,8 @@ public enum ControlEndpointFile {
     /// So the mode is applied to the temporary file *before* it becomes visible under the real name,
     /// and `rename(2)` — which replaces atomically and carries the source's mode with it — publishes
     /// it. A reader therefore sees either the old file or a complete `0600` one, and never a partial
-    /// or a wide one.
+    /// or a wide one. Publication and owner-checked cleanup hold the same sibling-file lock so a
+    /// second instance cannot replace the record between the ownership check and removal.
     public static func write(
         _ endpoint: ControlEndpoint,
         to url: URL? = nil,
@@ -112,6 +118,12 @@ public enum ControlEndpointFile {
         let target = try url ?? writeURL(environment: environment)
         let data = try ControlCoding.encoder(pretty: true).encode(endpoint)
 
+        try withOwnershipLock(at: target) {
+            try publish(data, to: target)
+        }
+    }
+
+    private static func publish(_ data: Data, to target: URL) throws {
         // Same directory, so the rename stays within one filesystem and is therefore atomic.
         let temporary = target.deletingLastPathComponent()
             .appendingPathComponent(".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier)")
@@ -145,12 +157,46 @@ public enum ControlEndpointFile {
     /// Refuse missing, damaged, or different records. Compare the whole decoded record, including
     /// the port, pid, and token, so a reused environment token cannot make a different process an
     /// owner of this file.
+    /// The ownership check and removal share the writer's lock; if locking fails, leave the file
+    /// in place rather than risking another instance's advertisement.
     public static func remove(expected: ControlEndpoint, at url: URL) {
-        guard let data = try? Data(contentsOf: url),
-              let current = try? ControlCoding.decode(ControlEndpoint.self, from: data),
-              current == expected
-        else { return }
-        try? FileManager.default.removeItem(at: url)
+        remove(expected: expected, at: url, afterOwnershipCheck: {})
+    }
+
+    // The hook lets a test hold the lock after reading the old record while a second writer tries
+    // to replace it. Production always passes the empty closure above.
+    static func remove(
+        expected: ControlEndpoint,
+        at url: URL,
+        afterOwnershipCheck: () -> Void
+    ) {
+        try? withOwnershipLock(at: url) {
+            guard let data = try? Data(contentsOf: url),
+                  let current = try? ControlCoding.decode(ControlEndpoint.self, from: data),
+                  current == expected
+            else { return }
+            afterOwnershipCheck()
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// A stable sibling lock serializes every writer with owner-checked cleanup across processes.
+    /// Never unlink the lock file: replacing it would let two processes lock different inodes.
+    private static func withOwnershipLock<T>(at url: URL, _ body: () throws -> T) throws -> T {
+        let path = url.path + ".lock"
+        let descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, mode_t(0o600))
+        guard descriptor >= 0 else {
+            throw ControlEndpointFileError.couldNotWrite(path: path)
+        }
+        defer { _ = close(descriptor) }
+
+        while flock(descriptor, LOCK_EX) != 0 {
+            guard errno == EINTR else {
+                throw ControlEndpointFileError.couldNotWrite(path: path)
+            }
+        }
+        defer { _ = flock(descriptor, LOCK_UN) }
+        return try body()
     }
 
     /// Removes the file at a path without an ownership check.

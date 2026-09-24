@@ -42,7 +42,7 @@ For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, the
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
 The discovery file contains the instance's port, PID, and token. It is written `0600`, with a `0700` parent directory. Set the path variables before starting the app. A signed app is sandboxed and cannot write arbitrary temporary paths outside its container; the [end-to-end harness](../Scripts/run_cli_e2e.sh) uses a disposable ad hoc signed app copy for this purpose. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
-Shutdown removes the discovery file only when it still contains this instance's record. A failed bind has no record to remove, and cleanup leaves an already replaced record alone. The default path advertises one instance at a time; give concurrent runs separate `MIMIC_CONTROL_FILE` paths.
+Shutdown removes the discovery file only when it still contains this instance's record. Publication and cleanup use the same lock, so another instance cannot replace the record between that check and removal. A failed bind has no record to remove, and cleanup leaves an already replaced record alone. The default path advertises one instance at a time; give concurrent runs separate `MIMIC_CONTROL_FILE` paths.
 
 ## Command reference
 
