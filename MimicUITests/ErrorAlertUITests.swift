@@ -275,6 +275,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         XCTAssertFalse(app.buttons["portConflict.tryPortButton"].exists)
         alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep server stopped").click()
         XCTAssertTrue(waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "No higher port is available"))
+        assertStartServerAvailable(after: "last-port-conflict")
         XCTAssertFalse(
             waitForServerToReportAURL(timeout: 2),
             "Dismissal must leave the server stopped"
@@ -357,7 +358,7 @@ final class ErrorAlertUITests: MimicUITestCase {
             waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "already in use"),
             "Declining the suggestion should dismiss the alert"
         )
-        XCTAssertTrue(serverURLWell.waitForExistence(timeout: 5), "The status well should still be there")
+        assertStartServerAvailable(after: "keep-stopped-conflict")
         XCTAssertFalse(
             waitForServerToReportAURL(timeout: 2),
             "Keeping the server stopped must not start it on any port"
@@ -431,8 +432,15 @@ final class ErrorAlertUITests: MimicUITestCase {
             "The endpoint should be editable even though nothing can be written"
         )
 
+        // Native toolbar containers can absorb a child's identifier. The spoken failure words
+        // survive that flattening and also prove the indicator says what happened.
+        let failedStatus = autosaveFailureHandles
+        let reportsFailure = UITestApp.waitUntil(timeout: 15) {
+            failedStatus.contains { self.saysAutosaveFailed($0) }
+        }
+        if !reportsFailure { captureToolbarLookupFailure("autosave-failed-status") }
         XCTAssertTrue(
-            autosaveFailedIndicator.waitForExistence(timeout: 15),
+            reportsFailure,
             "An edit the store refuses should surface as \"Save failed\" in the toolbar"
         )
     }
@@ -990,11 +998,48 @@ final class ErrorAlertUITests: MimicUITestCase {
         ]
     }
 
-    /// The `.failed` arm of the autosave indicator. There is no `autosaveStatusIndicator` to query —
-    /// the toolbar slot is deliberately unnamed, and the three state-specific identifiers are the
-    /// addressable surface.
-    @MainActor private var autosaveFailedIndicator: XCUIElement {
-        element(identifier: "autosaveStatus.failed")
+    /// The `.failed` arm may lose its identifier to a native toolbar container. Query exact
+    /// spoken words on likely element types, with the cheap identifier query as another handle.
+    /// Avoid a predicate over every descendant: that has timed this suite out in XCUITest.
+    @MainActor private var autosaveFailureHandles: [XCUIElement] {
+        let words = NSPredicate(
+            format: "label == %@ OR value == %@ OR label == %@ OR value == %@",
+            "Could not save changes", "Could not save changes", "Save failed", "Save failed"
+        )
+        return [
+            element(identifier: "autosaveStatus.failed"),
+            app.staticTexts.matching(words).firstMatch,
+            app.groups.matching(words).firstMatch,
+            app.otherElements.matching(words).firstMatch,
+        ]
+    }
+
+    @MainActor
+    private func saysAutosaveFailed(_ element: XCUIElement) -> Bool {
+        let words = combinedText(of: element)
+        return words.contains("Could not save changes") || words.contains("Save failed")
+    }
+
+    /// A missing toolbar element needs the actual window and accessibility tree from that run.
+    @MainActor
+    private func captureToolbarLookupFailure(_ name: String) {
+        captureScreenshot("\(name)-screenshot")
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "\(name)-accessibility-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+    }
+
+    /// The Run control derives its action from the live server state. A missing status-well node
+    /// must not make the refused-start tests pass without a positive stopped-state assertion.
+    @MainActor
+    private func assertStartServerAvailable(after conflict: String) {
+        let startServer = app.buttons["Start server"].firstMatch
+        let canStart = UITestApp.waitUntil(timeout: 10) {
+            startServer.exists && startServer.isEnabled
+        }
+        if !canStart { captureToolbarLookupFailure(conflict) }
+        XCTAssertTrue(canStart, "Declining the port suggestion should leave Start server available")
     }
 
     /// Shared queries for the navigator's native segments.
@@ -1192,10 +1237,9 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     /// Whether the status well reports a running base URL within `timeout`.
     ///
-    /// Asserted in the negative by the two tests that must prove a *refused* start did not quietly
-    /// happen anyway: the well always exists — it reads "Server error" or "Server stopped" — so its
-    /// presence says nothing. The configured localhost address remains visible while stopped;
-    /// only the running state confirms that the listener bound successfully.
+    /// Asserted in the negative by tests that refuse a start. A missing accessibility node also
+    /// yields false, so callers must first assert a positive stopped-state control. The configured
+    /// localhost address remains visible while stopped; only the running state confirms a listener.
     @MainActor
     private func waitForServerToReportAURL(timeout: TimeInterval) -> Bool {
         UITestApp.waitUntil(timeout: timeout) {
