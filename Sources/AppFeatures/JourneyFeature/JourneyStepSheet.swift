@@ -16,6 +16,7 @@ struct JourneyStepSheet: View {
     /// `nil` when adding.
     let step: JourneyStep?
     var backends: [BackendConfiguration] = []
+    var globalDelayMs: Int = 0
     let onCommit: (JourneyStepSpec) -> Void
 
     private enum Kind: String, CaseIterable, Identifiable {
@@ -430,11 +431,12 @@ struct JourneyStepSheet: View {
         // `onCommit` then `dismiss()` unconditionally, anything the executor rejected afterwards had
         // no sheet left to report against. In the main window there is no alert at all, so the step
         // simply never appeared. The `.timeout` branch below already guards its own field this way.
-        guard let delay = Int(delayMs), delay >= 0 else {
+        guard let delay = Int(delayMs), delay >= 0,
+              delay <= ResponseDelay.maximumMilliseconds || delay == step?.delayMs else {
             timingExpanded = true
             validation = Validation(
                 field: .delay,
-                message: "Delay must be a whole number of milliseconds, zero or more."
+                message: "Delay must be a whole number from 0 to \(ResponseDelay.maximumMilliseconds) ms."
             )
             return
         }
@@ -474,11 +476,38 @@ struct JourneyStepSheet: View {
         case .drop:
             spec.failure = .connectionDrop
         case .timeout:
-            guard let hold = Int(holdMs), hold >= 0 else {
-                validation = Validation(field: .hold, message: "Hold duration must be zero or greater.")
+            let existingHold: Int?
+            if let step, case let .networkFailure(.timeout(value)) = step.outcome { existingHold = value }
+            else { existingHold = nil }
+            guard let hold = Int(holdMs), hold >= 0,
+                  hold <= ResponseDelay.maximumMilliseconds || hold == existingHold else {
+                validation = Validation(field: .hold,
+                    message: "Hold duration must be from 0 to \(ResponseDelay.maximumMilliseconds) ms.")
                 return
             }
             spec.failure = .timeout(holdMs: hold)
+        }
+
+        let requestedHold: Int
+        if case let .timeout(hold)? = spec.failure { requestedHold = hold }
+        else { requestedHold = 0 }
+        let oldHold: Int
+        if let step, case let .networkFailure(.timeout(hold)) = step.outcome { oldHold = hold }
+        else { oldHold = 0 }
+        let unchanged = step.map { $0.delayMs == delay && oldHold == requestedHold } == true
+        let correction = step.map {
+            delay <= $0.delayMs && requestedHold <= oldHold
+                && (delay < $0.delayMs || requestedHold < oldHold)
+        } == true
+        guard unchanged || correction || ResponseDelay.isWithinLimit(
+            globalMs: globalDelayMs, localMs: delay, holdMs: requestedHold
+        ) else {
+            timingExpanded = true
+            validation = Validation(
+                field: kind == .timeout ? .hold : .delay,
+                message: "Total wait must not exceed \(ResponseDelay.maximumDescription)."
+            )
+            return
         }
 
         validation = nil

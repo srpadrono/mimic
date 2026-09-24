@@ -32,8 +32,14 @@ public enum ProjectCommandExecutor {
     ) throws -> ProjectCommandOutcome? {
         var candidate = project
         let result = try applyAtomically(command, to: &candidate)
-        if result?.didMutate == true, [.serverConfigure, .backendUpsert, .backendDelete].contains(command.kind) {
-            try validate { try ProjectValidator.validate(candidate) }
+        if result?.didMutate == true {
+            if [.serverConfigure, .backendUpsert, .backendDelete].contains(command.kind) {
+                // Existing stored timing may predate the cap. Listener edits still validate the
+                // configuration without making that project uneditable; changed timing is checked
+                // separately against the previous snapshot below.
+                try validate { try ProjectValidator.validatePreservingLegacyTiming(candidate) }
+            }
+            try validate { try ProjectValidator.validateTimingChanges(from: project, to: candidate) }
         }
         project = candidate
         return result
@@ -72,7 +78,7 @@ public enum ProjectCommandExecutor {
                 }
                 guard configuration.globalDelayMs >= 0 else { throw ControlError.invalid("Global delay must be zero or greater.") }
                 project.serverConfiguration = configuration
-                try validate { try ProjectValidator.validate(project) }
+                try validate { try ProjectValidator.validatePreservingLegacyTiming(project) }
                 return mutated(.init(message: "Updated server configuration.", project: project))
             }
             if let port {

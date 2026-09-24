@@ -146,15 +146,13 @@ enum VaporConfigurator {
     ///
     /// A dropped connection is immediate (bar any configured artificial delay); a timeout is
     /// deliberately long, because the behaviour under test is the *client* giving up. Values
-    /// from an invalid or older document are clamped to zero and the sum saturates at `Int.max`.
+    /// from an invalid or older document are clamped to the five-minute serving budget.
     static func holdMilliseconds(for failure: NetworkFailure, delayMs: Int) -> Int {
         switch failure {
         case .connectionDrop:
-            return max(0, delayMs)
+            return ResponseDelay.combined(globalMs: delayMs, localMs: 0)
         case let .timeout(timeoutHoldMs):
-            let delay = max(0, delayMs)
-            let timeoutHold = max(0, timeoutHoldMs)
-            return timeoutHold > Int.max - delay ? Int.max : delay + timeoutHold
+            return ResponseDelay.combined(globalMs: delayMs, localMs: timeoutHoldMs)
         }
     }
 

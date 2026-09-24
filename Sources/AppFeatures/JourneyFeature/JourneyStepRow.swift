@@ -197,8 +197,8 @@ private let widestStep = JourneyStep(
     name: "Poll stays pending",
     method: .post,
     path: "/account-summary/transactions",
-    outcome: .networkFailure(.timeout(holdMs: 3_600_000)),
-    delayMs: 3_600_000,
+    outcome: .networkFailure(.timeout(holdMs: 30_000)),
+    delayMs: 270_000,
     repeatCount: 100
 )
 
@@ -210,7 +210,7 @@ private func progress(for step: JourneyStep, servedCount: Int) -> JourneyStepPro
         method: step.method,
         path: step.path,
         statusCode: nil,
-        failure: JourneyStepRow.failureText(.timeout(holdMs: 3_600_000)),
+        failure: JourneyStepRow.failureText(.timeout(holdMs: 30_000)),
         repeatCount: step.repeatCount,
         servedCount: servedCount,
         isExhausted: false,
