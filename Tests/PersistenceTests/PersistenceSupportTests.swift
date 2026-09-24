@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 import Domain
 @testable import Persistence
@@ -12,30 +13,31 @@ struct PersistenceSupportTests {
         #expect(throws: (any Error).self) { try record.toDomain() }
     }
 
-    @Test("DatabaseFactory creates an app database in Application Support")
-    func makeAppDatabaseQueueCreatesExpectedFile() throws {
-        let originalHome = NSHomeDirectory()
-        let temporaryHome = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: temporaryHome, withIntermediateDirectories: true)
-        setenv("HOME", temporaryHome.path, 1)
-        defer {
-            setenv("HOME", originalHome, 1)
-            try? FileManager.default.removeItem(at: temporaryHome)
-        }
+    @Test("DatabaseFactory creates and migrates only the requested temporary store")
+    func makeAppDatabaseQueueHonoursExplicitPath() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-persistence-support-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        _ = try DatabaseFactory.makeAppDatabaseQueue()
+        // The nested parent does not exist yet; the factory must create it at the explicit path.
+        let dbURL = directory.appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("store.sqlite")
+        let environment = [DatabaseFactory.databasePathEnvironmentKey: dbURL.path]
+        let resolved = try DatabaseFactory.resolveDatabaseURL(environment: environment)
+        try #require(resolved == dbURL, "Refuse to open a database outside this test's temporary directory")
+        #expect(!FileManager.default.fileExists(atPath: dbURL.path))
 
-        let appSupport = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        )
-        let dbURL = appSupport
-            .appendingPathComponent("devxa.Mimic", isDirectory: true)
-            .appendingPathComponent("mimic.sqlite")
+        let dbQueue = try DatabaseFactory.makeAppDatabaseQueue(environment: environment)
 
+        // If the factory ignores the override, this unique file is absent. These table checks also
+        // prove it ran migrations, rather than merely creating an empty SQLite file.
         #expect(FileManager.default.fileExists(atPath: dbURL.path))
+        let migrated = try dbQueue.read { db in
+            let hasProject = try db.tableExists("project")
+            let hasJourneyStep = try db.tableExists("journeyStep")
+            return hasProject && hasJourneyStep
+        }
+        #expect(migrated)
     }
 
     @Test("PersistenceError describes missing projects")
@@ -62,31 +64,26 @@ struct PersistenceSupportTests {
 
         let record = ScenarioRecord(
             from: scenario,
-            endpointID: "endpoint-1",
+            endpointID: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
             sortOrder: 2
         )
-        let restored = record.toDomain()
+        let restored = try record.toDomain()
 
-        #expect(record.endpointID == "endpoint-1")
+        #expect(record.endpointID == "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
         #expect(record.sortOrder == 2)
         #expect(restored == scenario)
     }
 
-    @Test("ScenarioRecord falls back for malformed persisted data")
-    func scenarioRecordFallbacks() throws {
+    @Test("ScenarioRecord refuses malformed persisted data")
+    func scenarioRecordRejectsMalformedData() throws {
         var record = ScenarioRecord(
             from: Scenario(name: "Broken", statusCode: 500),
-            endpointID: "endpoint-2"
+            endpointID: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
         )
         record.id = "not-a-uuid"
         record.headersJSON = "{bad json"
         record.bodyContentType = "not/a-real-type"
 
-        let restored = record.toDomain()
-
-        #expect(restored.name == "Broken")
-        #expect(restored.statusCode == 500)
-        #expect(restored.headers.isEmpty)
-        #expect(restored.bodyContentType == Scenario.ContentType.json)
+        #expect(throws: Persistence.PersistenceError.self) { try record.toDomain() }
     }
 }

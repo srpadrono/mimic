@@ -33,7 +33,7 @@ The app target links each module for bundling, while its source imports `AppFeat
 
 - **Domain** holds value models, matching, `JourneyResolver`, `MockResolver`, validation, `ControlCommand`, `ProjectCommandExecutor`, and command discovery. It uses Foundation; `ControlEndpointDiscovery` is its deliberate file I/O and process-liveness exception.
 - **MockServerEngine** serves HTTP, applies delays and transport failures, and owns the live journey cursor and request-log stream. Cursor read, resolution, and advance happen inside one actor hop.
-- **Persistence** implements `ProjectRepository` with GRDB. A newer stored schema is refused on load rather than partially read and resaved.
+- **Persistence** implements `ProjectRepository` with GRDB. A newer project schema or malformed stored identity or response behavior is refused on load rather than partially read and resaved. Project listings use stable columns so one unreadable backend payload does not hide the other projects. Backups are published only after SQLite finishes the snapshot.
 - **ControlPlane** contains the loopback `ControlServer`, the `0600` discovery file, and `ControlHost` protocol. It depends on Domain and Vapor, not Persistence or MockServerEngine.
 - **SpecImport** parses HAR and OpenAPI/Swagger into candidates reviewed in the window. Neither ControlPlane nor the CLI links it.
 - **DesignSystem** holds `DS*` SwiftUI tokens and components.

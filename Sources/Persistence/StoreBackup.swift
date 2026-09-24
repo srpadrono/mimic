@@ -49,20 +49,36 @@ public enum StoreBackup {
         date: Date = Date(),
         keeping: Int = keptSnapshots
     ) throws -> URL {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: storeURL.path) else {
+            // DatabaseQueue(path:) creates a missing file. A backup of that new empty database
+            // would look successful and could prune the user's real earlier snapshots.
+            throw StoreBackupError.sourceMissing(path: storeURL.path)
+        }
+
         let directory = directoryURL(for: storeURL)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let destination = availableURL(in: directory, stamp: timestamp(date), version: version)
+        // SQLite may leave output behind if VACUUM INTO fails. Keep that output out of the
+        // snapshot listing until the operation has returned successfully.
+        let temporary = directory.appendingPathComponent(
+            ".\(destination.lastPathComponent).\(UUID().uuidString).pending"
+        )
+        defer { try? manager.removeItem(at: temporary) }
 
         var configuration = Configuration()
         configuration.busyMode = .timeout(DatabaseFactory.busyTimeoutSeconds)
         let dbQueue = try DatabaseQueue(path: storeURL.path, configuration: configuration)
         try dbQueue.writeWithoutTransaction { db in
-            // `VACUUM INTO` refuses a destination that already exists rather than overwriting it,
-            // which is the behaviour worth having — `availableURL` has picked an unused name, and if
-            // that race is ever lost the error is better than a clobbered snapshot.
-            try db.execute(sql: "VACUUM INTO ?", arguments: [destination.path])
+            try db.execute(sql: "VACUUM INTO ?", arguments: [temporary.path])
         }
+
+        // Both paths are in one directory. Creating the hard link publishes a complete snapshot
+        // atomically and fails if another writer claimed the name after availableURL chose it.
+        // A rename would silently replace that writer's snapshot on POSIX filesystems.
+        try manager.linkItem(at: temporary, to: destination)
+        try manager.removeItem(at: temporary)
 
         try prune(for: storeURL, keeping: keeping)
         return destination
@@ -141,5 +157,15 @@ public enum StoreBackup {
             suffix += 1
         }
         return candidate
+    }
+}
+
+public enum StoreBackupError: Error, LocalizedError, Equatable {
+    case sourceMissing(path: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .sourceMissing(path): "No project store exists at \(path) to back up."
+        }
     }
 }
