@@ -394,6 +394,11 @@ final class MockServerRuntime {
     /// together still race inside the engine — which owns the cursor either way.
     private var journeyStatusTicket = 0
 
+    /// A log burst needs one engine read in progress and, if another log arrives during that read,
+    /// one final read. Keep only the newest trailing ticket instead of creating a task per log.
+    private var journeyStatusRefreshInFlight = false
+    private var trailingJourneyStatusTicket: Int?
+
     /// Restarts the run and reports the fresh cursor the engine produced.
     ///
     /// The primitive, in the same split as ``advanceJourneyReportingStatus()`` and for the same
@@ -455,11 +460,25 @@ final class MockServerRuntime {
 
     func refreshJourneyStatus() {
         let ticket = nextJourneyStatusTicket()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let status = await engine.journeyStatus()
-            setJourneyStatus(status, ticket: ticket)
+        if journeyStatusRefreshInFlight {
+            trailingJourneyStatusTicket = ticket
+            return
         }
+        journeyStatusRefreshInFlight = true
+        Task { @MainActor [weak self] in
+            await self?.drainJourneyStatusRefresh(startingWith: ticket)
+        }
+    }
+
+    private func drainJourneyStatusRefresh(startingWith firstTicket: Int) async {
+        var ticket: Int? = firstTicket
+        while let currentTicket = ticket {
+            let status = await engine.journeyStatus()
+            setJourneyStatus(status, ticket: currentTicket)
+            ticket = trailingJourneyStatusTicket
+            trailingJourneyStatusTicket = nil
+        }
+        journeyStatusRefreshInFlight = false
     }
 
     /// The engine's cursor, read only once the configuration push dispatched most recently has landed.
