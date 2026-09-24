@@ -68,6 +68,8 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case endpointGet(endpoint: EndpointRef)
     case endpointCreate(name: String?, method: HTTPMethod, path: String, spec: EndpointSpec?)
     case endpointUpdate(endpoint: EndpointRef, spec: EndpointSpec)
+    /// Applies endpoint fields and the response active at execution time in one project mutation.
+    case endpointUpdateWithActiveScenario(endpoint: EndpointRef, spec: EndpointSpec, scenarioSpec: ScenarioSpec)
     case endpointDelete(endpoint: EndpointRef)
     case endpointDuplicate(endpoint: EndpointRef)
 

@@ -41,6 +41,7 @@ public enum CommandCatalog {
         .init(name: "endpointGet", summary: "Show one endpoint.", parameters: ["endpoint"], cli: "mimic endpoint get <METHOD> <PATH>"),
         .init(name: "endpointCreate", summary: "Add an endpoint with a default 200 scenario.", parameters: ["name?", "method", "path", "spec?"], cli: "mimic endpoint create <METHOD> <PATH> [--name N] [--delay MS] [--group G] [--graphql-operation OP]"),
         .init(name: "endpointUpdate", summary: "Change endpoint fields.", parameters: ["endpoint", "spec"], cli: "mimic endpoint update <METHOD> <PATH> [--new-path P] [--delay MS] [--group G] [--graphql-operation OP]"),
+        .init(name: "endpointUpdateWithActiveScenario", summary: "Change endpoint fields and its active response in one project edit.", parameters: ["endpoint", "spec", "scenarioSpec"], cli: "mimic endpoint update <METHOD> <PATH> --delay 5 --status 201"),
         .init(name: "endpointDelete", summary: "Remove an endpoint.", parameters: ["endpoint"], cli: "mimic endpoint delete <METHOD> <PATH>"),
         .init(name: "endpointDuplicate", summary: "Copy an endpoint and its scenarios.", parameters: ["endpoint"], cli: "mimic endpoint duplicate <METHOD> <PATH>"),
 

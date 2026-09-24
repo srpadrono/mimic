@@ -203,11 +203,9 @@ struct EndpointCommand: AsyncParsableCommand {
             }
 
             if endpointSpec != EndpointSpec(), responseSpec != ScenarioSpec() {
-                // This CLI invocation sends two existing control commands. Check response rules
-                // shared with the host and the presence of an active scenario before the first
-                // mutation, so the common refusals do not leave only the endpoint half applied.
-                // The host still decides each command; concurrent edits can change its state
-                // between these requests.
+                // Keep familiar local errors for malformed response options and an endpoint with no
+                // active scenario. The host checks again when it applies both edits as one command;
+                // a concurrent scenario change cannot leave only the endpoint half applied.
                 do {
                     if let status = responseSpec.statusCode {
                         try EndpointValidator.validateStatusCode(status)
@@ -228,6 +226,23 @@ struct EndpointCommand: AsyncParsableCommand {
                             + "Create one with `mimic scenario create`."
                     )
                 }
+
+                let updated = try await client.send(.endpointUpdateWithActiveScenario(
+                    endpoint: ref,
+                    spec: endpointSpec,
+                    scenarioSpec: responseSpec
+                ))
+                guard updated.ok else {
+                    throw CLIFailure.commandFailed(updated.error ?? .internalFailure("Update failed."))
+                }
+                guard let changed = updated.result?.endpoint else {
+                    throw CLIFailure.commandFailed(.internalFailure("Update returned no endpoint."))
+                }
+                // The mutation result is the complete endpoint. A second read can fail if another
+                // client deletes it after this successful edit, or show a later unrelated change.
+                // Emit the same endpoint-only shape that `endpoint get` returned previously.
+                try Output(options).emit(.success(.init(endpoint: changed)))
+                return
             }
 
             var stableRef = ref
