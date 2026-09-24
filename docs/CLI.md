@@ -112,7 +112,7 @@ mimic scenario delete GET /account-summary "Server error"
 ```
 
 `--body-file -` reads stdin. `endpoint update --status` changes the active scenario. A scenario selects a standing response; a journey scripts a sequence.
-An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario before sending either edit. The edits are still two control commands; another client changing the project between them can leave only the first edit applied.
+An `endpoint update` that changes both endpoint fields and response fields checks the response status, headers, and active scenario, then applies both edits in one project mutation. The host chooses the active scenario at execution time if another client switched it after the check.
 Endpoint edits require a unique match. If multiple backends contain the same method and path, select the endpoint by UUID with `--id`.
 Scenario create, update, activate, and delete also accept `--id <endpoint-UUID> <scenario-name>` when an endpoint route is shared.
 

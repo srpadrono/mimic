@@ -178,6 +178,20 @@ public enum ProjectCommandExecutor {
             }
             return mutated(.init(message: "Updated endpoint.", endpoint: project.endpoints[index]))
 
+        case let .endpointUpdateWithActiveScenario(ref, spec, scenarioSpec):
+            let index = try project.requireEndpointIndex(ref)
+            guard let activeID = project.endpoints[index].activeScenarioID,
+                  let scenarioIndex = project.endpoints[index].scenarios.firstIndex(where: { $0.id == activeID })
+            else {
+                throw ControlError.invalid("Endpoint has no active scenario to edit.")
+            }
+            try applyEndpointSpec(spec, to: &project.endpoints[index])
+            if let backend = spec.backend {
+                project.endpoints[index].backendID = try resolveBackend(backend, in: project)
+            }
+            try applyScenarioSpec(scenarioSpec, to: &project.endpoints[index].scenarios[scenarioIndex])
+            return mutated(.init(message: "Updated endpoint.", endpoint: project.endpoints[index]))
+
         case let .endpointDelete(ref):
             let index = try project.requireEndpointIndex(ref)
             let removed = project.endpoints.remove(at: index)

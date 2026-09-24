@@ -174,6 +174,10 @@ struct HostCommandSweepTests {
         case .endpointGet: .endpointGet(endpoint: .route(.get, "/a"))
         case .endpointCreate: .endpointCreate(name: "A", method: .get, path: "/a", spec: nil)
         case .endpointUpdate: .endpointUpdate(endpoint: .route(.get, "/a"), spec: EndpointSpec(delayMs: 5))
+        case .endpointUpdateWithActiveScenario:
+            .endpointUpdateWithActiveScenario(
+                endpoint: .route(.get, "/a"), spec: EndpointSpec(delayMs: 5), scenarioSpec: ScenarioSpec(statusCode: 201)
+            )
         case .endpointDelete: .endpointDelete(endpoint: .route(.get, "/a"))
         case .endpointDuplicate: .endpointDuplicate(endpoint: .route(.get, "/a"))
         case .scenarioList: .scenarioList(endpoint: .route(.get, "/a"))
