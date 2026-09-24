@@ -1,19 +1,29 @@
 import Foundation
 
-/// Limits admitted handlers and logs not yet processed by the consumer. Admission never waits:
+/// Limits active handlers and logs not yet processed by the consumer. Admission never waits:
 /// Vapor has already collected the request body, so suspended handlers would retain unbounded
 /// bodies under load. A rejected request has not resolved a route or advanced a journey.
 actor RequestLogGate {
     static let capacity = 32
 
+    private var activeRequests = 0
     private var outstanding = 0
     private var isTerminated = false
 
+    var activeCount: Int { activeRequests }
     var outstandingCount: Int { outstanding }
     func tryAcquireLease() -> RequestLogLease? {
-        guard !isTerminated, outstanding < Self.capacity else { return nil }
+        guard !isTerminated, activeRequests < Self.capacity,
+              outstanding < Self.capacity else { return nil }
+        activeRequests += 1
         outstanding += 1
         return RequestLogLease(gate: self)
+    }
+
+    func finishRequest(releaseUnpublishedLog: Bool) {
+        guard activeRequests > 0 else { return }
+        activeRequests -= 1
+        if releaseUnpublishedLog, outstanding > 0 { outstanding -= 1 }
     }
 
     func acknowledge() {
@@ -33,27 +43,30 @@ actor RequestLogGate {
 final class RequestLogLease: @unchecked Sendable {
     private let gate: RequestLogGate
     private let lock = NSLock()
-    private var isOwned = true
+    private var isActive = true
+    private var ownsLog = true
 
     init(gate: RequestLogGate) { self.gate = gate }
 
     func transferToConsumer() -> Bool {
         lock.withLock {
-            guard isOwned else { return false }
-            isOwned = false
+            guard isActive, ownsLog else { return false }
+            ownsLog = false
             return true
         }
     }
 
     func release() {
-        let shouldRelease = lock.withLock {
-            guard isOwned else { return false }
-            isOwned = false
-            return true
+        let unpublishedLog = lock.withLock { () -> Bool? in
+            guard isActive else { return nil }
+            isActive = false
+            let unpublished = ownsLog
+            ownsLog = false
+            return unpublished
         }
-        if shouldRelease {
+        if let unpublishedLog {
             let gate = gate
-            Task { await gate.acknowledge() }
+            Task { await gate.finishRequest(releaseUnpublishedLog: unpublishedLog) }
         }
     }
 

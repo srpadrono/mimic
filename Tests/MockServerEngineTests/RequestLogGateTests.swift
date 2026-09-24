@@ -11,7 +11,10 @@ import Vapor
 struct RequestLogGateTests {
     private func waitForEmpty(_ gate: RequestLogGate) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while await gate.outstandingCount != 0 {
+        while true {
+            let pending = await gate.outstandingCount
+            let active = await gate.activeCount
+            if pending == 0, active == 0 { break }
             try #require(ContinuousClock.now < deadline, "A released request kept its slot.")
             await Task.yield()
         }
@@ -30,6 +33,13 @@ struct RequestLogGateTests {
 
         #expect(leases[0].transferToConsumer())
         await gate.acknowledge()
+        #expect(await gate.tryAcquireLease() == nil, "The first handler still owns an active slot.")
+        leases[0].release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await gate.activeCount == RequestLogGate.capacity {
+            try #require(ContinuousClock.now < deadline, "The completed handler kept its active slot.")
+            await Task.yield()
+        }
         let recovered = try #require(await gate.tryAcquireLease())
         recovered.release()
         for lease in leases.dropFirst() { lease.release() }
@@ -68,6 +78,52 @@ struct RequestLogGateTests {
 
 @Suite("Request log wire backpressure", .serialized, .timeLimit(.minutes(1)))
 struct RequestLogBackpressureWireTests {
+    @Test("Acknowledged logs do not free handlers still serving delayed responses")
+    func delayedHandlersKeepAdmissionSlots() async throws {
+        let port = try #require(PlatformSocket.freePort())
+        let engine = MockServerEngine()
+        try await engine.start(configuration: .init(port: port, globalDelayMs: 1_500))
+        defer { Task { try? await engine.stop() } }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = RequestLogGate.capacity + 1
+        configuration.timeoutIntervalForRequest = 5
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let drain = Task {
+            for await _ in engine.logStream { await engine.acknowledgeLog() }
+        }
+        defer { drain.cancel() }
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/slow"))
+        let active = (0..<RequestLogGate.capacity).map { _ in
+            Task { try await session.data(from: url) }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while true {
+            let handlers = await engine.logGate.activeCount
+            let pending = await engine.logGate.outstandingCount
+            if handlers == RequestLogGate.capacity, pending == 0 { break }
+            try #require(ContinuousClock.now < deadline, "The delayed handlers did not fill admission.")
+            await Task.yield()
+        }
+
+        let (_, rejected) = try await session.data(from: url)
+        #expect((rejected as? HTTPURLResponse)?.statusCode == 503)
+        #expect(await engine.logGate.activeCount == RequestLogGate.capacity)
+
+        for call in active {
+            let (_, response) = try await call.value
+            #expect((response as? HTTPURLResponse)?.statusCode == 404)
+        }
+        let recoveryDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await engine.logGate.activeCount != 0 {
+            try #require(ContinuousClock.now < recoveryDeadline, "Completed delayed handlers kept admission.")
+            await Task.yield()
+        }
+        let (_, recovered) = try await session.data(from: url)
+        #expect((recovered as? HTTPURLResponse)?.statusCode == 404)
+        try await engine.stop()
+    }
+
     @Test("Saturation rejects before journey resolution and recovers without losing accepted logs")
     func fullQueueRejectsWithoutAdvancingJourney() async throws {
         let port = try #require(PlatformSocket.freePort())
