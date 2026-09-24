@@ -90,6 +90,30 @@ struct ServingHardeningTests {
 
     // MARK: - Header injection
 
+    @Test("The HTTP decoder rejects excessive header fields before serving a mock")
+    func excessiveRequestHeadersAreRejected() async throws {
+        let scenario = Scenario(name: "default", statusCode: 200, body: "{}")
+        let endpoint = Endpoint(
+            name: "header limit", method: .get, path: "/header-limit",
+            scenarios: [scenario], activeScenarioID: scenario.id
+        )
+
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { _, baseURL in
+            let port = try #require(baseURL.port)
+            // Each field is tiny. This crosses NIOHTTP1's cumulative field-count limit rather
+            // than its older per-field size limit, and would have reached the mock on 2.97.1.
+            let headers = (1...300).map { ("X-Pad-\($0)", "x") }
+            let rejected = try RawHTTPClient.send(
+                method: "GET", path: "/header-limit", port: port, additionalHeaders: headers
+            )
+            #expect(!rejected.statusLine.hasPrefix("HTTP/1.1 200"))
+
+            // A malformed peer must not take the embedded server down for the next client.
+            let normal = try RawHTTPClient.send(method: "GET", path: "/header-limit", port: port)
+            #expect(normal.statusLine.hasPrefix("HTTP/1.1 200"))
+        }
+    }
+
     @Test("A header value containing CRLF cannot split the response")
     func crlfHeaderValueIsDropped() async throws {
         let scenario = Scenario(
