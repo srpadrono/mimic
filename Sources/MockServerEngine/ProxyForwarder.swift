@@ -37,15 +37,12 @@ enum ProxyForwarder {
     static func forward(
         _ request: Request, to upstreamURL: String, localPorts: Set<Int>,
         incoming: IncomingRequest, projectID: UUID?, backendName: String, listenerPort: Int,
-        logContinuation: AsyncStream<RequestLog>.Continuation, logGate: RequestLogGate
+        logContinuation: AsyncStream<RequestLog>.Continuation, logGate: RequestLogGate,
+        lease: RequestLogLease
     ) async -> Response {
         let started = ContinuousClock.now
-        // No upstream body exists while this waits, so cancellation cannot race a delayed
-        // AsyncHTTPClient body iterator. The response writer retains the lease; if it never runs,
-        // deinit returns the slot. Vapor has already collected the incoming body before this point.
-        guard let lease = await logGate.acquireLease() else {
-            return Response(status: .serviceUnavailable)
-        }
+        // The handler acquired this slot before resolving routes. The response writer retains
+        // it; if the writer never runs, deinit returns the slot.
         @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
             // A response can publish at most once even if a framework callback is repeated.
             guard lease.transferToConsumer() else { return }

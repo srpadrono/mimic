@@ -185,18 +185,27 @@ struct RealTrafficTests {
             }
             defer { drain.cancel() }
 
-            let results = try await withThrowingTaskGroup(of: (String, Int).self) { group in
-                for _ in 0..<40 {
-                    for (path, _) in routes {
-                        group.addTask {
-                            let reply = try await JourneyServingTests.call("GET", path, baseURL: baseURL, session: session)
-                            return (reply.body, reply.status)
+            var results: [(String, Int)] = []
+            for _ in 0..<5 {
+                let wave = try await withThrowingTaskGroup(of: (String, Int).self) { group in
+                    for _ in 0..<8 {
+                        for (path, _) in routes {
+                            group.addTask {
+                                let reply = try await JourneyServingTests.call("GET", path, baseURL: baseURL, session: session)
+                                return (reply.body, reply.status)
+                            }
                         }
                     }
+                    var collected: [(String, Int)] = []
+                    for try await result in group { collected.append(result) }
+                    return collected
                 }
-                var collected: [(String, Int)] = []
-                for try await result in group { collected.append(result) }
-                return collected
+                results.append(contentsOf: wave)
+                let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+                while await engine.logGate.outstandingCount != 0 {
+                    try #require(ContinuousClock.now < deadline, "The log consumer fell behind the request wave.")
+                    await Task.yield()
+                }
             }
 
             #expect(results.count == 120)
