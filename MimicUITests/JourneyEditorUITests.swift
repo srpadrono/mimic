@@ -295,14 +295,19 @@ final class JourneyEditorUITests: MimicUITestCase {
     /// clicked — `testTemplateShelfListsEveryTemplateAndCancels` walks the rest with the keyboard.
     @MainActor
     private func addTemplate(_ id: String, activate: Bool) {
-        journeys.addButton.click()
+        // This is a single-level menu, so its button is the helper's parent and there is no
+        // enclosing menu for reopenMenu to open. The helper stabilizes both frames, retries a
+        // missed menu selection, and still requires the picker to appear on the last attempt.
         XCTAssertTrue(
-            journeys.templateMenuItem.waitForExistence(timeout: 5),
-            "The add menu should offer the template shelf"
+            UITestApp.chooseFromSubmenu(
+                in: app,
+                parent: journeys.addButton,
+                item: journeys.templateMenuItem,
+                thenAwait: templatePicker.addButton,
+                reopenMenu: {}
+            ),
+            "The add menu should open the template picker"
         )
-        journeys.templateMenuItem.click()
-
-        XCTAssertTrue(templatePicker.addButton.waitForExistence(timeout: 5), "Template picker should open")
 
         let row = templatePicker.template(id)
         XCTAssertTrue(row.waitForExistence(timeout: 5), "Template \(id) should be listed")

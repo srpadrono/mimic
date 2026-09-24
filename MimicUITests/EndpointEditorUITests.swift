@@ -176,6 +176,33 @@ final class EndpointEditorUITests: MimicUITestCase {
         _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
     }
 
+    /// Check the inspector row's visible click point before asking XCTest to open its context menu.
+    /// A CI run found the row but failed inside XCTest's automatic ScrollView-to-visible gesture.
+    @MainActor
+    private func rightClickScenarioRow(_ row: XCUIElement, named name: String) {
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name) should be in the scenario list")
+        let list = inspector.element("inspector.scenarioList")
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "The inspector should show its scenario list")
+
+        func rowIsVisible() -> Bool {
+            let viewport = list.frame.intersection(app.windows.firstMatch.frame)
+            guard viewport.width > 0, viewport.height > 0 else { return false }
+            let rowCenter = CGPoint(x: row.frame.midX, y: row.frame.midY)
+            return viewport.contains(rowCenter) && row.isHittable
+        }
+
+        if !rowIsVisible() {
+            workspace.fillWindow()
+            UITestApp.waitForStableFrame(list)
+        }
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) { rowIsVisible() },
+            "\(name) needs a visible hit point before its context menu opens; "
+                + "row: \(row.frame), list: \(list.frame), window: \(app.windows.firstMatch.frame)"
+        )
+        row.rightClick()
+    }
+
     /// Where an element is and whether the pointer can get to it, for a failure message.
     @MainActor
     private func describe(_ element: XCUIElement) -> String {
@@ -1372,7 +1399,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         let defaultRow = inspector.scenarioRow(named: "Default")
         XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
-        defaultRow.rightClick()
+        rightClickScenarioRow(defaultRow, named: "Default")
 
         let deleteItem = app.menuItems["Delete scenario"]
         XCTAssertTrue(deleteItem.waitForExistence(timeout: 5),
@@ -1391,7 +1418,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         let addedRow = inspector.scenarioRow(named: "Unauthorized")
         XCTAssertTrue(addedRow.waitForExistence(timeout: 5))
 
-        addedRow.rightClick()
+        rightClickScenarioRow(addedRow, named: "Unauthorized")
         let secondDelete = app.menuItems["Delete scenario"]
         XCTAssertTrue(secondDelete.waitForExistence(timeout: 5))
         XCTAssertTrue(secondDelete.isEnabled,
