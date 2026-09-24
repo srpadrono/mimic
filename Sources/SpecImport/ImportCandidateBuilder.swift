@@ -125,8 +125,8 @@ enum ImportCandidateBuilder {
     }
 }
 
-/// Every route an import has already accounted for: the endpoints the project holds, **plus the
-/// candidates produced so far in this same batch**.
+/// Every route an import has already accounted for: the primary-backend endpoints the project
+/// holds, **plus the candidates produced so far in this same batch**.
 ///
 /// The second half is what was missing, and it is a HAR that needs it: a spec's `paths` is a
 /// dictionary keyed by the route as written, so one document cannot list the same path twice —
@@ -165,7 +165,9 @@ struct ImportRouteLedger {
     private var claims: Set<Claim>
 
     init(existingEndpoints: [Endpoint]) {
-        claims = Set(existingEndpoints.map {
+        // ImportCommitter creates endpoints on the primary backend. A matching route on another
+        // listener cannot answer primary-backend requests, so it must not pre-deselect this import.
+        claims = Set(existingEndpoints.filter { $0.backendID == nil }.map {
             Claim(method: $0.method, path: $0.path, graphqlOperation: $0.graphqlOperation)
         })
     }

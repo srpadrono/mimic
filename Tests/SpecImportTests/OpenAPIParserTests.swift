@@ -543,7 +543,76 @@ struct OpenAPIParserTests {
         let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
 
         #expect(candidates[0].responseContentType == .plainText)
-        #expect(candidates[0].responseBody?.contains("pong") == true)
+        #expect(candidates[0].responseBody == "pong")
+    }
+
+    @Test("Plain-text Swagger examples and schema examples keep their exact string body")
+    func swaggerPlainTextExamplesAreNotJSONQuoted() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Text API", "version": "1.0" },
+            "produces": ["text/plain"],
+            "paths": {
+                "/example": {
+                    "get": { "responses": { "200": {
+                        "description": "Example",
+                        "examples": { "text/plain": "csv,data" }
+                    } } }
+                },
+                "/schema": {
+                    "get": { "responses": { "200": {
+                        "description": "Schema",
+                        "schema": { "type": "string", "example": "schema text" }
+                    } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let example = try #require(candidates.first { $0.path == "/example" })
+        let schema = try #require(candidates.first { $0.path == "/schema" })
+
+        #expect(example.responseContentType == .plainText)
+        #expect(example.responseBody == "csv,data")
+        #expect(schema.responseContentType == .plainText)
+        #expect(schema.responseBody == "schema text")
+    }
+
+    @Test("OpenAPI plain-text direct and named examples keep their exact string body")
+    func openAPIPlainTextExamplesAreNotJSONQuoted() async throws {
+        let spec = """
+        {
+            "openapi": "3.0.3",
+            "info": { "title": "Text API", "version": "1.0" },
+            "paths": {
+                "/direct": {
+                    "get": { "responses": { "200": {
+                        "description": "Direct",
+                        "content": { "text/plain": { "example": "direct text" } }
+                    } } }
+                },
+                "/named": {
+                    "get": { "responses": { "200": {
+                        "description": "Named",
+                        "content": { "text/plain": { "examples": {
+                            "zeta": { "value": "later" },
+                            "alpha": { "value": "first" },
+                            "middle": { "value": "middle" }
+                        } } }
+                    } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let direct = try #require(candidates.first { $0.path == "/direct" })
+        let named = try #require(candidates.first { $0.path == "/named" })
+
+        #expect(direct.responseContentType == .plainText)
+        #expect(direct.responseBody == "direct text")
+        #expect(named.responseContentType == .plainText)
+        #expect(named.responseBody == "first")
     }
 
     @Test("Resolves referenced examples from components")
@@ -668,6 +737,74 @@ struct OpenAPIParserTests {
         #expect(candidates[0].responseBody?.contains("Wildcard success") == true)
     }
 
+    @Test("OpenAPI response and media choices are stable when several valid alternatives exist")
+    func choosesLowestSuccessAndFirstJSONMediaType() async throws {
+        let spec = """
+        {
+            "openapi": "3.0.3",
+            "info": { "title": "Choice API", "version": "1.0" },
+            "paths": {
+                "/status": {
+                    "get": { "responses": {
+                        "299": { "description": "Last success" },
+                        "207": { "description": "Multi status" },
+                        "206": { "description": "Partial" },
+                        "205": { "description": "Reset" },
+                        "203": { "description": "Non authoritative" },
+                        "202": { "description": "Accepted" },
+                        "500": { "description": "Failure" }
+                    } }
+                },
+                "/media": {
+                    "get": { "responses": { "200": {
+                        "description": "Multiple media",
+                        "content": {
+                            "text/plain": { "example": "plain" },
+                            "application/vnd.api+json": { "example": { "source": "vendor" } },
+                            "application/xml": { "example": "<source>xml</source>" },
+                            "application/hal+json": { "example": { "source": "hal" } }
+                        }
+                    } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let status = try #require(candidates.first { $0.path == "/status" })
+        let media = try #require(candidates.first { $0.path == "/media" })
+
+        #expect(status.statusCode == 202)
+        #expect(status.responseBody?.contains("Accepted") == true)
+        #expect(media.responseContentType == .json)
+        #expect(media.responseBody?.contains("\"hal\"") == true)
+        #expect(media.responseBody?.contains("vendor") != true)
+    }
+
+    @Test("An unresolved local response reference reports the missing component")
+    func unresolvedLocalResponseDoesNotInventAnEmptySuccess() async {
+        let spec = """
+        {
+            "openapi": "3.0.3",
+            "info": { "title": "Broken API", "version": "1.0" },
+            "paths": {
+                "/broken": {
+                    "get": { "responses": {
+                        "200": { "$ref": "#/components/responses/MissingResponse" }
+                    } }
+                }
+            }
+        }
+        """
+
+        do {
+            _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            Issue.record("Import must not create a bodyless 200 response for a broken reference")
+        } catch {
+            #expect(error.localizedDescription.contains("Cannot resolve OpenAPI response reference"))
+            #expect(error.localizedDescription.contains("#/components/responses/MissingResponse"))
+        }
+    }
+
     @Test("Uses default responses when no explicit status code is available")
     func usesDefaultResponse() async throws {
         let spec = """
@@ -785,11 +922,11 @@ struct OpenAPIParserTests {
 
         #expect(candidates[0].statusCode == 204)
         #expect(candidates[0].responseContentType == .plainText)
-        #expect(candidates[0].responseBody?.contains("done") == true)
+        #expect(candidates[0].responseBody == "done")
     }
 
-    @Test("Swagger 2.0 uses non-JSON examples when application/json is absent")
-    func swaggerUsesFirstAvailableExample() async throws {
+    @Test("Swagger 2.0 infers plain text from the selected response when produces is absent")
+    func swaggerInfersTextFromSelectedResponse() async throws {
         let spec = """
         {
             "swagger": "2.0",
@@ -798,6 +935,10 @@ struct OpenAPIParserTests {
                 "/api/export": {
                     "get": {
                         "responses": {
+                            "500": {
+                                "description": "Failure",
+                                "examples": { "application/json": { "error": true } }
+                            },
                             "200": {
                                 "description": "Export",
                                 "examples": {
@@ -812,11 +953,74 @@ struct OpenAPIParserTests {
         """
         let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
 
-        #expect(candidates[0].responseBody?.contains("csv,data") == true)
-        // This document declares no `produces` at all — not on the operation, not at the top. That
-        // used to import as `.plainText`; it is now JSON, which is what the body already was:
-        // `AnyCodableValue.toJSONString()` runs the example through `JSONEncoder`.
-        #expect(candidates[0].responseContentType == .json)
+        #expect(candidates[0].statusCode == 200)
+        #expect(candidates[0].responseContentType == .plainText)
+        #expect(candidates[0].responseBody == "csv,data")
+    }
+
+    @Test("Swagger 2.0 prefers JSON when an undeclared response has JSON and text examples")
+    func swaggerPrefersJSONAmongUndeclaredExamples() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Mixed API", "version": "1.0" },
+            "paths": {
+                "/mixed": {
+                    "get": { "responses": { "200": {
+                        "description": "Mixed",
+                        "examples": {
+                            "text/plain": "plain result",
+                            "application/json": { "kind": "json result" }
+                        }
+                    } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.responseContentType == .json)
+        #expect(candidate.responseBody?.contains("json result") == true)
+        #expect(candidate.responseBody?.contains("plain result") != true)
+    }
+
+    @Test("Swagger 2.0 skips an unrelated JSON example and keeps a matching schema fallback")
+    func swaggerIgnoresUnrelatedJSONExampleForPlainText() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Text API", "version": "1.0" },
+            "produces": ["text/plain"],
+            "paths": {
+                "/no-body": {
+                    "get": { "responses": { "200": {
+                        "description": "No text representation",
+                        "examples": {
+                            "application/json": { "wrong": true },
+                            "application/xml": "<wrong/>",
+                            "text/xml": "<also-wrong/>"
+                        }
+                    } } }
+                },
+                "/schema": {
+                    "get": { "responses": { "200": {
+                        "description": "Schema text",
+                        "examples": { "application/json": { "wrong": true } },
+                        "schema": { "type": "string", "example": "schema text" }
+                    } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let noBody = try #require(candidates.first { $0.path == "/no-body" })
+        let schema = try #require(candidates.first { $0.path == "/schema" })
+
+        #expect(noBody.responseContentType == .plainText)
+        #expect(noBody.responseBody == nil)
+        #expect(schema.responseContentType == .plainText)
+        #expect(schema.responseBody == "schema text")
     }
 
     // MARK: - Content types as real specs declare them
@@ -960,7 +1164,7 @@ struct OpenAPIParserTests {
         let rows = try #require(candidates.first { $0.path == "/api/rows" })
 
         #expect(export.responseContentType == .plainText)
-        #expect(export.responseBody?.contains("csv,data") == true, "a text/plain operation serves its text/plain example")
+        #expect(export.responseBody == "csv,data", "a text/plain operation serves its text/plain example exactly")
         #expect(export.responseBody?.contains("rows") != true, "the JSON example belongs to the content type this operation did not declare")
 
         // The JSON side of the same map still pairs the other way.

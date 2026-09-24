@@ -200,6 +200,37 @@ struct ImportedRouteMatchingTests {
         #expect(byID.isSelected == false, "a duplicate arrives unselected")
     }
 
+    @Test("A route on another backend does not pre-deselect a primary import")
+    func secondaryBackendRouteIsNotADuplicate() async throws {
+        // The importer commits to the primary listener. The same method and normalized route on
+        // a secondary listener cannot answer that listener's requests, so it is not a duplicate.
+        let secondaryID = try #require(UUID(uuidString: "C4713574-8B55-4B67-9CC3-3787D75BD13C"))
+        let secondary = Endpoint(
+            name: "Secondary pet",
+            method: .get,
+            path: "/v2/pet/:petId",
+            backendID: secondaryID
+        )
+        let secondaryOnly = try await OpenAPIParser.parse(
+            data: Data(Self.petstoreSwagger.utf8),
+            existingEndpoints: [secondary]
+        )
+        let secondaryGets = secondaryOnly.filter { $0.method == .get }
+        let secondaryGet = try #require(secondaryGets.first { $0.path == "/v2/pet/:petId" })
+        #expect(secondaryGet.isSelected)
+        #expect(!secondaryGet.isDuplicate)
+
+        let primary = Endpoint(name: "Primary pet", method: .get, path: "/v2/pet/:petId")
+        let withPrimary = try await OpenAPIParser.parse(
+            data: Data(Self.petstoreSwagger.utf8),
+            existingEndpoints: [secondary, primary]
+        )
+        let primaryGets = withPrimary.filter { $0.method == .get }
+        let primaryGet = try #require(primaryGets.first { $0.path == "/v2/pet/:petId" })
+        #expect(!primaryGet.isSelected)
+        #expect(primaryGet.isDuplicate)
+    }
+
     // MARK: - The prefix, in every shape a document writes it
 
     @Test("A Swagger 2 basePath reaches the route, and `/` still means no prefix")

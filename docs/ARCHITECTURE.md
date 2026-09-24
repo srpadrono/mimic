@@ -35,7 +35,7 @@ The app target links each module for bundling, while its source imports `AppFeat
 - **MockServerEngine** serves HTTP, applies delays and transport failures, and owns the live journey cursor and request-log stream. Cursor read, resolution, and advance happen inside one actor hop.
 - **Persistence** implements `ProjectRepository` with GRDB. A newer stored schema is refused on load rather than partially read and resaved.
 - **ControlPlane** contains the loopback `ControlServer`, the `0600` discovery file, and `ControlHost` protocol. It depends on Domain and Vapor, not Persistence or MockServerEngine.
-- **SpecImport** parses HAR and OpenAPI/Swagger into candidates reviewed in the window. Neither ControlPlane nor the CLI links it.
+- **SpecImport** parses HAR and OpenAPI/Swagger into candidates reviewed in the window. Imports create primary-backend endpoints, so duplicate detection compares existing primary routes and earlier candidates. Neither ControlPlane nor the CLI links it.
 - **DesignSystem** holds `DS*` SwiftUI tokens and components.
 - **AppFeatures** coordinates workflows. `AppState` owns the session, `ProjectWorkspace` owns project lifecycle, `MockServerRuntime` coordinates the live engine, and `AppControlHost` implements the only production `ControlHost`.
 - **MimicCLICore** formats and sends commands. It does not host a server or open the project database.
