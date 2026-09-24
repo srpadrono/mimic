@@ -79,7 +79,7 @@ struct HostCommandSweepTests {
     private actor MutationRepository: ProjectRepository {
         private var stored: MockProject
         private let holdsFirstSave: Bool
-        private let refusesSaves: Bool
+        private var refusesSaves: Bool
         private var firstSaveContinuation: CheckedContinuation<Void, Never>?
         private(set) var startedSaves: [String] = []
 
@@ -110,6 +110,8 @@ struct HostCommandSweepTests {
             firstSaveContinuation?.resume()
             firstSaveContinuation = nil
         }
+
+        func allowSaves() { refusesSaves = false }
     }
 
     private actor CompletedCommands {
@@ -232,9 +234,35 @@ struct HostCommandSweepTests {
 
         #expect(response.ok == false)
         #expect(response.error?.code == ControlErrorCode.persistenceFailure.rawValue)
+        #expect(response.error?.message.contains("still active in this session") == true)
+        #expect(response.error?.message.contains("Inspect the open project before retrying") == true)
         #expect(session.appState.currentProject?.name == "Edited")
         #expect(session.appState.autosaveStatus == .failed("the store refused the mutation"))
         #expect(await repository.startedSaves == ["Edited"])
+    }
+
+    @Test("A failed endpoint create stays visible for inspection and later safe save")
+    func endpointCreateFailureCanBeRecoveredWithoutDuplicate() async throws {
+        let project = MockProject(name: "Original")
+        let repository = MutationRepository(project, refusesSaves: true)
+        let session = try makeSession(repository: repository, project: project)
+
+        let failed = await session.host.execute(.endpointCreate(
+            name: "Checkout", method: .get, path: "/checkout", spec: nil
+        ))
+        #expect(failed.error?.code == ControlErrorCode.persistenceFailure.rawValue)
+        #expect(session.appState.currentProject?.endpoints.count == 1)
+        #expect(try await repository.load(id: project.id).endpoints.isEmpty)
+
+        let inspection = await session.host.execute(.endpointList)
+        #expect(inspection.result?.endpoints?.count == 1)
+
+        await repository.allowSaves()
+        let recovered = await session.host.execute(.projectRename(name: "Recovered"))
+        #expect(recovered.ok)
+        let stored = try await repository.load(id: project.id)
+        #expect(stored.endpoints.count == 1)
+        #expect(stored.endpoints.first?.path == "/checkout")
     }
 
     @Test("Overlapping mutations save captured snapshots in command order")
