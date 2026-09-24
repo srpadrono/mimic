@@ -1617,7 +1617,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5),
                       "The editor header should offer its more-actions menu")
         XCTAssertEqual(endpointEditor.moreMenu.elementType, .menuButton)
-        XCTAssertEqual(endpointEditor.moreMenu.title, "More actions for this endpoint")
+        UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "More actions for this endpoint")
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
         XCTAssertLessThanOrEqual(endpointEditor.moreMenu.frame.width, 28)
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
@@ -1643,7 +1643,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The copy should be listed under its own name")
     }
 
-    /// The compact editor must keep the same actionable square and AX title as the wide
+    /// The compact editor must keep the same actionable square and AX name as the wide
     /// editor. A click in its outer left edge also catches a glyph-sized AppKit menu target.
     @MainActor
     func testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance() throws {
@@ -1658,7 +1658,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertEqual(menu.elementType, .menuButton)
-        XCTAssertEqual(menu.title, "More actions for this endpoint")
+        UITestApp.assertAccessibleMenuName(menu, equals: "More actions for this endpoint")
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
 

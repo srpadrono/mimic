@@ -273,7 +273,7 @@ final class JourneyUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertEqual(menu.elementType, .menuButton)
-        XCTAssertEqual(menu.title, "Choose how to add a journey")
+        UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertLessThanOrEqual(menu.frame.width, 28)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
@@ -291,7 +291,7 @@ final class JourneyUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
-    /// A compact light window needs the chooser's full hit target and distinct AX title.
+    /// A compact light window needs the chooser's full hit target and distinct AX name.
     @MainActor
     func testCompactNavigatorAddMenuRespondsAtEdgeInLightAppearance() throws {
         launchWithProject(named: "Compact Light Journeys", lightAppearance: true)
@@ -304,7 +304,7 @@ final class JourneyUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertEqual(menu.elementType, .menuButton)
-        XCTAssertEqual(menu.title, "Choose how to add a journey")
+        UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
         XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")

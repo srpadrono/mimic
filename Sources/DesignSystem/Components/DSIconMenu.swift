@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// The frame and content shape belong inside the menu label. With `.menuStyle(.button)`, putting
 /// them only around `Menu` leaves AppKit with an 11–13pt actionable element. Focused macOS UI tests
-/// click beyond the glyph at both horizontal edges and verify the menu actions and AX titles.
+/// click beyond the glyph at both horizontal edges and verify the menu actions and AX names.
 /// The outer frame and hover well keep the visible control aligned with `DSPanelHeaderButton`.
 public struct DSIconMenu<Content: View>: View {
     private let systemImage: String
@@ -35,7 +35,7 @@ public struct DSIconMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            // Keep a semantic title for AppKit; an Image-only menu exposed an empty AX title on CI.
+            // Preserve the nonvisual name even though only the icon is drawn.
             Label(label, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .accessibilityLabel(label)
