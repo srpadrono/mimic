@@ -71,6 +71,63 @@ struct HostCommandSweepTests {
         func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
     }
 
+    private nonisolated struct RefusedMutationSave: Error, LocalizedError {
+        var errorDescription: String? { "the store refused the mutation" }
+    }
+
+    /// Holds the first save so concurrent commands can be observed before it settles.
+    private actor MutationRepository: ProjectRepository {
+        private var stored: MockProject
+        private let holdsFirstSave: Bool
+        private let refusesSaves: Bool
+        private var firstSaveContinuation: CheckedContinuation<Void, Never>?
+        private(set) var startedSaves: [String] = []
+
+        init(_ project: MockProject, holdsFirstSave: Bool = false, refusesSaves: Bool = false) {
+            stored = project
+            self.holdsFirstSave = holdsFirstSave
+            self.refusesSaves = refusesSaves
+        }
+
+        func load(id: UUID) async throws -> MockProject {
+            guard id == stored.id else { throw PersistenceError.projectNotFound(id) }
+            return stored
+        }
+
+        func save(_ project: MockProject) async throws {
+            startedSaves.append(project.name)
+            if holdsFirstSave && startedSaves.count == 1 {
+                await withCheckedContinuation { firstSaveContinuation = $0 }
+            }
+            if refusesSaves { throw RefusedMutationSave() }
+            stored = project
+        }
+
+        func allProjects() async throws -> [MockProject] { [stored] }
+        func delete(id: UUID) async throws {}
+
+        func releaseFirstSave() {
+            firstSaveContinuation?.resume()
+            firstSaveContinuation = nil
+        }
+    }
+
+    private actor CompletedCommands {
+        private(set) var names: [String] = []
+        func record(_ name: String) { names.append(name) }
+    }
+
+    private func waitUntil(
+        _ predicate: @escaping () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if await predicate() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for a control mutation")
+    }
+
     private func makeSession() throws -> Session {
         let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
         // Its own defaults suite, so a run cannot inherit — or overwrite — a real recents list or a
@@ -97,6 +154,119 @@ struct HostCommandSweepTests {
             appState: appState,
             engine: engine
         )
+    }
+
+    private func makeSession(repository: any ProjectRepository, project: MockProject) throws -> Session {
+        let defaults = try #require(UserDefaults(suiteName: "HostCommandSweepTests.\(UUID().uuidString)"))
+        let engine = SweepStubEngine()
+        let appState = AppState(
+            server: MockServerRuntime(engine: engine),
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+        )
+        appState.currentProject = project
+        return Session(
+            host: AppControlHost(appState: appState, repository: repository),
+            appState: appState,
+            engine: engine
+        )
+    }
+
+    @Test("A successful project mutation is readable from the store before the reply")
+    func mutationSuccessWaitsForStore() async throws {
+        let session = try makeSession()
+        try await seedProject(session)
+        let id = try #require(session.appState.currentProject?.id)
+
+        let response = await session.host.execute(.projectRename(name: "Stored name"))
+
+        #expect(response.ok)
+        let stored = try await session.appState.repository.load(id: id)
+        #expect(stored.name == "Stored name")
+    }
+
+    @Test("A control mutation supersedes an older window debounce")
+    func mutationSupersedesPendingAutosave() async throws {
+        let session = try makeSession()
+        try await seedProject(session)
+        let id = try #require(session.appState.currentProject?.id)
+        await session.appState.projects.awaitPendingStoreWrites()
+
+        session.appState.currentProject?.name = "Window edit"
+        session.appState.scheduleAutosave()
+        let response = await session.host.execute(.projectRename(name: "Control edit"))
+        #expect(response.ok)
+
+        try await Task.sleep(for: .milliseconds(600))
+        await session.appState.projects.awaitPendingStoreWrites()
+        #expect(try await session.appState.repository.load(id: id).name == "Control edit")
+    }
+
+    @Test("Saving a passed-through response also waits for its project save")
+    func logSaveAsMockWaitsForStore() async throws {
+        let session = try makeSession()
+        try await seedProject(session)
+        let id = try #require(session.appState.currentProject?.id)
+        let log = RequestLog(
+            method: .get, path: "/captured", responseStatusCode: 200,
+            responseBody: "captured body", outcome: .passthrough
+        )
+        session.appState.requestLogs = [log]
+
+        let response = await session.host.execute(.logSaveAsMock(id: log.id))
+
+        #expect(response.ok)
+        let stored = try await session.appState.repository.load(id: id)
+        #expect(stored.endpoints.count == 1)
+        #expect(stored.endpoints.first?.path == "/captured")
+    }
+
+    @Test("A refused project mutation reports persistence failure and retains the edited session")
+    func mutationRefusalIsReported() async throws {
+        let project = MockProject(name: "Original")
+        let repository = MutationRepository(project, refusesSaves: true)
+        let session = try makeSession(repository: repository, project: project)
+
+        let response = await session.host.execute(.projectRename(name: "Edited"))
+
+        #expect(response.ok == false)
+        #expect(response.error?.code == ControlErrorCode.persistenceFailure.rawValue)
+        #expect(session.appState.currentProject?.name == "Edited")
+        #expect(session.appState.autosaveStatus == .failed("the store refused the mutation"))
+        #expect(await repository.startedSaves == ["Edited"])
+    }
+
+    @Test("Overlapping mutations save captured snapshots in command order")
+    func overlappingMutationSavesAreFIFO() async throws {
+        let project = MockProject(name: "Original")
+        let repository = MutationRepository(project, holdsFirstSave: true)
+        let session = try makeSession(repository: repository, project: project)
+        let completed = CompletedCommands()
+
+        let first = Task { @MainActor in
+            let response = await session.host.execute(.projectRename(name: "First"))
+            await completed.record("First")
+            return response
+        }
+        try await waitUntil { await repository.startedSaves == ["First"] }
+
+        let second = Task { @MainActor in
+            let response = await session.host.execute(.projectRename(name: "Second"))
+            await completed.record("Second")
+            return response
+        }
+        try await waitUntil { session.appState.currentProject?.name == "Second" }
+        #expect(await repository.startedSaves == ["First"])
+        #expect(await completed.names.isEmpty)
+
+        await repository.releaseFirstSave()
+        let firstResponse = await first.value
+        let secondResponse = await second.value
+        #expect(firstResponse.ok)
+        #expect(secondResponse.ok)
+        #expect(await repository.startedSaves == ["First", "Second"])
+        #expect(try await repository.load(id: project.id).name == "Second")
     }
 
     /// A release the sweep can be answered with, so the update arm is exercised without a network.
