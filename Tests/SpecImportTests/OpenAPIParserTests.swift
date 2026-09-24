@@ -985,6 +985,39 @@ struct OpenAPIParserTests {
         #expect(candidate.responseBody?.contains("plain result") != true)
     }
 
+    @Test("Swagger 2.0 keeps the selected response's text example when JSON is also declared")
+    func swaggerUsesAvailableDeclaredTextExample() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Reports", "version": "1.0" },
+            "paths": {
+                "/reports": {
+                    "get": {
+                        "produces": ["application/json", "text/csv"],
+                        "responses": {
+                            "200": {
+                                "description": "Export",
+                                "examples": { "text/csv": "date,amount\\n2026-09-24,42" }
+                            },
+                            "500": {
+                                "description": "Error",
+                                "examples": { "application/json": { "error": true } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+
+        #expect(candidate.statusCode == 200)
+        #expect(candidate.responseContentType == .plainText)
+        #expect(candidate.responseBody == "date,amount\n2026-09-24,42")
+    }
+
     @Test("Swagger 2.0 skips an unrelated JSON example and keeps a matching schema fallback")
     func swaggerIgnoresUnrelatedJSONExampleForPlainText() async throws {
         let spec = """

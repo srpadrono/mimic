@@ -138,7 +138,9 @@ public enum OpenAPIParser {
     }
 
     /// The content type an operation actually produces: its own `produces`, then the document's,
-    /// then an example on the chosen response, then JSON when the spec declares none.
+    /// preferring a declared representation with an example on the chosen response. When neither
+    /// declared representation has an example, prefer JSON; with no declaration, infer from the
+    /// chosen response's examples and otherwise default to JSON.
     ///
     /// Matched with the same rule the other importers use — a substring test, via
     /// `ImportCandidateBuilder.detectContentType`. The exact `contains("application/json")` this
@@ -159,6 +161,17 @@ public enum OpenAPIParser {
         // falls through to the document rather than deciding for it.
         let declared = operation.produces?.isEmpty == false ? operation.produces : doc.produces
         if let declared, !declared.isEmpty {
+            let exampleTypes = response?.examples?.keys.compactMap(supportedSwaggerExampleType) ?? []
+            // A JSON preference must not discard the selected response's sole text example when
+            // both representations are declared. Keep JSON first only when it has an example too.
+            if declared.contains(where: { supportedSwaggerExampleType($0) == .json }),
+               exampleTypes.contains(.json) {
+                return .json
+            }
+            if declared.contains(where: { supportedSwaggerExampleType($0) == .plainText }),
+               exampleTypes.contains(.plainText) {
+                return .plainText
+            }
             return declared.contains { ImportCandidateBuilder.detectContentType($0) == .json }
                 ? .json : .plainText
         }
