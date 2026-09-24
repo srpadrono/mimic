@@ -154,13 +154,17 @@ final class JourneyUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchWithProject(named name: String = "Journey Tests") {
+    private func launchWithProject(named name: String = "Journey Tests", lightAppearance: Bool = false) {
         let application = XCUIApplication()
         application.launchArguments = [
             "-MimicResetForTesting",
             "-ApplePersistenceIgnoreState",
             "YES",
         ]
+        if lightAppearance {
+            application.launchArguments += ["-AppleInterfaceStyle", "Light",
+                                            "-NSRequiresAquaSystemAppearance", "YES"]
+        }
         application.launchEnvironment["MIMIC_DEFAULTS_SUITE"] = Self.testSuite
         // Port 0 lets the OS pick, so a test run neither collides with a developer's running instance
         // nor with a second run on the same machine. The discovery-file half of that isolation —
@@ -284,6 +288,34 @@ final class JourneyUITests: XCTestCase {
         menuEvidence.name = "journey-add-menu-edge-click"
         menuEvidence.lifetime = .keepAlways
         add(menuEvidence)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+
+    /// A compact light window needs the chooser's full hit target and distinct AX title.
+    @MainActor
+    func testCompactNavigatorAddMenuRespondsAtEdgeInLightAppearance() throws {
+        launchWithProject(named: "Compact Light Journeys", lightAppearance: true)
+        workspace.compactWindow()
+        workspace.showSidebarIfNeeded()
+        showJourneysNavigator()
+
+        let menu = journeys.addButton
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.isHittable)
+        XCTAssertEqual(menu.elementType, .menuButton)
+        XCTAssertEqual(menu.title, "Choose how to add a journey")
+        XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+        XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")
+
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).click()
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "compact-journey-add-menu-light"
+        evidence.lifetime = .keepAlways
+        add(evidence)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 

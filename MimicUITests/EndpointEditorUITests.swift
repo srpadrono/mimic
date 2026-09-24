@@ -38,6 +38,15 @@ import XCTest
 /// pretended otherwise would be green about nothing. The status colour dot (EPEDIT-08) is
 /// `.accessibilityHidden(true)` on purpose; its colour mapping belongs to a `DSColors` unit test.
 final class EndpointEditorUITests: MimicUITestCase {
+    private var usesDarkAppearance = false
+
+    @MainActor
+    override func configureLaunchEnvironment(_ app: XCUIApplication) {
+        if usesDarkAppearance {
+            app.launchArguments += ["-AppleInterfaceStyle", "Dark",
+                                    "-NSRequiresAquaSystemAppearance", "NO"]
+        }
+    }
 
     // MARK: - Shared element resolution
 
@@ -1160,7 +1169,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(delayValidationNote.waitForExistence(timeout: 5),
                       "A non-numeric delay should say why it was not accepted")
         let delayMessage = shownText(of: delayValidationNote)
-        XCTAssertTrue(delayMessage.contains("whole number of milliseconds"),
+        XCTAssertTrue(delayMessage.contains("Delay must be a whole number from 0 to 300000 ms"),
                       "The note should state the rule — it reads \(delayMessage)")
     }
 
@@ -1605,6 +1614,35 @@ final class EndpointEditorUITests: MimicUITestCase {
             self.sidebarEndpointRows().contains { $0.label.contains("Orders (Copy)") }
         },
                       "The copy should be listed under its own name")
+    }
+
+    /// The compact editor must keep the same actionable square and AX title as the wide
+    /// editor. A click in its outer left edge also catches a glyph-sized AppKit menu target.
+    @MainActor
+    func testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance() throws {
+        usesDarkAppearance = true
+        launchApp()
+        createProjectViaUI(name: "Compact Editor Menu")
+        createEndpointViaUI(name: "Orders", path: "/api/orders")
+        workspace.compactWindow()
+
+        let menu = endpointEditor.moreMenu
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.isHittable)
+        XCTAssertEqual(menu.elementType, .menuButton)
+        XCTAssertEqual(menu.title, "More actions for this endpoint")
+        XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
+        XCTAssertTrue(app.menuItems["Duplicate"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "compact-endpoint-more-menu-dark"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
     // MARK: - 24. The editor's delete confirmation, cancelled
