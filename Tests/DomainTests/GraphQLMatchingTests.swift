@@ -233,6 +233,23 @@ struct GraphQLOperationTests {
         // with one of them would be silently wrong.
         #expect(GraphQLRequest.operation(inBody: batch) == nil)
     }
+
+    @Test("Batch shape survives a single readable operation or no readable operations")
+    func batchShapeDoesNotDependOnOperationCount() {
+        let single = #"[{"operationName":"GetUser","query":"query GetUser { user { id } }"}]"#
+        let mixed = #"[{"operationName":"GetUser","query":"query GetUser { user { id } }"},42]"#
+        let unreadable = #"[42, null]"#
+
+        for batch in [single, mixed] {
+            #expect(GraphQLRequest.operations(inBody: batch).map(\.name) == ["GetUser"])
+            #expect(GraphQLRequest.operation(inBody: batch) == nil)
+            #expect(GraphQLRequest.isBatched(body: batch))
+        }
+        #expect(GraphQLRequest.operations(inBody: unreadable).isEmpty)
+        #expect(GraphQLRequest.isBatched(body: unreadable))
+        #expect(GraphQLRequest.isBatched(body: "[]"))
+        #expect(!GraphQLRequest.isBatched(body: #"{"query":"query GetUser { user { id } }"}"#))
+    }
 }
 
 @Suite("GraphQL endpoint matching")
@@ -299,6 +316,22 @@ struct GraphQLEndpointMatchingTests {
         ]
         let plan = MockResolver.plan(request: Self.request("SomethingElse"), endpoints: endpoints, globalDelayMs: 0)
         #expect(plan.response.statusCode == 500)
+    }
+
+    @Test("A batch with one readable operation skips named mocks and reaches the catch-all")
+    func batchDoesNotMatchNamedMock() {
+        let single = #"[{"operationName":"GetUser","query":"query GetUser { user { id } }"}]"#
+        let mixed = #"[{"operationName":"GetUser","query":"query GetUser { user { id } }"},42]"#
+        let named = Self.endpoint(operation: "GetUser", status: 200, name: "user")
+        let catchAll = Self.endpoint(operation: nil, status: 500, name: "catch-all")
+
+        for batch in [single, mixed] {
+            let request = IncomingRequest(method: .post, path: "/graphql", body: batch)
+            #expect(MockResolver.plan(request: request, endpoints: [named], globalDelayMs: 0)
+                .response.outcome == .unmatched)
+            #expect(MockResolver.plan(request: request, endpoints: [catchAll, named], globalDelayMs: 0)
+                .response.statusCode == 500)
+        }
     }
 
     @Test("A mock for one operation never answers another")

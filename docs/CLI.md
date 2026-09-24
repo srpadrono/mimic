@@ -108,6 +108,7 @@ mimic scenario delete GET /account-summary "Server error"
 ```
 
 `--body-file -` reads stdin. `endpoint update --status` changes the active scenario. A scenario selects a standing response; a journey scripts a sequence.
+Endpoint edits require a unique match. If multiple backends contain the same method and path, select the endpoint by UUID with `--id`.
 
 ### Journeys
 

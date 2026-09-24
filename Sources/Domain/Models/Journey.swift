@@ -143,7 +143,9 @@ public struct JourneyStep: Identifiable, Codable, Sendable, Equatable {
         path = try container.decode(String.self, forKey: .path)
         outcome = try container.decode(JourneyStepOutcome.self, forKey: .outcome)
         delayMs = try container.decodeIfPresent(Int.self, forKey: .delayMs) ?? 0
-        repeatCount = max(1, try container.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1)
+        // Preserve malformed imported values so ProjectValidator can reject the document with
+        // the step named, rather than silently changing its requested progression.
+        repeatCount = try container.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1
         graphqlOperation = try container.decodeIfPresent(String.self, forKey: .graphqlOperation)
         backendID = try container.decodeIfPresent(UUID.self, forKey: .backendID)
     }

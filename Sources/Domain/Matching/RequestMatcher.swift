@@ -180,7 +180,7 @@ public enum RequestMatcher {
                 headers: scenario.headers,
                 contentType: scenario.bodyContentType,
                 body: scenario.body,
-                delayMs: max(0, globalDelayMs) + max(0, endpoint.delayMs),
+                delayMs: ResponseDelay.combined(globalMs: globalDelayMs, localMs: endpoint.delayMs),
                 matchedEndpointID: endpoint.id,
                 matchedScenarioID: scenario.id,
                 outcome: .endpoint

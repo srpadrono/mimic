@@ -33,6 +33,7 @@ The app target links each module for bundling, while its source imports `AppFeat
 
 - **Domain** holds value models, matching, `JourneyResolver`, `MockResolver`, validation, `ControlCommand`, `ProjectCommandExecutor`, and command discovery. It uses Foundation; `ControlEndpointDiscovery` is its deliberate file I/O and process-liveness exception.
 - **MockServerEngine** serves HTTP, applies delays and transport failures, and owns the live journey cursor and request-log stream. Cursor read, resolution, and advance happen inside one actor hop.
+- Engine configuration, routes, project identity, and the journey cursor are read from one ordered snapshot for each request. The log stream is lossless and unbounded before the runtime caps the visible log.
 - **Persistence** implements `ProjectRepository` with GRDB. A newer stored schema is refused on load rather than partially read and resaved.
 - **ControlPlane** contains the loopback `ControlServer`, the `0600` discovery file, and `ControlHost` protocol. It depends on Domain and Vapor, not Persistence or MockServerEngine.
 - **SpecImport** parses HAR and OpenAPI/Swagger into candidates reviewed in the window. Neither ControlPlane nor the CLI links it.

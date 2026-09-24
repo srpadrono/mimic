@@ -17,6 +17,13 @@ nonisolated protocol MockServerEngineProtocol: Sendable {
         journey: Journey?,
         activationEpoch: Int
     ) async
+    func updateConfiguration(
+        configuration: ServerConfiguration,
+        projectID: UUID?,
+        endpoints: [Endpoint],
+        journey: Journey?,
+        activationEpoch: Int
+    ) async
     func restartJourney() async -> JourneyStatus?
     func advanceJourney() async -> JourneyStatus?
     func journeyStatus() async -> JourneyStatus?
@@ -43,6 +50,24 @@ extension MockServerEngineProtocol {
         activationEpoch: Int
     ) async {
         await updateConfiguration(endpoints: endpoints, globalDelayMs: globalDelayMs, journey: journey)
+    }
+
+    /// Existing test engines can keep their separate observations. The production engine overrides
+    /// this with one route-store update, so a live request sees one complete project snapshot.
+    func updateConfiguration(
+        configuration: ServerConfiguration,
+        projectID: UUID?,
+        endpoints: [Endpoint],
+        journey: Journey?,
+        activationEpoch: Int
+    ) async {
+        await updateServerConfiguration(configuration, projectID: projectID)
+        await updateConfiguration(
+            endpoints: endpoints,
+            globalDelayMs: configuration.globalDelayMs,
+            journey: journey,
+            activationEpoch: activationEpoch
+        )
     }
 
     func restartJourney() async -> JourneyStatus? { nil }
@@ -140,7 +165,11 @@ final class MockServerRuntime {
         startFailure = nil
 
         let configuration = serverConfiguration
-        startTask = Task { @MainActor [weak self] in
+        let predecessor = pendingMockUpdate
+        let task = Task { @MainActor [weak self] in
+            // Start is part of the same dispatch order as project pushes. A later edit must not
+            // reach the engine before this captured configuration has been applied.
+            await predecessor?.value
             guard let self else { return }
             do {
                 try await engine.start(configuration: configuration)
@@ -179,6 +208,8 @@ final class MockServerRuntime {
                 genericStartError = message
             }
         }
+        startTask = task
+        pendingMockUpdate = task
     }
 
     /// Stops the engine — from `.running` immediately, and from `.starting` by remembering the stop
@@ -260,8 +291,9 @@ final class MockServerRuntime {
     /// hops to the engine actor before the push task has even started, and acts on the journey the
     /// engine still had. And ``updateMocks(endpoints:journey:)`` awaits it from the *next* push's
     /// task, which is what makes the pushes a chain rather than a race — see the note there.
-    /// Because each link awaits its predecessor, awaiting this one task is awaiting every push
-    /// dispatched before it.
+    /// `startServer()` also joins this chain, so a project push dispatched after a start cannot
+    /// overtake the settings captured for that bind. Because each link awaits its predecessor,
+    /// awaiting this one task is awaiting every earlier start or push.
     private var pendingMockUpdate: Task<Void, Never>?
 
     /// How many journey activations this session has performed, carried on every configuration push.
@@ -299,19 +331,16 @@ final class MockServerRuntime {
     /// Each task now awaits its predecessor before touching the engine — the `storeWrites` shape
     /// `ProjectWorkspace` uses for the same class of defect.
     ///
-    /// Chained rather than versioned, because ordering here is a property of *dispatch*, not of the
-    /// payload: every push funnels through this one main-actor method, so "the order the pushes were
-    /// asked for" is well-defined on this side and the chain preserves all of it in one line. A
-    /// generation number would have to be threaded through the protocol, the engine and the store to
-    /// let the store *discard* what the chain simply never sends out of order. The activation epoch
-    /// stays as it is: it answers a question ordering cannot — whether an argument-for-argument
-    /// identical push is an activation or a re-push — and its `>` guard keeps the engine correct for
-    /// callers that do not serialize; see
+    /// Chained here because ordering is a property of *dispatch*: every project push and start
+    /// passes through this main-actor controller, so their requested order is known before any task
+    /// reaches the engine. The engine separately versions calls at its actor boundary to guard
+    /// against reentrant delivery from direct callers. The activation epoch answers a different
+    /// question: whether an otherwise identical push is an activation or a re-push. Its `>` guard
+    /// keeps the cursor correct for callers that do not serialize; see
     /// `MockRouteStore.update(endpoints:globalDelayMs:journey:activationEpoch:)`.
     func updateMocks(endpoints: [Endpoint], journey: Journey? = nil) {
         let configuration = serverConfiguration
         let projectID = projectID
-        let globalDelayMs = configuration.globalDelayMs
         let activationEpoch = journeyActivationEpoch
         let predecessor = pendingMockUpdate
         let stopping = pendingStop
@@ -321,10 +350,12 @@ final class MockServerRuntime {
             await predecessor?.value
             await stopping?.value
             guard let self else { return }
-            await engine.updateServerConfiguration(configuration, projectID: projectID)
+            // One call publishes the routing rules and their backend/project identity together.
+            // A request must never resolve against one project and proxy through another.
             await engine.updateConfiguration(
+                configuration: configuration,
+                projectID: projectID,
                 endpoints: endpoints,
-                globalDelayMs: globalDelayMs,
                 journey: journey,
                 activationEpoch: activationEpoch
             )
