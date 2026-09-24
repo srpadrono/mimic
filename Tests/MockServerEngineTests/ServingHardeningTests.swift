@@ -90,7 +90,7 @@ struct ServingHardeningTests {
 
     // MARK: - Header injection
 
-    @Test("The HTTP decoder rejects excessive header fields before serving a mock")
+    @Test("The HTTP decoder rejects an excessive cumulative header list before serving a mock")
     func excessiveRequestHeadersAreRejected() async throws {
         let scenario = Scenario(name: "default", statusCode: 200, body: "{}")
         let endpoint = Endpoint(
@@ -103,9 +103,9 @@ struct ServingHardeningTests {
             let drain = Task { for await entry in engine.logStream { await collector.append(entry) } }
             defer { drain.cancel() }
             let port = try #require(baseURL.port)
-            // Each field is tiny. This crosses NIOHTTP1's cumulative field-count limit rather
-            // than its older per-field size limit, and would have reached the mock on 2.97.1.
-            let headers = (1...300).map { ("X-Pad-\($0)", "x") }
+            // Each field is below the per-field limit, while their combined size exceeds
+            // NIOHTTP1's 80 KiB list limit. The old decoder had no cumulative limit.
+            let headers = (1...300).map { ("X-Pad-\($0)", String(repeating: "x", count: 512)) }
             let rejected = try RawHTTPClient.send(
                 method: "GET", path: "/header-limit", port: port, additionalHeaders: headers
             )

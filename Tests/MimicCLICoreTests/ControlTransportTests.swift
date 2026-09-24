@@ -289,7 +289,9 @@ struct EmittedCommandTests {
         let both = await Self.emitted(
             ["endpoint", "update", "GET", "/a", "--delay", "100", "--status", "500"]
         )
-        #expect(both.map(\.kind) == [.endpointUpdate, .endpointGet, .scenarioUpdate, .endpointGet])
+        // The combined path preflights the response before changing the endpoint, then uses
+        // the endpoint id after the route changes.
+        #expect(both.map(\.kind) == [.endpointGet, .endpointUpdate, .endpointGet, .scenarioUpdate, .endpointGet])
 
         // Nothing to change is bad usage, and nothing is sent at all.
         let empty = await Self.emitted(["endpoint", "update", "GET", "/a"], exitCode: 2)
