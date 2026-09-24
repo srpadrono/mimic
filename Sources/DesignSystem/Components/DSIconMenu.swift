@@ -35,7 +35,9 @@ public struct DSIconMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            Image(systemName: systemImage)
+            // Keep a semantic title for AppKit; an Image-only menu exposed an empty AX title on CI.
+            Label(label, systemImage: systemImage)
+                .labelStyle(.iconOnly)
                 .accessibilityLabel(label)
                 .font(.system(size: DSGlyph.controlProminent, weight: .medium))
                 // `labelSecondary` at rest, never `labelTertiary`: at 36% alpha an icon-only control
