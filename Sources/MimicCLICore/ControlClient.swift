@@ -29,7 +29,14 @@ public struct ControlClient: Sendable {
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        let session = URLSession(configuration: configuration)
+        // The discovery token belongs to one advertised listener. URLSession normally follows
+        // redirects and forwards custom headers, including X-Mimic-Token, even to another port.
+        // A control endpoint has no redirect contract, so keep every request on its original URL.
+        let session = URLSession(
+            configuration: configuration,
+            delegate: ControlRedirectPolicy(),
+            delegateQueue: nil
+        )
         // One session, captured once and reused by both `send` and `isReachable`, exactly as the
         // stored property it replaces was.
         self.init(baseURL: baseURL, token: token, exchange: { try await session.data(for: $0) })
@@ -188,6 +195,18 @@ public typealias ControlHTTPExchange = @Sendable (URLRequest) async throws -> (D
 /// The three members are already exactly what the protocol asks for, which is the point: the seam was
 /// added around the type rather than through it, so no production call path changed on the way in.
 extension ControlClient: ControlTransport {}
+
+private final class ControlRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
 
 /// Failures that belong to the CLI itself rather than to a command.
 public enum CLIFailure: Error, LocalizedError, Equatable {
