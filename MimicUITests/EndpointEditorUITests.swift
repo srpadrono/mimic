@@ -1580,11 +1580,23 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5),
                       "The editor header should offer its more-actions menu")
-        endpointEditor.moreMenu.click()
+        XCTAssertEqual(endpointEditor.moreMenu.elementType, .menuButton)
+        XCTAssertEqual(endpointEditor.moreMenu.title, "More actions for this endpoint")
+        XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
+        XCTAssertLessThanOrEqual(endpointEditor.moreMenu.frame.width, 28)
+        XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
+        // The outer tenth of the square is beyond the centred glyph. It should still respond.
+        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
 
         let duplicate = app.menuItems["Duplicate"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
                       "The more-actions menu should offer Duplicate")
+        XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists,
+                      "The same menu should retain the delete action")
+        let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuEvidence.name = "endpoint-more-menu-edge-click"
+        menuEvidence.lifetime = .keepAlways
+        add(menuEvidence)
         duplicate.click()
 
         XCTAssertTrue(waitForSidebarRowCount(2),

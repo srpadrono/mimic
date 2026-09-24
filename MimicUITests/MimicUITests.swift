@@ -374,6 +374,8 @@ struct EndpointEditorPage {
     var delayField: XCUIElement { app.textFields["endpointEditor.delay"] }
     var groupTagField: XCUIElement { app.textFields["endpointEditor.groupTag"] }
     var moreMenu: XCUIElement {
+        let byMenuButton = app.menuButtons["endpointEditor.moreMenu"].firstMatch
+        if byMenuButton.exists { return byMenuButton }
         let byButton = app.buttons["endpointEditor.moreMenu"].firstMatch
         if byButton.exists { return byButton }
         let byPopUp = app.popUpButtons["endpointEditor.moreMenu"].firstMatch

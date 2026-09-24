@@ -174,27 +174,8 @@ struct EndpointEditorView: View {
         }
     }
 
-    /// The endpoint's own actions.
-    ///
-    /// `DSIconMenu`, which is where the block this used to spell out now lives — the same block the
-    /// journeys navigator's "+" spelled out too, whose own note named this one as its twin. The hover
-    /// well is the point of the shape: an ellipsis that never responds to the pointer reads as
-    /// decoration, and the well has to sit on the `Menu` rather than inside its label, because a
-    /// `Menu` renders its own label and a frame in there fights the control it builds.
-    ///
-    /// What this note used to argue was that `.menuStyle(.borderlessButton)` was right here and
-    /// `.button` right for `BreadcrumbJumpBar` — which split the app's four hand-styled menus two
-    /// and two. The component takes `.borderlessButton` for both, and the reason it still does has
-    /// changed: it used to be that the menu style decides the AppKit element type and
-    /// `JourneyUITests` separated two identically-labelled "Add journey" controls by element type
-    /// alone. That is fixed — the journeys navigator's menu and the journeys empty state's button
-    /// carry different labels now, and the suite separates them by name. What is left is the hit
-    /// target, which is the question `DSIconMenu`'s own note ends on and which this menu shares:
-    /// its 22pt frame and hover well sit outside the `Menu`, not inside a `Button`'s label.
-    /// `.buttonStyle(.plain)` *is* shared with the breadcrumb and `DSFilterField.ScopeMenu`; see
-    /// that note for why `.plain` and not the `.borderless` Apple's deprecation message suggests.
-    ///
-    /// The alert stays here. It is this endpoint's confirmation, not a property of icon menus.
+    /// The endpoint's own actions use the shared 22pt icon menu. The delete confirmation remains
+    /// here because it belongs to this endpoint, not to the menu component.
     @ViewBuilder
     private var moreMenu: some View {
         DSIconMenu(
