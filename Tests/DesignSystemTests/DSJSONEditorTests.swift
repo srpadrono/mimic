@@ -22,6 +22,16 @@ struct DSJSONEditorTests {
         #expect(DSJSONEditor.validateJSON(#"[1, 2, 3]"#))
     }
 
+    @Test("Valid top-level JSON scalars do not show a syntax warning")
+    func validJSONScalars() {
+        for scalar in ["42", "true", #""ok""#, "null"] {
+            #expect(DSJSONEditor.validateJSON(scalar))
+            #expect(DSJSONEditor.validationErrorMessage(
+                text: scalar, isValid: DSJSONEditor.validateJSON(scalar)
+            ) == nil)
+        }
+    }
+
     @Test("Valid nested JSON")
     func validNestedJSON() {
         let json = """
@@ -67,14 +77,32 @@ struct DSJSONEditorTests {
         #expect(bIndex.lowerBound < aIndex.lowerBound)
     }
 
-    @Test("Pretty-print leaves text that is not JSON alone")
+    @Test("Pretty-print refuses malformed and non-JSON text")
     func prettyPrintInvalid() {
-        // Anything not opening with a brace or bracket is refused outright. Text that *does* open
-        // like JSON but is malformed still gets re-indented, deliberately: the scanner never
-        // reparses, so a truncated body still formats where a parser would refuse. The Format button
-        // is not reachable in that state anyway — `canFormatBody` gates on `isJSONValid`.
+        // The traffic scanner accepts truncated captures, but the editor's Format action must not
+        // rewrite a malformed response body that a user is intentionally serving.
         #expect(DSJSONEditor.prettyPrint("hello") == nil)
         #expect(DSJSONEditor.prettyPrint("<html><body>hi</body></html>") == nil)
+        #expect(DSJSONEditor.prettyPrint("{invalid}") == nil)
+        #expect(DSJSONEditor.prettyPrint(#"{"missing": "closing""#) == nil)
+        #expect(DSJSONEditor.prettyPrint("[1,,2]") == nil)
+    }
+
+    @Test("Valid JSON scalars need no structural reflow")
+    func prettyPrintScalars() {
+        #expect(DSJSONEditor.prettyPrint("42") == nil)
+        #expect(DSJSONEditor.prettyPrint("true") == nil)
+        #expect(DSJSONEditor.prettyPrint(#""ok""#) == nil)
+        #expect(DSJSONEditor.prettyPrint("null") == nil)
+    }
+
+    @Test("Valid deep JSON cannot be formatted past the output budget")
+    func prettyPrintDeepJSON() {
+        let depth = 400
+        let compact = String(repeating: "[", count: depth) + "0" + String(repeating: "]", count: depth)
+
+        #expect(DSJSONEditor.validateJSON(compact))
+        #expect(DSJSONEditor.prettyPrint(compact) == nil)
     }
 
     @Test("Pretty-print returns nil for empty string")
