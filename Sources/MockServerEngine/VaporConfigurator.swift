@@ -20,11 +20,13 @@ enum VaporConfigurator {
     ) {
         let handler: @Sendable (Request) async throws -> Response = { req in
             // Reject before resolution: a rejected request must neither advance a journey nor
-            // allocate a pending log or proxy response preview. No handler waits with a collected
-            // request body in memory for the consumer to catch up.
+            // allocate a pending log or proxy response preview. With a streaming route, the
+            // admission check also happens before Vapor collects a large request body.
             guard let lease = await logGate.tryAcquireLease() else {
                 return Response(status: .serviceUnavailable)
             }
+            // Preserve the previous 10 MiB/413 limit, but collect only after admission.
+            _ = try await req.body.collect(max: 10 << 20).get()
             let incoming = IncomingRequest(
                 method: DomainHTTPMethod(rawValue: req.method.rawValue) ?? .get,
                 path: req.url.path,
@@ -79,7 +81,7 @@ enum VaporConfigurator {
         let methods: [Vapor.HTTPMethod] = [.GET, .POST, .PUT, .PATCH, .DELETE, .OPTIONS, .HEAD]
         for method in methods {
             for path in interceptAllPaths {
-                app.on(method, path, body: .collect(maxSize: "10mb"), use: handler)
+                app.on(method, path, body: .stream, use: handler)
             }
         }
     }

@@ -78,10 +78,42 @@ struct RequestLogGateTests {
 
 @Suite("Request log wire backpressure", .serialized, .timeLimit(.minutes(1)))
 struct RequestLogBackpressureWireTests {
+    @Test("Accepted bodies still collect and oversized bodies still return 413")
+    func bodyLimitAfterAdmission() async throws {
+        let port = try #require(PlatformSocket.freePort())
+        let engine = MockServerEngine()
+        try await engine.start(configuration: .init(port: port, globalDelayMs: 0))
+        defer { Task { try? await engine.stop() } }
+        let session = JourneyServingTests.session(timeout: 10)
+        defer { session.invalidateAndCancel() }
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/upload"))
+        var ordinary = URLRequest(url: url)
+        ordinary.httpMethod = "POST"
+        ordinary.httpBody = Data("ordinary".utf8)
+        let (_, accepted) = try await session.data(for: ordinary)
+        #expect((accepted as? HTTPURLResponse)?.statusCode == 404)
+        var logs = engine.logStream.makeAsyncIterator()
+        let log = try #require(await logs.next())
+        #expect(log.requestBody == "ordinary")
+        await engine.acknowledgeLog()
+
+        var oversized = URLRequest(url: url)
+        oversized.httpMethod = "POST"
+        oversized.httpBody = Data(repeating: 0x61, count: (10 << 20) + 1)
+        let (_, rejected) = try await session.data(for: oversized)
+        #expect((rejected as? HTTPURLResponse)?.statusCode == 413)
+        #expect(await engine.logGate.outstandingCount == 0)
+        try await engine.stop()
+    }
+
     @Test("Acknowledged logs do not free handlers still serving delayed responses")
     func delayedHandlersKeepAdmissionSlots() async throws {
         let port = try #require(PlatformSocket.freePort())
         let engine = MockServerEngine()
+        let scenario = Scenario(name: "Slow", statusCode: 200, body: "slow")
+        let endpoint = Endpoint(name: "Slow", path: "/slow", scenarios: [scenario],
+            activeScenarioID: scenario.id)
+        await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 1_500)
         try await engine.start(configuration: .init(port: port, globalDelayMs: 1_500))
         defer { Task { try? await engine.stop() } }
         let configuration = URLSessionConfiguration.ephemeral
@@ -112,7 +144,7 @@ struct RequestLogBackpressureWireTests {
 
         for call in active {
             let (_, response) = try await call.value
-            #expect((response as? HTTPURLResponse)?.statusCode == 404)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
         }
         let recoveryDeadline = ContinuousClock.now.advanced(by: .seconds(3))
         while await engine.logGate.activeCount != 0 {
@@ -120,7 +152,7 @@ struct RequestLogBackpressureWireTests {
             await Task.yield()
         }
         let (_, recovered) = try await session.data(from: url)
-        #expect((recovered as? HTTPURLResponse)?.statusCode == 404)
+        #expect((recovered as? HTTPURLResponse)?.statusCode == 200)
         try await engine.stop()
     }
 
@@ -147,6 +179,14 @@ struct RequestLogBackpressureWireTests {
         }
         #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
         #expect(await engine.journeyStatus()?.totalServed == 0)
+
+        // This client sends only the first byte of a large declared body. Streaming admission
+        // must reject it before waiting for the rest of the upload.
+        let slowUpload = try RawHTTPClient.send(method: "POST", path: "/journey", port: port,
+            additionalHeaders: [("Content-Length", String(10 << 20))],
+            bodyPrefix: Data([0x61]), timeout: 2)
+        #expect(slowUpload.statusLine.contains("503"))
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
 
         let journeyURL = try #require(URL(string: "http://127.0.0.1:\(port)/journey"))
         let (_, rejected) = try await session.data(from: journeyURL)
