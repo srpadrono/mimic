@@ -228,7 +228,7 @@ struct EndpointCommand: AsyncParsableCommand {
                 }
 
                 let updated = try await client.send(.endpointUpdateWithActiveScenario(
-                    endpoint: ref,
+                    endpoint: .id(endpoint.id),
                     spec: endpointSpec,
                     scenarioSpec: responseSpec
                 ))
