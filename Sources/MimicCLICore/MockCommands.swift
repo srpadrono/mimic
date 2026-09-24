@@ -7,7 +7,7 @@ struct EndpointCommand: AsyncParsableCommand {
         commandName: "endpoint",
         abstract: "Define the routes the mock server answers.",
         discussion: """
-        Endpoints are addressed by route, so no command needs a UUID:
+        Endpoints can be addressed by route; use --id when several share one:
           mimic endpoint create GET /account-summary --status 200 --body '{"balance":10}'
           mimic endpoint delete GET /account-summary
         """,
@@ -202,17 +202,24 @@ struct EndpointCommand: AsyncParsableCommand {
                 )
             }
 
+            var stableRef = ref
             if endpointSpec != EndpointSpec() {
                 let result = try await client.send(.endpointUpdate(endpoint: ref, spec: endpointSpec))
                 guard result.ok else {
                     throw CLIFailure.commandFailed(result.error ?? .internalFailure("Update failed."))
                 }
+                guard let endpoint = result.result?.endpoint else {
+                    throw CLIFailure.commandFailed(.internalFailure("Update returned no endpoint."))
+                }
+                // A route or name may have changed. Follow the endpoint returned by the host,
+                // rather than resolving the old selector again after the mutation.
+                stableRef = .id(endpoint.id)
             }
 
             if responseSpec != ScenarioSpec() {
                 // Editing "the endpoint's response" means editing whichever scenario is active — the
                 // one a request would actually get.
-                let fetched = try await client.send(.endpointGet(endpoint: ref))
+                let fetched = try await client.send(.endpointGet(endpoint: stableRef))
                 guard fetched.ok, let endpoint = fetched.result?.endpoint else {
                     throw CLIFailure.commandFailed(fetched.error ?? .internalFailure("Endpoint not found."))
                 }
@@ -222,6 +229,7 @@ struct EndpointCommand: AsyncParsableCommand {
                             + "Create one with `mimic scenario create`."
                     )
                 }
+                stableRef = .id(endpoint.id)
                 let result = try await client.send(.scenarioUpdate(
                     endpoint: .id(endpoint.id),
                     scenario: .id(activeID),
@@ -232,7 +240,7 @@ struct EndpointCommand: AsyncParsableCommand {
                 }
             }
 
-            try Output(options).emit(try await client.send(.endpointGet(endpoint: ref)))
+            try Output(options).emit(try await client.send(.endpointGet(endpoint: stableRef)))
         }
     }
 
@@ -285,14 +293,7 @@ struct ScenarioCommand: AsyncParsableCommand {
     struct Create: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Add a response variant to an endpoint.")
 
-        @Argument(help: "HTTP method.")
-        var method: String
-
-        @Argument(help: "Endpoint path.")
-        var path: String
-
-        @Argument(help: "Scenario name, e.g. \"Server error\".")
-        var name: String
+        @OptionGroup var target: ScenarioTarget
 
         @Flag(name: .long, help: "Make this the active response immediately.")
         var activate: Bool = false
@@ -302,7 +303,7 @@ struct ScenarioCommand: AsyncParsableCommand {
 
         func run() async throws {
             let client = try options.client()
-            let ref = EndpointRef.route(try ArgumentParsing.method(method), path)
+            let (ref, name) = try target.resolve()
 
             let created = try await client.send(.scenarioCreate(
                 endpoint: ref,
@@ -312,9 +313,12 @@ struct ScenarioCommand: AsyncParsableCommand {
             guard created.ok else {
                 throw CLIFailure.commandFailed(created.error ?? .internalFailure("Create failed."))
             }
-            guard activate, let scenario = created.result?.scenario else {
+            guard activate else {
                 try Output(options).emit(created)
                 return
+            }
+            guard let scenario = created.result?.scenario else {
+                throw CLIFailure.commandFailed(.internalFailure("Create returned no scenario to activate."))
             }
             try Output(options).emit(
                 try await client.send(.scenarioActivate(endpoint: ref, scenario: .id(scenario.id)))
@@ -325,14 +329,7 @@ struct ScenarioCommand: AsyncParsableCommand {
     struct Update: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Change a scenario's response.")
 
-        @Argument(help: "HTTP method.")
-        var method: String
-
-        @Argument(help: "Endpoint path.")
-        var path: String
-
-        @Argument(help: "Scenario name.")
-        var name: String
+        @OptionGroup var target: ScenarioTarget
 
         @Option(name: .long, help: "Rename the scenario.")
         var newName: String?
@@ -341,12 +338,13 @@ struct ScenarioCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
+            let (ref, name) = try target.resolve()
             let spec = try response.scenarioSpec(name: newName)
             guard spec != ScenarioSpec() else {
                 throw CLIFailure.badArgument("Nothing to change. Pass --status, --body, --header, or --new-name.")
             }
             try Output(options).emit(await options.client().send(.scenarioUpdate(
-                endpoint: .route(try ArgumentParsing.method(method), path),
+                endpoint: ref,
                 scenario: .name(name),
                 spec: spec
             )))
@@ -356,20 +354,14 @@ struct ScenarioCommand: AsyncParsableCommand {
     struct Delete: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Remove a scenario.")
 
-        @Argument(help: "HTTP method.")
-        var method: String
-
-        @Argument(help: "Endpoint path.")
-        var path: String
-
-        @Argument(help: "Scenario name.")
-        var name: String
+        @OptionGroup var target: ScenarioTarget
 
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
+            let (ref, name) = try target.resolve()
             try Output(options).emit(await options.client().send(.scenarioDelete(
-                endpoint: .route(try ArgumentParsing.method(method), path),
+                endpoint: ref,
                 scenario: .name(name)
             )))
         }
@@ -380,22 +372,40 @@ struct ScenarioCommand: AsyncParsableCommand {
             abstract: "Make a scenario the live response for its endpoint."
         )
 
-        @Argument(help: "HTTP method.")
-        var method: String
-
-        @Argument(help: "Endpoint path.")
-        var path: String
-
-        @Argument(help: "Scenario name.")
-        var name: String
+        @OptionGroup var target: ScenarioTarget
 
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
+            let (ref, name) = try target.resolve()
             try Output(options).emit(await options.client().send(.scenarioActivate(
-                endpoint: .route(try ArgumentParsing.method(method), path),
+                endpoint: ref,
                 scenario: .name(name)
             )))
         }
+    }
+}
+
+/// The route spelling remains convenient when unique; a UUID selects an endpoint when several
+/// backends or GraphQL operations share the same route. Only the handle changes here. The host
+/// still owns scenario lookup and mutation rules.
+struct ScenarioTarget: ParsableArguments {
+    @Argument(help: "METHOD PATH SCENARIO, or SCENARIO with --id.")
+    var components: [String] = []
+
+    @Option(name: .long, help: "Endpoint UUID when its route is shared.")
+    var id: String?
+
+    func resolve() throws -> (EndpointRef, String) {
+        if let id {
+            guard components.count == 1 else {
+                throw CLIFailure.badArgument("With --id, provide only the scenario name.")
+            }
+            return (.id(try ArgumentParsing.uuid(id, flag: "--id")), components[0])
+        }
+        guard components.count == 3 else {
+            throw CLIFailure.badArgument("Provide <METHOD> <PATH> <SCENARIO>, or --id <UUID> <SCENARIO>.")
+        }
+        return (.route(try ArgumentParsing.method(components[0]), components[1]), components[2])
     }
 }

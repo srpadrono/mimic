@@ -325,6 +325,15 @@ struct JourneyResolutionTests {
         #expect(observed[0].delayMs == 350)
     }
 
+    @Test("A global delay at Int.max plus a step delay saturates")
+    func stepDelayOverflowSaturates() {
+        let journey = Journey(name: "Slow", steps: [Self.step(.get, "/inbox", 200, delayMs: 1)])
+        let observed = Self.replay([(.get, "/inbox")], journey: journey, globalDelayMs: Int.max)
+
+        #expect(observed[0].delayMs == Int.max)
+        #expect(observed[0].fromJourney)
+    }
+
     @Test("Network-failure steps resolve to a failure plan, not a status code")
     func networkFailuresResolveAsFailures() {
         let journey = Journey(
