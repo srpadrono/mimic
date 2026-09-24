@@ -548,18 +548,35 @@ struct AppStateAndViewTests {
 
     @Test("Both stores share one suite, so a test run cannot touch real preferences")
     func appStateStoresShareTheResolvedSuite() {
+        let protectedKeys = ["recentProjects", "panel.requestLog.height"]
+        let originalValues = protectedKeys.map { UserDefaults.standard.object(forKey: $0) }
+        func standardPreferencesUnchanged() -> Bool {
+            zip(protectedKeys, originalValues).allSatisfy { key, original in
+                let current = UserDefaults.standard.object(forKey: key)
+                return (original as? NSObject)?.isEqual(current) ?? (current == nil)
+            }
+        }
+        defer {
+            // Restore a developer's value if this regression ever writes to the standard suite.
+            for (key, original) in zip(protectedKeys, originalValues) {
+                let current = UserDefaults.standard.object(forKey: key)
+                guard !((original as? NSObject)?.isEqual(current) ?? (current == nil)) else { continue }
+                if let original { UserDefaults.standard.set(original, forKey: key) }
+                else { UserDefaults.standard.removeObject(forKey: key) }
+            }
+        }
+
         let isolated = UserDefaults(suiteName: "AppStateShared.\(UUID().uuidString)")!
         let recents = RecentProjectsStore(defaults: isolated)
         let layout = PanelLayoutStore(defaults: isolated)
 
         recents.record(id: UUID(), name: "Isolated")
-        layout.save(PanelLayout(requestLogHeight: 300))
+        let probeHeight: CGFloat = (originalValues[1] as? NSNumber)?.doubleValue == 300 ? 301 : 300
+        layout.save(PanelLayout(requestLogHeight: probeHeight))
 
         #expect(recents.load().first?.name == "Isolated")
-        #expect(PanelLayoutStore(defaults: isolated).load().requestLogHeight == 300)
-        // And none of it reached the real preferences.
-        #expect(UserDefaults.standard.object(forKey: "panel.requestLog.height") == nil
-                || PanelLayoutStore(defaults: isolated).load().requestLogHeight == 300)
+        #expect(PanelLayoutStore(defaults: isolated).load().requestLogHeight == probeHeight)
+        #expect(standardPreferencesUnchanged(), "neither store may write to standard preferences")
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
