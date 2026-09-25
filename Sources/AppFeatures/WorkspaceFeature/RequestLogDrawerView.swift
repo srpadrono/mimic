@@ -394,7 +394,7 @@ struct RequestLogDrawerView: View {
                         VStack(spacing: 0) {
                             tableHeader(compact: narrow, pathWidth: pathWidth)
                             DSDivider(style: .standard, identifier: "drawer.table.header")
-                            tableBody(compact: narrow, pathWidth: pathWidth)
+                            tableBody(compact: narrow, pathWidth: pathWidth, tableWidth: tableWidth)
                         }
                         .frame(width: tableWidth, height: table.size.height)
                     }
@@ -566,7 +566,7 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Body
 
     @ViewBuilder
-    private func tableBody(compact: Bool, pathWidth: CGFloat) -> some View {
+    private func tableBody(compact: Bool, pathWidth: CGFloat, tableWidth: CGFloat) -> some View {
         // Both resolved once for the whole table. A row's context menu has to know the entire
         // selection, and working that out inside the row would be O(rows²) on a log that holds a
         // thousand of them.
@@ -615,7 +615,11 @@ struct RequestLogDrawerView: View {
                         )
                     }
                 }
+                // The vertical scrollbar narrows its viewport. Keep the rows anchored to the
+                // header's full table width instead of centering an over-wide stack in that viewport.
+                .frame(width: tableWidth, alignment: .leading)
             }
+            .frame(width: tableWidth, alignment: .leading)
             // Selection here was reachable only by pointer — and this is the app's one multi-select
             // surface, the one a journey is captured from, so capturing a flow was a pointer-only
             // workflow end to end. `.focusable()` is what lets a `ScrollView` of tap targets take a
