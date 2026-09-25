@@ -183,13 +183,17 @@ struct ServerStatusWell: View {
                     .font(DSTypography.bodyMedium)
                 Spacer(minLength: DSSpacing.md)
                 Button { copyURL(for: backend) } label: {
-                    Label(copiedPort == backend.port ? "Copied" : "Copy URL",
-                          systemImage: copiedPort == backend.port ? "checkmark" : "doc.on.doc")
-                        .font(DSTypography.label)
-                        .lineLimit(1)
-                        .frame(width: DSToolbarGeometry.copyButtonWidth)
+                    HStack(spacing: DSSpacing.xs) {
+                        Image(systemName: copiedPort == backend.port ? "checkmark" : "doc.on.doc")
+                        Text(copiedPort == backend.port ? "Copied" : "Copy URL")
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .font(DSTypography.label)
+                    .frame(minWidth: DSToolbarGeometry.copyButtonWidth, alignment: .trailing)
                 }
                 .buttonStyle(.borderless)
+                .layoutPriority(1)
                 .disabled(!isRunning)
                 .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
                 .accessibilityLabel("Copy \(backend.name) URL, port \(backend.port)")
