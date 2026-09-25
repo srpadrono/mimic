@@ -87,22 +87,28 @@ struct WelcomeWindow: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            // MARK: - Left column: branding + actions
-            leftColumn
-                .frame(width: 280)
-                .frame(maxHeight: .infinity)
-                .background(DSColors.dominant)
+        GeometryReader { geometry in
+            let heroWidth = min(360, max(280, geometry.size.width * 0.26))
 
-            // `.strong`, now that it means something: this separates the window's two full-height
-            // columns, which is the heaviest job a rule in this app does. `.standard` reads as an
-            // in-panel hairline and let the two halves run together.
-            DSDivider(style: .strong, axis: .vertical)
+            HStack(spacing: 0) {
+                // Keep the launcher compact at its usual size, then give its existing action and
+                // identity a little more room when returning from a maximized workspace.
+                leftColumn(iconSize: 96 + (heroWidth - 280) * 0.2)
+                    .frame(width: heroWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(DSColors.dominant)
 
-            // MARK: - Right column: recent projects
-            rightColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DSColors.secondary)
+                // This separates the two full-height columns, which is the heaviest job a rule in
+                // this app does. `.standard` reads as an in-panel hairline.
+                DSDivider(style: .strong, axis: .vertical)
+
+                // A recent-project row should stay readable in a wide retained workspace window;
+                // it should not become a full-width stripe with its timestamp at the far edge.
+                rightColumn
+                    .frame(maxWidth: 840, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(DSColors.secondary)
+            }
         }
         .frame(minWidth: 640, minHeight: 380)
         .alert(
@@ -132,22 +138,22 @@ struct WelcomeWindow: View {
 
     // MARK: - Left Column
 
-    private var leftColumn: some View {
+    private func leftColumn(iconSize: CGFloat) -> some View {
         VStack(spacing: DSSpacing.xxxl) {
             Spacer(minLength: 0)
-            hero
+            hero(iconSize: iconSize)
             actions
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DSSpacing.lg)
     }
 
-    private var hero: some View {
+    private func hero(iconSize: CGFloat) -> some View {
         VStack(spacing: DSSpacing.lg) {
             Image("MimicLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 96, height: 96)
+                .frame(width: iconSize, height: iconSize)
                 // The app-icon squircle is not a control corner, so it stays local to this image.
                 // Deliberately not a `DSCornerRadius` token — those are for controls and panels, and
                 // rounding an app icon to 12 would make it look like a button.
