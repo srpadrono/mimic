@@ -61,8 +61,10 @@ nonisolated public enum DSToolbarGeometry {
     /// Matches the native macOS sidebar toggle in the same toolbar.
     public static let height: CGFloat = 36
     public static let contentHeight: CGFloat = 16
-    /// Room for the project, summary, and the editor's native icon actions.
-    public static let expandedCenterWidth: CGFloat = 840
+    /// The full project and server summaries need this much centre-column space beside the actions.
+    public static let expandedCenterWidth: CGFloat = 600
+    /// The shorter summaries keep both editor actions visible until the centre gets this narrow.
+    public static let actionOverflowCenterWidth: CGFloat = 440
     public static let projectTitleWidth: CGFloat = 160
     public static let compactProjectTitleWidth: CGFloat = 120
     public static let metadataHeight: CGFloat = 12

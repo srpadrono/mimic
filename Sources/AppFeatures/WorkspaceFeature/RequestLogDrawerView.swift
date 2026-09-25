@@ -37,7 +37,15 @@ enum LogColumns {
     // Reserve a readable path column before offering horizontal scrolling.
     static let minimumTableWidth = method + endpoint + scenario + status + time + endpoint + DSSpacing.md * 2
 
-    // path is flexible — takes remaining space
+    /// Header and rows must receive the same resolved path width. A vertical scrollbar can reduce
+    /// the row viewport without reducing the separate header's width; letting each HStack distribute
+    /// the remainder independently shifts every column after Path when the log starts scrolling.
+    static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
+        let fixedWidth = compact
+            ? compactMethod + compactStatus + time
+            : method + endpoint + scenario + status + time
+        return max(0, tableWidth - fixedWidth - DSSpacing.md * 2)
+    }
 }
 
 /// One traffic row's geometry.
@@ -380,14 +388,15 @@ struct RequestLogDrawerView: View {
                 )
             } else {
                 GeometryReader { table in
+                    let tableWidth = narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth)
+                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: narrow)
                     ScrollView(.horizontal) {
                         VStack(spacing: 0) {
-                            tableHeader(compact: narrow)
+                            tableHeader(compact: narrow, pathWidth: pathWidth)
                             DSDivider(style: .standard, identifier: "drawer.table.header")
-                            tableBody(compact: narrow)
+                            tableBody(compact: narrow, pathWidth: pathWidth)
                         }
-                        .frame(width: narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth),
-                               height: table.size.height)
+                        .frame(width: tableWidth, height: table.size.height)
                     }
                 }
             }
@@ -512,11 +521,11 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Header
 
     @ViewBuilder
-    private func tableHeader(compact: Bool) -> some View {
+    private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             columnHeader("Method", field: .method,
                          width: compact ? LogColumns.compactMethod : LogColumns.method)
-            columnHeader("Path", field: .path, width: nil)
+            columnHeader("Path", field: .path, width: pathWidth)
             if !compact {
                 columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
                 columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
@@ -557,7 +566,7 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Body
 
     @ViewBuilder
-    private func tableBody(compact: Bool) -> some View {
+    private func tableBody(compact: Bool, pathWidth: CGFloat) -> some View {
         // Both resolved once for the whole table. A row's context menu has to know the entire
         // selection, and working that out inside the row would be O(rows²) on a log that holds a
         // thousand of them.
@@ -576,6 +585,7 @@ struct RequestLogDrawerView: View {
                             rowIndex: index,
                             isSelected: selectedLogIDs.contains(log.id),
                             compact: compact,
+                            pathWidth: pathWidth,
                             onCreateEndpoint: onCreateEndpoint,
                             onSaveAsMock: onSaveAsMock,
                             journeys: journeys,
@@ -1170,6 +1180,8 @@ struct RequestLogTableRow: View {
     let rowIndex: Int
     let isSelected: Bool
     var compact = false
+    /// The live table supplies its measured Path width; standalone rows may size it naturally.
+    var pathWidth: CGFloat? = nil
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
     var onSaveAsMock: ((UUID) -> Void)? = nil
     @State private var showingSaveConfirmation = false
@@ -1206,7 +1218,8 @@ struct RequestLogTableRow: View {
                 .font(DSTypography.codePath)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: pathWidth, alignment: .leading)
+                .frame(maxWidth: pathWidth == nil ? .infinity : nil, alignment: .leading)
 
             // Endpoint — or, when none matched, what did answer. A bare em dash here used to mean
             // both "unconfigured" and "a journey answered", which is exactly the distinction someone
