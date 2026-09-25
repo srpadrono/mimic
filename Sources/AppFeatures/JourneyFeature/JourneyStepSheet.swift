@@ -70,6 +70,7 @@ struct JourneyStepSheet: View {
     @State private var headersExpanded = false
     @State private var timingExpanded = false
     @State private var validation: Validation?
+    @State private var scrollPresentationID = UUID()
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -121,6 +122,7 @@ struct JourneyStepSheet: View {
                     }
                 }
             }
+            .id(scrollPresentationID)
 
             DSDivider(identifier: "stepSheet.footer")
             HStack(spacing: DSSpacing.md) {
@@ -144,7 +146,12 @@ struct JourneyStepSheet: View {
                            (NSScreen.main?.visibleFrame.height ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .defaultFocus($focusedField, .path)
-        .onAppear(perform: loadExistingStep)
+        .onAppear {
+            loadExistingStep()
+            // AppKit may reuse the same scroll view when switching between Add and Edit sheets.
+            // Recreate only the scroll container for each presentation so its old offset is not restored.
+            scrollPresentationID = UUID()
+        }
     }
 
     private var requestFields: some View {
