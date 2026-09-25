@@ -582,7 +582,9 @@ final class JourneyEditorUITests: MimicUITestCase {
             UITestApp.waitForAny([scoped, loose], timeout: 5),
             "The outcome control should offer \"\(title)\""
         )
-        (scoped.exists ? scoped : loose).click()
+        let selected = scoped.exists ? scoped : loose
+        stepSheet.reveal(selected, byScrollingUp: false)
+        selected.click()
     }
 
     /// A context-menu item, preferring its identifier and falling back to its title.

@@ -186,6 +186,7 @@ struct ServerStatusWell: View {
                     Label(copiedPort == backend.port ? "Copied" : "Copy URL",
                           systemImage: copiedPort == backend.port ? "checkmark" : "doc.on.doc")
                         .font(DSTypography.label)
+                        .lineLimit(1)
                         .frame(width: DSToolbarGeometry.copyButtonWidth)
                 }
                 .buttonStyle(.borderless)

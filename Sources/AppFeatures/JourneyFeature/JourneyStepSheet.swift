@@ -327,6 +327,7 @@ struct JourneyStepSheet: View {
                 Text(summary).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
             }
             .foregroundStyle(DSColors.labelPrimary)
+            .frame(minHeight: DSControlHeight.navigation)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

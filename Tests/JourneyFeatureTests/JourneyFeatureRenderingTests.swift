@@ -133,8 +133,8 @@ struct JourneyFeatureRenderingTests {
             text: .constant("Retry"), scopeID: .constant("any"), scopes: [],
             placeholder: "Filter journeys", identifier: "test.journeys"
         ) { Image(systemName: "play.circle.fill") }, size: CGSize(width: 240, height: 100))
-        #expect(endpoints.height == 42)
-        #expect(journeys.height == 42)
+        #expect(endpoints.height == 48)
+        #expect(journeys.height == 48)
     }
 
     /// An unrelated active identifier must not change an empty navigator.

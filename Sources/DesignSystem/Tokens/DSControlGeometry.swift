@@ -68,7 +68,7 @@ nonisolated public enum DSToolbarGeometry {
     public static let metadataHeight: CGFloat = 12
     public static let detailsWidth: CGFloat = 340
     public static let detailsListHeight: CGFloat = 320
-    public static let copyButtonWidth: CGFloat = 80
+    public static let copyButtonWidth: CGFloat = 100
     public static let compactStatusWidth: CGFloat = 104
     public static let statusWidth: CGFloat = 220
 }

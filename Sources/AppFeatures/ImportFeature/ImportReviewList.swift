@@ -17,8 +17,8 @@ private enum ImportColumns {
     static let name: CGFloat = 120
     static let status: CGFloat = 42
     static let size: CGFloat = 58
-    /// Seats the "Duplicate" pill and the readable binary/body-drop labels.
-    static let flag: CGFloat = 100
+    /// Seats the "Duplicate" pill and the binary/body-drop labels at the operational text size.
+    static let flag: CGFloat = 116
     /// The checkbox, plus the gap the list puts either side of it.
     static let toggle: CGFloat = 18
     // path is flexible — takes the remaining space
@@ -185,7 +185,7 @@ struct ImportReviewList: View {
 
     private func columnTitle(_ title: String, width: CGFloat?) -> some View {
         Text(title)
-            .font(DSTypography.meta)
+            .font(DSTypography.label)
             // Column titles carry the meaning of the numbers under them — see the note above.
             .foregroundStyle(DSColors.labelSecondary)
             .frame(width: width, alignment: .leading)
@@ -332,7 +332,7 @@ private struct ImportCandidateRow: View {
                 // review is a column of identical rows. Same rule the sidebar follows.
                 if let operation = candidate.graphqlOperation, !operation.isEmpty {
                     Text(operation)
-                        .font(DSTypography.meta)
+                        .font(DSTypography.code)
                         .foregroundStyle(DSColors.accentText)
                         .lineLimit(1)
                         .accessibilityIdentifier("import.candidate.index.\(rowIndex).operation")
@@ -352,13 +352,13 @@ private struct ImportCandidateRow: View {
             // Coloured text, not a filled pill. A 200 is an ordinary value, and a row where every
             // field is a chip has no emphasis left for the field that needs it.
             Text("\(candidate.statusCode)")
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.code)
                 .foregroundStyle(DSColors.httpStatusColor(for: candidate.statusCode))
                 .frame(width: ImportColumns.status, alignment: .leading)
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
 
             Text(candidate.bodySizeLabel)
-                .font(DSTypography.meta)
+                .font(DSTypography.label)
                 .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.size, alignment: .leading)
@@ -412,7 +412,7 @@ private struct ImportCandidateRow: View {
             // Before the size branch, deliberately: a binary body's recorded size can also exceed
             // the limit, and binary is the more specific reason there is no body.
             Label("Binary body", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.metaSmall)
+                .font(DSTypography.label)
                 .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
@@ -420,7 +420,7 @@ private struct ImportCandidateRow: View {
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.binaryBody")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.metaSmall)
+                .font(DSTypography.label)
                 .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")

@@ -136,7 +136,9 @@ final class BackendSettingsUITests: MimicUITestCase {
     func testBackendListSelectionAndRemoval() {
         launchApp()
         createProjectViaUI(name: "Backend selection")
+        workspace.fillWindow()
         let page = BackendSettingsPage(app: app)
+        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
         page.open.click()
         XCTAssertTrue(page.primarySelection.waitForExistence(timeout: 5))
         page.add.click()

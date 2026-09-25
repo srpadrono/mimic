@@ -1406,6 +1406,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         launchShell()
         workspace.compactWindow()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
+        XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5),
+                      "The compact toolbar must keep the project name visible")
         // On the smallest CI displays AppKit itself overflows the entire center group.
         // Check our compact menu whenever that group fits; the expanded layout is always checked.
         if workspace.overflowMenu.exists {
@@ -1455,6 +1457,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         well.closeDetails()
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(workspace.projectTitle.isHittable,
+                      "Running in a compact window must keep the project name visible")
         XCTAssertTrue(workspace.serverToggleButton.isHittable,
                       "Run/Stop must remain usable in the compact toolbar")
         XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")

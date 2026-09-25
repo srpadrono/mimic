@@ -30,7 +30,7 @@ struct UpdateSheet: View {
                 // to find it again.
                 Toggle("Check automatically", isOn: automaticChecks)
                     .toggleStyle(.checkbox)
-                    .font(DSTypography.meta)
+                    .font(DSTypography.label)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
                     .accessibilityIdentifier("update.automaticToggle")
@@ -105,7 +105,7 @@ struct UpdateSheet: View {
             VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
                 Text("You have \(service.installedVersionDescription). "
                     + "The installer is \(release.asset.sizeInBytes.formatted(.byteCount(style: .file))).")
-                    .font(DSTypography.meta)
+                    .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("update.summary")
 
@@ -113,7 +113,7 @@ struct UpdateSheet: View {
 
                 Text("Installing quits Mimic and updates the mimic command-line tool. "
                     + "Your projects are preserved.")
-                    .font(DSTypography.meta)
+                    .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("update.installNote")
             }
@@ -125,7 +125,7 @@ struct UpdateSheet: View {
                     .accessibilityLabel("Download progress")
                 Text("\(Int(fraction * 100))% of "
                     + "\(release.asset.sizeInBytes.formatted(.byteCount(style: .file)))")
-                    .font(DSTypography.meta)
+                    .font(DSTypography.code)
                     .foregroundStyle(DSColors.labelSecondary)
                     .monospacedDigit()
                     .accessibilityIdentifier("update.progressLabel")
@@ -143,7 +143,7 @@ struct UpdateSheet: View {
 
                 Text("Mimic will save your work, take a copy of your projects, then quit and open "
                     + "the installer. macOS will ask for your password.")
-                    .font(DSTypography.meta)
+                    .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("update.readyNote")
             }
@@ -161,12 +161,12 @@ struct UpdateSheet: View {
             VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
                 Text(message)
                     .font(DSTypography.body)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .foregroundStyle(DSColors.labelPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("update.failure")
 
                 Link("Open the releases page", destination: UpdateFeed.releasesPageURL)
-                    .font(DSTypography.meta)
+                    .font(DSTypography.label)
                     .accessibilityIdentifier("update.releasesLink")
                     .accessibilityLabel("Open the releases page")
             }
@@ -265,7 +265,7 @@ struct UpdateSheet: View {
 
         case .installing:
             Text("Please wait…")
-                .font(DSTypography.meta)
+                .font(DSTypography.label)
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityIdentifier("update.installingStatus")
 
