@@ -196,7 +196,7 @@ struct ServerStatusWell: View {
                 .layoutPriority(1)
                 .disabled(!isRunning)
                 .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
-                .accessibilityLabel("Copy \(backend.name) URL, port \(backend.port)")
+                .accessibilityLabel("Copy \(backend.name) URL, port \(String(backend.port))")
                 .accessibilityValue(copiedPort == backend.port ? "Copied" : "")
                 .help("Copy \(backend.localURL)")
             }
