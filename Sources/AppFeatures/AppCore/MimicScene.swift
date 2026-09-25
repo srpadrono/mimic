@@ -59,6 +59,12 @@ public struct MimicScene: Scene {
                 Button("Close Project") { appState.closeProject() }
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(appState.currentProject == nil)
+
+                Button("Rename Project\u{2026}") {
+                    guard let project = appState.currentProject else { return }
+                    appState.projectRenameTarget = .init(id: project.id, name: project.name)
+                }
+                .disabled(appState.currentProject == nil)
             }
 
             CommandMenu("Server") {
@@ -85,6 +91,9 @@ public struct MimicScene: Scene {
                         )
                         .disabled(appState.currentProject == nil)
                 }
+                Button("Filter Navigator") { appState.navigatorFilterRequest += 1 }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(appState.currentProject == nil)
             }
 
             CommandMenu("Journeys") {

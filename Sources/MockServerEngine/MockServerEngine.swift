@@ -27,7 +27,7 @@ public actor MockServerEngine {
 
     /// Lossless delivery to the single consumer. Automatic response capture consumes this stream,
     /// so dropping pending events also silently loses persistent mocks. Producers reserve one of
-    /// 32 permits before resolving a route or making a log. Excess requests get a 503 without
+    /// 32 handler permits and one of 64 pending-log permits before resolving a route. Excess requests get a 503 without
     /// advancing a journey; the runtime returns permits after processing accepted entries.
     public nonisolated let logStream: AsyncStream<RequestLog>
     private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation

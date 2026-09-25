@@ -267,6 +267,36 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
     // MARK: - The recents context menu
 
+    @MainActor
+    func testRenameFromRecentsSurvivesReopeningProject() throws {
+        launchApp()
+        createProjectWithEndpoint(named: "Before Rename", path: "/rename-check")
+
+        let row = recentsRow(named: "Before Rename")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.rightClick()
+        let renameItem = app.menuItems["Rename\u{2026}"]
+        XCTAssertTrue(renameItem.waitForExistence(timeout: 3))
+        renameItem.click()
+
+        let nameField = app.textFields["ds.textfield.projectRename.name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 3))
+        nameField.click()
+        nameField.typeKey("a", modifierFlags: .command)
+        nameField.typeText("After Rename")
+        app.buttons["projectRename.confirm"].click()
+
+        let renamedRow = recentsRow(named: "After Rename")
+        XCTAssertTrue(renamedRow.waitForExistence(timeout: 5), "Renaming should update the welcome list")
+        renamedRow.click()
+        // Renaming the project leaves the endpoint's own name unchanged.
+        XCTAssertTrue(
+            NavigatorPage(app: app).endpointRow(named: "Before Rename EP", path: "/rename-check")
+                .waitForExistence(timeout: 10),
+            "The renamed stored project should reopen with its endpoints"
+        )
+    }
+
     /// WELC-19 — Open on the context menu opens the project.
     ///
     /// The existing suite asserts the item exists and stops there, so until now nothing proved the

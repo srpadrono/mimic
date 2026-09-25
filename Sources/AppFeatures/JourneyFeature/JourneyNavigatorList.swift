@@ -15,18 +15,22 @@ struct JourneyNavigatorList: View {
     let onAdd: () -> Void
     let onDuplicate: (UUID) -> Void
     let onDelete: (UUID) -> Void
+    let onRename: (UUID, String) -> Void
 
     /// Deleting a journey takes its steps with it and there is no undo anywhere in `AppState`, so
     /// the navigator asks first — as `SidebarView`
     /// does for endpoints. The confirmation lives here rather than at the call site because the
     /// context menu that offers the action lives here.
     @State private var deleteTarget: Journey?
+    @State private var renameTarget: Journey?
+    @FocusState private var focusedJourneyID: UUID?
     var searchText: String = ""
     @Binding var collapsedGroups: Set<String>
 
     init(journeys: [Journey], activeJourneyID: UUID?, selectedJourneyID: Binding<UUID?>,
          onActivate: @escaping (UUID?) -> Void, onAdd: @escaping () -> Void,
          onDuplicate: @escaping (UUID) -> Void, onDelete: @escaping (UUID) -> Void,
+         onRename: @escaping (UUID, String) -> Void = { _, _ in },
          searchText: String = "", collapsedGroups: Binding<Set<String>> = .constant([])) {
         self.journeys = journeys
         self.activeJourneyID = activeJourneyID
@@ -35,6 +39,7 @@ struct JourneyNavigatorList: View {
         self.onAdd = onAdd
         self.onDuplicate = onDuplicate
         self.onDelete = onDelete
+        self.onRename = onRename
         self.searchText = searchText
         self._collapsedGroups = collapsedGroups
     }
@@ -118,6 +123,39 @@ struct JourneyNavigatorList: View {
                 // on a container renames every descendant to match it.
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("journeys.list")
+                .onChange(of: selectedJourneyID) { _, selection in
+                    if let selection { focusedJourneyID = selection }
+                }
+                .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                    guard !press.modifiers.contains(.command), !press.modifiers.contains(.option) else {
+                        return .ignored
+                    }
+                    let offset = press.key == .downArrow ? 1 : -1
+                    guard let next = NavigatorKeyboardSelection.moved(
+                        from: selectedJourneyID, by: offset, through: visibleJourneyIDs
+                    ) else { return .ignored }
+                    selectedJourneyID = next
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    guard let id = selectedJourneyID,
+                          visibleJourneyIDs.contains(id),
+                          let journey = journeys.first(where: { $0.id == id }) else { return .ignored }
+                    renameTarget = journey
+                    return .handled
+                }
+                .onKeyPress(keys: [.delete, .deleteForward]) { _ in
+                    guard let id = selectedJourneyID,
+                          visibleJourneyIDs.contains(id),
+                          let journey = journeys.first(where: { $0.id == id }) else { return .ignored }
+                    deleteTarget = journey
+                    return .handled
+                }
+                .onDeleteCommand {
+                    guard let id = selectedJourneyID,
+                          visibleJourneyIDs.contains(id) else { return }
+                    deleteTarget = journeys.first(where: { $0.id == id })
+                }
             }
         }
         .onChange(of: searchText) { _, text in
@@ -135,6 +173,14 @@ struct JourneyNavigatorList: View {
             if let newSelection = new.first(where: { $0.id == selectedJourneyID }),
                oldSelection == nil || newSelection.groupTag != oldSelection?.groupTag {
                 collapsedGroups.remove(sectionKey(for: newSelection))
+            }
+        }
+        .sheet(item: $renameTarget) { journey in
+            RenameItemSheet(
+                title: "Rename journey", fieldLabel: "Journey name",
+                identifier: "journeyRename", initialName: journey.name
+            ) { name in
+                onRename(journey.id, name)
             }
         }
         .alert(
@@ -163,6 +209,16 @@ struct JourneyNavigatorList: View {
     static func groupSectionKey(_ name: String) -> String { "group:\(name)" }
     private var ungroupedJourneys: [Journey] { filteredJourneys.filter { ($0.groupTag ?? "").isEmpty } }
 
+    private var visibleJourneyIDs: [UUID] {
+        let grouped = groupNames.flatMap { name in
+            collapsedGroups.contains(Self.groupSectionKey(name))
+                ? [] : (groupedJourneys[name] ?? []).map(\.id)
+        }
+        let ungrouped = groupNames.isEmpty || !collapsedGroups.contains(Self.ungroupedSectionKey)
+            ? ungroupedJourneys.map(\.id) : []
+        return grouped + ungrouped
+    }
+
     private func sectionKey(for journey: Journey) -> String {
         guard let group = journey.groupTag, !group.isEmpty else { return Self.ungroupedSectionKey }
         return Self.groupSectionKey(group)
@@ -173,10 +229,19 @@ struct JourneyNavigatorList: View {
             journey: journey, isActive: journey.id == activeJourneyID,
             isSelected: journey.id == selectedJourneyID,
             onToggleActivation: { onActivate(journey.id == activeJourneyID ? nil : journey.id) },
+            onRename: { renameTarget = journey },
             onDuplicate: { onDuplicate(journey.id) }, onDelete: { deleteTarget = journey }
         )
         .dsNavigatorRow(indented: indented)
         .tag(journey.id)
+        .focusable()
+        .focused($focusedJourneyID, equals: journey.id)
+        .simultaneousGesture(TapGesture().onEnded {
+            // A click on the already-selected row must reclaim focus from editor fields so
+            // Return, Delete, and the arrow keys operate on the navigator again.
+            selectedJourneyID = journey.id
+            focusedJourneyID = journey.id
+        })
     }
 
     private var filteredJourneys: [Journey] {
@@ -195,6 +260,7 @@ struct JourneyNavigatorRow: View {
     let isActive: Bool
     var isSelected: Bool = false
     let onToggleActivation: () -> Void
+    var onRename: () -> Void = {}
     let onDuplicate: () -> Void
     let onDelete: () -> Void
 
@@ -223,6 +289,11 @@ struct JourneyNavigatorRow: View {
         .contentShape(Rectangle())
         .help(accessibilityDescription)
         .contextMenu {
+            Button(action: onRename) {
+                Label("Rename\u{2026}", systemImage: "pencil")
+            }
+            .accessibilityIdentifier("journeys.contextMenu.rename")
+
             Button(action: onToggleActivation) {
                 Label(
                     isActive ? "Deactivate" : "Activate",

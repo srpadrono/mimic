@@ -183,6 +183,11 @@ struct EndpointEditorView: View {
             help: "More actions for this endpoint",
             identifier: "endpointEditor.moreMenu"
         ) {
+            Button("Rename\u{2026}", systemImage: "pencil", action: actions.onRename)
+                .accessibilityIdentifier("endpointEditor.moreMenu.rename")
+            Button("Edit request\u{2026}", action: actions.onEditRequest)
+                .accessibilityIdentifier("endpointEditor.moreMenu.editRequest")
+            Divider()
             Button {
                 actions.onDuplicate()
             } label: {

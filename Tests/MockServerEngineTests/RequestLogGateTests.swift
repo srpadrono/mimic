@@ -46,6 +46,26 @@ struct RequestLogGateTests {
         try await waitForEmpty(gate)
     }
 
+    @Test("Completed requests can queue 40 logs while the UI drains them")
+    func pendingLogBacklogStaysBoundedWithoutRejectingTheDemo() async throws {
+        let gate = RequestLogGate()
+        for _ in 0..<40 {
+            let lease = try #require(await gate.tryAcquireLease())
+            #expect(lease.transferToConsumer())
+            await lease.finish()
+        }
+        #expect(await gate.activeCount == 0)
+        #expect(await gate.outstandingCount == 40)
+        for _ in 40..<RequestLogGate.pendingLogCapacity {
+            let lease = try #require(await gate.tryAcquireLease())
+            #expect(lease.transferToConsumer())
+            await lease.finish()
+        }
+        #expect(await gate.tryAcquireLease() == nil)
+        for _ in 0..<RequestLogGate.pendingLogCapacity { await gate.acknowledge() }
+        try await waitForEmpty(gate)
+    }
+
     @Test("A terminated stream rejects new admissions even after slots are returned")
     func terminationRejectsAdmission() async throws {
         let gate = RequestLogGate()
@@ -78,6 +98,50 @@ struct RequestLogGateTests {
 
 @Suite("Request log wire backpressure", .serialized, .timeLimit(.minutes(1)))
 struct RequestLogBackpressureWireTests {
+    @Test("Completed keep-alive requests return slots before the next bounded batch")
+    func completedMocksDoNotExhaustAdmission() async throws {
+        let port = try #require(PlatformSocket.freePort())
+        let engine = MockServerEngine()
+        let scenario = Scenario(name: "Ready", statusCode: 200, body: "ready")
+        let endpoint = Endpoint(name: "Ready", path: "/ready", scenarios: [scenario],
+            activeScenarioID: scenario.id, delayMs: 20)
+        await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 0)
+        try await engine.start(configuration: .init(port: port, globalDelayMs: 0))
+        defer { Task { try? await engine.stop() } }
+        let session = JourneyServingTests.session(timeout: 10)
+        defer { session.invalidateAndCancel() }
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/ready"))
+        let drain = Task {
+            var count = 0
+            for await _ in engine.logStream {
+                await engine.acknowledgeLog()
+                count += 1
+                if count == 40 { break }
+            }
+            return count
+        }
+
+        for _ in 0..<5 {
+            let statuses = try await withThrowingTaskGroup(of: Int.self, returning: [Int].self) { group in
+                for _ in 0..<8 {
+                    group.addTask {
+                        let (_, response) = try await session.data(from: url)
+                        return (response as? HTTPURLResponse)?.statusCode ?? 0
+                    }
+                }
+                var values: [Int] = []
+                for try await status in group { values.append(status) }
+                return values
+            }
+            #expect(statuses.count == 8)
+            #expect(statuses.allSatisfy { $0 == 200 }, "A finished mock kept an admission slot.")
+            #expect(await engine.logGate.activeCount == 0)
+        }
+        #expect(await drain.value == 40)
+        #expect(await engine.logGate.outstandingCount == 0)
+        try await engine.stop()
+    }
+
     @Test("An incomplete HEAD upload closes despite HEAD suppressing response bodies")
     func stalledHeadUploadCloses() async throws {
         let port = try #require(PlatformSocket.freePort())
@@ -287,12 +351,12 @@ struct RequestLogBackpressureWireTests {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
 
-        for index in 0..<RequestLogGate.capacity {
+        for index in 0..<RequestLogGate.pendingLogCapacity {
             let url = try #require(URL(string: "http://127.0.0.1:\(port)/queued/\(index)"))
             let (_, response) = try await session.data(from: url)
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
         }
-        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.pendingLogCapacity)
         #expect(await engine.journeyStatus()?.totalServed == 0)
 
         // This client sends only the first byte of a large declared body. Streaming admission
@@ -302,12 +366,12 @@ struct RequestLogBackpressureWireTests {
             bodyPrefix: Data([0x61]), timeout: 2)
         #expect(slowUpload.statusLine.contains("503"))
         #expect(slowUpload.raw.lowercased().contains("x-mimic-rejection: admission-capacity"))
-        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.pendingLogCapacity)
 
         let journeyURL = try #require(URL(string: "http://127.0.0.1:\(port)/journey"))
         let (_, rejected) = try await session.data(from: journeyURL)
         #expect((rejected as? HTTPURLResponse)?.statusCode == 503)
-        #expect(await engine.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await engine.logGate.outstandingCount == RequestLogGate.pendingLogCapacity)
         #expect(await engine.journeyStatus()?.totalServed == 0)
 
         var logs = engine.logStream.makeAsyncIterator()
@@ -318,7 +382,7 @@ struct RequestLogBackpressureWireTests {
         let (_, admitted) = try await session.data(from: journeyURL)
         #expect((admitted as? HTTPURLResponse)?.statusCode == 201)
         #expect(await engine.journeyStatus()?.totalServed == 1)
-        for index in 1..<RequestLogGate.capacity {
+        for index in 1..<RequestLogGate.pendingLogCapacity {
             let log = try #require(await logs.next())
             #expect(log.path == "/queued/\(index)")
             await engine.acknowledgeLog()

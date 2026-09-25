@@ -10,6 +10,8 @@ import DesignSystem
 struct CenterPaneView: View {
     @Environment(AppState.self) private var appState
     let content: CenterPaneContent
+    var onRenameEndpoint: (UUID) -> Void = { _ in }
+    var onEditEndpointRequest: (UUID) -> Void = { _ in }
 
     var body: some View {
         Group {
@@ -57,6 +59,8 @@ struct CenterPaneView: View {
                 globalDelayMs: appState.serverConfiguration.globalDelayMs,
                 backends: appState.serverConfiguration.listeners,
                 actions: EndpointEditorActions(
+                    onRename: { onRenameEndpoint(endpointID) },
+                    onEditRequest: { onEditEndpointRequest(endpointID) },
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
                     // Capture the scenario shown when the edit was typed. The pending edit closure

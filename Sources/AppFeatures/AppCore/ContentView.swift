@@ -25,6 +25,9 @@ struct ContentView: View {
                     onOpenProject: appState.openProject(id:),
                     onDuplicateProject: appState.duplicateProject(id:),
                     onDeleteProject: appState.deleteProject(id:),
+                    onRequestRenameProject: { entry in
+                        appState.projectRenameTarget = .init(id: entry.id, name: entry.name)
+                    },
                     onRequestNewProject: { appState.showNewProjectSheet = true }
                 )
             }
@@ -40,6 +43,14 @@ struct ContentView: View {
         .sheet(isPresented: $appState.showNewProjectSheet) {
             NewProjectSheet { name, port in
                 appState.createProject(name: name, port: port)
+            }
+        }
+        .sheet(item: $appState.projectRenameTarget) { target in
+            RenameItemSheet(
+                title: "Rename project", fieldLabel: "Project name",
+                identifier: "projectRename", initialName: target.name
+            ) { name in
+                appState.renameProject(id: target.id, name: name)
             }
         }
         // One presenter, for the same reason the new-project sheet has one: the menu item works from

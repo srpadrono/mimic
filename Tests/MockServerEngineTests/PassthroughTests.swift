@@ -125,11 +125,11 @@ struct PassthroughTests {
             upstreamURL: "http://127.0.0.1:\(real)"))
         let session = JourneyServingTests.session(timeout: 10)
         defer { session.invalidateAndCancel() }
-        for index in 0..<RequestLogGate.capacity {
+        for index in 0..<RequestLogGate.pendingLogCapacity {
             let url = try #require(URL(string: "http://127.0.0.1:\(local)/fill/\(index)"))
             _ = try await session.data(from: url)
         }
-        #expect(await proxy.logGate.outstandingCount == RequestLogGate.capacity)
+        #expect(await proxy.logGate.outstandingCount == RequestLogGate.pendingLogCapacity)
 
         let liveURL = try #require(URL(string: "http://127.0.0.1:\(local)/live"))
         let (_, rejected) = try await session.data(from: liveURL)
@@ -146,7 +146,7 @@ struct PassthroughTests {
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect(String(decoding: data, as: UTF8.self) == largeBody)
 
-        for index in 1..<RequestLogGate.capacity {
+        for index in 1..<RequestLogGate.pendingLogCapacity {
             let log = try #require(await logs.next())
             #expect(log.path == "/fill/\(index)")
             await proxy.acknowledgeLog()

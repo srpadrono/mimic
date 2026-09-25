@@ -205,9 +205,9 @@ public enum ProjectCommandExecutor {
 
         case let .endpointDuplicate(ref):
             let source = try project.requireEndpoint(ref)
-            let copy = duplicate(source)
+            let copy = duplicate(source, among: project.endpoints)
             project.endpoints.append(copy)
-            return mutated(.init(message: "Duplicated endpoint as \"\(copy.name)\".", endpoint: copy))
+            return mutated(.init(message: "Duplicated endpoint as \"\(copy.name)\" at \(copy.method.rawValue) \(copy.path).", endpoint: copy))
 
         // MARK: Scenarios
 
@@ -620,7 +620,7 @@ public enum ProjectCommandExecutor {
 
     // MARK: - Duplication
 
-    /// A copy of `source` named "… (Copy)", reminted by ``Endpoint/copyingWithFreshIdentifiers()``.
+    /// A copy of `source` with a distinct route, reminted by ``Endpoint/copyingWithFreshIdentifiers()``.
     ///
     /// The reminting is not repeated here, and that is the whole point. This arm used to build its own
     /// copy, and it and the shared helper disagreed about one field: it pointed the copy at
@@ -630,12 +630,23 @@ public enum ProjectCommandExecutor {
     /// "Server error" handed back one serving "Default".
     ///
     /// Following the source is the correct half: a duplicate should answer the way the original
-    /// answers. The rename is the only thing left that is specific to duplicating *within* a project,
-    /// where the copy lands in the same list as its original and two identical names tell the reader
-    /// nothing about which is which.
-    static func duplicate(_ source: Endpoint) -> Endpoint {
+    /// answers. Within a project, the copy lands in the same list as its original. A duplicate with the same method,
+    /// backend and path cannot answer a request because the original wins route resolution. Give
+    /// the copy a predictable child path, with a suffix if that path is already in use.
+    static func duplicate(_ source: Endpoint, among endpoints: [Endpoint]) -> Endpoint {
         var copy = source.copyingWithFreshIdentifiers()
         copy.name = "\(source.name) (Copy)"
+        let base = source.path == "/" ? "/copy" : source.path + (source.path.hasSuffix("/") ? "copy" : "/copy")
+        var path = base
+        var suffix = 2
+        while endpoints.contains(where: {
+            $0.backendID == source.backendID && $0.method == source.method
+                && $0.path.caseInsensitiveCompare(path) == .orderedSame
+        }) {
+            path = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        copy.path = path
         return copy
     }
 
