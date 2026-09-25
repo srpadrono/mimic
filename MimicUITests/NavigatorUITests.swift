@@ -33,8 +33,11 @@ struct NavigatorPage {
         )).firstMatch
     }
     func rowHeight(named name: String) -> CGFloat {
+        outlineRow(named: name).frame.height
+    }
+    func outlineRow(named name: String) -> XCUIElement {
         app.descendants(matching: .outlineRow)
-            .containing(.any, identifier: row(named: name).identifier).firstMatch.frame.height
+            .containing(.any, identifier: row(named: name).identifier).firstMatch
     }
     func group(_ name: String) -> XCUIElement {
         let identified = element("sidebar.group.\(name)")
@@ -145,16 +148,16 @@ final class NavigatorUITests: MimicUITestCase {
     func testInspectorIdentityFollowsEndpointSelection() async throws {
         try await launchFixture()
         let navigator = NavigatorPage(app: app)
-        let identity = navigator.element("ds.method.inspector.endpointMethod")
+        let identity = navigator.element("inspector.endpointIdentity")
 
         navigator.row(named: "Account summary").click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            (identity.value as? String)?.contains("GET method /account-summary") == true
+            identity.label.contains("GET method /account-summary")
         }, "The inspector must announce the selected GET route")
 
         navigator.row(named: "Create order").click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            (identity.value as? String)?.contains("POST method /api/v1/orders") == true
+            identity.label.contains("POST method /api/v1/orders")
         }, "The inspector must not announce the previous endpoint's path")
     }
 
@@ -170,10 +173,11 @@ final class NavigatorUITests: MimicUITestCase {
         let account = navigator.row(named: "Account summary")
         account.click()
         app.typeKey(.downArrow, modifierFlags: [])
-        XCTAssertTrue(navigator.row(named: "Current orders").isSelected,
+        XCTAssertTrue(navigator.outlineRow(named: "Current orders").isSelected,
                       "Down should select the next visible endpoint")
         app.typeKey(.upArrow, modifierFlags: [])
-        XCTAssertTrue(account.isSelected, "Up should return to the previous endpoint")
+        XCTAssertTrue(navigator.outlineRow(named: "Account summary").isSelected,
+                      "Up should return to the previous endpoint")
 
         account.rightClick()
         app.menuItems["sidebar.contextMenu.rename"].click()
@@ -196,9 +200,9 @@ final class NavigatorUITests: MimicUITestCase {
         app.buttons["endpointRequest.save"].click()
         XCTAssertTrue(navigator.endpointRow(named: "Account overview", path: "/account-overview")
             .waitForExistence(timeout: 5))
-        let identity = navigator.element("ds.method.inspector.endpointMethod")
+        let identity = navigator.element("inspector.endpointIdentity")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            (identity.value as? String)?.contains("GET method /account-overview") == true
+            identity.label.contains("GET method /account-overview")
         }, "The inspector should announce the edited path for the same endpoint")
 
         let scenario = navigator.element("inspector.scenario.Default")
@@ -221,9 +225,10 @@ final class NavigatorUITests: MimicUITestCase {
         app.buttons["endpointRename.cancel"].click()
         edited.click()
         app.typeKey(.delete, modifierFlags: [])
-        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5),
+        let endpointDeleteSheet = app.sheets.firstMatch
+        XCTAssertTrue(endpointDeleteSheet.buttons["Delete"].waitForExistence(timeout: 5),
                       "Delete should confirm before removing the selected endpoint")
-        app.alerts.buttons["Cancel"].click()
+        endpointDeleteSheet.buttons["Cancel"].click()
         XCTAssertTrue(edited.exists)
     }
 
@@ -241,10 +246,11 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(empty.waitForExistence(timeout: 5))
         empty.click()
         app.typeKey(.upArrow, modifierFlags: [])
-        XCTAssertTrue(navigator.row(named: "Payment succeeds").isSelected,
+        XCTAssertTrue(navigator.outlineRow(named: "Payment succeeds").isSelected,
                       "Up should select the previous visible journey")
         app.typeKey(.downArrow, modifierFlags: [])
-        XCTAssertTrue(empty.isSelected, "Down should return to the empty journey")
+        XCTAssertTrue(navigator.outlineRow(named: "Empty journey").isSelected,
+                      "Down should return to the empty journey")
 
         empty.rightClick()
         app.menuItems["journeys.contextMenu.rename"].click()
@@ -266,9 +272,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertEqual(summary.value as? String, "Fallback sequence")
         renamed.click()
         app.typeKey(.delete, modifierFlags: [])
-        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5),
+        let journeyDeleteSheet = app.sheets.firstMatch
+        XCTAssertTrue(journeyDeleteSheet.buttons["Delete"].waitForExistence(timeout: 5),
                       "Delete should confirm before removing the selected journey")
-        app.alerts.buttons["Cancel"].click()
+        journeyDeleteSheet.buttons["Cancel"].click()
         XCTAssertTrue(renamed.exists)
     }
 

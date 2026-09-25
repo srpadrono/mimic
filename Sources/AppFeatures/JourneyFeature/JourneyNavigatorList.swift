@@ -23,7 +23,7 @@ struct JourneyNavigatorList: View {
     /// context menu that offers the action lives here.
     @State private var deleteTarget: Journey?
     @State private var renameTarget: Journey?
-    @FocusState private var journeyListHasFocus: Bool
+    @FocusState private var focusedJourneyID: UUID?
     var searchText: String = ""
     @Binding var collapsedGroups: Set<String>
 
@@ -123,9 +123,8 @@ struct JourneyNavigatorList: View {
                 // on a container renames every descendant to match it.
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("journeys.list")
-                .focused($journeyListHasFocus)
                 .onChange(of: selectedJourneyID) { _, selection in
-                    if selection != nil { journeyListHasFocus = true }
+                    if let selection { focusedJourneyID = selection }
                 }
                 .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
                     guard !press.modifiers.contains(.command), !press.modifiers.contains(.option) else {
@@ -235,6 +234,14 @@ struct JourneyNavigatorList: View {
         )
         .dsNavigatorRow(indented: indented)
         .tag(journey.id)
+        .focusable()
+        .focused($focusedJourneyID, equals: journey.id)
+        .simultaneousGesture(TapGesture().onEnded {
+            // A click on the already-selected row must reclaim focus from editor fields so
+            // Return, Delete, and the arrow keys operate on the navigator again.
+            selectedJourneyID = journey.id
+            focusedJourneyID = journey.id
+        })
     }
 
     private var filteredJourneys: [Journey] {

@@ -269,8 +269,9 @@ struct InspectorPanelView: View {
             // AppKit can retain the selectable path's old accessibility value when the row is
             // reused, including after editing this endpoint's request identity.
             .id("\(endpoint.id)-\(endpoint.method.rawValue)-\(endpoint.path)")
-            .accessibilityElement(children: .contain)
+            .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("inspector.endpointIdentity")
+            .accessibilityLabel("\(endpoint.method.rawValue) method \(endpoint.path)")
             switch endpointTab {
             case .scenarios:
                 ScenarioListView(endpoint: endpoint, onSetActive: onSetActiveScenario,
