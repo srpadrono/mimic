@@ -123,8 +123,10 @@ struct JourneyNavigatorList: View {
                 // on a container renames every descendant to match it.
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("journeys.list")
-                .focusable()
                 .focused($journeyListHasFocus)
+                .onChange(of: selectedJourneyID) { _, selection in
+                    if selection != nil { journeyListHasFocus = true }
+                }
                 .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
                     guard !press.modifiers.contains(.command), !press.modifiers.contains(.option) else {
                         return .ignored
@@ -233,7 +235,6 @@ struct JourneyNavigatorList: View {
         )
         .dsNavigatorRow(indented: indented)
         .tag(journey.id)
-        .simultaneousGesture(TapGesture().onEnded { journeyListHasFocus = true })
     }
 
     private var filteredJourneys: [Journey] {

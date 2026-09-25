@@ -289,8 +289,10 @@ final class WelcomeProjectUITests: MimicUITestCase {
         let renamedRow = recentsRow(named: "After Rename")
         XCTAssertTrue(renamedRow.waitForExistence(timeout: 5), "Renaming should update the welcome list")
         renamedRow.click()
+        // Renaming the project leaves the endpoint's own name unchanged.
         XCTAssertTrue(
-            openedEndpoint(in: "After Rename", path: "/rename-check").waitForExistence(timeout: 10),
+            NavigatorPage(app: app).endpointRow(named: "Before Rename EP", path: "/rename-check")
+                .waitForExistence(timeout: 10),
             "The renamed stored project should reopen with its endpoints"
         )
     }

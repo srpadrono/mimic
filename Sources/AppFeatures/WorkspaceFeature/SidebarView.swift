@@ -188,8 +188,10 @@ struct SidebarView: View {
         }
         .dsNavigatorList()
         .accessibilityIdentifier("sidebar.endpointList")
-        .focusable()
         .focused($endpointListHasFocus)
+        .onChange(of: selectedEndpointID) { _, selection in
+            if selection != nil { endpointListHasFocus = true }
+        }
         .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
             guard !press.modifiers.contains(.command), !press.modifiers.contains(.option) else {
                 return .ignored
@@ -238,7 +240,6 @@ struct SidebarView: View {
         )
         .dsNavigatorRow(indented: indented)
         .tag(endpoint.id)
-        .simultaneousGesture(TapGesture().onEnded { endpointListHasFocus = true })
         .contextMenu { endpointContextMenu(endpoint) }
     }
 
