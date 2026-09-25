@@ -64,7 +64,7 @@ public struct DSInspectorValueRow: View {
     public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.smPlus) {
             Text(label)
-                .font(DSTypography.labelMedium)
+                .font(DSTypography.metaBold)
                 .foregroundStyle(DSColors.labelSecondary)
                 .frame(width: DSInspectorMetrics.labelColumn, alignment: .trailing)
             Text(value)

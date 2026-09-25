@@ -36,7 +36,8 @@ struct JourneyRunControls: View {
                 runButtons
                 Spacer(minLength: DSSpacing.md)
                 Text(compactProgressText)
-                    .font(DSTypography.label)
+                    .font(isActive ? DSTypography.labelMedium : DSTypography.label)
+                    .monospacedDigit()
                     .foregroundStyle(isActive ? DSColors.labelPrimary : DSColors.labelSecondary)
                     .lineLimit(1)
                     .help(progressText)
@@ -55,14 +56,8 @@ struct JourneyRunControls: View {
         }
         .padding(.horizontal, DSSpacing.md)
         .padding(.vertical, DSSpacing.sm)
-        // The control-row rung, and the row now lands on it exactly: `DSButton(.small)` is a pinned
-        // 20pt, so `DSSpacing.sm` above and below makes 32. It stood at 33 while these were bordered
-        // system buttons — AppKit draws a small one at 21 where a small popup or segmented control
-        // measures 20 — and that one-point drift is the smaller half of why they are `DSButton`s now:
-        // a row's height should not depend on which kind of control somebody reached for.
-        //
-        // A floor rather than a fixed height, because of the `ViewThatFits` above. The last
-        // candidate is two rows; pinning the frame would let it draw over the next section.
+        // A floor rather than a fixed height: the shared small-control size may grow, and the
+        // narrowest `ViewThatFits` candidate places the readout below the buttons.
         .frame(minHeight: DSBarHeight.controlRow)
     }
 
@@ -156,7 +151,8 @@ struct JourneyRunControls: View {
     /// Where the run has got to — or, when nothing is running, that nothing is.
     private var progressReadout: some View {
         Text(progressText)
-            .font(DSTypography.label)
+            .font(isActive ? DSTypography.labelMedium : DSTypography.label)
+            .monospacedDigit()
             // Never `labelTertiary`. This line answers "is something overriding my endpoints right
             // now", which is the first thing you check when a response surprises you, and 36% alpha
             // is not where you put an answer somebody has to read.

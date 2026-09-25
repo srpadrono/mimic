@@ -40,10 +40,9 @@ public enum DSButtonSize {
 ///   away; the glyph is the part that survives. Same reasoning as `DSTextField`'s error row.
 /// - **ghost** — accent text, no fill, no border. A link, essentially.
 ///
-/// Sizes are the workspace's row geometry, not a scale someone invented: `.small` is the 20pt /
-/// `DSCornerRadius.sm` / 0.5pt-hairline / 3pt-padding shape that every control in a panel header
-/// wears, so a small button dropped into one of those rows lines up instead of standing a point
-/// proud of its neighbours.
+/// Sizes use the workspace's row geometry: `.small` is the 24pt / `DSCornerRadius.sm` /
+/// 0.5pt-hairline / 3pt-padding shape for compact row actions, so a small button dropped into a
+/// panel-header row lines up with its neighbours.
 public struct DSButton: View {
     private let title: String
     private let variant: DSButtonVariant
@@ -178,9 +177,8 @@ private let dsButtonBorderWidth = DSStroke.hairline
 private extension DSButtonSize {
     /// Fixed, so two buttons of the same size are the same height whatever their titles.
     ///
-    /// `.small` is 20pt because that is the workspace's row-control height. `.medium` is 22pt, which
-    /// is both a 13pt line plus 3pt above and below *and* the height AppKit gives a regular push
-    /// button — so a `.medium` button standing next to a system `Picker` in a sheet lines up.
+    /// `.small` is the workspace's 24pt row-control height. `.medium` is 26pt for a field or
+    /// header action, and `.large` is 32pt for the primary action in a sheet.
     var height: CGFloat {
         switch self {
         case .small: DSControlHeight.row
@@ -199,8 +197,8 @@ private extension DSButtonSize {
 
     /// Never below 8pt, and a step *under* the line it sits beside rather than level with it.
     ///
-    /// The rungs are `DSGlyph`'s: `.small` sets `DSTypography.label` (11) and takes the inline rung at
-    /// 10, while `.medium` and `.large` both set 13pt lines and take control rungs at 11 and 12.
+    /// The rungs are `DSGlyph`'s: `.small` sets `DSTypography.label` (13pt) and takes the inline rung
+    /// at 10pt, while `.medium` and `.large` set 14pt lines and take control rungs at 11 and 12pt.
     ///
     /// This used to promise the glyph was "never smaller than the text it sits beside", which no
     /// size here has ever satisfied — and should not. An SF Symbol drawn at a line's own point size
@@ -231,7 +229,7 @@ private extension DSButtonSize {
     }
 
     /// `sm` for the row sizes so a small button matches the wells it sits between; `md` for the
-    /// sheet sizes, where a 4pt radius on a 28pt slab reads as a chip rather than a button.
+    /// sheet sizes, where a 4pt radius on a 26–32pt slab reads as a chip rather than a button.
     var cornerRadius: CGFloat {
         switch self {
         case .small: DSCornerRadius.sm

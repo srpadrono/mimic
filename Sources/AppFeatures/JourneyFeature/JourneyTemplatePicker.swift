@@ -25,7 +25,7 @@ struct JourneyTemplatePicker: View {
             List(JourneyTemplates.all, selection: $selection) { template in
                 VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                     Text(template.title)
-                        .font(DSTypography.body)
+                        .font(DSTypography.bodyMedium)
                         .foregroundStyle(DSColors.labelPrimary)
 
                     // `.fixedSize(horizontal: false, vertical: true)` is safe *here*: a `List` row is
@@ -35,8 +35,9 @@ struct JourneyTemplatePicker: View {
                     // `DSEmptyState` claim a thousand points of height, and the difference is only
                     // ever the container.
                     Text(template.summary)
-                        .font(DSTypography.caption)
+                        .font(DSTypography.label)
                         .foregroundStyle(DSColors.labelSecondary)
+                        .lineSpacing(DSSpacing.xxs)
                         .fixedSize(horizontal: false, vertical: true)
 
                     // `labelSecondary`, not `labelTertiary`. 36% alpha is right for a timestamp you
@@ -46,11 +47,11 @@ struct JourneyTemplatePicker: View {
                     // template is one step long today, but the shelf is meant to grow, and "1 steps"
                     // beside two lists that say "1 step" is a difference nobody chose.
                     Text(Self.stepCountText(for: template))
-                        .font(DSTypography.caption)
+                        .font(DSTypography.metaBold)
                         .foregroundStyle(DSColors.labelSecondary)
                         .monospacedDigit()
                 }
-                .padding(.vertical, DSSpacing.xxs)
+                .padding(.vertical, DSSpacing.sm)
                 // The rows are the sheet's primary control — you are here to pick one — and they were
                 // the only clickable rows in the journey feature that looked identical whether or not
                 // the pointer was on them. The journeys list, the journeys navigator and the step

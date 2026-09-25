@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A 22pt icon menu for panel chrome, shared by the journey navigator and endpoint editor.
+/// A 26pt icon menu for panel chrome, shared by the journey navigator and endpoint editor.
 ///
 /// The frame and content shape belong inside the menu label. With `.menuStyle(.button)`, putting
 /// them only around `Menu` leaves AppKit with an 11–13pt actionable element. Focused macOS UI tests
@@ -51,7 +51,7 @@ public struct DSIconMenu<Content: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         // The label above draws the whole control; the system indicator would be a second glyph in a
-        // 22pt box that already holds one.
+        // 26pt box that already holds one.
         .menuIndicator(.hidden)
         .frame(width: DSControlHeight.field, height: DSControlHeight.field)
         .background {

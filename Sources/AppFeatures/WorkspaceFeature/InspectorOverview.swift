@@ -68,9 +68,10 @@ struct InspectorOverview: View {
                         // hand-rolled `.plain` button either. Link style was the only AppKit link in
                         // the window: it draws its own blue and its own underline-on-hover, neither of
                         // which matches the accent text buttons around it, and it gave a ~13pt-tall
-                        // hit target. What replaced it — accent text, 20pt tall, `accentSubtle` under
-                        // the pointer — was `DSButton(.ghost, .small)` written out by hand, down to
-                        // the corner radius. So it is that now, and the copy bar's three are too.
+                        // hit target. The subsequent hand-rolled replacement — accent text, a 20pt
+                        // target, `accentSubtle` under the pointer — duplicated the shared ghost
+                        // button. `DSButton(.ghost, .small)` now gives it a 24pt target, as it does
+                        // the copy bar's three actions.
                         // "Show", not "Open". It used to open the standalone journeys window; it now
                         // switches the navigator to its Journeys tab, which is where journeys live.
                         // "Open" promises a window, and a label that names the wrong outcome is worse
@@ -173,9 +174,10 @@ struct InspectorOverview: View {
     @ViewBuilder
     private func note(_ message: String, identifier: String) -> some View {
         Text(message)
-            .font(DSTypography.caption)
+            .font(DSTypography.label)
             // "Requests arrived that no endpoint answered" is the point of the panel, not a hint.
             .foregroundStyle(DSColors.labelSecondary)
+            .lineSpacing(DSSpacing.xxs)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSSpacing.md)
@@ -195,8 +197,8 @@ struct InspectorOverview: View {
 
     private var serverStatusColor: Color {
         switch summary.serverState {
-        case .running: DSColors.serverRunning
-        case .error: DSColors.destructive
+        case .running: DSColors.successText
+        case .error: DSColors.destructiveText
         default: DSColors.labelSecondary
         }
     }

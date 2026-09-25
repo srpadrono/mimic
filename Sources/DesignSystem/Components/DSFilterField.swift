@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A 26-point filter well. Scope, text, and clear controls share one vertically centered row.
+/// A 30-point filter well. Scope, text, and clear controls share one vertically centered row.
 public struct DSFilterField: View {
     public struct Scope: Identifiable, Equatable, Sendable {
         public let id: String

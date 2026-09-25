@@ -225,7 +225,7 @@ final class NavigatorUITests: MimicUITestCase {
         let endpointRowHeight = navigator.rowHeight(named: "Account summary")
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.endpointFilter.frame.maxX, 20, accuracy: 1,
                        "Inactive journey controls must not leave an empty slot beside the filter")
-        XCTAssertEqual(endpointRowHeight, 30, accuracy: 1)
+        XCTAssertEqual(endpointRowHeight, 34, accuracy: 1)
         XCTAssertEqual(navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX, 12, accuracy: 1)
         XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.element("sidebar.addEndpointButton").frame.maxX, 12, accuracy: 1)
         XCTAssertTrue(navigator.row(named: "Current orders").exists)
@@ -461,7 +461,7 @@ final class NavigatorUITests: MimicUITestCase {
         let scenario = panel.scenarioRow(named: "Unauthorized")
         XCTAssertTrue(scenario.waitForExistence(timeout: 5))
         XCTAssertEqual(panel.header.frame.midY, navigator.header.frame.midY, accuracy: 1)
-        XCTAssertEqual(scenario.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(scenario.frame.height, 30, accuracy: 1)
         scenario.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.isScenarioActive(named: "Unauthorized") })
         XCTAssertFalse(panel.isScenarioActive(named: "Default"))
@@ -501,7 +501,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(panel.tab("scenarios").isHittable)
         XCTAssertTrue(panel.tab("traffic").isHittable)
         XCTAssertTrue(panel.addScenarioButton.isHittable)
-        XCTAssertEqual(scenario.frame.height, 26, accuracy: 1)
+        XCTAssertEqual(scenario.frame.height, 30, accuracy: 1)
         for column in ["method", "path", "status", "timestamp"] {
             let header = app.buttons["drawer.columnHeader.\(column)"].firstMatch
             XCTAssertTrue(header.isHittable, "\(column) must stay visible in the compact request log")

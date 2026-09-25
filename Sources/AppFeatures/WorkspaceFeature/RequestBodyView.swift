@@ -38,7 +38,8 @@ struct RequestBodyView: View {
                     Text(payload.utf8.count > JSONFormatter.formattingLimit
                          ? "Shown unformatted — body is over \(JSONFormatter.formattingLimit / 1024) KB."
                          : "Shown unformatted — body would be too large when indented.")
-                        .font(DSTypography.caption)
+                        .font(DSTypography.label)
+                        .lineSpacing(DSSpacing.xxs)
                         // `labelSecondary`. This is the sentence that explains why the payload below
                         // is a wall of minified JSON rather than the indented view every other body
                         // gets — without it the view looks broken. `DSContrastTests` asserts that
@@ -52,7 +53,7 @@ struct RequestBodyView: View {
                 // answer, not a failed search.
                 if !searchText.isEmpty {
                     Text(Self.matchSummary(rendered.matchCount))
-                        .font(DSTypography.caption)
+                        .font(DSTypography.labelMedium)
                         // "No matches in this body" is the answer to a search someone just typed, so
                         // it is read rather than glanced past — the same reason the line above moved
                         // off `labelTertiary`. Still quieter than the hit count, which keeps
@@ -62,7 +63,8 @@ struct RequestBodyView: View {
                 }
 
                 Text(rendered.text)
-                    .font(DSTypography.codeSmall)
+                    .font(DSTypography.code)
+                    .lineSpacing(DSSpacing.xxs)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // Take the full height the wrapped text needs. Inside a `ScrollView` the text

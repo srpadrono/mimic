@@ -22,10 +22,9 @@ struct RequestLogColumnTests {
 
     @Test("The time column fits a 12-hour timestamp with seconds")
     func timeColumnFitsSeconds() {
-        // The row draws `.dateTime.hour().minute().second()` at `DSTypography.Figure.small`, which is
-        // SF Mono 11pt with monospaced digits. The widest thing that column has to hold is a
-        // 12-hour reading — "11:41:33 PM", eleven characters — and SF Mono advances 0.6em, so 11pt
-        // gives 6.6pt per character.
+        // The row draws `.dateTime.hour().minute().second()` at the 11pt caption size with
+        // monospaced digits. The widest thing that column has to hold is a 12-hour reading —
+        // "11:41:33 PM", eleven characters — and 6.6pt per character is a conservative estimate.
         //
         // This is the assertion the column was missing when seconds were added: the previous 58
         // fitted "9:41 AM" and would have clipped the string it now draws.

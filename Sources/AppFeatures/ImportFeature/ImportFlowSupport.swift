@@ -353,11 +353,11 @@ struct ImportWorkflowScreen: View {
         VStack(spacing: 0) {
             // A sheet heading at `DSTypography.title`, *not* a `DSPanelHeader`, and deliberately so.
             // This is the shared sheet convention — `NewProjectSheet`, `NewJourneySheet`,
-            // `JourneyTemplatePicker` and `JourneyStepSheet` all open with a sentence-case 20pt
+            // `JourneyTemplatePicker` and `JourneyStepSheet` all open with a sentence-case 21pt
             // heading — and a modal you have just opened from a menu needs a title that says what it
-            // is, which a 10pt `labelSecondary` caption does not. The decisive part is what sits
+            // is, which a small `labelSecondary` caption does not. The decisive part is what sits
             // directly beneath: `ImportReviewList` opens with a real `DSPanelHeader` ("Endpoints
-            // found"), so making this one too would stack two identical 30pt caption bars and leave
+            // found"), so making this one too would stack two identical 36pt panel bars and leave
             // the sheet with no title at all.
             HStack(spacing: DSSpacing.sm) {
                 Text(kind.title)

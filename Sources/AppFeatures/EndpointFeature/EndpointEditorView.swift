@@ -162,7 +162,7 @@ struct EndpointEditorView: View {
             // no path at all. Plain compression truncates only once the row genuinely runs out of
             // room — which is the behaviour wanted, and the same fix `DSPanelHeader` took.
             Text(endpoint.path)
-                .font(DSTypography.codeLarge)
+                .font(DSTypography.codeHeading)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -174,7 +174,7 @@ struct EndpointEditorView: View {
         }
     }
 
-    /// The endpoint's own actions use the shared 22pt icon menu. The delete confirmation remains
+    /// The endpoint's own actions use the shared 26pt icon menu. The delete confirmation remains
     /// here because it belongs to this endpoint, not to the menu component.
     @ViewBuilder
     private var moreMenu: some View {
@@ -360,8 +360,8 @@ struct EndpointEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Response body")
-                    .font(DSTypography.metaBold)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .font(DSTypography.controlLabel)
+                    .foregroundStyle(DSColors.labelPrimary)
                 Spacer(minLength: DSSpacing.sm)
                 Button {
                     if let formatCandidate, formatCandidate.source == responseBody {
@@ -588,7 +588,7 @@ struct EndpointEditorView: View {
     /// Why the row above it was not accepted, in `DSTextField`'s language: a filled
     /// `exclamationmark.circle.fill` beside `DSColors.destructive` text.
     ///
-    /// The glyph is not decoration. Red 11pt text alone is one channel of meaning, and with
+    /// The glyph is not decoration. Red 13pt text alone is one channel of meaning, and with
     /// Differentiate Without Color on, in a greyscale screenshot, or to a reader with a red
     /// deficiency, a complaint and a hint look identical. It sits at the value seam like `note()`,
     /// so it reads as belonging to the field it is about rather than to the section.

@@ -15,20 +15,17 @@ private enum ImportColumns {
     static let method: CGFloat = 58
     /// The name the endpoint will be created with.
     static let name: CGFloat = 120
-    static let status: CGFloat = 34
+    static let status: CGFloat = 42
     static let size: CGFloat = 58
-    /// Wide enough for the "Duplicate" pill; the flag column is empty on most rows.
-    static let flag: CGFloat = 92
+    /// Seats the "Duplicate" pill and the readable binary/body-drop labels.
+    static let flag: CGFloat = 100
     /// The checkbox, plus the gap the list puts either side of it.
     static let toggle: CGFloat = 18
     // path is flexible — takes the remaining space
 }
 
 /// One row of a dense table — ``DSRowHeight/importRow`` — and the fills and the ink that row
-/// draws.
-///
-/// The token is what makes this row and the request log's match, rather than a sentence in each
-/// file naming the other.
+/// draws. Its height is the review table's own rung, with enough room for method and flag labels.
 ///
 /// Internal rather than private so the contrast tests can measure *what the window paints* rather
 /// than a copy of it. A bed list written out inside a test is the blind spot every contrast failure
@@ -117,14 +114,14 @@ struct ImportReviewList: View {
 
     // MARK: - Chrome
 
-    /// The panel's own controls, in the panel's own header — 30pt, title left, controls right, like
+    /// The panel's own controls, in the panel's own header — title left, controls right, like
     /// every other panel in the app.
     ///
     /// "Select all" and "Deselect all" used to be `.plain` buttons in accent text sitting next to a
     /// label in the same size: nothing said they were controls except their colour, and they had no
     /// hit target beyond the width of the words.
     ///
-    /// `.secondary` at `.small` is the panel-row well — 20pt, `DSCornerRadius.sm`, a 0.5pt hairline
+    /// `.secondary` at `.small` is the panel-row well — 24pt, `DSCornerRadius.sm`, a 0.5pt hairline
     /// — so these two match each other and match the controls in the request log's header. Not
     /// `.ghost`: a ghost button is a link, which is what these already looked like and the reason
     /// nobody could find them.
@@ -132,7 +129,7 @@ struct ImportReviewList: View {
         DSPanelHeader("Endpoints found", identifier: "import.review") {
             HStack(spacing: DSSpacing.sm) {
                 Text("\(selectedCount) of \(candidates.count) selected")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.label)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("import.selectionCount")
 
@@ -188,7 +185,7 @@ struct ImportReviewList: View {
 
     private func columnTitle(_ title: String, width: CGFloat?) -> some View {
         Text(title)
-            .font(DSTypography.caption)
+            .font(DSTypography.meta)
             // Column titles carry the meaning of the numbers under them — see the note above.
             .foregroundStyle(DSColors.labelSecondary)
             .frame(width: width, alignment: .leading)
@@ -335,7 +332,7 @@ private struct ImportCandidateRow: View {
                 // review is a column of identical rows. Same rule the sidebar follows.
                 if let operation = candidate.graphqlOperation, !operation.isEmpty {
                     Text(operation)
-                        .font(DSTypography.caption)
+                        .font(DSTypography.meta)
                         .foregroundStyle(DSColors.accentText)
                         .lineLimit(1)
                         .accessibilityIdentifier("import.candidate.index.\(rowIndex).operation")
@@ -346,7 +343,7 @@ private struct ImportCandidateRow: View {
             // What the endpoint will be called once imported — the only thing on the row that is
             // about the result rather than the capture.
             Text(candidate.suggestedName)
-                .font(DSTypography.caption)
+                .font(DSTypography.label)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.name, alignment: .leading)
@@ -361,7 +358,7 @@ private struct ImportCandidateRow: View {
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
 
             Text(candidate.bodySizeLabel)
-                .font(DSTypography.caption)
+                .font(DSTypography.meta)
                 .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
                 .lineLimit(1)
                 .frame(width: ImportColumns.size, alignment: .leading)
@@ -415,7 +412,7 @@ private struct ImportCandidateRow: View {
             // Before the size branch, deliberately: a binary body's recorded size can also exceed
             // the limit, and binary is the more specific reason there is no body.
             Label("Binary body", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.caption)
+                .font(DSTypography.metaSmall)
                 .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
@@ -423,7 +420,7 @@ private struct ImportCandidateRow: View {
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.binaryBody")
         } else if candidate.bodySizeExceedsLimit {
             Label("Body dropped", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.caption)
+                .font(DSTypography.metaSmall)
                 .foregroundStyle(ImportRow.warningInk)
                 .lineLimit(1)
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")

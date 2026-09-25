@@ -260,9 +260,8 @@ struct DSComponentRenderingTests {
         #expect(standardGet.width == standardOptions.width)
 
         // And the widest method still fits the 58pt column its two callers reserve —
-        // `SidebarView.EndpointSidebarRow` and `ImportColumns.method`. The badge is 56pt wide
-        // (`DSMethodBadgeSize.badgeWidth`), so this passes with two points of slack rather than the
-        // 0.2pt of overflow that caused the wrap.
+        // `SidebarView.EndpointSidebarRow` and `ImportColumns.method`. The badge and the column
+        // both measure 58pt, so the widest method stays on a single line.
         #expect(compactOptions.width <= 58)
 
         // The two sizes are genuinely two sizes: a dense list gets the smaller badge.
@@ -277,7 +276,7 @@ struct DSComponentRenderingTests {
     /// headers stop aligning horizontally, which is the state the window was in before either
     /// component existed. `DSTabStrip` states the parity in its own documentation; nothing checked it.
     ///
-    /// Measured against a bare `Color` fixed to the token rather than against the literal 30, so the
+    /// Measured against a bare `Color` fixed to the token rather than against a literal, so the
     /// comparison cannot drift from the ladder and cannot be broken by anything the hosting layer adds
     /// to both sides equally.
     @Test("Panel chrome stands one height, whether a panel opens with a header or a tab strip")
@@ -320,7 +319,7 @@ struct DSComponentRenderingTests {
                 },
                 size: CGSize(width: width, height: 120)
             )
-            #expect(adaptive.height == 30)
+            #expect(adaptive.height == DSBarHeight.panelHeader)
             // fittingSize asks for the ideal width, not the laid-out width. The UI resize test
             // checks the icon/title transition using the actual button frames instead.
         }
@@ -358,18 +357,18 @@ struct DSComponentRenderingTests {
     /// "Controls sharing a row share their geometry", measured on the one control that spent longest
     /// not measuring itself.
     ///
-    /// `DSFilterField` documented a 20pt row from the day it was written and stated no height, so its
+    /// `DSFilterField` once documented a 20pt row and stated no height, so its
     /// height was whatever the scope `Menu` inside it happened to want — which is the failure the
     /// house rule is about, since a panel's chrome is built out of controls that are supposed to line
     /// up. The scopeless arm is measured beside it because the pill is exactly what used to set the
     /// number: a well with no pill in it must still stand on the same rung, or a panel's header
     /// changes height depending on whether its filter has anything to be pointed at.
     ///
-    /// Pin the intended 26-point height independently of the production token.
+    /// Pin the intended 30-point height independently of the production token.
     @Test("A filter field stands on the control rung, with a scope pill and without one")
     func filterFieldStandsOnTheControlRung() {
         let measure = CGSize(width: 240, height: 80)
-        let ruler = render(Color.clear.frame(height: 26), size: measure)
+        let ruler = render(Color.clear.frame(height: 30), size: measure)
         let scoped = render(
             DSFilterField(
                 text: .constant("/v1/accounts"),
@@ -470,15 +469,15 @@ struct DSComponentRenderingTests {
     /// literals are no longer there to compare against each other.
     @Test("The bar, control and stroke ladders are the measured values")
     func laddersArePinned() {
-        #expect(DSBarHeight.panelHeader == 30)
-        #expect(DSBarHeight.secondaryBar == 24)
-        #expect(DSBarHeight.controlRow == 32)
-        #expect(DSBarHeight.columnHeader == 22)
+        #expect(DSBarHeight.panelHeader == 36)
+        #expect(DSBarHeight.secondaryBar == 28)
+        #expect(DSBarHeight.controlRow == 36)
+        #expect(DSBarHeight.columnHeader == 26)
 
-        #expect(DSControlHeight.row == 20)
-        #expect(DSControlHeight.field == 22)
-        #expect(DSRowHeight.importRow == 26)
-        #expect(DSControlHeight.prominent == 28)
+        #expect(DSControlHeight.row == 24)
+        #expect(DSControlHeight.field == 26)
+        #expect(DSRowHeight.importRow == 30)
+        #expect(DSControlHeight.prominent == 32)
         #expect(DSControlHeight.verticalPadding == 3)
 
         #expect(DSStroke.hairline == 0.5)

@@ -79,7 +79,7 @@ struct JourneyEditorView: View {
                     .font(DSTypography.controlLabel)
                 Spacer(minLength: DSSpacing.xs)
                 Text("\(journey.groupTag ?? "Ungrouped") · \(journey.matchMode == .orderedPerEndpoint ? "Ordered per route" : "Strict sequence")")
-                    .font(DSTypography.label)
+                    .font(DSTypography.meta)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(DSColors.labelSecondary)
@@ -90,7 +90,7 @@ struct JourneyEditorView: View {
             }
             .foregroundStyle(DSColors.labelPrimary)
             .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.secondaryBar)
+            .frame(minHeight: DSBarHeight.controlRow)
             .contentShape(Rectangle())
         }
         .buttonStyle(.dsPlain)
@@ -135,9 +135,10 @@ struct JourneyEditorView: View {
                 .accessibilityIdentifier("journeyEditor.name")
             if let summary = journey.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(DSTypography.label)
+                    .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(2)
+                    .lineSpacing(DSSpacing.xxs)
                     .help(summary)
                     .accessibilityIdentifier("journeyEditor.summary")
             }
@@ -214,6 +215,7 @@ struct JourneyEditorView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(title)
+                .font(DSTypography.meta)
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityHidden(true)
             control()

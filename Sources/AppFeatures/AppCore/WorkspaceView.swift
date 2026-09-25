@@ -721,7 +721,7 @@ struct WorkspaceView: View {
 
     /// The navigator's "+" on the Journeys tab.
     ///
-    /// `DSIconMenu` shares the 22pt control and hover treatment with the endpoint editor's menu.
+    /// `DSIconMenu` shares the 26pt control and hover treatment with the endpoint editor's menu.
     private var addJourneyMenu: some View {
         DSIconMenu(
             systemImage: "plus",

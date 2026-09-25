@@ -22,7 +22,7 @@ struct JourneyInspector: View {
                         .foregroundStyle(DSColors.labelPrimary)
                         .accessibilityIdentifier("inspector.journey.steps")
                     Text(context.selected.groupTag.map { "In \($0)" } ?? "Ungrouped journey")
-                        .font(DSTypography.label)
+                        .font(DSTypography.meta)
                         .foregroundStyle(DSColors.labelSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -40,12 +40,14 @@ struct JourneyInspector: View {
                             Text("Active journey: \(active.name)")
                                 .font(DSTypography.label)
                                 .foregroundStyle(DSColors.labelSecondary)
+                                .lineSpacing(DSSpacing.xxs)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("inspector.journey.activeName")
                         }
                         if let progress = context.progress {
                             Text(progress)
-                                .font(DSTypography.label)
+                                .font(DSTypography.labelMedium)
+                                .monospacedDigit()
                                 .foregroundStyle(DSColors.labelPrimary)
                                 .accessibilityIdentifier("inspector.journey.progress")
                         }
@@ -53,6 +55,7 @@ struct JourneyInspector: View {
                         Text("No journey active. Endpoints answer directly.")
                             .font(DSTypography.label)
                             .foregroundStyle(DSColors.labelSecondary)
+                            .lineSpacing(DSSpacing.xxs)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("inspector.journey.noActiveRun")
                     }
@@ -65,6 +68,7 @@ struct JourneyInspector: View {
                         Text("Restart and Advance set the step for the next server run.")
                             .font(DSTypography.label)
                             .foregroundStyle(DSColors.labelSecondary)
+                            .lineSpacing(DSSpacing.xxs)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -80,6 +84,7 @@ struct JourneyInspector: View {
                 }
                 .font(DSTypography.label)
                 .foregroundStyle(DSColors.labelSecondary)
+                .lineSpacing(DSSpacing.xxs)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(DSInspectorMetrics.inset)

@@ -30,9 +30,8 @@ enum LogColumns {
     static let status: CGFloat = 52
     static let compactStatus: CGFloat = 44
 
-    /// Up from 58, which fitted "9:41 AM" and does not fit "9:41:33 AM". Sized for a 12-hour locale,
-    /// the wider of the two, at `Figure.small`: "11:41:33 PM" is eleven characters and SF Mono
-    /// advances 0.6em, so 11pt needs 72.6 — and 72 was picked by eye before the test measured it.
+    /// Fits a seconds-precision timestamp in a 12-hour locale at the compact caption size.
+    /// Keeping timestamps secondary preserves space for the flexible path column.
     static let time: CGFloat = 74
 
     // Reserve a readable path column before offering horizontal scrolling.
@@ -43,8 +42,8 @@ enum LogColumns {
 
 /// One traffic row's geometry.
 ///
-/// Traffic has its own 28pt content-row rung. It carries a method badge and six other columns, so
-/// the import review's denser 26pt candidate row is not a useful source of geometry here.
+/// Traffic has its own 32pt content-row rung. It carries a method badge and six other columns, so
+/// the import review's denser 30pt candidate row is not a useful source of geometry here.
 private enum LogRow {
     static let height = DSRowHeight.logRow
 }
@@ -348,7 +347,7 @@ struct RequestLogDrawerView: View {
                 HStack(spacing: DSSpacing.md) {
                     if let countSubtitle {
                         Text(countSubtitle)
-                            .font(DSTypography.caption)
+                            .font(DSTypography.metaSmall)
                             .foregroundStyle(DSColors.labelSecondary)
                             .lineLimit(1)
                             .accessibilityIdentifier("drawer.count")
@@ -1025,7 +1024,7 @@ private struct UnmatchedFilterToggle: View {
                     .font(.system(size: DSGlyph.inline))
                 if !compact {
                     Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                        .font(DSTypography.caption)
+                        .font(DSTypography.label)
                 }
             }
             .foregroundStyle(foreground)
@@ -1112,7 +1111,9 @@ private struct SortableColumnHeader: View {
         Button(action: sort) {
             HStack(spacing: DSSpacing.xxs) {
                 Text(title)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.metaSmall)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
                     // The sorted column should be legible as sorted from across the row, without
                     // first finding a chevron to read.
                     .fontWeight(isActive ? .semibold : nil)
@@ -1202,7 +1203,7 @@ struct RequestLogTableRow: View {
 
             // Path
             Text(log.path)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.codePath)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1221,7 +1222,7 @@ struct RequestLogTableRow: View {
 
             // Scenario
                 Text(scenarioName ?? "\u{2014}")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
                     .lineLimit(1)
                     .frame(width: LogColumns.scenario, alignment: .leading)
@@ -1240,12 +1241,11 @@ struct RequestLogTableRow: View {
             // not do it. `.dateTime` rather than a `DateFormatter` so the 12/24-hour choice stays the
             // reader's locale rather than this file's opinion.
             //
-            // `Figure.small` is `codeSmall.monospacedDigit()`, which exists for exactly this: at a
-            // proportional face the colons and the 1s wandered, so a column of times did not line up
-            // as a column.
+            // A timestamp is supporting context, so use the caption size. Monospaced digits keep
+            // a burst of adjacent times aligned without widening this fixed column.
             Text(log.timestamp, format: .dateTime.hour().minute().second())
-                .font(DSTypography.Figure.small)
-                .foregroundStyle(DSColors.labelTertiary)
+                .font(DSTypography.caption.monospacedDigit())
+                .foregroundStyle(DSColors.labelSecondary)
                 .frame(width: LogColumns.time, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
@@ -1374,37 +1374,40 @@ struct RequestLogTableRow: View {
     private var endpointCell: some View {
         if let endpointName {
             Text(endpointName)
-                .font(DSTypography.caption)
+                .font(DSTypography.meta)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
         } else {
             switch log.outcome {
             case .unmatched:
                 Text(RequestOutcome.unmatched.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.httpStatusColor(for: 404))
                     .lineLimit(1)
             case .blockedByJourney:
                 Text(RequestOutcome.blockedByJourney.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
             case .journey:
                 Text(RequestOutcome.journey.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.accentText)
                     .lineLimit(1)
             case .proxyFailure:
-                Text(RequestOutcome.proxyFailure.label).foregroundStyle(DSColors.destructive)
+                Text(RequestOutcome.proxyFailure.label)
+                    .font(DSTypography.meta)
+                    .foregroundStyle(DSColors.destructive)
+                    .lineLimit(1)
             case .passthrough:
                 Text((log.backendName.map { $0 + " · " } ?? "") + RequestOutcome.passthrough.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.success)
                     .lineLimit(1)
             case .endpoint:
                 // An endpoint answered but has since been renamed or deleted.
                 Text("\u{2014}")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.labelTertiary)
             }
         }
