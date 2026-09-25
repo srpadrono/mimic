@@ -85,7 +85,9 @@ enum VaporConfigurator {
                 if holdMs > 0 {
                     try? await Task.sleep(for: .milliseconds(holdMs))
                 }
-                return abortedResponse(for: failure)
+                let response = abortedResponse(for: failure)
+                await lease.finish()
+                return response
             }
 
             // Apply the effective delay (global + per-endpoint or per-step) before answering.
@@ -93,7 +95,9 @@ enum VaporConfigurator {
                 try? await Task.sleep(for: .milliseconds(resolved.delayMs))
             }
 
-            return response(for: resolved)
+            let response = response(for: resolved)
+            await lease.finish()
+            return response
         }
 
         let methods: [Vapor.HTTPMethod] = [.GET, .POST, .PUT, .PATCH, .DELETE, .OPTIONS, .HEAD]

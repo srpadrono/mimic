@@ -19,6 +19,7 @@ struct InspectorPanelView: View {
     let onSetActiveScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDuplicateScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDeleteScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
+    let onRenameScenario: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void
     /// Every request the selected endpoint answered. Already filtered by the caller.
     let endpointTraffic: [RequestLog]
     /// Opens one of those requests in the request detail.
@@ -92,6 +93,7 @@ struct InspectorPanelView: View {
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
+        onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in },
         onSaveAsMock: ((UUID) -> Void)? = nil,
         initialEndpointTab: EndpointTab = .scenarios
     ) {
@@ -109,6 +111,7 @@ struct InspectorPanelView: View {
         self.onSetActiveScenario = onSetActiveScenario
         self.onDuplicateScenario = onDuplicateScenario
         self.onDeleteScenario = onDeleteScenario
+        self.onRenameScenario = onRenameScenario
         _endpointTab = State(initialValue: initialEndpointTab)
     }
 
@@ -263,12 +266,16 @@ struct InspectorPanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSInspectorMetrics.inset)
             .frame(height: DSBarHeight.controlRow)
+            // AppKit can retain the selectable path's old accessibility value when the row is
+            // reused, including after editing this endpoint's request identity.
+            .id("\(endpoint.id)-\(endpoint.method.rawValue)-\(endpoint.path)")
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("inspector.endpointIdentity")
             switch endpointTab {
             case .scenarios:
                 ScenarioListView(endpoint: endpoint, onSetActive: onSetActiveScenario,
-                                 onDuplicate: onDuplicateScenario, onDelete: onDeleteScenario)
+                                 onDuplicate: onDuplicateScenario, onDelete: onDeleteScenario,
+                                 onRename: onRenameScenario)
                 HStack {
                     Text("\(endpoint.scenarios.count) \(endpoint.scenarios.count == 1 ? "scenario" : "scenarios")")
                     Spacer(minLength: DSSpacing.sm)
@@ -294,6 +301,8 @@ struct ScenarioListView: View {
     let onSetActive: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDuplicate: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDelete: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
+    var onRename: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in }
+    @State private var renameTarget: Scenario?
 
     var body: some View {
         List(endpoint.scenarios) { scenario in
@@ -302,6 +311,7 @@ struct ScenarioListView: View {
                 isActive: scenario.id == endpoint.activeScenarioID,
                 isOnlyScenario: endpoint.scenarios.count == 1,
                 onTap: { onSetActive(endpoint.id, scenario.id) },
+                onRename: { renameTarget = scenario },
                 onDuplicate: { onDuplicate(endpoint.id, scenario.id) },
                 onDelete: { onDelete(endpoint.id, scenario.id) }
             )
@@ -312,6 +322,14 @@ struct ScenarioListView: View {
         .environment(\.defaultMinListRowHeight, DSInspectorMetrics.rowHeight)
         .contentMargins(.all, 0, for: .scrollContent)
         .accessibilityIdentifier("inspector.scenarioList")
+        .sheet(item: $renameTarget) { scenario in
+            RenameItemSheet(
+                title: "Rename scenario", fieldLabel: "Scenario name",
+                identifier: "scenarioRename", initialName: scenario.name
+            ) { name in
+                onRename(endpoint.id, scenario.id, name)
+            }
+        }
     }
 }
 
@@ -321,6 +339,7 @@ struct ScenarioRow: View {
     let isActive: Bool
     let isOnlyScenario: Bool
     let onTap: () -> Void
+    var onRename: () -> Void = {}
     let onDuplicate: () -> Void
     let onDelete: () -> Void
 
@@ -351,6 +370,8 @@ struct ScenarioRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(rowTraits)
         .contextMenu {
+            Button(action: onRename) { Label("Rename\u{2026}", systemImage: "pencil") }
+                .accessibilityIdentifier("inspector.scenario.contextMenu.rename")
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
                 .accessibilityIdentifier("inspector.scenario.contextMenu.duplicate")
             Divider()

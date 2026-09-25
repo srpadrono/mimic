@@ -44,6 +44,9 @@ enum ProxyForwarder {
         // The handler acquired this slot before resolving routes. The response writer retains
         // it; if the writer never runs, deinit returns the slot.
         @Sendable func log(status: Int, headers: HTTPHeaders, preview: Data, truncated: Bool, failure: String? = nil) {
+            // Streamed responses keep their slot until the last byte or an error. Do not depend
+            // on Vapor releasing the response closure promptly on a keep-alive connection.
+            defer { lease.release() }
             // A response can publish at most once even if a framework callback is repeated.
             guard lease.transferToConsumer() else { return }
             let (requestBody, requestBodyTruncated) = RequestLog.cappedBody(incoming.body)

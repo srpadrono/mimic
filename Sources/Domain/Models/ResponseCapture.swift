@@ -72,10 +72,19 @@ public enum ResponseCapture {
         let transport: Set<String> = ["connection", "keep-alive", "transfer-encoding", "te", "trailer",
             "upgrade", "proxy-authenticate", "proxy-authorization", "content-length", "content-encoding",
             "content-range", "date", "age", "server"]
+        // These describe the upstream's network, rate-limit window, or reporting service at
+        // capture time. Replaying them from localhost gives clients false state and can send
+        // browser network reports to the upstream's reporting endpoint.
+        let transient: Set<String> = [
+            "alt-svc", "cf-cache-status", "cf-ray", "nel", "report-to", "server-timing",
+            "strict-transport-security", "via", "x-cache", "x-correlation-id", "x-request-id",
+        ]
         let nominated = Set(headers.filter { $0.key.lowercased() == "connection" }
             .flatMap { $0.value.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } })
         return headers.filter {
-            !transport.contains($0.key.lowercased()) && !nominated.contains($0.key.lowercased())
+            let name = $0.key.lowercased()
+            return !transport.contains(name) && !transient.contains(name)
+                && !name.hasPrefix("x-ratelimit-") && !nominated.contains(name)
                 && !RequestLog.isSensitiveHeader($0.key) && !$0.key.hasPrefix(":")
         }
     }

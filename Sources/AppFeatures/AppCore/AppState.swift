@@ -13,6 +13,14 @@ import SpecImport
 @Observable
 @MainActor
 final class AppState {
+    struct ProjectRenameTarget: Identifiable {
+        let id: UUID
+        let name: String
+    }
+
+    var projectRenameTarget: ProjectRenameTarget?
+    var navigatorFilterRequest = 0
+
     let server: MockServerRuntime
     let projects: ProjectWorkspace
     /// The store this session reads and writes.
@@ -421,6 +429,11 @@ final class AppState {
         run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
     }
 
+    @discardableResult
+    func updateEndpoint(id: UUID, spec: EndpointSpec) -> Bool {
+        run(.endpointUpdate(endpoint: .id(id), spec: spec)) != nil
+    }
+
     // There is deliberately no `updateEndpoint(_ updated: Endpoint)`. One used to sit here, writing a
     // whole `Endpoint` into the open project through `mutateCurrentProject` — a second way to mutate
     // the document, past the checks `ProjectCommandExecutor.applyEndpointSpec` runs on
@@ -774,6 +787,21 @@ final class AppState {
     func createProject(name: String, port: Int = 8080) {
         stopServerForProjectChange()
         _ = projects.createProject(name: name, port: port)
+    }
+
+    func renameProject(id: UUID, name: String) {
+        if currentProject?.id == id {
+            _ = run(.projectRename(name: name))
+        } else {
+            Task { @MainActor in
+                switch await projects.renameStoredProject(id: id, name: name).value {
+                case .success:
+                    lastCommandError = nil
+                case .failure(let error):
+                    lastCommandError = error.message
+                }
+            }
+        }
     }
 
     func openProject(id: UUID) {

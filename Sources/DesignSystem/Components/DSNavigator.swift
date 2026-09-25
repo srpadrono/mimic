@@ -75,18 +75,21 @@ public struct DSNavigatorFooter<Status: View>: View {
     private let scopes: [DSFilterField.Scope]
     private let placeholder: String
     private let identifier: String
+    private let focusRequest: Int
     private let status: Status
     private let showsStatus: Bool
 
     public init(
         text: Binding<String>, scopeID: Binding<String>, scopes: [DSFilterField.Scope],
-        placeholder: String, identifier: String, showsStatus: Bool = true, @ViewBuilder status: () -> Status
+        placeholder: String, identifier: String, focusRequest: Int = 0,
+        showsStatus: Bool = true, @ViewBuilder status: () -> Status
     ) {
         self._text = text
         self._scopeID = scopeID
         self.scopes = scopes
         self.placeholder = placeholder
         self.identifier = identifier
+        self.focusRequest = focusRequest
         self.status = status()
         self.showsStatus = showsStatus
     }
@@ -95,7 +98,7 @@ public struct DSNavigatorFooter<Status: View>: View {
         HStack(spacing: DSSpacing.smPlus) {
             DSFilterField(
                 text: $text, scopeID: $scopeID, scopes: scopes,
-                placeholder: placeholder, identifier: identifier
+                placeholder: placeholder, identifier: identifier, focusRequest: focusRequest
             )
             if showsStatus {
                 status.frame(width: DSControlHeight.field, height: DSControlHeight.field)

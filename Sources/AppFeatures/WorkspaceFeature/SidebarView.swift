@@ -7,9 +7,12 @@ struct SidebarView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let projectName: String?
     let endpoints: [Endpoint]
+    let serverConfiguration: ServerConfiguration?
     @Binding var selectedEndpointID: UUID?
     let onDeleteEndpoint: (UUID) -> Void
     let onDuplicateEndpoint: (UUID) -> UUID?
+    let onRenameEndpoint: (UUID) -> Void
+    let onEditEndpointRequest: (UUID) -> Void
     let onAddEndpoint: () -> Void
 
     @State private var deleteTarget: EndpointDeleteTarget?
@@ -20,6 +23,7 @@ struct SidebarView: View {
     @State private var groupedSections: [EndpointGroup] = []
     @State private var ungroupedEndpoints: [Endpoint] = []
     @State private var searchDebounceTask: Task<Void, Never>?
+    @FocusState private var endpointListHasFocus: Bool
 
     struct EndpointDeleteTarget: Identifiable {
         let id: UUID
@@ -29,9 +33,12 @@ struct SidebarView: View {
     public init(
         projectName: String?,
         endpoints: [Endpoint],
+        serverConfiguration: ServerConfiguration? = nil,
         selectedEndpointID: Binding<UUID?>,
         onDeleteEndpoint: @escaping (UUID) -> Void,
         onDuplicateEndpoint: @escaping (UUID) -> UUID?,
+        onRenameEndpoint: @escaping (UUID) -> Void = { _ in },
+        onEditEndpointRequest: @escaping (UUID) -> Void = { _ in },
         onAddEndpoint: @escaping () -> Void,
         searchText: Binding<String> = .constant(""),
         methodScopeID: Binding<String> = .constant(SidebarView.anyMethodScopeID),
@@ -40,9 +47,12 @@ struct SidebarView: View {
         self.init(
             projectName: projectName,
             endpoints: endpoints,
+            serverConfiguration: serverConfiguration,
             selectedEndpointID: selectedEndpointID,
             onDeleteEndpoint: onDeleteEndpoint,
             onDuplicateEndpoint: onDuplicateEndpoint,
+            onRenameEndpoint: onRenameEndpoint,
+            onEditEndpointRequest: onEditEndpointRequest,
             onAddEndpoint: onAddEndpoint,
             initialSearchText: "",
             initialCollapsedSections: []
@@ -55,18 +65,24 @@ struct SidebarView: View {
     init(
         projectName: String?,
         endpoints: [Endpoint],
+        serverConfiguration: ServerConfiguration? = nil,
         selectedEndpointID: Binding<UUID?>,
         onDeleteEndpoint: @escaping (UUID) -> Void,
         onDuplicateEndpoint: @escaping (UUID) -> UUID?,
+        onRenameEndpoint: @escaping (UUID) -> Void = { _ in },
+        onEditEndpointRequest: @escaping (UUID) -> Void = { _ in },
         onAddEndpoint: @escaping () -> Void,
         initialSearchText: String,
         initialCollapsedSections: Set<String>
     ) {
         self.projectName = projectName
         self.endpoints = endpoints
+        self.serverConfiguration = serverConfiguration
         self._selectedEndpointID = selectedEndpointID
         self.onDeleteEndpoint = onDeleteEndpoint
         self.onDuplicateEndpoint = onDuplicateEndpoint
+        self.onRenameEndpoint = onRenameEndpoint
+        self.onEditEndpointRequest = onEditEndpointRequest
         self.onAddEndpoint = onAddEndpoint
         _searchText = .constant(initialSearchText)
         _methodScopeID = .constant(Self.anyMethodScopeID)
@@ -172,12 +188,49 @@ struct SidebarView: View {
         }
         .dsNavigatorList()
         .accessibilityIdentifier("sidebar.endpointList")
+        .focusable()
+        .focused($endpointListHasFocus)
+        .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+            guard !press.modifiers.contains(.command), !press.modifiers.contains(.option) else {
+                return .ignored
+            }
+            let offset = press.key == .downArrow ? 1 : -1
+            guard let next = NavigatorKeyboardSelection.moved(
+                from: selectedEndpointID, by: offset, through: visibleEndpointIDs
+            ) else { return .ignored }
+            selectedEndpointID = next
+            return .handled
+        }
+        .onKeyPress(.return) {
+            guard let id = selectedEndpointID, visibleEndpointIDs.contains(id) else { return .ignored }
+            onRenameEndpoint(id)
+            return .handled
+        }
+        .onDeleteCommand {
+            guard let id = selectedEndpointID,
+                  visibleEndpointIDs.contains(id),
+                  let endpoint = endpoints.first(where: { $0.id == id }) else { return }
+            deleteTarget = Self.deleteTarget(for: endpoint)
+        }
+    }
+
+    private var visibleEndpointIDs: [UUID] {
+        let grouped = groupedSections.flatMap { section in
+            collapsedSections.contains(Self.groupSectionKey(section.name))
+                ? [] : section.endpoints.map(\.id)
+        }
+        let ungrouped = groupedSections.isEmpty || !collapsedSections.contains(Self.ungroupedSectionKey)
+            ? ungroupedEndpoints.map(\.id) : []
+        return grouped + ungrouped
     }
 
     private func endpointRow(_ endpoint: Endpoint, indented: Bool) -> some View {
         EndpointSidebarRow(
             endpoint: endpoint,
             isSelected: endpoint.id == selectedEndpointID,
+            backendName: Self.backendNameForAmbiguousRoute(
+                endpoint, among: endpoints, configuration: serverConfiguration
+            ),
             showsName: endpoints.contains {
                 $0.id != endpoint.id && $0.method == endpoint.method && $0.path == endpoint.path
                     && $0.graphqlOperation == endpoint.graphqlOperation
@@ -185,7 +238,23 @@ struct SidebarView: View {
         )
         .dsNavigatorRow(indented: indented)
         .tag(endpoint.id)
+        .simultaneousGesture(TapGesture().onEnded { endpointListHasFocus = true })
         .contextMenu { endpointContextMenu(endpoint) }
+    }
+
+    /// Identical method/path rows on different listeners need a visible owner. Show the server
+    /// only for those collisions so the common single-backend list stays compact.
+    static func backendNameForAmbiguousRoute(
+        _ endpoint: Endpoint, among endpoints: [Endpoint], configuration: ServerConfiguration?
+    ) -> String? {
+        guard let configuration, configuration.listeners.count > 1 else { return nil }
+        let backendID = endpoint.backendID ?? ServerConfiguration.primaryID
+        guard endpoints.contains(where: {
+            $0.id != endpoint.id && $0.method == endpoint.method && $0.path == endpoint.path
+                && $0.graphqlOperation == endpoint.graphqlOperation
+                && ($0.backendID ?? ServerConfiguration.primaryID) != backendID
+        }) else { return nil }
+        return configuration.backend(id: endpoint.backendID)?.name
     }
 
     private func groupRow(_ section: EndpointGroup) -> some View {
@@ -203,6 +272,13 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func endpointContextMenu(_ endpoint: Endpoint) -> some View {
+        Button("Rename\u{2026}", systemImage: "pencil") { onRenameEndpoint(endpoint.id) }
+            .accessibilityIdentifier("sidebar.contextMenu.rename")
+        Button("Edit request\u{2026}", systemImage: "point.topleft.down.curvedto.point.bottomright.up") {
+            onEditEndpointRequest(endpoint.id)
+        }
+        .accessibilityIdentifier("sidebar.contextMenu.editRequest")
+        Divider()
         Button {
             selectedEndpointID = Self.performDuplicate(endpointID: endpoint.id, onDuplicate: onDuplicateEndpoint)
         } label: {
@@ -354,6 +430,7 @@ enum SidebarQuery {
 struct EndpointSidebarRow: View {
     let endpoint: Endpoint
     var isSelected: Bool = false
+    var backendName: String? = nil
     var showsName: Bool = false
 
     nonisolated static func subtitle(for endpoint: Endpoint) -> String? {
@@ -384,8 +461,8 @@ struct EndpointSidebarRow: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if showsName, let name = Self.subtitle(for: endpoint) {
-                Text(name)
+            if let metadata = backendName ?? (showsName ? Self.subtitle(for: endpoint) : nil) {
+                Text(metadata)
                     .font(DSTypography.label)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
@@ -394,10 +471,12 @@ struct EndpointSidebarRow: View {
             }
         }
         .help("\(endpoint.method.rawValue) \(endpoint.path)\n\(endpoint.name)"
-            + (endpoint.graphqlOperation.map { "\n\($0)" } ?? ""))
+            + (endpoint.graphqlOperation.map { "\n\($0)" } ?? "")
+            + (backendName.map { "\nServer: \($0)" } ?? ""))
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("endpoint-\(endpoint.id.uuidString)")
         .accessibilityLabel("\(endpoint.method.rawValue) \(endpoint.path), \(endpoint.name)"
-            + (endpoint.graphqlOperation.map { ", \($0)" } ?? ""))
+            + (endpoint.graphqlOperation.map { ", \($0)" } ?? "")
+            + (backendName.map { ", server \($0)" } ?? ""))
     }
 }

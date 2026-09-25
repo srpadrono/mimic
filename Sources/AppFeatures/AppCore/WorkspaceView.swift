@@ -12,6 +12,8 @@ struct WorkspaceView: View {
     @State private var showInspector: Bool
     @State private var showDrawer: Bool
     @State private var selectedEndpointID: UUID?
+    @State private var renameEndpointTarget: Endpoint?
+    @State private var editEndpointRequestTarget: Endpoint?
     /// The logged requests the user has selected. Owned here rather than inside the drawer because
     /// two panels need them: the log paints the rows selected, the inspector renders the detail.
     ///
@@ -158,7 +160,9 @@ struct WorkspaceView: View {
                                 navigatorTab,
                                 endpointID: selectedEndpointID,
                                 journeyID: appState.selectedJourneyID
-                            )
+                            ),
+                            onRenameEndpoint: beginEndpointRename,
+                            onEditEndpointRequest: beginEndpointRequestEdit
                         )
                         // Anchored to the top, not centred. A pane is exactly as tall as the split
                         // view gives it, and an editor taller than that — the journey editor has no
@@ -253,6 +257,19 @@ struct WorkspaceView: View {
                 if let endpoint = appState.addEndpoint(name: name, method: method, path: path) {
                     revealEndpoint(endpoint)
                 }
+            }
+        }
+        .sheet(item: $renameEndpointTarget) { endpoint in
+            RenameItemSheet(
+                title: "Rename endpoint", fieldLabel: "Endpoint name",
+                identifier: "endpointRename", initialName: endpoint.name
+            ) { name in
+                appState.updateEndpoint(id: endpoint.id, spec: EndpointSpec(name: name))
+            }
+        }
+        .sheet(item: $editEndpointRequestTarget) { endpoint in
+            EndpointRequestSheet(endpoint: endpoint) { spec in
+                appState.updateEndpoint(id: endpoint.id, spec: spec)
             }
         }
         // Generic server error alert
@@ -789,9 +806,12 @@ struct WorkspaceView: View {
                     SidebarView(
                         projectName: appState.currentProject?.name,
                         endpoints: currentEndpoints,
+                        serverConfiguration: appState.currentProject?.serverConfiguration,
                         selectedEndpointID: $selectedEndpointID,
                         onDeleteEndpoint: appState.deleteEndpoint,
                         onDuplicateEndpoint: { appState.duplicateEndpoint(id: $0)?.id },
+                        onRenameEndpoint: beginEndpointRename,
+                        onEditEndpointRequest: beginEndpointRequestEdit,
                         onAddEndpoint: { appState.showNewEndpointSheet = true },
                         searchText: $endpointFilter,
                         methodScopeID: $endpointMethodScope,
@@ -810,6 +830,9 @@ struct WorkspaceView: View {
                         },
                         onDuplicate: { _ = appState.duplicateJourney(id: $0) },
                         onDelete: appState.deleteJourney,
+                        onRename: { id, name in
+                            appState.updateJourney(id: id, spec: JourneySpec(name: name))
+                        },
                         searchText: journeyFilter,
                         collapsedGroups: $collapsedJourneyGroups
                     )
@@ -823,6 +846,7 @@ struct WorkspaceView: View {
                 scopes: navigatorTab == .endpoints ? SidebarView.methodScopes : [],
                 placeholder: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
                 identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
+                focusRequest: appState.navigatorFilterRequest,
                 showsStatus: appState.activeJourney != nil
             ) {
                 if let active = appState.activeJourney {
@@ -938,6 +962,7 @@ struct WorkspaceView: View {
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
             onDeleteScenario: appState.deleteScenario,
+            onRenameScenario: appState.renameScenario,
             onSaveAsMock: { id in
                 if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
                     revealEndpoint(endpoint)
@@ -951,6 +976,14 @@ struct WorkspaceView: View {
         navigatorTab = .endpoints
         selectedEndpointID = endpoint.id
         selectedLogIDs = []
+    }
+
+    private func beginEndpointRename(_ id: UUID) {
+        renameEndpointTarget = currentEndpoints.first { $0.id == id }
+    }
+
+    private func beginEndpointRequestEdit(_ id: UUID) {
+        editEndpointRequestTarget = currentEndpoints.first { $0.id == id }
     }
 
     /// The selected request, resolved against the current project so the endpoint and scenario names

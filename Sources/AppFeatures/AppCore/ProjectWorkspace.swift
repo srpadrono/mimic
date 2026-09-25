@@ -302,6 +302,42 @@ final class ProjectWorkspace {
         }
     }
 
+    /// Rename a project from the welcome list without opening it or changing the restore target.
+    func renameStoredProject(id: UUID, name: String) -> Task<Result<Void, ControlError>, Never> {
+        let previousWrites = storeWrites
+        let write: Task<Result<Void, ControlError>, Never> = Task { @MainActor [weak self] in
+            await previousWrites?.value
+            guard let self else {
+                return .failure(.internalFailure("The Mimic session is no longer available."))
+            }
+            do {
+                var project = try await projectRepository.load(id: id)
+                guard let outcome = try ProjectCommandExecutor.apply(.projectRename(name: name), to: &project),
+                      outcome.didMutate else {
+                    return .failure(.internalFailure("The project rename was not applied."))
+                }
+                project.modifiedAt = Date()
+                autosaveStatus = .saving
+                try await projectRepository.save(project)
+                autosaveStatus = .saved
+                scheduleSavedStatusClear()
+                recentProjects = recentProjects.map { entry in
+                    guard entry.id == id else { return entry }
+                    return RecentProjectEntry(id: id, name: project.name, lastOpenedAt: entry.lastOpenedAt)
+                }
+                refreshProjectList()
+                return .success(())
+            } catch let error as ControlError {
+                return .failure(error)
+            } catch {
+                autosaveStatus = .failed(error.localizedDescription)
+                return .failure(.persistenceFailure(error))
+            }
+        }
+        storeWrites = Task { @MainActor in _ = await write.value }
+        return write
+    }
+
     /// Stores a document that came from outside the app, reporting whether the store took it.
     ///
     /// `AppControlHost` used to do this itself, as `Task { try? await repository.save(document) }`
