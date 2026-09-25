@@ -4,7 +4,7 @@ import DesignSystem
 
 /// Shared columns for endpoint options and the editable header table.
 private enum EditorRowMetrics {
-    static let labelColumn: CGFloat = 68
+    static let labelColumn: CGFloat = 80
     static let numericFieldWidth: CGFloat = 72
     static let textFieldWidth: CGFloat = 240
     static let headerKeyWidth: CGFloat = 200
@@ -561,6 +561,7 @@ struct EndpointEditorView: View {
             Text(label)
                 .font(DSTypography.label)
                 .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
                 .frame(width: EditorRowMetrics.labelColumn, alignment: .trailing)
 
             content()
