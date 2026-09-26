@@ -31,18 +31,7 @@ public struct DSJSONEditor: View {
                 messages: $messages,
                 language: Self.jsonLanguage
             )
-            // Through the environment, not the initializer: the `layout:` parameter is deprecated,
-            // and passing it kept a warning in every Release build.
-            //
-            // `.standard` turns the minimap on, and a minimap is for navigating a thousand-line
-            // source file. A mock response body is a few dozen lines at most, so it rendered as an
-            // unexplained grey block floating at the top-right of the field — which reads as a
-            // drawing artefact, not a feature. Xcode has one for the same reason it has a scroll
-            // bar: there is somewhere to scroll to.
-            //
-            // `wrapText` stays on. A minified payload is one very long line, and the alternative is
-            // scrolling sideways to read it — the exact failure the request inspector's body view
-            // was rebuilt to remove.
+            // Keep payloads wrapped and hide the source-file minimap.
             .environment(
                 \.codeEditorLayoutConfiguration,
                 CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: true)
@@ -52,16 +41,15 @@ public struct DSJSONEditor: View {
             .overlay(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                     .stroke(DSColors.border, lineWidth: DSStroke.hairline)
+                    .allowsHitTesting(false)
             )
             .accessibilityIdentifier("ds.jsoneditor.\(identifier)")
+            .accessibilityLabel("JSON editor")
 
             if let error = Self.validationErrorMessage(text: text, isValid: isValid) {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(DSColors.destructive)
-                        // The same `inline` rung `DSTextField`'s validation row takes, beside the same
-                        // `DSTypography.label`. The two error rows are one idiom and used to be two
-                        // literals that happened to agree.
                         .font(.system(size: DSGlyph.inline))
                     Text(error)
                         .font(DSTypography.label)
@@ -83,30 +71,11 @@ public struct DSJSONEditor: View {
 
     // MARK: - Metrics
 
-    /// The face both themes are built from.
-    ///
-    /// Named because it was written twice — once per theme — and because ``height(forLines:)`` has to
-    /// measure the same font the editor actually draws with. A size that moves in one theme and not
-    /// the other is a bug nobody sees until they switch appearance.
+    // Font metrics and both native editor themes share this face.
     static let editorFontName = "SFMono-Regular"
     static let editorFontSize: CGFloat = 13
 
-    /// How tall this editor has to be to show `lines` lines without scrolling itself.
-    ///
-    /// **The caller has to count the lines, because nothing here can.** `CodeEditor` is an
-    /// `NSViewRepresentable` over an `NSScrollView` and implements no `sizeThatFits`, so it has no
-    /// opinion about its own height and a `ScrollView` proposes none — which is why the endpoint
-    /// editor used to hand it a fixed `idealHeight` and get a 240pt well for a five-line body. The
-    /// document's line count is not reachable either: the package's `Info.SelectionSummary` reports
-    /// the *selection*, and its `LineMap` is internal.
-    ///
-    /// Measured from the font rather than assumed, so a substitution or a metrics change moves this
-    /// with it. Ascender minus descender plus leading is what the text system lays a line out at.
-    ///
-    /// **Logical lines, not visual ones.** `wrapText` is on, so one very long line — a minified
-    /// payload — wraps to several and this under-reports it. That is what the call site's floor is
-    /// for; it is not worth threading a width through to predict a wrap that the editor's own scroll
-    /// view already handles.
+    /// Height for logical lines. Wrapped lines may need more room; callers provide a minimum height.
     public static func height(forLines lines: Int) -> CGFloat {
         let font = NSFont(name: editorFontName, size: editorFontSize)
             ?? .monospacedSystemFont(ofSize: editorFontSize, weight: .regular)
@@ -114,60 +83,18 @@ public struct DSJSONEditor: View {
         return CGFloat(max(1, lines)) * lineHeight.rounded(.up)
     }
 
-    /// The number of logical lines in `text` — what ``height(forLines:)`` wants.
-    ///
-    /// An empty document is one line, not zero: an empty editor still shows a caret on a line.
-    ///
-    /// **Split on `isNewline`, not on `"\n"`.** Counting `Character == "\n"` looks equivalent and is
-    /// not: `"\r\n"` is a *single* grapheme cluster that compares unequal to `"\n"`, so a CRLF
-    /// document — a HAR capture, a Windows-authored fixture — counted as one line no matter how long
-    /// it was. `CodeEditorView` disagrees with that reading, because its own line map splits with
-    /// `NSString.lineRange(for:)`, which honours CR, CRLF, U+2028, U+2029 and U+0085. `isNewline`
-    /// matches that set, so the well and the gutter now count the same lines.
+    /// Counts logical lines, including CRLF and trailing empty lines, for editor sizing.
     public static func lineCount(of text: String) -> Int {
         text.isEmpty ? 1 : text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
     }
 
     // MARK: - Themes — warm, cohesive with Ink & Electric palette
 
-    /// The surface each theme fills with, named rather than inlined.
-    ///
-    /// This is what closes the gap that put the syntax palette's contrast readings on the wrong
-    /// background for months: the editor's canvas was a literal inside a twenty-two-argument `Theme`,
-    /// so a test could only measure a surface somebody *believed* it had.
-    /// `DSContrastTests.syntaxColoursOnTheWellTheyAreDrawnIn` reads these two and requires each to be
-    /// the ``DSColors/dominant`` value for its appearance, so the surface the suite measures and the
-    /// surface the component sets are the same object rather than two hopes about one.
+    // Exposed internally so contrast tests use the surfaces the native editor actually draws.
     static let lightCanvas = DSColors.dominantLightInk.nsColor()
     static let darkCanvas = DSColors.dominantDarkInk.nsColor()
 
-    /// **Seven fields come from `DSColors`; the rest are the editor's own and say so.**
-    ///
-    /// Both themes used to be twenty-two `NSColor` literals with a comment over three of them claiming
-    /// they "mirror `DSColors.Syntax`". A copy is not a mirror, and in light mode the copy had come
-    /// adrift: `numberColour` was `(0.63, 0.39, 0.0)` where ``DSColors/Syntax/number`` is
-    /// `(0.58, 0.35, 0.0)`, and `keywordColour` `(0.0, 0.40, 0.85)` where
-    /// ``DSColors/Syntax/literal`` is `(0.0, 0.38, 0.85)` — both of them the value the token carried
-    /// before it was darkened. Nobody had touched the editor when the tokens moved, because nothing
-    /// connected them.
-    ///
-    /// A `Theme` takes `NSColor` per field, which is why `DSColors.Ink` exists: the token and the
-    /// theme field are now built from one set of components. The seven are `stringColour`,
-    /// `numberColour` and `keywordColour` — the three kinds the grammar below arms with a regex or a
-    /// reserved identifier — plus `backgroundColour`, `currentLineColour`, `selectionColour` and
-    /// `cursorColour`.
-    ///
-    /// **`backgroundColour` is ``DSColors/dominant`` — the token whose own comment reads "editor
-    /// canvas".** Its light value was already bit-identical to that token; the dark one had drifted to
-    /// `(0.137, 0.137, 0.145)`, ΔL\* 3.44 lighter than the canvas it is supposed to be, and light and
-    /// dark were derived two different ways as a result. Nothing gets harder to read for the change:
-    /// the dark background moves *down*, so every ink on it gains.
-    ///
-    /// Everything else here — the plain text colour, comments, characters, identifiers, operators,
-    /// symbols, types, fields, cases and invisibles — is the editor's own and stays a literal, because
-    /// none of them is a role this palette has a name for. That is the only claim being made about
-    /// them: whether the JSON grammar can emit the kinds they colour is a question about
-    /// `LanguageConfiguration`, a dependency's type, and this comment does not answer it.
+    // Syntax colors and surfaces share DSColors; other native editor roles are explicit here.
     private static let darkTheme = Theme(
         colourScheme: .dark,
         fontName: editorFontName,
@@ -191,27 +118,8 @@ public struct DSJSONEditor: View {
         invisiblesColour: NSColor(srgbRed: 0.30, green: 0.33, blue: 0.38, alpha: 1.0)
     )
 
-    /// What the editor treats as JSON.
-    ///
-    /// Without a `language:` the editor got `LanguageConfiguration.none`, whose every regex is `nil`
-    /// — so no token was ever produced and the two twenty-two-field themes on either side of this one
-    /// coloured nothing but the plain text. The type doc promised syntax highlighting and the body field rendered a wall of
-    /// one colour, while `RequestBodyView` coloured the *same payload* from `DSColors.Syntax`.
-    ///
-    /// One limitation worth stating: a JSON key and a JSON string are both quoted strings, and a
-    /// regex tokenizer cannot tell them apart without lookahead for the colon. So keys take the
-    /// string colour here, where `RequestBodyView`'s scanner distinguishes them. Numbers, `true`,
-    /// `false` and `null` match the inspector exactly — which this line claimed before it was true.
-    /// In light mode the editor's copies of those two hues were the values ``DSColors/Syntax/number``
-    /// and ``DSColors/Syntax/literal`` held before they were darkened; both themes read the tokens
-    /// themselves now, so "exactly" is the same constant rather than a resemblance.
-    /// Built from `Regex` values rather than pattern strings: the string-taking initializer is
-    /// deprecated, and swapping one deprecation for another is not a fix.
+    // The regex grammar colors keys as strings; the read-only formatter distinguishes keys.
     private static let jsonLanguage: LanguageConfiguration = {
-        // `try?` because these are literals, not input. A nil would mean the pattern beside it is
-        // malformed — a programming error whose only symptom is that highlighting stops, which the
-        // next look at the body field shows immediately. Propagating it through a static would buy
-        // nothing a caller could act on.
         let string = try? Regex<Substring>(#""(?:[^"\\]|\\.)*""#, as: Substring.self)
         let number = try? Regex<Substring>(
             #"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"#,
@@ -234,13 +142,6 @@ public struct DSJSONEditor: View {
         )
     }()
 
-    /// The light half of the pair — see `darkTheme` above for which fields are tokens and why.
-    ///
-    /// The three syntax fields are where the drift showed, and the readings say why it mattered rather
-    /// than only that it was untidy. On this theme's own background, the old `numberColour` measured
-    /// **4.60:1** and the old `keywordColour` **5.07**; the tokens they had been copied from read
-    /// **5.37** and **5.33**. The number was clearing AA by a tenth in the app's densest reading, on a
-    /// value that had already been corrected once somewhere else.
     private static let lightTheme = Theme(
         colourScheme: .light,
         fontName: editorFontName,
@@ -278,37 +179,16 @@ public struct DSJSONEditor: View {
         }
     }
 
-    /// Re-indents a body without touching its key order.
-    ///
-    /// This used to be `JSONSerialization` in, `[.prettyPrinted, .sortedKeys]` out — and that is a
-    /// data-loss bug, not a formatting choice. A round trip through a dictionary drops the payload's
-    /// key order, and `.sortedKeys` then alphabetises it. This is the *editor's* Format button, so
-    /// the reordered text was written straight back into the saved response body: a mock arranged to
-    /// mirror the real API's payload came back rearranged, and the served response changed with it.
-    ///
-    /// It delegates to `JSONFormatter` — the character scanner already written for the traffic log,
-    /// and already covered by a `preservesKeyOrder` test — so the editor and the inspector cannot
-    /// format the same body two different ways. The scanner also accepts truncated traffic, so an
-    /// editor action must validate first: Format must not rewrite a deliberately malformed response.
-    /// Valid scalars have no object or array structure to reflow and return `nil`.
+    /// Re-indents valid JSON without changing key order, string contents or number spelling.
+    /// Malformed bodies, scalars and output beyond the shared size budget return nil.
     public nonisolated static func prettyPrint(_ string: String) -> String? {
         guard validateJSON(string) else { return nil }
-        // `reflow: true` — pressing Format is an instruction, not a hint. Without it the scanner's
-        // "do not fight a layout somebody chose" rule applied here too, so the button was enabled,
-        // clickable and did nothing for any body already spread across lines.
         return JSONFormatter.prettyPrinted(string, reflow: true)
     }
 
     static func validationErrorMessage(text: String, isValid: Bool) -> String? {
         guard !text.isEmpty, !isValid else { return nil }
-        // Says what actually happens. It used to promise "Fix the syntax to save", and the body
-        // was committed regardless — a message that is simply false about the app it is in.
-        //
-        // Saving it is the right behaviour, though, which is why the message moved rather than the
-        // save: a mock server whose whole job is standing in for a backend has to be able to serve
-        // a malformed payload on purpose. Testing what your client does with broken JSON is the
-        // same kind of task as testing what it does with a dropped connection, and Mimic already
-        // simulates that. So this is a warning, not a refusal.
+        // Malformed bodies are supported for testing clients' error handling.
         return "Not valid JSON \u{2014} it is still saved and served exactly as written."
     }
 
@@ -320,7 +200,9 @@ public struct DSJSONEditor: View {
         onValidationChanged: ((Bool) -> Void)? = nil
     ) async -> Bool? {
         do {
+            try Task.checkCancellation()
             try await sleep(.milliseconds(300))
+            try Task.checkCancellation()
             let currentIsValid = await validate(text)
             guard !Task.isCancelled else { return nil }
             onValidationChanged?(currentIsValid)
@@ -331,8 +213,15 @@ public struct DSJSONEditor: View {
     }
 
     static func validateAsync(_ string: String) async -> Bool {
-        await Task.detached {
-            validateJSON(string)
-        }.value
+        guard !Task.isCancelled else { return false }
+        let validation = Task.detached {
+            guard !Task.isCancelled else { return false }
+            return validateJSON(string)
+        }
+        return await withTaskCancellationHandler {
+            await validation.value
+        } onCancel: {
+            validation.cancel()
+        }
     }
 }

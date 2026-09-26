@@ -289,7 +289,10 @@ private struct DSButtonStyle: ButtonStyle {
                 .opacity(isEnabled ? 1 : 0.4)
                 .animation(.easeOut(duration: DSAnimation.micro), value: configuration.isPressed)
                 .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-                .onHover { isHovered = $0 }
+                .onHover { isHovered = isEnabled && $0 }
+                .onChange(of: isEnabled) { _, enabled in
+                    if !enabled { isHovered = false }
+                }
         }
 
         /// Feedback is carried by the fill, not by a scale.
@@ -311,7 +314,7 @@ private struct DSButtonStyle: ButtonStyle {
 
         /// The wash over a filled slab. `.clear` for the two variants whose feedback *is* their fill.
         private var shade: Color {
-            guard variant.fill != nil else { return .clear }
+            guard isEnabled, variant.fill != nil else { return .clear }
             return DSButtonShade.wash(isPressed: configuration.isPressed, isHovered: isHovered)
         }
 
@@ -326,6 +329,7 @@ private struct DSButtonStyle: ButtonStyle {
         /// Unfilled variants borrow the design system's established hover tint rather than inventing
         /// one — the same `accentSubtle` a panel header button lights up with.
         private func unfilled(rest: Color) -> Color {
+            guard isEnabled else { return rest }
             if configuration.isPressed { return DSColors.accentMuted }
             return isHovered ? DSColors.accentSubtle : rest
         }

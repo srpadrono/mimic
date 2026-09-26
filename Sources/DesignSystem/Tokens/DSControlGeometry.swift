@@ -1,19 +1,6 @@
 import CoreGraphics
 
-/// The heights a control is allowed to be, and the padding that produces them.
-///
-/// `DSBarHeight` names the rungs a *bar* stands on. Nothing named the rungs a *control* stands on,
-/// and the house rule says controls sharing a row share their geometry — "height, corner radius,
-/// border weight and vertical padding come from one place, not from four independently written call
-/// sites". There were five places. `DSButtonSize`, `DSTextField` and `DSFilterField` each declared
-/// the ladder privately, and `RequestLogDrawerView.HeaderControl` and
-/// `EndpointEditorView.EditorField` declared it again in a different module — the first with a
-/// comment noting it matches `DSFilterField` "so a panel that later adopts that component does not
-/// change shape on the way in". That is a cross-module coupling asserted in prose, kept true by hand,
-/// and checked by nothing.
-///
-/// Extracting the rungs originally changed no pixel: all five already agreed. It means later sizing
-/// changes move together, and a new control starts from the shared scale.
+/// Shared control heights and internal padding. Controls in the same row use the same tier.
 public enum DSControlHeight {
     /// 24pt — small buttons and compact row controls.
     public static let row: CGFloat = 24
@@ -33,17 +20,8 @@ public enum DSControlHeight {
     public static let verticalPadding: CGFloat = 3
 }
 
-/// The two line weights this window draws.
-///
-/// A hairline and a seam. `DSDivider` already encodes which colour goes with which — `border` and
-/// `separator` at ``hairline``, `panelSeparator` at ``seam`` — and explains why two of the three used
-/// to be indistinguishable. The *weights* were written as bare literals in twenty-three places:
-/// eleven strokes, eight closing rules under a bar, three private constants, and
-/// `DSDividerStyle.thickness`.
-///
-/// A stroke weight is not a free parameter here. 0.5 is a device pixel on every display this app runs
-/// on, and 1 is the deliberate step up for the one line that separates two panels rather than two
-/// rows inside one.
+/// Shared stroke widths in points. A 0.5pt hairline is one physical pixel at 2× scale
+/// and subpixel on a 1× display; the 1pt seam emphasizes panel boundaries.
 public enum DSStroke {
     /// 0.5 — a border, a well's edge, the rule that closes a bar. One device pixel at 2×.
     public static let hairline: CGFloat = 0.5

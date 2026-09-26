@@ -1,11 +1,6 @@
 import SwiftUI
 
-// Guarded so previews do not ship.
-//
-// `#Preview` expands to a `PreviewRegistry` conformance, which is compiled into whatever
-// configuration builds the file — and nothing here was gated, so 386 lines of preview scaffolding
-// went into the Release binary. Every `#Preview` elsewhere in this project is already inside
-// `#if DEBUG`; the design system's were the exception.
+// Preview scaffolding is excluded from release builds.
 #if DEBUG
 #Preview("Spacing Scale") {
     VStack(alignment: .leading, spacing: DSSpacing.sm) {
@@ -23,20 +18,20 @@ import SwiftUI
 
 #Preview("Typography") {
     VStack(alignment: .leading, spacing: DSSpacing.md) {
-        Text("Display (28px bold)").font(DSTypography.display)
-        Text("Title (20px semibold)").font(DSTypography.title)
-        Text("Heading (16px semibold)").font(DSTypography.heading)
-        Text("Subheading (14px medium)").font(DSTypography.subheading)
-        Text("Body Bold (13px semibold)").font(DSTypography.bodyBold)
-        Text("Body Medium (13px medium)").font(DSTypography.bodyMedium)
-        Text("Body (13px regular)").font(DSTypography.body)
-        Text("Label (11px regular)").font(DSTypography.label)
-        Text("Caption (10px medium)").font(DSTypography.caption)
+        Text("Display (28pt bold)").font(DSTypography.display)
+        Text("Title (21pt semibold)").font(DSTypography.title)
+        Text("Heading (18pt semibold)").font(DSTypography.heading)
+        Text("Subheading (15pt medium)").font(DSTypography.subheading)
+        Text("Body Bold (14pt semibold)").font(DSTypography.bodyBold)
+        Text("Body Medium (14pt medium)").font(DSTypography.bodyMedium)
+        Text("Body (14pt regular)").font(DSTypography.body)
+        Text("Label (13pt regular)").font(DSTypography.label)
+        Text("Caption (11pt medium)").font(DSTypography.caption)
         Divider()
-        Text("Code Large (SF Mono 13px)").font(DSTypography.codeLarge)
-        Text("Code Bold (SF Mono 12px medium)").font(DSTypography.codeBold)
-        Text("Code (SF Mono 12px regular)").font(DSTypography.code)
-        Text("Code Small (SF Mono 11px)").font(DSTypography.codeSmall)
+        Text("Code Large (SF Mono 14pt)").font(DSTypography.codeLarge)
+        Text("Code Bold (SF Mono 13pt medium)").font(DSTypography.codeBold)
+        Text("Code (SF Mono 13pt regular)").font(DSTypography.code)
+        Text("Code Small (SF Mono 12pt)").font(DSTypography.codeSmall)
     }
     .padding()
 }

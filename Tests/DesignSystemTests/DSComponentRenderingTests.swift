@@ -3,9 +3,43 @@ import SwiftUI
 import Testing
 @testable import DesignSystem
 
-@Suite("DesignSystem Components")
+@Suite("DesignSystem Components", .serialized)
 @MainActor
 struct DSComponentRenderingTests {
+    /// Hosted rendering checks share AppKit's active window, so this suite is serial.
+    private func withHostedView<V: View>(
+        _ view: V,
+        size: CGSize = CGSize(width: 360, height: 160),
+        inspect: (NSView) throws -> Void
+    ) rethrows {
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        controller.view.frame = CGRect(origin: .zero, size: size)
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        controller.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        controller.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        try inspect(controller.view)
+    }
+
+    private func menuItem(_ title: String, in menu: NSMenu) -> (menu: NSMenu, index: Int)? {
+        for (index, item) in menu.items.enumerated() {
+            if item.title == title { return (menu, index) }
+            if let submenu = item.submenu, let found = menuItem(title, in: submenu) { return found }
+        }
+        return nil
+    }
+
     @discardableResult
     private func render<V: View>(
         _ view: V,
@@ -395,6 +429,60 @@ struct DSComponentRenderingTests {
 
         #expect(scoped.height == ruler.height)
         #expect(unscoped.height == ruler.height)
+    }
+
+    @Test("Filter scope choices show one native checkmark and write the chosen value", arguments: ["any", "body"])
+    func filterScopeIsANativeSelection(initial: String) throws {
+        var selection = initial
+        let menu = NSHostingMenu(rootView: DSFilterField.ScopeOptions(
+            scopes: [.init(id: "any", title: "Anything"), .init(id: "body", title: "Response bodies")],
+            scopeID: Binding(get: { selection }, set: { selection = $0 }),
+            identifier: "filter"
+        ))
+        menu.update()
+        let any = try #require(menuItem("Anything", in: menu))
+        let body = try #require(menuItem("Response bodies", in: menu))
+        #expect(any.menu.items[any.index].state == (initial == "any" ? .on : .off))
+        #expect(body.menu.items[body.index].state == (initial == "body" ? .on : .off))
+
+        let target = initial == "any" ? body : any
+        target.menu.performActionForItem(at: target.index)
+        #expect(selection == (initial == "any" ? "body" : "any"))
+    }
+
+    @Test("A custom plain button visibly dims when disabled")
+    func disabledPlainButtonDims() throws {
+        func ink(isEnabled: Bool) throws -> Double {
+            var total = 0.0
+            try withHostedView(
+                Button {} label: {
+                    Text("Refresh")
+                        .font(DSTypography.heading)
+                        .foregroundStyle(.black)
+                        .padding(8)
+                }
+                .buttonStyle(.dsPlain)
+                .disabled(!isEnabled)
+                .frame(width: 180, height: 48)
+                .background(.white)
+                .environment(\.colorScheme, .light),
+                size: CGSize(width: 180, height: 48)
+            ) { view in
+                let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                for y in 0..<bitmap.pixelsHigh {
+                    for x in 0..<bitmap.pixelsWide {
+                        let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                        total += Double(1 - (color.redComponent + color.greenComponent + color.blueComponent) / 3)
+                    }
+                }
+            }
+            return total
+        }
+        let enabled = try ink(isEnabled: true)
+        let disabled = try ink(isEnabled: false)
+        #expect(enabled > 1, "The hosted button label must actually be drawn")
+        #expect(disabled < enabled * 0.7, "Disabled text should visibly fade instead of looking actionable")
     }
 
     /// The validation message is a row under the field, not an overlay on it.

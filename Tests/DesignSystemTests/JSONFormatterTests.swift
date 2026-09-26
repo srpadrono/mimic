@@ -49,6 +49,36 @@ struct JSONFormatterTests {
         #expect(formatted.contains(#""n": 2"#))
     }
 
+    @Test("Combining marks beside quotes cannot turn string contents into JSON structure")
+    func preservesUnicodeStringBytes() throws {
+        let source = "{\"\u{0301}key\":\"\u{0301} a:b [c], {d}\",\"emoji\":\"👩🏽‍💻\",\"decomposed\":\"e\u{0301}\"}"
+        let formatted = try #require(JSONFormatter.prettyPrinted(source))
+        let expected = """
+        {
+          "\u{0301}key": "\u{0301} a:b [c], {d}",
+          "emoji": "👩🏽‍💻",
+          "decomposed": "e\u{0301}"
+        }
+        """
+
+        #expect(Array(formatted.utf8) == Array(expected.utf8))
+    }
+
+    @Test("Display preserves LF, CRLF and CR layouts while explicit reflow formats each")
+    func preservesExistingLineBreaks() {
+        let expected = "{\n  \"a\": 1\n}"
+        for source in ["{\n\"a\":1\n}", "{\r\n\"a\":1\r\n}", "{\r\"a\":1\r}"] {
+            #expect(JSONFormatter.prettyPrinted(source) == nil)
+            #expect(JSONFormatter.prettyPrinted(source, reflow: true) == expected)
+        }
+    }
+
+    @Test("Only JSON whitespace can be discarded outside a string")
+    func preservesNonJSONWhitespace() {
+        #expect(!JSONFormatter.looksLikeJSON("\u{00A0}{\"a\":1}"))
+        #expect(JSONFormatter.prettyPrinted("{\"a\":\u{00A0}1}") == "{\n  \"a\": \u{00A0}1\n}")
+    }
+
     @Test("Empty containers stay on one line")
     func keepsEmptyContainersInline() throws {
         let formatted = try #require(JSONFormatter.prettyPrinted(#"{"items":[],"meta":{}}"#))
@@ -134,6 +164,47 @@ struct JSONFormatterTests {
         let rejoined = JSONFormatter.tokenize(source).map(\.text).joined()
 
         #expect(rejoined == source)
+    }
+
+    @Test("Unicode keys and strings stay complete colored runs")
+    func classifiesUnicodeStringBoundaries() {
+        let source = "{\"\u{0301}key\":\"\u{0301} a:b [c]\"}"
+        let tokens = JSONFormatter.tokenize(source)
+
+        #expect(tokens == [
+            .init(text: "{", kind: .punctuation),
+            .init(text: "\"\u{0301}key\"", kind: .key),
+            .init(text: ":", kind: .punctuation),
+            .init(text: "\"\u{0301} a:b [c]\"", kind: .string),
+            .init(text: "}", kind: .punctuation)
+        ])
+        #expect(Array(tokens.map(\.text).joined().utf8) == Array(source.utf8))
+    }
+
+    @Test("Contiguous indentation is one plain run")
+    func groupsWhitespaceRuns() {
+        let source = "{\r\n    \"a\": 1\n}"
+        let tokens = JSONFormatter.tokenize(source)
+
+        #expect(tokens.filter { $0.kind == .plain }.map(\.text) == ["\r\n    ", " ", "\n"])
+        #expect(tokens.map(\.text).joined() == source)
+    }
+
+    @Test("An unterminated Unicode string retains its spaces and punctuation")
+    func preservesTruncatedUnicodeString() {
+        let source = "{\"value\":\"\u{0301} a:b [c]"
+        #expect(JSONFormatter.prettyPrinted(source) == "{\n  \"value\": \"\u{0301} a:b [c]")
+        #expect(JSONFormatter.tokenize(source).last == .init(text: "\"\u{0301} a:b [c]", kind: .string))
+    }
+
+    @Test("The formatted size limit counts UTF-8 bytes rather than characters")
+    func countsMultibyteOutputAgainstBudget() throws {
+        let withinBudget = "[\"" + String(repeating: "é", count: 131_068) + "\"]"
+        let overBudget = "[\"" + String(repeating: "é", count: 131_069) + "\"]"
+
+        let formatted = try #require(JSONFormatter.prettyPrinted(withinBudget))
+        #expect(formatted.utf8.count == 262_144)
+        #expect(JSONFormatter.prettyPrinted(overBudget) == nil)
     }
 
     @Test("A small truncated nesting payload cannot expand into an oversized formatted body")

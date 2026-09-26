@@ -105,17 +105,23 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         nsViewController: DSSplitPaneController<Primary, Secondary>,
         context: Context
     ) -> CGSize? {
-        let fallback = CGSize(
-            width: minimumPrimaryThickness,
-            height: minimumPrimaryThickness + minimumSecondaryThickness
-        )
+        fittingSize(for: proposal)
+    }
+
+    /// The proposed extent must cover every visible pane and its divider, along the split axis.
+    func fittingSize(for proposal: ProposedViewSize) -> CGSize {
+        let floor = minimumPrimaryThickness
+            + (isSecondaryPresented ? minimumSecondaryThickness + DSHairlineSplitView.bandThickness : 0)
+        let fallback = axis == .vertical
+            ? CGSize(width: minimumPrimaryThickness, height: floor)
+            : CGSize(width: floor, height: minimumPrimaryThickness)
         var size = proposal.replacingUnspecifiedDimensions(by: fallback)
         // An unbounded proposal is a question, not an offer: answering `.infinity` would make the
         // stack around this view meaningless.
         if !size.width.isFinite { size.width = fallback.width }
         if !size.height.isFinite { size.height = fallback.height }
 
-        // Never claim to fit in less than the two minimums, because the split view cannot.
+        // Never claim to fit in less than the visible panes and divider, because the split view cannot.
         //
         // Offered less, `NSSplitView` does not shrink the panes below their `minimumThickness` — it
         // overflows, and the overflow goes *upward*: the first pane's content is laid out above the
@@ -123,9 +129,9 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         // that is what hid the journey editor's "Add step" button, so the step sheet never opened and
         // two UI tests failed on a symptom several layers from the cause.
         //
-        // Reporting the honest floor lets the stack above clip at the bottom instead, which is
-        // recoverable — the divider still moves and the panes are still reachable.
-        let floor = minimumPrimaryThickness + minimumSecondaryThickness
+        // Reporting the honest floor lets the stack above clip at the bottom instead. A hidden
+        // secondary pane needs no space; reserving its minimum would still clip the primary when
+        // hiding the log was meant to make room for the editor.
         if axis == .vertical {
             size.height = max(size.height, floor)
         } else {
