@@ -21,6 +21,7 @@ enum VaporConfigurator {
         routeStore: MockRouteStore,
         logContinuation: AsyncStream<RequestLog>.Continuation,
         logGate: RequestLogGate,
+        delayController: RequestDelayController,
         backendID: UUID? = nil,
         listenerPort: Int = 8080,
         localPorts: Set<Int> = []
@@ -36,14 +37,23 @@ enum VaporConfigurator {
             // Preserve the previous 10 MiB/413 limit, but collect only after admission. If the
             // peer stalls, answer and close its connection so the underlying NIO body collector
             // finishes too; canceling a Swift task waiting on its future does not cancel it.
-            guard try await collectBodyBeforeDeadline(req) else {
+            let bodyCompleted: Bool
+            do {
+                bodyCompleted = try await collectBodyBeforeDeadline(req)
+            } catch {
+                await lease.finish()
+                throw error
+            }
+            guard bodyCompleted else {
                 if req.method == .HEAD {
                     // Vapor skips the response stream writer for HEAD. This timed-out request is
                     // never resolved or logged, and the response has a zero-length body; changing
                     // the method here only lets Vapor run the writer that closes the socket.
                     req.method = .GET
                 }
-                return timedOutBodyResponse(for: req)
+                let response = timedOutBodyResponse(for: req)
+                await lease.finish()
+                return response
             }
             let incoming = IncomingRequest(
                 method: DomainHTTPMethod(rawValue: req.method.rawValue) ?? .get,
@@ -83,7 +93,14 @@ enum VaporConfigurator {
                 // what ends the request.
                 let holdMs = holdMilliseconds(for: failure, delayMs: resolved.delayMs)
                 if holdMs > 0 {
-                    try? await Task.sleep(for: .milliseconds(holdMs))
+                    // Cancellation ends the hold early; both paths still abort the response.
+                    try? await delayController.wait(milliseconds: holdMs)
+                }
+                if req.method == .HEAD {
+                    // Run the stream that fails the response before any header is flushed. Vapor
+                    // otherwise skips HEAD writers and turns this failure into a successful 200.
+                    // Matching and logging already captured the original HEAD method above.
+                    req.method = .GET
                 }
                 let response = abortedResponse(for: failure)
                 await lease.finish()
@@ -92,7 +109,13 @@ enum VaporConfigurator {
 
             // Apply the effective delay (global + per-endpoint or per-step) before answering.
             if resolved.delayMs > 0 {
-                try? await Task.sleep(for: .milliseconds(resolved.delayMs))
+                do {
+                    try await delayController.wait(milliseconds: resolved.delayMs)
+                } catch {
+                    if req.method == .HEAD { req.method = .GET }
+                    await lease.finish()
+                    return abortedResponse(for: .connectionDrop)
+                }
             }
 
             let response = response(for: resolved)
@@ -159,6 +182,7 @@ enum VaporConfigurator {
     // MARK: - Responses
 
     static func response(for resolved: ResolvedResponse) -> Response {
+        let statusCode = clampedStatusCode(resolved.statusCode)
         var headers = HTTPHeaders()
         headers.add(name: "Content-Type", value: resolved.contentType.rawValue)
         for (key, value) in resolved.headers {
@@ -172,11 +196,23 @@ enum VaporConfigurator {
             // must win outright. Appending would emit the header twice and leave the client to guess.
             headers.replaceOrAdd(name: key, value: value)
         }
-        return Response(
-            status: HTTPResponseStatus(statusCode: clampedStatusCode(resolved.statusCode)),
+        let response = Response(
+            status: HTTPResponseStatus(statusCode: statusCode),
             headers: headers,
-            body: resolved.body.map { .init(string: $0) } ?? .empty
+            body: allowsResponseBody(statusCode: statusCode)
+                ? resolved.body.map { .init(string: $0) } ?? .empty : .empty
         )
+        // NIO removes framing headers for these statuses. Apply the same rule before logging;
+        // their messages end at the header section, regardless of a configured body or length.
+        if statusCode == 204 || statusCode == 304 {
+            response.headers.remove(name: .contentLength)
+            response.headers.remove(name: .transferEncoding)
+        }
+        return response
+    }
+
+    private static func allowsResponseBody(statusCode: Int) -> Bool {
+        statusCode != 204 && statusCode != 205 && statusCode != 304
     }
 
     /// Forces a status into the range a response can actually be completed with.
@@ -210,9 +246,8 @@ enum VaporConfigurator {
 
     /// A response that is torn down instead of completed.
     ///
-    /// The body is declared as a stream of unknown length, so the head goes out with
-    /// `Transfer-Encoding: chunked` and the connection then closes without the terminating chunk. A
-    /// client sees a truncated, unusable response and its read fails — which is the point: an HTTP
+    /// The body is declared as a stream of unknown length and fails before completing it. A client
+    /// sees an empty connection close or a truncated, unusable response and its read fails: an HTTP
     /// 500 is a *reply*, and a torn connection exercises the retry and offline paths a status code
     /// can never reach.
     ///
@@ -250,8 +285,10 @@ enum VaporConfigurator {
         backendName: String? = nil,
         listenerPort: Int? = nil
     ) -> RequestLog {
-        // A failed request wrote no body, so recording the scenario's would be a fiction.
-        let (body, truncated) = resolved.failure == nil
+        // HEAD and bodyless status codes suppress configured content just as transport failures
+        // do. The preview follows those content semantics even if the scenario contains a body.
+        let (body, truncated) = resolved.failure == nil && incoming.method != .head
+            && allowsResponseBody(statusCode: clampedStatusCode(resolved.statusCode))
             ? RequestLog.cappedBody(resolved.body)
             : (nil, false)
 
@@ -306,15 +343,11 @@ enum VaporConfigurator {
     /// one Content-Type on the wire; an exact-string dictionary logged two, disagreeing with each
     /// other, one of which the client never received.
     static func loggedResponseHeaders(_ resolved: ResolvedResponse) -> [String: String] {
-        var headers = ["Content-Type": resolved.contentType.rawValue]
-        for (key, value) in resolved.headers {
-            guard EndpointValidator.isValidHeader(name: key, value: value) else { continue }
-            if let replaced = headers.keys.first(where: { $0.lowercased() == key.lowercased() }) {
-                headers.removeValue(forKey: replaced)
-            }
-            headers[key] = value
-        }
-        return headers
+        // Response also owns framing: it replaces a configured Content-Length with the real byte
+        // count and removes Transfer-Encoding for these buffered mocks. Reuse those headers so
+        // the log cannot claim the configured framing that Vapor corrected before writing it.
+        Dictionary(response(for: resolved).headers.map { ($0.name, $0.value) },
+            uniquingKeysWith: { _, last in last })
     }
 
     static func failureLabel(for failure: NetworkFailure?) -> String? {

@@ -11,6 +11,7 @@ import Domain
 /// so a stop/start cycle keeps delivering logs to the same consumer.
 public actor MockServerEngine {
     private var apps: [Int: Application] = [:]
+    private var delayController: RequestDelayController?
     private var isStarting = false
     /// Set for the whole of `stop()`, because `stop()` clears `app` before it awaits the shutdown and
     /// `app == nil` is otherwise indistinguishable from "nothing is listening". See `start`.
@@ -58,16 +59,24 @@ public actor MockServerEngine {
         // because the two ask different things of the caller: one means "you already have a server",
         // this one means "ask again in a moment".
         guard !isStopping else { throw MockServerError.invalidState(.stopping) }
+        let listeners = configuration.listeners.map { ($0.port, $0.id == ServerConfiguration.primaryID ? nil : Optional($0.id)) }
+        // Stored configurations and direct engine callers can bypass the editing validators.
+        // Port zero would bind an undisclosed ephemeral port while the configuration still reports
+        // zero. Validate every listener before creating any application or snapshot.
+        for (port, _) in listeners {
+            do { try EndpointValidator.validatePort(port) }
+            catch { throw MockServerError.invalidConfiguration(error.localizedDescription) }
+        }
+        let localPorts = Set(listeners.map(\.0))
+        guard localPorts.count == listeners.count else {
+            throw MockServerError.invalidConfiguration("Each backend must use a different local port.")
+        }
         isStarting = true
         defer { isStarting = false }
 
         let revision = nextConfigurationRevision()
         await routeStore.updateServerConfiguration(configuration, revision: revision)
-        let listeners = configuration.listeners.map { ($0.port, $0.id == ServerConfiguration.primaryID ? nil : Optional($0.id)) }
-        let localPorts = Set(listeners.map(\.0))
-        guard localPorts.count == listeners.count else {
-            throw MockServerError.invalidConfiguration("Each backend must use a different local port.")
-        }
+        let delays = RequestDelayController()
         var started: [Int: Application] = [:]
         do {
             for (port, backendID) in listeners {
@@ -81,6 +90,7 @@ public actor MockServerEngine {
                 newApp.http.server.configuration.port = port
                 VaporConfigurator.registerRoutes(
                     on: newApp, routeStore: routeStore, logContinuation: logContinuation, logGate: logGate,
+                    delayController: delays,
                     backendID: backendID, listenerPort: port, localPorts: localPorts
                 )
                 do {
@@ -92,7 +102,9 @@ public actor MockServerEngine {
                 started[port] = newApp
             }
             apps = started
+            delayController = delays
         } catch {
+            await delays.cancel()
             for running in started.values {
                 await running.server.shutdown()
                 try? await running.asyncShutdown()
@@ -139,12 +151,22 @@ public actor MockServerEngine {
         // half-stopped state: `app` already cleared, the socket still open.
         isStopping = true
         let running = apps
+        let delays = delayController
         apps = [:]
+        delayController = nil
         defer { isStopping = false }
+        // Vapor does not cancel responder tasks when their sockets close. Wake this run's waits
+        // before shutdown so old handlers cannot retain admission slots through a later restart.
+        await delays?.cancel()
         for app in running.values { await app.server.shutdown() }
-        for app in running.values { try await app.asyncShutdown() }
+        var firstShutdownError: (any Error)?
+        for app in running.values {
+            do { try await app.asyncShutdown() }
+            catch { if firstShutdownError == nil { firstShutdownError = error } }
+        }
         // Intentionally does NOT finish `logContinuation` — the engine may be started again and the
         // same consumer must keep receiving logs across stop/start cycles.
+        if let firstShutdownError { throw firstShutdownError }
     }
 
     public var isRunning: Bool { !apps.isEmpty }

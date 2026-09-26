@@ -143,6 +143,22 @@ struct BackendCommandTests {
         #expect(withStep == stepOriginal)
     }
 
+    @Test("A DNS root dot cannot bypass the upstream loop guard")
+    func fullyQualifiedLocalhostIsRejected() {
+        var project = Self.configuredProject
+        let original = project
+        #expect(throws: ControlError.self) {
+            _ = try ProjectCommandExecutor.apply(
+                .serverConfigure(port: nil, globalDelayMs: nil, upstreamURL: "http://LOCALHOST.:8080"),
+                to: &project
+            )
+        }
+        #expect(project == original)
+        #expect(EndpointValidator.isLoopbackHost("[::1]"))
+        #expect(!EndpointValidator.isLoopbackHost("localhost.example"))
+        #expect(!EndpointValidator.isLoopbackHost("127.0.0.1.example"))
+    }
+
     @Test("Whole-project validation rolls back a backend edit that makes another upstream loop")
     func lateValidationFailureIsAtomic() {
         var project = MockProject(

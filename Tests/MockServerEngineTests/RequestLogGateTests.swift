@@ -161,7 +161,7 @@ struct RequestLogBackpressureWireTests {
             additionalHeaders: [("Content-Length", String(10 << 20))],
             bodyPrefix: Data([0x61]))
         defer { PlatformSocket.close(upload) }
-        let response = RawHTTPClient.receive(on: upload, timeout: 12)
+        let response = RawHTTPClient.receive(on: upload, timeout: 12, method: "HEAD")
         #expect(response.statusLine.contains("408"))
         #expect(response.didClose)
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
@@ -281,6 +281,7 @@ struct RequestLogBackpressureWireTests {
         oversized.httpBody = Data(repeating: 0x61, count: (10 << 20) + 1)
         let (_, rejected) = try await session.data(for: oversized)
         #expect((rejected as? HTTPURLResponse)?.statusCode == 413)
+        #expect(await engine.logGate.activeCount == 0)
         #expect(await engine.logGate.outstandingCount == 0)
         try await engine.stop()
     }

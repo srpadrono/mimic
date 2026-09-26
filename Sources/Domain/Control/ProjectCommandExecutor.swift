@@ -421,7 +421,7 @@ public enum ProjectCommandExecutor {
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else {
             throw ControlError.invalid("Real backend must be an HTTP or HTTPS base URL without credentials, query, or fragment.")
         }
-        if ["127.0.0.1", "localhost", "::1"].contains(host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))), (parts.port ?? (scheme == "https" ? 443 : 80)) == localPort {
+        if EndpointValidator.isLoopbackHost(host), (parts.port ?? (scheme == "https" ? 443 : 80)) == localPort {
             throw ControlError.invalid("The real backend cannot point to its own local port.")
         }
     }

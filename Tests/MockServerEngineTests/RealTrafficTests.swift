@@ -71,7 +71,7 @@ struct RealTrafficTests {
         ) { _, baseURL in
             let reply = try await JourneyServingTests.call("GET", "big", baseURL: baseURL, session: JourneyServingTests.session(timeout: 30))
             #expect(reply.body.utf8.count == payload.utf8.count)
-            #expect(reply.body.hasSuffix("]}"), "a truncated body would lose the closing brackets")
+            #expect(reply.body == payload)
         }
     }
 
@@ -136,6 +136,7 @@ struct RealTrafficTests {
             let (data, response) = try await JourneyServingTests.session().data(for: request)
             let http = try #require(response as? HTTPURLResponse)
             #expect(http.statusCode == 200)
+            #expect(http.value(forHTTPHeaderField: "X-Trace") == "t")
             // HTTP forbids a body on a HEAD response; sending one confuses well-behaved clients.
             #expect(data.isEmpty)
         }

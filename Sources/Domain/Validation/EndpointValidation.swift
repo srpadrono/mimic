@@ -67,6 +67,17 @@ public enum EndpointValidator {
         }
     }
 
+    /// Recognizes the literal loopback names used to reject an upstream pointing back at a
+    /// listener. This does not resolve DNS and must not be used to authorize token disclosure.
+    public static func isLoopbackHost(_ host: String) -> Bool {
+        var normalized = host.lowercased()
+        if normalized.hasPrefix("["), normalized.hasSuffix("]") {
+            normalized = String(normalized.dropFirst().dropLast())
+        }
+        if normalized.hasSuffix(".") { normalized.removeLast() }
+        return ["127.0.0.1", "localhost", "::1"].contains(normalized)
+    }
+
     /// Rejects header names and values that would corrupt the response Mimic writes.
     ///
     /// A value containing CR or LF does not become part of that header — it ends it, and everything

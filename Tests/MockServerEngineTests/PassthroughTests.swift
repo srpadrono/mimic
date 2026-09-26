@@ -16,6 +16,29 @@ struct PassthroughTests {
         return Endpoint(name: path, path: path, scenarios: [scenario], activeScenarioID: scenario.id, backendID: backendID)
     }
 
+    private static func withProxy(
+        endpoints: [Endpoint], basePath: String = "",
+        operation: (MockServerEngine, MockServerEngine, Int, Int) async throws -> Void
+    ) async throws {
+        let proxy = MockServerEngine(), upstream = MockServerEngine()
+        let real = try port()
+        await upstream.updateConfiguration(endpoints: endpoints)
+        try await upstream.start(configuration: .init(port: real, globalDelayMs: 0))
+        do {
+            // Allocate the second port after the upstream binds, so they cannot be the same.
+            let local = try port()
+            try await proxy.start(configuration: .init(port: local, globalDelayMs: 0,
+                upstreamURL: "http://127.0.0.1:\(real)\(basePath)"))
+            try await operation(proxy, upstream, local, real)
+            try await proxy.stop()
+            try await upstream.stop()
+        } catch {
+            try? await proxy.stop()
+            try? await upstream.stop()
+            throw error
+        }
+    }
+
     @Test("Complete response files are private and removed when their owner is released")
     func responseFileLifetime() throws {
         var file: CapturedResponseFile? = try CapturedResponseFile(data: Data("complete".utf8))
@@ -24,8 +47,124 @@ struct PassthroughTests {
         #expect(try String(contentsOf: url, encoding: .utf8) == "complete")
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        let directoryAttributes = try FileManager.default.attributesOfItem(atPath: directory.path)
+        #expect((directoryAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
         file = nil
         #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    @Test("The target builder does not parse origin-form path segments as authorities")
+    func leadingDoubleSlashTarget() {
+        #expect(ProxyForwarder.target(base: "https://example.test/api/", requestURI: "//segment/thing?value=a%2Fb")?
+            .absoluteString == "https://example.test/api//segment/thing?value=a%2Fb")
+    }
+
+    @Test("Vapor-normalized double-slash requests retain their first segment and encoded query")
+    func leadingDoubleSlashPath() async throws {
+        try await Self.withProxy(
+            endpoints: [Self.endpoint("/api/segment/thing", body: "the whole path arrived")], basePath: "/api/"
+        ) { proxy, _, local, real in
+            let reply = try RawHTTPClient.send(method: "GET", path: "//segment/thing?value=a%2Fb", port: local)
+            #expect(reply.statusLine == "HTTP/1.1 200 OK")
+            #expect(reply.raw.contains("the whole path arrived"))
+            #expect(reply.didClose && !reply.isTruncated)
+            var logs = proxy.logStream.makeAsyncIterator()
+            let log = try #require(await logs.next())
+            // Pinned Vapor constructs URI(path:) and collapses leading slashes before routing.
+            // Assert that supported wire behavior rather than inventing raw-path preservation.
+            #expect(log.path == "/segment/thing?value=a%2Fb")
+            #expect(log.upstreamURL == "http://127.0.0.1:\(real)/api/segment/thing?value=a%2Fb")
+            await proxy.acknowledgeLog()
+        }
+    }
+
+    @Test("A proxied HEAD preserves representation length and releases its log slot without a body")
+    func headPreservesMetadata() async throws {
+        try await Self.withProxy(endpoints: [
+            RealTrafficTests.endpoint(.head, "/metadata", headers: ["X-Trace": "upstream"], body: "hello")
+        ]) { proxy, _, local, _ in
+            let reply = try RawHTTPClient.send(method: "HEAD", path: "/metadata", port: local)
+            #expect(reply.statusLine == "HTTP/1.1 200 OK")
+            let parts = reply.raw.components(separatedBy: "\r\n\r\n")
+            let head = try #require(parts.first).lowercased()
+            #expect(head.components(separatedBy: "\r\n").contains("content-length: 5"))
+            #expect(head.components(separatedBy: "\r\n").contains("x-trace: upstream"))
+            #expect(parts.dropFirst().joined(separator: "\r\n\r\n").isEmpty)
+            #expect(reply.didClose && !reply.isTruncated)
+            var logs = proxy.logStream.makeAsyncIterator()
+            let log = try #require(await logs.next())
+            #expect(log.method == .head)
+            #expect(log.outcome == .passthrough)
+            #expect(log.responseBody == "")
+            #expect(!log.responseBodyTruncated)
+            #expect(log.capturedResponseBody == nil)
+            #expect(log.responseHeaders.first { $0.key.lowercased() == "content-length" }?.value == "5")
+            await proxy.acknowledgeLog()
+            #expect(await proxy.logGate.outstandingCount == 0)
+        }
+    }
+
+    @Test("A preview limit inside a UTF-8 scalar does not mislabel complete text traffic as binary")
+    func unicodeAcrossPreviewLimit() async throws {
+        let payload = String(repeating: "a", count: ResponseCapture.maxBodyBytes - 1) + "💡"
+        try await Self.withProxy(endpoints: [
+            RealTrafficTests.endpoint(.get, "/large-unicode", body: payload, contentType: .plainText)
+        ]) { proxy, _, local, _ in
+            let session = JourneyServingTests.session(timeout: 30)
+            defer { session.invalidateAndCancel() }
+            let url = try #require(URL(string: "http://127.0.0.1:\(local)/large-unicode"))
+            let (data, response) = try await session.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(data == Data(payload.utf8))
+            var logs = proxy.logStream.makeAsyncIterator()
+            let log = try #require(await logs.next())
+            #expect(log.outcome == .passthrough)
+            #expect(log.responseBodyIsBinary == false)
+            #expect(log.responseBody == String(repeating: "a", count: RequestLog.maxLoggedBodyBytes))
+            #expect(log.responseBodyTruncated)
+            #expect(log.capturedResponseBody == nil)
+            #expect(throws: ControlError.self) { try ResponseCapture.validate(log) }
+            await proxy.acknowledgeLog()
+        }
+    }
+
+    @Test("Repeated identity encodings still retain the complete text needed to capture a large reply")
+    func repeatedIdentityEncoding() async throws {
+        let payload = String(repeating: "v", count: RequestLog.maxLoggedBodyBytes + 1)
+        try await Self.withProxy(endpoints: [
+            RealTrafficTests.endpoint(.get, "/identity", headers: ["Content-Encoding": "identity, identity"],
+                body: payload, contentType: .plainText)
+        ]) { proxy, _, local, _ in
+            let reply = try RawHTTPClient.send(method: "GET", path: "/identity", port: local)
+            #expect(reply.statusLine == "HTTP/1.1 200 OK")
+            #expect(reply.didClose && !reply.isTruncated)
+            var logs = proxy.logStream.makeAsyncIterator()
+            let log = try #require(await logs.next())
+            #expect(log.outcome == .passthrough)
+            #expect(log.responseBodyTruncated)
+            #expect(log.capturedResponseBody?.byteCount == RequestLog.maxLoggedBodyBytes + 1)
+            #expect(try ResponseCapture.body(log) == payload)
+            await proxy.acknowledgeLog()
+        }
+    }
+
+    @Test("The proxy returns redirects to the client without following them upstream")
+    func redirectIsReturnedUnfollowed() async throws {
+        try await Self.withProxy(endpoints: [
+            RealTrafficTests.endpoint(.get, "/redirect", status: 302, headers: ["Location": "/destination"]),
+            Self.endpoint("/destination", body: "the proxy must not fetch this")
+        ]) { proxy, upstream, local, _ in
+            let reply = try RawHTTPClient.send(method: "GET", path: "/redirect", port: local)
+            #expect(reply.statusLine == "HTTP/1.1 302 Found")
+            #expect(reply.raw.lowercased().contains("\r\nlocation: /destination\r\n"))
+            #expect(reply.didClose && !reply.isTruncated)
+            #expect(await upstream.logGate.outstandingCount == 1)
+            var logs = proxy.logStream.makeAsyncIterator()
+            let log = try #require(await logs.next())
+            #expect(log.outcome == .passthrough)
+            #expect(log.responseStatusCode == 302)
+            await proxy.acknowledgeLog()
+        }
     }
 
     @Test("A bounded log consumer receives every request from a parallel burst")
@@ -214,6 +353,7 @@ struct PassthroughTests {
         let (data, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(local)/blocked")!)
         #expect((response as? HTTPURLResponse)?.statusCode == 404)
         #expect(String(decoding: data, as: UTF8.self) == "Request is not part of the active journey.")
+        #expect(await upstream.logGate.outstandingCount == 0)
     }
     @Test("Disabling forwarding takes effect without rebinding the listener")
     func disableLive() async throws {
@@ -242,6 +382,15 @@ struct PassthroughTests {
         #expect(forwarded["X-Hop"].isEmpty)
         #expect(forwarded["Connection"].isEmpty)
         #expect(forwarded["Content-Encoding"] == ["gzip"])
+    }
+
+    @Test("HEAD metadata preservation still removes Connection-nominated content length")
+    func headHeaderFiltering() {
+        let ordinary = Vapor.HTTPHeaders([("Content-Length", "123"), ("Content-Type", "text/plain")])
+        #expect(ProxyForwarder.endToEndHeaders(ordinary, preservingContentLength: true)["Content-Length"] == ["123"])
+        let nominated = Vapor.HTTPHeaders([("Connection", "content-length"), ("Content-Length", "123")])
+        #expect(ProxyForwarder.endToEndHeaders(nominated, preservingContentLength: true)["Content-Length"].isEmpty)
+        #expect(ProxyForwarder.endToEndHeaders(ordinary, request: true)["Content-Length"].isEmpty)
     }
 
 }
