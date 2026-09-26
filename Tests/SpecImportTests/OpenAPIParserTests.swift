@@ -6,6 +6,283 @@ import Domain
 @Suite("OpenAPIParser")
 struct OpenAPIParserTests {
 
+    @Test("A cancelled caller does not launch a detached specification decode", arguments: [
+        #"{"openapi":"3.0.3","info":{"title":"Cancelled","version":"1.0"},"paths":{}}"#,
+        #"{"swagger":"2.0","info":{"title":"Cancelled","version":"1.0"},"paths":{}}"#,
+    ])
+    func cancelledParse(spec: String) async {
+        let parsing = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await OpenAPIParser.parse(data: Data(spec.utf8))
+        }
+        await #expect(throws: CancellationError.self) {
+            try await parsing.value
+        }
+    }
+
+    @Test("Unsupported OpenAPI declarations do not become unrelated metadata bodies")
+    func unsupportedDeclarationsDoNotUseMetadataFallback() async throws {
+        let spec = """
+        {
+            "openapi": "3.0.3",
+            "info": { "title": "Declared bodies", "version": "1.0" },
+            "paths": {
+                "/missing-schema": { "get": { "responses": { "200": {
+                    "description": "Metadata is not this schema",
+                    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Missing" } } }
+                } } } },
+                "/pattern": { "get": { "responses": { "200": {
+                    "description": "Metadata is not a matching string",
+                    "content": { "application/json": { "schema": { "type": "string", "pattern": "^[A-Z]{4}$" } } }
+                } } } },
+                "/external-example": { "get": { "responses": { "200": {
+                    "description": "Metadata is not this example",
+                    "content": { "application/json": { "examples": {
+                        "remote": { "externalValue": "https://example.com/example.json" }
+                    } } }
+                } } } }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        try #require(candidates.count == 3)
+        for candidate in candidates {
+            #expect(candidate.responseContentType == .json)
+            #expect(candidate.responseBody == nil)
+        }
+    }
+
+    @Test("Unsupported Swagger declarations do not become unrelated metadata bodies")
+    func unsupportedSwaggerDeclarationsDoNotUseMetadataFallback() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Declared bodies", "version": "1.0" },
+            "paths": {
+                "/missing-schema": { "get": { "responses": { "200": {
+                    "description": "Metadata is not this schema",
+                    "schema": { "$ref": "#/definitions/Missing" }
+                } } } },
+                "/unsupported-example": { "get": { "responses": { "200": {
+                    "description": "Metadata is not this example",
+                    "examples": { "application/xml": "<ok/>" }
+                } } } }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        try #require(candidates.count == 2)
+        for candidate in candidates {
+            #expect(candidate.responseContentType == .json)
+            #expect(candidate.responseBody == nil)
+        }
+    }
+
+    @Test("Swagger null schema examples become a JSON null response")
+    func swaggerNullSchemaExampleIsPreserved() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Null example", "version": "1.0" },
+            "paths": {
+                "/empty": { "get": { "responses": { "200": {
+                    "description": "A null response", "schema": { "example": null }
+                } } } }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseContentType == .json)
+        #expect(candidate.responseBody == "null")
+    }
+
+    @Test("Operation and path servers override the document server, including empty overrides")
+    func serverOverridesChooseTheEffectiveRoute() async throws {
+        let spec = """
+        {
+            "openapi": "3.0.3",
+            "info": { "title": "Server overrides", "version": "1.0" },
+            "servers": [{ "url": "https://root.example/{base}", "variables": {
+                "base": { "default": "root" }
+            } }],
+            "paths": {
+                "/global": { "get": { "responses": { "200": { "description": "Root server" } } } },
+                "/default": {
+                    "servers": [],
+                    "get": { "responses": { "200": { "description": "Default server" } } }
+                },
+                "/inventory/{id}": {
+                    "servers": [{ "url": "https://path.example/path" }],
+                    "get": {
+                        "servers": [{ "url": "https://operation.example/{stage}", "variables": {
+                            "stage": { "default": "operation" }
+                        } }],
+                        "responses": { "200": { "description": "Operation server" } }
+                    },
+                    "post": { "responses": { "201": { "description": "Path server" } } },
+                    "put": { "servers": [], "responses": { "202": { "description": "Default server" } } }
+                }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+
+        #expect(Set(candidates.map { "\($0.method.rawValue) \($0.path)" }) == [
+            "GET /root/global", "GET /default", "GET /operation/inventory/:id",
+            "POST /path/inventory/:id", "PUT /inventory/:id",
+        ])
+        #expect(candidates.count == 5)
+    }
+
+    @Test("Swagger shared responses preserve status, example, and declared representation")
+    func swaggerSharedResponsesResolveBeforeChoosingTheBody() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Shared responses", "version": "1.0" },
+            "produces": ["application/json", "text/plain"],
+            "responses": {
+                "Created": { "description": "Created", "examples": { "application/json": { "id": 42 } } },
+                "Ready/state~v1": { "description": "Ready", "examples": { "text/plain": "ready" } },
+                "Progress report": { "description": "Progress", "examples": { "text/plain": "report" } }
+            },
+            "paths": {
+                "/created": { "post": { "responses": { "201": { "$ref": "#/responses/Created" } } } },
+                "/escaped": { "get": { "responses": { "202": { "$ref": "#/responses/Ready~1state~0v1" } } } },
+                "/percent": { "get": { "responses": { "203": { "$ref": "#/responses/Progress%20report" } } } }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let created = try #require(candidates.first { $0.path == "/created" })
+        let escaped = try #require(candidates.first { $0.path == "/escaped" })
+        let percent = try #require(candidates.first { $0.path == "/percent" })
+        let body = try #require(created.responseBody)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Int])
+
+        #expect(created.statusCode == 201)
+        #expect(created.responseContentType == .json)
+        #expect(object == ["id": 42])
+        #expect(escaped.statusCode == 202)
+        #expect(escaped.responseContentType == .plainText)
+        #expect(escaped.responseBody == "ready")
+        #expect(percent.statusCode == 203)
+        #expect(percent.responseBody == "report")
+    }
+
+    @Test("Broken, external, and cyclic Swagger response references fail the whole parse", arguments: [
+        "#/responses/Missing", "https://example.com/responses.json#/Created",
+        "#/responses/Bad~2name", "#/responses/Parent/child", "#/responses/CycleA",
+    ])
+    func swaggerInvalidResponseReferencesAreRefused(reference: String) async {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Broken response", "version": "1.0" },
+            "responses": {
+                "CycleA": { "$ref": "#/responses/CycleB" },
+                "CycleB": { "$ref": "#/responses/CycleA" }
+            },
+            "paths": {
+                "/a-valid": { "get": { "responses": { "200": { "description": "OK" } } } },
+                "/z-broken": { "get": { "responses": { "200": { "$ref": "\(reference)" } } } }
+            }
+        }
+        """
+        do {
+            _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            Issue.record("An invalid response reference must not produce a partial import")
+        } catch {
+            #expect(error.localizedDescription.contains("Cannot resolve Swagger response reference"))
+            #expect(error.localizedDescription.contains(reference))
+        }
+    }
+
+    @Test("Swagger referenced path items are explicit import failures")
+    func swaggerReferencedPathIsRefused() async {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Referenced path", "version": "1.0" },
+            "paths": {
+                "/a-inline": { "get": { "responses": { "200": { "description": "OK" } } } },
+                "/z-reference": { "$ref": "paths.json#/users" }
+            }
+        }
+        """
+        do {
+            _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            Issue.record("A referenced path item must not disappear from the import")
+        } catch {
+            #expect(error.localizedDescription.contains("Path item reference"))
+            #expect(error.localizedDescription.contains("paths.json#/users"))
+        }
+    }
+
+    @Test("Swagger integer and boolean enum examples keep their JSON types")
+    func swaggerScalarEnumsGenerateValidExamples() async throws {
+        let spec = """
+        {
+            "swagger": "2.0",
+            "info": { "title": "Enum examples", "version": "1.0" },
+            "paths": {
+                "/integer": { "get": { "responses": { "200": {
+                    "description": "Integer", "schema": { "type": "integer", "enum": [7, 9] }
+                } } } },
+                "/boolean": { "get": { "responses": { "200": {
+                    "description": "Boolean", "schema": { "type": "boolean", "enum": [false] }
+                } } } }
+            }
+        }
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        #expect(candidates.first { $0.path == "/integer" }?.responseBody == "7")
+        #expect(candidates.first { $0.path == "/boolean" }?.responseBody == "false")
+    }
+
+    @Test("Partial-segment templates are refused instead of creating dead routes", arguments: [
+        "/files/{name}.json", "/v{major}/users", "/range/{from}-{to}",
+    ])
+    func partialTemplatesAreRefused(path: String) async {
+        for (format, version) in [("openapi", "3.0.3"), ("swagger", "2.0")] {
+            let spec = """
+            {
+                "\(format)": "\(version)",
+                "info": { "title": "Partial template", "version": "1.0" },
+                "paths": {
+                    "\(path)": { "get": { "responses": { "200": { "description": "OK" } } } }
+                }
+            }
+            """
+            do {
+                _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
+                Issue.record("\(format) must not import a route it cannot match: \(path)")
+            } catch {
+                #expect(error.localizedDescription.contains("a path parameter must occupy an entire segment"))
+                #expect(error.localizedDescription.contains(path))
+            }
+        }
+    }
+
+    @Test("Whole-segment templates and encoded literal braces remain importable")
+    func supportedTemplateShapesRemainImportable() async throws {
+        for (format, version) in [("openapi", "3.0.3"), ("swagger", "2.0")] {
+            let spec = """
+            {
+                "\(format)": "\(version)",
+                "info": { "title": "Supported paths", "version": "1.0" },
+                "paths": {
+                    "/files/{name}": { "get": { "responses": { "200": { "description": "OK" } } } },
+                    "/files/%7Bname%7D.json": { "get": { "responses": { "200": { "description": "OK" } } } }
+                }
+            }
+            """
+            let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            #expect(Set(candidates.map(\.path)) == ["/files/:name", "/files/%7Bname%7D.json"])
+        }
+    }
+
     // MARK: - Valid OpenAPI Parsing
 
     @Test("Parses a valid OpenAPI v3 spec with one path")
@@ -873,22 +1150,29 @@ struct OpenAPIParserTests {
         #expect(candidates[0].responseBody?.contains("\"count\"") == true)
     }
 
-    @Test("Skips referenced path items that are not resolved")
-    func skipsReferencedPathItems() async throws {
+    @Test("A referenced path item fails the import instead of silently dropping a route")
+    func refusesReferencedPathItems() async {
         let spec = """
         {
             "openapi": "3.0.3",
             "info": { "title": "Test", "version": "1.0" },
             "paths": {
+                "/a-inline": {
+                    "get": { "responses": { "200": { "description": "OK" } } }
+                },
                 "/api/users": {
                     "$ref": "#/components/pathItems/UserCollection"
                 }
             }
         }
         """
-        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
-
-        #expect(candidates.isEmpty)
+        do {
+            _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            Issue.record("An unresolved path item must not produce a partial import")
+        } catch {
+            #expect(error.localizedDescription.contains("Path item reference"))
+            #expect(error.localizedDescription.contains("#/components/pathItems/UserCollection"))
+        }
     }
 
     @Test("Swagger 2.0 uses schema examples and first successful response")

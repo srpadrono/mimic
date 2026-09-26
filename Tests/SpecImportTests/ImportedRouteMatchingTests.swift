@@ -3,27 +3,8 @@ import Foundation
 @testable import SpecImport
 import Domain
 
-/// Import tested against the thing an import is *for*: answering a request.
-///
-/// Every test that already covered this module asserted the path **string** an import produces.
-/// Not one asked whether that string can match anything, and it could not: `PathPattern` reads a
-/// segment as a wildcard only when it starts with `:`, OpenAPI and Swagger write `{id}`, and
-/// nothing converted between them — so every parameterised route imported as literal segments and
-/// 404'd for the rest of its life. The document's own prefix was lost to the same blind spot:
-/// `basePath` was decoded and read by nothing, `servers` was not decoded at all, so a spec
-/// declaring `basePath: /v2` produced `/pet/{petId}` for a server that answers `/v2/pet/42` and
-/// even the literal routes were wrong.
-///
-/// Every fixture in the suite that carried a `basePath` carried `"/"` — the one value for which the
-/// prefix is a no-op. The skill `mimic-build-and-test` (`references/real-inputs.md`) names that
-/// shape exactly: "a fixture whose every instance agrees on
-/// something the format does not require. If all of them put a field in the same place, the parser
-/// has only ever been asked to read it there."
-///
-/// So the assertion that closes this is not another string comparison. It is
-/// `PathPattern.matches(requestPath:pattern:)` — the function the running server reaches through
-/// `RequestMatcher` — against a path an import actually produced, from the canonical Swagger
-/// petstore, because that is the shape a real generator emits: `basePath: "/v2"`, `"/pet/{petId}"`.
+/// Checks imported routes against the production matcher, including document prefixes, wildcard
+/// specificity, percent encoding, duplicate defaults, and GraphQL-aware route identity.
 @Suite("Imported routes match real requests")
 struct ImportedRouteMatchingTests {
 
@@ -302,6 +283,24 @@ struct ImportedRouteMatchingTests {
         #expect(emptyList == "/pet/:petId")
     }
 
+    @Test("A slash inside an authority's query or fragment is not a route prefix", arguments: [
+        "https://api.example.com?next=/wrong",
+        "https://api.example.com#section/wrong",
+        "//api.example.com?next=/wrong",
+        "https://{region}.example.com#section/wrong",
+    ])
+    func authorityQueryDoesNotBecomePath(server: String) {
+        #expect(ImportPath.normalized("/pets", documentBasePath: server) == "/pets")
+    }
+
+    @Test("A server URL query does not redirect imported routes to its query value")
+    func importedServerQueryDoesNotBecomePath() async throws {
+        let path = try await Self.openAPI3ImportedPath(
+            serversJSON: #"[{ "url": "https://api.example.com?next=/wrong" }]"#
+        )
+        #expect(path == "/pet/:petId")
+    }
+
     // MARK: - What the rewrite does with each shape, including the ones it declines
 
     @Test("Each shape a spec can write a segment in, and what it becomes")
@@ -328,16 +327,15 @@ struct ImportedRouteMatchingTests {
         #expect(ImportPath.route("/") == "/")
     }
 
-    @Test("A parameter covering only part of a segment imports literally, and that is the decision")
+    @Test("The low-level rewrite does not widen unsupported partial templates")
     func partialSegmentParametersStayLiteral() {
-        // Matching is segment-wise: the only wildcard available covers a whole segment. So there is
-        // no rewrite of `/files/{name}.json` that means what the spec means, and the choice is
-        // between a route that visibly does not match and one that silently matches too much.
+        // Spec parsers refuse these templates. The helper itself preserves the literal instead
+        // of turning a suffix-constrained parameter into a wildcard that matches too much.
         let partial = ImportPath.route("/files/{name}.json")
         #expect(partial == "/files/{name}.json")
         #expect(
             PathPattern.matches(requestPath: "/files/report.json", pattern: partial) == false,
-            "this is the documented cost: the route 404s until someone edits the path"
+            "a partial template has no equivalent whole-segment pattern"
         )
         // …and this is what was rejected in exchange. `:name` would answer requests the document
         // never described, which is worse than a route that is obviously wrong.

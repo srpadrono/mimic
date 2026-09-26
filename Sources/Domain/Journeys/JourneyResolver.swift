@@ -165,6 +165,12 @@ public enum JourneyResolver {
 /// segment matches anything. Returns the number of literal segments matched so callers can rank
 /// competing patterns by specificity.
 public enum PathPattern {
+    /// Identity for patterns that match the same paths with the same specificity. Empty slash
+    /// segments and wildcard names do not affect matching; literal spelling and case still do.
+    public static func matchingKey(for pattern: String) -> [String] {
+        pattern.split(separator: "/").map { $0.hasPrefix(":") ? ":" : String($0) }
+    }
+
     public static func specificity(requestPath: String, pattern: String) -> Int? {
         // Query strings never participate in matching.
         let cleanRequestPath = requestPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? requestPath

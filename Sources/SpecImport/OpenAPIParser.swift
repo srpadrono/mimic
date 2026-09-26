@@ -4,11 +4,20 @@ import OpenAPIKit30
 
 private enum OpenAPIImportError: LocalizedError {
     case unresolvedResponse(String)
+    case unresolvedSwaggerResponse(String)
+    case unsupportedPathItem(String)
+    case unsupportedPathTemplate(String)
 
     var errorDescription: String? {
         switch self {
         case .unresolvedResponse(let reference):
             return "Cannot resolve OpenAPI response reference \(reference)."
+        case .unresolvedSwaggerResponse(let reference):
+            return "Cannot resolve Swagger response reference \(reference). Use an inline response or a local #/responses/ reference."
+        case .unsupportedPathItem(let reference):
+            return "Path item reference \(reference) is not supported. Inline the referenced path item before importing."
+        case .unsupportedPathTemplate(let path):
+            return "Cannot import path \(path): a path parameter must occupy an entire segment."
         }
     }
 }
@@ -22,44 +31,48 @@ public enum OpenAPIParser {
         data: Data,
         existingEndpoints: [Endpoint] = []
     ) async throws -> [ImportCandidate] {
-        try await Task.detached {
+        try Task.checkCancellation()
+        let parsing = Task.detached {
+            try Task.checkCancellation()
             // Peek at the JSON to detect spec version
             if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let swagger = dict["swagger"] as? String, swagger.hasPrefix("2") {
                 return try parseSwagger2(data: data, existingEndpoints: existingEndpoints)
             }
             // Default: try OpenAPI 3.x
+            try Task.checkCancellation()
             let document = try JSONDecoder().decode(OpenAPI.Document.self, from: data)
             return try candidatesFromDocument(
                 document,
-                documentBasePath: openAPI3BasePath(in: data),
                 existingEndpoints: existingEndpoints
             )
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            let candidates = try await parsing.value
+            try Task.checkCancellation()
+            return candidates
+        } onCancel: {
+            parsing.cancel()
+        }
     }
 
-    /// The prefix an OpenAPI 3 document's first `servers` entry declares, or `nil` when it declares
-    /// none. ``ImportPath`` reduces it; this only has to hand over the string the document wrote.
-    ///
-    /// Decoded straight from the JSON rather than read off `OpenAPI.Document.servers`, for two
-    /// reasons. The prefix then arrives as the same kind of thing in both formats — a raw string
-    /// beside Swagger 2's `basePath` — so one function reduces both and they cannot diverge. And
-    /// nothing here has to reach into `URLTemplate`, which is declared in `OpenAPIKitCore`; this
-    /// module imports `OpenAPIKit30` and not that.
-    ///
-    /// Server variables are substituted with their declared defaults first, because that is what
-    /// the spec says an unbound variable means: `https://{region}.example.com/{tier}` with
-    /// `tier: { default: "v2" }` serves `/v2`.
-    static func openAPI3BasePath(in data: Data) -> String? {
-        guard let envelope = try? JSONDecoder().decode(OpenAPIServersEnvelope.self, from: data),
-              let first = envelope.servers?.first,
-              var url = first.url
-        else { return nil }
-        for (name, variable) in first.variables ?? [:] {
-            guard let value = variable.default else { continue }
-            url = url.replacingOccurrences(of: "{\(name)}", with: value)
+    /// Uses the first effective server, substituting declared defaults once per variable. An
+    /// explicitly empty override selects the default root URL rather than inheriting its parent.
+    private static func serverURL(from servers: [OpenAPI.Server]) -> String? {
+        guard let server = servers.first else { return nil }
+        let defaults = Dictionary(uniqueKeysWithValues: server.variables.map { ($0.key, $0.value.default) })
+        return server.urlTemplate.replacing(defaults).rawValue
+    }
+
+    /// Domain matches whole-segment parameters. Keeping a partial template as a literal would
+    /// create a mock that can never answer the concrete requests this specification describes.
+    private static func validatePathTemplate(_ path: String) throws {
+        for segment in path.split(separator: "/") where segment.contains("{") || segment.contains("}") {
+            let parameter = segment.dropFirst().dropLast()
+            guard segment.first == "{", segment.last == "}", !parameter.isEmpty,
+                  !parameter.contains("{"), !parameter.contains("}")
+            else { throw OpenAPIImportError.unsupportedPathTemplate(path) }
         }
-        return url
     }
 
     // MARK: - Swagger 2.0
@@ -68,13 +81,19 @@ public enum OpenAPIParser {
         data: Data,
         existingEndpoints: [Endpoint]
     ) throws -> [ImportCandidate] {
+        try Task.checkCancellation()
         let doc = try JSONDecoder().decode(SwaggerDocument.self, from: data)
+        try Task.checkCancellation()
         var candidates: [ImportCandidate] = []
         var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
         guard let paths = doc.paths else { return [] }
 
         for (pathString, pathItem) in paths.sorted(by: { $0.key < $1.key }) {
+            try Task.checkCancellation()
+            if let reference = pathItem.ref {
+                throw OpenAPIImportError.unsupportedPathItem(reference)
+            }
             let operations: [(String, SwaggerOperation?)] = [
                 ("GET", pathItem.get),
                 ("POST", pathItem.post),
@@ -86,12 +105,14 @@ public enum OpenAPIParser {
             ]
 
             for (methodString, operation) in operations {
+                try Task.checkCancellation()
                 guard let operation else { continue }
                 guard let method = HTTPMethod(rawValue: methodString) else { continue }
+                try validatePathTemplate(pathString)
 
                 // Choose the response once. When `produces` is absent, its examples can identify
                 // the content type; an example on a different status must not decide it.
-                let selectedResponse = selectedSwagger2Response(from: operation)
+                let selectedResponse = try selectedSwagger2Response(from: operation, document: doc)
                 let contentType = swagger2ContentType(
                     operation: operation,
                     doc: doc,
@@ -103,8 +124,12 @@ public enum OpenAPIParser {
                     preferring: contentType
                 )
 
-                // Fallback: auto-generate body from operation metadata when no schema/examples
-                if exampleBody == nil && contentType == .json {
+                // Metadata is a best-effort preview only when the response declares no body
+                // shape or examples. A schema we cannot generate must not become an unrelated
+                // message/parameter object that falsely appears to implement that schema.
+                if exampleBody == nil && contentType == .json,
+                   selectedResponse?.response.schema == nil,
+                   selectedResponse?.response.examples?.isEmpty != false {
                     exampleBody = SchemaExampleGenerator.generateFallbackBody(
                         description: responseDescription,
                         parameters: operation.parameters
@@ -134,6 +159,7 @@ public enum OpenAPIParser {
             }
         }
 
+        try Task.checkCancellation()
         return candidates
     }
 
@@ -184,8 +210,9 @@ public enum OpenAPIParser {
     }
 
     private static func selectedSwagger2Response(
-        from operation: SwaggerOperation
-    ) -> (statusCode: Int, response: SwaggerResponse)? {
+        from operation: SwaggerOperation,
+        document: SwaggerDocument
+    ) throws -> (statusCode: Int, response: SwaggerResponse)? {
         guard let responses = operation.responses else { return nil }
 
         // Prefer 200, then 201, then first 2xx, then first
@@ -205,7 +232,24 @@ public enum OpenAPIParser {
         }
 
         guard let bestKey, let response = responses[bestKey] else { return nil }
-        return (Int(bestKey) ?? 200, response)
+        return (Int(bestKey) ?? 200, try resolveSwaggerResponse(response, in: document))
+    }
+
+    private static func resolveSwaggerResponse(
+        _ response: SwaggerResponse,
+        in document: SwaggerDocument
+    ) throws -> SwaggerResponse {
+        var current = response
+        var visited: Set<String> = []
+        while let reference = current.ref {
+            try Task.checkCancellation()
+            guard visited.insert(reference).inserted,
+                  let name = SwaggerReference.localName(reference, section: "responses"),
+                  let resolved = document.responses?[name]
+            else { throw OpenAPIImportError.unresolvedSwaggerResponse(reference) }
+            current = resolved
+        }
+        return current
     }
 
     private static func extractSwagger2Response(
@@ -281,9 +325,9 @@ public enum OpenAPIParser {
 
     private static func candidatesFromDocument(
         _ document: OpenAPI.Document,
-        documentBasePath: String?,
         existingEndpoints: [Endpoint]
     ) throws -> [ImportCandidate] {
+        try Task.checkCancellation()
         var candidates: [ImportCandidate] = []
         var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
 
@@ -292,13 +336,12 @@ public enum OpenAPIParser {
         // endpoints differently on two imports, and neither order matched the spec. A list you scan
         // to decide what to keep has to hold still.
         for (path, pathItemEither) in document.paths.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            // pathItemEither is Either<JSONReference<PathItem>, PathItem>
-            // We only handle inline path items (.b case)
+            try Task.checkCancellation()
             let pathItem: OpenAPI.PathItem
             switch pathItemEither {
-            case .a:
-                // Referenced path item — skip (would need resolution)
-                continue
+            case .a(let reference):
+                // Returning the other paths would silently turn a partial import into success.
+                throw OpenAPIImportError.unsupportedPathItem(reference.absoluteString)
             case .b(let item):
                 pathItem = item
             }
@@ -316,8 +359,10 @@ public enum OpenAPIParser {
             ]
 
             for (httpMethod, operation) in operations {
+                try Task.checkCancellation()
                 guard let operation else { continue }
                 guard let method = domainMethod(from: httpMethod) else { continue }
+                try validatePathTemplate(pathString)
 
                 let (statusCode, exampleBody, contentType, headers) = try extractBestResponse(
                     from: operation,
@@ -327,7 +372,7 @@ public enum OpenAPIParser {
                 candidates.append(ImportCandidateBuilder.makeCandidate(
                     method: method,
                     path: pathString,
-                    documentBasePath: documentBasePath,
+                    documentBasePath: serverURL(from: operation.servers ?? pathItem.servers ?? document.servers),
                     suggestedName: name,
                     // The group tag used to be passed in from here as
                     // `HARParser.suggestGroupTag(path: pathString)`, which forwards to the very
@@ -344,6 +389,7 @@ public enum OpenAPIParser {
             }
         }
 
+        try Task.checkCancellation()
         return candidates
     }
 
@@ -416,6 +462,7 @@ public enum OpenAPIParser {
         // Extract example body from content
         var exampleBody: String?
         var contentType: Scenario.ContentType = .json
+        var allowsMetadataFallback = response.content.isEmpty
 
         let sortedContentKeys = response.content.keys.sorted { $0.rawValue < $1.rawValue }
         if let selectedKey = sortedContentKeys.first(where: { $0 == .json })
@@ -425,6 +472,9 @@ public enum OpenAPIParser {
             ?? sortedContentKeys.first,
            let selectedContent = response.content[selectedKey] {
             contentType = ImportCandidateBuilder.detectContentType(selectedKey.rawValue)
+            allowsMetadataFallback = selectedContent.schema == nil
+                && selectedContent.example == nil
+                && (selectedContent.examples?.isEmpty ?? true)
             exampleBody = extractExample(
                 from: selectedContent,
                 document: document,
@@ -432,8 +482,9 @@ public enum OpenAPIParser {
             )
         }
 
-        // Fallback: auto-generate body from operation metadata when no content/schema
-        if exampleBody == nil && contentType == .json {
+        // With no declared schema or examples, metadata can supply a best-effort review body.
+        // Unresolved or unsupported declarations instead remain without a generated body.
+        if exampleBody == nil && contentType == .json && allowsMetadataFallback {
             // Resolve parameters (inline only)
             let resolvedParams: [OpenAPI.Parameter] = operation.parameters.compactMap { paramEither in
                 switch paramEither {
@@ -588,28 +639,4 @@ public enum OpenAPIParser {
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
     }
-}
-
-/// Just enough of an OpenAPI 3 document to read its `servers` array, decoded alongside the full
-/// parse rather than through it — see ``OpenAPIParser/openAPI3BasePath(in:)``.
-///
-/// Every field is optional, and the decode above is `try?`ed, so this can never be what fails an
-/// import: a document with no `servers`, or one whose entries carry keys this does not model,
-/// simply imports with no prefix — exactly as every document did before there was one.
-///
-/// It is not a validator, and must not be read as one. `OpenAPI.Document` has already decoded the
-/// same bytes by the time this runs, and it is the thing that rejects a genuinely malformed
-/// `servers` — `OpenAPI.Server` requires `url`, so an entry without one throws out of the full
-/// decode before this is ever reached.
-private struct OpenAPIServersEnvelope: Decodable {
-    struct Server: Decodable {
-        struct Variable: Decodable {
-            let `default`: String?
-        }
-
-        let url: String?
-        let variables: [String: Variable]?
-    }
-
-    let servers: [Server]?
 }

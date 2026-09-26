@@ -376,11 +376,13 @@ struct PassthroughTests {
     @Test("Repeated cookies survive and Connection-nominated headers do not")
     func headers() {
         let input = Vapor.HTTPHeaders([("Set-Cookie", "a=one; Path=/"), ("Set-Cookie", "b=two; Path=/"),
-            ("Connection", "X-Hop, keep-alive"), ("X-Hop", "private"), ("Content-Encoding", "gzip")])
+            ("Connection", "X-Hop, keep-alive"), ("X-Hop", "private"), ("Content-Encoding", "gzip"),
+            ("Proxy-Connection", "keep-alive")])
         let forwarded = ProxyForwarder.endToEndHeaders(input)
         #expect(forwarded["Set-Cookie"] == ["a=one; Path=/", "b=two; Path=/"])
         #expect(forwarded["X-Hop"].isEmpty)
         #expect(forwarded["Connection"].isEmpty)
+        #expect(forwarded["Proxy-Connection"].isEmpty)
         #expect(forwarded["Content-Encoding"] == ["gzip"])
     }
 

@@ -18,17 +18,18 @@ public struct ImportCandidate: Identifiable, Sendable {
     public let bodySizeBytes: Int
     public let bodySizeExceedsLimit: Bool
     /// The captured body was bytes, not text: base64 whose decoded form is not valid UTF-8 — an
-    /// image, a font, a gzipped payload — or a body declared base64 that would not decode at all.
-    /// A `String` response body cannot reproduce those bytes, so the candidate imports without
-    /// one, flagged, the same treatment an oversized body gets. What it must never do is import
-    /// the base64 *spelling* as the body, which is what happened before this flag existed.
+    /// image, a font, a gzipped payload — or an encoded body that could not be decoded.
+    /// A `String` response body cannot reproduce those bytes, so the candidate remains in review
+    /// without a body and is not selected by default. The base64 spelling must never stand in for it.
     public let bodyIsBinary: Bool
+    /// The capture records a nonempty response but omits its text, so it cannot be replayed yet.
+    public let bodyIsUnavailable: Bool
     /// Something already covers this method, path and GraphQL operation: an endpoint the project
     /// holds, **or an earlier candidate in the same import**. Flagged and deselected either way —
     /// see ``ImportRouteLedger`` for why the earlier one is the one left selected.
     public let isDuplicate: Bool
 
-    /// Explicit rather than memberwise so `graphqlOperation` and `bodyIsBinary` can default —
+    /// Explicit rather than memberwise so operation and body-warning metadata can default —
     /// each is meaningful for a minority of captures, and every other call site would otherwise
     /// have to pass `nil` or `false`.
     public init(
@@ -46,6 +47,7 @@ public struct ImportCandidate: Identifiable, Sendable {
         bodySizeBytes: Int,
         bodySizeExceedsLimit: Bool,
         bodyIsBinary: Bool = false,
+        bodyIsUnavailable: Bool = false,
         isDuplicate: Bool
     ) {
         self.id = id
@@ -62,6 +64,7 @@ public struct ImportCandidate: Identifiable, Sendable {
         self.bodySizeBytes = bodySizeBytes
         self.bodySizeExceedsLimit = bodySizeExceedsLimit
         self.bodyIsBinary = bodyIsBinary
+        self.bodyIsUnavailable = bodyIsUnavailable
         self.isDuplicate = isDuplicate
     }
 
@@ -79,7 +82,7 @@ public struct ImportCandidate: Identifiable, Sendable {
 
 /// Parses HAR files into import candidates.
 public enum HARParser {
-    /// Maximum response body size (1 MB). Bodies exceeding this are flagged but still included.
+    /// Maximum response body size (1 MiB). Oversized bodies are omitted; their candidates stay reviewable.
     public static let bodySizeLimit = ImportCandidateBuilder.bodySizeLimit
 
     /// Parse HAR file data into import candidates.
@@ -92,7 +95,9 @@ public enum HARParser {
         data: Data,
         existingEndpoints: [Endpoint] = []
     ) async throws -> [ImportCandidate] {
-        try await Task.detached {
+        try Task.checkCancellation()
+        let parsing = Task.detached {
+            try Task.checkCancellation()
             let harFile = try JSONDecoder().decode(HARFile.self, from: data)
             // One ledger, threaded through the entries in order. This was a `compactMap` with
             // `existingEndpoints` captured once before it and nothing accumulated, so `isDuplicate`
@@ -101,11 +106,18 @@ public enum HARParser {
             var ledger = ImportRouteLedger(existingEndpoints: existingEndpoints)
             var candidates: [ImportCandidate] = []
             for entry in harFile.log.entries {
+                try Task.checkCancellation()
                 guard let candidate = candidateFromEntry(entry, ledger: &ledger) else { continue }
                 candidates.append(candidate)
             }
+            try Task.checkCancellation()
             return candidates
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await parsing.value
+        } onCancel: {
+            parsing.cancel()
+        }
     }
 
     // MARK: - Private
@@ -114,7 +126,8 @@ public enum HARParser {
         _ entry: HAREntry,
         ledger: inout ImportRouteLedger
     ) -> ImportCandidate? {
-        guard let method = httpMethod(from: entry.request.method) else { return nil }
+        guard let method = httpMethod(from: entry.request.method),
+              isSupportedRequestURL(entry.request.url) else { return nil }
         let path = extractPath(from: entry.request.url)
         guard !path.isEmpty else { return nil }
 
@@ -131,9 +144,29 @@ public enum HARParser {
             responseBody = nil
             binaryBodySizeBytes = sizeBytes
         }
-        let contentType = ImportCandidateBuilder.detectContentType(entry.response.content?.mimeType)
-
-        let headers = extractResponseHeaders(entry.response.headers)
+        let unavailableBodySizeBytes: Int?
+        if method != .head, ![204, 205, 304].contains(entry.response.status), entry.response.content?.text == nil {
+            unavailableBodySizeBytes = [entry.response.content?.size, entry.response.bodySize]
+                .compactMap { $0 }.first { $0 > 0 }
+        } else {
+            unavailableBodySizeBytes = nil
+        }
+        var rawHeaders = entry.response.headers ?? []
+        if !rawHeaders.contains(where: { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }),
+           let mimeType = entry.response.content?.mimeType, !mimeType.isEmpty {
+            // Some exporters omit the header list but retain HAR's content metadata. Keep the
+            // actual media type (HTML/XML/etc.) instead of replacing it with generic plain text.
+            rawHeaders.append(HARHeader(name: "Content-Type", value: mimeType))
+        }
+        let capturedType = rawHeaders.last { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value
+        let contentType = ImportCandidateBuilder.detectContentType(capturedType)
+        var headers = extractResponseHeaders(rawHeaders)
+        if responseBody != nil, let key = headers.keys.first(where: { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }),
+           let value = headers[key] {
+            // HAR has already transcoded unencoded text; decoded base64 is accepted only as UTF-8.
+            // Mimic serves those UTF-8 bytes, so an original legacy charset would misdescribe them.
+            headers[key] = contentTypeUsingUTF8(value)
+        }
 
         // GraphQL sends every operation to one path, so a capture of twenty distinct calls would
         // otherwise collapse into twenty candidates that all look like `POST /graphql` — and, worse,
@@ -151,6 +184,7 @@ public enum HARParser {
             responseHeaders: headers,
             responseBody: responseBody,
             binaryBodySizeBytes: binaryBodySizeBytes,
+            unavailableBodySizeBytes: unavailableBodySizeBytes,
             responseContentType: contentType,
             graphqlOperation: operation?.name,
             ledger: &ledger
@@ -164,6 +198,15 @@ public enum HARParser {
 
     private static func httpMethod(from raw: String) -> HTTPMethod? {
         HTTPMethod(rawValue: raw.uppercased())
+    }
+
+    /// Browser captures can include data, blob, or file resources that an HTTP mock cannot replay.
+    /// Retain support for relative captures, but do not turn another URL scheme into a fake route.
+    private static func isSupportedRequestURL(_ value: String) -> Bool {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let components = URLComponents(string: value) else { return false }
+        guard let scheme = components.scheme?.lowercased() else { return true }
+        return ["http", "https"].contains(scheme) && !(components.host ?? "").isEmpty
     }
 
     /// Extract the path component from a full URL, **percent-encoded**, which is the form the
@@ -240,8 +283,8 @@ public enum HARParser {
     private enum DecodedBody {
         case empty
         case text(String)
-        /// Base64 whose decoded bytes are not valid UTF-8, or a body declared base64 that did not
-        /// decode as it. Carries the byte count for the review sheet; the body itself is dropped.
+        /// Encoded bytes that are not valid UTF-8 or cannot be decoded. Carries the available byte
+        /// count for the review sheet; the body itself is dropped.
         case binary(sizeBytes: Int)
     }
 
@@ -272,11 +315,14 @@ public enum HARParser {
     /// the deliberate trade: see `SECURITY.md`. Review an imported mock before committing it.
     private static func decodeResponseBody(_ content: HARContent?) -> DecodedBody {
         guard let content, let text = content.text, !text.isEmpty else { return .empty }
-        guard content.encoding?.lowercased() == "base64" else { return .text(text) }
+        let encoding = content.encoding?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard !encoding.isEmpty else { return .text(text) }
+        guard encoding == "base64" else { return .binary(sizeBytes: text.utf8.count) }
 
-        // `.ignoreUnknownCharacters`, because a strict decode fails on the first line break of
-        // wrapped base64 — and the failure must not hand the wrapped spelling to the caller.
-        guard let data = Data(base64Encoded: text, options: .ignoreUnknownCharacters) else {
+        // Accept the ASCII whitespace used by wrapped exporters, while rejecting other invalid
+        // characters. Ignoring all unknown bytes silently repairs corrupt payloads into valid text.
+        let encoded = text.utf8.filter { $0 != 9 && $0 != 10 && $0 != 13 && $0 != 32 }
+        guard let data = Data(base64Encoded: Data(encoded)) else {
             // Declared base64, not decodable as it. The capture says these characters are an
             // *encoding* of the body, not the body — importing them as text would be the same lie
             // as the binary case, so same treatment. The raw length is the only size on hand.
@@ -290,19 +336,49 @@ public enum HARParser {
 
     /// Flattens HAR's header list, dropping anything ``ImportHeaderPolicy`` says must not be replayed.
     ///
-    /// A HAR may list the same header more than once, including with different casing. The last
-    /// value wins under HTTP's case-insensitive header-name rule, retaining that entry's spelling.
+    /// The complete list must reach the policy before duplicate merging, so all Connection fields
+    /// can nominate headers to omit even when a later Connection field has different casing.
     static func extractResponseHeaders(_ headers: [HARHeader]?) -> [String: String] {
-        guard let headers else { return [:] }
-        var dict: [String: String] = [:]
-        var spellingByName: [String: String] = [:]
-        for header in headers where !ImportHeaderPolicy.shouldDrop(header.name) {
-            let name = header.name.lowercased()
-            if let previousSpelling = spellingByName.updateValue(header.name, forKey: name) {
-                dict.removeValue(forKey: previousSpelling)
+        ImportHeaderPolicy.replayable((headers ?? []).map { (name: $0.name, value: $0.value) })
+    }
+
+    /// Change charset parameters without mistaking a semicolon inside a quoted parameter for a
+    /// new parameter. Other media-type parameters retain their captured spelling and order.
+    private static func contentTypeUsingUTF8(_ value: String) -> String {
+        var parameters: [String] = []
+        var current = ""
+        var quoted = false
+        var escaped = false
+        for scalar in value.unicodeScalars {
+            if escaped {
+                escaped = false
+            } else if quoted && scalar == "\\" {
+                escaped = true
+            } else if scalar == "\"" {
+                quoted.toggle()
+            } else if scalar == ";" && !quoted {
+                parameters.append(current)
+                current = ""
+                continue
             }
-            dict[header.name] = header.value
+            current.unicodeScalars.append(scalar)
         }
-        return dict
+        parameters.append(current)
+        var hasCharset = false
+        let rewritten = parameters.enumerated().map { index, parameter in
+            guard index > 0,
+                  let equals = parameter.firstIndex(of: "="),
+                  parameter[..<equals].trimmingCharacters(in: .whitespaces).lowercased() == "charset" else {
+                return parameter
+            }
+            hasCharset = true
+            return " charset=utf-8"
+        }.joined(separator: ";")
+        let mediaType = parameters[0].trimmingCharacters(in: .whitespaces).lowercased()
+        let markupType = ["text/html", "text/xml", "application/xml"].contains(mediaType)
+            || (mediaType.contains("/") && mediaType.hasSuffix("+xml"))
+        // HTML meta tags and XML declarations may still name the original encoding. The HAR
+        // text is UTF-8, so authoritative transport metadata must override those stale declarations.
+        return !hasCharset && markupType ? rewritten + "; charset=utf-8" : rewritten
     }
 }

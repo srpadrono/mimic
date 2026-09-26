@@ -11,6 +11,8 @@ enum ImportCandidateBuilder {
     ///   than text, or `nil` when the body — if there is one — is text. Non-nil means the parser
     ///   could not produce a `String` for the body at all, so the caller passes
     ///   `responseBody: nil` beside it and the candidate arrives flagged ``ImportCandidate/bodyIsBinary``.
+    /// - Parameter unavailableBodySizeBytes: A positive captured size whose text was omitted from
+    ///   the HAR. Kept separate from binary content so review can explain what is missing.
     /// - Parameter ledger: Every route this import has already accounted for. Passed `inout` because
     ///   a candidate claims its own route as it is built — see ``ImportRouteLedger``.
     static func makeCandidate(
@@ -23,6 +25,7 @@ enum ImportCandidateBuilder {
         responseHeaders: [String: String],
         responseBody: String?,
         binaryBodySizeBytes: Int? = nil,
+        unavailableBodySizeBytes: Int? = nil,
         responseContentType: Scenario.ContentType,
         graphqlOperation: String? = nil,
         ledger: inout ImportRouteLedger
@@ -33,7 +36,7 @@ enum ImportCandidateBuilder {
         let replayableHeaders = ImportHeaderPolicy.replayable(responseHeaders)
         // A binary body has no `String` form, so its size arrives separately — the review sheet
         // still shows what the capture carried, even though no body can be imported from it.
-        let bodySize = binaryBodySizeBytes ?? responseBody?.utf8.count ?? 0
+        let bodySize = max(0, unavailableBodySizeBytes ?? binaryBodySizeBytes ?? responseBody?.utf8.count ?? 0)
 
         // The route as Mimic will match it, and the route as the *document* wrote it. See
         // ``ImportPath``: the first carries the document's prefix, the second does not, because a
@@ -46,6 +49,12 @@ enum ImportCandidateBuilder {
         // captured path is not something a browser or a client library normally emits.
         let route = ImportPath.normalized(path, documentBasePath: documentBasePath)
         let namingRoute = ImportPath.route(path)
+        // A failed, partial, or unavailable capture must not hide a later complete response for
+        // this route. The row remains reviewable, but only replayable defaults claim the route.
+        let canReplay = EndpointValidator.serveableStatusCodes.contains(statusCode) && statusCode != 206
+            && (try? EndpointValidator.validatePath(route)) != nil
+            && (try? EndpointValidator.validateHeaders(replayableHeaders)) != nil
+            && binaryBodySizeBytes == nil && unavailableBodySizeBytes == nil && bodySize <= bodySizeLimit
 
         // Two GraphQL operations share a route, so route alone would call every one after the first
         // a duplicate. The operation is what makes them distinct.
@@ -56,12 +65,13 @@ enum ImportCandidateBuilder {
         let isDuplicate = ledger.isAlreadyClaimed(
             method: method,
             path: route,
-            graphqlOperation: graphqlOperation
+            graphqlOperation: graphqlOperation,
+            claiming: canReplay
         )
 
         return ImportCandidate(
             id: UUID(),
-            isSelected: !isDuplicate,
+            isSelected: canReplay && !isDuplicate,
             method: method,
             path: route,
             suggestedName: suggestedName ?? suggestName(method: method, path: namingRoute),
@@ -74,6 +84,7 @@ enum ImportCandidateBuilder {
             bodySizeBytes: bodySize,
             bodySizeExceedsLimit: bodySize > bodySizeLimit,
             bodyIsBinary: binaryBodySizeBytes != nil,
+            bodyIsUnavailable: unavailableBodySizeBytes != nil,
             isDuplicate: isDuplicate
         )
     }
@@ -102,8 +113,10 @@ enum ImportCandidateBuilder {
     }
 
     static func detectContentType(_ mimeType: String?) -> Scenario.ContentType {
-        guard let mimeType, !mimeType.isEmpty else { return .plainText }
-        return mimeType.lowercased().contains("json") ? .json : .plainText
+        let mediaType = mimeType?.split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return mediaType == "application/json" || mediaType == "text/json"
+            || (mediaType.contains("/") && mediaType.hasSuffix("+json")) ? .json : .plainText
     }
 
     private static func meaningfulSegments(in path: String) -> [String] {
@@ -112,7 +125,7 @@ enum ImportCandidateBuilder {
             .filter { segment in
                 let lower = segment.lowercased()
                 let isCommonPrefix = lower == "api"
-                    || (lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber))
+                    || (lower.count > 1 && lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber))
                 // A wildcard segment is the template form of the `42` the numeric filter beside it
                 // already drops: neither one names the resource. `/pet/:petId` is named after
                 // `pet`, so a spec that supplies no `summary` and no `operationId` gets "Get Pet"
@@ -125,41 +138,23 @@ enum ImportCandidateBuilder {
     }
 }
 
-/// Every route an import has already accounted for: the primary-backend endpoints the project
-/// holds, **plus the candidates produced so far in this same batch**.
-///
-/// The second half is what was missing, and it is a HAR that needs it: a spec's `paths` is a
-/// dictionary keyed by the route as written, so one document cannot list the same path twice —
-/// though two different templates can still normalise onto one route, and that is now caught here
-/// too — while a capture of real traffic repeats routes by definition.
-/// `HARParser.parse` computed `isDuplicate` against a list of existing
-/// endpoints captured once before the loop and accumulated nothing, so four hits on `/cart` produced
-/// four candidates all flagged clean and all pre-selected. `ImportCommitter` issues one
-/// `.endpointCreate` per selected candidate and `ProjectCommandExecutor` appends, so all four landed
-/// on one method and path — and `RequestMatcher.match` replaces its best only on *strictly greater*
-/// specificity, so the first answered every request and the other three were unreachable rows
-/// carrying responses the user could see in the review sheet and never reach.
-///
-/// **The first claim on a route keeps it**, which is a choice and not the only defensible one. Three
-/// reasons for it over last-write-wins:
-///
-/// - It is the same direction as the rule for an endpoint the project already holds, which is not
-///   negotiable: what exists wins, and the candidate arrives deselected. One rule, applied whether
-///   the earlier claim is in the project or three entries up the capture.
-/// - It agrees with what the server does. `RequestMatcher.match` keeps the first endpoint of equal
-///   specificity, so if a user overrides the defaults and selects several repeats, the one that
-///   answers is the one that was selected for them. Under last-wins the default and the override
-///   would name different rows.
-/// - Deselection is a default, not a decision. Every repeat still appears in the review sheet with
-///   its own status and size, flagged the way a pre-existing duplicate is flagged, and the user can
-///   flip which one lands — that is what makes the choice visible rather than silent.
+/// Tracks primary-backend endpoints and replayable candidates already selected by default.
+/// Equivalent slash shapes and wildcard names share a claim; method and GraphQL operation still
+/// distinguish routes. The first usable response wins, matching the server's equal-specificity
+/// rule. Later duplicates remain visible and may be selected explicitly in the review sheet.
 struct ImportRouteLedger {
     /// What makes two candidates the same mock. Method and route alone would call every GraphQL
     /// operation after the first a duplicate of the one before it: they all share `POST /graphql`.
     private struct Claim: Hashable {
         let method: HTTPMethod
-        let path: String
+        let path: [String]
         let graphqlOperation: String?
+
+        init(method: HTTPMethod, path: String, graphqlOperation: String?) {
+            self.method = method
+            self.path = PathPattern.matchingKey(for: path)
+            self.graphqlOperation = graphqlOperation?.isEmpty == true ? nil : graphqlOperation
+        }
     }
 
     private var claims: Set<Claim>
@@ -172,14 +167,17 @@ struct ImportRouteLedger {
         })
     }
 
-    /// `true` when this route was already spoken for — by an endpoint the project holds, or by an
-    /// earlier candidate in this import. Records it either way, so the *next* repeat is answered
-    /// too.
+    /// Reports an existing claim. Only candidates that can be replayed by default create a new
+    /// claim; a failed or unavailable capture must not hide a complete response later in the file.
     mutating func isAlreadyClaimed(
         method: HTTPMethod,
         path: String,
-        graphqlOperation: String?
+        graphqlOperation: String?,
+        claiming: Bool = true
     ) -> Bool {
-        claims.insert(Claim(method: method, path: path, graphqlOperation: graphqlOperation)).inserted == false
+        let claim = Claim(method: method, path: path, graphqlOperation: graphqlOperation)
+        let isDuplicate = claims.contains(claim)
+        if claiming { claims.insert(claim) }
+        return isDuplicate
     }
 }

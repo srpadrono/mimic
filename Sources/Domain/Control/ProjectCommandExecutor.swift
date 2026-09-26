@@ -642,7 +642,7 @@ public enum ProjectCommandExecutor {
         var suffix = 2
         while endpoints.contains(where: {
             $0.backendID == source.backendID && $0.method == source.method
-                && MockProject.normalize($0.path) == MockProject.normalize(path)
+                && PathPattern.matchingKey(for: $0.path) == PathPattern.matchingKey(for: path)
         }) {
             path = "\(base)-\(suffix)"
             suffix += 1

@@ -53,13 +53,10 @@ enum ImportPath {
     /// - A segment already starting with `:` is returned untouched, by falling through the `{`
     ///   guard. A spec emitted by a tool that writes Express-style routes already says what Mimic
     ///   says; translating an already-translated route is how `::id` gets shipped.
-    /// - **A partial segment is left verbatim, as a literal.** `/files/{name}.json`, `v{major}` and
-    ///   `{a}-{b}` cannot be expressed: matching is segment-wise, so the only wildcard available
-    ///   covers the entire segment, and `:name` there would also answer `/files/report.xml` — a
-    ///   route the spec never described. Importing it literally leaves something that 404s until
-    ///   someone edits the path, which is visible; importing it as a wildcard silently answers
-    ///   requests that were never in the document. `ImportedRouteMatchingTests` pins both halves of
-    ///   that, so the choice is asserted rather than merely described.
+    /// - **A partial segment is left verbatim.** `/files/{name}.json`, `v{major}` and `{a}-{b}`
+    ///   cannot be expressed by the whole-segment matcher. The spec parsers refuse these templates
+    ///   before candidate construction. This low-level rewrite preserves them rather than widening
+    ///   their meaning: replacing `{name}.json` with `:name` would also match `report.xml`.
     ///
     /// The name is reduced to letters, numbers, `_`, `-` and `.`; anything else a spec puts inside
     /// the braces (RFC 6570 modifiers like `{petId*}`, stray whitespace) is dropped, and a name left
@@ -120,8 +117,9 @@ enum ImportPath {
         } else {
             return raw
         }
-        guard let slash = afterAuthorityStart.firstIndex(of: "/") else { return "" }
-        return String(afterAuthorityStart[slash...])
+        guard let boundary = afterAuthorityStart.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }),
+              afterAuthorityStart[boundary] == "/" else { return "" }
+        return String(afterAuthorityStart[boundary...])
     }
 
     /// Joins a reduced prefix to a rewritten route without ever producing `//`, which

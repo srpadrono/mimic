@@ -75,7 +75,7 @@ public enum ResponseCapture {
     public static func headers(_ headers: [String: String]) -> [String: String] {
         let transport: Set<String> = ["connection", "keep-alive", "transfer-encoding", "te", "trailer",
             "upgrade", "proxy-authenticate", "proxy-authorization", "content-length", "content-encoding",
-            "content-range", "date", "age", "server"]
+            "content-range", "date", "age", "server", "proxy-connection"]
         // These describe the upstream's network, rate-limit window, or reporting service at
         // capture time. Replaying them from localhost gives clients false state and can send
         // browser network reports to the upstream's reporting endpoint.

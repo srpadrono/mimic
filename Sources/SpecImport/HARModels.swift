@@ -77,6 +77,8 @@ public struct HARContent: Codable, Sendable {
     public let size: Int?
     public let compression: Int?
     public let mimeType: String?
+    /// With no encoding, HAR text is decompressed, unchunked, and transcoded to UTF-8.
     public let text: String?
+    /// The encoding of text inside the archive (for example base64), not Content-Encoding.
     public let encoding: String?
 }

@@ -275,6 +275,23 @@ struct ControlCommandExecutionTests {
         #expect(response.body == "copied response")
     }
 
+    @Test("A duplicated wildcard route avoids equivalent patterns with different parameter names")
+    func duplicateEndpointAvoidsEquivalentWildcard() throws {
+        let scenario = Scenario(name: "Ready", statusCode: 200, body: "copy")
+        let source = Endpoint(name: "Item", path: "/items/:id", scenarios: [scenario], activeScenarioID: scenario.id)
+        let existingScenario = Scenario(name: "Taken", statusCode: 409)
+        let existing = Endpoint(name: "Existing", path: "/items/:other/copy/",
+            scenarios: [existingScenario], activeScenarioID: existingScenario.id)
+        var project = MockProject(name: "Items", endpoints: [source, existing])
+        let outcome = try #require(ProjectCommandExecutor.apply(.endpointDuplicate(endpoint: .id(source.id)), to: &project))
+        let copy = try #require(outcome.result.endpoint)
+        #expect(copy.path == "/items/:id/copy-2")
+        let resolved = RequestMatcher.resolve(request: IncomingRequest(method: .get, path: "/items/42/copy-2"),
+            against: project.endpoints, globalDelayMs: 0)
+        #expect(resolved.matchedEndpointID == copy.id)
+        #expect(resolved.body == "copy")
+    }
+
     @Test("An empty group tag clears the group, since a shell cannot pass JSON null")
     func emptyGroupTagClearsTheGroup() throws {
         var project = try Self.apply(

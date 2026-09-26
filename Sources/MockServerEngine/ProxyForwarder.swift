@@ -25,7 +25,7 @@ enum ProxyForwarder {
         _ source: HTTPHeaders, request: Bool = false, preservingContentLength: Bool = false
     ) -> HTTPHeaders {
         var excluded: Set<String> = ["connection", "keep-alive", "transfer-encoding", "te", "trailer",
-            "upgrade", "proxy-authenticate", "proxy-authorization"]
+            "upgrade", "proxy-authenticate", "proxy-authorization", "proxy-connection"]
         if !preservingContentLength { excluded.insert("content-length") }
         if request { excluded.insert("host") }
         for value in source["connection"] {

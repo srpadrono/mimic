@@ -88,6 +88,17 @@ struct HARParserTests {
         }
     }
 
+    @Test("A cancelled caller does not launch a detached HAR decode")
+    func cancelledParse() async {
+        let parsing = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await HARParser.parse(data: Data(#"{"log":{"entries":[]}}"#.utf8))
+        }
+        await #expect(throws: CancellationError.self) {
+            try await parsing.value
+        }
+    }
+
     @Test("Skips entries with unknown HTTP methods")
     func skipsUnknownMethods() async throws {
         let harJSON = """

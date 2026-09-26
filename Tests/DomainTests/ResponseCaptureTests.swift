@@ -159,6 +159,7 @@ struct ResponseCaptureTests {
             "Report-To": #"{"url":"https://upstream.example/reports"}"#,
             "Strict-Transport-Security": "max-age=31536000", "Alt-Svc": "h3=\":443\"",
             "Server-Timing": "origin;dur=42", "X-Request-ID": "one-request",
+            "Proxy-Connection": "keep-alive",
         ]
         let expected = ["Content-Type": "application/json", "Cache-Control": "no-store", "ETag": "v1"]
         #expect(ResponseCapture.headers(captured) == expected)
