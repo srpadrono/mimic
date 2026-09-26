@@ -19,11 +19,31 @@ import Foundation
 /// `nonisolated` because this is arithmetic over values: it has no actor affinity, the same opt-out
 /// `NavigationHistory` and `SidebarQuery` take in this module for the same reason.
 nonisolated enum JourneyCapture {
+    struct Preview {
+        let stepCount: Int
+        let refusal: String?
+    }
+
+    /// Uses the same capture boundary as creation, including complete-response requirements.
+    static func preview(_ logs: [RequestLog]) -> Preview {
+        do {
+            let steps = try JourneyStepSpec.capturing(logs)
+            return Preview(
+                stepCount: steps.count,
+                refusal: steps.isEmpty
+                    ? "No new steps can be captured. Select requests that were not already answered by a journey."
+                    : nil
+            )
+        } catch {
+            return Preview(stepCount: 0, refusal: error.localizedDescription)
+        }
+    }
+
     /// How many steps a selection would actually produce, for the capture sheet to report before the
     /// user commits. Not `logs.count`: requests a journey already answered are dropped, and a run of
     /// identical polls collapses into one repeating step.
     static func stepCount(_ logs: [RequestLog]) -> Int {
-        (try? JourneyStepSpec.capturing(logs).count) ?? 0
+        preview(logs).stepCount
     }
 
     /// Names a journey captured from a run after the resource its *earliest* call touches — the call
@@ -49,7 +69,8 @@ nonisolated enum JourneyCapture {
             .map(String.init)
             .last { segment in
                 let lower = segment.lowercased()
-                let isVersion = lower.hasPrefix("v") && lower.dropFirst().allSatisfy(\.isNumber)
+                let isVersion = lower.hasPrefix("v") && lower.count > 1
+                    && lower.dropFirst().allSatisfy(\.isNumber)
                 return lower != "api" && !isVersion && !segment.allSatisfy(\.isNumber)
             }
         guard let resource else { return "Captured flow" }

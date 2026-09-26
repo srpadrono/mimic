@@ -25,7 +25,7 @@ struct ControlPlaneCoordinatorTests {
         let repository: GRDBProjectRepository
     }
 
-    private func makeContext() throws -> Context {
+    private func makeContext(storeFailure: String? = nil) throws -> Context {
         let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
         let repository = GRDBProjectRepository(dbQueue: dbQueue)
         // Its own defaults suite, so a run cannot inherit — or overwrite — a real recents list or a
@@ -36,7 +36,12 @@ struct ControlPlaneCoordinatorTests {
         let appState = AppState(
             projectRepository: repository,
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            ),
+            storeFailure: storeFailure
         )
         let coordinator = ControlPlaneCoordinator()
         coordinator.prepareShutdownFlush(appState: appState, repository: repository)
@@ -55,7 +60,7 @@ struct ControlPlaneCoordinatorTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(predicate(), "Timed out waiting for condition")
     }
 
     /// What the termination hooks were called with, in order, and how often a quit's reply fired.
@@ -63,6 +68,132 @@ struct ControlPlaneCoordinatorTests {
         var exits: [Int32] = []
         var fileRemovals = 0
         var replies = 0
+    }
+
+    private actor UpdateSaveRepository: ProjectRepository {
+        struct Refused: Error, LocalizedError {
+            var errorDescription: String? { "The update save was refused." }
+        }
+        let refusesSave: Bool
+        private var holdsSave: Bool
+        private var stored: [UUID: MockProject] = [:]
+        private(set) var saveCount = 0
+
+        init(refusesSave: Bool = false, holdsSave: Bool = false) {
+            self.refusesSave = refusesSave
+            self.holdsSave = holdsSave
+        }
+
+        func release() { holdsSave = false }
+        func save(_ project: MockProject) async throws {
+            saveCount += 1
+            while holdsSave { try await Task.sleep(for: .milliseconds(5)) }
+            if refusesSave { throw Refused() }
+            stored[project.id] = project
+        }
+        func load(id: UUID) async throws -> MockProject {
+            guard let project = stored[id] else { throw PersistenceError.projectNotFound(id) }
+            return project
+        }
+        func allProjects() async throws -> [MockProject] { Array(stored.values) }
+        func delete(id: UUID) async throws { stored[id] = nil }
+    }
+
+    private func updateContext(repository: UpdateSaveRepository) throws -> (ControlPlaneCoordinator, AppState) {
+        let defaults = try #require(UserDefaults(suiteName: "UpdateSave.\(UUID().uuidString)"))
+        let state = AppState(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
+        )
+        let coordinator = ControlPlaneCoordinator()
+        coordinator.prepareShutdownFlush(appState: state, repository: repository)
+        return (coordinator, state)
+    }
+
+    @Test("An update flush returns only after the final project snapshot is saved")
+    func updateFlushSavesTheFinalSnapshot() async throws {
+        let context = try makeContext()
+        context.appState.createProject(name: "Original", port: 9230)
+        await context.appState.projects.awaitPendingStoreWrites()
+        context.appState.currentProject?.name = "Latest edit"
+        context.appState.scheduleAutosave()
+        try await context.coordinator.flushPendingSaveForUpdate()
+        let id = try #require(context.appState.currentProject?.id)
+        #expect(try await context.repository.load(id: id).name == "Latest edit")
+    }
+
+    @Test("An update flush reports a refused final save")
+    func updateFlushRejectsASaveFailure() async throws {
+        let repository = UpdateSaveRepository(refusesSave: true)
+        let (coordinator, state) = try updateContext(repository: repository)
+        state.currentProject = MockProject(name: "Unsaved changes")
+        await #expect(throws: ControlError.self) { try await coordinator.flushPendingSaveForUpdate() }
+        #expect(state.autosaveStatus == .failed("The update save was refused."))
+        #expect(await repository.saveCount == 1)
+    }
+
+    @Test("An update flush reports a write still pending at its deadline")
+    func updateFlushRejectsAnUnfinishedSave() async throws {
+        let repository = UpdateSaveRepository(holdsSave: true)
+        defer { Task { await repository.release() } }
+        let (coordinator, state) = try updateContext(repository: repository)
+        state.currentProject = MockProject(name: "Pending changes")
+        do {
+            try await coordinator.flushPendingSaveForUpdate()
+            Issue.record("The unfinished save must stop installation")
+        } catch let error as ControlError {
+            #expect(error.code == "persistence.failure")
+            #expect(error.message == "Saving is still in progress. Wait for it to finish before installing the update.")
+        }
+        #expect(await repository.saveCount == 1)
+        await repository.release()
+        await state.projects.awaitPendingStoreWrites()
+        let id = try #require(state.currentProject?.id)
+        #expect(try await repository.load(id: id).name == "Pending changes")
+    }
+
+    @Test("An update flush waits for and reports an import refusal")
+    func updateFlushRejectsAnImportFailure() async throws {
+        let repository = UpdateSaveRepository(refusesSave: true)
+        let (coordinator, state) = try updateContext(repository: repository)
+        state.importProject(MockProject(name: "Refused import"), activate: false)
+        await #expect(throws: ControlError.self) { try await coordinator.flushPendingSaveForUpdate() }
+        #expect(state.autosaveStatus == .failed("Could not import project \"Refused import\"."))
+        #expect(await repository.saveCount == 1)
+    }
+
+    @Test("An in-memory fallback cannot claim a durable save after its alert is acknowledged",
+          arguments: [false, true])
+    func updateFlushRejectsAnEphemeralStore(acknowledged: Bool) async throws {
+        let failure = "This session is running in memory."
+        let context = try makeContext(storeFailure: failure)
+        #expect(context.appState.isShowingStoreFailure)
+        if acknowledged { context.appState.isShowingStoreFailure = false }
+        #expect(context.appState.isShowingStoreFailure == !acknowledged)
+        #expect(context.appState.storeFailure == failure)
+        await #expect(throws: ControlError(code: .persistenceFailure, message: failure)) {
+            try await context.coordinator.flushPendingSaveForUpdate()
+        }
+    }
+
+    @Test("Control port accepts the default and explicit ephemeral test port")
+    func controlPortResolvesValidValues() throws {
+        #expect(try ControlPlaneCoordinator.resolvePort(environment: [:]) == ControlAPI.defaultPort)
+        #expect(try ControlPlaneCoordinator.resolvePort(environment: ["MIMIC_CONTROL_PORT": ""]) == ControlAPI.defaultPort)
+        #expect(try ControlPlaneCoordinator.resolvePort(environment: ["MIMIC_CONTROL_PORT": "0"]) == 0)
+        #expect(try ControlPlaneCoordinator.resolvePort(environment: ["MIMIC_CONTROL_PORT": "65535"]) == 65535)
+    }
+
+    @Test("An invalid configured control port never silently binds the default", arguments: ["invalid", "-1", "65536", "999999999999999999999999999", " ", "12.5"])
+    func controlPortRejectsInvalidValues(raw: String) {
+        #expect(throws: ControlError.self) {
+            try ControlPlaneCoordinator.resolvePort(environment: ["MIMIC_CONTROL_PORT": raw])
+        }
     }
 
     // MARK: - The drain-ordering property

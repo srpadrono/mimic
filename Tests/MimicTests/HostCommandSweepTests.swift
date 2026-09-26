@@ -127,7 +127,7 @@ struct HostCommandSweepTests {
             if await predicate() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
-        Issue.record("Timed out waiting for a control mutation")
+        try #require(await predicate(), "Timed out waiting for a control mutation")
     }
 
     private func makeSession() throws -> Session {
@@ -140,7 +140,11 @@ struct HostCommandSweepTests {
             server: MockServerRuntime(engine: engine),
             projectRepository: GRDBProjectRepository(dbQueue: queue),
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
         return Session(
             host: AppControlHost(
@@ -165,7 +169,11 @@ struct HostCommandSweepTests {
             server: MockServerRuntime(engine: engine),
             projectRepository: repository,
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
         appState.currentProject = project
         return Session(
@@ -295,6 +303,28 @@ struct HostCommandSweepTests {
         #expect(secondResponse.ok)
         #expect(await repository.startedSaves == ["First", "Second"])
         #expect(try await repository.load(id: project.id).name == "Second")
+    }
+
+    @Test("Server start cannot switch targets while saving its port", arguments: [false, true])
+    func serverStartKeepsItsProjectIdentity(closeProject: Bool) async throws {
+        let project = MockProject(name: "Original")
+        let repository = MutationRepository(project, holdsFirstSave: true)
+        defer { Task { await repository.releaseFirstSave() } }
+        let session = try makeSession(repository: repository, project: project)
+        let start = Task { @MainActor in await session.host.execute(.serverStart(port: 9234)) }
+        try await waitUntil { await repository.startedSaves == ["Original"] }
+        if closeProject {
+            session.appState.closeProject()
+        } else {
+            session.appState.currentProject = MockProject(name: "Replacement")
+        }
+        await repository.releaseFirstSave()
+        let response = await start.value
+        #expect(response.ok == false)
+        #expect(response.error?.code == (closeProject ? "project.noneOpen" : "request.invalid"))
+        #expect(session.appState.serverState == .stopped)
+        #expect(await session.engine.startedPorts.isEmpty)
+        #expect(try await repository.load(id: project.id).serverConfiguration.port == 9234)
     }
 
     /// A release the sweep can be answered with, so the update arm is exercised without a network.

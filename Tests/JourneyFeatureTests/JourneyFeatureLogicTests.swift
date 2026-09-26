@@ -15,6 +15,43 @@ import Domain
 @MainActor
 struct JourneyFeatureLogicTests {
 
+    @Test("Capture preview refuses requests without an HTTP response")
+    func capturePreviewExplainsTransportFailures() {
+        let logs = [
+            RequestLog(method: .get, path: "/account", responseStatusCode: nil, outcome: .endpoint),
+            RequestLog(method: .get, path: "/account", responseStatusCode: nil, outcome: .proxyFailure),
+        ]
+        for log in logs {
+            let capture = CaptureJourneySheet.Capture(logs: [log], suggestedName: "Account flow")
+            #expect(capture.stepCount == 0)
+            #expect(capture.refusal != nil)
+            #expect(capture.summary == capture.refusal)
+            #expect(!capture.summary.contains("one step, reproducing"))
+        }
+        #expect(CaptureJourneySheet.Capture(logs: [logs[0]], suggestedName: "Account flow").refusal
+                == "This request has no HTTP response to capture. Add a connection-drop or timeout step to reproduce a transport failure.")
+        #expect(CaptureJourneySheet.Capture(logs: [logs[1]], suggestedName: "Account flow").refusal
+                == "The backend did not return a complete response.")
+    }
+
+    @Test("Capture preview explains skipped journey traffic separately from repeated responses")
+    func capturePreviewCountsActualSteps() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let logs = [
+            RequestLog(timestamp: start, method: .get, path: "/poll", responseStatusCode: 202, outcome: .endpoint),
+            RequestLog(timestamp: start.addingTimeInterval(1), method: .get, path: "/poll", responseStatusCode: 202, outcome: .endpoint),
+            RequestLog(timestamp: start.addingTimeInterval(2), method: .get, path: "/scripted", responseStatusCode: 200, outcome: .journey),
+        ]
+        let capture = CaptureJourneySheet.Capture(logs: logs, suggestedName: "Poll flow")
+        #expect(capture.refusal == nil)
+        #expect(capture.stepCount == 1)
+        #expect(capture.summary == "Captures 2 requests in the order they arrived, as 1 step. Requests already answered by a journey are excluded. Consecutive identical responses become one step that repeats.")
+
+        let scriptedOnly = CaptureJourneySheet.Capture(logs: [logs[2]], suggestedName: "Scripted flow")
+        #expect(scriptedOnly.stepCount == 0)
+        #expect(scriptedOnly.refusal == "No new steps can be captured. Select requests that were not already answered by a journey.")
+    }
+
     // MARK: - Header parsing
 
     @Test("A header line is split at its first colon, so a value may contain more of them")
@@ -53,6 +90,31 @@ struct JourneyFeatureLogicTests {
         #expect(JourneyStepSheet.firstInvalidHeaderLine("X-Trace: abc\nRetry-After 30") == 2)
         #expect(JourneyStepSheet.firstInvalidHeaderLine("\n: 30\nX-Trace: abc") == 2)
         #expect(JourneyStepSheet.firstInvalidHeaderLine("\nX-Trace: abc\nLocation: https://example.com:8443") == nil)
+        #expect(JourneyStepSheet.firstInvalidHeaderLine("X-Trace: abc\r\nRetry-After 30") == 2)
+    }
+
+    @Test("An ASCII colon separates a header even when followed by a combining mark")
+    func preservesUnicodeHeaderValues() {
+        let source = "X-Note:\u{0301}value"
+        #expect(JourneyStepSheet.firstInvalidHeaderLine(source) == nil)
+        let headers = JourneyStepSheet.parseHeaders(source)
+        #expect(headers == ["X-Note": "\u{0301}value"])
+        #expect(Array((headers["X-Note"] ?? "").utf8) == [0xCC, 0x81, 0x76, 0x61, 0x6C, 0x75, 0x65])
+    }
+
+    @Test("Wait fields allow gradual repair of legacy excessive values", arguments: [
+        ("300000", nil, 300_000),
+        ("300001", nil, nil),
+        ("500000", 500_000, 500_000),
+        ("400000", 500_000, 400_000),
+        ("500001", 500_000, nil),
+        ("300001", 300_000, nil),
+        ("-1", 500_000, nil),
+        ("abc", 500_000, nil),
+        ("0", 500_000, 0),
+    ] as [(String, Int?, Int?)])
+    func validatesEditedWait(text: String, existing: Int?, expected: Int?) {
+        #expect(JourneyStepSheet.validatedWaitValue(text, existingValue: existing) == expected)
     }
 
     /// A dictionary, so the same name twice keeps the last one — worth stating because it is a real

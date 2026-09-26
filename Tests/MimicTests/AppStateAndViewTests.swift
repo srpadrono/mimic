@@ -52,6 +52,62 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.endpoints.isEmpty == true)
     }
 
+    @Test("A failed transport is neither captured automatically nor promoted as an HTTP response")
+    func failedTransportIsNotCaptured() throws {
+        let appState = try makeAppState()
+        let project = MockProject(name: "Capture", serverConfiguration: .init(
+            port: 8080, globalDelayMs: 0, upstreamURL: "http://localhost:19000", captureResponses: true
+        ))
+        appState.currentProject = project
+        let log = RequestLog(
+            method: .get, path: "/interrupted", projectID: project.id,
+            responseStatusCode: nil, failureLabel: "Connection closed", outcome: .passthrough
+        )
+        appState.requestLogs = [log]
+        appState.server.onLog?(log)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+        #expect(appState.savePassedThroughLogAsMock(id: log.id) == nil)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+        #expect(appState.lastCommandError == "Select a complete passed-through HTTP response to save.")
+    }
+
+    @Test("Project switches and closing clear journey selection and endpoint drafts; edits preserve them")
+    func journeySelectionFollowsProjectIdentity() async throws {
+        let appState = try makeAppState()
+        let firstJourney = Journey(name: "First journey")
+        let secondJourney = Journey(name: "Second journey")
+        let first = MockProject(name: "First project", journeys: [firstJourney])
+        let second = MockProject(name: "Second project", journeys: [secondJourney])
+        try await appState.repository.save(first)
+        try await appState.repository.save(second)
+
+        appState.openProject(id: first.id)
+        try await waitUntil { appState.currentProject?.id == first.id }
+        appState.selectedJourneyID = firstJourney.id
+        appState.showNewEndpointSheet = true
+        appState.updateJourney(id: firstJourney.id, spec: JourneySpec(name: "Edited journey"))
+        #expect(appState.selectedJourneyID == firstJourney.id)
+        #expect(appState.showNewEndpointSheet)
+        #expect(appState.journeys.first?.name == "Edited journey")
+
+        appState.openProject(id: second.id)
+        try await waitUntil { appState.currentProject?.id == second.id }
+        #expect(appState.selectedJourneyID == nil)
+        #expect(!appState.showNewEndpointSheet)
+        appState.selectedJourneyID = secondJourney.id
+        appState.showNewEndpointSheet = true
+
+        appState.closeProject()
+        #expect(appState.currentProject == nil)
+        #expect(appState.selectedJourneyID == nil)
+        #expect(!appState.showNewEndpointSheet)
+        appState.openProject(id: first.id)
+        try await waitUntil { appState.currentProject?.id == first.id }
+        #expect(appState.selectedJourneyID == nil)
+        #expect(!appState.showNewEndpointSheet)
+        #expect(appState.journeys.first?.name == "Edited journey")
+    }
+
     @Test("Capture preserves GraphQL identity and refuses duplicate mocks")
     func capturedGraphQLStaysSpecific() throws {
         let appState = try makeAppState()
@@ -276,6 +332,8 @@ struct AppStateAndViewTests {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
         window.contentViewController = controller
         controller.view.frame = CGRect(origin: .zero, size: size)
         window.orderFront(nil)
@@ -293,7 +351,15 @@ struct AppStateAndViewTests {
         let repository = GRDBProjectRepository(dbQueue: dbQueue)
         let defaults = UserDefaults(suiteName: "AppStateAndViewTests.\(UUID().uuidString)")!
         let store = RecentProjectsStore(defaults: defaults)
-        return AppState(projectRepository: repository, recentProjectsStore: store)
+        return AppState(
+            projectRepository: repository,
+            recentProjectsStore: store,
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
+        )
     }
 
     private func makeAppState(server: MockServerRuntime) throws -> AppState {
@@ -301,7 +367,16 @@ struct AppStateAndViewTests {
         let repository = GRDBProjectRepository(dbQueue: dbQueue)
         let defaults = UserDefaults(suiteName: "AppStateAndViewTests.\(UUID().uuidString)")!
         let store = RecentProjectsStore(defaults: defaults)
-        return AppState(server: server, projectRepository: repository, recentProjectsStore: store)
+        return AppState(
+            server: server,
+            projectRepository: repository,
+            recentProjectsStore: store,
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
+        )
     }
 
     private func makeAppState(repository: any ProjectRepository) throws -> AppState {
@@ -309,7 +384,12 @@ struct AppStateAndViewTests {
         return AppState(
             server: MockServerRuntime(engine: StubEngine()),
             projectRepository: repository,
-            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
     }
 
@@ -342,7 +422,7 @@ struct AppStateAndViewTests {
             if await predicate() { return }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(await predicate(), "Timed out waiting for condition")
     }
 
     private func makeImportCandidate(
@@ -1226,6 +1306,15 @@ struct AppStateAndViewTests {
         #expect(state.currentProject == nil)
     }
 
+    #if DEBUG
+    @Test("The unit-test session reports the same isolated store it opens")
+    func unitTestBackupUsesTheSessionStore() throws {
+        let expected = try #require(UITestSupport.unitTestDatabaseURL())
+        #expect(AppState.sessionStoreURL() == expected)
+        #expect(expected.lastPathComponent == "mimic-unittests.sqlite")
+    }
+    #endif
+
     @Test("UI test activation helper can be invoked from unit tests")
     func uiTestActivationHelperBuilds() async {
         #expect(UITestSupport.isRunningUITests == false)
@@ -1964,7 +2053,12 @@ struct AppStateFacadeTests {
         let defaults = UserDefaults(suiteName: "AppStateFacadeTests.\(UUID().uuidString)")!
         return AppState(
             projectRepository: GRDBProjectRepository(dbQueue: dbQueue),
-            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
     }
 

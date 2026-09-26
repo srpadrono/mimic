@@ -16,7 +16,7 @@ Projects are stored in SQLite in Application Support with normal user file permi
 
 The control API redacts credential-bearing *header values* in log output; the app window shows the original traffic. Screenshots, project exports, and response bodies are not automatically redacted. Review them before sharing.
 
-HAR and OpenAPI import omit sensitive credential headers but preserve text response bodies. A captured token inside JSON therefore remains in the imported mock. The import review is where to remove it before saving or committing the project. Pass-through capture likewise requires reviewing saved response bodies; binary, compressed, truncated, or unsuitable partial responses cannot become text mocks.
+HAR and OpenAPI import omit sensitive credential headers but preserve text response bodies. A captured token inside JSON therefore remains in the imported mock. Preview bodies and deselect unwanted entries during review; to remove a token before import, edit the source file. After import, edit the endpoint body before sharing or exporting the project. Pass-through capture likewise requires reviewing saved response bodies; binary, compressed, truncated, or unsuitable partial responses cannot become text mocks.
 
 ## Serving limits
 

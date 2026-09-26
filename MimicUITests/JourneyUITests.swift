@@ -58,7 +58,8 @@ struct JourneysNavigatorPage {
 
     func journeyRow(named name: String) -> XCUIElement {
         app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", name))
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                                  "journeys.row.", "\(name), "))
             .firstMatch
     }
 
@@ -224,16 +225,18 @@ final class JourneyUITests: XCTestCase {
         XCTAssertTrue(templatePicker.addButton.waitForExistence(timeout: 5), "Template picker should open")
 
         let row = templatePicker.template(id)
-        if row.waitForExistence(timeout: 3) {
-            row.click()
-        }
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The requested template should be listed")
+        row.click()
 
         // The toggle defaults to on; only click when the caller wants the other state.
-        if !activate, templatePicker.activateToggle.exists,
-           templatePicker.activateToggle.value as? Int == 1 {
+        XCTAssertTrue(templatePicker.activateToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(templatePicker.activateToggle.value as? Int, 1)
+        if !activate {
             templatePicker.activateToggle.click()
+            XCTAssertEqual(templatePicker.activateToggle.value as? Int, 0)
         }
         templatePicker.addButton.click()
+        XCTAssertTrue(templatePicker.addButton.waitForNonExistence(timeout: 5))
     }
 
     // MARK: - Tests
@@ -331,12 +334,16 @@ final class JourneyUITests: XCTestCase {
         )
         XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 5))
 
-        // Four steps, in run order — the sequence is the feature.
-        for index in 0..<4 {
+        // Literal routes and outcomes distinguish order from the presence of four rows.
+        let expected = [("/login", "responds 200"), ("/account-summary", "responds 500"),
+                        ("/inbox", "responds 200"), ("/account-summary", "responds 200")]
+        for (index, step) in expected.enumerated() {
             XCTAssertTrue(
                 journeys.step(at: index).waitForExistence(timeout: 5),
                 "Step \(index) should be listed"
             )
+            XCTAssertTrue(journeys.step(at: index).label.contains(step.0))
+            XCTAssertTrue(journeys.step(at: index).label.contains(step.1))
         }
     }
 

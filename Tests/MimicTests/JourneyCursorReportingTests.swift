@@ -100,7 +100,11 @@ struct JourneyCursorReportingTests {
             server: MockServerRuntime(engine: engine),
             projectRepository: GRDBProjectRepository(dbQueue: queue),
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
 
         let journey = Journey(name: Self.documentJourneyName)

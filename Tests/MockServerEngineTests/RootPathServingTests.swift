@@ -250,6 +250,26 @@ struct RootPathServingTests {
 
     // MARK: - On the wire
 
+    @Test("Unicode and literal braces match their URL-encoded request bytes")
+    func encodedLiteralRoutesReachTheirEndpoints() async throws {
+        try await JourneyServingTests.withEngine(endpoints: [
+            JourneyServingTests.endpoint(.get, "/café", 218, body: "cafe-response"),
+            JourneyServingTests.endpoint(.get, "/literal{brace}", 219, body: "brace-response"),
+            JourneyServingTests.endpoint(.get, "/files/:id", 220, body: "one-segment"),
+        ]) { _, baseURL in
+            let port = try #require(baseURL.port)
+            let cafe = try RawHTTPClient.send(method: "GET", path: "/caf%C3%A9", port: port)
+            #expect(cafe.statusLine.hasPrefix("HTTP/1.1 218"))
+            #expect(cafe.raw.hasSuffix("cafe-response"))
+            let brace = try RawHTTPClient.send(method: "GET", path: "/literal%7Bbrace%7D", port: port)
+            #expect(brace.statusLine.hasPrefix("HTTP/1.1 219"))
+            #expect(brace.raw.hasSuffix("brace-response"))
+            let slash = try RawHTTPClient.send(method: "GET", path: "/files/a%2Fb", port: port)
+            #expect(slash.statusLine.hasPrefix("HTTP/1.1 220"))
+            #expect(slash.raw.hasSuffix("one-segment"))
+        }
+    }
+
     @Test("The exact bytes for GET / are Mimic's response, read off the socket")
     func rootResponseOnTheWire() async throws {
         // URLSession normalises URLs on the way out; this makes the request the way the bug report

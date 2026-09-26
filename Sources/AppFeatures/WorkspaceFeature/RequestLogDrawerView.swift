@@ -195,6 +195,9 @@ enum RequestLogQuery {
         if let body = log.requestBody, !body.isEmpty {
             text += "\nBody:\n\(body)\n"
         }
+        if log.requestBodyTruncated == true {
+            text += "(request body truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB)\n"
+        }
 
         // The response belongs in a copied report: pasting a request into an issue without what came
         // back makes the report half a story.
@@ -213,6 +216,8 @@ enum RequestLogQuery {
             if log.responseBodyTruncated {
                 text += "(truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB)\n"
             }
+        } else if log.responseBodyIsBinary == true {
+            text += "\nBody: Binary or non-UTF-8 (not previewed)\n"
         }
         return text
     }
@@ -230,6 +235,7 @@ enum RequestLogQuery {
 struct RequestLogDrawerView: View {
     let requestLogs: [RequestLog]
     let endpoints: [Endpoint]
+    let serverState: ServerState
     let onClear: () -> Void
     /// The selected rows. Owned by `WorkspaceView` because the inspector needs to see them too — this
     /// panel no longer renders the detail itself.
@@ -277,6 +283,7 @@ struct RequestLogDrawerView: View {
     public init(
         requestLogs: [RequestLog],
         endpoints: [Endpoint],
+        serverState: ServerState,
         onClear: @escaping () -> Void,
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
@@ -289,6 +296,7 @@ struct RequestLogDrawerView: View {
         self.init(
             requestLogs: requestLogs,
             endpoints: endpoints,
+            serverState: serverState,
             onClear: onClear,
             selectedLogIDs: selectedLogIDs,
             unmatchedOnly: unmatchedOnly,
@@ -307,6 +315,7 @@ struct RequestLogDrawerView: View {
     init(
         requestLogs: [RequestLog],
         endpoints: [Endpoint],
+        serverState: ServerState,
         onClear: @escaping () -> Void,
         selectedLogIDs: Binding<Set<UUID>> = .constant([]),
         unmatchedOnly: Binding<Bool> = .constant(false),
@@ -322,6 +331,7 @@ struct RequestLogDrawerView: View {
     ) {
         self.requestLogs = requestLogs
         self.endpoints = endpoints
+        self.serverState = serverState
         self.onClear = onClear
         _selectedLogIDs = selectedLogIDs
         _unmatchedOnly = unmatchedOnly
@@ -339,6 +349,19 @@ struct RequestLogDrawerView: View {
     public var body: some View {
         GeometryReader { geometry in
             drawerContent(width: geometry.size.width)
+        }
+    }
+
+    private var emptyMessage: String {
+        switch serverState {
+        case .running:
+            "Send a request to see it appear here."
+        case .starting:
+            "The server is starting. Send a request once it is ready."
+        case .stopping:
+            "The server is stopping. Start it again to receive requests."
+        case .stopped, .error:
+            "Start the server and send a request to see it appear here."
         }
     }
 
@@ -377,7 +400,7 @@ struct RequestLogDrawerView: View {
                 DSEmptyState(
                     systemImage: "arrow.down.circle",
                     heading: "No requests yet",
-                    message: "Start the server and send a request to see it appear here.",
+                    message: emptyMessage,
                     identifier: "drawer.requests"
                 )
             } else if sortedAndFilteredLogs.isEmpty {
@@ -440,7 +463,7 @@ struct RequestLogDrawerView: View {
                 if !requestLogs.isEmpty {
                     Picker("Method", selection: $methodFilter) {
                         Text("All").tag(HTTPMethod?.none)
-                        ForEach([HTTPMethod.get, .post, .put, .patch, .delete], id: \.self) { method in
+                        ForEach(HTTPMethod.allCases, id: \.self) { method in
                             Text(method.rawValue).tag(HTTPMethod?.some(method))
                         }
                     }

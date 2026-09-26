@@ -374,6 +374,9 @@ jobs:
             name: endpoint editor A
             only: >-
               -only-testing:MimicUITests/EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance
+              -only-testing:MimicUITests/EndpointEditorUITests/testClearingTheBodyPersistsWithoutChangingAnotherScenario
+              -only-testing:MimicUITests/EndpointEditorUITests/testChangingProjectsDismissesThePreviousEndpointDraft
+              -only-testing:MimicUITests/EndpointEditorUITests/testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts
               -only-testing:MimicUITests/EndpointEditorUITests/testDeleteScenarioIsDisabledForTheOnlyScenarioAndRemovesOneOfSeveral
               -only-testing:MimicUITests/EndpointEditorUITests/testEditorDeleteConfirmationCancelKeepsTheEndpoint
               -only-testing:MimicUITests/EndpointEditorUITests/testEndpointDelayCommitsOnBlurAndRejectsANonNumericValue
@@ -400,6 +403,7 @@ jobs:
               -only-testing:MimicUITests/EndpointEditorUITests/testMethodScopeFilterRestrictsTheListAndNamesTheEmptyScope
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetCancelsAndSubmitsOnReturn
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsAPathWithoutALeadingSlash
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsUnservablePathsAndAcceptsEncodedParameters
               -only-testing:MimicUITests/EndpointEditorUITests/testNewScenarioSheetCancelsAndSubmitsOnReturn
               -only-testing:MimicUITests/EndpointEditorUITests/testRemovingAMiddleHeaderRowKeepsTheOthersIntact
               -only-testing:MimicUITests/EndpointEditorUITests/testSidebarContextMenuDeleteConfirmationNamesTheEndpoint

@@ -72,6 +72,8 @@ final class ProjectWorkspace {
     /// on a project whose every save those guards are already dropping. Struck when the delete
     /// settles, on both arms — a refused delete leaves a live project whose edits must keep saving.
     private var pendingDeleteIDs: Set<UUID> = []
+    /// Edits withheld during deletion, recoverable if the store refuses the delete.
+    private var savesDeferredByDelete: [UUID: MockProject] = [:]
     /// Which project the debounce currently waiting in ``autosaveTask`` would write.
     ///
     /// Read only by ``cancelPendingAutosave(forProject:)``, which the delete calls when it settles.
@@ -246,7 +248,12 @@ final class ProjectWorkspace {
     func saveCurrentProject() {
         // Not while a chained delete for this project is in flight: the save would join the chain
         // behind the delete and re-insert the row — see ``pendingDeleteIDs``.
-        guard let project = currentProject, !pendingDeleteIDs.contains(project.id) else { return }
+        guard let project = currentProject else { return }
+        guard !pendingDeleteIDs.contains(project.id) else {
+            savesDeferredByDelete[project.id] = project
+            return
+        }
+        cancelPendingAutosave()
         // Captured by value, because the write lands whenever its turn in the chain comes: what it
         // writes must be what the caller asked to save, not whatever is open by then. As a
         // free-floating task this was one of the five writes outside ``storeWrites`` — a chained
@@ -423,6 +430,9 @@ final class ProjectWorkspace {
         // perfect chain order, and put the row straight back. The chain covers the other window on
         // its own: a debounced write already claimed before this call sits ahead of the delete and
         // is settled before it runs.
+        if let project = currentProject, project.id == id, hasPendingAutosave {
+            savesDeferredByDelete[id] = project
+        }
         if currentProject?.id == id { cancelPendingAutosave() }
         // The cancel covers only the debounce pending *now*; the tombstone covers the rest of the
         // delete's flight, during which `currentProject` still names this project and an edit's
@@ -448,10 +458,20 @@ final class ProjectWorkspace {
                 // later save of a live project — the one failure mode this app has no way of
                 // telling you about, reintroduced by its own fix.
                 pendingDeleteIDs.remove(id)
+                if let project = savesDeferredByDelete.removeValue(forKey: id) {
+                    // Stay in this chain link: a later delete must follow the recovery save too.
+                    do {
+                        try await projectRepository.save(project)
+                    } catch {
+                        autosaveStatus = .failed("Could not delete the project or save its pending changes: \(error.localizedDescription)")
+                        return .failure(.persistenceFailure(error))
+                    }
+                }
                 autosaveStatus = .failed("Could not delete the project.")
                 return .failure(.persistenceFailure(error))
             }
             pendingDeleteIDs.remove(id)
+            savesDeferredByDelete[id] = nil
             // Lifting the tombstone is what makes this necessary: a debounce still counting down
             // for this project would pass the guard from here on and re-insert the row it just
             // removed. Scoped by id, so an edit to a different open project survives.
@@ -500,6 +520,16 @@ final class ProjectWorkspace {
         await storeWrites?.value
     }
 
+    /// An update must not quit after a refused import, lifecycle write, or final document save.
+    func saveBeforeUpdate() async throws {
+        await awaitPendingStoreWrites()
+        if case let .failed(message) = autosaveStatus {
+            throw ControlError(code: .persistenceFailure, message: message)
+        }
+        guard let project = currentProject else { return }
+        try await enqueueControlMutationSave(project).value.get()
+    }
+
     /// Persists a control mutation before its caller reports success.
     ///
     /// Called on the main actor immediately after publishing the edited project, before the host's
@@ -510,6 +540,7 @@ final class ProjectWorkspace {
     func enqueueControlMutationSave(_ project: MockProject) -> Task<Result<Void, ControlError>, Never> {
         cancelPendingAutosave()
         guard !pendingDeleteIDs.contains(project.id) else {
+            savesDeferredByDelete[project.id] = project
             let error = ControlError.persistenceFailure(PersistenceError.projectNotFound(project.id))
             autosaveStatus = .failed(error.message)
             return Task { .failure(error) }
@@ -544,6 +575,11 @@ final class ProjectWorkspace {
     func scheduleAutosave() {
         guard !isRestoringProject else { return }
         guard let project = currentProject else { return }
+        guard !pendingDeleteIDs.contains(project.id) else {
+            savesDeferredByDelete[project.id] = project
+            cancelPendingAutosave(forProject: project.id)
+            return
+        }
 
         autosaveTask?.cancel()
         hasPendingAutosave = true
@@ -562,6 +598,7 @@ final class ProjectWorkspace {
                 // Superseded by a newer change, or taken over by the flush.
                 return
             }
+            guard !Task.isCancelled else { return }
             // Claimed before the guard below: from here the write belongs to the chain, and a flush
             // that ran now would only duplicate it. The tombstone is what the guard is left doing —
             // `currentProject` still names a project whose delete is mid-chain until that turn

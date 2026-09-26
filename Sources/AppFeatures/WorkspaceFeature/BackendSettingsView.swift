@@ -183,17 +183,17 @@ struct BackendSettingsView: View {
                 sectionHeading("Local listener", detail: "Your app connects to this address.")
                 HStack(alignment: .top, spacing: DSSpacing.md) {
                     DSTextField("Name", text: name,
-                                validation: fieldIssue(backendID, .name), identifier: prefix + ".name")
-                        .accessibilityIdentifier(prefix + ".name")
+                                validation: fieldIssue(backendID, .name),
+                                inputIdentifier: prefix + ".name", identifier: prefix + ".name")
                     DSTextField("Port", text: Binding(get: {
                         portText[prefix] ?? String(port.wrappedValue)
                     }, set: {
                         portText[prefix] = $0
                         if let value = Int($0), (1...65535).contains(value) { port.wrappedValue = value }
                     }), validation: validPort == nil ? "Use 1–65535" : fieldIssue(backendID, .port),
+                        inputIdentifier: prefix + ".port",
                         identifier: prefix + ".port")
                         .frame(width: DSFormMetrics.portFieldWidth)
-                        .accessibilityIdentifier(prefix + ".port")
                 }
                 HStack(spacing: DSSpacing.sm) {
                     Text(verbatim: validPort.map { "http://localhost:\(String($0))" } ?? "Enter a valid local port")
@@ -229,9 +229,9 @@ struct BackendSettingsView: View {
                     }, set: {
                         upstream.wrappedValue = $0.isEmpty ? nil : $0
                     }), placeholder: "https://api.example.com",
-                        validation: fieldIssue(backendID, .upstream), identifier: prefix + ".upstream")
-                        .accessibilityIdentifier(prefix + ".upstream")
-                        .accessibilityLabel("Real backend URL")
+                        validation: fieldIssue(backendID, .upstream),
+                        validationIdentifier: prefix + ".upstreamError",
+                        inputIdentifier: prefix + ".upstream", identifier: prefix + ".upstream")
                     settingsToggle("Save responses as mocks", isOn: capture,
                                    identifier: prefix + ".capture")
                     if capture.wrappedValue {
@@ -339,8 +339,7 @@ struct BackendSettingsView: View {
                       let host = parts.host, !host.isEmpty,
                       parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
                       !ports.contains(parts.port ?? (scheme == "https" ? 443 : 80))
-                        || !["127.0.0.1", "localhost", "::1"].contains(
-                            host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))) else {
+                        || !EndpointValidator.isLoopbackHost(host) else {
                     return FieldIssue(backendID: backend.id, field: .upstream,
                                       message: "Enter an HTTP or HTTPS base URL outside these local listeners")
                 }

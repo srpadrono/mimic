@@ -180,7 +180,7 @@ final class AppControlHost: ControlHost {
         // MARK: Server
 
         case let .serverStart(port):
-            guard appState.currentProject != nil else { return .failure(.noProjectOpen) }
+            guard let projectID = appState.currentProject?.id else { return .failure(.noProjectOpen) }
             // Set before the first suspension below, cleared however this arm leaves. Two scripts —
             // or one script racing itself — asking to start at once would otherwise both cross the
             // `await` on `serverConfigure` and both call `startServer()`. Refused rather than queued,
@@ -221,6 +221,13 @@ final class AppControlHost: ControlHost {
                 }
                 let configured = await perform(.serverConfigure(port: port, globalDelayMs: nil))
                 guard configured.ok else { return configured }
+            }
+            guard let currentProject = appState.currentProject else { return .failure(.noProjectOpen) }
+            guard currentProject.id == projectID else {
+                return .failure(.invalid("The open project changed while saving the server settings. Start the server again for the current project."))
+            }
+            if appState.serverState == .starting || appState.serverState == .stopping {
+                return .failure(.serverBusy)
             }
             // Already up. Read after the `await` above, not before it: a port supplied here is still
             // written to the project, and only then is the caller told the bind it asked for is not

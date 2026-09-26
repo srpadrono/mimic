@@ -15,10 +15,16 @@ import Foundation
 /// `nonisolated`: everything here is file and network work that must stay off the main actor. The
 /// handoff at the end is the exception and says so.
 nonisolated protocol UpdateInstalling: Sendable {
-    func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL
+    func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) async -> Void) async throws -> URL
     func verify(_ fileURL: URL, against release: UpdateRelease) throws
     func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws
+    func discard(_ fileURL: URL)
     @MainActor func handOff(_ fileURL: URL) async throws
+}
+
+nonisolated extension UpdateInstalling {
+    /// Fixtures that do not create files have nothing to discard.
+    func discard(_ fileURL: URL) {}
 }
 
 nonisolated struct UpdateInstaller: UpdateInstalling {
@@ -67,14 +73,16 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     }
 
     private let session: URLSession
+    private let downloadRoot: URL?
 
     /// `FileManager.default` is used directly rather than injected: it is not `Sendable`, so holding
     /// one would make this type unable to cross the actor boundary it exists to work on. Every call
     /// below is a plain path operation, which `FileManager` documents as safe from any thread.
     private var fileManager: FileManager { .default }
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, downloadRoot: URL? = nil) {
         self.session = session
+        self.downloadRoot = downloadRoot
     }
 
     // MARK: - Where the download lands
@@ -87,10 +95,31 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// directory but never inside it — nothing in `Application Support/devxa.Mimic` should be
     /// anything but the store and its backups.
     func downloadDirectory() throws -> URL {
+        if let downloadRoot {
+            try fileManager.createDirectory(at: downloadRoot, withIntermediateDirectories: true)
+            return downloadRoot
+        }
         let caches = try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let directory = caches.appendingPathComponent("Updates", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    /// Removes only one attempt's directory; another download or a handed-off package survives.
+    func discard(_ fileURL: URL) {
+        let root: URL
+        if let downloadRoot {
+            root = downloadRoot
+        } else {
+            guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+            root = caches.appendingPathComponent("Updates", isDirectory: true)
+        }
+        let directory = fileURL.deletingLastPathComponent()
+        guard fileURL.isFileURL, fileURL.lastPathComponent == "Mimic.pkg",
+              UUID(uuidString: directory.lastPathComponent) != nil,
+              directory.deletingLastPathComponent().standardizedFileURL.path == root.standardizedFileURL.path
+        else { return }
+        try? fileManager.removeItem(at: directory)
     }
 
     // MARK: - Download
@@ -98,28 +127,55 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// Fetches the release's installer, reporting progress as a fraction of the expected size.
     func download(
         _ release: UpdateRelease,
-        onProgress: @escaping @Sendable (Double) -> Void = { _ in }
+        onProgress: @escaping @Sendable (Double) async -> Void = { _ in }
     ) async throws -> URL {
-        let directory = try downloadDirectory()
-        let destination = directory.appendingPathComponent(release.asset.name)
-        // A leftover from an interrupted attempt is not a head start: it may be a partial file, and
-        // it would fail the checksum in a way that reads as "the release is corrupt".
-        try? fileManager.removeItem(at: destination)
+        try Task.checkCancellation()
+        guard release.asset.sizeInBytes > 0 else {
+            throw InstallError.downloadFailed("The release does not specify a positive installer size.")
+        }
 
         var request = URLRequest(url: release.asset.downloadURL)
         request.timeoutInterval = 60
 
         let delegate = DownloadProgress(expectedBytes: release.asset.sizeInBytes, onProgress: onProgress)
         let temporaryURL: URL
+        let response: URLResponse
         do {
-            (temporaryURL, _) = try await session.download(for: request, delegate: delegate)
+            (temporaryURL, response) = try await session.download(for: request, delegate: delegate)
         } catch {
+            try Task.checkCancellation()
+            if let actual = delegate.oversizedBytes {
+                throw InstallError.wrongSize(expected: release.asset.sizeInBytes, actual: actual)
+            }
             throw InstallError.downloadFailed(error.localizedDescription)
         }
+        defer { try? fileManager.removeItem(at: temporaryURL) }
+        try Task.checkCancellation()
+        if let actual = delegate.oversizedBytes {
+            throw InstallError.wrongSize(expected: release.asset.sizeInBytes, actual: actual)
+        }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "a non-HTTP response"
+            throw InstallError.downloadFailed("The server returned \(status).")
+        }
+        // Progress callbacks can be absent or coalesced, so the completed file is authoritative.
+        guard let actualSize = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw InstallError.downloadFailed("The downloaded file's size could not be read.")
+        }
+        guard actualSize == release.asset.sizeInBytes else {
+            throw InstallError.wrongSize(expected: release.asset.sizeInBytes, actual: actualSize)
+        }
+
+        // Each attempt owns its file. A canceled download must never remove or replace another
+        // attempt's verified installer, and a feed-provided filename must not escape the cache.
+        let directory = try downloadDirectory().appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destination = directory.appendingPathComponent("Mimic.pkg")
 
         do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
             try fileManager.moveItem(at: temporaryURL, to: destination)
         } catch {
+            try? fileManager.removeItem(at: directory)
             throw InstallError.downloadFailed(error.localizedDescription)
         }
         return destination
@@ -133,6 +189,7 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// defeated on purpose. The checksum catches a truncated or corrupted download; the signature
     /// catches a file that is intact and *not ours*.
     func verify(_ fileURL: URL, against release: UpdateRelease) throws {
+        try Task.checkCancellation()
         let size = (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? nil
         if let size, size != release.asset.sizeInBytes {
             throw InstallError.wrongSize(expected: release.asset.sizeInBytes, actual: size)
@@ -166,6 +223,7 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
         var context = CC_SHA256_CTX()
         CC_SHA256_Init(&context)
         while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            try Task.checkCancellation()
             chunk.withUnsafeBytes { buffer in
                 // A non-empty `Data` always has a base address; the guard is here because
                 // `CC_SHA256_Update` with a null pointer is undefined rather than a no-op.
@@ -192,12 +250,14 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
     /// by our Developer ID*, not *notarised*. Notarisation is still enforced — by Gatekeeper, when
     /// Installer opens the quarantined file, which is why ``stampQuarantine(on:from:)`` exists.
     func verifySignature(of fileURL: URL) throws {
+        try Task.checkCancellation()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/pkgutil")
         process.arguments = ["--check-signature", fileURL.path]
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        // Drain both streams together so a full stderr pipe cannot deadlock pkgutil.
+        process.standardError = pipe
 
         let output: String
         do {
@@ -295,9 +355,13 @@ nonisolated struct UpdateInstaller: UpdateInstalling {
 private final class DownloadProgress: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
     private let expectedBytes: Int
-    private let onProgress: @Sendable (Double) -> Void
+    private let onProgress: @Sendable (Double) async -> Void
+    private let lock = NSLock()
+    private var rejectedByteCount: Int?
 
-    init(expectedBytes: Int, onProgress: @escaping @Sendable (Double) -> Void) {
+    var oversizedBytes: Int? { lock.withLock { rejectedByteCount } }
+
+    init(expectedBytes: Int, onProgress: @escaping @Sendable (Double) async -> Void) {
         self.expectedBytes = expectedBytes
         self.onProgress = onProgress
     }
@@ -309,12 +373,18 @@ private final class DownloadProgress: NSObject, URLSessionDownloadDelegate, @unc
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
+        if totalBytesWritten > Int64(expectedBytes) {
+            lock.withLock { rejectedByteCount = Int(exactly: totalBytesWritten) ?? Int.max }
+            downloadTask.cancel()
+            return
+        }
         // The server's own Content-Length when it sent one, the release manifest's size otherwise:
         // a chunked response reports `NSURLSessionTransferSizeUnknown` (-1), which would otherwise
         // produce a negative fraction and a progress bar running backwards.
         let total = totalBytesExpectedToWrite > 0 ? Double(totalBytesExpectedToWrite) : Double(expectedBytes)
         guard total > 0 else { return }
-        onProgress(min(1, max(0, Double(totalBytesWritten) / total)))
+        let fraction = min(1, max(0, Double(totalBytesWritten) / total))
+        Task { [onProgress] in await onProgress(fraction) }
     }
 
     /// Required by the protocol; the `async` `download(for:delegate:)` call takes the file itself.

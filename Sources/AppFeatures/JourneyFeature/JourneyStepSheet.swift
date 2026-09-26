@@ -12,6 +12,7 @@ import SwiftUI
 /// disclosures, so a new step does not open as a full settings page with its last section hidden.
 struct JourneyStepSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `nil` when adding.
     let step: JourneyStep?
@@ -96,29 +97,36 @@ struct JourneyStepSheet: View {
                         outcomeFields
                         timingFields
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(DSSpacing.lg)
                 }
-                .onChange(of: validation) { _, newValue in
-                    guard let newValue else { return }
+                .task(id: validation) {
+                    guard let validation else { return }
                     // Let a newly expanded disclosure lay out before bringing its field into view.
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(100))
-                        withAnimation { scroll.scrollTo(newValue.field, anchor: .center) }
-                        focusedField = newValue.field
+                    do { try await Task.sleep(for: .milliseconds(100)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : .default) {
+                        scroll.scrollTo(validation.field, anchor: .center)
+                    }
+                    focusedField = validation.field
+                }
+                .task(id: headersExpanded) {
+                    guard headersExpanded else { return }
+                    do { try await Task.sleep(for: .milliseconds(100)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : .default) {
+                        scroll.scrollTo(Field.headers, anchor: .bottom)
                     }
                 }
-                .onChange(of: headersExpanded) { _, expanded in
-                    guard expanded else { return }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(100))
-                        withAnimation { scroll.scrollTo(Field.headers, anchor: .bottom) }
-                    }
-                }
-                .onChange(of: timingExpanded) { _, expanded in
-                    guard expanded else { return }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(100))
-                        withAnimation { scroll.scrollTo(Field.delay, anchor: .bottom) }
+                .task(id: timingExpanded) {
+                    guard timingExpanded else { return }
+                    do { try await Task.sleep(for: .milliseconds(100)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : .default) {
+                        scroll.scrollTo(Field.delay, anchor: .bottom)
                     }
                 }
             }
@@ -197,7 +205,7 @@ struct JourneyStepSheet: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: DSSheetWidth.medium - DSSpacing.lg * 2)
+            .frame(maxWidth: .infinity)
             .accessibilityIdentifier("stepSheet.outcomePicker")
             .accessibilityLabel("Outcome")
             .onChange(of: kind) { validation = nil }
@@ -215,7 +223,7 @@ struct JourneyStepSheet: View {
                     .id(Field.statusCode)
                 DSMultilineField("Response body", text: $responseBody,
                                  height: DSControlHeight.field * 5,
-                                 identifier: "stepSheet.bodyField") {
+                                 identifier: "stepSheet.bodyField", isFocused: focusBinding(for: .body)) {
                     Button {
                         if let formatted = DSJSONEditor.prettyPrint(responseBody) {
                             responseBody = formatted
@@ -234,15 +242,13 @@ struct JourneyStepSheet: View {
                     .accessibilityIdentifier("stepSheet.prettyPrintButton")
                     .accessibilityLabel("Pretty-print JSON")
                 }
-                .focused($focusedField, equals: .body)
                 disclosureRow("Response headers", summary: headerText.isEmpty ? "None" : "Custom",
                               expanded: $headersExpanded, identifier: "stepSheet.headersDisclosure")
                 if headersExpanded {
                     VStack(alignment: .leading, spacing: DSSpacing.xs) {
                         DSMultilineField("Headers", text: $headerText,
                                          height: DSControlHeight.field * 3,
-                                         identifier: "stepSheet.headersField")
-                            .focused($focusedField, equals: .headers)
+                                         identifier: "stepSheet.headersField", isFocused: focusBinding(for: .headers))
                             .accessibilityLabel("Response headers, one per line")
                             .onChange(of: headerText) { clearValidation(for: .headers) }
                             .id(Field.headers)
@@ -357,6 +363,13 @@ struct JourneyStepSheet: View {
         !responseBody.isEmpty && DSJSONEditor.prettyPrint(responseBody) != nil
     }
 
+    private func focusBinding(for field: Field) -> Binding<Bool> {
+        Binding(get: { focusedField == field }, set: { focused in
+            if focused { focusedField = field }
+            else if focusedField == field { focusedField = nil }
+        })
+    }
+
     private func validationText(for field: Field) -> String? {
         validation?.field == field ? validation?.message : nil
     }
@@ -439,8 +452,7 @@ struct JourneyStepSheet: View {
         // `onCommit` then `dismiss()` unconditionally, anything the executor rejected afterwards had
         // no sheet left to report against. In the main window there is no alert at all, so the step
         // simply never appeared. The `.timeout` branch below already guards its own field this way.
-        guard let delay = Int(delayMs), delay >= 0,
-              delay <= ResponseDelay.maximumMilliseconds || delay == step?.delayMs else {
+        guard let delay = Self.validatedWaitValue(delayMs, existingValue: step?.delayMs) else {
             timingExpanded = true
             validation = Validation(
                 field: .delay,
@@ -478,17 +490,22 @@ struct JourneyStepSheet: View {
                 return
             }
             spec.headers = Self.parseHeaders(headerText)
-            // An empty body field means "no body", which is different from an empty string body only
-            // in intent; sending nil keeps the response bodyless.
-            spec.body = responseBody.isEmpty ? nil : responseBody
+            do {
+                try EndpointValidator.validateHeaders(spec.headers ?? [:])
+            } catch {
+                headersExpanded = true
+                validation = Validation(field: .headers, message: error.localizedDescription)
+                return
+            }
+            // Updates are partial: nil preserves the old body, so clearing must send an empty value.
+            spec.body = responseBody.isEmpty && step == nil ? nil : responseBody
         case .drop:
             spec.failure = .connectionDrop
         case .timeout:
             let existingHold: Int?
             if let step, case let .networkFailure(.timeout(value)) = step.outcome { existingHold = value }
             else { existingHold = nil }
-            guard let hold = Int(holdMs), hold >= 0,
-                  hold <= ResponseDelay.maximumMilliseconds || hold == existingHold else {
+            guard let hold = Self.validatedWaitValue(holdMs, existingValue: existingHold) else {
                 validation = Validation(field: .hold,
                     message: "Hold duration must be from 0 to \(ResponseDelay.maximumMilliseconds) ms.")
                 return
@@ -523,12 +540,20 @@ struct JourneyStepSheet: View {
         dismiss()
     }
 
+    /// Existing excessive waits may be preserved or reduced while a saved project is repaired.
+    static func validatedWaitValue(_ text: String, existingValue: Int?) -> Int? {
+        guard let value = Int(text), value >= 0,
+              value <= ResponseDelay.maximumMilliseconds || value <= (existingValue ?? 0) else {
+            return nil
+        }
+        return value
+    }
+
     /// Accepts `Name: Value` per line, tolerating blank lines and colons inside the value.
     static func firstInvalidHeaderLine(_ text: String) -> Int? {
-        for (index, line) in text.components(separatedBy: .newlines).enumerated() {
+        for (index, line) in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
             guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            guard let separator = line.firstIndex(of: ":"),
-                  !line[..<separator].trimmingCharacters(in: .whitespaces).isEmpty else {
+            guard let header = headerLine(line), !header.name.isEmpty else {
                 return index + 1
             }
         }
@@ -539,12 +564,17 @@ struct JourneyStepSheet: View {
     static func parseHeaders(_ text: String) -> [String: String] {
         var headers: [String: String] = [:]
         for line in text.split(whereSeparator: \.isNewline) {
-            guard let separator = line.firstIndex(of: ":") else { continue }
-            let name = line[line.startIndex..<separator].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { continue }
-            headers[name] = value
+            guard let header = headerLine(line), !header.name.isEmpty else { continue }
+            headers[header.name] = header.value
         }
         return headers
+    }
+
+    private static func headerLine(_ line: Substring) -> (name: String, value: String)? {
+        let scalars = line.unicodeScalars
+        guard let separator = scalars.firstIndex(of: ":") else { return nil }
+        let name = String(scalars[..<separator]).trimmingCharacters(in: .whitespaces)
+        let value = String(scalars[scalars.index(after: separator)...]).trimmingCharacters(in: .whitespaces)
+        return (name, value)
     }
 }

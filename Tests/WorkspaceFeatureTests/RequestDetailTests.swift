@@ -27,7 +27,7 @@ struct RequestDetailTests {
 
     @Test("A body over the formatting limit is shown verbatim")
     func skipsFormattingForHugeBodies() {
-        let huge = "{\"a\":\"" + String(repeating: "x", count: JSONFormatter.formattingLimit) + "\"}"
+        let huge = "{\"a\":\"" + String(repeating: "x", count: 20_480) + "\"}"
         let rendered = RequestBodyView.render(payload: huge, searchText: "")
 
         #expect(rendered.isFormatted == false)
@@ -55,6 +55,17 @@ struct RequestDetailTests {
         #expect(rendered.matchCount == 2)
     }
 
+    @Test("A body with carriage-return line endings keeps its layout without a refusal")
+    func carriageReturnLayoutIsPreservedWithoutARefusal() {
+        let body = "{\r  \"ok\": true,\r  \"message\": \"ready\"\r}"
+
+        let rendered = RequestBodyView.render(payload: body, searchText: "ready")
+
+        #expect(rendered.isFormatted)
+        #expect(String(rendered.text.characters) == body)
+        #expect(rendered.matchCount == 1)
+    }
+
     @Test("Match summary reads as a sentence")
     func matchSummaryWording() {
         #expect(RequestBodyView.matchSummary(0) == "No matches in this body")
@@ -76,7 +87,7 @@ struct RequestDetailTests {
 
         let command = RequestLogExport.curl(for: log, port: 8080)
 
-        #expect(command.hasPrefix("curl -X POST 'http://localhost:8080/api/users?dry=true'"))
+        #expect(command.hasPrefix("curl --globoff --path-as-is -X POST 'http://localhost:8080/api/users?dry=true'"))
         #expect(command.contains("-H 'Authorization: Bearer abc'"))
         #expect(command.contains("-H 'Content-Type: application/json'"))
         #expect(command.contains(#"--data-raw '{"name":"Ada"}'"#))
@@ -90,7 +101,111 @@ struct RequestDetailTests {
     func curlWithoutPort() {
         let log = RequestLog(method: .get, path: "/health")
 
-        #expect(RequestLogExport.curl(for: log, port: nil) == "curl -X GET '/health'")
+        let expected = [
+            "curl --globoff --path-as-is -X GET '/health'",
+            "  -H 'Accept:'",
+            "  -H 'User-Agent:'",
+        ].joined(separator: " \\\n")
+        #expect(RequestLogExport.curl(for: log, port: nil) == expected)
+    }
+
+    @Test("A HEAD command uses header-only handling and preserves its literal target")
+    func curlUsesHeadModeAndPreservesTheRequestTarget() {
+        let log = RequestLog(method: .head, path: "/a/../b?item[0]=one&item[1]=two")
+
+        let expected = [
+            "curl --globoff --path-as-is --head 'http://localhost:8080/a/../b?item[0]=one&item[1]=two'",
+            "  -H 'Accept:'",
+            "  -H 'User-Agent:'",
+        ].joined(separator: " \\\n")
+        #expect(RequestLogExport.curl(for: log, port: 8080) == expected)
+    }
+
+    @Test("A copied command keeps end-to-end headers and lets curl frame the captured body")
+    func curlDoesNotReuseCapturedFramingHeaders() {
+        let log = RequestLog(
+            method: .post,
+            path: "/framing",
+            requestHeaders: [
+                "Authorization": "Bearer fixture",
+                "Content-Type": "text/plain",
+                "X-Keep": "kept",
+                "Content-Length": "999",
+                "Transfer-Encoding": "chunked",
+                "TE": "trailers",
+                "Connection": "keep-alive, X-Hop",
+                "x-hop": "connection only",
+                "Keep-Alive": "timeout=5",
+                "Proxy-Connection": "keep-alive",
+                "Trailer": "X-Checksum",
+                "Upgrade": "websocket",
+            ],
+            requestBody: "literal body"
+        )
+
+        let expected = [
+            "curl --globoff --path-as-is -X POST 'http://localhost:8080/framing'",
+            "  -H 'Authorization: Bearer fixture'",
+            "  -H 'Content-Type: text/plain'",
+            "  -H 'X-Keep: kept'",
+            "  -H 'Accept:'",
+            "  -H 'User-Agent:'",
+            "  --data-raw 'literal body'",
+        ].joined(separator: " \\\n")
+        #expect(RequestLogExport.curl(for: log, port: 8080) == expected)
+    }
+
+    @Test("Empty captured headers stay present and absent curl defaults stay absent")
+    func curlPreservesEmptyAndAbsentHeaderValues() {
+        let log = RequestLog(
+            method: .post,
+            path: "/headers",
+            requestHeaders: ["aCcEpT": "", "X-Empty": ""],
+            requestBody: "unchanged"
+        )
+        let expected = [
+            "curl --globoff --path-as-is -X POST 'http://localhost:8080/headers'",
+            "  -H 'X-Empty;'",
+            "  -H 'aCcEpT;'",
+            "  -H 'User-Agent:'",
+            "  -H 'Content-Type:'",
+            "  --data-raw 'unchanged'",
+        ].joined(separator: " \\\n")
+
+        #expect(RequestLogExport.curl(for: log, port: 8080) == expected)
+    }
+
+    @Test("Incomplete or shell-incompatible bodies cannot become a misleading runnable command")
+    func unavailableCurlRequestsReturnAnExplanation() {
+        let truncated = RequestLog(
+            method: .post, path: "/truncated", requestBody: "prefix", requestBodyTruncated: true
+        )
+        let nullByte = RequestLog(method: .post, path: "/binary", requestBody: "a\0b")
+        let headBody = RequestLog(method: .head, path: "/head", requestBody: "body")
+
+        #expect(RequestLogExport.curl(for: truncated, port: 8080)
+            == "# The request body was truncated; a complete cURL command is unavailable.")
+        #expect(RequestLogExport.curl(for: nullByte, port: 8080)
+            == "# The request body contains a null byte and cannot be copied as a shell argument.")
+        #expect(RequestLogExport.curl(for: headBody, port: 8080)
+            == "# A HEAD request with a body cannot be reproduced with cURL's header-only mode.")
+    }
+
+    @Test("A copied report discloses truncated requests and unavailable binary responses")
+    func copiedDetailsDiscloseUnavailableBodyData() {
+        let log = RequestLog(
+            method: .post,
+            path: "/image",
+            responseBodyIsBinary: true,
+            requestBody: "prefix",
+            requestBodyTruncated: true,
+            responseStatusCode: 200
+        )
+
+        let report = RequestLogQuery.formattedDetails(for: log)
+
+        #expect(report.contains("(request body truncated at 64 KB)"))
+        #expect(report.contains("Body: Binary or non-UTF-8 (not previewed)"))
     }
 
     @Test("Single quotes in a body cannot break out of the shell quoting")

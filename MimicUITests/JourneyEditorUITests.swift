@@ -126,9 +126,9 @@ extension JourneysNavigatorPage {
     func row(named name: String) -> XCUIElement {
         app.descendants(matching: .any)
             .matching(NSPredicate(
-                format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                 "journeys.row.",
-                name
+                "\(name), "
             ))
             .firstMatch
     }
@@ -1055,6 +1055,16 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.saveButton.click()
         assertSpeaks(stepSheet.validationMessage, contains: "Name: Value",
                      "A malformed header must not disappear silently")
+        stepSheet.headersField.click()
+        stepSheet.headersField.typeKey("a", modifierFlags: .command)
+        stepSheet.headersField.typeText("Bad Header")
+        stepSheet.headersField.typeKey(";", modifierFlags: .shift)
+        stepSheet.headersField.typeText(" retained draft")
+        stepSheet.saveButton.click()
+        assertSpeaks(stepSheet.validationMessage, contains: "header name",
+                     "A header rejected by the shared validator must keep the sheet open")
+        assertSpeaks(stepSheet.headersField, contains: "Bad Header: retained draft",
+                     "A refused save must retain the draft for correction")
         // `typeText(":")` is dropped on the British test keyboard. Shift-semicolon enters the
         // actual colon on both British and US layouts, so exercise the repaired value explicitly.
         stepSheet.headersField.click()
@@ -1075,6 +1085,16 @@ final class JourneyEditorUITests: MimicUITestCase {
             UITestApp.waitUntil(timeout: 5) { self.stepSheet.prettyPrintButton.isEnabled },
             "Format should enable when the body contains valid JSON"
         )
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.stepSheet.bodyField.value as? String == "not JSON"
+                && !self.stepSheet.prettyPrintButton.isEnabled
+        }, "Undo must update both the native text and the draft used by Format")
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.stepSheet.bodyField.value as? String == "[1,2,3]"
+                && self.stepSheet.prettyPrintButton.isEnabled
+        }, "Redo must restore the native text and the draft used by Format")
         // Opening headers scrolls the Format action above the sheet's viewport. XCUITest can
         // synthesize a click on that offscreen button without activating it, so bring the action
         // into view before asking it to rewrite the body.
@@ -1088,9 +1108,17 @@ final class JourneyEditorUITests: MimicUITestCase {
             },
             "Format should reflow the compact JSON across lines"
         )
-        let formattedBody = stepSheet.bodyField.value as? String ?? ""
-        XCTAssertTrue(formattedBody.contains("1") && formattedBody.contains("2") && formattedBody.contains("3"),
-                      "Formatting must preserve the response payload")
+        let formattedBody = "[\n  1,\n  2,\n  3\n]"
+        XCTAssertEqual(stepSheet.bodyField.value as? String, formattedBody,
+                       "Formatting must preserve the response payload exactly")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.stepSheet.bodyField.value as? String == "[1,2,3]"
+        }, "Undo must restore the complete compact body, not combine it with formatted fragments")
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.stepSheet.bodyField.value as? String == formattedBody
+        }, "Redo must restore the complete formatted body")
 
         let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         screenshot.name = "journey-step-response-sheet"
@@ -1111,8 +1139,20 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         journeys.step(at: 0).click()
         XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "The saved step should reopen")
-        XCTAssertTrue((stepSheet.bodyField.value as? String)?.contains("\n") == true,
-                      "The formatted body should survive saving and reopening")
+        XCTAssertEqual(stepSheet.bodyField.value as? String, formattedBody,
+                       "The formatted body should survive saving and reopening exactly")
+        stepSheet.reveal(stepSheet.bodyField, byScrollingUp: false)
+        stepSheet.bodyField.click()
+        stepSheet.bodyField.typeKey("a", modifierFlags: .command)
+        stepSheet.bodyField.typeKey(.delete, modifierFlags: [])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.stepSheet.bodyField.value as? String == "" },
+                      "Clearing must empty the editor before saving")
+        stepSheet.saveButton.click()
+        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5))
+        journeys.step(at: 0).click()
+        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5))
+        XCTAssertEqual(stepSheet.bodyField.value as? String, "",
+                       "An explicitly cleared body must stay empty when the saved step reopens")
         stepSheet.cancelButton.click()
     }
 

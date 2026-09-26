@@ -158,9 +158,7 @@ struct BreadcrumbJumpBar: View {
             ForEach(crumbs.dropLast(2)) { crumb in
                 if !crumb.options.isEmpty {
                     Menu(crumb.title) {
-                        ForEach(crumb.options) { option in
-                            Button(option.title) { onSelectOption(crumb.id, option.id) }
-                        }
+                        Options(crumb: crumb) { onSelectOption(crumb.id, $0) }
                     }
                 } else {
                     Text(crumb.title)
@@ -187,6 +185,27 @@ struct BreadcrumbJumpBar: View {
         .accessibilityIdentifier("breadcrumb.earlierLocations")
         .accessibilityLabel("Earlier locations")
     }
+
+    /// Shared by compact and expanded menus so the active location is a native selection in both.
+    struct Options: View {
+        let crumb: Crumb
+        let onSelect: (UUID) -> Void
+
+        var body: some View {
+            Picker(crumb.title, selection: Binding<UUID?>(
+                get: { crumb.options.first(where: \.isSelected)?.id },
+                set: { if let id = $0 { onSelect(id) } }
+            )) {
+                ForEach(crumb.options) { option in
+                    Text(option.title)
+                        .tag(Optional(option.id))
+                        .accessibilityIdentifier("breadcrumb.option.\(option.id.uuidString)")
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
+    }
 }
 
 // MARK: - Crumb
@@ -209,21 +228,7 @@ private struct BreadcrumbCrumbView: View {
                 .accessibilityLabel(crumb.title)
         } else {
             Menu {
-                ForEach(crumb.options) { option in
-                    Button {
-                        onSelect(option.id)
-                    } label: {
-                        // A checkmark rather than a tint, so the current choice survives
-                        // Differentiate Without Color.
-                        if option.isSelected {
-                            Label(option.title, systemImage: "checkmark")
-                        } else {
-                            Text(option.title)
-                        }
-                    }
-                    .accessibilityIdentifier("breadcrumb.option.\(option.id.uuidString)")
-                    .accessibilityLabel(option.isSelected ? "\(option.title), selected" : option.title)
-                }
+                BreadcrumbJumpBar.Options(crumb: crumb, onSelect: onSelect)
             } label: {
                 content(color: isHovered ? DSColors.labelPrimary : restingColor)
             }
@@ -394,6 +399,14 @@ nonisolated struct NavigationHistory<Item: Equatable>: Equatable {
 
     var canGoForward: Bool { index >= 0 && index < entries.count - 1 }
 
+    func canGoBack(where isValid: (Item) -> Bool) -> Bool {
+        previousIndex(where: isValid) != nil
+    }
+
+    func canGoForward(where isValid: (Item) -> Bool) -> Bool {
+        nextIndex(where: isValid) != nil
+    }
+
     /// Records a move to `item`. A new visit truncates any forward entries — the standard rule.
     /// Visiting the item you are already on is a no-op, so re-selecting does not stack duplicates.
     mutating func visit(_ item: Item) {
@@ -415,18 +428,38 @@ nonisolated struct NavigationHistory<Item: Equatable>: Equatable {
 
     @discardableResult
     mutating func goBack() -> Item? {
-        guard canGoBack else { return nil }
-        index -= 1
+        goBack(where: { _ in true })
+    }
+
+    @discardableResult
+    mutating func goBack(where isValid: (Item) -> Bool) -> Item? {
+        guard let previous = previousIndex(where: isValid) else { return nil }
+        index = previous
         refreshCurrent()
         return current
     }
 
     @discardableResult
     mutating func goForward() -> Item? {
-        guard canGoForward else { return nil }
-        index += 1
+        goForward(where: { _ in true })
+    }
+
+    @discardableResult
+    mutating func goForward(where isValid: (Item) -> Bool) -> Item? {
+        guard let next = nextIndex(where: isValid) else { return nil }
+        index = next
         refreshCurrent()
         return current
+    }
+
+    private func previousIndex(where isValid: (Item) -> Bool) -> Int? {
+        guard index > 0 else { return nil }
+        return entries[..<index].lastIndex(where: isValid)
+    }
+
+    private func nextIndex(where isValid: (Item) -> Bool) -> Int? {
+        guard index >= 0, index < entries.count - 1 else { return nil }
+        return entries[(index + 1)...].firstIndex(where: isValid)
     }
 
     private mutating func refreshCurrent() {

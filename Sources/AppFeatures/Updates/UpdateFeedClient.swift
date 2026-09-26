@@ -1,11 +1,7 @@
 import Domain
 import Foundation
 
-/// Fetches the release feed. The only part of the update flow that talks to the network.
-///
-/// `nonisolated` rather than inheriting `AppFeatures`' `MainActor` default: this decodes a JSON
-/// payload that carries the full release notes, and doing that on the main actor stalls the window
-/// for as long as it takes. Nothing here touches UI state — the caller marshals the result back.
+/// Fetches and decodes the release feed away from the window's main actor.
 nonisolated struct UpdateFeedClient: Sendable {
 
     enum CheckError: Error, LocalizedError, Equatable {
@@ -20,10 +16,7 @@ nonisolated struct UpdateFeedClient: Sendable {
             case .offline(let detail):
                 return "Mimic could not reach the release feed. \(detail)"
             case .rateLimited:
-                return """
-                GitHub is rate-limiting this network for now. Update checks share an hourly \
-                allowance with everything else on this connection; it resets within the hour.
-                """
+                return "GitHub is limiting update checks for now. Try again later."
             case .notFound:
                 return "The release feed did not return a published release."
             case .unexpectedStatus(let code):
@@ -100,7 +93,9 @@ nonisolated struct UpdateFeedClient: Sendable {
     static let feedFixtureEnvironmentKey = "MIMIC_UPDATE_FEED_FIXTURE"
     #endif
 
+    @concurrent
     func latestRelease() async throws -> UpdateRelease {
+        try Task.checkCancellation()
         var request = URLRequest(url: feedURL)
         // GitHub rejects an unidentified caller, and pinning the media type keeps a future default
         // change on their side from altering the shape this decodes.
@@ -117,8 +112,10 @@ nonisolated struct UpdateFeedClient: Sendable {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            try Task.checkCancellation()
             throw CheckError.offline(error.localizedDescription)
         }
+        try Task.checkCancellation()
 
         // A `file://` fixture has no HTTPURLResponse, which is what a UI test's feed looks like.
         if let http = response as? HTTPURLResponse {
@@ -128,9 +125,7 @@ nonisolated struct UpdateFeedClient: Sendable {
             case 429:
                 throw CheckError.rateLimited
             case 403:
-                // GitHub spends 403 on both "you have used your hourly allowance" and genuine
-                // refusals, and only the header tells them apart. Reporting the first as the second
-                // would send someone hunting for a problem that fixes itself in under an hour.
+                // A rate-limit response can use 403 as well as 429.
                 throw http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0"
                     ? CheckError.rateLimited
                     : CheckError.unexpectedStatus(403)

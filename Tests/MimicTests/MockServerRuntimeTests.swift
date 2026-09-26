@@ -388,6 +388,7 @@ struct MockServerRuntimeTests {
         nonisolated let logStream: AsyncStream<RequestLog>
         private nonisolated let logContinuation: AsyncStream<RequestLog>.Continuation
         private var pushed: Journey?
+        private(set) var controlledJourneyNames: [String] = []
 
         init() {
             (logStream, logContinuation) = AsyncStream<RequestLog>.makeStream()
@@ -412,13 +413,82 @@ struct MockServerRuntimeTests {
 
         func restartJourney() async -> JourneyStatus? {
             guard let pushed else { return nil }
+            controlledJourneyNames.append(pushed.name)
             return JourneyStatus.make(journey: pushed, state: nil)
         }
 
         func advanceJourney() async -> JourneyStatus? {
             guard let pushed else { return nil }
+            controlledJourneyNames.append(pushed.name)
             return JourneyStatus.make(journey: pushed, state: nil)
         }
+    }
+
+    @Test("A window journey control retains its place before a later project push", arguments: [false, true])
+    func windowControlPrecedesNextProject(restart: Bool) async throws {
+        let engine = PushRecordingEngine()
+        let manager = MockServerRuntime(engine: engine)
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Original"))
+        _ = await manager.journeyStatusAfterPendingUpdates()
+
+        if restart { manager.restartJourney() }
+        else { manager.advanceJourney() }
+        // No suspension between the user action and the next project push. A wrapper that only
+        // joins the chain from a later Task sees the replacement as its predecessor and target.
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Replacement"))
+        let status = await manager.journeyStatusAfterPendingUpdates()
+
+        #expect(await engine.controlledJourneyNames == ["Original"])
+        #expect(status?.journeyName == "Replacement")
+    }
+
+    private actor HeldControlEngine: MockServerEngineProtocol {
+        nonisolated let logStream = AsyncStream<RequestLog> { $0.finish() }
+        private var journey: Journey?
+        private var holdsControl = true
+        private(set) var controlEntered = false
+        private(set) var controlledJourneyName: String?
+
+        func release() { holdsControl = false }
+        func start(configuration: ServerConfiguration) async throws {}
+        func stop() async throws {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int) async {}
+        func updateConfiguration(endpoints: [Endpoint], globalDelayMs: Int, journey: Journey?) async {
+            self.journey = journey
+        }
+        func journeyStatus() async -> JourneyStatus? {
+            journey.map { JourneyStatus.make(journey: $0, state: nil) }
+        }
+        func restartJourney() async -> JourneyStatus? { await control() }
+        func advanceJourney() async -> JourneyStatus? { await control() }
+        private func control() async -> JourneyStatus? {
+            controlEntered = true
+            while holdsControl { try? await Task.sleep(for: .milliseconds(5)) }
+            controlledJourneyName = journey?.name
+            return await journeyStatus()
+        }
+    }
+
+    @Test("A later project push cannot overtake an awaited journey control", arguments: [false, true])
+    func projectPushWaitsForAcceptedControl(restart: Bool) async throws {
+        let engine = HeldControlEngine()
+        defer { Task { await engine.release() } }
+        let manager = MockServerRuntime(engine: engine)
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Original"))
+        _ = await manager.journeyStatusAfterPendingUpdates()
+        let control = Task { @MainActor in
+            if restart { return await manager.restartJourneyReportingStatus() }
+            return await manager.advanceJourneyReportingStatus()
+        }
+        try await waitUntilAsync { await engine.controlEntered }
+        manager.updateMocks(endpoints: [], journey: Journey(name: "Replacement"))
+        // Give an unchained push the opportunity to land while the accepted control is held.
+        try await Task.sleep(for: .milliseconds(50))
+        await engine.release()
+        #expect(await control.value?.journeyName == "Original")
+        let finalStatus = await manager.journeyStatusAfterPendingUpdates()
+        #expect(await engine.controlledJourneyName == "Original")
+        #expect(finalStatus?.journeyName == "Replacement")
     }
 
     private func waitUntil(
@@ -433,7 +503,7 @@ struct MockServerRuntimeTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(predicate(), "Timed out waiting for condition")
     }
 
     /// The same poll for a predicate that has to ask an actor. Named apart from `waitUntil` rather
@@ -451,7 +521,7 @@ struct MockServerRuntimeTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(await predicate(), "Timed out waiting for condition")
     }
 
     private func makeEndpoint(name: String = "Users") -> Endpoint {

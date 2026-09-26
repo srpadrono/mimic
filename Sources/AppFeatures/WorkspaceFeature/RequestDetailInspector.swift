@@ -250,7 +250,8 @@ struct RequestDetailInspector: View {
 
             DSInspectorSectionHeader("Sizes", identifier: "requestDetail.sizes")
 
-            summaryRow("Request body", value: Self.byteSummary(log.requestBody))
+            summaryRow("Request body", value: Self.byteSummary(log.requestBody)
+                       + (log.requestBodyTruncated == true ? " (truncated)" : ""))
             summaryRow(
                 "Response body",
                 value: (log.responseBodyIsBinary == true ? "Binary or non-UTF-8 (not previewed)" : Self.byteSummary(log.responseBody)) + (log.responseBodyTruncated ? " (truncated)" : "")
@@ -384,7 +385,13 @@ struct RequestDetailInspector: View {
                 // claiming to match the other; only the frame ever did, and only one of them answered
                 // the pointer.
                 DSClearButton(
-                    text: $searchText,
+                    text: Binding(
+                        get: { searchText },
+                        set: {
+                            searchText = $0
+                            searchFieldIsFocused = true
+                        }
+                    ),
                     identifier: "requestDetail.clearBodySearch",
                     label: "Clear the search",
                     help: "Clear the search"
@@ -422,21 +429,20 @@ struct RequestDetailInspector: View {
             } else {
                 emptyNote("No request body", identifier: "requestDetail.body.request.empty")
             }
+            if log.requestBodyTruncated == true {
+                truncationNote(identifier: "request")
+            }
 
             DSInspectorSectionHeader(responseSectionTitle("body"), identifier: "requestDetail.body.response")
 
-            if let responseBody = log.responseBody, !responseBody.isEmpty {
+            if log.responseBodyIsBinary == true {
+                emptyNote("Binary or non-UTF-8 response body is not previewed",
+                          identifier: "requestDetail.body.response.empty")
+            } else if let responseBody = log.responseBody, !responseBody.isEmpty {
                 RequestBodyView(payload: responseBody, searchText: searchText, identifier: "response")
 
                 if log.responseBodyTruncated {
-                    Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
-                        .font(DSTypography.label)
-                        // The one thing telling you the payload above is not the whole payload. See
-                        // the unmatched note above for why this is not `labelTertiary`.
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .padding(.horizontal, DSSpacing.md)
-                        .padding(.vertical, DSSpacing.xs)
-                        .accessibilityIdentifier("requestDetail.body.response.truncated")
+                    truncationNote(identifier: "response")
                 }
             } else {
                 emptyNote(
@@ -445,6 +451,15 @@ struct RequestDetailInspector: View {
                 )
             }
         }
+    }
+
+    private func truncationNote(identifier: String) -> some View {
+        Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
+            .font(DSTypography.label)
+            .foregroundStyle(DSColors.labelSecondary)
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.vertical, DSSpacing.xs)
+            .accessibilityIdentifier("requestDetail.body.\(identifier).truncated")
     }
 
     // MARK: - Copy bar
@@ -476,15 +491,18 @@ struct RequestDetailInspector: View {
 
                     copyButton(
                         "cURL",
-                        help: port == nil
+                        help: RequestLogExport.curlUnavailability(for: log).map { "Copy as a curl command — \($0)" }
+                            ?? (port == nil
                             ? "Copy as a curl command — the server is stopped, so the URL has no port"
-                            : "Copy as a curl command",
+                            : "Copy as a curl command"),
                         identifier: "curl"
                     ) {
                         RequestLogExport.curl(for: log, port: port)
                     }
+                    .disabled(RequestLogExport.curlUnavailability(for: log) != nil)
 
-                    copyButton("Response", help: "Copy the response body", identifier: "responseBody") {
+                    copyButton("Response", help: log.responseBodyTruncated
+                               ? "Copy the available response body preview" : "Copy the response body", identifier: "responseBody") {
                         log.responseBody.map(RequestLogExport.formattedBody) ?? ""
                     }
                     .disabled(log.responseBody?.isEmpty != false)

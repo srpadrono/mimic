@@ -475,7 +475,7 @@ struct NewScenarioSheet: View {
     }
 
     static func sanitizedName(from rawName: String) -> String? {
-        let trimmedName = rawName.trimmingCharacters(in: .whitespaces)
+        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedName.isEmpty ? nil : trimmedName
     }
 

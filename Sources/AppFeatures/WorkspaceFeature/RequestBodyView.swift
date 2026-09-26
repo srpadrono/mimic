@@ -118,7 +118,8 @@ struct RequestBodyView: View {
         // A body already laid out across lines is deliberately preserved. A compact JSON-shaped
         // body whose indentation exceeded the formatter's budget needs an honest fallback label.
         let expansionRejected = withinLimit && pretty == nil
-            && JSONFormatter.looksLikeJSON(payload) && !payload.contains("\n")
+            && JSONFormatter.looksLikeJSON(payload)
+            && !payload.utf8.contains(where: { $0 == 0x0A || $0 == 0x0D })
 
         var text = withinLimit ? coloured(formatted) : AttributedString(formatted)
         let matches = highlight(searchText, in: &text)

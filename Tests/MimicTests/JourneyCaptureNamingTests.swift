@@ -15,6 +15,7 @@ struct JourneyCaptureNamingTests {
     func namesAfterTheResource() {
         #expect(AppState.journeyName(capturing: Self.log("/account-summary")) == "Account summary flow")
         #expect(AppState.journeyName(capturing: Self.log("/inbox")) == "Inbox flow")
+        #expect(AppState.journeyName(capturing: Self.log("/v")) == "V flow")
     }
 
     @Test("Version and api segments are skipped, since they name no resource")

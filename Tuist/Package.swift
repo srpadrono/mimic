@@ -122,7 +122,8 @@ let package = Package(
         .package(url: "https://github.com/vapor/vapor", from: "4.76.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.33.1"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
-        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.15.4"),
+        // 0.16 fixes native typing after Unicode characters using UTF-16 text ranges.
+        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.16.0"),
         .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "3.3.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],

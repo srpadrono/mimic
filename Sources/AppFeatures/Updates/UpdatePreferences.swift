@@ -60,9 +60,7 @@ final class UpdatePreferences: @unchecked Sendable {
     func isAutomaticCheckDue(now: Date = Date()) -> Bool {
         guard checksAutomatically else { return false }
         guard let lastCheckedAt else { return true }
-        // A `lastCheckedAt` in the future means the clock moved backwards — a timezone change, a
-        // restored backup, a corrected system clock. Treating that as "not due yet" would disable
-        // checks until real time caught up, which could be months.
+        // A restored backup or corrected system clock must not postpone checks indefinitely.
         guard lastCheckedAt <= now else { return true }
         return now.timeIntervalSince(lastCheckedAt) >= Self.checkInterval
     }

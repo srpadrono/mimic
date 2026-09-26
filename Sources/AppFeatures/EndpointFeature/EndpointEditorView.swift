@@ -26,6 +26,10 @@ struct EndpointEditorView: View {
 
     @State private var statusCodeString = ""
     @State private var responseBody = ""
+    /// Identity of the body actually hydrated into the draft. Fresh selection IDs arrive before
+    /// onChange synchronizes these State values, so passing those directly would mix documents in
+    /// the native editor's undo history for one render.
+    @State private var bodyDocumentID: String?
     @State private var delayString = ""
     @State private var groupTag = ""
     @State private var headers: [HeaderEntry] = []
@@ -137,6 +141,11 @@ struct EndpointEditorView: View {
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
         .onChange(of: endpoint.activeScenarioID) { scenarioSelectionChanged() }
+        .onChange(of: endpoint) { previous, current in
+            guard previous.id == current.id,
+                  previous.activeScenarioID == current.activeScenarioID else { return }
+            refreshUneditedFields(from: previous)
+        }
         .onChange(of: statusCodeString) { debounceStatusCode() }
         .accessibilityIdentifier("endpointEditor")
         // The mandatory partner to the identifier above. On its own it renames every descendant, so
@@ -392,7 +401,7 @@ struct EndpointEditorView: View {
 
             // Fill the available workspace regardless of payload length. Formatting a long payload
             // changes the document, never the height of the editor or the position of its options.
-            DSJSONEditor(text: $responseBody, identifier: "editor.body")
+            DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID)
             .frame(height: height)
             .padding(.horizontal, DSSpacing.md)
             .padding(.bottom, DSSpacing.md)
@@ -707,6 +716,7 @@ struct EndpointEditorView: View {
         guard let synced = Self.syncedValues(endpoint: endpoint, activeScenario: activeScenario) else { return }
         statusCodeString = synced.statusCodeString
         responseBody = synced.responseBody
+        bodyDocumentID = activeScenario.map { "\(endpoint.id.uuidString):\($0.id.uuidString)" }
         delayString = synced.delayString
         groupTag = synced.groupTag
         headers = synced.headers.map { HeaderEntry(key: $0.0, value: $0.1) }
@@ -715,6 +725,42 @@ struct EndpointEditorView: View {
         // A complaint about the endpoint you just navigated away from is not about anything on
         // screen any more.
         statusCodeError = nil
+    }
+
+    /// A control command can update the selected model without changing either selection ID.
+    /// Refresh each clean field independently so another writer cannot leave a stale response on
+    /// screen, while a local draft (including an invalid status or an unfinished header row) stays
+    /// intact. Selection changes still take the separate flush-and-sync path above.
+    private func refreshUneditedFields(from previous: Endpoint) {
+        guard let previousScenario = previous.scenarios.first(where: { $0.id == previous.activeScenarioID }),
+              let activeScenario else { return }
+
+        if previousScenario.statusCode != activeScenario.statusCode,
+           statusCodeString == String(previousScenario.statusCode) {
+            pendingEdits.cancel(.statusCode)
+            statusCodeString = String(activeScenario.statusCode)
+            statusCodeError = nil
+        }
+        if previousScenario.body != activeScenario.body,
+           responseBody == (previousScenario.body ?? "") {
+            pendingEdits.cancel(.body)
+            responseBody = activeScenario.body ?? ""
+        }
+        if previousScenario.headers != activeScenario.headers,
+           headers.count == previousScenario.headers.count,
+           Set(headers.map(\.key)).count == headers.count,
+           headers.allSatisfy({ previousScenario.headers[$0.key] == $0.value }) {
+            pendingEdits.cancel(.headers)
+            headers = activeScenario.headers.sorted { $0.key < $1.key }
+                .map { HeaderEntry(key: $0.key, value: $0.value) }
+        }
+        if previous.delayMs != endpoint.delayMs, delayString == String(previous.delayMs) {
+            delayString = String(endpoint.delayMs)
+            delayError = nil
+        }
+        if previous.groupTag != endpoint.groupTag, groupTag == (previous.groupTag ?? "") {
+            groupTag = endpoint.groupTag ?? ""
+        }
     }
 
     /// Writes the status code if it is one the server can serve, and says why not if it is not.
@@ -810,7 +856,9 @@ struct EndpointEditorView: View {
 
     /// The action was bound to the scenario shown when the text was typed.
     private func commit(body text: String) {
-        actions.onUpdateScenario(nil, nil, Self.bodyValue(from: text))
+        // nil means "leave this field unchanged" in ScenarioSpec. An empty string is the explicit
+        // clear operation, so deleting the last character must still be forwarded to the model.
+        actions.onUpdateScenario(nil, nil, text)
     }
 
     func debounceBody() {
@@ -928,10 +976,6 @@ struct EndpointEditorView: View {
             }
         }
         return dict
-    }
-
-    static func bodyValue(from text: String) -> String? {
-        text.isEmpty ? nil : text
     }
 
     static func delayValue(from text: String) -> Int? {

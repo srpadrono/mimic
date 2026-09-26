@@ -89,6 +89,23 @@ struct ProjectFeatureRenderingTests {
         #expect(dismissed)
     }
 
+    @Test("Pasted line breaks are trimmed from project names and cannot create a blank project")
+    func projectNamesTrimAllWhitespace() {
+        for name in ["\n", "\r\n", " \t\n "] {
+            let form = NewProjectFormState(projectName: name)
+            #expect(!form.canCreate)
+            #expect(form.confirmedValues == nil)
+            NewProjectSheet.confirm(
+                form: form,
+                onConfirm: { _, _ in Issue.record("A blank project name must not be submitted") },
+                dismiss: { Issue.record("An invalid form must remain open") }
+            )
+        }
+        let form = NewProjectFormState(projectName: "\r\n  Payments API \t\n", portString: "8081")
+        #expect(form.confirmedValues?.name == "Payments API")
+        #expect(form.confirmedValues?.port == 8081)
+    }
+
     @Test("New project sheet exposes initial form state and confirm wrapper")
     func newProjectSheetStateAndConfirmWrapper() {
         let sheet = NewProjectSheet(

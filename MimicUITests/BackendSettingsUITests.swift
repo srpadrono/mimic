@@ -16,6 +16,9 @@ struct BackendSettingsPage {
     }
     var primaryCopy: XCUIElement { app.buttons["backend.primary.copy"].firstMatch }
     var primaryUpstream: XCUIElement { app.textFields["backend.primary.upstream"].firstMatch }
+    var primaryUpstreamError: XCUIElement {
+        app.descendants(matching: .any)["backend.primary.upstreamError"].firstMatch
+    }
     var primaryCapture: XCUIElement { app.descendants(matching: .any)["backend.primary.capture"].firstMatch }
     var primarySelection: XCUIElement { app.buttons["backend.select.00000000-0000-0000-0000-000000000000"].firstMatch }
     var additionalSelection: XCUIElement {
@@ -39,6 +42,21 @@ struct BackendSettingsPage {
     }
     var portsDescription: String { "\(ports.label) \(ports.value.map { String(describing: $0) } ?? "")" }
     var ports: XCUIElement { app.buttons["serverStatusWell.url"].firstMatch }
+    func inspectorShowsPort(_ port: Int) -> Bool {
+        // Native accessibility may flatten the overview into the first section's text.
+        let candidates = [
+            app.staticTexts["inspector.overview.port"].firstMatch,
+            app.staticTexts["ds.sectionheader.overview.server"].firstMatch,
+        ]
+        return candidates.contains { element in
+            guard element.exists else { return false }
+            return [element.label, element.value as? String ?? ""].contains { text in
+                guard let marker = text.range(of: "Port:") else { return false }
+                let value = text[marker.upperBound...].drop(while: \.isWhitespace).prefix(while: \.isNumber)
+                return Int(value) == port
+            }
+        }
+    }
     var error: XCUIElement { app.staticTexts["backend.error"].firstMatch }
     func additional(_ suffix: String) -> XCUIElement {
         app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
@@ -54,6 +72,8 @@ struct BackendSettingsPage {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
         app.typeKey("v", modifierFlags: .command)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 3) { field.value as? String == value },
+                      "The field must contain the exact fixture value before validation")
         field.typeKey(.tab, modifierFlags: [])
     }
 }
@@ -182,30 +202,79 @@ final class BackendSettingsUITests: MimicUITestCase {
     }
 
     @MainActor
+    func testPassThroughRefusesEquivalentLoopbackListenerBeforeApplying() {
+        launchApp()
+        createProjectViaUI(name: "Loopback validation")
+        let page = BackendSettingsPage(app: app)
+        page.open.click()
+        XCTAssertTrue(page.primaryEnabled.waitForExistence(timeout: 5))
+        page.primaryEnabled.click()
+        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+
+        for upstream in ["http://localhost.:8080", "http://[::1]:8080"] {
+            page.replace(page.primaryUpstream, with: upstream)
+            page.apply.click()
+            XCTAssertTrue(page.primaryUpstreamError.waitForExistence(timeout: 5),
+                          "Loopback equivalents need the same inline refusal as localhost")
+            XCTAssertEqual(page.primaryUpstreamError.label,
+                           "Enter an HTTP or HTTPS base URL outside these local listeners")
+            XCTAssertEqual(page.primaryUpstream.value as? String, upstream,
+                           "Refusal must retain the URL so it can be corrected")
+            XCTAssertTrue(page.apply.exists, "An invalid draft must stay open")
+        }
+
+        page.replace(page.primaryUpstream, with: "http://localhost.:8081")
+        XCTAssertTrue(page.primaryUpstreamError.waitForNonExistence(timeout: 5))
+        page.apply.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5),
+                      "A different local server remains a supported upstream")
+        page.open.click()
+        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        XCTAssertEqual(page.primaryUpstream.value as? String, "http://localhost.:8081")
+        page.cancel.click()
+    }
+
+    @MainActor
     func testToolbarDistinguishesListeningAndPendingPorts() throws {
-        func freePort() throws -> Int {
-            let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-            guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
-            defer { Darwin.close(descriptor) }
-            var address = sockaddr_in()
-            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            address.sin_family = sa_family_t(AF_INET)
-            address.sin_addr.s_addr = inet_addr("127.0.0.1")
-            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-            try withUnsafeMutablePointer(to: &address) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                    guard Darwin.bind(descriptor, socketAddress, length) == 0,
-                          getsockname(descriptor, socketAddress, &length) == 0 else {
-                        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
+        func distinctFreePorts() throws -> [Int] {
+            var descriptors: [Int32] = []
+            defer { for descriptor in descriptors { Darwin.close(descriptor) } }
+            // Keep all four bound until allocation completes so the OS cannot hand back a
+            // just-released port for the next listener or its replacement.
+            return try (0..<4).map { _ in
+                let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+                guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                descriptors.append(descriptor)
+                var address = sockaddr_in()
+                address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+                address.sin_family = sa_family_t(AF_INET)
+                address.sin_addr.s_addr = inet_addr("127.0.0.1")
+                var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+                try withUnsafeMutablePointer(to: &address) { pointer in
+                    try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                        guard Darwin.bind(descriptor, socketAddress, length) == 0,
+                              getsockname(descriptor, socketAddress, &length) == 0 else {
+                            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                        }
                     }
                 }
+                return Int(UInt16(bigEndian: address.sin_port))
             }
-            return Int(UInt16(bigEndian: address.sin_port))
         }
-        let primary = try freePort(), secondary = try freePort(), replacement = try freePort()
+        let ports = try distinctFreePorts()
+        let primary = ports[0], secondary = ports[1], replacement = ports[2]
+        let primaryReplacement = ports[3]
         launchApp()
         createProjectViaUI(name: "Listening ports")
         workspace.fillWindow()
+        XCTAssertTrue(workspace.centerAddEndpointMessage.waitForExistence(timeout: 5),
+                      "An empty project must explain how to create its first endpoint")
+        XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
+                       "There is no endpoint available to select yet")
+        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
+        XCTAssertFalse(workspace.drawerRunningMessage.exists)
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -219,11 +288,14 @@ final class BackendSettingsUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
+        XCTAssertTrue(workspace.drawerRunningMessage.waitForExistence(timeout: 5),
+                      "A running server must invite a request without asking to start again")
+        XCTAssertFalse(workspace.drawerStoppedMessage.exists)
         workspace.compactWindow()
-        if !page.ports.isHittable {
-            workspace.fillWindow()
-        }
-        XCTAssertTrue(page.ports.isHittable)
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180,
+                          "This assertion must exercise the compact toolbar")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.ports.isHittable },
+                      "Server details must remain reachable without enlarging the compact window")
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
         page.ports.click()
         let copy = page.portMenuItem(secondary, copying: true)
@@ -236,7 +308,13 @@ final class BackendSettingsUITests: MimicUITestCase {
         compactShot.lifetime = .keepAlways
         add(compactShot)
         workspace.fillWindow()
+        if !InspectorPage(app: app).header.exists {
+            workspace.toggleInspectorButton.click()
+        }
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primary) })
         page.open.click()
+        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.replace(page.primaryPort, with: String(primaryReplacement))
         XCTAssertTrue(page.additionalSelection.waitForExistence(timeout: 5))
         page.additionalSelection.click()
         XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
@@ -251,14 +329,22 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.portsDescription.contains("Restart required"))
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(secondary)"))
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primary) },
+                      "While running, the inspector must show the bound port, not the pending configuration")
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         shot.name = "Toolbar — running ports with restart required"
         shot.lifetime = .keepAlways
         add(shot)
         workspace.serverToggleButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
+        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
+        XCTAssertFalse(workspace.drawerRunningMessage.exists)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
+                      "A stopped server shows the port configured for its next start")
         workspace.serverToggleButton.click()
-        XCTAssertTrue(workspace.waitForServerURL(port: primary))
+        XCTAssertTrue(workspace.waitForServerURL(port: primaryReplacement))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
+                      "After restart, the inspector must show the newly bound port")
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
         XCTAssertFalse(page.portsDescription.contains("Restart required"))
         workspace.serverToggleButton.click()

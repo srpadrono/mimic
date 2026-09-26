@@ -181,10 +181,13 @@ nonisolated struct ImportCommitter {
 
     /// Why an imported candidate cannot become an endpoint, or `nil` when it can.
     ///
-    /// Exactly the three checks `ProjectCommandExecutor` would apply to the two commands
-    /// ``commit(_:)`` runs — path on the create, status and headers on the response — run early
-    /// enough that a refusal costs no half-made endpoint.
+    /// The same field validation as the executor, plus the import-only partial-response policy.
+    /// Manual 206 mocks remain supported, but a capture's range metadata cannot describe the
+    /// normalized text an import would save. Refuse it before creating a half-made endpoint.
     static func rejection(for candidate: ImportCandidate) -> String? {
+        guard candidate.statusCode != 206 else {
+            return "Partial responses (206) cannot be imported. Capture a complete response."
+        }
         do {
             try EndpointValidator.validatePath(candidate.path)
             try EndpointValidator.validateStatusCode(candidate.statusCode)

@@ -88,7 +88,7 @@ struct ContentView: View {
             // The one control in this file, and it was the one element in the app with no identifier
             // and no label: nothing could dismiss the alert from a test, so the failure path was
             // unreachable to the suite that is supposed to prove it works.
-            Button("Continue anyway") { appState.storeFailure = nil }
+            Button("Continue anyway") { appState.isShowingStoreFailure = false }
                 .accessibilityIdentifier("storeFailure.continueButton")
                 .accessibilityLabel("Continue anyway")
         } message: { reason in

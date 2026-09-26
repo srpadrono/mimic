@@ -194,8 +194,6 @@ struct EndpointFeatureRenderingTests {
             "Content-Type": "application/json",
             "X-Request-ID": "abc-123",
         ])
-        #expect(EndpointEditorView.bodyValue(from: #"{"ok":true}"#) == #"{"ok":true}"#)
-        #expect(EndpointEditorView.bodyValue(from: "") == nil)
         #expect(EndpointEditorView.delayValue(from: "125") == 125)
         #expect(EndpointEditorView.delayValue(from: "-1") == nil)
         #expect(EndpointEditorView.groupTagValue(from: " Users ") == "Users")

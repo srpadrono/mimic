@@ -60,7 +60,9 @@ struct ImportFeatureRenderingTests {
         isDuplicate: Bool = false,
         bodySizeBytes: Int = 128,
         bodySizeExceedsLimit: Bool = false,
-        bodyIsBinary: Bool = false
+        bodyIsBinary: Bool = false,
+        bodyIsUnavailable: Bool = false,
+        statusCode: Int = 200
     ) -> ImportCandidate {
         ImportCandidate(
             id: UUID(),
@@ -69,13 +71,14 @@ struct ImportFeatureRenderingTests {
             path: path,
             suggestedName: "Import \(method.rawValue)",
             suggestedGroupTag: "Users",
-            statusCode: 200,
+            statusCode: statusCode,
             responseHeaders: ["Content-Type": "application/json"],
-            responseBody: bodySizeExceedsLimit || bodyIsBinary ? nil : #"{"ok":true}"#,
+            responseBody: bodySizeExceedsLimit || bodyIsBinary || bodyIsUnavailable ? nil : #"{"ok":true}"#,
             responseContentType: .json,
             bodySizeBytes: bodySizeBytes,
             bodySizeExceedsLimit: bodySizeExceedsLimit,
             bodyIsBinary: bodyIsBinary,
+            bodyIsUnavailable: bodyIsUnavailable,
             isDuplicate: isDuplicate
         )
     }
@@ -185,7 +188,7 @@ struct ImportFeatureRenderingTests {
             }
         )
 
-        try await Task.sleep(for: .milliseconds(50))
+        await model.parseTask?.value
 
         #expect(model.candidates.count == 1)
         #expect(model.candidates.first?.path == parsed.first?.path)
@@ -218,7 +221,7 @@ struct ImportFeatureRenderingTests {
             parse: { _, _ in [] }
         )
 
-        try await Task.sleep(for: .milliseconds(50))
+        await model.parseTask?.value
 
         #expect(model.candidates.isEmpty)
         #expect(model.parseError?.hasPrefix("Invalid spec fixture") == true)
@@ -269,7 +272,7 @@ struct ImportFeatureRenderingTests {
             }
         )
 
-        try await Task.sleep(for: .milliseconds(80))
+        await model.parseTask?.value
 
         #expect(model.parseError == nil)
         #expect(model.candidates.count == 1)
@@ -431,9 +434,8 @@ struct ImportFeatureRenderingTests {
             ) { _ in }
         )
 
-        // One row per branch of `ImportCandidateRow.flag`: a duplicate, a binary body, an oversized
-        // body, and the ordinary row whose `else` draws `Color.clear` to hold the 92pt column open.
-        // The binary row also exercises the `import.binaryBodyWarning` footer beside the size one.
+        // Host each warning branch together at the minimum review width. Actual visible copy,
+        // selection, preview and footer actions are covered by targeted SpecImportUITests.
         render(
             ImportReviewHarness(
                 candidates: [
@@ -446,9 +448,13 @@ struct ImportFeatureRenderingTests {
                         bodySizeExceedsLimit: true
                     ),
                     makeCandidate(method: .get, path: "/api/v1/logo.png", bodyIsBinary: true),
+                    makeCandidate(path: "/api/v1/missing", bodyIsUnavailable: true),
+                    makeCandidate(path: "/api/v1/range", statusCode: 206),
+                    makeCandidate(path: "/api/v1/cancelled", statusCode: 0),
                 ],
                 onImport: {}
-            )
+            ),
+            size: CGSize(width: 760, height: 520)
         )
     }
 }

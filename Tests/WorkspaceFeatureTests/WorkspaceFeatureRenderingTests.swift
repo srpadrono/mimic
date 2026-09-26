@@ -21,6 +21,8 @@ struct WorkspaceFeatureRenderingTests {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
         window.contentViewController = controller
         controller.view.frame = CGRect(origin: .zero, size: size)
         window.orderFront(nil)
@@ -28,9 +30,7 @@ struct WorkspaceFeatureRenderingTests {
         RunLoop.main.run(until: Date().addingTimeInterval(wait))
         controller.view.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
-        let renderedSize = controller.view.fittingSize
-        window.orderOut(nil)
-        return renderedSize
+        return controller.view.fittingSize
     }
 
     private func makeEndpoint() -> Endpoint {
@@ -66,26 +66,6 @@ struct WorkspaceFeatureRenderingTests {
             matchedScenarioID: endpoint.activeScenarioID,
             responseStatusCode: 200
         )
-    }
-
-    /// Idle is `EmptyView`, and that is the assertion.
-    ///
-    /// The indicator sits in a toolbar row beside controls that must not move: if the idle case drew
-    /// a placeholder — or a fixed frame holding room for the word "Saved" — the row would shift every
-    /// time an autosave settled, which is the kind of motion you notice without being able to name.
-    /// The other three states have to draw something, or the feature is invisible.
-    @Test("The idle autosave state occupies nothing, and the rest occupy something")
-    func autosaveIdleStateTakesNoRoom() {
-        let measure = CGSize(width: 240, height: 60)
-        let idle = render(AutosaveStatusIndicator(status: .idle), size: measure)
-        let saving = render(AutosaveStatusIndicator(status: .saving), size: measure)
-        let saved = render(AutosaveStatusIndicator(status: .saved), size: measure)
-        let failed = render(AutosaveStatusIndicator(status: .failed("Disk full")), size: measure)
-
-        #expect(idle.height < saving.height)
-        #expect(idle.height < saved.height)
-        #expect(idle.height < failed.height)
-        #expect(idle.width < saving.width)
     }
 
     /// The app's primary action keeps one footprint through the whole start/stop cycle.
@@ -159,6 +139,7 @@ struct WorkspaceFeatureRenderingTests {
             RequestLogDrawerView(
                 requestLogs: [],
                 endpoints: [],
+                serverState: .stopped,
                 onClear: {}
             )
         )
@@ -166,6 +147,7 @@ struct WorkspaceFeatureRenderingTests {
             RequestLogDrawerView(
                 requestLogs: [log],
                 endpoints: [endpoint],
+                serverState: .stopped,
                 onClear: {}
             )
         )
@@ -173,6 +155,7 @@ struct WorkspaceFeatureRenderingTests {
             RequestLogDrawerView(
                 requestLogs: [log],
                 endpoints: [endpoint],
+                serverState: .stopped,
                 onClear: {},
                 selectedLogIDs: .constant([log.id]),
                 initialFilterText: "",

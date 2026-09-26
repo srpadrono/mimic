@@ -6,37 +6,40 @@ import LanguageSupport
 /// Wraps CodeEditorView behind a DesignSystem abstraction.
 public struct DSJSONEditor: View {
     @Binding private var text: String
-    @State private var position = CodeEditor.Position()
-    @State private var messages: Set<TextLocated<Message>> = []
     @State private var isValid: Bool = true
     @Environment(\.colorScheme) private var colorScheme
     private let identifier: String
+    private let documentID: String?
     private let onValidationChanged: ((Bool) -> Void)?
 
+    /// Update `documentID` together with the hydrated text when changing documents.
+    /// Replacements within one document are undoable; a new document starts with empty history.
     public init(
         text: Binding<String>,
         identifier: String,
+        documentID: String? = nil,
         onValidationChanged: ((Bool) -> Void)? = nil
     ) {
         self._text = text
         self.identifier = identifier
+        self.documentID = documentID
         self.onValidationChanged = onValidationChanged
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CodeEditor(
-                text: $text,
-                position: $position,
-                messages: $messages,
-                language: Self.jsonLanguage
-            )
-            // Keep payloads wrapped and hide the source-file minimap.
-            .environment(
-                \.codeEditorLayoutConfiguration,
-                CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: true)
-            )
-            .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
+            DSNativeTextEditor(text: $text, documentID: documentID ?? identifier,
+                               configurationID: colorScheme, identifier: "ds.jsoneditor.\(identifier)",
+                               label: "JSON editor") { session in
+                CodeEditor(text: session.textBinding,
+                           position: session.positionBinding,
+                           messages: session.messagesBinding,
+                           language: Self.jsonLanguage)
+                    .environment(\.codeEditorLayoutConfiguration,
+                                 CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: true))
+                    .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
+                    .environment(\.colorScheme, colorScheme)
+            }
             .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.sm))
             .overlay(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)

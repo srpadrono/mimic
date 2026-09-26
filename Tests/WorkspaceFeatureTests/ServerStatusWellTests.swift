@@ -1,11 +1,34 @@
 import Foundation
 import Testing
 import Domain
+import DesignSystem
 @testable import AppFeatures
 
 @Suite("Server toolbar presentation")
 struct ServerStatusWellTests {
     private let accountsID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+
+    @Test("Stopped is a neutral state, while errors and pending restarts remain distinct")
+    @MainActor
+    func stoppedStatusIsNotAnError() {
+        let configuration = ServerConfiguration(port: 8080, globalDelayMs: 0)
+        let stopped = ServerStatusWell(serverState: .stopped, projectName: "Test", requestCount: 0,
+                                       unmatchedCount: 0, configuration: configuration)
+        let failed = ServerStatusWell(serverState: .error("Port occupied"), projectName: "Test",
+                                      requestCount: 0, unmatchedCount: 0, configuration: configuration)
+        let running = ServerStatusWell(serverState: .running(port: 8080), projectName: "Test",
+                                       requestCount: 0, unmatchedCount: 0, configuration: configuration,
+                                       boundConfiguration: configuration)
+        let pending = ServerStatusWell(serverState: .running(port: 8080), projectName: "Test",
+                                       requestCount: 0, unmatchedCount: 0,
+                                       configuration: ServerConfiguration(port: 9090, globalDelayMs: 0),
+                                       boundConfiguration: configuration)
+        #expect(stopped.statusColor == DSColors.labelSecondary)
+        #expect(failed.statusColor == DSColors.destructiveText)
+        #expect(running.statusColor == DSColors.successText)
+        #expect(pending.statusColor == DSColors.warningText)
+        #expect(stopped.statusColor != failed.statusColor)
+    }
 
     @Test("One configured address remains visible through every lifecycle state")
     func stableSinglePortTitle() {

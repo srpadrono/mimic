@@ -184,7 +184,8 @@ final class AppState {
         recentProjectsStore: RecentProjectsStore,
         panelLayoutStore: PanelLayoutStore = PanelLayoutStore(),
         presentation: WindowPresentation = WindowPresentation(),
-        updates: UpdateService? = nil
+        updates: UpdateService? = nil,
+        storeFailure: String? = nil
     ) {
         #if DEBUG
         Self.instancesCreated += 1
@@ -192,9 +193,9 @@ final class AppState {
         self.server = server
         self.panelLayoutStore = panelLayoutStore
         self.presentation = presentation
-        // Defaulted so the many test call sites that do not care about updates keep compiling, and
-        // so the one they get is bound to a throwaway suite rather than to `.standard` — a test that
-        // silently turned off the developer's update checks would be very hard to notice.
+        self.storeFailure = storeFailure
+        isShowingStoreFailure = storeFailure != nil
+        // Test compositions inject isolated preferences alongside their repository and layout store.
         self.updates = updates ?? UpdateService(
             installedVersion: { Self.installedReleaseVersion },
             preferences: UpdatePreferences(defaults: .standard)
@@ -249,9 +250,9 @@ final class AppState {
                 installedVersion: { Self.installedReleaseVersion },
                 preferences: UpdatePreferences(defaults: defaults),
                 installer: updateInstaller
-            )
+            ),
+            storeFailure: opened.failure
         )
-        storeFailure = opened.failure
         newerStoreWarning = opened.provenance.warning(latestBackup: Self.latestBackup())
     }
 
@@ -272,19 +273,18 @@ final class AppState {
     static func sessionStoreURL() -> URL? {
         #if DEBUG
         if let testDatabaseURL = UITestSupport.databaseURL() { return testDatabaseURL }
+        if let unitTestDatabaseURL = UITestSupport.unitTestDatabaseURL() { return unitTestDatabaseURL }
         #endif
         return try? DatabaseFactory.resolveDatabaseURL()
     }
 
     /// Why the on-disk store could not be opened, or `nil` when it opened normally.
     ///
-    /// Non-nil means the session is running in memory: everything works, and nothing survives quit.
-    var storeFailure: String?
+    /// Non-nil means the session is running in memory. Acknowledging the alert does not make the
+    /// store durable; update installation and control status retain this fact for the session.
+    let storeFailure: String?
 
-    var isShowingStoreFailure: Bool {
-        get { storeFailure != nil }
-        set { if !newValue { storeFailure = nil } }
-    }
+    var isShowingStoreFailure: Bool
 
     /// The update flow — checking, offering, downloading, handing off to macOS's installer.
     let updates: UpdateService
@@ -906,19 +906,17 @@ final class AppState {
     }
 
     private func bindProjectWorkspace() {
-        // Every change applies the whole project, configuration included.
-        //
-        // This used to take the configuration only when the *identity* of the open project changed,
-        // behind a `syncConfigurationOnNextProjectChange` flag, and push endpoints alone otherwise.
-        // But the configuration is edited in place on the open project — `mimic server configure
-        // --delay 500` is a `.serverConfigure` command like any other — so that edit reached the
-        // project and stopped there. The engine kept the old delay, `mimic server status` reported
-        // the old port, the editor's "Global delay" row showed a number nothing had changed, and
-        // `startServer` bound whichever port the runtime happened to be holding. The window and the
-        // script disagreed about the same project, which is the one thing this seam exists to
-        // prevent — and the headless host, which keeps no second copy, behaved correctly all along.
+        // Every mutation applies the whole project, configuration included. Shared presentation
+        // resets at an identity change even when closing the project removes the workspace view.
+        var projectID = projects.currentProject?.id
         projects.onCurrentProjectChanged = { [weak self] project in
-            self?.server.applyProject(project)
+            guard let self else { return }
+            if projectID != project?.id {
+                projectID = project?.id
+                selectedJourneyID = nil
+                showNewEndpointSheet = false
+            }
+            server.applyProject(project)
         }
         server.applyProject(projects.currentProject)
     }

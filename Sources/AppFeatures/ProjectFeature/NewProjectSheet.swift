@@ -20,12 +20,12 @@ struct NewProjectFormState {
     }
 
     var canCreate: Bool {
-        !projectName.trimmingCharacters(in: .whitespaces).isEmpty && isPortValid
+        !projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && isPortValid
     }
 
     var confirmedValues: (name: String, port: Int)? {
         guard canCreate, let port = portValue else { return nil }
-        return (projectName.trimmingCharacters(in: .whitespaces), port)
+        return (projectName.trimmingCharacters(in: .whitespacesAndNewlines), port)
     }
 }
 
