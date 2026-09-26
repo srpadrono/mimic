@@ -1,7 +1,8 @@
 name: CI
 
 # Portable Swift runs on Linux. macOS builds the app and runs unit, CLI, Release, and UI gates.
-# UI tests use three separate runners because they share a database, defaults, and window server.
+# UI tests run on separate runners because they share a database, defaults, and window server.
+# Build their portable test products once, then give each runner a small slice of the suite.
 
 on:
   push:
@@ -56,7 +57,7 @@ jobs:
           python3 Scripts/check_doc_counts.py --self-test
           python3 Scripts/check_doc_counts.py
 
-      - name: UI shards cover every UI test class
+      - name: UI shards cover every UI test method
         run: |
           python3 Scripts/check_ui_shards.py --self-test
           python3 Scripts/check_ui_shards.py
@@ -209,39 +210,10 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  macos-ui:
-    name: UI tests (${{ matrix.name }})
+  macos-ui-build:
+    name: Build UI test products
     runs-on: macos-26
-    timeout-minutes: 90
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: 1
-            name: core window, journeys, spec import
-            only: >-
-              -only-testing:MimicUITests/MimicUITests
-              -only-testing:MimicUITests/JourneyUITests
-              -only-testing:MimicUITests/SpecImportUITests
-              -only-testing:MimicUITests/ControlPlaneIsolationTests
-              -only-testing:MimicUITests/UpdateUITests
-
-          - id: 2
-            name: workspace shell, welcome, request log
-            only: >-
-              -only-testing:MimicUITests/BackendSettingsUITests
-              -only-testing:MimicUITests/WorkspaceShellUITests
-              -only-testing:MimicUITests/NavigatorUITests
-              -only-testing:MimicUITests/WelcomeProjectUITests
-              -only-testing:MimicUITests/RequestLogUITests
-
-          - id: 3
-            name: endpoint editor, alerts, journey editor
-            only: >-
-              -only-testing:MimicUITests/EndpointEditorUITests
-              -only-testing:MimicUITests/ErrorAlertUITests
-              -only-testing:MimicUITests/JourneyEditorUITests
+    timeout-minutes: 15
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
@@ -250,6 +222,229 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/macos-setup
+
+      - name: Build for UI testing
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts
+          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
+            build-for-testing -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$DERIVED_DATA" \
+            -testProductsPath .artifacts/MimicUITests.xctestproducts \
+            -enableCodeCoverage YES \
+            CODE_SIGN_IDENTITY=-
+          test -d .artifacts/MimicUITests.xctestproducts
+          tar -C .artifacts -czf .artifacts/MimicUITests.xctestproducts.tar.gz \
+            MimicUITests.xctestproducts
+
+      - name: Upload UI test products
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-test-products
+          path: .artifacts/MimicUITests.xctestproducts.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  macos-ui:
+    name: UI tests (${{ matrix.name }})
+    needs: macos-ui-build
+    runs-on: macos-26
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: 1
+            name: core window A
+            only: >-
+              -only-testing:MimicUITests/MimicUITests/testArrowKeysMoveThroughTheRequestLog
+              -only-testing:MimicUITests/MimicUITests/testAutosaveIndicatorAppearsAfterEdit
+              -only-testing:MimicUITests/MimicUITests/testCapturingSelectedRequestsAsJourney
+              -only-testing:MimicUITests/MimicUITests/testClosingAProjectReturnsToWelcomeWithRecents
+              -only-testing:MimicUITests/MimicUITests/testContextMenuOnRecentProject
+              -only-testing:MimicUITests/MimicUITests/testCustomProjectPortPersistsAfterCloseAndReopen
+              -only-testing:MimicUITests/MimicUITests/testDeleteProjectWithConfirmation
+              -only-testing:MimicUITests/MimicUITests/testEditEndpointStatusCode
+              -only-testing:MimicUITests/MimicUITests/testImportMenuOpensHARSheet
+              -only-testing:MimicUITests/MimicUITests/testImportMenuOpensOpenAPISheet
+              -only-testing:MimicUITests/MimicUITests/testRequestLogDrawerShowsHeaderAndEmptyState
+              -only-testing:MimicUITests/MimicUITests/testReturnSubmitsNewProjectSheet
+              -only-testing:MimicUITests/MimicUITests/testSelectingLoggedRequestShowsDetailInInspector
+              -only-testing:MimicUITests/MimicUITests/testSwitchActiveScenarioViaClick
+              -only-testing:MimicUITests/MimicUITests/testToggleDrawerPanel
+              -only-testing:MimicUITests/MimicUITests/testWelcomeScreenShowsHeroAndButtons
+              -only-testing:MimicUITests/MimicUITests/testWorkspaceShowsFourPanelLayout
+
+          - id: 2
+            name: core window B
+            only: >-
+              -only-testing:MimicUITests/MimicUITests/testCancelButtonDismissesNewProjectSheet
+              -only-testing:MimicUITests/MimicUITests/testCaptureEvidenceScreenshots
+              -only-testing:MimicUITests/MimicUITests/testCloseAndReopenProjectFromRecents
+              -only-testing:MimicUITests/MimicUITests/testCreateEndpointViaToolbar
+              -only-testing:MimicUITests/MimicUITests/testCreateNewProject
+              -only-testing:MimicUITests/MimicUITests/testDefaultScenarioVisibleInInspector
+              -only-testing:MimicUITests/MimicUITests/testDeleteEndpointWithConfirmation
+              -only-testing:MimicUITests/MimicUITests/testDuplicateProject
+              -only-testing:MimicUITests/MimicUITests/testDuplicateScenario
+              -only-testing:MimicUITests/MimicUITests/testEndpointPersistsAfterCloseAndReopen
+              -only-testing:MimicUITests/MimicUITests/testEndpointStatusCodePersistsAfterCloseAndReopen
+              -only-testing:MimicUITests/MimicUITests/testEscapeDismissesNewProjectSheet
+              -only-testing:MimicUITests/MimicUITests/testNewProjectOpensTheSheetAndLeavesTheProjectOpen
+              -only-testing:MimicUITests/MimicUITests/testPortValidationShowsInlineError
+              -only-testing:MimicUITests/MimicUITests/testProjectEndpointAndJourneySurviveAppRelaunch
+              -only-testing:MimicUITests/MimicUITests/testSidebarSearchFiltersEndpoints
+              -only-testing:MimicUITests/MimicUITests/testToggleInspectorPanel
+
+          - id: 3
+            name: journeys and spec import
+            only: >-
+              -only-testing:MimicUITests/JourneyUITests
+              -only-testing:MimicUITests/SpecImportUITests
+
+          - id: 4
+            name: updates and backend settings
+            only: >-
+              -only-testing:MimicUITests/UpdateUITests
+              -only-testing:MimicUITests/ControlPlaneIsolationTests
+              -only-testing:MimicUITests/BackendSettingsUITests
+
+          - id: 5
+            name: workspace shell A
+            only: >-
+              -only-testing:MimicUITests/WorkspaceShellUITests/testClickingALoggedRequestOpensTheCollapsedInspector
+              -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorOverviewAnswersForTheProject
+              -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorTrafficTabListsTheEndpointsRequests
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJourneyCrumbJumpsToAnotherJourney
+              -only-testing:MimicUITests/WorkspaceShellUITests/testMenuBarGuardsTheCommandsThatNeedAProject
+              -only-testing:MimicUITests/WorkspaceShellUITests/testNarrowJumpBarCollapsesEarlierLocations
+              -only-testing:MimicUITests/WorkspaceShellUITests/testOverviewReportsUnmatchedTrafficAndSurvivesAMultiRowSelection
+              -only-testing:MimicUITests/WorkspaceShellUITests/testOverviewShowsTheActiveJourneyAndSwitchesTheNavigator
+              -only-testing:MimicUITests/WorkspaceShellUITests/testPanelArrangementSurvivesClosingAndReopeningTheProject
+              -only-testing:MimicUITests/WorkspaceShellUITests/testPanelChordsToggleBothPanels
+              -only-testing:MimicUITests/WorkspaceShellUITests/testScenarioCrumbSwitchesTheActiveScenario
+              -only-testing:MimicUITests/WorkspaceShellUITests/testStartingOnAnOccupiedPortOffersTheNextPort
+              -only-testing:MimicUITests/WorkspaceShellUITests/testToolbarPreservesIdentityAndCollapsesSecondaryActions
+              -only-testing:MimicUITests/WorkspaceShellUITests/testWorkspaceShellNamesItsWindowAndFourPanels
+
+          - id: 6
+            name: workspace shell B
+            only: >-
+              -only-testing:MimicUITests/WorkspaceShellUITests/testAutosaveIndicatorClearsOnceTheSaveSettles
+              -only-testing:MimicUITests/WorkspaceShellUITests/testAutosaveReportsAStoreThatRefusesTheWrite
+              -only-testing:MimicUITests/WorkspaceShellUITests/testEndpointCrumbJumpsToASibling
+              -only-testing:MimicUITests/WorkspaceShellUITests/testGroupCrumbJumpsToAnotherGroup
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJourneyRunCommandsAreDisabledWithoutAnActiveJourney
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJourneysMenuDrivesTheActiveJourney
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJumpBarHistoryWalksBackAndForward
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJumpBarNamesTheProjectAndHasNowhereToGoYet
+              -only-testing:MimicUITests/WorkspaceShellUITests/testNavigatorTabStripSwitchesTheNavigatorAndCentrePane
+              -only-testing:MimicUITests/WorkspaceShellUITests/testReselectingTheSameEndpointStacksNoHistory
+              -only-testing:MimicUITests/WorkspaceShellUITests/testSelectingAfterGoingBackDiscardsTheForwardStack
+              -only-testing:MimicUITests/WorkspaceShellUITests/testServerMenuStartsStopsAndFlipsItsTitle
+              -only-testing:MimicUITests/WorkspaceShellUITests/testServerWellReportsItsStateAndCopiesTheAddress
+              -only-testing:MimicUITests/WorkspaceShellUITests/testUnmatchedBadgeOpensTheLogFilteredToUnmatched
+              -only-testing:MimicUITests/WorkspaceShellUITests/testViewMenuAndShortcutSwitchNavigators
+
+          - id: 7
+            name: welcome projects
+            only: >-
+              -only-testing:MimicUITests/WelcomeProjectUITests
+
+          - id: 8
+            name: request log
+            only: >-
+              -only-testing:MimicUITests/RequestLogUITests
+
+          - id: 9
+            name: navigator
+            only: >-
+              -only-testing:MimicUITests/NavigatorUITests
+
+          - id: 10
+            name: endpoint editor A
+            only: >-
+              -only-testing:MimicUITests/EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance
+              -only-testing:MimicUITests/EndpointEditorUITests/testDeleteScenarioIsDisabledForTheOnlyScenarioAndRemovesOneOfSeveral
+              -only-testing:MimicUITests/EndpointEditorUITests/testEditorDeleteConfirmationCancelKeepsTheEndpoint
+              -only-testing:MimicUITests/EndpointEditorUITests/testEndpointDelayCommitsOnBlurAndRejectsANonNumericValue
+              -only-testing:MimicUITests/EndpointEditorUITests/testFilterClearButtonRestoresTheListAfterANoMatchesQuery
+              -only-testing:MimicUITests/EndpointEditorUITests/testGlobalDelayRowIsReadOnlyAndExplainsItself
+              -only-testing:MimicUITests/EndpointEditorUITests/testGroupTagGathersTheEndpointIntoASidebarSection
+              -only-testing:MimicUITests/EndpointEditorUITests/testInvalidJSONBodyWarnsAndDisablesFormat
+              -only-testing:MimicUITests/EndpointEditorUITests/testMethodPickerCreatesAPostEndpoint
+              -only-testing:MimicUITests/EndpointEditorUITests/testPrettyPrintFormatsTheJSONBodyAndTheResultPersists
+              -only-testing:MimicUITests/EndpointEditorUITests/testScalarJSONBodyClearsWarningWithoutEnablingFormat
+              -only-testing:MimicUITests/EndpointEditorUITests/testScenarioRowAnnouncesItsStatusCodeAndTracksEdits
+              -only-testing:MimicUITests/EndpointEditorUITests/testSidebarContextMenuDuplicatesAnEndpoint
+
+          - id: 11
+            name: endpoint editor B
+            only: >-
+              -only-testing:MimicUITests/EndpointEditorUITests/testAGroupSectionKeepsItsEndpointListedWhileASiblingIsEdited
+              -only-testing:MimicUITests/EndpointEditorUITests/testActivatingAScenarioMovesTheActiveMarkerOffThePreviousOne
+              -only-testing:MimicUITests/EndpointEditorUITests/testAddScenarioSheetAddsAScenarioToTheInspectorList
+              -only-testing:MimicUITests/EndpointEditorUITests/testAddingAResponseHeaderCommitsAndSurvivesReopening
+              -only-testing:MimicUITests/EndpointEditorUITests/testEditorMoreMenuDuplicatesTheEndpoint
+              -only-testing:MimicUITests/EndpointEditorUITests/testEmptyStateAndNavigatorAddEndpointButtonsAreDistinct
+              -only-testing:MimicUITests/EndpointEditorUITests/testFormatStaysDisabledWhenValidDeepJSONExceedsOutputBudget
+              -only-testing:MimicUITests/EndpointEditorUITests/testMethodScopeFilterRestrictsTheListAndNamesTheEmptyScope
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetCancelsAndSubmitsOnReturn
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsAPathWithoutALeadingSlash
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewScenarioSheetCancelsAndSubmitsOnReturn
+              -only-testing:MimicUITests/EndpointEditorUITests/testRemovingAMiddleHeaderRowKeepsTheOthersIntact
+              -only-testing:MimicUITests/EndpointEditorUITests/testSidebarContextMenuDeleteConfirmationNamesTheEndpoint
+              -only-testing:MimicUITests/EndpointEditorUITests/testStatusCodeValidationNotesExplainWhyACodeWasRejected
+
+          - id: 12
+            name: alerts
+            only: >-
+              -only-testing:MimicUITests/ErrorAlertUITests
+
+          - id: 13
+            name: journey editor A
+            only: >-
+              -only-testing:MimicUITests/JourneyEditorUITests/testEditingAStepLoadsItsValuesAndSavesInPlace
+              -only-testing:MimicUITests/JourneyEditorUITests/testNewJourneySheetExplainsItselfAndCreatesOnReturn
+              -only-testing:MimicUITests/JourneyEditorUITests/testRunControlsAdvanceToCompletionAndRestart
+              -only-testing:MimicUITests/JourneyEditorUITests/testStepSheetAuthorsARespondStepWithMethodHeadersAndBody
+              -only-testing:MimicUITests/JourneyEditorUITests/testStepsEmptyStateAddsTheFirstStep
+              -only-testing:MimicUITests/JourneyEditorUITests/testTemplateActivateToggleDecidesWhetherTheJourneyStartsAnswering
+              -only-testing:MimicUITests/JourneyEditorUITests/testTemplateShelfListsEveryTemplateAndCancels
+
+          - id: 14
+            name: journey editor B
+            only: >-
+              -only-testing:MimicUITests/JourneyEditorUITests/testBehaviourControlsChangeTheJourneyAndSurviveReselection
+              -only-testing:MimicUITests/JourneyEditorUITests/testDeleteJourneyConfirmsFirstAndCanBeCalledOff
+              -only-testing:MimicUITests/JourneyEditorUITests/testDuplicateJourneyFromTheRowContextMenu
+              -only-testing:MimicUITests/JourneyEditorUITests/testNavigatorIndicatorRevealsTheActiveJourneyWithoutChangingTheRun
+              -only-testing:MimicUITests/JourneyEditorUITests/testOutcomePickerSwapsTheFieldsAndAuthorsADroppedConnection
+              -only-testing:MimicUITests/JourneyEditorUITests/testStepContextMenuReordersAndRemovesSteps
+              -only-testing:MimicUITests/JourneyEditorUITests/testStepSheetKeepsSaveDisabledUntilAPathIsTypedAndCancelsCleanly
+              -only-testing:MimicUITests/JourneyEditorUITests/testStepSheetNamesTheRuleThatRefusedEachTime
+
+    env:
+      DERIVED_DATA: .artifacts/DerivedData
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Allow UI automation without an interactive prompt
+        run: sudo automationmodetool enable-automationmode-without-authentication
+
+      - name: Download UI test products
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ui-test-products
+          path: .artifacts/download
+
+      - name: Restore UI test products
+        run: |
+          set -euo pipefail
+          tar -C .artifacts -xzf .artifacts/download/MimicUITests.xctestproducts.tar.gz
+          test -d .artifacts/MimicUITests.xctestproducts
 
       - name: Test (UI)
         env:
@@ -260,13 +455,13 @@ jobs:
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
           mkdir -p .artifacts/ui
-          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            test -destination 'platform=macOS' \
+          xcodebuild test-without-building \
+            -testProductsPath .artifacts/MimicUITests.xctestproducts \
+            -destination 'platform=macOS,arch=arm64' \
             $ONLY_TESTING \
             -derivedDataPath "$DERIVED_DATA" \
             -enableCodeCoverage YES \
             -resultBundlePath "$RESULT_BUNDLE" \
-            -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=- 2>&1 | tee "$BUILD_LOG"
 
       - name: Test failure details
@@ -299,7 +494,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -d ".artifacts/ui/$BUNDLE_NAME" ]; then
-            echo "::warning::No result bundle at .artifacts/ui/$BUNDLE_NAME — this shard died before xcodebuild wrote one, so the coverage job will find three bundles instead of four and publish nothing."
+            echo "::warning::No result bundle at .artifacts/ui/$BUNDLE_NAME — this shard died before xcodebuild wrote one, so the coverage job will reject the incomplete bundle set."
             exit 0
           fi
           tar -C .artifacts/ui -czf ".artifacts/$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME"
@@ -327,17 +522,17 @@ jobs:
           RESULT: ${{ needs.macos-ui.result }}
         run: |
           set -euo pipefail
-          echo "The three UI shards rolled up to: $RESULT"
+          echo "The UI shards rolled up to: $RESULT"
           case "$RESULT" in
             success)
-              echo "All three UI shards passed."
+              echo "All UI shards passed."
               ;;
             skipped)
               echo "::error::The UI shards did not run, so nothing exercised the window on this commit."
               exit 1
               ;;
             *)
-              echo "::error::At least one UI shard is red. Open the run page: the shards are named for the parts of the window they cover, and each uploads its own xcresult-ui-N artifact. Read the failing shard's 'Test failure details' step first — and note that -retry-tests-on-failure leaves the step red for a test that passed on its rerun, so a listed failure above a passing final summary is a flake, not a break."
+              echo "::error::At least one UI shard is red. Open the run page: each shard uploads its own xcresult-ui-N artifact. Read the failing shard's 'Test failure details' step first."
               exit 1
               ;;
           esac
@@ -353,12 +548,12 @@ jobs:
       coverage: ${{ steps.figures.outputs.json }}
 
     env:
-      EXPECTED_COVERAGE_BUNDLES: 4
+      EXPECTED_COVERAGE_BUNDLES: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Download the four result bundles
+      - name: Download the result bundles
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-bundle-*
