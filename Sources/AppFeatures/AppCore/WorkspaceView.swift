@@ -61,8 +61,9 @@ struct WorkspaceView: View {
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
 
-    /// Update the native toolbar only when its layout changes, not on every pixel of a resize.
-    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .overflow
+    /// Start with the narrowest fit so AppKit never overflows the identity before the first
+    /// geometry measurement. Then update only when the layout tier changes during a resize.
+    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .iconStatus
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
