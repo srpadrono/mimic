@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-26
+
 ### Added
 
 - Organize journeys into saved groups in the navigator, editor, or CLI with
@@ -543,6 +545,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.13.0]: https://github.com/srpadrono/mimic/releases/tag/v0.13.0
 [0.11.0]: https://github.com/srpadrono/mimic/releases/tag/v0.11.0
 [0.10.0]: https://github.com/srpadrono/mimic/releases/tag/v0.10.0
 [0.9.3]: https://github.com/srpadrono/mimic/releases/tag/v0.9.3
