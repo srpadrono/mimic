@@ -571,6 +571,22 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
     }
 
+    /// Expanded settings share the centre pane with the step list and request log. In a short pane
+    /// the controls still exist in the accessibility tree below the settings scroll viewport, and
+    /// XCTest's automatic click scroll can leave them there. Drive that specific scroll view with a
+    /// vertical gesture and check the control's hit point before clicking it.
+    @MainActor
+    private func revealJourneySetting(_ control: XCUIElement) {
+        let scroller = app.scrollViews["journeyEditor.settingsScroll"].firstMatch
+        XCTAssertTrue(scroller.waitForExistence(timeout: 5), "Expanded journey settings should scroll")
+        XCTAssertTrue(control.waitForExistence(timeout: 5), "The journey setting should exist")
+        for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0] {
+            if control.isHittable { return }
+            scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
+        }
+        XCTAssertTrue(control.isHittable, "The journey setting should be visible after scrolling")
+    }
+
     /// Picks one segment of the step sheet's outcome control.
     @MainActor
     private func selectOutcome(_ title: String) {
@@ -680,8 +696,11 @@ final class JourneyEditorUITests: MimicUITestCase {
             contains: "Ordered per route",
             "Match mode should start on the default"
         )
+        revealJourneySetting(journeys.matchModePicker)
         choose("Strict sequence", in: journeys.matchModePicker, "The match mode picker")
+        revealJourneySetting(journeys.completionPicker)
         choose("Restart", in: journeys.completionPicker, "The on-completion picker")
+        revealJourneySetting(journeys.unmatchedPicker)
         choose("404", in: journeys.unmatchedPicker, "The unscripted-requests picker")
 
         // JRNEDIT-08 — the checkbox.
@@ -694,6 +713,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // starts clear; CI read 1, and the model is right. Toggling it *off* is the state worth
         // proving anyway: it is the one a user chooses deliberately.
         XCTAssertEqual(journeys.autoAdvanceToggle.value as? Int, 1, "Auto-advance should start on")
+        revealJourneySetting(journeys.autoAdvanceToggle)
         journeys.autoAdvanceToggle.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 0 },
