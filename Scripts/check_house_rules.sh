@@ -177,8 +177,11 @@ STRIPPED="$WORK_DIR/stripped"
 strip_file() {
     local file=$1
     if [ -f "$STRIPPED/$file" ]; then return 0; fi
-    mkdir -p "$STRIPPED/$(dirname "$file")"
-    awk "$STRIP_COMMENTS" "$file" > "$STRIPPED/$file"
+    mkdir -p "$STRIPPED/$(dirname "$file")" || return 1
+    if ! awk "$STRIP_COMMENTS" "$file" > "$STRIPPED/$file"; then
+        rm -f "$STRIPPED/$file"
+        return 1
+    fi
 }
 
 # Prints `path:line:text` for every match of $1 in the stripped copies of the .swift files under $2….
@@ -212,10 +215,21 @@ scan() {
         return 1
     fi
 
-    local file
+    local file matches grep_status
     while IFS= read -r file; do
-        strip_file "$file"
-        grep -nE "$pattern" "$STRIPPED/$file" | sed "s|^|$file:|" || true
+        if ! strip_file "$file"; then
+            printf 'house rules: could not read or lex "%s".\n' "$file" >&2
+            return 1
+        fi
+        grep_status=0
+        matches="$(grep -nE "$pattern" "$STRIPPED/$file")" || grep_status=$?
+        if (( grep_status > 1 )); then
+            printf 'house rules: pattern scan failed for "%s" (exit %d).\n' "$file" "$grep_status" >&2
+            return 1
+        fi
+        if [ -n "$matches" ]; then
+            printf '%s\n' "$matches" | sed "s|^|$file:|" || return 1
+        fi
     done < "$listing"
 }
 
@@ -330,6 +344,32 @@ selftest_missing_tree() {
     printf '       got:      %s\n' "${output:-nothing}"
 }
 
+selftest_scan_errors() {
+    local dir="$WORK_DIR/selftest/scan-errors"
+    mkdir -p "$dir"
+    printf 'Text("fixture")\n' > "$dir/Probe.swift"
+
+    local output scan_status=0
+    # A function replacement inside a subshell models an unreadable file or failed awk process.
+    # It must not be swallowed because scan itself is called from an if/command substitution.
+    output="$(strip_file() { return 42; }; scan 'Text' "$dir" 2>&1)" || scan_status=$?
+    if (( scan_status == 0 )); then
+        selftest_failures=$((selftest_failures + 1))
+        printf '  FAIL scan errors — a failed lexer reported a clean tree: %s\n' "$output"
+    else
+        printf '  ok   scan errors — a failed lexer fails the scan\n'
+    fi
+
+    scan_status=0
+    output="$(scan '[' "$dir" 2>&1)" || scan_status=$?
+    if (( scan_status == 0 )); then
+        selftest_failures=$((selftest_failures + 1))
+        printf '  FAIL scan errors — an invalid pattern reported a clean tree: %s\n' "$output"
+    else
+        printf '  ok   scan errors — an invalid grep pattern fails the scan\n'
+    fi
+}
+
 violations=0
 rules_checked=0
 selftest_failures=0
@@ -356,7 +396,7 @@ report() {
     # a failed scan has, and this is the one place a real run reads it.
     local hits
     if ! hits="$(scan "$pattern" "$@")"; then
-        printf '\nThe rule above ran over no tree at all, so nothing in this run has been checked.\n' >&2
+        printf '\nThe scan failed; this run cannot certify the tree.\n' >&2
         exit 1
     fi
     if [ -n "$allow" ]; then
@@ -602,6 +642,7 @@ report \
 
 if (( self_test )); then
     selftest_missing_tree
+    selftest_scan_errors
 
     if (( selftest_failures > 0 )); then
         printf '\n%d self-test failure(s) across %d rules and the reachability case — the scanner is broken, not the tree.\n' \
@@ -610,7 +651,7 @@ if (( self_test )); then
     fi
     printf '%d spellings of %d rules planted and caught — canonical, spaced and module-qualified;\n' \
         "$probes_planted" "$rules_checked"
-    printf 'comments, string literals and multi-line literals told apart; a missing tree fails the run.\n'
+    printf 'comments and literals told apart; unreachable trees and scanner errors fail the run.\n'
     exit 0
 fi
 

@@ -1,38 +1,9 @@
 #!/usr/bin/env python3
-"""Compares how Project.swift and Package.swift configure the compiler.
+"""Enforce compiler parity for every portable target, without invoking a toolchain.
 
-The lockfiles are checked next door by `check_lockfiles.py`; this is the other half of the same
-drift. Both manifests build the portable modules from the same directories, so they cannot disagree
-about *what* they compile — only about how. Two kinds of disagreement, and they are not equally
-serious, so this file treats them differently.
-
-**The deployment floor is a gate.** `Project.swift` sets `MACOSX_DEPLOYMENT_TARGET` in its shared
-base and `Package.swift` sets `platforms:`; they are the same fact written twice, and they have
-already come apart. Package.swift's own comment records it: `platforms:` said `.v15` — eleven majors
-below the value in `Project.swift`, CONTRIBUTING.md, the README badge and the installer's
-`<os-version min>` — and nothing caught it, because no CI job builds that manifest on a Mac and
-Linux ignores `platforms:` entirely. A contributor running `swift build` compiled the portable
-modules against a macOS 15 availability floor while Xcode used 26, so an API introduced in between
-built in one and errored in the other. Comparing two literals needs no toolchain, so this half
-fails.
-
-**The Swift settings are a warning.** `Project.swift` sets four in its shared base and
-`Package.swift` sets none, which makes the Linux job the looser gate: it accepts an implicit
-transitive import that Xcode rejects, because member-import visibility is enforced there and not
-here. That gap cannot be closed by editing a manifest and hoping — turning the setting on lights up
-every portable module at once, and the errors have to be read off a real Swift 6.2 compiler while
-you fix them. Failing here would mean iterating against a red pipeline, which is how a gate stops
-being read. So it is reported on every run, in the job summary, and closes itself the day
-`swiftSettings: [.enableUpcomingFeature(...)]` lands in `Package.swift`.
-
-It lives in a file rather than inside the two runners because it used to be pasted into both
-`Scripts/ci.sh` and `.github/workflows/ci.yml`, under a comment in ci.sh promising the copies were
-"character-for-character" identical "so a diff between the two files shows drift at a glance". They
-had drifted: diffed after dedent, the lockfile program matched and this one did not — the comment
-policing the duplication was itself the thing that was wrong. A shared file cannot drift from itself.
-
-Runs before anything is compiled, so: stdlib only, no arguments. Paths are resolved from this file's
-location rather than the working directory, so it answers the same from anywhere.
+The manifests use literal target names, settings arrays and build-setting values. Unsupported
+expressions fail instead of being treated as absent settings. Xcode's approachable-concurrency
+umbrella adds two features in Swift 6; its other features are already language defaults.
 """
 
 import os
@@ -40,155 +11,187 @@ import pathlib
 import re
 import sys
 
+from check_module_edges import balanced_span, strip_comments, target_definitions
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-
-
-def annotate(kind, path, message):
-    print(("::%s file=%s::%s" if os.environ.get("GITHUB_ACTIONS") else "%s (%s): %s")
-          % (kind if os.environ.get("GITHUB_ACTIONS") else kind.upper(), path, message))
-
-
-def warn(path, message):
-    annotate("warning", path, message)
-
-
-def error(path, message):
-    annotate("error", path, message)
-
-
-def without_line_comments(text):
-    """Drops whole-line `//` comments.
-
-    Both manifests explain themselves at length, and a setting merely *named* in prose must not be
-    able to stand in for one that is actually set — that is the whole failure this file exists to
-    catch. Trailing comments are left alone on purpose: `//` also appears inside every
-    `.package(url:)`, and cutting there would mangle the manifest being read. (The house-rule
-    scanner has a real lexer for that problem; it is not worth one here, because neither thing this
-    reads for is ever written after a trailing comment.)
-    """
-    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("//"))
+APPROACHABLE_FEATURES = {"InferIsolatedConformances", "NonisolatedNonsendingByDefault"}
+FEATURE_SETTINGS = {
+    "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "MemberImportVisibility",
+    "SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES": "InferIsolatedConformances",
+    "SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT": "NonisolatedNonsendingByDefault",
+}
+KNOWN_SETTINGS = set(FEATURE_SETTINGS) | {
+    "SWIFT_VERSION", "SWIFT_DEFAULT_ACTOR_ISOLATION", "SWIFT_APPROACHABLE_CONCURRENCY",
+    "MACOSX_DEPLOYMENT_TARGET",
+}
+FEATURE_CALL = re.compile(r'\.enableUpcomingFeature\s*\(\s*"([^"\n]+)"\s*\)')
 
 
 def normalized_version(text):
-    """(26, ) for "26.0", ".v26" and "26"; (10, 15) for ".v10_15".
-
-    Trailing zeros are dropped so the two spellings of the same floor compare equal — Xcode writes
-    `26.0` where SwiftPM writes `.v26`, and a mismatch reported between those two would be noise
-    that teaches people to ignore this check.
-    """
     parts = [int(p) for p in re.findall(r"\d+", text)]
     while len(parts) > 1 and parts[-1] == 0:
         parts.pop()
     return tuple(parts)
 
 
-def check_deployment_target(project_block, package):
-    """The gate. Returns a list of (manifest, failure) pairs; empty means the two floors agree."""
-    xcode = re.search(r'"MACOSX_DEPLOYMENT_TARGET"\s*:\s*"([^"]*)"', project_block)
-    swiftpm = re.search(r'\.macOS\(\s*(?:"([0-9.]+)"|\.v([0-9_]+))\s*\)', package)
-
-    if xcode is None:
-        return [("Project.swift",
-                 "Project.swift's shared base no longer sets MACOSX_DEPLOYMENT_TARGET, so there "
-                 "was nothing to compare Package.swift's platforms: against. Point this check at "
-                 "wherever the deployment floor moved to.")]
-    if swiftpm is None:
-        return [("Package.swift",
-                 "Package.swift declares no `.macOS(...)` in platforms:, so SwiftPM builds the "
-                 "portable modules against its own default floor while Xcode uses "
-                 f"MACOSX_DEPLOYMENT_TARGET = {xcode.group(1)}. Declare the same floor here.")]
-
-    swiftpm_text = swiftpm.group(1) or (".v" + swiftpm.group(2))
-    if normalized_version(xcode.group(1)) != normalized_version(swiftpm_text):
-        return [("Package.swift",
-                 f"Deployment floors disagree: Project.swift MACOSX_DEPLOYMENT_TARGET = "
-                 f"{xcode.group(1)}, Package.swift platforms: = .macOS({swiftpm_text}). "
-                 "`swift build` then compiles the portable modules against a different "
-                 "availability floor than the one that ships them, so an API introduced between "
-                 "the two builds in one manifest and errors in the other. This has shipped once "
-                 "already, at .v15 against 26.0.")]
-
-    print(f"  Deployment floor agrees: {xcode.group(1)} in both manifests.")
-    return []
+def build_settings(text):
+    result = {}
+    for field in re.finditer(r'"(SWIFT_[A-Z_0-9]+|MACOSX_DEPLOYMENT_TARGET)"\s*:\s*', text):
+        value = re.match(r'"([^"\n]*)"', text[field.end():])
+        if value is None:
+            raise ValueError(f"{field.group(1)} must use a literal build-setting value")
+        if field.group(1) in result:
+            raise ValueError(f"duplicate build setting {field.group(1)}")
+        result[field.group(1)] = value.group(1)
+    return result
 
 
-# Spelled differently in the two manifests but meaning the same thing today. Printed every run,
-# because that is a fact about the current tree rather than a property of either file.
-EQUIVALENT_TODAY = {
-    "SWIFT_VERSION":
-        "swift-tools-version 6.0 already puts SwiftPM in language mode 6",
-    "SWIFT_DEFAULT_ACTOR_ISOLATION":
-        'every module Package.swift builds overrides this to "none" in Project.swift, and '
-        "nonisolated is what SwiftPM defaults to — so the two agree by coincidence, not by "
-        "construction",
-}
-
-# Deliberately NOT in the dict above. It is an Xcode umbrella that turns on a set of upcoming
-# concurrency features, and Package.swift enables none of them — so calling it "equivalent today"
-# would file a real divergence under the heading of things that are only spelled differently, which
-# is the failure this whole check exists to stop. It has no one-to-one SwiftPM spelling, so it is
-# reported as unmapped rather than as a missing feature flag.
-UMBRELLA_WITHOUT_SWIFTPM_SPELLING = {
-    "SWIFT_APPROACHABLE_CONCURRENCY":
-        "an Xcode umbrella over several upcoming concurrency features; Package.swift enables none "
-        "of them, so the Linux gate is genuinely looser here",
-}
+def features_in(array):
+    features = set(FEATURE_CALL.findall(array))
+    remainder = FEATURE_CALL.sub("", array)
+    if re.sub(r"[\s,\[\]]", "", remainder):
+        raise ValueError("unsupported Swift settings; declare unconditional upcoming features explicitly")
+    return features
 
 
-def check_swift_settings(project_block, package):
-    """The warning half. Reports; never fails. See the module docstring for why."""
-    xcode = dict(re.findall(r'"(SWIFT_[A-Z_0-9]+)"\s*:\s*"([^"]*)"', project_block))
-    looser, unmapped, notes = [], [], []
-    for name, value in sorted(xcode.items()):
-        if name.startswith("SWIFT_UPCOMING_FEATURE_"):
-            # Xcode names an upcoming feature in UPPER_SNAKE, SwiftPM in UpperCamel. Deriving it
-            # means a feature added to Project.swift is picked up with no edit here.
-            feature = "".join(w.capitalize()
-                              for w in name[len("SWIFT_UPCOMING_FEATURE_"):].split("_"))
-            token = 'enableUpcomingFeature("%s")' % feature
-            if token not in package:
-                looser.append("  %s = %s — Package.swift declares no .%s" % (name, value, token))
-        elif name in UMBRELLA_WITHOUT_SWIFTPM_SPELLING:
-            unmapped.append("  %s = %s — %s" % (name, value, UMBRELLA_WITHOUT_SWIFTPM_SPELLING[name]))
-        elif name in EQUIVALENT_TODAY:
-            notes.append("  %s = %s — %s" % (name, value, EQUIVALENT_TODAY[name]))
+def package_features(package, targets):
+    shared = {}
+    for declaration in re.finditer(r"\blet\s+(\w+)\s*:\s*\[SwiftSetting\]\s*=\s*\[", package):
+        start = declaration.end() - 1
+        shared[declaration.group(1)] = features_in(package[start:balanced_span(package, start)])
+    result = {}
+    for name, body in targets.items():
+        field = re.search(r"\bswiftSettings\s*:\s*", body)
+        if field is None:
+            result[name] = set()
+        elif body[field.end()] == "[":
+            start = field.end()
+            result[name] = features_in(body[start:balanced_span(body, start)])
         else:
-            unmapped.append("  %s = %s — this check has no SwiftPM mapping for it; add one"
-                            % (name, value))
-    for line in looser + unmapped + notes:
-        print(line)
-    if looser or unmapped:
-        warn("Package.swift",
-             "%d Swift setting(s) Project.swift applies that Package.swift does not, so this gate "
-             "is looser than the compiler that ships the app. Reported, not enforced: turning them "
-             "on here lights up every portable module at once, and closing those errors wants a "
-             "toolchain to hand rather than a red pipeline to iterate against."
-             % (len(looser) + len(unmapped)))
-    else:
-        print("  Every Swift setting Project.swift applies is declared in Package.swift too.")
+            reference = re.match(r"(\w+)\s*(?:,|\))", body[field.end():])
+            if reference is None or reference.group(1) not in shared:
+                raise ValueError(f"{name}: swiftSettings must reference a declared [SwiftSetting] array")
+            result[name] = shared[reference.group(1)]
+    return result
+
+
+def macos_floor(package):
+    match = re.search(r'\.macOS\(\s*(?:"([0-9.]+)"|\.v([0-9_]+))\s*\)', package)
+    if match is None:
+        raise ValueError("missing literal .macOS(...) deployment floor")
+    return normalized_version(match.group(1) or match.group(2))
+
+
+def disagreements(project_text, package_text, tuist_package_text):
+    project, package, tuist_package = map(strip_comments, (project_text, package_text, tuist_package_text))
+    shared_call = re.search(r"\blet\s+sharedSettings\b[^=]*=\s*\.settings\s*\(", project)
+    if shared_call is None:
+        raise ValueError("Project.swift: missing sharedSettings declaration")
+    start = shared_call.end() - 1
+    shared = build_settings(project[start:balanced_span(project, start)])
+    floor = normalized_version(shared.get("MACOSX_DEPLOYMENT_TARGET", ""))
+    if not floor:
+        raise ValueError("Project.swift: missing shared MACOSX_DEPLOYMENT_TARGET")
+
+    problems = []
+    for name, manifest in (("Package.swift", package), ("Tuist/Package.swift", tuist_package)):
+        if macos_floor(manifest) != floor:
+            problems.append(f"{name}: deployment floor differs from Project.swift")
+    tools = re.search(r"^//\s*swift-tools-version:\s*([0-9.]+)", package_text)
+    if tools is None or normalized_version(tools.group(1)) < (6, 2):
+        problems.append("Package.swift: Swift 6.2 or newer is required for these upcoming features")
+    if re.search(r"\bswiftLanguageModes\s*:\s*\[\s*\.v6\s*,?\s*\]", package) is None:
+        problems.append("Package.swift: explicitly declare swiftLanguageModes: [.v6]")
+
+    portable, xcode = target_definitions(package), target_definitions(project)
+    if not portable:
+        raise ValueError("Package.swift: no targets found")
+    enabled = package_features(package, portable)
+    for name in portable:
+        xcode_name = "MimicCLI" if name == "mimic" else name
+        if xcode_name not in xcode:
+            problems.append(f"{name}: no corresponding Tuist target {xcode_name}")
+            continue
+        effective = shared | build_settings(xcode[xcode_name])
+        unknown = effective.keys() - KNOWN_SETTINGS
+        if unknown:
+            problems.append(f"{name}: unmapped Tuist settings: {', '.join(sorted(unknown))}")
+        if normalized_version(effective.get("SWIFT_VERSION", ""))[:1] != (6,):
+            problems.append(f"{name}: Tuist must use Swift 6 language mode")
+        if effective.get("SWIFT_DEFAULT_ACTOR_ISOLATION") != "none":
+            problems.append(f"{name}: Tuist default actor isolation differs from SwiftPM's nonisolated default")
+        if normalized_version(effective.get("MACOSX_DEPLOYMENT_TARGET", "")) != floor:
+            problems.append(f"{name}: target deployment floor differs from Package.swift")
+        expected = set()
+        approachable = effective.get("SWIFT_APPROACHABLE_CONCURRENCY", "NO")
+        if approachable not in {"YES", "NO"}:
+            problems.append(f"{name}: unsupported approachable-concurrency value {approachable!r}")
+        elif approachable == "YES":
+            expected |= APPROACHABLE_FEATURES
+        for setting, feature in FEATURE_SETTINGS.items():
+            if setting not in effective:
+                continue
+            value = effective[setting]
+            if value == "YES":
+                expected.add(feature)
+            elif value == "NO":
+                expected.discard(feature)
+            else:
+                problems.append(f"{name}: unsupported {setting} value {value!r}")
+        missing, extra = expected - enabled[name], enabled[name] - expected
+        if missing:
+            problems.append(f"{name}: SwiftPM is missing {', '.join(sorted(missing))}")
+        if extra:
+            problems.append(f"{name}: SwiftPM enables features absent from Tuist: {', '.join(sorted(extra))}")
+    return problems
+
+
+def self_test():
+    project = '''let sharedSettings: Settings = .settings(base: [
+        "SWIFT_VERSION": "6.2", "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+        "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+        "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
+        "MACOSX_DEPLOYMENT_TARGET": "26.0"], configurations: [])
+    let project = Project(targets: [.target(name: "Domain", dependencies: [],
+        settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"]))])'''
+    package = '''// swift-tools-version: 6.2
+    let flags: [SwiftSetting] = [.enableUpcomingFeature("MemberImportVisibility"),
+        .enableUpcomingFeature("InferIsolatedConformances"),
+        .enableUpcomingFeature("NonisolatedNonsendingByDefault")]
+    let package = Package(platforms: [.macOS("26.0")], targets: [
+        .target(name: "Domain", swiftSettings: flags)], swiftLanguageModes: [.v6])'''
+    cases = [
+        (project, package, False),
+        (project, package.replace(", swiftSettings: flags", ""), True),
+        (project, package.replace('.enableUpcomingFeature("MemberImportVisibility"),',
+                                 '// .enableUpcomingFeature("MemberImportVisibility"),'), True),
+        (project, package.replace('"NonisolatedNonsendingByDefault"', '"OtherFeature"'), True),
+        (project.replace('"none"', '"MainActor"'), package, True),
+        (project.replace('"SWIFT_VERSION": "6.2"', '"SWIFT_VERSION": "5.0"'), package, True),
+        (project, package.replace('swiftLanguageModes: [.v6]', 'swiftLanguageModes: [.v5]'), True),
+    ]
+    for index, (tuist, spm, should_fail) in enumerate(cases):
+        if bool(disagreements(tuist, spm, 'Package(platforms: [.macOS("26.0")])')) != should_fail:
+            raise AssertionError(f"compiler parity fixture {index} gave the wrong result")
+    print(f"{len(cases)} compiler-parity fixtures passed")
 
 
 def main():
-    project = without_line_comments((ROOT / "Project.swift").read_text())
-    package = without_line_comments((ROOT / "Package.swift").read_text())
-
-    block = re.search(r"let sharedSettings.*?configurations:", project, re.S)
-    if block is None:
-        # Fatal, unlike the Swift-settings half below. A check that cannot find its input has not
-        # found agreement, and reporting success there is how a manifest refactor silently turns
-        # this file into a no-op that prints a reassuring line every run.
-        error("Project.swift",
-              "Could not find `sharedSettings`, so this check compared nothing. Point it at "
-              "wherever the shared base settings moved to.")
-        sys.exit(1)
-
-    failures = check_deployment_target(block.group(0), package)
-    check_swift_settings(block.group(0), package)
-
-    for manifest, line in failures:
-        error(manifest, line)
-    if failures:
-        sys.exit("%d manifest disagreement(s) that a build cannot catch." % len(failures))
+    try:
+        if sys.argv[1:] == ["--self-test"]:
+            self_test()
+        elif sys.argv[1:]:
+            raise ValueError("usage: check_compiler_settings.py [--self-test]")
+        problems = disagreements(*((ROOT / path).read_text(encoding="utf-8") for path in
+                                    ("Project.swift", "Package.swift", "Tuist/Package.swift")))
+    except (OSError, ValueError) as error:
+        sys.exit(f"Compiler parity could not be checked: {error}")
+    for problem in problems:
+        prefix = "::error file=Package.swift::" if os.environ.get("GITHUB_ACTIONS") else "ERROR: "
+        print(prefix + problem)
+    if problems:
+        sys.exit(f"{len(problems)} compiler-setting disagreement(s)")
+    print("All portable targets match Tuist's Swift 6 language mode, isolation and upcoming features; deployment floors agree.")
 
 
 if __name__ == "__main__":

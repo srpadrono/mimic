@@ -3,20 +3,15 @@
 # /usr/local/bin, in one double-click.
 #
 # It exists because shipping two zips makes the user do the packaging by hand, and one of those
-# steps fails silently: the CLI is *built* ad-hoc signed with no team identifier —
-# `"CODE_SIGN_IDENTITY": "-"` on the `MimicCLI` target in Project.swift — so unless MIMIC_SIGN_APP
-# re-signs it, a copy carrying the download quarantine flag is killed with SIGKILL, exit 137, nothing
-# on stdout or stderr. Someone follows the instructions, runs `mimic --version`, and gets silence. An
-# installer payload is laid down without that flag, and the postinstall below strips it anyway, so
-# the problem cannot reach a user.
+# steps can fail silently when an ad-hoc signed CLI is distributed independently. The installer
+# carries both products; release output requires Developer ID signing and notarization.
 #
 # This mechanism was once described as a measurement of a version that never shipped. Keep the
 # packaging rationale here without stale release-number claims; CHANGELOG.md is the release record.
 #
-# Signing is opt-in through the environment. With the three variables set the output is signed,
-# notarised and stapled, and opens with no warning at all. Without them it still builds, so the
-# packaging can be developed and tested before anyone buys a certificate — but it prints what that
-# costs the user, because an unsigned installer is still blocked by Gatekeeper.
+# With all three variables set, the script publishes only a signed, notarized, stapled package
+# accepted by Gatekeeper. Without notarization, the package stays in .artifacts/package for local
+# development. Incomplete signing configuration fails before building; it never downgrades signing.
 #
 #   MIMIC_SIGN_APP        "Developer ID Application: Name (TEAMID)"  — signs the app and the CLI
 #   MIMIC_SIGN_INSTALLER  "Developer ID Installer: Name (TEAMID)"    — signs the .pkg itself
@@ -35,8 +30,7 @@ step()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 warn()  { printf '\033[33m%s\033[0m\n' "$1"; }
 fail()  { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
 
-# MARKETING_VERSION is the one place a version is written; the tag, the bundle and `mimic state`
-# all read from it, so the installer must too rather than carrying its own copy.
+# The package and CLI must agree with the app's marketing version.
 VERSION="$(grep -m1 '"MARKETING_VERSION"' Project.swift | sed -E 's/.*: *"([^"]+)".*/\1/')"
 [[ -n "$VERSION" ]] || fail "could not read MARKETING_VERSION from Project.swift"
 
@@ -62,9 +56,8 @@ fi
 
 BUILD_DIR="$ROOT_DIR/.artifacts/package"
 STAGE_DIR="$BUILD_DIR/root"
-SCRIPTS_DIR="$BUILD_DIR/scripts"
 OUT_DIR="$ROOT_DIR/.artifacts/release"
-PKG_OUT="$OUT_DIR/Mimic-$VERSION.pkg"
+PKG_OUT="$BUILD_DIR/Mimic-$VERSION.pkg"
 
 SIGN_APP="${MIMIC_SIGN_APP:-}"
 SIGN_INSTALLER="${MIMIC_SIGN_INSTALLER:-}"
@@ -77,23 +70,24 @@ TEAM_ID="${MIMIC_TEAM_ID:-}"
 if [[ -n "$TEAM_ID" ]]; then
   identity_for() {
     security find-identity -v 2>/dev/null \
-      | grep "$1: " | grep "($TEAM_ID)" \
-      | sed -E 's/^.*"(.*)".*$/\1/' | head -1
+      | grep -F "$1: " | grep -F "($TEAM_ID)" \
+      | sed -E 's/^.*"(.*)".*$/\1/' | head -1 || true
   }
   [[ -n "$SIGN_APP" ]]       || SIGN_APP="$(identity_for 'Developer ID Application')"
   [[ -n "$SIGN_INSTALLER" ]] || SIGN_INSTALLER="$(identity_for 'Developer ID Installer')"
 
   if [[ -z "$SIGN_APP" || -z "$SIGN_INSTALLER" ]]; then
-    warn "MIMIC_TEAM_ID=$TEAM_ID is set, but this Mac has only part of the pair:"
+    warn "MIMIC_TEAM_ID=$TEAM_ID is set, but the signing pair is incomplete:"
     [[ -z "$SIGN_APP" ]]       && warn "  missing: Developer ID Application  (signs Mimic.app and the mimic binary)"
     [[ -z "$SIGN_INSTALLER" ]] && warn "  missing: Developer ID Installer    (signs the .pkg)"
     warn "Create it in Xcode ▸ Settings ▸ Accounts ▸ Manage Certificates ▸ +, then re-run."
-    # Drop both rather than half-sign. A signed installer wrapping an unsigned app is still
-    # rejected by Gatekeeper, so it buys nothing and it looks like it should have worked.
-    SIGN_APP=""
-    SIGN_INSTALLER=""
-    warn "Building fully unsigned instead, so the result is not ambiguous."
+    fail "Requested signing identities were not found; no unsigned replacement will be built."
   fi
+fi
+
+if [[ -n "$SIGN_APP" || -n "$SIGN_INSTALLER" || -n "$NOTARY_PROFILE" ]]; then
+  [[ -n "$SIGN_APP" && -n "$SIGN_INSTALLER" ]] \
+    || fail "Set both MIMIC_SIGN_APP and MIMIC_SIGN_INSTALLER before signing or notarizing."
 fi
 
 step "Mimic $VERSION — installer package"
@@ -103,7 +97,7 @@ printf 'notarisation:      %s\n' "${NOTARY_PROFILE:-(none)}"
 
 # .artifacts/ is gitignored and is only ever written by scripts, so clearing our own subtrees is safe.
 rm -rf "$BUILD_DIR"
-mkdir -p "$STAGE_DIR/Applications" "$STAGE_DIR/usr/local/bin" "$SCRIPTS_DIR" "$OUT_DIR"
+mkdir -p "$STAGE_DIR/Applications" "$STAGE_DIR/usr/local/bin"
 
 step "Build (Release)"
 # CODE_SIGN_IDENTITY is applied here rather than after the fact: the hardened runtime has to be in
@@ -142,6 +136,12 @@ done
 PRODUCTS="$DERIVED/Build/Products/Release"
 [[ -d "$PRODUCTS/Mimic.app" ]] || fail "no Mimic.app at $PRODUCTS"
 [[ -f "$PRODUCTS/mimic"     ]] || fail "no mimic binary at $PRODUCTS"
+BUILT_APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PRODUCTS/Mimic.app/Contents/Info.plist")"
+BUILT_CLI_VERSION="$("$PRODUCTS/mimic" --version | sed -nE 's/^mimic ([0-9]+\.[0-9]+\.[0-9]+) \(control API [^)]+\)$/\1/p')"
+[[ "$BUILT_APP_VERSION" == "$VERSION" && "$BUILT_CLI_VERSION" == "$VERSION" ]] \
+  || fail "Built app/CLI versions do not match $VERSION; regenerate the workspace and rebuild."
+codesign --verify --deep --strict "$PRODUCTS/Mimic.app" || fail "App signature verification failed."
+codesign --verify --strict "$PRODUCTS/mimic" || fail "CLI signature verification failed."
 
 step "Stage the payload"
 # ditto rather than cp: it preserves the bundle's symlinks and extended attributes, and a copy that
@@ -154,25 +154,23 @@ printf '  mimic      %s (%s)\n' \
   "$(du -h "$STAGE_DIR/usr/local/bin/mimic" | cut -f1)" \
   "$(lipo -archs "$STAGE_DIR/usr/local/bin/mimic" 2>/dev/null || echo '?')"
 
-step "Postinstall script"
-# Installer payloads are not quarantined, so this is belt and braces — but it is cheap, and it is
-# the difference between "should be fine" and "cannot bite the user".
-cat > "$SCRIPTS_DIR/postinstall" <<'POSTINSTALL'
-#!/bin/bash
-# Strip the download quarantine flag from everything we just installed. Without it an ad-hoc-signed
-# `mimic` is killed with SIGKILL and prints nothing, which reads to the user as the tool not working.
-set -uo pipefail
-xattr -dr com.apple.quarantine /Applications/Mimic.app  2>/dev/null || true
-xattr -d  com.apple.quarantine /usr/local/bin/mimic     2>/dev/null || true
-exit 0
-POSTINSTALL
-chmod +x "$SCRIPTS_DIR/postinstall"
-
 step "Build the package"
 COMPONENT="$BUILD_DIR/component.pkg"
+COMPONENTS="$BUILD_DIR/components.plist"
+# Installing an update must replace /Applications/Mimic.app, not a relocated test or backup copy.
+pkgbuild --analyze --root "$STAGE_DIR" "$COMPONENTS"
+python3 - "$COMPONENTS" <<'PY'
+import plistlib, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+components = plistlib.loads(path.read_bytes())
+app = next(item for item in components if item['RootRelativeBundlePath'] == 'Applications/Mimic.app')
+app.update(BundleIsRelocatable=False, BundleOverwriteAction='upgrade')
+path.write_bytes(plistlib.dumps(components))
+PY
 pkgbuild \
   --root "$STAGE_DIR" \
-  --scripts "$SCRIPTS_DIR" \
+  --component-plist "$COMPONENTS" \
   --identifier "devxa.Mimic.installer" \
   --version "$VERSION" \
   --install-location / \
@@ -212,8 +210,24 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
   # --wait, because an un-stapled package still shows a warning on the first launch of a machine
   # that is offline, and stapling is the only way to close that gap.
   xcrun notarytool submit "$PKG_OUT" --keychain-profile "$NOTARY_PROFILE" --wait \
+    --output-format json > "$BUILD_DIR/notarization.json" \
     || fail "notarisation failed — run: xcrun notarytool log <submission-id> --keychain-profile $NOTARY_PROFILE"
+  python3 - "$BUILD_DIR/notarization.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as source:
+    result = json.load(source)
+if result.get('status') != 'Accepted':
+    raise SystemExit('Notarization was not accepted; inspect ' + sys.argv[1])
+PY
   xcrun stapler staple "$PKG_OUT"
+  xcrun stapler validate "$PKG_OUT"
+  spctl -a -vvv -t install "$PKG_OUT" > "$BUILD_DIR/gatekeeper.log" 2>&1 \
+    || fail "Gatekeeper rejected the package; inspect $BUILD_DIR/gatekeeper.log. No release output was published."
+  mkdir -p "$OUT_DIR"
+  ditto "$PKG_OUT" "$OUT_DIR/Mimic-$VERSION.pkg"
+  PKG_OUT="$OUT_DIR/Mimic-$VERSION.pkg"
+else
+  warn "Development package only: not notarized, not published to .artifacts/release."
 fi
 
 step "Result"
@@ -221,25 +235,4 @@ SIZE_BYTES="$(wc -c < "$PKG_OUT" | tr -d ' ')"
 printf '%s\n' "$PKG_OUT"
 printf 'size: %s bytes (%.1f MB)\n' "$SIZE_BYTES" "$(( SIZE_BYTES / 1048576.0 ))"
 
-# The verdict that matters, and the only honest way to report it: ask Gatekeeper.
-printf '\ngatekeeper: '
-if spctl -a -vvv -t install "$PKG_OUT" 2>&1 | grep -q accepted; then
-  printf '\033[32maccepted — installs with no warning\033[0m\n'
-else
-  printf '\033[33mrejected\033[0m\n'
-  # Name the step that is actually missing. Reporting "not signed" at a package that carries a
-  # valid Developer ID signature sends the reader to fix something that is already done.
-  if [[ -z "$SIGN_APP" ]]; then
-    warn "Nothing is signed. Set MIMIC_TEAM_ID (or MIMIC_SIGN_APP and MIMIC_SIGN_INSTALLER)."
-  elif [[ -z "$NOTARY_PROFILE" ]]; then
-    warn "Signed, but not notarised — and Apple has required notarisation for downloaded software"
-    warn "since Catalina, so signing alone does not clear this. Store credentials once:"
-    warn "  xcrun notarytool store-credentials mimic-notary --apple-id <id> --team-id $TEAM_ID"
-    warn "then re-run with MIMIC_NOTARY_PROFILE=mimic-notary."
-  else
-    warn "Signed and notarised, yet still rejected. Check the log for the submission:"
-    warn "  xcrun notarytool history --keychain-profile $NOTARY_PROFILE"
-  fi
-  warn "Until it is accepted, the user must open System Settings ▸ Privacy & Security and click"
-  warn "Open Anyway — the Control-click ▸ Open shortcut was removed in macOS Sequoia."
-fi
+[[ -z "$NOTARY_PROFILE" ]] || printf '\nGatekeeper accepted the stapled release package.\n'

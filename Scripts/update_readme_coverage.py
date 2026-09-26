@@ -1,51 +1,18 @@
 #!/usr/bin/env python3
 
-"""Reads line coverage out of `.xcresult` bundles. One reader, five callers.
+"""Read coverage without running tests or inferring whether a test run passed.
 
-**The two figures land in two different places, written by two different people, and that split is
-the design rather than an accident.** The badges at the top of README.md are published by CI, from
-`main`, as shields.io *endpoint* payloads on an orphan `badges` branch — nothing in the tracked tree
-moves when they change. The detailed per-target table between README.md's `coverage:generated`
-markers is written **only** by a local full-suite run on a Mac; no CI path writes it, and no mode of
-this script writes it from anything but `--results-dir`.
+--result-bundle prints a report; --emit-json requires the app and all eight modules.
+CI merges its unit and UI result bundles before exporting those figures. The Linux
+publisher uses --from-json --emit-badges to write two shields.io endpoint payloads
+on the orphan badges branch. --print-badge-branch exposes that branch contract.
 
-**`--results-dir`** is the mode `Scripts/run_full_test_suite.sh` uses: one bundle per scheme, on a
-Mac, after a full suite run. It rewrites the block between the `coverage:generated` markers, in
-place, and **does not touch the badges** — it checks them instead, see `check_badges`.
+--results-dir writes only README's generated table from existing per-scheme bundles,
+as the CI-only run_full_test_suite.sh produces. It does not publish badges. Reports
+describe their input bundles; neither timestamps nor badge freshness are inferred.
 
-**`--result-bundle`** is the mode `.github/workflows/ci.yml` uses for the job summary: one bundle —
-the workspace-wide unit run — printed as Markdown on stdout. It reads the bundle and changes
-nothing, so it is safe on a pull request from a fork, where the token is read-only.
-
-**`--result-bundle --emit-json`** writes those same numbers to a small JSON file instead of printing
-them. It is what the macOS job hands to the job that publishes them, so a several-hundred-megabyte
-`.xcresult` never has to leave the runner that produced it.
-
-**`--from-json --emit-badges`** turns that file into the two shields.io endpoint payloads the
-`badges` branch carries. It needs neither Xcode nor a bundle, which is what lets the publishing job
-run on Linux holding `contents: write` while the job that compiles code out of a pull request keeps
-a read-only token.
-
-**`--print-badge-branch`** prints the branch name the workflow force-pushes those payloads to, so
-the branch is written down once — here, beside the URLs the README has to carry — rather than once
-in YAML and once in Markdown.
-
-Every mode goes through `target_metrics`, so the numbers a reviewer reads in a job summary, the
-numbers on the badges and the numbers in the README table come out of one piece of code rather than
-three that agree by hand.
-
-**Nothing generated here carries a timestamp, a run number or a run URL, deliberately.** Everything
-written is a pure function of the coverage figures. That property no longer has to hold for CI — the
-badge branch is force-pushed to a single commit every time, so it cannot accumulate history whatever
-the payload says — but it still has to hold for the README block, which a human commits: an
-unchanged local measurement must leave the file byte-identical, or every full-suite run leaves a
-dirty tree and a diff nobody wants to read.
-
-`--self-test` exercises the JSON round trip, the badge payloads, the block rewriter and the refusals
-against fixtures written out longhand in this file, so the half of it that needs no Mac is checked
-on every Linux CI run.
-
-Stdlib only, so the Linux CI container's `python3-minimal` and a Mac's system Python both run it.
+--self-test uses literal fixtures for parsers, denominators, payloads and refusals.
+This script uses only the standard library available in python3-minimal.
 """
 
 from __future__ import annotations
@@ -65,10 +32,6 @@ MODULE_TARGETS = [
     ("Persistence.framework", "Persistence.framework", "Persistence.xcresult"),
     ("DesignSystem.framework", "DesignSystem.framework", "DesignSystem.xcresult"),
     ("SpecImport.framework", "SpecImport.framework", "SpecImport.xcresult"),
-    # ControlPlane and MimicCLICore are the automation surface the README leads with, and both were
-    # missing here while `run_full_test_suite.sh` produced their bundles anyway — so the generated
-    # "modules at or above 95%: n/6" counted six of the eight modules actually measured, and the two
-    # left out were invisible.
     ("ControlPlane.framework", "ControlPlane.framework", "ControlPlane.xcresult"),
     ("MimicCLICore.framework", "MimicCLICore.framework", "MimicCLICore.xcresult"),
     # AppFeatures has no standalone test scheme; its coverage is captured in the app test run.
@@ -82,44 +45,13 @@ MODULE_TARGETS = [
 SUMMARY_ORDER = [APP_TARGET[1]] + [xccov_name for _, xccov_name, _ in MODULE_TARGETS]
 
 
-# ---------------------------------------------------------------------------
-# The published badges.
-#
-# `main` is protected: changes to it must arrive through a pull request, and the Actions bot is not
-# exempt. Every push the recording job ever made to `main` was refused with GH006, for six merges,
-# while the job itself went green — so the badges read `not measured` for this repository's whole
-# history. The owner declined to weaken the rule for a badge, so the figures go somewhere the rule
-# does not apply: an **orphan branch carrying nothing but these two files**, force-pushed to a single
-# commit on every push to `main`, holding no source and therefore needing no review.
-#
-# The four names below are the whole contract between three files — this script writes the payloads,
-# `.github/workflows/ci.yml` pushes them (asking `--print-badge-branch` for the branch rather than
-# repeating it), and README.md links them. `check_badges` holds the README to them, so renaming a
-# payload here fails the next full-suite run rather than silently turning both badges into
-# shields.io's "invalid" placeholder.
+# CI publishes only badge payloads on a separate branch; it never writes the protected main branch.
 BADGE_REPO = "srpadrono/mimic"
 BADGE_BRANCH = "badges"
 APP_BADGE_FILE = "app-coverage.json"
 MODULE_BADGE_FILE = "module-coverage.json"
 
-# The file names are addresses and the labels are descriptions, and only one of the two is allowed
-# to lie for a while.
-#
-# The first badge used to read `Mimic.app coverage`, and measured the target of that name — which is
-# `App/Sources/MimicApp.swift`, thirty-four lines of `@main` entry point that `xccov` counts as sixty
-# executable ones. It published `46.67%`: twenty-eight of those sixty lines. A reader took that for a
-# statement about the application, and it was a statement about a shim. The application is
-# `AppFeatures`, fourteen thousand lines of it, and it is one row in the *other* badge's eight.
-#
-# It reads the **weighted total across all nine targets** now, which is the figure the label always
-# implied. `Mimic.app` keeps its row in the table and its entry in the JSON — sixty lines of entry
-# point is worth reporting, just not worth being the headline.
-#
-# `APP_BADGE_FILE` deliberately keeps its name through that change. It is a URL README.md carries and
-# the `badges` branch serves; renaming it would leave the merged README pointing at a file the next
-# run has not published yet, so both badges would render shields.io's "invalid" placeholder for the
-# length of a CI run. A file name nobody reads is the cheaper inaccuracy, and this paragraph is the
-# price of it.
+# Preserve the published URL even though its payload aggregates the app and all eight modules.
 TOTAL_BADGE_LABEL = "line coverage"
 MODULE_BADGE_LABEL = "modules at or above 95%"
 
@@ -149,6 +81,20 @@ class CoverageMetrics:
     executable_lines: int
 
 
+def validated_metrics(percent: object, covered: object, executable: object) -> CoverageMetrics:
+    """Use counts as the authority; tolerate only the text report's percentage rounding."""
+    if type(covered) is not int or type(executable) is not int:
+        raise ValueError("line counts must be integers")
+    if not 0 <= covered <= executable:
+        raise ValueError("line counts must satisfy 0 <= covered <= executable")
+    if type(percent) not in (int, float) or not 0 <= percent <= 100:
+        raise ValueError("coverage percentage must be finite and between 0 and 100")
+    actual = 100.0 * covered / executable if executable else 0.0
+    if abs(percent - actual) > 0.00501:
+        raise ValueError("coverage percentage disagrees with line counts")
+    return CoverageMetrics(actual, covered, executable)
+
+
 def run_xccov(result_bundle: Path) -> str:
     completed = subprocess.run(
         ["xcrun", "xccov", "view", "--report", "--only-targets", str(result_bundle)],
@@ -171,15 +117,46 @@ TEXT_ROW = re.compile(
 )
 
 
+def parse_xccov_json(report_text: str) -> dict[str, CoverageMetrics]:
+    report = json.loads(report_text)
+    # --only-targets returns an array; a full --report JSON object wraps it in targets.
+    targets = report.get("targets") if isinstance(report, dict) else report
+    if not isinstance(targets, list):
+        raise ValueError("coverage targets must be an array")
+    metrics = {}
+    for target in targets:
+        if not isinstance(target, dict):
+            raise ValueError("each coverage target must be an object")
+        name = target["name"]
+        fraction = target["lineCoverage"]
+        if not isinstance(name, str) or not name or name in metrics:
+            raise ValueError("coverage target names must be nonempty and unique")
+        if type(fraction) not in (int, float) or not 0 <= fraction <= 1:
+            raise ValueError("lineCoverage must be finite and between 0 and 1")
+        metrics[name] = validated_metrics(
+            100.0 * fraction, target["coveredLines"], target["executableLines"]
+        )
+    return metrics
+
+
+def parse_xccov_text(report_text: str) -> dict[str, CoverageMetrics]:
+    metrics = {}
+    for match in TEXT_ROW.finditer(report_text):
+        name = match.group("name")
+        if name in metrics:
+            raise ValueError("coverage target names must be unique")
+        metrics[name] = validated_metrics(
+            float(match.group("percent")),
+            int(match.group("covered")),
+            int(match.group("executable")),
+        )
+    return metrics
+
+
 def target_metrics(result_bundle: Path) -> dict[str, CoverageMetrics]:
     """Every target in one bundle, keyed by the name `xccov` reports it under.
 
-    JSON first, because it is a documented structure with named fields rather than a column layout
-    that has to be matched by eye — and this file could not be run against a real bundle where it
-    was last edited, so the parse that does not depend on spacing is the one to prefer. The text
-    report is kept as a fallback for an `xccov` whose `--json` is unavailable, and a failure of both
-    is raised with whatever `xccov` said, since "could not read the bundle" and "the bundle has no
-    coverage in it" want different fixes from whoever reads the message.
+    Prefer named JSON fields; keep the text fallback for older xccov versions.
     """
     if not result_bundle.exists():
         raise RuntimeError(f"no result bundle at {result_bundle}")
@@ -191,15 +168,7 @@ def target_metrics(result_bundle: Path) -> dict[str, CoverageMetrics]:
     )
     if completed.returncode == 0:
         try:
-            report = json.loads(completed.stdout)
-            return {
-                target["name"]: CoverageMetrics(
-                    percent=100.0 * float(target["lineCoverage"]),
-                    covered_lines=int(target["coveredLines"]),
-                    executable_lines=int(target["executableLines"]),
-                )
-                for target in report["targets"]
-            }
+            return parse_xccov_json(completed.stdout)
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             pass
 
@@ -209,14 +178,10 @@ def target_metrics(result_bundle: Path) -> dict[str, CoverageMetrics]:
         detail = (error.stderr or "").strip() or f"exit {error.returncode}"
         raise RuntimeError(f"`xcrun xccov` could not read {result_bundle}: {detail}") from error
 
-    return {
-        match.group("name"): CoverageMetrics(
-            percent=float(match.group("percent")),
-            covered_lines=int(match.group("covered")),
-            executable_lines=int(match.group("executable")),
-        )
-        for match in TEXT_ROW.finditer(report_text)
-    }
+    try:
+        return parse_xccov_text(report_text)
+    except ValueError as error:
+        raise RuntimeError(f"invalid coverage report for {result_bundle}: {error}") from error
 
 
 def metrics_for_target(result_bundle: Path, target_name: str) -> CoverageMetrics:
@@ -258,7 +223,7 @@ def build_coverage_block(
         "<!-- coverage:generated:start -->",
         f"This section is auto-generated — do not edit it by hand. {generated_from}",
         "",
-        "Latest measured line coverage:",
+        "Line coverage in the supplied result bundles:",
         "",
         "| Target | Coverage | Lines |",
         "| --- | ---: | ---: |",
@@ -270,16 +235,14 @@ def build_coverage_block(
 
     at_or_above = modules_at_or_above_95(module_metrics)
     total = total_metrics(app_metrics, module_metrics)
-    # The row the first badge publishes, in the table it belongs to. Without it a reader comparing
-    # the badge against this block has to add nine numbers by hand to find out where it came from.
-    lines.append(f"| **All nine targets** | **`{format_percent(total.percent)}`** | **`{format_lines(total)}`** |")
+    target_count = len(module_metrics) + 1
+    lines.append(f"| **All {target_count} measured targets** | **`{format_percent(total.percent)}`** | **`{format_lines(total)}`** |")
     lines.extend(
         [
             "",
             "Coverage notes:",
             "",
-            f"- Total line coverage across all nine targets is `{format_percent(total.percent)}` — "
-            "the figure the first badge at the top of this file publishes.",
+            f"- Total line coverage across the {target_count} measured targets is `{format_percent(total.percent)}`.",
             f"- `Mimic.app` is the app *bundle* target: `App/Sources/MimicApp.swift`, the `@main` "
             f"entry point, currently `{format_percent(app_metrics.percent)}` of "
             f"`{app_metrics.executable_lines:,}` executable lines. The application itself is "
@@ -287,7 +250,7 @@ def build_coverage_block(
             f"- Modules at or above `95%`: `{at_or_above}/{len(module_metrics)}`.",
             f"- Total executable lines tracked in this table: `{total.executable_lines:,}`.",
             "- `Lines` shows covered/executable lines reported by `xcrun xccov`.",
-            "- Coverage is gathered with `xcodebuild` and `xcrun xccov` from fresh `.xcresult` bundles.",
+            "- Coverage is read with `xcrun xccov`; these figures do not establish test success.",
             f"- {provenance}",
             "<!-- coverage:generated:end -->",
         ]
@@ -313,38 +276,43 @@ def build_summary(result_bundle: Path, metrics: dict[str, CoverageMetrics], titl
         entry = metrics[name]
         lines.append(f"| `{name}` | {format_percent(entry.percent)} | {format_lines(entry)} |")
 
-    products = [entry for name, entry in metrics.items() if not name.endswith(".xctest")]
+    products = [metrics[name] for name in SUMMARY_ORDER
+                if name in metrics and metrics[name].executable_lines > 0]
     covered = sum(entry.covered_lines for entry in products)
     executable = sum(entry.executable_lines for entry in products)
     lines.append("")
     if executable:
         lines.append(
-            f"**Product targets together: {format_percent(100.0 * covered / executable)}** "
+            f"**Measured Mimic targets ({len(products)}/{len(SUMMARY_ORDER)}): "
+            f"{format_percent(100.0 * covered / executable)}** "
             f"({covered:,}/{executable:,} lines)."
         )
-    if any(name.endswith(".xctest") for name in metrics):
+    if any(name not in SUMMARY_ORDER for name in metrics):
         lines.append(
-            "Rows ending `.xctest` are the test bundles themselves — coverage of the tests, not of "
-            "the app — and are left out of that figure."
+            "Test bundles and dependency targets are shown separately and excluded from the Mimic total."
         )
     lines.extend(
         [
             "",
-            "No coverage floor is enforced: this run measures and reports, nothing more. A floor is "
-            "the next step, once there is a baseline to set it against.",
+            "No coverage floor is enforced. Coverage measurements do not establish test success "
+            "or verify user-visible behavior.",
         ]
     )
     return "\n".join(lines)
 
 
 def replace_coverage_block(readme: str, new_block: str) -> str:
+    if any(readme.count(marker) != 1 for marker in (
+        "<!-- coverage:generated:start -->", "<!-- coverage:generated:end -->"
+    )):
+        raise RuntimeError("README.md must contain exactly one pair of coverage generation markers.")
     pattern = re.compile(
         r"<!-- coverage:generated:start -->.*?<!-- coverage:generated:end -->",
         re.DOTALL,
     )
     if not pattern.search(readme):
         raise RuntimeError("README.md is missing coverage generation markers.")
-    return pattern.sub(new_block, readme, count=1)
+    return pattern.sub(lambda _: new_block, readme, count=1)
 
 
 def modules_at_or_above_95(module_metrics: list[tuple[str, CoverageMetrics]]) -> int:
@@ -461,10 +429,10 @@ def report_one_bundle(result_bundle: Path, title: str) -> int:
         print(f"### {title}\n\nNot reported: {error}.")
         return 1
 
-    if not metrics:
+    if not any(metrics[name].executable_lines > 0 for name in SUMMARY_ORDER if name in metrics):
         print(
-            f"### {title}\n\nNot reported: `xcrun xccov` read `{result_bundle}` and found no target "
-            "with coverage data in it. Either the test run was not built with "
+            f"### {title}\n\nNot reported: `xcrun xccov` read `{result_bundle}` and found no Mimic "
+            "product target with executable lines. Either the test run was not built with "
             "`-enableCodeCoverage YES`, or the scheme gathers coverage for no target."
         )
         return 1
@@ -473,19 +441,13 @@ def report_one_bundle(result_bundle: Path, title: str) -> int:
     return 0
 
 
-# The one provenance wording left. There used to be two, because CI wrote this block as well and a
-# reader had to be told which of the two writers a number came from. It does not any more: the block
-# is local-only by design, and the badges above it are CI-only, so the answer to "how stale is this"
-# is the same every time.
 FULL_SUITE_GENERATED_FROM = (
-    "It is written from the coverage-enabled `.xcresult` bundles `./Scripts/run_full_test_suite.sh` "
-    "produces on a Mac, one per scheme."
+    "It is written from existing coverage-enabled `.xcresult` bundles, one per scheme."
 )
 FULL_SUITE_PROVENANCE = (
-    "This table is as fresh as whoever last ran the full suite on a Mac, and nothing in CI writes "
-    "it. The two badges at the top of this file are the other way round — CI measures them on every "
-    "push to `main` and publishes them to the `badges` branch — so when the two disagree, the badges "
-    "are the current ones."
+    "This table describes the supplied per-scheme runs. Badges describe the latest successfully "
+    "published main-branch CI coverage, merging unit and UI runs. Different revisions and test "
+    "selections can produce different figures; neither report proves the other's freshness."
 )
 
 
@@ -540,6 +502,10 @@ def update_readme(readme_path: Path, results_dir: Path) -> None:
     for display_name, xccov_name, filename in MODULE_TARGETS:
         module_metrics.append((display_name, metrics_for_target(results_dir / filename, xccov_name)))
 
+    app_metrics, module_metrics = split_workspace_metrics(
+        {APP_TARGET[0]: app_metrics, **dict(module_metrics)}
+    )
+
     write_readme(
         readme_path,
         app_metrics,
@@ -554,10 +520,7 @@ def split_workspace_metrics(
 ) -> tuple[CoverageMetrics, list[tuple[str, CoverageMetrics]]]:
     """Pick the README's nine targets out of one workspace-wide report.
 
-    Every one of them has to be there. A partial table is worse than none: the badge's denominator
-    is `len(module_metrics)`, so a module that silently dropped out of the bundle would shrink
-    "modules at or above 95%: n/8" to `n/7` and read as a pass. That exact failure is why
-    `ControlPlane` and `MimicCLICore` were once measured and invisible — see `MODULE_TARGETS`.
+    Refuse missing or unmeasured targets so the published denominator cannot shrink.
     """
     wanted = [APP_TARGET[1]] + [xccov_name for _, xccov_name, _ in MODULE_TARGETS]
     missing = [name for name in wanted if name not in metrics]
@@ -567,6 +530,9 @@ def split_workspace_metrics(
             f"the report is missing {', '.join(missing)} — it has {found}. Refusing to write a "
             "partial coverage table."
         )
+    unmeasured = [name for name in wanted if metrics[name].executable_lines == 0]
+    if unmeasured:
+        raise RuntimeError(f"the report has no executable lines for {', '.join(unmeasured)}")
     return metrics[APP_TARGET[1]], [
         (display_name, metrics[xccov_name]) for display_name, xccov_name, _ in MODULE_TARGETS
     ]
@@ -588,34 +554,24 @@ def metrics_from_json(
     """Read back what `--emit-json` wrote, on a machine with no Xcode and no bundle."""
     try:
         payload = json.loads(json_path.read_text())
-        app_metrics = CoverageMetrics(
-            percent=float(payload["app"]["percent"]),
-            covered_lines=int(payload["app"]["covered_lines"]),
-            executable_lines=int(payload["app"]["executable_lines"]),
-        )
-        module_metrics = [
-            (
-                str(entry["name"]),
-                CoverageMetrics(
-                    percent=float(entry["percent"]),
-                    covered_lines=int(entry["covered_lines"]),
-                    executable_lines=int(entry["executable_lines"]),
-                ),
+        app = payload["app"]
+        modules = payload["modules"]
+        if app["name"] != APP_TARGET[0] or not isinstance(modules, list):
+            raise ValueError("expected Mimic.app and a module list")
+        expected_modules = {name for name, _, _ in MODULE_TARGETS}
+        names = [entry["name"] for entry in modules]
+        if len(names) != len(expected_modules) or set(names) != expected_modules:
+            raise ValueError("expected each of the eight Mimic modules exactly once")
+        metrics = {
+            entry["name"]: validated_metrics(
+                entry["percent"], entry["covered_lines"], entry["executable_lines"]
             )
-            for entry in payload["modules"]
-        ]
+            for entry in [app, *modules]
+        }
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         raise RuntimeError(f"{json_path} is not a coverage payload this script wrote: {error}") from error
 
-    if not module_metrics:
-        # The module badge's denominator is `len(module_metrics)`, so an empty list is not an empty
-        # badge — it is a division by zero, and a payload of eight modules that arrived carrying
-        # three would read `3/3` and look like a clean sweep. `split_workspace_metrics` refuses the
-        # partial table upstream for the same reason; this is the same refusal at the other end of
-        # the hand-off, where the file could have been truncated in between.
-        raise RuntimeError(f"{json_path} carries no modules; refusing to publish a badge with none.")
-
-    return app_metrics, module_metrics
+    return split_workspace_metrics(metrics)
 
 
 # Both URLs are written out longhand, character by character, and are **not** built from
@@ -658,20 +614,25 @@ FIXTURE_README_WITH_STATIC_BADGES = """# Fixture
 <!-- coverage:generated:end -->
 """
 
+# The publication boundary requires all nine named products. Keep this input independent
+# of MODULE_TARGETS and the serializer so a missing or renamed target fails the contract.
+FIXTURE_COVERAGE_JSON = """{
+  "app": {"name": "Mimic.app", "percent": 50, "covered_lines": 50, "executable_lines": 100},
+  "modules": [
+    {"name": "Domain.framework", "percent": 95, "covered_lines": 95, "executable_lines": 100},
+    {"name": "MockServerEngine.framework", "percent": 96, "covered_lines": 96, "executable_lines": 100},
+    {"name": "Persistence.framework", "percent": 97, "covered_lines": 97, "executable_lines": 100},
+    {"name": "DesignSystem.framework", "percent": 98, "covered_lines": 98, "executable_lines": 100},
+    {"name": "SpecImport.framework", "percent": 99, "covered_lines": 99, "executable_lines": 100},
+    {"name": "ControlPlane.framework", "percent": 100, "covered_lines": 100, "executable_lines": 100},
+    {"name": "MimicCLICore.framework", "percent": 94, "covered_lines": 94, "executable_lines": 100},
+    {"name": "AppFeatures.framework", "percent": 93, "covered_lines": 93, "executable_lines": 100}
+  ]
+}"""
+
 
 def self_test() -> int:
-    """Check the Mac-free half: the badge URLs, the badge payloads, the JSON round trip, the block
-    rewriter and every refusal.
-
-    This is the only automated coverage the file has. The bundle-reading half needs `xcrun xccov`
-    and a real `.xcresult`, so it is exercised only by the macOS job; everything below runs in a
-    tenth of a second on the Linux gate alongside the other checkers.
-
-    Every expected value here is written out longhand. Nothing asks a function under test what the
-    right answer is — the badge URLs, the payload dictionaries and the colour ladder are all pinned
-    to literals, so reverting any of those mechanisms turns this red instead of moving the fixture
-    along with the bug.
-    """
+    """Exercise parsing and publication with literal fixtures; no Xcode or test run required."""
     import tempfile
 
     failures: list[str] = []
@@ -679,6 +640,82 @@ def self_test() -> int:
     def check(condition: bool, message: str) -> None:
         if not condition:
             failures.append(message)
+
+    def refuses(operation, message: str, error_type=RuntimeError) -> None:
+        try:
+            operation()
+            failures.append(message)
+        except error_type:
+            pass
+
+    parsed = parse_xccov_json('''{"targets": [
+        {"name": "Mimic.app", "lineCoverage": 0.5, "coveredLines": 50, "executableLines": 100},
+        {"name": "Domain.framework", "lineCoverage": 0.96, "coveredLines": 96, "executableLines": 100}
+    ]}''')
+    check(parsed == {
+        "Mimic.app": CoverageMetrics(50.0, 50, 100),
+        "Domain.framework": CoverageMetrics(96.0, 96, 100),
+    }, "the xccov JSON parser changed the reported target metrics")
+    target_array = '''[
+        {"name": "Algorithms.framework", "lineCoverage": 0, "coveredLines": 0, "executableLines": 566},
+        {"name": "Mimic.app", "lineCoverage": 0.5, "coveredLines": 50, "executableLines": 100}
+    ]'''
+    check(parse_xccov_json(target_array) == {
+        "Algorithms.framework": CoverageMetrics(0, 0, 566),
+        "Mimic.app": CoverageMetrics(50, 50, 100),
+    }, "the actual --only-targets JSON array shape was not parsed")
+
+    # Exercise the reader boundary: valid JSON must not silently fall back to rounded text.
+    commands = []
+
+    def fixture_xccov(command, **_):
+        commands.append(command)
+        check("--json" in command, "a valid --only-targets JSON array triggered text fallback")
+        return subprocess.CompletedProcess(command, 0, stdout=target_array, stderr="")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = Path(tmp) / "Fixture.xcresult"
+        bundle.mkdir()
+        original_run = subprocess.run
+        subprocess.run = fixture_xccov
+        try:
+            read_metrics = target_metrics(bundle)
+        finally:
+            subprocess.run = original_run
+        check(read_metrics == {
+            "Algorithms.framework": CoverageMetrics(0, 0, 566),
+            "Mimic.app": CoverageMetrics(50, 50, 100),
+        }, "the reader did not return the literal JSON array metrics")
+        check(commands == [["xcrun", "xccov", "view", "--report", "--only-targets", "--json", str(bundle)]],
+              "the JSON reader made an unexpected command or fallback call")
+    for invalid_report in [
+        '{"targets": {}}', 'null', '[null]',
+        '{"targets":[{"name":"Mimic.app","lineCoverage":NaN,"coveredLines":0,"executableLines":100}]}',
+        '{"targets":[{"name":"Mimic.app","lineCoverage":true,"coveredLines":100,"executableLines":100}]}',
+        '{"targets":[{"name":"Mimic.app","lineCoverage":1,"coveredLines":1,"executableLines":100}]}',
+        '''{"targets":[
+            {"name":"Mimic.app","lineCoverage":0.5,"coveredLines":1,"executableLines":2},
+            {"name":"Mimic.app","lineCoverage":1,"coveredLines":2,"executableLines":2}
+        ]}''',
+    ]:
+        refuses(lambda: parse_xccov_json(invalid_report),
+                "invalid or duplicate xccov JSON metrics were accepted", ValueError)
+    text_metrics = parse_xccov_text("1 Domain.framework 12 95.00% (94999/100000)\n")
+    check(text_metrics["Domain.framework"] == CoverageMetrics(94.999, 94999, 100000),
+          "the text parser did not derive its percentage from line counts")
+    check(modules_at_or_above_95(list(text_metrics.items())) == 0,
+          "a rounded text percentage incorrectly cleared the 95% threshold")
+    refuses(lambda: parse_xccov_text("Domain.framework 100.00% (1/100)"),
+            "contradictory xccov text metrics were accepted", ValueError)
+    refuses(lambda: parse_xccov_text("Domain.framework 50.00% (1/2)\nDomain.framework 100.00% (2/2)"),
+            "duplicate xccov text targets were accepted", ValueError)
+    for percent, covered, executable in [
+        (100, True, 1), (50, 1.5, 3), (50, "1", 2), (0, -1, 10),
+        (100, 11, 10), (0, 0, -1), (float("nan"), 0, 1),
+        (float("inf"), 1, 1), (True, 1, 100), (100, 1, 100),
+    ]:
+        refuses(lambda: validated_metrics(percent, covered, executable),
+                f"invalid metrics were accepted: {percent}, {covered}, {executable}", ValueError)
 
     # ---- the URLs, pinned to the strings README.md carries -------------------------------------
     check(
@@ -718,7 +755,7 @@ def self_test() -> int:
             f"badge_color({percent}) is not {expected_color}",
         )
 
-    app = CoverageMetrics(percent=41.5, covered_lines=1_000, executable_lines=2_409)
+    app = CoverageMetrics(percent=41.51, covered_lines=1_000, executable_lines=2_409)
     modules = [
         ("Domain.framework", CoverageMetrics(percent=96.0, covered_lines=960, executable_lines=1_000)),
         ("ControlPlane.framework", CoverageMetrics(percent=80.25, covered_lines=321, executable_lines=400)),
@@ -765,19 +802,18 @@ def self_test() -> int:
     # the block and the badge must not be able to disagree: a reader who checks one against the other
     # is doing what this row exists for.
     check(
-        "| **All nine targets** | **`59.88%`** | **`2,281/3,809`** |" in rendered,
+        "| **All 3 measured targets** | **`59.88%`** | **`2,281/3,809`** |" in rendered,
         "the total row is missing, or is not the weighted total of the rows above it",
     )
     check(
-        "Total line coverage across all nine targets is `59.88%`" in rendered,
+        "Total line coverage across the 3 measured targets is `59.88%`" in rendered,
         "the block does not state the figure the first badge publishes",
     )
     check("Prose that must survive untouched." in rendered, "prose outside the markers was lost")
     check("Trailing prose." in rendered, "prose after the block was lost")
     check(rendered.count("coverage:generated:start") == 1, "the start marker was duplicated or dropped")
     check(rendered.count("coverage:generated:end") == 1, "the end marker was duplicated or dropped")
-    # The badges are published, not written: a local full-suite run must leave them exactly as it
-    # found them, or the next person to run the suite commits a static badge over the live one.
+    # Rewriting the optional table must preserve the published endpoint URLs.
     check(FIXTURE_APP_BADGE_URL in rendered, "the app badge was rewritten by the local writer")
     check(FIXTURE_MODULE_BADGE_URL in rendered, "the module badge was rewritten by the local writer")
     check("41.50%25" not in rendered, "the local writer baked a figure into a badge URL")
@@ -790,21 +826,37 @@ def self_test() -> int:
         rendered, app, modules, generated_from="From a fixture.", provenance="Fixture note."
     )
     check(again == rendered, "rewriting with unchanged figures produced a different README")
+    check(replace_coverage_block(FIXTURE_README, r"literal\path\1")
+          == FIXTURE_README.replace(
+              "<!-- coverage:generated:start -->\n<!-- coverage:generated:end -->", r"literal\path\1"),
+          "the block writer interpreted backslashes as replacement syntax")
+    refuses(lambda: replace_coverage_block(FIXTURE_README + FIXTURE_README, "replacement"),
+            "duplicate marker pairs were accepted")
+    report = build_summary(Path("fixture.xcresult"), {
+        "Mimic.app": app, **dict(modules),
+        "Persistence.framework": CoverageMetrics(0, 0, 0),
+        "Dependency.framework": CoverageMetrics(100, 10000, 10000),
+        "DomainTests.xctest": CoverageMetrics(100, 10000, 10000),
+    }, "Fixture")
+    check("**Measured Mimic targets (3/9): 59.88%** (2,281/3,809 lines)." in report,
+          "the report included test or dependency lines in the Mimic total")
 
     # ---- the JSON round trip, and out the other side as files ----------------------------------
     with tempfile.TemporaryDirectory() as tmp:
         json_path = Path(tmp) / "coverage.json"
-        json_path.write_text(
-            json.dumps(
-                {
-                    "app": {"name": "Mimic.app", **asdict(app)},
-                    "modules": [{"name": name, **asdict(metrics)} for name, metrics in modules],
-                }
-            )
-        )
+        json_path.write_text(FIXTURE_COVERAGE_JSON)
         round_tripped_app, round_tripped_modules = metrics_from_json(json_path)
-        check(round_tripped_app == app, "the app figures did not survive the JSON round trip")
-        check(round_tripped_modules == modules, "the module figures did not survive the JSON round trip")
+        check(round_tripped_app == CoverageMetrics(50, 50, 100), "the app figures did not survive the JSON hand-off")
+        check(round_tripped_modules == [
+            ("Domain.framework", CoverageMetrics(95, 95, 100)),
+            ("MockServerEngine.framework", CoverageMetrics(96, 96, 100)),
+            ("Persistence.framework", CoverageMetrics(97, 97, 100)),
+            ("DesignSystem.framework", CoverageMetrics(98, 98, 100)),
+            ("SpecImport.framework", CoverageMetrics(99, 99, 100)),
+            ("ControlPlane.framework", CoverageMetrics(100, 100, 100)),
+            ("MimicCLICore.framework", CoverageMetrics(94, 94, 100)),
+            ("AppFeatures.framework", CoverageMetrics(93, 93, 100)),
+        ], "the module identities or figures did not survive the JSON hand-off")
 
         badge_dir = Path(tmp) / "badges"
         written = write_badges(badge_dir, round_tripped_app, round_tripped_modules)
@@ -817,13 +869,19 @@ def self_test() -> int:
             == {
                 "schemaVersion": 1,
                 "label": "line coverage",
-                # 2,281/3,809 again, and written out again rather than referred to: this arm is the
-                # one that proves the figure survives the JSON hand-off from the macOS job to the
-                # Linux one, so it has to state the answer independently of the arm above.
-                "message": "59.88%",
-                "color": "red",
+                "message": "91.33%",
+                "color": "green",
             },
             "the app payload on disk is not the document shields.io expects",
+        )
+        check(
+            json.loads((badge_dir / "module-coverage.json").read_text()) == {
+                "schemaVersion": 1,
+                "label": "modules at or above 95%",
+                "message": "6/8",
+                "color": "red",
+            },
+            "the module payload does not retain the full denominator",
         )
         check(
             (badge_dir / "module-coverage.json").read_text().endswith("}\n"),
@@ -836,6 +894,23 @@ def self_test() -> int:
             failures.append("a malformed payload was accepted")
         except RuntimeError:
             pass
+
+        for defect in ("missing", "duplicate", "unknown", "wrong-app", "unmeasured", "contradictory"):
+            payload = json.loads(FIXTURE_COVERAGE_JSON)
+            if defect == "missing":
+                payload["modules"].pop()
+            elif defect == "duplicate":
+                payload["modules"][-1] = payload["modules"][0]
+            elif defect == "unknown":
+                payload["modules"][-1]["name"] = "Dependency.framework"
+            elif defect == "wrong-app":
+                payload["app"]["name"] = "Other.app"
+            elif defect == "unmeasured":
+                payload["modules"][0].update(percent=0, covered_lines=0, executable_lines=0)
+            elif defect == "contradictory":
+                payload["modules"][0]["percent"] = 100
+            json_path.write_text(json.dumps(payload))
+            refuses(lambda: metrics_from_json(json_path), f"a {defect} publication payload was accepted")
 
         json_path.write_text(json.dumps({"app": {"name": "Mimic.app", **asdict(app)}, "modules": []}))
         try:

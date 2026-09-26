@@ -1,6 +1,6 @@
 # CLI and control API
 
-`mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, one diagnostic line on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
+`mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, a diagnostic on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
 
 Project edits (such as rename, endpoint, scenario, journey definition, and `log save-as-mock` changes) report success after the edited project has been saved. If the store refuses a save, the command returns `persistence.failure`; the edited project remains in the open session and the window shows the save failure. Inspect the open project before retrying a create command: repeating it can add a second item to that session. Project create, open, and duplicate retain their asynchronous window workflow; confirm their settled state with a follow-up command.
 
@@ -167,7 +167,7 @@ mimic log save-as-mock <log-UUID>
 mimic log clear
 ```
 
-Each entry identifies the outcome (`endpoint`, `journey`, `passthrough`, `unmatched`, or `blockedByJourney`) and includes response status, headers, and a capped body preview. An intentional endpoint `404` is not `unmatched`. A transport failure has no fabricated status code.
+Each entry identifies the outcome (`endpoint`, `journey`, `passthrough`, `proxyFailure`, `unmatched`, or `blockedByJourney`) and includes response status, headers, and a capped body preview. An intentional endpoint `404` is not `unmatched`. A transport failure has no fabricated status code.
 
 ## A disposable test run
 

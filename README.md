@@ -50,7 +50,9 @@ The embedded Vapor server runs in the app process. `Domain` owns matching, journ
 
 ## Testing
 
-Run `swift test` for portable modules or the focused Xcode schemes in [Contributing](CONTRIBUTING.md). `./Scripts/ci.sh` runs the local build and test gates. Coverage badges are published from CI. `./Scripts/run_full_test_suite.sh` generates a detailed coverage table on macOS. The section below is empty until that report is committed.
+Run `swift test` for portable modules or the focused Xcode checks in [Contributing](CONTRIBUTING.md#test-gates). Local UI checks select the affected test methods; the full UI suite runs only in CI. `./Scripts/ci.sh` runs the local non-UI, Release-build, and CLI gates.
+
+CI publishes coverage badges from merged unit and UI runs on `main`. Line coverage combines the app target and eight first-party modules, weighted by executable lines; the module badge counts how many of those eight reach 95%. Coverage measures exercised lines, not correctness or release acceptance. The optional table below describes its own supplied result bundles and can differ from the badges.
 
 <!-- coverage:generated:start -->
 <!-- coverage:generated:end -->

@@ -41,11 +41,15 @@ runs:
     # macOS 26 SDK are both required to compile at all, so the image label is load-bearing rather
     # than a preference. Printed so a green run says which Xcode produced it.
     - name: Xcode and Swift versions
+      id: toolchain
       shell: bash
       run: |
         xcodebuild -version
         swift --version
         sw_vers
+        xcode_key="$(xcodebuild -version | tr '\n' '-' | tr -c 'a-zA-Z0-9._-' '-')"
+        swift_key="$(swift --version | head -1 | tr -c 'a-zA-Z0-9._-' '-')"
+        echo "key=$xcode_key-$swift_key" >> "$GITHUB_OUTPUT"
 
     # The one thing that makes macOS XCUITest possible on a hosted runner.
     #
@@ -88,8 +92,10 @@ runs:
         path: |
           ~/.cache/tuist
           Tuist/.build
-        key: ${{ runner.os }}-tuist-${{ hashFiles('Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
-        restore-keys: ${{ runner.os }}-tuist-
+        # Tuist/.build includes compiled manifests/plugins, so even fallback restores must match
+        # the compiler and architecture. mise.toml also invalidates a changed Tuist version.
+        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-${{ hashFiles('mise.toml', 'Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
+        restore-keys: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-
 
     # The macOS half of the lockfile invariant. `tuist install` is a SwiftPM resolve behind another
     # name, so it rewrites `Tuist/Package.resolved` on exactly the same trigger — a range that

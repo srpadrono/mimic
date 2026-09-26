@@ -379,15 +379,8 @@ struct ImportedRouteMatchingTests {
 
     @Test("A capture whose path is percent-encoded answers the request that produced it")
     func percentEncodedCaptureAnswersItsOwnRequest() async throws {
-        // Every segment here is a literal, and that is the point. The test named
-        // `percentEncodedPath` in `Tests/MockServerEngineTests/RealTrafficTests.swift` claims this
-        // property and cannot fail on it: its fixture route is `/things/:id`, and `PathPattern`
-        // skips a `:` segment before it compares anything, so that request matches whichever
-        // encoding either side happens to use.
-        //
-        // A browser writes the URL encoded, and encoded is the only form the server can hand the
-        // matcher: `VaporConfigurator` builds its `IncomingRequest` from `req.url.path`, which Vapor
-        // answers with `percentEncodedPath` (4.121.3, `Sources/Vapor/Utilities/URI.swift:179`).
+        // Literal segments exercise spelling normalization; a parameter would match either value
+        // without comparing it. Imports retain the wire spelling for accurate display and export.
         let candidates = try await HARParser.parse(data: Self.har(url: "https://api.test/v1/caf%C3%A9/my%20items"))
         let candidate = try #require(candidates.first)
         #expect(candidate.path == "/v1/caf%C3%A9/my%20items")
@@ -399,14 +392,24 @@ struct ImportedRouteMatchingTests {
         )))
         #expect(matched.path == "/v1/caf%C3%A9/my%20items")
 
-        // And the decoded spelling — what the importer used to produce — matches nothing the server
-        // can receive. This is the whole defect: the endpoint imports, appears in the sidebar, and
-        // 404s forever.
+        // Unicode and characters that URL clients encode share the same literal identity, even
+        // when an in-process caller supplies the decoded spelling. Reserved separators do not.
         let decoded = Self.matchedEndpoint(RequestMatcher.match(
             request: IncomingRequest(method: .get, path: "/v1/café/my items"),
             against: endpoints
         ))
-        #expect(decoded == nil)
+        #expect(decoded?.id == matched.id)
+
+        let slashCandidates = try await HARParser.parse(data: Self.har(url: "https://api.test/folders/a%2Fb"))
+        let slashCandidate = try #require(slashCandidates.first)
+        #expect(slashCandidate.path == "/folders/a%2Fb")
+        let slashEndpoints = [Self.endpoint(from: slashCandidate)]
+        #expect(Self.matchedEndpoint(RequestMatcher.match(
+            request: IncomingRequest(method: .get, path: "/folders/a%2Fb"), against: slashEndpoints
+        ))?.id == slashEndpoints[0].id)
+        #expect(Self.matchedEndpoint(RequestMatcher.match(
+            request: IncomingRequest(method: .get, path: "/folders/a/b"), against: slashEndpoints
+        )) == nil)
     }
 
     // MARK: - A capture repeats itself

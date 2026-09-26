@@ -5,61 +5,45 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Organize journeys into saved groups in the navigator, editor, or CLI with
+  `journey create/update --group`.
+
 ### Improved
 
-- Use the same colored HTTP method pills in endpoint navigation and journey steps. Balance filter
-  padding and center its controls; reclaim the empty footer slot when no journey is active.
-
-- Organize journeys into saved groups with the same disclosure rows, spacing, indentation, and
-  inline counts as endpoints. Edit Group in the journey editor or use `journey create/update --group`;
-  filtering and the active-journey shortcut reveal matching grouped journeys.
-
-- Give Endpoints and Journeys a shared native navigator: a segmented mode picker, aligned Add
-  actions, uniform 26-point rows, compact endpoint disclosure groups, and a pinned bottom filter.
-  Preserve each mode's filter while switching; retain names for duplicate routes and show full
-  identities in tooltips. Journey execution controls live in the editor, with an active-journey
-  indicator in either navigator that reveals the current run without restarting it. Group and step
-  counts sit beside their names, with gentle separation between endpoint groups.
-- Unify the inspector's spacing and sections, simplify scenario activation to one checkmark, and
-  use native Scenarios/Traffic tabs. Returning from request details preserves the traffic list.
-  Show the selected journey's settings separately from the active run; identify multi-request
-  selections explicitly. The inspector now defaults to 300 points and resizes down to 260.
-
-- Keep project identity and a two-line server summary together, separated by a padded vertical
-  divider. Show a computer icon and Local mock subtitle below the project name, using the same
-  space for save feedback.
-- Pin native Import and Server Settings icon actions to the editor's right edge, with panel controls
-  grouped separately above the inspector. Narrow windows move supporting editor actions into overflow.
-- Show one or many named listeners through a consistent details popover with per-port URL copying,
-  traffic, and pending port changes that need a restart.
-- Animate the Play/Stop symbol through server transitions, with a green running button. The status
-  below the localhost port is green when running and red when stopped; Local mock stays neutral.
-  Reduce Motion disables the symbol animation.
+- Give Endpoints and Journeys consistent native navigation, independent filters, grouped rows,
+  and a shortcut to the active journey. Filter menus show the selected scope; clearing a filter
+  keeps typing focus.
+- Keep project identity, Run/Stop, and panel controls reachable in compact windows. Import and
+  Server Settings stay together, and listener details show named ports and pending restarts.
+  Controls and inspectors share sizing, spacing, disabled states, and Reduce Motion behavior.
+- Preview imported response bodies and explain unavailable, binary, oversized, partial, or invalid
+  entries before saving. Usable captures are selected ahead of earlier unusable responses.
+- Disclose truncated traffic bodies and prevent copying an incomplete request as a complete cURL
+  command. Request details and editing forms remain usable in shorter windows.
 
 ### Fixed
 
-- Capture complete passthrough text responses up to 5 MiB while keeping traffic previews at 64 KiB.
-  Larger captures use private temporary files and support automatic recording, manual mock saving,
-  and journey capture without saving a truncated preview.
-
-- Do not capture cache-only 304, partial 206/Content-Range, or unexpectedly empty JSON replies as
-  complete mocks. Explain compressed JSON capture refusals with guidance to request an uncompressed reply.
-
-- Preserve pending request records during concurrent bursts so automatic pass-through capture does
-  not silently miss endpoints. The visible traffic history still retains the latest 1,000 calls.
-- Show multiple backend ports in the toolbar, with named listeners, per-port URL copying, and
-  a distinction between running ports and configuration changes that require a restart. Keep the
-  toolbar in place when the autosave indicator clears, so click targets do not move.
-
-- Pin Tuist 4.209.0 for native Swift 6.4 / Xcode 27 dependency deployment targets, including
-  synthesized resource bundles, without generated-project repair scripts.
-
-- Quit and install dismisses the update sheet before requesting termination, so the modal dialog
-  no longer leaves Mimic running after installer handoff. Preparation now shows progress and prevents
-  duplicate install requests; a failed handoff keeps the app open with an explanation.
-- Toolbar actions and server status share aligned heights and consistent capsule padding. Run and
-  Stop use one animated control again; compact editor actions stay separate from panel toggles.
-- Copying the server address confirms in place without a nested miniature button or layout shift.
+- Preserve Unicode text, selection, and Undo/Redo when formatting response bodies. Clearing a body
+  persists, switching scenarios resets document undo, and remote updates refresh clean fields while
+  preserving local drafts.
+- Match encoded and Unicode routes consistently, preserve literal route distinctions, and select
+  the requested operation in GraphQL documents containing multiple operations.
+- Preserve HAR text encoding correctly and refuse unsupported import paths or partial responses
+  without blocking valid entries from the same file.
+- Keep each database's backups in its own retention directory, preserve older shared backups, and
+  refuse unsafe saves of newer or malformed project data.
+- Bound concurrent requests and stalled request bodies without losing accepted request logs or
+  advancing journeys for rejected traffic. Correct pass-through headers, empty-body responses,
+  loopback checks, and temporary-file cleanup.
+- Capture complete pass-through text responses up to 5 MiB with 64 KiB traffic previews. Refuse
+  binary, compressed, truncated, cache-only, and partial responses as complete text mocks.
+- Reject invalid CLI destinations and timeouts, prevent redirects from forwarding control tokens,
+  and keep reflected tokens and terminal control characters out of raw response diagnostics.
+- Cancel update downloads cleanly, validate completed download sizes, and require a successful
+  project save and backup before installation. A failed handoff keeps Mimic open with recovery
+  guidance; a successful handoff dismisses the sheet before quitting.
 
 ## 0.12.0 — 2026-09-20
 

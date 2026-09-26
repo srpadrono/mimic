@@ -42,6 +42,7 @@ red? A fixture derived from the parsers would move with them and the answer woul
 
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,9 +63,6 @@ ONLY_TESTING = re.compile(
 # PyYAML.
 EXPECTED_BUNDLES = re.compile(r"^\s*EXPECTED_COVERAGE_BUNDLES:\s*(\d+)\s*$", re.MULTILINE)
 
-# A shard is a `- id: N` entry, and its flags are the `-only-testing:` lines before the next one.
-SHARD_SPLIT = r"^\s*- id:\s*"
-
 # A class declaration at the start of a line, with a superclass. Page objects in this target are
 # `struct`s and are correctly invisible to this; a `class` with no superclass is not an XCTestCase
 # either. The `func test…` count below is the real filter — `MimicUITestCase` is a `class` with a
@@ -79,14 +77,67 @@ TEST_FUNC = re.compile(
 )
 
 
-def shard_selectors(workflow_text):
-    """Every `(class, method or None)` selector, in order, duplicates kept.
+def mapping_block(text, key):
+    """Read an indented block from the workflow's explicit mapping syntax.
 
-    Order and duplicates both matter: the caller reports a class named twice, and it can only do
-    that if this does not deduplicate on the way past.
+    This intentionally accepts the repository's small YAML subset, not arbitrary YAML. Selectors
+    in comments, another job, or a shell command must not certify the UI matrix.
     """
-    return [(match.group("class"), match.group("method"))
-            for match in ONLY_TESTING.finditer(workflow_text)]
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = re.fullmatch(r"( *)" + re.escape(key) + r":\s*(?:#.*)?", line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        end = index + 1
+        while end < len(lines):
+            following = lines[end]
+            if following.strip() and not following.lstrip().startswith("#"):
+                if len(following) - len(following.lstrip()) <= indent:
+                    break
+            end += 1
+        return "\n".join(lines[index + 1:end])
+    return ""
+
+
+def shard_entries(workflow_text):
+    """Every UI matrix id and its literal folded/block `only` field, including empty legs."""
+    block = mapping_block(workflow_text, "jobs")
+    for key in ("macos-ui", "strategy", "matrix", "include"):
+        block = mapping_block(block, key)
+    entries = []
+    current_id = None
+    entry_indent = None
+    only_indent = None
+    flags = []
+    for line in block.splitlines():
+        if not line.strip():
+            continue
+        entry = re.fullmatch(r"( *)- id:\s*([^\s#]+)\s*(?:#.*)?", line)
+        if entry:
+            if current_id is not None:
+                entries.append((current_id, "\n".join(flags)))
+            current_id = entry.group(2)
+            entry_indent = len(entry.group(1))
+            only_indent = None
+            flags = []
+            continue
+        indent = len(line) - len(line.lstrip())
+        if only_indent is not None and indent > only_indent:
+            flags.append(line.strip())
+            continue
+        only_indent = None
+        if (current_id is not None and indent == entry_indent + 2
+                and re.fullmatch(r"only:\s*[>|][-+]?\s*(?:#.*)?", line.strip())):
+            only_indent = indent
+    if current_id is not None:
+        entries.append((current_id, "\n".join(flags)))
+    return entries
+
+
+def shard_selectors(workflow_text):
+    """Every matrix `(class, method or None)` selector, in order, with duplicates retained."""
+    return [selector for _shard_id, selectors in shard_blocks(workflow_text) for selector in selectors]
 
 
 def suite_methods(sources):
@@ -116,26 +167,24 @@ def suite_classes(sources):
     return {name: len(names) for name, names in suite_methods(sources).items()}
 
 
-def shard_blocks(workflow_text):
-    """`[(id, [selectors])]` for every matrix leg that selects at least one test.
+def read_sources(root):
+    """Tuist's buildable folder includes nested Swift files, so the shard guard must include them."""
+    return [(p.relative_to(root).as_posix(), p.read_text(encoding="utf-8"))
+            for p in sorted(root.rglob("*.swift"))]
 
-    A leg naming none is not a shard — it is a `- id:` in some other list, or a leg mid-edit — and
-    counting it would make the bundle-count check below disagree with what the `coverage` job will
-    actually be handed.
-    """
-    blocks = re.split(SHARD_SPLIT, workflow_text, flags=re.MULTILINE)[1:]
-    found = []
-    for block in blocks:
-        selectors = shard_selectors(block)
-        if selectors:
-            found.append((block.split("\n", 1)[0].strip(), selectors))
-    return found
+
+def shard_blocks(workflow_text):
+    """`[(id, [selectors])]` for every UI matrix leg, including an invalid empty one."""
+    return [(shard_id, [(match.group("class"), match.group("method"))
+                       for match in ONLY_TESTING.finditer(flags)])
+            for shard_id, flags in shard_entries(workflow_text)]
 
 
 def check_bundle_count(workflow_text):
     """`EXPECTED_COVERAGE_BUNDLES` against the shard count. One string, or none."""
     shards = len(shard_blocks(workflow_text))
-    declared = EXPECTED_BUNDLES.search(workflow_text)
+    coverage = mapping_block(mapping_block(workflow_text, "jobs"), "coverage")
+    declared = EXPECTED_BUNDLES.search(mapping_block(coverage, "env"))
 
     if declared is None:
         return [
@@ -165,6 +214,17 @@ def check(workflow_text, sources):
     methods = suite_methods(sources)
     tests = {name: len(names) for name, names in methods.items()}
     problems = list(check_bundle_count(workflow_text))
+
+    seen_ids = set()
+    for shard_id, flags in shard_entries(workflow_text):
+        if not shard_id.isdecimal() or shard_id in seen_ids:
+            problems.append(f"UI shard id {shard_id!r} must be a unique integer for result artifacts.")
+        seen_ids.add(shard_id)
+        if not flags:
+            problems.append(f"UI shard {shard_id} has no literal `only` selectors; it would run every test.")
+        for token in flags.split():
+            if not ONLY_TESTING.fullmatch(token):
+                problems.append(f"UI shard {shard_id} has an unsupported selection token: {token!r}.")
 
     selected = {}
     for name, method in sharded:
@@ -234,6 +294,9 @@ def report_balance(workflow_text, tests):
 # whatever they currently do, including doing nothing.
 
 GOOD_WORKFLOW = """
+jobs:
+  macos-ui:
+    strategy:
       matrix:
         include:
           - id: 1
@@ -276,6 +339,17 @@ def self_test():
 
     print("check_ui_shards.py --self-test")
 
+    with tempfile.TemporaryDirectory(prefix="mimic-shard-fixture-") as directory:
+        root = Path(directory)
+        nested = root / "Nested"
+        nested.mkdir()
+        (nested / "NestedUITests.swift").write_text(
+            "final class NestedUITests: XCTestCase {\n    func testNested() {}\n}\n",
+            encoding="utf-8",
+        )
+        expect("nested UI suite sources are included",
+               suite_classes(read_sources(root)) == {"NestedUITests": 1})
+
     problems, sharded, tests = check(GOOD_WORKFLOW, GOOD_SOURCES)
     expect("a complete, non-overlapping split passes", problems == [], problems)
     expect(
@@ -314,7 +388,11 @@ def self_test():
     )
 
     # The same class selected twice.
-    doubled = GOOD_WORKFLOW + "              -only-testing:MimicUITests/AlphaUITests\n"
+    doubled = GOOD_WORKFLOW.replace(
+        "              -only-testing:MimicUITests/AlphaUITests\n",
+        "              -only-testing:MimicUITests/AlphaUITests\n"
+        "              -only-testing:MimicUITests/AlphaUITests\n",
+    )
     problems, _s, _t = check(doubled, GOOD_SOURCES)
     expect(
         "a class named twice fails",
@@ -335,6 +413,30 @@ def self_test():
         problems,
     )
 
+    outside_matrix = partial + "\n# -only-testing:MimicUITests/BetaUITests/testTwo\n"
+    problems, _s, _t = check(outside_matrix, GOOD_SOURCES)
+    expect("a commented selector cannot cover an omitted matrix test",
+           len(problems) == 1 and "testTwo" in problems[0], problems)
+    other_job = partial + """
+  unrelated:
+    steps:
+      - id: example
+        run: echo -only-testing:MimicUITests/BetaUITests/testTwo
+"""
+    problems, _s, _t = check(other_job, GOOD_SOURCES)
+    expect("a selector in another job cannot cover an omitted matrix test",
+           len(problems) == 1 and "testTwo" in problems[0], problems)
+    empty_leg = GOOD_WORKFLOW.replace(
+        "  coverage:", "          - id: 3\n            only: >-\n\n  coverage:"
+    ).replace("EXPECTED_COVERAGE_BUNDLES: 3", "EXPECTED_COVERAGE_BUNDLES: 4")
+    problems, _s, _t = check(empty_leg, GOOD_SOURCES)
+    expect("an empty shard fails instead of silently running all UI tests",
+           len(problems) == 1 and "no literal" in problems[0], problems)
+    repeated_id = GOOD_WORKFLOW.replace("- id: 2", "- id: 1")
+    problems, _s, _t = check(repeated_id, GOOD_SOURCES)
+    expect("duplicate shard ids cannot overwrite result artifacts",
+           len(problems) == 1 and "unique integer" in problems[0], problems)
+
     # A shard naming a class that is not there — what a rename leaves behind.
     renamed = [s for s in GOOD_SOURCES if s[0] != "Gamma.swift"]
     problems, _s, _t = check(GOOD_WORKFLOW, renamed)
@@ -348,7 +450,8 @@ def self_test():
     # the loud version of the quiet failure — worth pinning, because a checker that reported "all
     # clear" against an empty flag list would be agreeing with nothing.
     problems, _s, _t = check(
-        "matrix:\n  include: []\nEXPECTED_COVERAGE_BUNDLES: 1\n", GOOD_SOURCES
+        "jobs:\n  macos-ui:\n    strategy:\n      matrix:\n        include: []\n"
+        "  coverage:\n    env:\n      EXPECTED_COVERAGE_BUNDLES: 1\n", GOOD_SOURCES
     )
     expect("an empty shard list fails for every class", len(problems) == 3, problems)
 
@@ -414,7 +517,7 @@ def main():
         return 1
 
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
-    sources = [(p.name, p.read_text(encoding="utf-8")) for p in sorted(UI_TESTS.glob("*.swift"))]
+    sources = read_sources(UI_TESTS)
 
     problems, sharded, tests = check(workflow_text, sources)
 
