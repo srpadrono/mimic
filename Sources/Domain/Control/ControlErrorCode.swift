@@ -56,6 +56,11 @@ public enum ControlErrorCode: String, Sendable, CaseIterable {
     /// available, which is a different thing from there being no update.
     case updateCheckFailed = "update.checkFailed"
 
+    // MARK: Update lifecycle
+
+    /// Project edits are paused while a verified update snapshots the store and hands off Installer.
+    case updateInstalling = "update.installing"
+
     // MARK: Mimic's own failures
 
     case persistenceFailure = "persistence.failure"

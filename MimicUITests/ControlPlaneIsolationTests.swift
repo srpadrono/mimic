@@ -12,29 +12,6 @@ import XCTest
 /// credential.
 final class ControlPlaneIsolationTests: XCTestCase {
 
-    /// The signed app's container is not readable by the UI runner, even though `fileExists` can
-    /// see its sidecar. `lsof` identifies the loopback port that process actually bound without
-    /// weakening the sandbox or adding a product-facing test hook.
-    private func listeningPort(of pid: pid_t) -> Int? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = Pipe()
-        guard (try? process.run()) != nil else { return nil }
-        let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(separator: "\n")
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        for line in lines {
-            guard let range = line.range(of: "TCP 127.0.0.1:") else { continue }
-            let digits = line[range.upperBound...].prefix(while: { $0.isNumber })
-            if let port = Int(digits), port > 0 { return port }
-        }
-        return nil
-    }
-
     /// Every suite launches through `UITestApp.launchAndBringToForeground`. This launch checks the
     /// exported override, the isolated file's actual existence, and a live authenticated health
     /// request on the app's assigned loopback port. File permissions are covered by the separate
@@ -102,7 +79,7 @@ final class ControlPlaneIsolationTests: XCTestCase {
         ).first { !preexistingPIDs.contains($0.processIdentifier) })
         var assignedPort: Int?
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) {
-            assignedPort = self.listeningPort(of: launched.processIdentifier)
+            assignedPort = UITestApp.listeningLoopbackPort(of: launched.processIdentifier)
             return assignedPort != nil
         }, "The launched app should bind an ephemeral loopback control port")
         let port = try XCTUnwrap(assignedPort)

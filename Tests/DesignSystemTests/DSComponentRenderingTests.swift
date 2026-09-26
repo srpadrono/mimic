@@ -450,21 +450,33 @@ struct DSComponentRenderingTests {
         #expect(selection == (initial == "any" ? "body" : "any"))
     }
 
-    @Test("A custom plain button visibly dims when disabled")
-    func disabledPlainButtonDims() throws {
-        func ink(isEnabled: Bool) throws -> Double {
-            var total = 0.0
+    @Test("A custom plain button visibly dims when disabled", arguments: [1.0, 0.7])
+    func disabledPlainButtonDims(backgroundWhite: Double) throws {
+        struct UndimmedStyle: ButtonStyle {
+            func makeBody(configuration: Configuration) -> some View {
+                configuration.label
+            }
+        }
+
+        func brightness<Style: ButtonStyle>(
+            isEnabled: Bool,
+            hidesLabel: Bool = false,
+            style: Style
+        ) throws -> [Double] {
+            var pixels: [Double] = []
             try withHostedView(
                 Button {} label: {
                     Text("Refresh")
                         .font(DSTypography.heading)
                         .foregroundStyle(.black)
                         .padding(8)
+                        .opacity(hidesLabel ? 0 : 1)
                 }
-                .buttonStyle(.dsPlain)
+                .buttonStyle(style)
                 .disabled(!isEnabled)
+                .allowsHitTesting(false)
                 .frame(width: 180, height: 48)
-                .background(.white)
+                .background(Color(white: backgroundWhite))
                 .environment(\.colorScheme, .light),
                 size: CGSize(width: 180, height: 48)
             ) { view in
@@ -473,16 +485,34 @@ struct DSComponentRenderingTests {
                 for y in 0..<bitmap.pixelsHigh {
                     for x in 0..<bitmap.pixelsWide {
                         let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
-                        total += Double(1 - (color.redComponent + color.greenComponent + color.blueComponent) / 3)
+                        pixels.append(Double((color.redComponent + color.greenComponent + color.blueComponent) / 3))
                     }
                 }
             }
-            return total
+            return pixels
         }
-        let enabled = try ink(isEnabled: true)
-        let disabled = try ink(isEnabled: false)
-        #expect(enabled > 1, "The hosted button label must actually be drawn")
-        #expect(disabled < enabled * 0.7, "Disabled text should visibly fade instead of looking actionable")
+
+        let background = try brightness(isEnabled: true, hidesLabel: true, style: .dsPlain)
+        let enabled = try brightness(isEnabled: true, style: .dsPlain)
+        let disabled = try brightness(isEnabled: false, style: .dsPlain)
+        let undimmed = try brightness(isEnabled: false, style: UndimmedStyle())
+        try #require([enabled.count, disabled.count, undimmed.count].allSatisfy { $0 == background.count })
+
+        // Subtract an identical blank-label render so host chrome and background cannot dilute
+        // the ratio. Sample the same visible glyph pixels in every image, avoiding antialias fringes.
+        let labelPixels = background.indices.filter { background[$0] - enabled[$0] > 0.1 }
+        func contrast(_ pixels: [Double]) -> Double {
+            labelPixels.reduce(0) { $0 + max(0, background[$1] - pixels[$1]) }
+        }
+        let enabledContrast = contrast(enabled)
+        try #require(enabledContrast > 1, "The hosted button label must actually be drawn")
+        let disabledRatio = contrast(disabled) / enabledContrast
+        #expect(disabledRatio > 0.1, "Disabled text must remain visible")
+        #expect(disabledRatio < 0.7, "Disabled text should visibly fade instead of looking actionable")
+        // This control omits the style's opacity, proving that native disabled state alone does
+        // not satisfy the dimming assertion. Reverting DSPlainButtonStyle to opacity 1 must fail it.
+        let undimmedRatio = contrast(undimmed) / enabledContrast
+        #expect(undimmedRatio > 0.9, "The undimmed reference must retain the enabled label's contrast")
     }
 
     /// The validation message is a row under the field, not an overlay on it.

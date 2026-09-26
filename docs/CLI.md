@@ -6,6 +6,8 @@ Project edits (such as rename, endpoint, scenario, journey definition, and `log 
 
 HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
 
+While the app saves and backs up projects for installation, new control edits that can change the project store return `update.installing` (HTTP 409, CLI exit code 4). Read-only queries remain available. If installation cannot proceed, the app resumes accepting edits and the caller may retry.
+
 ## Exit codes
 
 | Code | Meaning |

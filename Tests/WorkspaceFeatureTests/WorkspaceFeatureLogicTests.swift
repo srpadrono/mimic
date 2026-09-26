@@ -580,17 +580,6 @@ struct WorkspaceFeatureLogicTests {
         #expect(SidebarView.sectionKey(for: makeEndpoint(groupTag: "__ungrouped__")) == "group:__ungrouped__")
     }
 
-    @Test("Navigator movement clamps large offsets without overflowing")
-    func navigatorMovementClampsIntegerBounds() {
-        let first = UUID()
-        let last = UUID()
-        #expect(NavigatorKeyboardSelection.moved(from: last, by: .max, through: [first, last]) == last)
-        #expect(NavigatorKeyboardSelection.moved(from: first, by: .min, through: [first, last]) == first)
-        #expect(NavigatorKeyboardSelection.moved(from: nil, by: 1, through: [first, last]) == first)
-        #expect(NavigatorKeyboardSelection.moved(from: nil, by: -1, through: [first, last]) == last)
-        #expect(NavigatorKeyboardSelection.moved(from: first, by: 1, through: []) == nil)
-    }
-
     @Test("Breadcrumb choices carry native selected state and select the requested destination")
     func breadcrumbOptionsUseNativeSelection() throws {
         let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))

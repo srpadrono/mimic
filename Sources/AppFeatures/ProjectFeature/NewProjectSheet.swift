@@ -91,9 +91,10 @@ struct NewProjectSheet: View {
                     text: $form.portString,
                     placeholder: "8080",
                     validation: portValidationMessage,
+                    validationIdentifier: "newProject.port.error",
+                    inputIdentifier: "serverPortField",
                     identifier: "newProject.port"
                 )
-                .accessibilityIdentifier("serverPortField")
                 .focused($focusedField, equals: .port)
                 .onSubmit { confirmIfValid() }
             }

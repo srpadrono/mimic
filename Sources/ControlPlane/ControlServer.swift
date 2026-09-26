@@ -399,7 +399,7 @@ public actor ControlServer {
         case .projectNotFound, .endpointNotFound, .scenarioNotFound, .journeyNotFound,
              .journeyStepNotFound, .journeyTemplateNotFound:
             return .notFound
-        case .noProjectOpen, .noActiveJourney, .serverPortInUse, .serverBusy:
+        case .noProjectOpen, .noActiveJourney, .serverPortInUse, .serverBusy, .updateInstalling:
             // The request was well formed but the instance is not in a state to satisfy it.
             return .conflict
         case .updateCheckFailed:

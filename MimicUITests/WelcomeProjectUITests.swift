@@ -757,30 +757,10 @@ final class WelcomeProjectUITests: MimicUITestCase {
             .firstMatch
     }
 
-    /// The inline validation message under the new-project sheet's port field.
-    ///
-    /// By the sentence it reads out, not by `ds.textfield.newProject.port.error`, which is not in the
-    /// tree — and the spelling is not the problem. `NewProjectSheet` stamps `serverPortField` on the
-    /// whole `DSTextField`, and that is the *point*: the wrapper lends its name to the single input
-    /// inside it, which is why `app.textFields["serverPortField"]` matches at all. The same
-    /// propagation reaches the validation row, so whatever identifier `DSTextField` builds for it is
-    /// overwritten. What survives is the row's `.accessibilityElement()` + `.accessibilityLabel(message)`.
-    ///
-    /// `NewProjectSheetPage.portValidationError` and `NewEndpointSheetPage.pathError` both still ask
-    /// for the identifier; both live in `MimicUITests.swift`, so this file cannot fix them.
-    ///
-    /// The message tracks the field's binding, not its commit: `portValidationMessage` in
-    /// `NewProjectSheet` is derived from `form.portString`, and a SwiftUI `TextField` over a `String`
-    /// updates that on every keystroke — so nothing has to be blurred or submitted first.
+    /// The inline validation message under the port field, identified independently of its input.
     @MainActor
-    /// Shares `XCUIApplication.validationNote(startingWith:)` rather than keeping a local copy.
-    ///
-    /// The copy this replaces ran its predicate over `descendants(matching: .any)`, and CI failed it
-    /// twice with "Failed to get matching snapshots: Timed out while evaluating UI query" — not a
-    /// missing element but a query the runner gave up on. The shared helper asks `staticTexts` and
-    /// then `otherElements`, which is where a `DSTextField` validation row actually realizes.
     private var portValidationMessage: XCUIElement {
-        app.validationNote(startingWith: "Port must be")
+        newProjectSheet.portValidationError
     }
 
     /// The recents list itself, matched across element types.

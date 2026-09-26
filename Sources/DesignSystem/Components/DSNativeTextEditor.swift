@@ -263,6 +263,10 @@ final class DSNativeTextEditingSession {
             delegate.forwardedDelegate = candidate.delegate
             candidate.delegate = delegate
         }
+        // SwiftUI can attach the text view before AppKit places it in a scroll view. Reapply this
+        // on every attach so tests and accessibility clients can address the visible viewport
+        // separately from the document text, whose frame grows with its content.
+        candidate.enclosingScrollView?.setAccessibilityIdentifier("\(identifier).viewport")
         candidate.isEditable = isEnabled
     }
 

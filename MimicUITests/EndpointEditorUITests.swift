@@ -21,12 +21,8 @@ import XCTest
 /// buttons; two "Add scenario" buttons once the sheet is up) the query names the identifier it must
 /// *not* have, so the two stay distinguishable instead of collapsing into a `firstMatch` coin toss.
 ///
-/// The first CI run of this file taught the same lesson in two more places, and both fixes are
-/// generalizations rather than one-offs. A **row of elements sharing one identifier** — the
-/// `DSTextField` validation row under a wrapper that lends its name to everything below it, the
-/// `DSJSONEditor` warning whose glyph and sentence both wear `ds.jsoneditor.<id>.error` — is read by
-/// *content*, never by `firstMatch`, which resolves to whichever of them the tree lists first (a
-/// glyph, whose AppKit label is the one word "Warning"). And a **`List` section header** does not
+/// The JSON warning's glyph and sentence can share one identifier, so its message is read from the
+/// row's content rather than the first element. A **`List` section header** does not
 /// keep the identifier its `HStack` was given the way `EndpointSidebarRow` keeps its own, because
 /// the row declares an accessibility element and the header does not — so the sidebar's group
 /// sections are found by identifier *or* by the header's text, polled together.
@@ -42,7 +38,8 @@ final class EndpointEditorUITests: MimicUITestCase {
     private var usesControlFixture = false
     private let controlFixtureID = UUID().uuidString
     private let controlFixtureToken = UUID().uuidString + UUID().uuidString
-    private let controlFixturePort = 62176
+    private var controlFixturePort: Int?
+    private var controlFixturePreexistingPIDs: Set<pid_t> = []
     private var verifiedControlFixture = false
 
     @MainActor
@@ -52,8 +49,11 @@ final class EndpointEditorUITests: MimicUITestCase {
                                     "-NSRequiresAquaSystemAppearance", "NO"]
         }
         if usesControlFixture {
+            controlFixturePreexistingPIDs = Set(NSRunningApplication.runningApplications(
+                withBundleIdentifier: UITestApp.bundleIdentifier
+            ).map(\.processIdentifier))
             let base = "~/Library/Application Support/devxa.Mimic/endpoint-editor-uitest-\(controlFixtureID)"
-            app.launchEnvironment["MIMIC_CONTROL_PORT"] = String(controlFixturePort)
+            app.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
             app.launchEnvironment["MIMIC_CONTROL_TOKEN"] = controlFixtureToken
             app.launchEnvironment["MIMIC_CONTROL_FILE"] = base + ".json"
             app.launchEnvironment["MIMIC_DATABASE_PATH"] = base + ".sqlite"
@@ -68,7 +68,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         guard verifiedControlFixture || (command.count == 1 && command["state"] != nil) else {
             throw NSError(domain: "EndpointEditorFixture", code: 1)
         }
-        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(controlFixturePort)/v1/command"))
+        let port = try XCTUnwrap(controlFixturePort)
+        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/v1/command"))
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 5
@@ -87,14 +88,27 @@ final class EndpointEditorUITests: MimicUITestCase {
     }
 
     @MainActor
-    private func verifyControlFixture(launchedAfter start: Date) async throws {
+    private func verifyControlFixture() async throws {
+        let launched = NSRunningApplication.runningApplications(withBundleIdentifier: UITestApp.bundleIdentifier)
+            .filter { !controlFixturePreexistingPIDs.contains($0.processIdentifier) }
+        guard launched.count == 1, let process = launched.first else {
+            throw NSError(domain: "EndpointEditorFixture", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not identify this test's app launch"])
+        }
+        var assignedPort: Int?
+        guard UITestApp.waitUntil(timeout: 10, {
+            assignedPort = UITestApp.listeningLoopbackPort(of: process.processIdentifier)
+            return assignedPort != nil
+        }), let assignedPort else {
+            throw NSError(domain: "EndpointEditorFixture", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "This test's control listener did not bind"])
+        }
+        controlFixturePort = assignedPort
         let result = try await controlResponse(["state": [:]])
         let state = try XCTUnwrap(result["state"] as? [String: Any])
         let pid = try XCTUnwrap(state["pid"] as? Int)
-        let process = try XCTUnwrap(NSRunningApplication(processIdentifier: pid_t(pid)))
-        let launchDate = try XCTUnwrap(process.launchDate)
-        guard process.bundleIdentifier == "devxa.Mimic", launchDate >= start else {
-            throw NSError(domain: "EndpointEditorFixture", code: 3,
+        guard pid == Int(process.processIdentifier) else {
+            throw NSError(domain: "EndpointEditorFixture", code: 5,
                           userInfo: [NSLocalizedDescriptionKey: "Refusing a control mutation outside this test's launch"])
         }
         verifiedControlFixture = true
@@ -153,24 +167,10 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     // MARK: - DSTextField validation messages
 
-    /// What the new-endpoint sheet's path field is complaining about, or `""` when it is not.
-    ///
-    /// **Not `ds.textfield.newEndpoint.path.error`, which is what `NewEndpointSheetPage.pathError`
-    /// asks for and why three suites failed on the same wall at once.** `DSTextField` does compose
-    /// that name for its validation row — but `NewEndpointSheet` then stamps
-    /// `.accessibilityIdentifier("newEndpoint.pathField")` on the whole field, and a container's
-    /// identifier overrides its descendants'. That propagation is the *point* of the wrapper: it is
-    /// what makes `app.textFields["newEndpoint.pathField"]` resolve the input at all, which is the
-    /// exception `DSTextField`'s own note asks callers to preserve. Its cost is that the field's
-    /// label, its input and its validation row all report the wrapper's name, and no
-    /// `ds.textfield.…` name reaches the tree. `NewProjectSheet` wraps `newProject.port` in
-    /// `serverPortField` exactly the same way, so the port message is reached the same way.
-    ///
-    /// The three are then told apart by what they carry rather than by their names — see
-    /// ``longestText(identified:)``.
+    /// The inline path note's words, or an empty string when the note is absent.
     @MainActor
     private func pathValidationMessage() -> String {
-        longestText(identified: "newEndpoint.pathField")
+        shownText(of: newEndpointSheet.pathError)
     }
 
     // MARK: - Editor scrolling
@@ -222,10 +222,10 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// `revealInEditor` stays as the backstop for a small screen.
     @MainActor
     private func hideRequestLogDrawer() {
-        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
         guard workspace.drawerEmptyHeading.exists else { return }
-        workspace.toggleDrawerButton.click()
-        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3),
+                      "The request log shortcut should close the drawer")
     }
 
     /// Check the inspector row's visible click point before asking XCTest to open its context menu.
@@ -496,21 +496,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         anyElement(identified: "endpointEditor.globalDelay.note")
     }
 
-    /// The JSON body's text view.
-    ///
-    /// `DSJSONEditor` tags its `CodeEditor` `ds.jsoneditor.editor.body`, but `CodeEditor` is an
-    /// `NSViewRepresentable` wrapping a scroll view around an `NSTextView`, so the name may land on
-    /// the wrapper with the typed content one level down. Both shapes are handled, and the untagged
-    /// text view is the last resort — the editor is the only text view in the workspace.
+    /// The native text view, separate from the identified scroll viewport used for layout checks.
     @MainActor
     private func bodyTextView() -> XCUIElement {
-        let container = anyElement(identified: "ds.jsoneditor.editor.body")
-        if container.exists {
-            let inner = container.descendants(matching: .textView).firstMatch
-            if inner.exists { return inner }
-            if container.elementType == .textView { return container }
-        }
-        return app.textViews.firstMatch
+        app.textViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
     }
 
     /// What the JSON editor's warning row is saying, or `""` while it is not showing one.
@@ -650,11 +639,8 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// EPCREATE-05, EPCREATE-06, EPCREATE-10.
     ///
-    /// `NewEndpointSheetPage.pathError` has existed unused since the page object was written, and its
-    /// own doc admits the identifier it originally carried never existed. Its replacement —
-    /// `ds.textfield.newEndpoint.path.error` — does not reach the tree either, for the reason
-    /// ``pathValidationMessage()`` records, which is what the first CI run of this test found. The
-    /// page object is left alone here; correcting it belongs with the page objects.
+    /// The path note and input have separate identifiers, so this checks the note's text and the
+    /// Create button's state as the path changes.
     @MainActor
     func testNewEndpointSheetRejectsAPathWithoutALeadingSlash() throws {
         launchApp()
@@ -677,9 +663,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
         newEndpointSheet.pathField.typeText("api/users")
 
-        // Recomputed on every keystroke by `NewEndpointSheet` — there is nothing
-        // to submit and nothing to blur first — and read through `pathValidationMessage`, not
-        // through `NewEndpointSheetPage.pathError`, which cannot match. See that property's note.
+        // The validation note recomputes on each keystroke; no submit or blur is needed.
         let statesTheRule = UITestApp.waitUntil(timeout: 5) {
             self.pathValidationMessage().contains("must start with")
         }
@@ -1063,12 +1047,11 @@ final class EndpointEditorUITests: MimicUITestCase {
     @MainActor
     func testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts() async throws {
         usesControlFixture = true
-        let launchStarted = Date()
         launchApp()
+        try await verifyControlFixture()
         createProjectViaUI(name: "Live editor updates")
         createEndpointViaUI(name: "Live response", path: "/api/live")
         hideRequestLogDrawer()
-        try await verifyControlFixture(launchedAfter: launchStarted)
 
         try await controlResponse(["scenarioUpdate": [
             "endpoint": ["name": "Live response"], "scenario": ["name": "Default"],
@@ -1102,10 +1085,9 @@ final class EndpointEditorUITests: MimicUITestCase {
     @MainActor
     func testChangingProjectsDismissesThePreviousEndpointDraft() async throws {
         usesControlFixture = true
-        let launchStarted = Date()
         launchApp()
+        try await verifyControlFixture()
         createProjectViaUI(name: "Original draft project")
-        try await verifyControlFixture(launchedAfter: launchStarted)
         workspace.addEndpointButton.click()
         XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
         newEndpointSheet.nameField.click()

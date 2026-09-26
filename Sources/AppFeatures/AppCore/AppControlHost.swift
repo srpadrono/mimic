@@ -27,6 +27,8 @@ final class AppControlHost: ControlHost {
     /// outlives the command, and only `MockServerRuntime.serverState` knows about it. Both arms read
     /// that state as well as this flag.
     private var isChangingServerState = false
+    /// Commands admitted before installation that may still change the store being backed up.
+    private(set) var activeSnapshotMutations = 0
     private let repository: any ProjectRepository
 
     /// How this host answers `appUpdateCheck`.
@@ -93,6 +95,12 @@ final class AppControlHost: ControlHost {
         guard let appState else {
             return .failure(.internalFailure("The Mimic session is no longer available."))
         }
+        let mayMutateSnapshot = command.kind.mayMutateProjectStore
+        guard !mayMutateSnapshot || !appState.updates.isPreparingInstallation else {
+            return .failure(.updateInstalling)
+        }
+        if mayMutateSnapshot { activeSnapshotMutations += 1 }
+        defer { if mayMutateSnapshot { activeSnapshotMutations -= 1 } }
 
         // Project-scoped: one implementation, shared with every caller of the executor.
         if var project = appState.currentProject {
@@ -294,13 +302,13 @@ final class AppControlHost: ControlHost {
         case let .journeyActivate(ref):
             guard let project = appState.currentProject else { return .failure(.noProjectOpen) }
             guard let ref else {
-                appState.activateJourney(id: nil)
+                appState.activateJourneyAdmitted(id: nil)
                 return .success(.message(ControlMessages.journeyCleared))
             }
             guard let journey = project.journey(matching: ref) else {
                 return .failure(.journeyNotFound(ref))
             }
-            appState.activateJourney(id: journey.id)
+            appState.activateJourneyAdmitted(id: journey.id)
             // The engine's own cursor, awaited — not a fabricated one.
             //
             // This used to answer `JourneyStatus.make(journey:state:nil)`, which reports a run that
@@ -408,7 +416,7 @@ final class AppControlHost: ControlHost {
             return .success(.message(ControlMessages.logCleared(count: count)))
 
         case let .logSaveAsMock(id):
-            guard let endpoint = appState.savePassedThroughLogAsMock(id: id) else {
+            guard let endpoint = appState.savePassedThroughLogAsMock(id: id, admittedBeforeInstallation: true) else {
                 return .failure(.invalid(appState.lastCommandError ?? "Could not save the response as a mock."))
             }
             guard let project = appState.currentProject else {
@@ -542,20 +550,21 @@ final class AppControlHost: ControlHost {
                     return .failure(.validation(error))
                 }
             }
-            appState.createProject(name: trimmed, port: port ?? ServerConfiguration.default.port)
+            appState.createProject(name: trimmed, port: port ?? ServerConfiguration.default.port,
+                                   admittedBeforeInstallation: true)
             return .success(.message("Creating and opening project \"\(trimmed)\"."))
 
         case let .projectOpen(ref):
             do {
                 let id = try await resolveStoredProjectID(ref, appState: appState)
-                appState.openProject(id: id)
+                appState.openProjectAdmitted(id: id)
                 return .success(.message("Opening project."))
             } catch {
                 return failureResponse(for: error)
             }
 
         case .projectClose:
-            appState.closeProject()
+            appState.closeProject(admittedBeforeInstallation: true)
             return .success(.message("Closed the project."))
 
         case let .projectDelete(ref):
@@ -574,7 +583,7 @@ final class AppControlHost: ControlHost {
         case let .projectDuplicate(ref):
             do {
                 let id = try await resolveStoredProjectID(ref, appState: appState)
-                appState.duplicateProject(id: id)
+                appState.duplicateProjectAdmitted(id: id)
                 return .success(.message("Duplicating the project."))
             } catch {
                 return failureResponse(for: error)

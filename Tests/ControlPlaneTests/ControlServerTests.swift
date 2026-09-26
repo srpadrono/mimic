@@ -5,6 +5,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
+import NIOHTTP1
 @testable import ControlPlane
 @testable import Domain
 #if canImport(Darwin)
@@ -282,7 +283,7 @@ struct ControlServerTests {
     /// codes each covered by whichever one it happened to name. That mattered while
     /// `ControlServer.httpStatus` switched over string literals it kept its own copies of: five of
     /// the six `*.notFound` codes reached `404` only through a suffix rule nothing exercised, and the
-    /// `409` arm listed four codes with one of them asserted. The switch is over ``ControlErrorCode``
+    /// `409` arm listed several codes with one of them asserted. The switch is over ``ControlErrorCode``
     /// now, so a rename cannot break the mapping — but a *reclassification* still can, and that is
     /// what this holds.
     ///
@@ -290,6 +291,7 @@ struct ControlServerTests {
     /// reason the server stopped typing them.
     @Test("Each family of error code answers with its own status")
     func errorFamiliesMapToStatuses() async throws {
+        #expect(ControlServer.httpStatus(for: .failure(.updateInstalling)).code == 409)
         try await Self.withServer { baseURL, _ in
             // A precondition the host reports rather than the executor, and the second member of the
             // 409 arm.

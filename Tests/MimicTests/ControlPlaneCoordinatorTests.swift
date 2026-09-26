@@ -51,16 +51,16 @@ struct ControlPlaneCoordinatorTests {
     private func waitUntil(
         timeout: Duration = .seconds(2),
         interval: Duration = .milliseconds(20),
-        _ predicate: @escaping @MainActor () -> Bool
+        _ predicate: @escaping @MainActor () async -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
-            if predicate() {
+            if await predicate() {
                 return
             }
             try await Task.sleep(for: interval)
         }
-        try #require(predicate(), "Timed out waiting for condition")
+        try #require(await predicate(), "Timed out waiting for condition")
     }
 
     /// What the termination hooks were called with, in order, and how often a quit's reply fired.
@@ -70,21 +70,43 @@ struct ControlPlaneCoordinatorTests {
         var replies = 0
     }
 
+    private actor SuspensionGate {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private(set) var hasArrived = false
+        private(set) var isReleased = false
+
+        func wait() async {
+            hasArrived = true
+            guard !isReleased else { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            isReleased = true
+            let pending = waiters
+            waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+    }
+
     private actor UpdateSaveRepository: ProjectRepository {
         struct Refused: Error, LocalizedError {
             var errorDescription: String? { "The update save was refused." }
         }
         let refusesSave: Bool
         private var holdsSave: Bool
-        private var stored: [UUID: MockProject] = [:]
+        private var stored: [UUID: MockProject]
+        private var listGate: SuspensionGate?
         private(set) var saveCount = 0
 
-        init(refusesSave: Bool = false, holdsSave: Bool = false) {
+        init(projects: [MockProject] = [], refusesSave: Bool = false, holdsSave: Bool = false) {
+            stored = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
             self.refusesSave = refusesSave
             self.holdsSave = holdsSave
         }
 
         func release() { holdsSave = false }
+        func holdProjectList(on gate: SuspensionGate) { listGate = gate }
         func save(_ project: MockProject) async throws {
             saveCount += 1
             while holdsSave { try await Task.sleep(for: .milliseconds(5)) }
@@ -95,7 +117,10 @@ struct ControlPlaneCoordinatorTests {
             guard let project = stored[id] else { throw PersistenceError.projectNotFound(id) }
             return project
         }
-        func allProjects() async throws -> [MockProject] { Array(stored.values) }
+        func allProjects() async throws -> [MockProject] {
+            await listGate?.wait()
+            return Array(stored.values)
+        }
         func delete(id: UUID) async throws { stored[id] = nil }
     }
 
@@ -125,6 +150,119 @@ struct ControlPlaneCoordinatorTests {
         try await context.coordinator.flushPendingSaveForUpdate()
         let id = try #require(context.appState.currentProject?.id)
         #expect(try await context.repository.load(id: id).name == "Latest edit")
+    }
+
+    @Test("An update flush drains an admitted mutation before saving the final snapshot")
+    func updateFlushWaitsForAnAdmittedMutation() async throws {
+        let source = MockProject(
+            name: "Source",
+            endpoints: [Endpoint(name: "Catalog", method: .get, path: "/catalog")]
+        )
+        let open = MockProject(name: "Open project")
+        let repository = UpdateSaveRepository(projects: [source, open])
+        let (coordinator, state) = try updateContext(repository: repository)
+        let host = AppControlHost(appState: state, repository: repository)
+        coordinator.prepareShutdownFlush(appState: state, repository: repository, host: host)
+        state.currentProject = open
+        state.currentProject?.name = "Final edit before update"
+        // Let the workspace's initial list refresh finish before gating the command's lookup.
+        try await waitUntil { state.projects.recentProjects.contains { $0.id == source.id } }
+
+        let gate = SuspensionGate()
+        await repository.holdProjectList(on: gate)
+        let command = Task { await host.execute(.projectDuplicate(project: .init(id: source.id))) }
+        defer {
+            command.cancel()
+            Task { await gate.release() }
+        }
+        try await waitUntil { await gate.hasArrived }
+        #expect(host.activeSnapshotMutations == 1)
+        #expect(await repository.saveCount == 0)
+
+        var flushStarted = false
+        var flushFinished = false
+        let flush = Task {
+            flushStarted = true
+            try await coordinator.flushPendingSaveForUpdate()
+            flushFinished = true
+        }
+        defer { flush.cancel() }
+        try await waitUntil { flushStarted }
+        #expect(!flushFinished, "A lookup can still enqueue a mutation after the current write queue drains")
+        #expect(await repository.saveCount == 0)
+
+        await gate.release()
+        try await flush.value
+        #expect(await command.value.ok)
+        #expect(host.activeSnapshotMutations == 0)
+        let stored = try await repository.allProjects()
+        #expect(stored.map(\.name).sorted() == ["Final edit before update", "Source", "Source (Copy)"])
+        #expect(stored.first { $0.name == "Source (Copy)" }?.endpoints.map(\.path) == ["/catalog"])
+        #expect(try await repository.load(id: open.id).name == "Final edit before update")
+        #expect(await repository.saveCount == 2)
+    }
+
+    @Test("A held read-only update check does not delay the update snapshot")
+    func updateFlushDoesNotWaitForAReadOnlyCheck() async throws {
+        let repository = UpdateSaveRepository()
+        let (coordinator, state) = try updateContext(repository: repository)
+        let project = MockProject(name: "Snapshot while checking")
+        state.currentProject = project
+        let gate = SuspensionGate()
+        let host = AppControlHost(appState: state, repository: repository, fetchLatestRelease: {
+            await gate.wait()
+            return UpdateServiceTests.release("0.11.0")
+        })
+        coordinator.prepareShutdownFlush(appState: state, repository: repository, host: host)
+        let check = Task { await host.execute(.appUpdateCheck) }
+        defer {
+            check.cancel()
+            Task { await gate.release() }
+        }
+        try await waitUntil { await gate.hasArrived }
+        #expect(host.activeSnapshotMutations == 0)
+
+        try await coordinator.flushPendingSaveForUpdate()
+        #expect(!(await gate.isReleased), "The snapshot must finish while the read-only fetch is still held")
+        #expect(try await repository.load(id: project.id).name == "Snapshot while checking")
+        #expect(await repository.saveCount == 1)
+        await gate.release()
+        #expect(await check.value.ok)
+    }
+
+    @Test("An admitted mutation still resolving its project stops installation at the deadline")
+    func updateFlushRejectsAnUnfinishedAdmittedMutation() async throws {
+        let source = MockProject(name: "Pending duplicate")
+        let repository = UpdateSaveRepository(projects: [source])
+        let (coordinator, state) = try updateContext(repository: repository)
+        let host = AppControlHost(appState: state, repository: repository)
+        coordinator.prepareShutdownFlush(appState: state, repository: repository, host: host)
+        try await waitUntil { state.projects.recentProjects.contains { $0.id == source.id } }
+        let gate = SuspensionGate()
+        await repository.holdProjectList(on: gate)
+        let command = Task { await host.execute(.projectDuplicate(project: .init(id: source.id))) }
+        defer {
+            command.cancel()
+            Task { await gate.release() }
+        }
+        try await waitUntil { await gate.hasArrived }
+        #expect(host.activeSnapshotMutations == 1)
+
+        // Nothing has joined the write queue yet. Removing the host drain must make this fail,
+        // even though saveBeforeUpdate still waits for every write already enqueued.
+        await #expect(throws: ControlError(
+            code: .updateInstalling,
+            message: "A control command is still finishing. Wait before installing the update."
+        )) {
+            try await coordinator.flushPendingSaveForUpdate()
+        }
+        #expect(await repository.saveCount == 0)
+        #expect(host.activeSnapshotMutations == 1)
+        await gate.release()
+        #expect(await command.value.ok)
+        await state.projects.awaitPendingStoreWrites()
+        #expect(host.activeSnapshotMutations == 0)
+        #expect(try await repository.allProjects().map(\.name).sorted() == ["Pending duplicate", "Pending duplicate (Copy)"])
     }
 
     @Test("An update flush reports a refused final save")

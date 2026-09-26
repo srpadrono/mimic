@@ -316,6 +316,7 @@ struct WorkspaceView: View {
                 existingEndpoints: currentEndpoints,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .sheet(isPresented: $showBackendSettings) {
             BackendSettingsView(configuration: appState.serverConfiguration)
@@ -328,6 +329,7 @@ struct WorkspaceView: View {
                 existingEndpoints: currentEndpoints,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         // Both moved here from the journeys window, which was their only presenter.
         .sheet(isPresented: $showNewJourneySheet) {
@@ -412,6 +414,7 @@ struct WorkspaceView: View {
                 initialIsParsing: injected.state.isParsing,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .task { await presentInjectedImportIfNeeded() }
         #endif

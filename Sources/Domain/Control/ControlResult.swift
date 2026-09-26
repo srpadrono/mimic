@@ -196,6 +196,11 @@ public struct ControlError: Codable, Sendable, Equatable, Error, LocalizedError 
         message: "The server is already starting or stopping. Try again in a moment."
     )
 
+    public static let updateInstalling = ControlError(
+        code: .updateInstalling,
+        message: "Mimic is preparing an update. Try the command again if installation does not complete."
+    )
+
     /// The port a start asked for is already bound by something else.
     ///
     /// `server.portInUse` is documented in `docs/CLI.md` as a stable code and mapped to `409` by

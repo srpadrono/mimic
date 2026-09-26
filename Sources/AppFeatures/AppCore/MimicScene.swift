@@ -51,24 +51,33 @@ public struct MimicScene: Scene {
                 // real button. ⌘N on a project you were working in therefore threw away your place,
                 // under a label that promised the opposite. The ellipsis is now honest too: this
                 // opens a dialog.
-                Button("New Project\u{2026}") { appState.showNewProjectSheet = true }
+                Button("New Project\u{2026}") {
+                    guard !appState.updates.isPreparingInstallation else { return }
+                    appState.showNewProjectSheet = true
+                }
                     .keyboardShortcut("n", modifiers: .command)
+                    .disabled(appState.updates.isPreparingInstallation)
 
                 // Closing is its own command now, and says so. ⇧⌘W rather than ⌘W, because ⌘W is
                 // AppKit's close-the-window and taking it would leave no way to close the window.
-                Button("Close Project") { appState.closeProject() }
+                Button("Close Project") {
+                    guard !appState.updates.isPreparingInstallation else { return }
+                    appState.closeProject()
+                }
                     .keyboardShortcut("w", modifiers: [.command, .shift])
-                    .disabled(appState.currentProject == nil)
+                    .disabled(appState.currentProject == nil || appState.updates.isPreparingInstallation)
 
                 Button("Rename Project\u{2026}") {
+                    guard !appState.updates.isPreparingInstallation else { return }
                     guard let project = appState.currentProject else { return }
                     appState.projectRenameTarget = .init(id: project.id, name: project.name)
                 }
-                .disabled(appState.currentProject == nil)
+                .disabled(appState.currentProject == nil || appState.updates.isPreparingInstallation)
             }
 
             CommandMenu("Server") {
                 Button(serverToggleTitle) {
+                    guard !appState.updates.isPreparingInstallation else { return }
                     Self.toggleServer(
                         serverState: appState.serverState,
                         start: appState.startServer,
@@ -76,7 +85,7 @@ public struct MimicScene: Scene {
                     )
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!canToggleServer)
+                .disabled(!canToggleServer || appState.updates.isPreparingInstallation)
             }
 
             // ⌘1 / ⌘2, the shape of shortcut Xcode gives its navigators. `appState.navigatorRequest`
@@ -112,16 +121,25 @@ public struct MimicScene: Scene {
 
                 Divider()
 
-                Button("Restart Active Journey", action: appState.restartActiveJourney)
+                Button("Restart Active Journey") {
+                    guard !appState.updates.isPreparingInstallation else { return }
+                    appState.restartActiveJourney()
+                }
                     .keyboardShortcut("r", modifiers: [.command, .option])
-                    .disabled(appState.activeJourney == nil)
+                    .disabled(appState.activeJourney == nil || appState.updates.isPreparingInstallation)
 
-                Button("Advance Active Journey", action: appState.advanceActiveJourney)
+                Button("Advance Active Journey") {
+                    guard !appState.updates.isPreparingInstallation else { return }
+                    appState.advanceActiveJourney()
+                }
                     .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                    .disabled(appState.activeJourney == nil)
+                    .disabled(appState.activeJourney == nil || appState.updates.isPreparingInstallation)
 
-                Button("Deactivate Journey") { appState.activateJourney(id: nil) }
-                    .disabled(appState.activeJourney == nil)
+                Button("Deactivate Journey") {
+                    guard !appState.updates.isPreparingInstallation else { return }
+                    appState.activateJourney(id: nil)
+                }
+                    .disabled(appState.activeJourney == nil || appState.updates.isPreparingInstallation)
             }
         }
 

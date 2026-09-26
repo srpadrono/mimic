@@ -881,8 +881,11 @@ final class MimicUITests: MimicUITestCase {
 
         // The click is what hands the table keyboard focus, so it is a precondition of the press
         // rather than part of what is being tested.
+        workspace.fillWindow()
         let rows = requestLogDrawer.distinctRows(limit: 2)
         XCTAssertEqual(rows.count, 2, "Both requests should be listed as separate rows")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 3) { rows[0].isHittable },
+                      "The first log row should be reachable in the filled window")
         rows[0].click()
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Request"),

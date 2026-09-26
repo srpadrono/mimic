@@ -295,12 +295,14 @@ struct HostCommandSweepTests {
         try await waitUntil { session.appState.currentProject?.name == "Second" }
         #expect(await repository.startedSaves == ["First"])
         #expect(await completed.names.isEmpty)
+        #expect(session.host.activeSnapshotMutations == 2)
 
         await repository.releaseFirstSave()
         let firstResponse = await first.value
         let secondResponse = await second.value
         #expect(firstResponse.ok)
         #expect(secondResponse.ok)
+        #expect(session.host.activeSnapshotMutations == 0)
         #expect(await repository.startedSaves == ["First", "Second"])
         #expect(try await repository.load(id: project.id).name == "Second")
     }

@@ -32,6 +32,7 @@ struct ContentView: View {
                 )
             }
         }
+        .disabled(appState.updates.isPreparingInstallation)
         .navigationTitle(appState.currentProject?.name ?? "Mimic")
         // Presented here rather than inside `WelcomeWindow`, because File ▸ New Project has to work
         // whichever branch is showing — and one sheet with one presenter is what stops the two

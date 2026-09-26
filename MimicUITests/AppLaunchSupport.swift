@@ -54,6 +54,28 @@ enum UITestApp {
         }
     }
 
+    /// The app container keeps its discovery file private, so find the ephemeral listener owned by
+    /// the process this test launched. Call before starting a mock server in that process.
+    static func listeningLoopbackPort(of pid: pid_t) -> Int? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n")
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        for line in lines {
+            guard let range = line.range(of: "TCP 127.0.0.1:") else { continue }
+            let digits = line[range.upperBound...].prefix(while: { $0.isNumber })
+            if let port = Int(digits), port > 0 { return port }
+        }
+        return nil
+    }
+
     /// Waits for a condition, polling until it holds or the deadline passes.
     ///
     /// Preferred over a fixed pause, which is wrong in both directions: too short and the test is

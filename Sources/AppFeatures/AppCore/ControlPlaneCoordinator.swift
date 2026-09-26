@@ -143,10 +143,9 @@ public final class ControlPlaneCoordinator {
 
         let host = AppControlHost(appState: appState, repository: repository)
         let server = ControlServer(host: host, mode: HeadlessMode.isEnabled ? "headless" : "app")
-        self.host = host
         // Held for the shutdown flush below, which needs to know what to write and where — and has to
         // know it before the signal arrives, because there is no time to go looking afterwards.
-        prepareShutdownFlush(appState: appState, repository: repository)
+        prepareShutdownFlush(appState: appState, repository: repository, host: host)
 
         // Before the port is bound, and deliberately outside the `Task` below.
         //
@@ -221,14 +220,16 @@ public final class ControlPlaneCoordinator {
         controlShutdownTask = Task.detached { _ = try? await server.stop() }
     }
 
-    /// Wires the session and store the shutdown flush reads, and nothing else.
-    ///
-    /// Split from `start(appState:repository:)` so a test can drive the flush paths without binding
-    /// a control server or installing signal handlers — the seam the twice-shipped quit data loss
-    /// never had. `start` routes through it, so the two cannot wire different things.
-    func prepareShutdownFlush(appState: AppState, repository: any ProjectRepository) {
+    /// Wires the session, store, and admitted command drain without binding a listener or installing
+    /// signal handlers. Production startup and flush tests use the same composition path.
+    func prepareShutdownFlush(
+        appState: AppState,
+        repository: any ProjectRepository,
+        host: AppControlHost? = nil
+    ) {
         self.appState = appState
         self.repository = repository
+        self.host = host
     }
 
     /// Removes the discovery file when the process goes away.
@@ -479,6 +480,18 @@ public final class ControlPlaneCoordinator {
         try Task.checkCancellation()
         guard let appState else {
             throw ControlError.internalFailure("The Mimic session is no longer available.")
+        }
+        // installNow set its installing phase before dispatching this task. No new store mutation
+        // can enter the host; finish mutations admitted before that change before taking the snapshot.
+        let commandDeadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
+        while (host?.activeSnapshotMutations ?? 0) > 0, ContinuousClock.now < commandDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard (host?.activeSnapshotMutations ?? 0) == 0 else {
+            throw ControlError(
+                code: .updateInstalling,
+                message: "A control command is still finishing. Wait before installing the update."
+            )
         }
         // The session's immutable store failure survives acknowledgement of its alert.
         if let failure = appState.storeFailure {

@@ -45,6 +45,13 @@ final class UpdateService {
 
     private(set) var phase: Phase = .idle
 
+    /// The install sheet is modal, but control clients and automatic capture can still edit a
+    /// project. They stop accepting new work from the moment installation preparation begins.
+    var isPreparingInstallation: Bool {
+        if case .installing = phase { return true }
+        return false
+    }
+
     /// Whether the update sheet is on screen.
     ///
     /// Separate from ``phase`` because they answer different questions: a background check that finds

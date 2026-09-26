@@ -79,9 +79,10 @@ struct NewEndpointSheet: View {
                         text: $path,
                         placeholder: "/api/v1/users",
                         validation: pathError,
+                        validationIdentifier: "newEndpoint.path.error",
+                        inputIdentifier: "newEndpoint.pathField",
                         identifier: "newEndpoint.path"
                     )
-                    .accessibilityIdentifier("newEndpoint.pathField")
                     .focused($focusedField, equals: .path)
                     .onSubmit { confirmIfValid() }
                 }

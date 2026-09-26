@@ -333,6 +333,22 @@ struct UpdateServiceTests {
 @MainActor
 @Suite("Update installation lifecycle")
 struct UpdateInstallationTests {
+    private nonisolated final class BackupLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private let releaseSignal = DispatchSemaphore(value: 0)
+        private var started = false
+
+        var didStart: Bool { lock.withLock { started } }
+
+        func blockThenFail() throws {
+            lock.withLock { started = true }
+            releaseSignal.wait()
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+
+        func release() { releaseSignal.signal() }
+    }
+
     private nonisolated final class DiscardedFiles: @unchecked Sendable {
         private let lock = NSLock()
         private var files: [URL] = []
@@ -373,7 +389,8 @@ struct UpdateInstallationTests {
         fails: Bool = false,
         saveFails: Bool = false,
         backupFails: Bool = false,
-        missingStore: Bool = false
+        missingStore: Bool = false,
+        backupOperation: (@Sendable () throws -> Void)? = nil
     ) async throws -> (UpdateService, Recorder) {
         let recorder = Recorder()
         let defaults = try #require(UserDefaults(suiteName: "UpdateInstallationTests.\(UUID())"))
@@ -383,6 +400,7 @@ struct UpdateInstallationTests {
             fetchLatestRelease: { UpdateServiceTests.release("0.11.0") },
             installer: Installer(recorder: recorder, fails: fails),
             makeBackup: { _, _ in
+                try backupOperation?()
                 if backupFails { throw CocoaError(.fileWriteOutOfSpace) }
             },
             resolveStoreURL: { missingStore ? nil : URL(fileURLWithPath: "/fixture/mimic.sqlite") },
@@ -405,6 +423,42 @@ struct UpdateInstallationTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         try #require(predicate(), "Update lifecycle did not settle")
+    }
+
+    @Test("Update preparation refuses late control edits and reopens commands after backup failure")
+    func backupPreparationClosesControlAdmission() async throws {
+        let latch = BackupLatch()
+        defer { latch.release() }
+        let (service, _) = try await readyService(backupOperation: { try latch.blockThenFail() })
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let defaults = try #require(UserDefaults(suiteName: "UpdateAdmissionTests.\(UUID())"))
+        let state = AppState(
+            projectRepository: GRDBProjectRepository(dbQueue: queue),
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: service
+        )
+        state.currentProject = MockProject(name: "Before backup")
+        let host = AppControlHost(appState: state, repository: state.repository)
+
+        service.installNow()
+        try await waitUntil { latch.didStart }
+        let refused = await host.execute(.projectRename(name: "Late edit"))
+        #expect(refused.error?.code == ControlErrorCode.updateInstalling.rawValue)
+        #expect(state.currentProject?.name == "Before backup")
+        #expect((await host.execute(.ping)).ok)
+        let projectID = try #require(state.currentProject?.id)
+        state.renameProject(id: projectID, name: "Late window edit")
+        state.createProject(name: "Late window project")
+        #expect(state.currentProject?.id == projectID)
+        #expect(state.currentProject?.name == "Before backup")
+
+        latch.release()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+        #expect(!service.isPreparingInstallation)
+        let retried = await host.execute(.projectRename(name: "After failure"))
+        #expect(retried.ok)
+        #expect(state.currentProject?.name == "After failure")
     }
 
     @Test("Successful handoff waits for actual sheet dismissal before quitting, exactly once")

@@ -99,20 +99,8 @@ struct NewProjectSheetPage {
     var portField: XCUIElement { app.textFields["serverPortField"] }
     var createButton: XCUIElement { app.buttons["createProjectButton"] }
     var cancelButton: XCUIElement { app.buttons["cancelCreateButton"] }
-    /// Matched by the sentence, not by `ds.textfield.newProject.port.error`.
-    ///
-    /// That identifier is built by `DSTextField.validationRow` and is never in the tree at this call
-    /// site, or any other: `NewProjectSheet` names the whole `DSTextField` `serverPortField`, and that
-    /// propagation is the point — it is why `app.textFields["serverPortField"]` matches the input at
-    /// all. It reaches the validation row too and overwrites the row's own name. The row does set
-    /// `.accessibilityElement()` and `.accessibilityLabel(message)`, so the message itself survives,
-    /// and the message is what a test wants to assert anyway.
-    ///
-    /// Making the identifier reachable would mean moving the caller's name onto the inner `TextField`,
-    /// which would break `app.textFields["serverPortField"]` and most of this suite's sheet coverage.
-    /// That is a trade, not an oversight — hence matching by label rather than "fixing" the field.
     var portValidationError: XCUIElement {
-        app.validationNote(startingWith: "Port must be")
+        app.descendants(matching: .any).matching(identifier: "newProject.port.error").firstMatch
     }
 }
 
@@ -320,17 +308,8 @@ struct NewEndpointSheetPage {
     var pathField: XCUIElement { app.textFields["newEndpoint.pathField"] }
     var createButton: XCUIElement { app.buttons["newEndpoint.createButton"] }
     var cancelButton: XCUIElement { app.buttons["newEndpoint.cancelButton"] }
-    /// The path field's inline validation message.
-    ///
-    /// Matched by the sentence. Two identifiers have now been wrong here, for different reasons.
-    ///
-    /// `newEndpoint.pathError` never existed at all. Its replacement,
-    /// `ds.textfield.newEndpoint.path.error`, is the name `DSTextField.validationRow` really builds —
-    /// and it is still not in the tree, because `NewEndpointSheet` stamps its own identifier on the
-    /// whole field and that overwrites the row beneath it. CI proved it: the corrected identifier
-    /// found nothing either. What survives is the row's `.accessibilityLabel(message)`, so match that.
     var pathError: XCUIElement {
-        app.validationNote(startingWith: "Path must")
+        app.descendants(matching: .any).matching(identifier: "newEndpoint.path.error").firstMatch
     }
 }
 
@@ -344,8 +323,9 @@ struct EndpointEditorPage {
     var headersToggle: XCUIElement { app.buttons["endpointEditor.toggleHeaders"] }
     var statusDescription: XCUIElement { app.staticTexts["endpointEditor.statusDescription"] }
     var globalDelayNote: XCUIElement { app.staticTexts["endpointEditor.globalDelay.note"] }
+    /// The visible scroll viewport; the inner text view keeps the unsuffixed identifier.
     var bodyEditor: XCUIElement {
-        app.scrollViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
+        app.scrollViews.matching(identifier: "ds.jsoneditor.editor.body.viewport").firstMatch
     }
 
     /// The form's scroll surface, outside the nested response-body editor.
@@ -355,7 +335,7 @@ struct EndpointEditorPage {
             .filter { scrollView in
                 let center = CGPoint(x: scrollView.frame.midX, y: scrollView.frame.midY)
                 return pane.contains(center)
-                    && scrollView.identifier != "ds.jsoneditor.editor.body"
+                    && scrollView.identifier != "ds.jsoneditor.editor.body.viewport"
             }
             .max { $0.frame.height < $1.frame.height }
         if let form { return form }
@@ -728,30 +708,6 @@ struct DeleteConfirmationPage {
 
     var deleteButton: XCUIElement { app.sheets.firstMatch.buttons["Delete project"] }
     var keepButton: XCUIElement { app.sheets.firstMatch.buttons["Keep project"] }
-}
-
-// MARK: - Validation notes
-
-@MainActor
-extension XCUIApplication {
-    /// A `DSTextField`'s inline validation note, found by the words it says.
-    ///
-    /// The note's own identifier — `ds.textfield.<id>.error` — is in no tree: every caller stamps an
-    /// identifier on the whole `DSTextField`, and that propagation is the point, since it is what
-    /// makes `app.textFields["serverPortField"]` resolve. It reaches the note too and overwrites it.
-    /// `DSTextField.validationRow` does set `.accessibilityElement()` and `.accessibilityLabel`, so
-    /// the sentence survives.
-    ///
-    /// Scoped to two element types rather than `descendants(matching: .any)`. A predicate over every
-    /// descendant of the whole app is expensive enough that the runner gives up on it: CI failed this
-    /// with "Failed to get matching snapshots: Timed out while evaluating UI query", which is not a
-    /// missing element but a query that never finished. The note realizes as a static text or, when
-    /// AppKit groups it, as a plain element — so ask those two and no more.
-    func validationNote(startingWith prefix: String) -> XCUIElement {
-        let matcher = NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", prefix, prefix)
-        // Keep one live query so a message appearing later can arrive as any native text/group role.
-        return descendants(matching: .any).matching(matcher).firstMatch
-    }
 }
 
 // MARK: - XCUIElement Helpers

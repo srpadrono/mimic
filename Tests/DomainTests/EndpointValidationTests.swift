@@ -164,6 +164,15 @@ struct EndpointValidationTests {
         }
     }
 
+    @Test("Only numeric spellings of the bound address count as a self-loop",
+          arguments: [
+            "127.0.0.2", "127.2", "2130706434", "0x7f000002", "127.0.0.256",
+            "127.0.0.08", "127.0.0.1.example", "localhost.example", "127.0.0.1..",
+          ])
+    func nonListenerHostIsNotALoopbackAlias(host: String) {
+        #expect(!EndpointValidator.isLoopbackHost(host))
+    }
+
     // MARK: - LocalizedError
 
     @Test func validationErrorProvidesLocalizedDescription() {

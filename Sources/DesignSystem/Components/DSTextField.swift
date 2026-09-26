@@ -52,10 +52,8 @@ public struct DSTextField: View {
 
     public var body: some View {
         // Deliberately *not* an accessibility container. This view carries no identifier of its own,
-        // and callers may stamp theirs on the whole field — `NewProjectSheet` tags it
-        // `serverPortField`, which the UI suite then looks up as `app.textFields[…]`. A field with
-        // inline validation can instead put `inputIdentifier` directly on the input, leaving its
-        // separately identified error reachable too. Making the stack a container would move the
+        // and callers can put `inputIdentifier` directly on the input, leaving a separately
+        // identified validation row reachable too. Making the stack a container would move its
         // identifier onto a group element and hide both descendants.
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(label)

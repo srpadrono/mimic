@@ -177,20 +177,24 @@ struct RecentProjectsStoreTests {
         let finished = DispatchGroup()
         let start = DispatchSemaphore(value: 0)
 
-        for (index, id) in ids.enumerated() {
+        // Two dedicated threads are enough to contend for the shared lock. Blocking ten global
+        // queue jobs until all ten start can exhaust a small CI worker pool before the test begins.
+        let writers = (0..<stores.count).map { storeIndex in
             ready.enter()
             finished.enter()
-            DispatchQueue.global().async {
+            return Thread {
                 ready.leave()
                 start.wait()
-                stores[index % stores.count].record(id: id, name: "Project \(index)")
+                for index in stride(from: storeIndex, to: ids.count, by: stores.count) {
+                    stores[storeIndex].record(id: ids[index], name: "Project \(index)")
+                }
                 finished.leave()
             }
         }
-        // Start every writer together without delaying any read inside the store's lock.
+        for writer in writers { writer.start() }
         let readyResult = ready.wait(timeout: .now() + 5)
-        for _ in ids { start.signal() }
-        #expect(readyResult == .success, "Concurrent writers did not become ready within five seconds")
+        for _ in writers { start.signal() }
+        #expect(readyResult == .success, "Both writers did not become ready within five seconds")
         guard finished.wait(timeout: .now() + 5) == .success else {
             Issue.record("Concurrent preference writes did not complete within five seconds")
             return

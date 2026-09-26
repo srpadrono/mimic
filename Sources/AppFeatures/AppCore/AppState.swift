@@ -206,7 +206,8 @@ final class AppState {
             recentProjectsStore: recentProjectsStore
         )
         server.onLog = { [weak self] log in
-            guard let self, log.outcome == .passthrough, log.projectID == self.currentProject?.id,
+            guard let self, !self.updates.isPreparingInstallation,
+                  log.outcome == .passthrough, log.projectID == self.currentProject?.id,
                   self.serverConfiguration.backend(id: log.backendID)?.captureResponses == true,
                   (try? ResponseCapture.validate(log)) != nil else { return }
             let path = EndpointFromLog.mockablePath(from: log.path)
@@ -483,7 +484,8 @@ final class AppState {
 
     /// Explicitly promotes one observed real response into an editable mock in a single publish.
     @discardableResult
-    func savePassedThroughLogAsMock(id: UUID) -> Endpoint? {
+    func savePassedThroughLogAsMock(id: UUID, admittedBeforeInstallation: Bool = false) -> Endpoint? {
+        guard admittedBeforeInstallation || !updates.isPreparingInstallation else { return nil }
         guard let log = requestLogs.first(where: { $0.id == id }), log.outcome == .passthrough,
               let status = log.responseStatusCode,
               EndpointValidator.serveableStatusCodes.contains(status),
@@ -547,6 +549,7 @@ final class AppState {
     /// `([ImportCandidate]) -> Void` commit action, so the reasons go to `lastCommandError` — the
     /// channel `ContentView` already presents.
     func commitImportedCandidates(_ candidates: [ImportCandidate]) {
+        guard !updates.isPreparingInstallation else { return }
         let outcome = ImportCommitter(project: currentProject).commit(candidates)
 
         // Published once, and only if something survived: assigning `currentProject` is what pushes
@@ -730,6 +733,11 @@ final class AppState {
     ///
     /// Clearing is not an activation and needs no count — a nil journey drops the run state outright.
     func activateJourney(id: UUID?) {
+        guard !updates.isPreparingInstallation else { return }
+        activateJourneyAdmitted(id: id)
+    }
+
+    func activateJourneyAdmitted(id: UUID?) {
         if let id, projects.currentProject?.journeys.contains(where: { $0.id == id }) == true {
             server.noteJourneyActivation()
         }
@@ -784,17 +792,22 @@ final class AppState {
 
     // MARK: - Projects
 
-    func createProject(name: String, port: Int = 8080) {
+    func createProject(name: String, port: Int = 8080, admittedBeforeInstallation: Bool = false) {
+        guard admittedBeforeInstallation || !updates.isPreparingInstallation else { return }
         stopServerForProjectChange()
         _ = projects.createProject(name: name, port: port)
     }
 
     func renameProject(id: UUID, name: String) {
+        guard !updates.isPreparingInstallation else { return }
         if currentProject?.id == id {
             _ = run(.projectRename(name: name))
         } else {
+            // Join the write chain before returning, so update preparation can drain this rename
+            // even if the task that reports its result has not had its first actor turn yet.
+            let write = projects.renameStoredProject(id: id, name: name)
             Task { @MainActor in
-                switch await projects.renameStoredProject(id: id, name: name).value {
+                switch await write.value {
                 case .success:
                     lastCommandError = nil
                 case .failure(let error):
@@ -805,6 +818,11 @@ final class AppState {
     }
 
     func openProject(id: UUID) {
+        guard !updates.isPreparingInstallation else { return }
+        openProjectAdmitted(id: id)
+    }
+
+    func openProjectAdmitted(id: UUID) {
         stopServerForProjectChange()
         projects.openProject(id: id)
     }
@@ -839,7 +857,7 @@ final class AppState {
             guard let self else { return }
             let stored = await projects.importProject(document)
             guard stored, activate else { return }
-            openProject(id: document.id)
+            openProjectAdmitted(id: document.id)
         }
     }
 
@@ -859,8 +877,13 @@ final class AppState {
         server.stopServer()
     }
     func saveCurrentProject() { projects.saveCurrentProject() }
-    func duplicateProject(id: UUID) { projects.duplicateProject(id: id) }
+    func duplicateProject(id: UUID) {
+        guard !updates.isPreparingInstallation else { return }
+        duplicateProjectAdmitted(id: id)
+    }
+    func duplicateProjectAdmitted(id: UUID) { projects.duplicateProject(id: id) }
     func deleteProject(id: UUID) {
+        guard !updates.isPreparingInstallation else { return }
         if currentProject?.id == id {
             stopServerForProjectChange()
         }
@@ -872,7 +895,8 @@ final class AppState {
         }
         return await projects.deleteProjectAndWait(id: id)
     }
-    func closeProject() {
+    func closeProject(admittedBeforeInstallation: Bool = false) {
+        guard admittedBeforeInstallation || !updates.isPreparingInstallation else { return }
         stopServerForProjectChange()
         projects.closeProject()
     }
@@ -886,6 +910,7 @@ final class AppState {
     /// Domain code, so a rule can only be implemented once.
     @discardableResult
     private func run(_ command: ControlCommand) -> ControlResult? {
+        guard !updates.isPreparingInstallation else { return nil }
         guard var project = currentProject else { return nil }
         do {
             guard let outcome = try ProjectCommandExecutor.apply(command, to: &project) else { return nil }

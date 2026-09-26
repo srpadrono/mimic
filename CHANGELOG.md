@@ -42,8 +42,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reject invalid CLI destinations and timeouts, prevent redirects from forwarding control tokens,
   and keep reflected tokens and terminal control characters out of raw response diagnostics.
 - Cancel update downloads cleanly, validate completed download sizes, and require a successful
-  project save and backup before installation. A failed handoff keeps Mimic open with recovery
-  guidance; a successful handoff dismisses the sheet before quitting.
+  project save and backup before installation. Pause new control edits and automatic capture until
+  the snapshot and installer handoff finish. A failed handoff keeps Mimic open with recovery guidance;
+  a successful handoff dismisses the sheet before quitting.
 
 ## 0.12.0 — 2026-09-20
 
