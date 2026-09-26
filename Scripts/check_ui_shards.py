@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
-"""Fails when a UI test class is not run by any CI shard, or is run by more than one.
+"""Fails when a UI test method is not run by exactly one CI shard.
 
-`.github/workflows/ci.yml` shards the XCUITest suite across three macOS runners, and it does so by
-naming test classes: each shard passes a list of `-only-testing:MimicUITests/<Class>` flags and runs
-exactly those. That is the only workable split — the suites share one store, one defaults domain and
-one window server, so `-parallel-testing-enabled` on a single machine is not available here, and the
-workflow's header argues that at length.
+`.github/workflows/ci.yml` shards the XCUITest suite across independent macOS runners. Each shard
+passes class or method `-only-testing:` selectors. The suites share one store, one defaults domain,
+and one window server, so parallel workers on a single machine cannot provide this isolation.
 
-Nothing below hard-codes that three. The shard list, the shard count and the per-shard totals are all
-derived from the workflow text, which is what let the split go from four shards to three — after run
-#89 measured the concurrent-macOS-job cap at four rather than the documented five — with this file's
-logic untouched and only this paragraph and the one above it edited.
+Nothing below hard-codes the shard count. The shard list, bundle count, and per-shard totals are
+derived from the workflow text.
 
-It also introduces a failure mode the single job did not have, and it is the worst kind: **a UI test
-class that no shard names simply never runs, and every shard is green.** Add `SettingsUITests.swift`
-tomorrow, write twenty tests in it, push, and three green checks report that the window is covered.
-Nothing in `xcodebuild` can notice — a shard asked for the classes it was given and got them — and
-nothing in the workflow can either, because the workflow is the thing that is wrong.
+Sharding introduces a failure mode the single job did not have: **a new UI test method that no shard
+names never runs, while every shard stays green.** `xcodebuild` cannot notice, because each shard
+asked for only the methods it was given. The checker compares those selections with the source tree.
 
 This repository has met that shape before. `Project.swift` carried a `buildableFolders` line naming
 `Tests/JourneyFeatureTests` with no directory behind it, which Tuist tolerated silently while the
@@ -26,28 +20,21 @@ that passed". This is the same sentence with `-only-testing:` in place of `build
 
 So the shard list is checked against the tree rather than trusted:
 
-  - a class with at least one `func test…` in `MimicUITests/` that appears in **no** shard fails;
-  - a class named by **two** shards fails, because it would be run twice and the balance the shards
-    were chosen for is wrong by that much;
-  - a shard naming a class that **does not exist** fails, which is what a rename leaves behind —
-    `xcodebuild` reports it as "no tests to run" and exits 0, so the shard goes green having run
-    nothing;
+  - a method declared in `MimicUITests/` that appears in **no** shard fails;
+  - a method selected by **two** shards fails, including a class selector overlapping a method one;
+  - a shard naming a class or method that **does not exist** fails — `xcodebuild` can otherwise
+    report "no tests to run" and exit 0;
   - and `EXPECTED_COVERAGE_BUNDLES` in the same workflow disagreeing with the shard count fails,
     which is the same shape one level up. The `coverage` job merges one result bundle per test-running
     job — the unit suites plus every shard — and refuses to publish if fewer arrive than it expects.
     It cannot count the shards for itself: a job cannot read another job's `matrix`, so the total is
-    written down as a literal. Add a fourth shard and leave the literal at 4 and that job merges
-    three shards' worth of coverage while believing it has all of them, publishing a number lower
-    than the truth with nothing anywhere to say a shard is missing. Lower the literal and the job
-    refuses forever. Both are quiet; this makes them loud.
+    written down as a literal. Adding a shard without increasing it could publish incomplete coverage;
+    leaving it too high refuses coverage forever. Both are quiet; this makes them loud.
 
-It reads the workflow as text and the suites as text. Nothing here imports PyYAML: the Linux CI job
-installs `python3-minimal` and has no third-party packages at all, which is a constraint every
-checker in `Scripts/` states in its own header so that it stays true. Regex over
-`-only-testing:MimicUITests/<Class>` is enough, because that string is the whole interface between
-the workflow and the suite.
+It reads the workflow and suite sources as text. Nothing here imports PyYAML: the Linux CI job
+installs `python3-minimal` and has no third-party packages.
 
-`--self-test` drives all four verdicts over fixtures written in this file — a workflow and a suite
+`--self-test` drives the verdicts over fixtures written in this file — a workflow and a suite
 tree invented here, never read off disk and never produced by the functions under test. That is the
 rule AGENTS.md states as one question: if I revert the mechanism this test is for, does this test go
 red? A fixture derived from the parsers would move with them and the answer would be no.
@@ -62,10 +49,13 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 UI_TESTS = ROOT / "MimicUITests"
 
 # The target name is part of the flag, and part of what makes this checkable: `-only-testing:` takes
-# `<target>/<class>` and this repository has exactly one UI target.
+# `<target>/<class>[/<method>]` and this repository has exactly one UI target.
 TARGET = "MimicUITests"
 
-ONLY_TESTING = re.compile(r"-only-testing:" + TARGET + r"/([A-Za-z_][A-Za-z0-9_]*)")
+ONLY_TESTING = re.compile(
+    r"-only-testing:" + TARGET
+    + r"/(?P<class>[A-Za-z_][A-Za-z0-9_]*)(?:/(?P<method>test[A-Za-z0-9_]+))?(?=\s|$)"
+)
 
 # The literal the `coverage` job compares its downloaded bundle count against. Matched as an `env:`
 # entry rather than parsed as YAML, for the reason the module header gives: nothing here imports
@@ -83,41 +73,51 @@ CLASS_DECL = re.compile(r"^(?:final\s+|public\s+|open\s+)*class\s+([A-Za-z_][A-Z
 
 # Indented, because a top-level `func test…` is not a test method. The same convention
 # `Scripts/check_doc_counts.py` uses the same declaration convention for its live count.
-TEST_FUNC = re.compile(r"^\s+(?:@\w+\s+)*(?:final\s+|public\s+|private\s+|internal\s+)*func\s+test")
+TEST_FUNC = re.compile(
+    r"^\s+(?:@\w+\s+)*(?:final\s+|public\s+|private\s+|internal\s+)*func\s+"
+    r"(test[A-Za-z0-9_]+)\s*\("
+)
 
 
-def shard_classes(workflow_text):
-    """Every class named by an `-only-testing:` flag, in order, duplicates kept.
+def shard_selectors(workflow_text):
+    """Every `(class, method or None)` selector, in order, duplicates kept.
 
     Order and duplicates both matter: the caller reports a class named twice, and it can only do
     that if this does not deduplicate on the way past.
     """
-    return ONLY_TESTING.findall(workflow_text)
+    return [(match.group("class"), match.group("method"))
+            for match in ONLY_TESTING.finditer(workflow_text)]
 
 
-def suite_classes(sources):
-    """`{class name: test count}` for every class in `sources` that declares at least one test.
+def suite_methods(sources):
+    """`{class name: [test methods]}` for every class declaring at least one test.
 
     `sources` is an iterable of `(filename, text)` so the caller decides whether that comes from
     disk or from a fixture. A file may hold more than one class; each `func test…` is attributed to
     the most recent declaration above it.
     """
-    counts = {}
+    methods = {}
     for _name, text in sources:
         current = None
         for line in text.splitlines():
             declared = CLASS_DECL.match(line)
             if declared:
                 current = declared.group(1)
-                counts.setdefault(current, 0)
+                methods.setdefault(current, [])
                 continue
-            if current and TEST_FUNC.match(line):
-                counts[current] += 1
-    return {name: n for name, n in counts.items() if n > 0}
+            test = TEST_FUNC.match(line)
+            if current and test:
+                methods[current].append(test.group(1))
+    return {name: names for name, names in methods.items() if names}
+
+
+def suite_classes(sources):
+    """`{class name: test count}` for reporting and the self-test's readable assertions."""
+    return {name: len(names) for name, names in suite_methods(sources).items()}
 
 
 def shard_blocks(workflow_text):
-    """`[(id, [class names])]` for every matrix leg that names at least one class.
+    """`[(id, [selectors])]` for every matrix leg that selects at least one test.
 
     A leg naming none is not a shard — it is a `- id:` in some other list, or a leg mid-edit — and
     counting it would make the bundle-count check below disagree with what the `coverage` job will
@@ -126,9 +126,9 @@ def shard_blocks(workflow_text):
     blocks = re.split(SHARD_SPLIT, workflow_text, flags=re.MULTILINE)[1:]
     found = []
     for block in blocks:
-        names = ONLY_TESTING.findall(block)
-        if names:
-            found.append((block.split("\n", 1)[0].strip(), names))
+        selectors = shard_selectors(block)
+        if selectors:
+            found.append((block.split("\n", 1)[0].strip(), selectors))
     return found
 
 
@@ -161,32 +161,41 @@ def check_bundle_count(workflow_text):
 
 def check(workflow_text, sources):
     """Returns `(problems, sharded, tests)` — a list of strings, the shard list, the counts."""
-    sharded = shard_classes(workflow_text)
-    tests = suite_classes(sources)
+    sharded = shard_selectors(workflow_text)
+    methods = suite_methods(sources)
+    tests = {name: len(names) for name, names in methods.items()}
     problems = list(check_bundle_count(workflow_text))
 
-    seen = set()
-    for name in sharded:
-        if name in seen:
+    selected = {}
+    for name, method in sharded:
+        if name not in methods:
             problems.append(
-                f"{TARGET}/{name} is named by more than one shard: it would run twice, and the "
-                f"balance the shards were chosen for is wrong by that much."
+                f"{TARGET}/{name} is named by a shard but declares no tests — a renamed or deleted "
+                "class. xcodebuild can report 'no tests to run' and exit 0."
             )
-        seen.add(name)
+            continue
+        if method is not None and method not in methods[name]:
+            problems.append(
+                f"{TARGET}/{name}/{method} is named by a shard but declares no test method."
+            )
+            continue
+        for selected_method in ([method] if method else methods[name]):
+            key = (name, selected_method)
+            selected[key] = selected.get(key, 0) + 1
 
-    for name in sorted(seen - set(tests)):
-        problems.append(
-            f"{TARGET}/{name} is named by a shard in .github/workflows/ci.yml but declares no "
-            f"tests — a renamed or deleted class. xcodebuild reports this as 'no tests to run' and "
-            f"exits 0, so the shard goes green having run nothing."
-        )
-
-    for name in sorted(set(tests) - seen):
-        problems.append(
-            f"{TARGET}/{name} declares {tests[name]} test(s) and no shard in "
-            f".github/workflows/ci.yml runs it. Add an -only-testing:{TARGET}/{name} line to the "
-            f"lightest shard's `only:` list."
-        )
+    for name, names in sorted(methods.items()):
+        missing = [method for method in names if selected.get((name, method), 0) == 0]
+        doubled = [method for method in names if selected.get((name, method), 0) > 1]
+        if missing:
+            problems.append(
+                f"{TARGET}/{name} has {len(missing)} test method(s) no shard runs: "
+                + ", ".join(missing)
+            )
+        if doubled:
+            problems.append(
+                f"{TARGET}/{name} has {len(doubled)} test method(s) selected more than once: "
+                + ", ".join(doubled)
+            )
 
     return problems, sharded, tests
 
@@ -198,22 +207,23 @@ def report_balance(workflow_text, tests):
     and look at the real per-test durations in a shard's result bundle, not a verdict on anything.
     """
     totals = [
-        (shard_id, sum(tests.get(n, 0) for n in names), names)
-        for shard_id, names in shard_blocks(workflow_text)
+        (shard_id, sum(tests.get(name, 0) if method is None else 1
+                       for name, method in selectors), selectors)
+        for shard_id, selectors in shard_blocks(workflow_text)
     ]
     if not totals:
         return
 
     print(f"UI shards ({sum(n for _i, n, _c in totals)} tests across {len(totals)}):")
-    for shard_id, total, names in totals:
-        print(f"  shard {shard_id}: {total:3d}  {', '.join(names)}")
+    for shard_id, total, selectors in totals:
+        print(f"  shard {shard_id}: {total:3d} tests from {len(selectors)} selector(s)")
     heaviest = max(n for _i, n, _c in totals)
     lightest = min(n for _i, n, _c in totals)
     if lightest and heaviest > lightest * 1.5:
         print(
-            f"  note: the heaviest shard carries {heaviest} tests against the lightest's "
-            f"{lightest}. Worth rebalancing the matrix — see the comment above `macos-ui` in "
-            f".github/workflows/ci.yml for how to do it from measured durations."
+            f"  note: the largest shard selects {heaviest} tests against the smallest's "
+            f"{lightest}. Test count is not elapsed time; compare measured durations before "
+            "changing the balance."
         )
 
 
@@ -229,9 +239,10 @@ GOOD_WORKFLOW = """
           - id: 1
             only: >-
               -only-testing:MimicUITests/AlphaUITests
-              -only-testing:MimicUITests/BetaUITests
+              -only-testing:MimicUITests/BetaUITests/testOne
           - id: 2
             only: >-
+              -only-testing:MimicUITests/BetaUITests/testTwo
               -only-testing:MimicUITests/GammaUITests
 
   coverage:
@@ -272,7 +283,24 @@ def self_test():
         tests == {"AlphaUITests": 1, "BetaUITests": 2, "GammaUITests": 1},
         tests,
     )
-    expect("every shard flag is found", len(sharded) == 3, sharded)
+    expect("every class and method flag is found", len(sharded) == 4, sharded)
+
+    # A class split by method must still run every method exactly once.
+    partial = GOOD_WORKFLOW.replace("              -only-testing:MimicUITests/BetaUITests/testTwo\n", "")
+    problems, _s, _t = check(partial, GOOD_SOURCES)
+    expect(
+        "an omitted method in a split class fails",
+        len(problems) == 1 and "BetaUITests" in problems[0] and "testTwo" in problems[0],
+        problems,
+    )
+
+    unknown_method = GOOD_WORKFLOW.replace("BetaUITests/testTwo", "BetaUITests/testRenamed")
+    problems, _s, _t = check(unknown_method, GOOD_SOURCES)
+    expect(
+        "a shard naming a nonexistent method fails",
+        len(problems) == 2 and "testRenamed" in problems[0] and "testTwo" in problems[1],
+        problems,
+    )
 
     # A class on disk that no shard names — the failure this file exists for.
     unsharded = GOOD_SOURCES + [
@@ -285,12 +313,25 @@ def self_test():
         problems,
     )
 
-    # The same class on two shards.
+    # The same class selected twice.
     doubled = GOOD_WORKFLOW + "              -only-testing:MimicUITests/AlphaUITests\n"
     problems, _s, _t = check(doubled, GOOD_SOURCES)
     expect(
-        "a class named by two shards fails",
-        len(problems) == 1 and "more than one shard" in problems[0],
+        "a class named twice fails",
+        len(problems) == 1 and "selected more than once" in problems[0],
+        problems,
+    )
+
+    overlap = GOOD_WORKFLOW.replace(
+        "              -only-testing:MimicUITests/BetaUITests/testTwo\n",
+        "              -only-testing:MimicUITests/BetaUITests\n"
+        "              -only-testing:MimicUITests/BetaUITests/testTwo\n",
+    )
+    problems, _s, _t = check(overlap, GOOD_SOURCES)
+    expect(
+        "a class selector overlapping a method selector fails",
+        len(problems) == 1 and "BetaUITests" in problems[0]
+        and "selected more than once" in problems[0],
         problems,
     )
 
@@ -397,7 +438,7 @@ def main():
             print(f"error: {problem}", file=sys.stderr)
         return 1
 
-    print(f"\nEvery one of the {len(tests)} UI test classes is run by exactly one shard.")
+    print(f"\nEvery one of the {sum(tests.values())} UI test methods is selected exactly once.")
     return 0
 
 

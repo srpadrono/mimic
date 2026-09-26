@@ -3,7 +3,7 @@ import SwiftUI
 /// The divider between two groups of rows inside a panel — a label for what follows, not a headline.
 ///
 /// Modelled on Xcode's inspector section headers, which are the smallest thing on screen that still
-/// reads as structure: 11pt, `secondary`-weight, sentence case, on a faintly tinted band with a
+/// reads as structure: 13pt, `secondary`-weight, sentence case, on a faintly tinted band with a
 /// hairline under it. This one used to be 13pt medium on the panel's own background, which put the
 /// header at the same visual weight as the values underneath it — so an inspector read as a wall of
 /// equally loud rows and you had to actually read a line to find out whether it was a heading.
@@ -42,15 +42,13 @@ public struct DSSectionHeader<Trailing: View>: View {
             }
         }
         .padding(.horizontal, DSSpacing.md)
-        // One point over `xs`. `sm` left the band taller than the 11pt line needed and the header
-        // started competing with the rows for height; `xs` alone read as cramped against the
-        // hairline.
+        // Four points keep the 13pt label clear of the hairline; the minimum height below sets the
+        // bar's rhythm, including the taller variant with an action.
         .padding(.vertical, DSSpacing.xs + 1)
         // A floor, not a fixed height, because this header has two honest sizes and both are rungs:
-        // bare it measures 24 (`secondaryBar`), and with a trailing action — "Add", "Format" — the
-        // 22pt control carries it to 32 (`controlRow`). Pinning it to 24 outright would leave those
-        // buttons drawing 4pt past the band on each side.
-        .frame(minHeight: DSBarHeight.secondaryBar)
+        // bare it measures 28 (`secondaryBar`), and with a trailing action it grows to the 36pt
+        // control row. A fixed bare height would clip the action when a pane is narrow.
+        .frame(minHeight: trailingAction == nil ? DSBarHeight.secondaryBar : DSBarHeight.controlRow)
         // Faint on purpose: enough to separate the header from the rows below without becoming a
         // second surface inside a panel that is already an elevated one. `band`, whose note explains
         // why it blends toward `tertiary` — the panel's own surface *is* secondary, so a wash of

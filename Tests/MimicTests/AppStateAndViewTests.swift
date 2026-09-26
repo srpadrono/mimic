@@ -2050,9 +2050,15 @@ struct AppStateFacadeTests {
 
     @Test("Editor toolbar overflow follows the space between the side panels")
     func toolbarOverflowFollowsCenterWidth() {
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 440))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 839))
-        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 840))
+        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 599))
+        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 600))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 439))
+        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 440))
+        #expect(WorkspaceView.toolbarUsesIconStatus(centerWidth: 379))
+        #expect(!WorkspaceView.toolbarUsesIconStatus(centerWidth: 380))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 380))
+        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 500))
+        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 500))
         #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 1400))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 0))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .infinity))

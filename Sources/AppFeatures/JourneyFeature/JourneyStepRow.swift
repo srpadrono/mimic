@@ -22,8 +22,8 @@ struct JourneyStepRow: View {
             VStack(spacing: DSSpacing.xs) {
                 marker
                 Text("\(index + 1)")
-                    .font(DSTypography.caption)
-                    .fontWeight(isCurrent ? .semibold : .medium)
+                    .font(DSTypography.metaBold)
+                    .monospacedDigit()
                     .foregroundStyle(isCurrent ? DSColors.accentText : DSColors.labelSecondary)
                     .lineLimit(1)
             }
@@ -32,7 +32,7 @@ struct JourneyStepRow: View {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 HStack(spacing: DSSpacing.sm) {
                     Text(step.name)
-                        .font(DSTypography.bodyMedium)
+                        .font(isCurrent ? DSTypography.bodyBold : DSTypography.bodyMedium)
                         .foregroundStyle(DSColors.labelPrimary)
                         .lineLimit(1)
                         .help(step.name)
@@ -42,8 +42,9 @@ struct JourneyStepRow: View {
                 HStack(spacing: DSSpacing.sm) {
                     DSMethodBadge(method: step.method.rawValue, size: .compact, identifier: step.id.uuidString)
                     Text(routeLabel)
-                        .font(isCurrent ? DSTypography.codeBold : DSTypography.code)
-                        .foregroundStyle(DSColors.labelSecondary)
+                        .font(DSTypography.codePath)
+                        .fontWeight(isCurrent ? .semibold : .regular)
+                        .foregroundStyle(isCurrent ? DSColors.labelPrimary : DSColors.labelSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(routeHelp)
@@ -60,10 +61,8 @@ struct JourneyStepRow: View {
         // row — the sidebar's, the journeys navigator's, the scenario list's. It was the one
         // clickable row in the app with no pointer feedback at all.
         .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
-        // Enough to read as spent, not so much that a served step becomes unreadable — at 0.55 the
-        // tick and the number underneath it landed around 20% alpha, which is a row you can see the
-        // shape of and not the content of.
-        .opacity(isExhausted ? 0.65 : 1)
+        // A served step recedes while its route and outcome remain legible at the shared text scale.
+        .opacity(isExhausted ? 0.82 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("journeyStep-\(index)")
         .accessibilityLabel(accessibilityDescription)
@@ -122,7 +121,7 @@ struct JourneyStepRow: View {
                 Image(systemName: failure == .connectionDrop ? "bolt.horizontal.circle" : "clock.badge.exclamationmark")
                     .font(.system(size: DSGlyph.inline))
                 Text(Self.failureText(failure))
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .lineLimit(1)
             }
             .foregroundStyle(DSColors.labelSecondary)

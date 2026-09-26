@@ -21,6 +21,7 @@ struct JourneyEditorView: View {
     @State private var editingStepID: UUID?
     @State private var showNewStepSheet = false
     @State private var settingsExpanded = false
+    @State private var settingsContentHeight: CGFloat = .infinity
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,7 +30,20 @@ struct JourneyEditorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             DSDivider(identifier: "journeyEditor.run")
             settingsDisclosure
-            if settingsExpanded { settingsContent }
+            if settingsExpanded {
+                ScrollView {
+                    VStack(spacing: 0) { settingsContent }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            settingsContentHeight = height
+                        }
+                }
+                // Give the settings their natural height in a tall pane. In a short pane they
+                // scroll, leaving the Steps heading and a reachable list below them.
+                .frame(minHeight: 0, maxHeight: settingsContentHeight)
+                .layoutPriority(1)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("journeyEditor.settingsScroll")
+            }
             DSSectionHeader("Steps", identifier: "journeyEditor.stepsHeader") {
                 DSButton("Add step\u{2026}", variant: .secondary, size: .small,
                          identifier: "journeyEditor.addStep") {
@@ -39,7 +53,9 @@ struct JourneyEditorView: View {
                 .accessibilityLabel("Add step")
             }
             stepList
-                .frame(minHeight: 0, maxHeight: .infinity)
+                // Keep one complete two-line step visible, including the List's top inset.
+                .frame(minHeight: settingsExpanded ? DSRowHeight.journeyStep + DSSpacing.lgPlus : 0,
+                       maxHeight: .infinity)
         }
         // The centre pane tags this view with an identifier of its own, and a bare
         // `.accessibilityIdentifier` on a container renames every descendant to match it — which
@@ -80,7 +96,7 @@ struct JourneyEditorView: View {
                     .font(DSTypography.controlLabel)
                 Spacer(minLength: DSSpacing.xs)
                 Text("\(journey.groupTag ?? "Ungrouped") · \(journey.matchMode == .orderedPerEndpoint ? "Ordered per route" : "Strict sequence")")
-                    .font(DSTypography.label)
+                    .font(DSTypography.meta)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(DSColors.labelSecondary)
@@ -91,7 +107,7 @@ struct JourneyEditorView: View {
             }
             .foregroundStyle(DSColors.labelPrimary)
             .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.secondaryBar)
+            .frame(minHeight: DSBarHeight.controlRow)
             .contentShape(Rectangle())
         }
         .buttonStyle(.dsPlain)
@@ -136,9 +152,10 @@ struct JourneyEditorView: View {
                 .accessibilityIdentifier("journeyEditor.name")
             if let summary = journey.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(DSTypography.label)
+                    .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(2)
+                    .lineSpacing(DSSpacing.xxs)
                     .help(summary)
                     .accessibilityIdentifier("journeyEditor.summary")
             }
@@ -215,6 +232,7 @@ struct JourneyEditorView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(title)
+                .font(DSTypography.meta)
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityHidden(true)
             control()

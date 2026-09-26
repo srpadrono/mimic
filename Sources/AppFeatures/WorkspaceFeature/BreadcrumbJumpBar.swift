@@ -12,12 +12,12 @@ import DesignSystem
 ///
 /// The chrome rules are deliberately not `DSPanelHeader`'s:
 ///
-/// - **24pt, not 30.** This sits *inside* the editor rather than above a panel. Matching the panel
+/// - **28pt, not 36.** This sits *inside* the editor rather than above a panel. Matching the panel
 ///   header height would make it read as a fourth panel header and put two same-weight bars in a row
 ///   at the top of the window. Secondary chrome should look secondary — but it still has to be
-///   readable, and 22pt was too short to sit 11pt text in without it feeling wedged.
+///   readable, and the earlier 24pt bar was too short for the current 13pt labels.
 /// - **Secondary is not disabled.** The whole bar once rendered at caption weight in the secondary
-///   label colour, which read as greyed-out chrome. Crumbs are 11pt; the trailing crumb — where you
+///   label colour, which read as greyed-out chrome. Crumbs are 13pt; the trailing crumb — where you
 ///   actually are — takes the primary label colour at medium weight, as Xcode's does.
 /// - **A crumb with nowhere to go is not a control.** Zero options renders as plain text — no hover
 ///   response, no menu indicator — because a button that does nothing when clicked is worse than a
@@ -29,7 +29,7 @@ import DesignSystem
 ///   menu so the current endpoint and scenario remain readable without losing sideways navigation.
 struct BreadcrumbJumpBar: View {
     @State private var isEarlierHovered = false
-    /// Deliberately shorter than `DSBarHeight.panelHeader`, but tall enough for 11pt crumbs. See the
+    /// Deliberately shorter than `DSBarHeight.panelHeader`, but tall enough for 13pt crumbs. See the
     /// type's note — `secondaryBar` is the rung that exists for this bar.
     static var height: CGFloat { DSBarHeight.secondaryBar }
 
@@ -268,7 +268,7 @@ private struct BreadcrumbCrumbView: View {
                     .accessibilityHidden(true)
             }
 
-            // 11pt, not the 10pt caption: a path you cannot read at a glance is decoration. The
+            // 13pt label, above the 11pt caption: a path you cannot read at a glance is decoration. The
             // crumb you are on carries medium weight so the end of the path is the part that reads
             // first — the one place in this file `fontWeight` earns itself.
             Text(crumb.title)
@@ -314,7 +314,7 @@ private struct BreadcrumbSeparator: View {
 
 // MARK: - History controls
 
-/// A back or forward arrow, sized for the 24pt bar.
+/// A back or forward arrow, sized for the 28pt bar.
 ///
 /// The icon is a `Label` with the text styled away rather than a bare `Image`, so VoiceOver and Voice
 /// Control still have something to say, and the 18pt frame plus `contentShape` gives it a hit target
@@ -333,7 +333,7 @@ private struct BreadcrumbHistoryButton: View {
             Label(label, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 // `inline`, a rung below the `control` a panel-header button takes: this bar is
-                // `DSBarHeight.secondaryBar` and its arrows sit in an 18pt frame rather than a 22pt
+                // `DSBarHeight.secondaryBar` and its arrows sit in an 18pt frame rather than a 26pt
                 // one, so a glyph at the control tier would stand proud of the chrome around it.
                 .font(.system(size: DSGlyph.inline, weight: .semibold))
                 .foregroundStyle(foreground)

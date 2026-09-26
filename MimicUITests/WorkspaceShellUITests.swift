@@ -928,6 +928,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenarios")
         createEndpointViaUI(name: "Get users", path: "/api/users")
 
+        // The hosted runner can restore an 808pt window with its right edge beyond the 1024pt
+        // display. Move it back on screen before using the inspector's pointer controls.
+        workspace.compactWindow()
+
         XCTAssertTrue(
             breadcrumb.waitForCrumb("scenario", toRead: "Default"),
             "A new endpoint answers with its default scenario — "
@@ -942,6 +946,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(
             addScenario.waitForExistence(timeout: 5),
             "The Scenarios header should offer a way to add one"
+        )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { addScenario.isHittable },
+            "The Scenarios header action should be on screen and clickable"
         )
         addScenario.click()
 
@@ -1406,6 +1414,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         launchShell()
         workspace.compactWindow()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
+        XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5),
+                      "The compact toolbar must keep the project name visible")
         // On the smallest CI displays AppKit itself overflows the entire center group.
         // Check our compact menu whenever that group fits; the expanded layout is always checked.
         if workspace.overflowMenu.exists {
@@ -1455,6 +1465,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         well.closeDetails()
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
+        XCTAssertTrue(workspace.projectTitle.isHittable,
+                      "Running in a compact window must keep the project name visible")
         XCTAssertTrue(workspace.serverToggleButton.isHittable,
                       "Run/Stop must remain usable in the compact toolbar")
         XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")

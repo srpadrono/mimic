@@ -92,22 +92,28 @@ struct WelcomeWindow: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            // MARK: - Left column: branding + actions
-            leftColumn
-                .frame(width: 280)
-                .frame(maxHeight: .infinity)
-                .background(DSColors.dominant)
+        GeometryReader { geometry in
+            let heroWidth = min(360, max(280, geometry.size.width * 0.26))
 
-            // `.strong`, now that it means something: this separates the window's two full-height
-            // columns, which is the heaviest job a rule in this app does. `.standard` reads as an
-            // in-panel hairline and let the two halves run together.
-            DSDivider(style: .strong, axis: .vertical)
+            HStack(spacing: 0) {
+                // Keep the launcher compact at its usual size, then give its existing action and
+                // identity a little more room when returning from a maximized workspace.
+                leftColumn(iconSize: 96 + (heroWidth - 280) * 0.2)
+                    .frame(width: heroWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(DSColors.dominant)
 
-            // MARK: - Right column: recent projects
-            rightColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DSColors.secondary)
+                // This separates the two full-height columns, which is the heaviest job a rule in
+                // this app does. `.standard` reads as an in-panel hairline.
+                DSDivider(style: .strong, axis: .vertical)
+
+                // A recent-project row should stay readable in a wide retained workspace window;
+                // it should not become a full-width stripe with its timestamp at the far edge.
+                rightColumn
+                    .frame(maxWidth: 840, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(DSColors.secondary)
+            }
         }
         .frame(minWidth: 640, minHeight: 380)
         .alert(
@@ -137,27 +143,27 @@ struct WelcomeWindow: View {
 
     // MARK: - Left Column
 
-    private var leftColumn: some View {
-        VStack(spacing: DSSpacing.xxl) {
+    private func leftColumn(iconSize: CGFloat) -> some View {
+        VStack(spacing: DSSpacing.xxxl) {
             Spacer(minLength: 0)
-            hero
+            hero(iconSize: iconSize)
             actions
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DSSpacing.lg)
     }
 
-    private var hero: some View {
-        VStack(spacing: DSSpacing.md) {
+    private func hero(iconSize: CGFloat) -> some View {
+        VStack(spacing: DSSpacing.lg) {
             Image("MimicLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 128, height: 128)
-                // 28 is ~0.2237 × the icon's edge: the macOS app-icon squircle, not a UI corner.
+                .frame(width: iconSize, height: iconSize)
+                // The app-icon squircle is not a control corner, so it stays local to this image.
                 // Deliberately not a `DSCornerRadius` token — those are for controls and panels, and
                 // rounding an app icon to 12 would make it look like a button.
-                .clipShape(RoundedRectangle(cornerRadius: 28))
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                .clipShape(RoundedRectangle(cornerRadius: 21))
+                .shadow(color: .black.opacity(0.16), radius: 8, y: 2)
                 // The title underneath says "Mimic"; without this VoiceOver says it twice, the
                 // second time as the asset's filename.
                 .accessibilityHidden(true)
@@ -213,7 +219,7 @@ struct WelcomeWindow: View {
 
     // MARK: - Right Column
 
-    /// The recents pane is a panel, so it wears the same chrome the workspace panels do: one 30pt
+    /// The recents pane is a panel, so it wears the same chrome the workspace panels do: one 36pt
     /// row, title left, count in the subtitle slot — and it stays when the list is empty, because
     /// chrome that disappears with its content reads as a rendering glitch.
     private var rightColumn: some View {
@@ -256,7 +262,12 @@ struct WelcomeWindow: View {
     private var recentsList: some View {
         List(recentProjects, selection: $selectedRecentID) { entry in
             RecentProjectRow(entry: entry)
-                .listRowInsets(EdgeInsets())
+                .listRowInsets(EdgeInsets(
+                    top: DSSpacing.xxs,
+                    leading: DSSpacing.smPlus,
+                    bottom: DSSpacing.xxs,
+                    trailing: DSSpacing.smPlus
+                ))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
                 // Without this the row responded to a click only where a glyph or a word happened to
@@ -288,6 +299,7 @@ struct WelcomeWindow: View {
                 }
         }
         .listStyle(.plain)
+        .padding(.top, DSSpacing.smPlus)
         // `.contain` before the identifier, so naming the list does not rename the rows —
         // `recentProject-<name>` is what a test clicks, and this is what it sends arrow keys to.
         .accessibilityElement(children: .contain)
@@ -351,24 +363,28 @@ private struct ActionRow: View {
         Button {
             action()
         } label: {
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.mdMinus) {
                 Image(systemName: icon)
                     .font(.system(size: DSGlyph.controlProminent))
                     .foregroundStyle(DSColors.accentText)
                     .frame(width: DSControlHeight.row)
 
                 Text(title)
-                    .font(DSTypography.body)
+                    .font(DSTypography.bodyMedium)
                     .foregroundStyle(DSColors.labelPrimary)
 
                 Spacer()
             }
-            .padding(.horizontal, DSSpacing.md)
-            .padding(.vertical, DSSpacing.smPlus)
+            .padding(.horizontal, DSSpacing.lg)
+            .frame(minHeight: 40)
             .background(
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .fill(isHovered ? DSColors.accentSubtle : .clear)
+                    .fill(isHovered ? DSColors.accentSubtle : DSColors.surfaceElevated)
             )
+            .overlay {
+                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
+                    .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -393,13 +409,13 @@ private struct RecentProjectRow: View {
             Image("MimicLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 32, height: 32)
-                // 7 is the same 0.2237 squircle the hero icon uses, at 32pt. Both are app-icon
+                .frame(width: 28, height: 28)
+                // The squircle follows the hero icon's proportion. Both are app-icon
                 // masks rather than control corners, which is why neither is a token.
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                 Text(entry.name)
                     .font(DSTypography.bodyMedium)
                     .foregroundStyle(DSColors.labelPrimary)
@@ -410,7 +426,7 @@ private struct RecentProjectRow: View {
                 // the list re-rendered once a second to move a number nobody was watching. This is
                 // a formatted string, resolved once.
                 Text("Last opened \(Self.relativeText(for: entry.lastOpenedAt))")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.metaSmall)
                     // Not `labelTertiary`: at 36% alpha this was the only thing distinguishing two
                     // rows and you could barely read it.
                     .foregroundStyle(DSColors.labelSecondary)
@@ -433,7 +449,7 @@ private struct RecentProjectRow: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
+        .frame(minHeight: 44)
         .background(
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
                 // `accentSubtle` (12%), the app's one hover fill, rather than a hand-rolled 15%.

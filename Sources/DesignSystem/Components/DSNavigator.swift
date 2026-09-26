@@ -11,7 +11,7 @@ public enum DSNavigatorMetrics {
     public static let headerHeight = DSBarHeight.navigatorHeader
     public static let footerHeight = DSBarHeight.navigatorFooter
     public static let minimumWidth: CGFloat = 240
-    public static let idealWidth: CGFloat = 260
+    public static let idealWidth: CGFloat = 240
     public static let maximumWidth: CGFloat = 360
 }
 

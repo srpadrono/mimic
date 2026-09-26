@@ -61,9 +61,9 @@ struct NewEndpointSheet: View {
                             Text(method.rawValue).tag(method)
                         }
                     }
-                    // AppKit's regular picker is 24pt beside the field's 22pt well. Pinning its
-                    // frame to 22 would centre the 24pt control and misalign both edges; keeping
-                    // their top edges aligned is the cleaner native arrangement.
+                    // AppKit's regular picker draws at 24pt beside the field's 26pt well. A 26pt
+                    // frame would not resize the popup chrome; keeping their top edges aligned is
+                    // the cleaner native arrangement.
                     .accessibilityLabel("HTTP method")
 
                     DSTextField(

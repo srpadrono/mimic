@@ -177,7 +177,7 @@ struct RequestDetailInspector: View {
                 .accessibilityLabel("Save response as mock")
                 .padding(DSSpacing.md)
             if let captureIssue {
-                Text(captureIssue).font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+                Text(captureIssue).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.captureIssue")
             }
@@ -197,8 +197,8 @@ struct RequestDetailInspector: View {
                 statusPill
                 Spacer(minLength: 0)
                 Text(log.timestamp, style: .time)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelTertiary)
+                    .font(DSTypography.metaSmall)
+                    .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("requestDetail.timestamp")
             }
 
@@ -208,7 +208,7 @@ struct RequestDetailInspector: View {
             // covers essentially every real path; the full string is still selectable and the
             // tooltip carries it whole.
             Text(log.path)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.codeLarge)
                 .foregroundStyle(DSColors.labelPrimary)
                 .textSelection(.enabled)
                 .lineLimit(2)
@@ -260,7 +260,7 @@ struct RequestDetailInspector: View {
 
             if log.outcome.isMissingConfiguration {
                 Text("Nothing was configured for this call, so Mimic answered with its fallback. Right-click the row in the request log to create an endpoint for it.")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.label)
                     // `labelSecondary`. This sentence is the only place the panel explains what an
                     // unmatched request is and what to do about it — and `DSContrastTests` asserts
                     // that `labelTertiary` clears AA on no surface in this app, in either appearance.
@@ -268,6 +268,7 @@ struct RequestDetailInspector: View {
                     // the truncation note further down, were the two that did not.
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(DSSpacing.xxs)
                     .padding(DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.unmatchedHint")
             }
@@ -338,20 +339,20 @@ struct RequestDetailInspector: View {
             ForEach(Array(headers.sorted(by: { $0.key < $1.key }).enumerated()), id: \.element.key) { index, header in
                 // Key above value rather than beside it. The inspector is 220–400pt wide, and a
                 // two-column layout at that width truncates both halves of every interesting header.
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
                     Text(header.key)
-                        .font(DSTypography.caption)
+                        .font(DSTypography.labelMedium)
                         // The key is the half you scan for; it cannot be the fainter half.
                         .foregroundStyle(DSColors.labelSecondary)
                     Text(header.value)
-                        .font(DSTypography.codeSmall)
+                        .font(DSTypography.code)
                         .foregroundStyle(DSColors.labelPrimary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DSSpacing.md)
-                .padding(.vertical, DSSpacing.xs + 1)
+                .padding(.vertical, DSSpacing.sm)
                 .background(index % 2 == 0 ? Color.clear : DSColors.rowStripe)
                 .accessibilityElement(children: .combine)
                 // Keyed by the header's name, which is what the `ForEach` already keys by, so the
@@ -429,7 +430,7 @@ struct RequestDetailInspector: View {
 
                 if log.responseBodyTruncated {
                     Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
-                        .font(DSTypography.caption)
+                        .font(DSTypography.label)
                         // The one thing telling you the payload above is not the whole payload. See
                         // the unmatched note above for why this is not `labelTertiary`.
                         .foregroundStyle(DSColors.labelSecondary)
@@ -502,15 +503,17 @@ struct RequestDetailInspector: View {
                 Spacer(minLength: 0)
 
                 if let copyConfirmation {
-                    Text(copyConfirmation)
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.success)
-                        // One line. The row is pinned to a single bar height, so wrapping is not
-                        // shorter text, it is clipped text.
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .transition(.opacity)
-                        .accessibilityIdentifier("requestDetail.copyConfirmation")
+                    ViewThatFits(in: .horizontal) {
+                        Text(copyConfirmation)
+                            .font(DSTypography.caption)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: DSGlyph.inline))
+                            .accessibilityLabel(copyConfirmation)
+                    }
+                    .foregroundStyle(DSColors.success)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("requestDetail.copyConfirmation")
                 }
             }
             .padding(.horizontal, DSSpacing.md)
@@ -519,9 +522,10 @@ struct RequestDetailInspector: View {
     }
 
     /// `DSButton`'s ghost variant — accent text, no fill, no border — which is what these were
-    /// hand-drawing: a `.plain` button tinted accent, padded, and pinned to 20pt, which is `.small`'s
-    /// height exactly. The one thing the hand-written version left out was any response to the
-    /// pointer, and these three are the buttons in this panel a user goes looking for most.
+    /// hand-drawing: a `.plain` button tinted accent, padded, and pinned to 20pt. The shared `.small`
+    /// action now takes a 24pt target. The one thing the hand-written version left out was any
+    /// response to the pointer, and these three are the buttons in this panel a user goes looking
+    /// for most.
     @ViewBuilder
     private func copyButton(
         _ title: String,
@@ -565,7 +569,7 @@ struct RequestDetailInspector: View {
     @ViewBuilder
     private func emptyNote(_ message: String, identifier: String) -> some View {
         Text(message)
-            .font(DSTypography.caption)
+            .font(DSTypography.label)
             // The only thing in an empty section, so it is the thing to read.
             .foregroundStyle(DSColors.labelSecondary)
             .fixedSize(horizontal: false, vertical: true)

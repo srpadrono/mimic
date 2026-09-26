@@ -7,7 +7,7 @@ public enum DSInspectorMetrics {
     public static let rowHeight = DSRowHeight.compactRow
     public static let inset = DSNavigatorMetrics.inset
     public static let iconSlot = DSNavigatorMetrics.iconSlot
-    public static let labelColumn: CGFloat = 104
+    public static let labelColumn: CGFloat = 112
     public static let statusColumn: CGFloat = 36
 }
 
@@ -64,8 +64,9 @@ public struct DSInspectorValueRow: View {
     public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.smPlus) {
             Text(label)
-                .font(DSTypography.labelMedium)
+                .font(DSTypography.metaBold)
                 .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
                 .frame(width: DSInspectorMetrics.labelColumn, alignment: .trailing)
             Text(value)
                 .font(DSTypography.label)

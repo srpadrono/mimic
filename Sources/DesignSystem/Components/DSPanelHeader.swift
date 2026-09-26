@@ -49,8 +49,8 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // `DSTypography.caption` at `labelSecondary` — the *same font and the same colour as
                 // the count beside it*. A panel's own name was the quietest text in its own bar, and
                 // "Scenarios" and "/account-summary" arrived with equal weight, so nothing in the row
-                // said which was the heading. 12pt semibold against 10pt medium is the smallest
-                // change that makes the title read as the title.
+                // said which was the heading. The current 13pt semibold title sits above the 11pt
+                // medium count without competing with the content below.
                 .font(DSTypography.controlLabel)
                 .foregroundStyle(DSColors.labelPrimary)
                 // `.lineLimit(1)` with priority, not `.fixedSize()`.
@@ -125,7 +125,7 @@ extension DSPanelHeader where Accessory == EmptyView {
 ///
 /// Panel headers were using bare `Image`s in `.plain` buttons, which gave a ~11pt hit target and no
 /// hover feedback — fine to look at, awkward to actually hit. This keeps the same quiet appearance
-/// but takes a real 22pt target and lights up under the pointer.
+/// but takes a real 26pt target and lights up under the pointer.
 public struct DSPanelHeaderButton: View {
     private let systemImage: String
     private let help: String

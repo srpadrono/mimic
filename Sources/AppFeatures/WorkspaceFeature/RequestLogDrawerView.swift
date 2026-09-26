@@ -30,21 +30,28 @@ enum LogColumns {
     static let status: CGFloat = 52
     static let compactStatus: CGFloat = 44
 
-    /// Up from 58, which fitted "9:41 AM" and does not fit "9:41:33 AM". Sized for a 12-hour locale,
-    /// the wider of the two, at `Figure.small`: "11:41:33 PM" is eleven characters and SF Mono
-    /// advances 0.6em, so 11pt needs 72.6 — and 72 was picked by eye before the test measured it.
+    /// Fits a seconds-precision timestamp in a 12-hour locale at the compact caption size.
+    /// Keeping timestamps secondary preserves space for the flexible path column.
     static let time: CGFloat = 74
 
     // Reserve a readable path column before offering horizontal scrolling.
     static let minimumTableWidth = method + endpoint + scenario + status + time + endpoint + DSSpacing.md * 2
 
-    // path is flexible — takes remaining space
+    /// Header and rows must receive the same resolved path width. A vertical scrollbar can reduce
+    /// the row viewport without reducing the separate header's width; letting each HStack distribute
+    /// the remainder independently shifts every column after Path when the log starts scrolling.
+    static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
+        let fixedWidth = compact
+            ? compactMethod + compactStatus + time
+            : method + endpoint + scenario + status + time
+        return max(0, tableWidth - fixedWidth - DSSpacing.md * 2)
+    }
 }
 
 /// One traffic row's geometry.
 ///
-/// Traffic has its own 28pt content-row rung. It carries a method badge and six other columns, so
-/// the import review's denser 26pt candidate row is not a useful source of geometry here.
+/// Traffic has its own 32pt content-row rung. It carries a method badge and six other columns, so
+/// the import review's denser 30pt candidate row is not a useful source of geometry here.
 private enum LogRow {
     static let height = DSRowHeight.logRow
 }
@@ -348,7 +355,7 @@ struct RequestLogDrawerView: View {
                 HStack(spacing: DSSpacing.md) {
                     if let countSubtitle {
                         Text(countSubtitle)
-                            .font(DSTypography.caption)
+                            .font(DSTypography.metaSmall)
                             .foregroundStyle(DSColors.labelSecondary)
                             .lineLimit(1)
                             .accessibilityIdentifier("drawer.count")
@@ -381,14 +388,15 @@ struct RequestLogDrawerView: View {
                 )
             } else {
                 GeometryReader { table in
+                    let tableWidth = narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth)
+                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: narrow)
                     ScrollView(.horizontal) {
                         VStack(spacing: 0) {
-                            tableHeader(compact: narrow)
+                            tableHeader(compact: narrow, pathWidth: pathWidth)
                             DSDivider(style: .standard, identifier: "drawer.table.header")
-                            tableBody(compact: narrow)
+                            tableBody(compact: narrow, pathWidth: pathWidth, tableWidth: tableWidth)
                         }
-                        .frame(width: narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth),
-                               height: table.size.height)
+                        .frame(width: tableWidth, height: table.size.height)
                     }
                 }
             }
@@ -513,11 +521,11 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Header
 
     @ViewBuilder
-    private func tableHeader(compact: Bool) -> some View {
+    private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             columnHeader("Method", field: .method,
                          width: compact ? LogColumns.compactMethod : LogColumns.method)
-            columnHeader("Path", field: .path, width: nil)
+            columnHeader("Path", field: .path, width: pathWidth)
             if !compact {
                 columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
                 columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
@@ -558,7 +566,7 @@ struct RequestLogDrawerView: View {
     // MARK: - Table Body
 
     @ViewBuilder
-    private func tableBody(compact: Bool) -> some View {
+    private func tableBody(compact: Bool, pathWidth: CGFloat, tableWidth: CGFloat) -> some View {
         // Both resolved once for the whole table. A row's context menu has to know the entire
         // selection, and working that out inside the row would be O(rows²) on a log that holds a
         // thousand of them.
@@ -577,6 +585,7 @@ struct RequestLogDrawerView: View {
                             rowIndex: index,
                             isSelected: selectedLogIDs.contains(log.id),
                             compact: compact,
+                            pathWidth: pathWidth,
                             onCreateEndpoint: onCreateEndpoint,
                             onSaveAsMock: onSaveAsMock,
                             journeys: journeys,
@@ -606,7 +615,11 @@ struct RequestLogDrawerView: View {
                         )
                     }
                 }
+                // The vertical scrollbar narrows its viewport. Keep the rows anchored to the
+                // header's full table width instead of centering an over-wide stack in that viewport.
+                .frame(width: tableWidth, alignment: .leading)
             }
+            .frame(width: tableWidth, alignment: .leading)
             // Selection here was reachable only by pointer — and this is the app's one multi-select
             // surface, the one a journey is captured from, so capturing a flow was a pointer-only
             // workflow end to end. `.focusable()` is what lets a `ScrollView` of tap targets take a
@@ -1025,7 +1038,7 @@ private struct UnmatchedFilterToggle: View {
                     .font(.system(size: DSGlyph.inline))
                 if !compact {
                     Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                        .font(DSTypography.caption)
+                        .font(DSTypography.label)
                 }
             }
             .foregroundStyle(foreground)
@@ -1112,7 +1125,9 @@ private struct SortableColumnHeader: View {
         Button(action: sort) {
             HStack(spacing: DSSpacing.xxs) {
                 Text(title)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.metaSmall)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
                     // The sorted column should be legible as sorted from across the row, without
                     // first finding a chevron to read.
                     .fontWeight(isActive ? .semibold : nil)
@@ -1169,6 +1184,8 @@ struct RequestLogTableRow: View {
     let rowIndex: Int
     let isSelected: Bool
     var compact = false
+    /// The live table supplies its measured Path width; standalone rows may size it naturally.
+    var pathWidth: CGFloat? = nil
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
     var onSaveAsMock: ((UUID) -> Void)? = nil
     @State private var showingSaveConfirmation = false
@@ -1202,10 +1219,11 @@ struct RequestLogTableRow: View {
 
             // Path
             Text(log.path)
-                .font(DSTypography.codeSmall)
+                .font(DSTypography.codePath)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: pathWidth, alignment: .leading)
+                .frame(maxWidth: pathWidth == nil ? .infinity : nil, alignment: .leading)
 
             // Endpoint — or, when none matched, what did answer. A bare em dash here used to mean
             // both "unconfigured" and "a journey answered", which is exactly the distinction someone
@@ -1221,7 +1239,7 @@ struct RequestLogTableRow: View {
 
             // Scenario
                 Text(scenarioName ?? "\u{2014}")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
                     .lineLimit(1)
                     .frame(width: LogColumns.scenario, alignment: .leading)
@@ -1240,12 +1258,11 @@ struct RequestLogTableRow: View {
             // not do it. `.dateTime` rather than a `DateFormatter` so the 12/24-hour choice stays the
             // reader's locale rather than this file's opinion.
             //
-            // `Figure.small` is `codeSmall.monospacedDigit()`, which exists for exactly this: at a
-            // proportional face the colons and the 1s wandered, so a column of times did not line up
-            // as a column.
+            // A timestamp is supporting context, so use the caption size. Monospaced digits keep
+            // a burst of adjacent times aligned without widening this fixed column.
             Text(log.timestamp, format: .dateTime.hour().minute().second())
-                .font(DSTypography.Figure.small)
-                .foregroundStyle(DSColors.labelTertiary)
+                .font(DSTypography.caption.monospacedDigit())
+                .foregroundStyle(DSColors.labelSecondary)
                 .frame(width: LogColumns.time, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
@@ -1374,37 +1391,40 @@ struct RequestLogTableRow: View {
     private var endpointCell: some View {
         if let endpointName {
             Text(endpointName)
-                .font(DSTypography.caption)
+                .font(DSTypography.meta)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
         } else {
             switch log.outcome {
             case .unmatched:
                 Text(RequestOutcome.unmatched.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.httpStatusColor(for: 404))
                     .lineLimit(1)
             case .blockedByJourney:
                 Text(RequestOutcome.blockedByJourney.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
             case .journey:
                 Text(RequestOutcome.journey.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.accentText)
                     .lineLimit(1)
             case .proxyFailure:
-                Text(RequestOutcome.proxyFailure.label).foregroundStyle(DSColors.destructive)
+                Text(RequestOutcome.proxyFailure.label)
+                    .font(DSTypography.meta)
+                    .foregroundStyle(DSColors.destructive)
+                    .lineLimit(1)
             case .passthrough:
                 Text((log.backendName.map { $0 + " · " } ?? "") + RequestOutcome.passthrough.label)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.success)
                     .lineLimit(1)
             case .endpoint:
                 // An endpoint answered but has since been renamed or deleted.
                 Text("\u{2014}")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.meta)
                     .foregroundStyle(DSColors.labelTertiary)
             }
         }

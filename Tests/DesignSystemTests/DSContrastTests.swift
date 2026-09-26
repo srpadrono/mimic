@@ -1558,7 +1558,7 @@ struct DSContrastTests {
             // pure ink, too: a label tier that picked up a tint would colour every panel it appears in.
             let tiers: [(Color, Double)] = [
                 (DSColors.labelPrimary, 0.88),
-                (DSColors.labelSecondary, 0.55),
+                (DSColors.labelSecondary, 0.66),
                 (DSColors.labelTertiary, 0.36)
             ]
             for (token, alpha) in tiers {
@@ -1703,21 +1703,10 @@ struct DSContrastTests {
     /// **The well goes green while the server is up, and a tint under text is a cost before it is a
     /// signal.** This is the reading that decided what the well may draw on itself.
     ///
-    /// ``DSColors/successSubtle`` is 12% of ``DSColors/success`` on the toolbar surface, a ΔL\* step
-    /// of 6.1 in light and 7.1 in dark — a surface you see change, in the same territory as the
-    /// widest band step in the window. What that costs is the whole question, and the answer is not
-    /// uniform: the address at `labelPrimary` never notices (12.94 and 9.01), the amber unmatched
-    /// badge clears comfortably (5.31 and 5.40), and `labelSecondary` — which clears AA on the bare
-    /// toolbar at 4.61 — drops to **4.40 in light**, under the bar.
-    ///
-    /// So the well draws no *word* at `labelSecondary`. The one thing that tier is left holding is
-    /// the request-count glyph, which is a mark rather than text and is measured against the 3:1
-    /// non-text bar it actually answers to. The copy chip's word moved onto ``DSColors/tertiary``
-    /// for exactly this reason, and the four readings that pushed it there — the 6% ink wash it was
-    /// first drawn on at rest, and the `accentSubtle` well it lit to — are pinned below as the
-    /// negative control, because "we
-    /// tried the obvious fill and it failed" is the part a later reader cannot re-derive from a
-    /// passing test.
+    /// ``DSColors/successSubtle`` is 12% of ``DSColors/success`` on the toolbar. The address,
+    /// unmatched badge, count glyph, and copy chip must remain readable on the tinted well in both
+    /// appearances. The stronger secondary label gives the count and resting chip more headroom;
+    /// the former `accentSubtle` hover is still too weak and remains a useful negative control.
     ///
     /// Every reading here is `ServerStatusWell`'s, and the composites are spelled the way that view
     /// spells them: `successSubtle` over ``DSColors/secondary``, which is the toolbar.
@@ -1735,8 +1724,8 @@ struct DSContrastTests {
             inkWashAtRest: Double,
             inkWashHovered: Double
         )] = [
-            .light: (6.09, 12.94, 5.31, 4.40, 4.55, 4.98, 5.76, 4.27, 4.03),
-            .dark: (7.08, 9.01, 5.40, 4.60, 4.67, 4.54, 5.61, 4.16, 3.96)
+            .light: (6.09, 12.94, 5.31, 6.46, 6.70, 4.98, 5.76, 6.12, 4.03),
+            .dark: (7.08, 9.01, 5.40, 5.86, 5.98, 4.54, 5.61, 5.18, 3.96)
         ]
 
         for appearance in Appearance.allCases {
@@ -1760,11 +1749,10 @@ struct DSContrastTests {
             #expect(unmatched >= 4.5, "The unmatched badge reads \(unmatched) in \(appearance)")
 
             // The count glyph is the one mark left at `labelSecondary` on the tint, and it is a
-            // glyph: 3:1 is the bar a non-text component answers to. It fails the text bar in light
-            // at 4.40, which is why nothing that has to be *read* is left on this tier.
+            // glyph. It now also clears the text bar after the secondary label was strengthened.
             let countGlyph = try contrast(DSColors.labelSecondary, on: well, in: appearance)
             #expect(isClose(countGlyph, bar.countGlyph, within: ratioTolerance))
-            #expect(countGlyph >= 3.0, "The count glyph reads \(countGlyph) in \(appearance)")
+            #expect(countGlyph >= 4.5, "The count glyph reads \(countGlyph) in \(appearance)")
 
             // The copy chip, in its three states, on the fill it settled on.
             let atRest = try contrast(DSColors.labelSecondary, on: chip, in: appearance)
@@ -1777,9 +1765,8 @@ struct DSContrastTests {
                 #expect(reading >= 4.5, "The copy chip \(state) reads \(reading) in \(appearance)")
             }
 
-            // **Negative control.** The fill the chip was first drawn on — a 6% ink wash lighting to
-            // `accentSubtle` — put back and shown failing, so that reverting to the idiom the rest
-            // of the window uses for a hover well fails here rather than shipping.
+            // The former 6% ink wash is readable at rest after raising secondary contrast. Its
+            // `accentSubtle` hover still falls below the text floor, so the chip retains its own fill.
             let inkWash = try resolve(DSColors.labelPrimary.opacity(0.06), in: appearance)
                 .composited(over: well)
             // The hover *replaced* the wash rather than layering on it, so this is `accentSubtle`
@@ -1790,7 +1777,7 @@ struct DSContrastTests {
             let wasHovered = try contrast(DSColors.accentText, on: inkWashHover, in: appearance)
             #expect(isClose(wasAtRest, bar.inkWashAtRest, within: ratioTolerance))
             #expect(isClose(wasHovered, bar.inkWashHovered, within: ratioTolerance))
-            #expect(wasAtRest < 4.5, "The 6% ink wash is the composite `tertiary` replaced")
+            #expect(wasAtRest >= 4.5, "The 6% ink wash should now be readable at rest")
             #expect(wasHovered < 4.5, "An `accentSubtle` hover on it failed in both appearances")
         }
     }

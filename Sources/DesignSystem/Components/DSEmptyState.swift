@@ -29,11 +29,10 @@ public struct DSEmptyState: View {
     /// Below this the illustration is dropped, because it is the only part of this view that can be
     /// spared and the only part that was not being spared.
     ///
-    /// The request log's default height is 220pt, less 30 for its header: 190. A full empty state
-    /// needs about 187 — 64 of icon, 12 of spacing, 17 of heading, 12 more, two lines of message at
-    /// 34, and 48 of vertical padding. Three points of slack, and the glow ring around the glyph
-    /// spends them. The `VStack` resolved the overflow by squeezing the one child that can shrink,
-    /// which is the sentence, and a `Text` given room for one line truncates rather than wraps: the
+    /// The request log's default height is 220pt; its 36pt header leaves about 184pt for this view.
+    /// The 64pt icon, heading, two-line message, and outer padding fill that space quickly. The
+    /// `VStack` resolved the overflow by squeezing the one child that can shrink, which is the
+    /// sentence, and a `Text` given room for one line truncates rather than wraps: the
     /// drawer read "Start the server and send a request to see it appea…" while the identical
     /// component in the taller centre pane wrapped the same string cleanly.
     ///

@@ -12,24 +12,21 @@ import CoreGraphics
 /// change shape on the way in". That is a cross-module coupling asserted in prose, kept true by hand,
 /// and checked by nothing.
 ///
-/// Naming the rungs changes no pixel: all five already agreed. It means the sixth control starts
-/// from a list rather than from whatever its neighbour happened to measure.
+/// Extracting the rungs originally changed no pixel: all five already agreed. It means later sizing
+/// changes move together, and a new control starts from the shared scale.
 public enum DSControlHeight {
-    /// 20 — a control that sits in a row of other controls: panel-header controls, badges, filter
-    /// fields, small buttons. `DSBarHeight.controlRow` is this height plus `DSSpacing.sm` above and
-    /// below.
-    public static let row: CGFloat = 20
+    /// 24pt — small buttons and compact row controls.
+    public static let row: CGFloat = 24
 
-    /// 22 — a control a user types into, or a single prominent action in a header. A 13pt line with
-    /// ``verticalPadding`` above and below.
-    public static let field: CGFloat = 22
+    /// 26pt — fields and single header actions.
+    public static let field: CGFloat = 26
 
-    /// 26 — readable panel search fields and icon-and-title navigation targets.
-    public static let search: CGFloat = 26
-    public static let navigation: CGFloat = 26
+    /// 30pt — search fields and icon-and-title navigation targets.
+    public static let search: CGFloat = 30
+    public static let navigation: CGFloat = 30
 
-    /// 28 — the one-per-sheet primary action.
-    public static let prominent: CGFloat = 28
+    /// 32pt — the one-per-sheet primary action.
+    public static let prominent: CGFloat = 32
 
     /// 3 — the inset above and below a control's own text. Half of `DSSpacing.sm`, which is why it is
     /// not on the spacing scale: it is a control's internal geometry, not a gap between two things.
@@ -64,14 +61,19 @@ nonisolated public enum DSToolbarGeometry {
     /// Matches the native macOS sidebar toggle in the same toolbar.
     public static let height: CGFloat = 36
     public static let contentHeight: CGFloat = 16
-    /// Room for the project, summary, and the editor's native icon actions.
-    public static let expandedCenterWidth: CGFloat = 840
+    /// The full project and server summaries need this much centre-column space beside the actions.
+    public static let expandedCenterWidth: CGFloat = 600
+    /// The shorter summaries keep both editor actions visible until the centre gets this narrow.
+    public static let actionOverflowCenterWidth: CGFloat = 440
+    /// Below this width, a status icon keeps the project identity in the native toolbar.
+    public static let iconStatusCenterWidth: CGFloat = 380
     public static let projectTitleWidth: CGFloat = 160
-    public static let compactProjectTitleWidth: CGFloat = 100
+    public static let compactProjectTitleWidth: CGFloat = 120
     public static let metadataHeight: CGFloat = 12
     public static let detailsWidth: CGFloat = 340
     public static let detailsListHeight: CGFloat = 320
-    public static let copyButtonWidth: CGFloat = 80
+    public static let copyButtonWidth: CGFloat = 100
     public static let compactStatusWidth: CGFloat = 104
+    public static let iconStatusWidth: CGFloat = height
     public static let statusWidth: CGFloat = 220
 }

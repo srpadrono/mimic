@@ -130,7 +130,7 @@ public struct DSScenarioControl: View {
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, DSSpacing.sm)
-        .frame(height: 22)
+        .frame(height: DSControlHeight.row)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.smPlus)
                 .fill(DSColors.accent.opacity(isHovered ? 0.16 : 0.11))

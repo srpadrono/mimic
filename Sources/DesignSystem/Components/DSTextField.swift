@@ -3,16 +3,14 @@ import SwiftUI
 /// Text input with label, focus ring, and validation state.
 ///
 /// The field wears the workspace's control shape: `DSCornerRadius.sm`, a 0.5pt `DSColors.border`
-/// hairline and 3pt above and below the text. It stands 22pt rather than the 20pt a panel-header
-/// control takes, because 20pt cannot hold a 13pt line honestly.
+/// hairline and 3pt above and below the text. Its 26pt height gives a 14pt line room to breathe.
 ///
 /// This used to claim 22 was also "what AppKit gives a regular-size `Picker`, which is the control
 /// this field is most often placed beside". It is not. Rendered and measured in sRGB, a `Picker`
 /// stands **24pt** at `.regular`, 20 at `.small` and 16 at `.mini` — so on the one row where the two
 /// genuinely sit side by side, the method picker and the path field in `NewEndpointSheet`, they end
-/// two points apart and no picker size closes the gap. The number here is still right for a 13pt
-/// line; only the justification was wrong, and the mismatch is written down at that call site rather
-/// than papered over with a frame the popup ignores.
+/// two points apart and no picker size closes the gap. The mismatch is written down at that call
+/// site rather than papered over with a frame the popup ignores.
 ///
 /// The border used to be 1pt at rest and 1.5pt focused, which put a form-weight rule around every
 /// input while the wells beside them wore hairlines; the field now differs from its neighbours by
@@ -93,13 +91,13 @@ public struct DSTextField: View {
 
     /// The message sits under the field it is about, and says so with a glyph as well as a colour.
     ///
-    /// Red 11pt text on its own is a single channel of meaning: with Differentiate Without Color on,
+    /// Red 13pt text on its own is a single channel of meaning: with Differentiate Without Color on,
     /// in a greyscale screenshot, or to a reader with a red deficiency, an invalid field and a hint
     /// look the same. The glyph is the part that survives all three.
     private func validationRow(_ message: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
-                // `inline`, at `DSTypography.caption`'s size, beside the 11pt `label` this row sets.
+                // `inline`, smaller than the 13pt `label` this row sets.
                 // A mark carrying the whole message for a greyscale reader has to be readable, which
                 // is what keeps it a tier above an indicator.
                 .font(.system(size: DSGlyph.inline, weight: .semibold))

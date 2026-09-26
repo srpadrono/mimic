@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Size variant for method badges.
 public enum DSMethodBadgeSize {
-    /// Standard size (12px code font) — editor, inspector, log rows
+    /// Standard size (12.5pt code font) — editor and inspector.
     case standard
-    /// Compact size (11px) with tighter padding — sidebar rows
+    /// Compact size (11.5pt) with tighter padding — sidebar and table rows.
     case compact
 }
 
@@ -48,9 +48,8 @@ public struct DSMethodBadge: View {
             .padding(.horizontal, size.horizontalPadding)
             .padding(.vertical, size.verticalPadding)
             // A fixed width, not a floor. `minWidth` let GET come out 54pt and OPTIONS 58pt, so a
-            // column of badges still had a ragged edge — and 58pt is exactly the frame `SidebarView`
-            // wraps them in, leaving the widest method zero slack against the clipping bug this
-            // component was already fixed for once.
+            // column of badges still had a ragged edge. The width now fits the largest method at the
+            // readable badge font without forcing the adjacent path to move between rows.
             .frame(width: size.badgeWidth, height: size.height)
             .background {
                 RoundedRectangle(cornerRadius: DSCornerRadius.sm)
@@ -82,8 +81,9 @@ private extension DSMethodBadgeSize {
     var horizontalPadding: CGFloat {
         switch self {
         // Was `DSSpacing.xs + 2`, which is what pushed compact `OPTIONS` past the 58pt the sidebar
-        // reserves for it. SF Mono's advance is 0.6em, so seven characters at 11pt is 46.2pt; 4pt
-        // either side lands the widest method at 54.2pt, inside every frame a caller gives it.
+        // reserves for it. SF Mono's advance is about 0.6em, so seven characters at 11.5pt take
+        // about 48.3pt; 4pt on either side lands the widest method at about 56.3pt,
+        // inside the 58pt compact frame.
         case .compact: DSSpacing.xs
         case .standard: DSSpacing.sm
         }
@@ -100,17 +100,16 @@ private extension DSMethodBadgeSize {
     /// substitution cannot push it back over the edge.
     var badgeWidth: CGFloat {
         switch self {
-        case .compact: 56
-        case .standard: 64
+        case .compact: 58
+        case .standard: 66
         }
     }
 
-    /// Fixed, so a list of badges keeps its row rhythm whatever methods are in it. The standard size
-    /// is the workspace's 20pt row-control height; the compact one is sized for a dense list.
+    /// Fixed, so a list of badges keeps its row rhythm whatever methods are in it.
     var height: CGFloat {
         switch self {
-        case .compact: 16
-        case .standard: 20
+        case .compact: 18
+        case .standard: 22
         }
     }
 }

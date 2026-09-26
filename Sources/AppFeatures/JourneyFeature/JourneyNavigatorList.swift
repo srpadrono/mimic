@@ -275,12 +275,12 @@ struct JourneyNavigatorRow: View {
             // Names stay at full contrast whether or not a journey is running: dimming the rest of
             // the list to mark one row would make the other journeys harder to read for no reason.
             Text(journey.name)
-                .font(DSTypography.controlLabelQuiet)
+                .font(DSTypography.labelMedium)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
 
             Text("· \(stepCountText)")
-                .font(DSTypography.label)
+                .font(DSTypography.meta)
                 .foregroundStyle(DSColors.labelSecondary)
                 .monospacedDigit()
                 .fixedSize()

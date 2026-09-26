@@ -797,15 +797,17 @@ final class WelcomeProjectUITests: MimicUITestCase {
     ///
     /// Clicking a row opens its project, so the click has to land in the empty space *below* the
     /// rows — the list fills the right column and no test here creates enough projects to reach the
-    /// bottom of it. Whether that click also clears the selection is AppKit's business; every caller
-    /// clamps with more arrow presses than there are rows, so it does not matter.
+    /// middle of it. The list can extend behind the macOS Dock on CI's 1024 × 768 desktop, so a
+    /// click near its bottom can activate the Dock instead of focusing the list. Whether the click
+    /// also clears the selection is AppKit's business; every caller clamps with more arrow presses
+    /// than there are rows, so it does not matter.
     @MainActor
     private func focusRecentsList() {
         XCTAssertTrue(
             recentsList.waitForExistence(timeout: 5),
             "The recents list should be addressable as welcome.recents.list"
         )
-        recentsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).click()
+        recentsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).click()
     }
 
     @MainActor

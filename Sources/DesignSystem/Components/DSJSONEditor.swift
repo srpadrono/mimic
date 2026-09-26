@@ -89,7 +89,7 @@ public struct DSJSONEditor: View {
     /// measure the same font the editor actually draws with. A size that moves in one theme and not
     /// the other is a bug nobody sees until they switch appearance.
     static let editorFontName = "SFMono-Regular"
-    static let editorFontSize: CGFloat = 12
+    static let editorFontSize: CGFloat = 13
 
     /// How tall this editor has to be to show `lines` lines without scrolling itself.
     ///

@@ -86,7 +86,7 @@ private struct DSModeRailItem: View {
             }
             .foregroundStyle(foreground)
             .padding(.horizontal, DSSpacing.sm)
-            .frame(height: 22)
+            .frame(height: DSControlHeight.row)
             .background {
                 RoundedRectangle(cornerRadius: DSCornerRadius.smPlus)
                     .fill(background)

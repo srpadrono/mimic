@@ -255,7 +255,7 @@ struct DSJSONEditorSizingTests {
         #expect(DSJSONEditor.height(forLines: -3) == DSJSONEditor.height(forLines: 1))
     }
 
-    @Test("One line of SF Mono at 12pt is a plausible line height")
+    @Test("One line of SF Mono at 13pt is a plausible line height")
     func oneLineIsAPlausibleHeight() {
         // Deliberately a range, not a number. The point is that the measurement comes from the font
         // rather than from a literal, so pinning it exactly would fail on a metrics change that is
@@ -272,7 +272,7 @@ struct DSJSONEditorSizingTests {
         // `height(forLines:)` measures that same face — so a size that moved in one appearance and
         // not the other would put the well's height and the text inside it out of step.
         #expect(DSJSONEditor.editorFontName == "SFMono-Regular")
-        #expect(DSJSONEditor.editorFontSize == 12)
+        #expect(DSJSONEditor.editorFontSize == 13)
     }
 }
 
@@ -365,7 +365,7 @@ struct DSColorsTests {
 // The claims they were reaching for are made properly in `DSComponentRenderingTests`, which is where
 // the hosting harness that can actually measure a view lives:
 //
-// - `laddersArePinned` pins `DSBarHeight.panelHeader == 30` — the assertion an equality between two
+// - `laddersArePinned` pins `DSBarHeight.panelHeader == 36` — the assertion an equality between two
 //   reads of one constant cannot make — and `DSPanelHeader<EmptyView>.height ==
 //   DSBarHeight.panelHeader`, so the view keeps taking its number from the ladder.
 // - `panelChromeSharesOneHeight` renders a bare header, a header *with* a subtitle and a trailing

@@ -19,18 +19,16 @@ import CoreGraphics
 /// the other is a bound to check against, and a test can only pin a bound that has a name.
 ///
 /// **These rungs come in tiers rather than as four flat points**, because the rule states ranges
-/// rather than values. Within a tier the choice is usually made for you by the text the glyph sits
-/// beside: 10, 11 and 13 are exactly the sizes of `DSTypography.caption`, `.label` and `.body`, so a
-/// glyph next to a line of type matches that line instead of standing a point proud of it. 9 and 12
-/// answer to no type size, and are the quiet and loud ends of their tiers.
+/// rather than values. The choice depends on the glyph's job beside the text: a supporting mark
+/// stays smaller than its label, while an icon-only control can use the top of its tier. The
+/// typography scale may change independently without turning a small mark into a second headline.
 ///
 /// **An illustration is not a glyph and does not belong here.** `DSEmptyState` draws its symbol at
 /// 26pt. That picture is sized to the panel it fills; folding it in would turn a ladder with a
 /// defensible top rung into an open-ended scale.
 ///
-/// Naming the rungs changes no pixel — every value below is one already in the window. What it
-/// changes is that the next glyph starts from a list of six rather than from whatever its neighbour
-/// happened to measure.
+/// Extracting the rungs originally changed no pixel — every value below was already in the window.
+/// The next glyph starts from this scale rather than from whatever its neighbour happened to measure.
 ///
 /// **Both modules now draw from it.** A chrome glyph in `AppFeatures` uses a rung here;
 /// illustrations stay inside the components that own them.
@@ -44,14 +42,13 @@ public enum DSGlyph {
     public static let indicator: CGFloat = 8
 
     /// 9 — the quiet end of the inline tier: a glyph that qualifies a control rather than labelling
-    /// it. The filter glyph inside `DSFilterField`'s scope pill, a column header's sort chevron, the
-    /// warning triangle in the server well.
+    /// it. The location icon beside a breadcrumb and a request-log column's sort chevron.
     ///
-    /// Deliberately below ``inline`` and not on a type size. A glyph at 10 beside an 11pt title reads
+    /// Deliberately below ``inline`` and not on a type size. A glyph at 10 beside a 13pt label reads
     /// as a second piece of content; at 9 it reads as an annotation on the first.
     public static let inlineSmall: CGFloat = 9
 
-    /// 10 — a glyph on a line of text, at `DSTypography.caption`'s size. `DSTextField`'s and
+    /// 10 — a glyph supporting a line of text, below `DSTypography.caption`'s size. `DSTextField`'s and
     /// `DSJSONEditor`'s validation marks, and the glyph `DSButton(.small)` puts before its title.
     ///
     /// The validation cases are why the tier exists at all: a red message is one channel of meaning,
@@ -60,7 +57,7 @@ public enum DSGlyph {
     /// above ``indicator``.
     public static let inline: CGFloat = 10
 
-    /// 11 — a glyph that *is* the control, at `DSTypography.label`'s size. `DSPanelHeaderButton`,
+    /// 11 — a glyph that *is* the control, below `DSTypography.label`'s size. `DSPanelHeaderButton`,
     /// `DSClearButton`, and `DSButton(.medium)`'s glyph.
     ///
     /// The bottom of the control tier rather than the top of the inline one: these have no title
@@ -77,7 +74,7 @@ public enum DSGlyph {
     /// deliberately changes rung to say something.
     public static let controlLarge: CGFloat = 12
 
-    /// 13 — the largest a chrome glyph goes, at `DSTypography.body`'s size. `DSTabStrip`'s navigator
+    /// 13 — the largest a chrome glyph goes, below `DSTypography.body`'s size. `DSTabStrip`'s navigator
     /// tabs, where the icon replaces a word rather than accompanying one, and `DSIconMenu`, which is
     /// what the editor's more menu and the journeys navigator's "+" are.
     ///

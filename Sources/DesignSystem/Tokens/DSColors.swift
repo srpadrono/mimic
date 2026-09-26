@@ -466,9 +466,9 @@ public nonisolated enum DSColors {
     public static let labelPrimary = Color(light: .init(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.88),
                                            dark: .init(red: 1.0, green: 1.0, blue: 1.0, opacity: 0.88))
 
-    /// Secondary label text — 60% hierarchy
-    public static let labelSecondary = Color(light: .init(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.55),
-                                             dark: .init(red: 1.0, green: 1.0, blue: 1.0, opacity: 0.55))
+    /// Secondary label text stays readable on both canvas and panel surfaces.
+    public static let labelSecondary = Color(light: .init(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.66),
+                                             dark: .init(red: 1.0, green: 1.0, blue: 1.0, opacity: 0.66))
 
     /// Tertiary label text — timestamps, hints
     public static let labelTertiary = Color(light: .init(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.36),
@@ -559,7 +559,7 @@ public nonisolated enum DSColors {
     /// theme, so a coloured body reads as part of Mimic instead of an embedded text editor. Keys carry
     /// the most saturated hue because scanning a response means scanning its keys.
     ///
-    /// A method badge is three bold characters on a tinted pill; a payload is hundreds of 11pt
+    /// A method badge is three bold characters on a tinted pill; a payload is hundreds of 13pt
     /// monospaced characters, and it is the densest reading in the app. The two palettes are therefore
     /// tuned against different backgrounds and hold different values — `PUT`'s dark amber and
     /// ``number``'s are the one pair that still coincide, which

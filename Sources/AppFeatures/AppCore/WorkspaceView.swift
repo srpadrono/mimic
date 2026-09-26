@@ -3,6 +3,13 @@ import Domain
 import DesignSystem
 import Persistence
 
+nonisolated enum WorkspaceToolbarLayout: Equatable {
+    case expanded
+    case compactSummary
+    case overflow
+    case iconStatus
+}
+
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
 /// a full-height inspector. Both side panels are real `NavigationSplitView`/`.inspector` columns, so
 /// only the request log is a tenant of the centre.
@@ -54,8 +61,9 @@ struct WorkspaceView: View {
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
 
-    /// The editor column determines when supporting toolbar actions need overflow.
-    @State private var centerToolbarWidth: CGFloat = 0
+    /// Start with the narrowest fit so AppKit never overflows the identity before the first
+    /// geometry measurement. Then update only when the layout tier changes during a resize.
+    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .iconStatus
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -186,7 +194,16 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { centerToolbarWidth = $0 }
+                .onGeometryChange(for: WorkspaceToolbarLayout.self) {
+                    Self.toolbarLayout(centerWidth: $0.size.width)
+                } action: { layout in
+                    // The toolbar changes its intrinsic width at two breakpoints. During a live
+                    // window resize, animating that change lets the Run button and its neighbours
+                    // occupy the same space for a frame while AppKit rearranges native items.
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { centerToolbarLayout = layout }
+                }
                 // Editor actions belong to this column, before the inspector divides the toolbar.
                 .toolbar { workspaceToolbar }
             }
@@ -399,13 +416,39 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
+    /// Shorten the summaries first; the actions remain visible while there is room for them.
+    nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
+        guard centerWidth.isFinite else { return .iconStatus }
+        if centerWidth < DSToolbarGeometry.iconStatusCenterWidth { return .iconStatus }
+        if centerWidth < DSToolbarGeometry.actionOverflowCenterWidth { return .overflow }
+        if centerWidth < DSToolbarGeometry.expandedCenterWidth { return .compactSummary }
+        return .expanded
+    }
+
+    nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) != .expanded
+    }
+
     /// Preserve project identity and server context; only editor actions move into overflow.
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
-        !centerWidth.isFinite || centerWidth < DSToolbarGeometry.expandedCenterWidth
+        let layout = toolbarLayout(centerWidth: centerWidth)
+        return layout == .overflow || layout == .iconStatus
+    }
+
+    nonisolated static func toolbarUsesIconStatus(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) == .iconStatus
+    }
+
+    private var usesCompactToolbarSummary: Bool {
+        centerToolbarLayout != .expanded
     }
 
     private var usesToolbarOverflow: Bool {
-        Self.toolbarUsesOverflow(centerWidth: centerToolbarWidth)
+        centerToolbarLayout == .overflow || centerToolbarLayout == .iconStatus
+    }
+
+    private var usesIconStatus: Bool {
+        centerToolbarLayout == .iconStatus
     }
 
     @ToolbarContentBuilder
@@ -420,7 +463,7 @@ struct WorkspaceView: View {
         .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(id: "workspace.identityAndServer", placement: .navigation) {
-            HStack(spacing: usesToolbarOverflow ? DSSpacing.sm : DSSpacing.md) {
+            HStack(spacing: usesCompactToolbarSummary ? DSSpacing.sm : DSSpacing.md) {
                 projectIdentity
                 Rectangle()
                     .fill(DSColors.border)
@@ -472,7 +515,7 @@ struct WorkspaceView: View {
             }
             .frame(height: DSToolbarGeometry.metadataHeight, alignment: .leading)
         }
-        .frame(maxWidth: usesToolbarOverflow
+        .frame(maxWidth: usesCompactToolbarSummary
             ? DSToolbarGeometry.compactProjectTitleWidth : DSToolbarGeometry.projectTitleWidth,
                alignment: .leading)
         .frame(height: DSToolbarGeometry.height, alignment: .leading)
@@ -486,7 +529,8 @@ struct WorkspaceView: View {
             projectName: appState.currentProject?.name,
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
-            compact: usesToolbarOverflow,
+            compact: usesCompactToolbarSummary,
+            iconOnly: usesIconStatus,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             onShowUnmatched: {
@@ -499,8 +543,9 @@ struct WorkspaceView: View {
                 showUnmatchedOnly = false
             }
         )
-        .frame(width: usesToolbarOverflow
-            ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth)
+        .frame(width: usesIconStatus
+            ? DSToolbarGeometry.iconStatusWidth
+            : (usesCompactToolbarSummary ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth))
     }
 
     @ToolbarContentBuilder
@@ -738,7 +783,7 @@ struct WorkspaceView: View {
 
     /// The navigator's "+" on the Journeys tab.
     ///
-    /// `DSIconMenu` shares the 22pt control and hover treatment with the endpoint editor's menu.
+    /// `DSIconMenu` shares the 26pt control and hover treatment with the endpoint editor's menu.
     private var addJourneyMenu: some View {
         DSIconMenu(
             systemImage: "plus",

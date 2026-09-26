@@ -1397,6 +1397,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenario Delete")
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
+        // A restored 808pt window can sit partly beyond CI's 1024pt display, leaving the
+        // inspector's Add scenario action offscreen even after the row menu is dismissed.
+        workspace.compactWindow()
+
         let defaultRow = inspector.scenarioRow(named: "Default")
         XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
         rightClickScenarioRow(defaultRow, named: "Default")
@@ -1407,8 +1411,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertFalse(deleteItem.isEnabled,
                        "Deleting the endpoint's only scenario would leave it serving nothing, so it is disabled")
         app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(deleteItem.waitForNonExistence(timeout: 5),
+                      "The context menu should close before using the inspector toolbar")
 
         XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { self.addScenarioButton.isHittable },
+            "Add scenario should be hittable after dismissing the context menu"
+        )
         addScenarioButton.click()
         XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
         newScenarioSheet.nameField.click()
