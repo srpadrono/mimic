@@ -218,11 +218,24 @@ final class JourneyUITests: XCTestCase {
 
     @MainActor
     private func addTemplate(_ id: String, activate: Bool) {
-        journeys.addButton.click()
-        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
-        journeys.templateMenuItem.click()
-
-        XCTAssertTrue(templatePicker.addButton.waitForExistence(timeout: 5), "Template picker should open")
+        XCTAssertTrue(
+            UITestApp.chooseFromSubmenu(
+                in: app,
+                parent: journeys.addButton,
+                item: journeys.templateMenuItem,
+                thenAwait: templatePicker.addButton,
+                reopenMenu: {
+                    // If a moving native menu sends the click to its first item, close the New
+                    // journey sheet before retrying the template action.
+                    let cancel = self.newJourneySheet.cancelButton
+                    if cancel.exists {
+                        cancel.click()
+                        _ = cancel.waitForNonExistence(timeout: 3)
+                    }
+                }
+            ),
+            "Template picker should open"
+        )
 
         let row = templatePicker.template(id)
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The requested template should be listed")
