@@ -1397,6 +1397,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenario Delete")
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
+        // A restored 808pt window can sit partly beyond CI's 1024pt display, leaving the
+        // inspector's Add scenario action offscreen even after the row menu is dismissed.
+        workspace.compactWindow()
+
         let defaultRow = inspector.scenarioRow(named: "Default")
         XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
         rightClickScenarioRow(defaultRow, named: "Default")
