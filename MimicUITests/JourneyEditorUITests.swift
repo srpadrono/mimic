@@ -1055,6 +1055,11 @@ final class JourneyEditorUITests: MimicUITestCase {
             UITestApp.waitUntil(timeout: 5) { self.stepSheet.prettyPrintButton.isEnabled },
             "Format should enable when the body contains valid JSON"
         )
+        // Opening headers scrolls the Format action above the sheet's viewport. XCUITest can
+        // synthesize a click on that offscreen button without activating it, so bring the action
+        // into view before asking it to rewrite the body.
+        stepSheet.reveal(stepSheet.prettyPrintButton, byScrollingUp: true)
+        XCTAssertTrue(stepSheet.prettyPrintButton.isHittable)
         stepSheet.prettyPrintButton.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {

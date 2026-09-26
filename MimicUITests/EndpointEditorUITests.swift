@@ -1407,8 +1407,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertFalse(deleteItem.isEnabled,
                        "Deleting the endpoint's only scenario would leave it serving nothing, so it is disabled")
         app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(deleteItem.waitForNonExistence(timeout: 5),
+                      "The context menu should close before using the inspector toolbar")
 
         XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { self.addScenarioButton.isHittable },
+            "Add scenario should be hittable after dismissing the context menu"
+        )
         addScenarioButton.click()
         XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
         newScenarioSheet.nameField.click()
