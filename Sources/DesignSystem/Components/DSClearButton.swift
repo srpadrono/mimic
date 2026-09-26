@@ -25,6 +25,7 @@ public struct DSClearButton: View {
     private let identifier: String
     private let label: String
     private let help: String
+    @Environment(\.isEnabled) private var isEnabled
 
     /// - Parameters:
     ///   - identifier: Used verbatim, not suffixed. `DSFilterField` hands in `"<field>.clear"` and the
@@ -53,12 +54,15 @@ public struct DSClearButton: View {
             // the annotations around it rather than above them, and this glyph is a control.
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: DSGlyph.control))
-                .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+                .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                 .frame(width: 18, height: 18)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .onHover { isHovered = isEnabled && $0 }
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled { isHovered = false }
+        }
         .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)

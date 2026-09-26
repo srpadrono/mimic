@@ -82,7 +82,9 @@ struct CenterPaneView: View {
             DSEmptyState(
                 systemImage: NavigatorTab.endpoints.systemImage,
                 heading: "No endpoint selected",
-                message: "Select an endpoint from the sidebar to view and edit its configuration.",
+                message: (appState.currentProject?.endpoints.isEmpty ?? true)
+                    ? "Add an endpoint or import a HAR file or OpenAPI spec to get started."
+                    : "Select an endpoint from the sidebar to view and edit its configuration.",
                 identifier: "center.noSelection"
             )
         }

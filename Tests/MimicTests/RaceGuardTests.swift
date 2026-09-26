@@ -42,7 +42,7 @@ struct RaceGuardTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(predicate(), "Timed out waiting for condition")
     }
 
     /// The same poll for a predicate that has to ask an actor. Named apart from `waitUntil` rather
@@ -60,7 +60,7 @@ struct RaceGuardTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(await predicate(), "Timed out waiting for condition")
     }
 
     // MARK: - ProjectWorkspace.openGeneration
@@ -137,7 +137,12 @@ struct RaceGuardTests {
         let defaults = try #require(UserDefaults(suiteName: "RaceGuardTests.\(UUID().uuidString)"))
         return AppState(
             projectRepository: repository,
-            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
     }
 

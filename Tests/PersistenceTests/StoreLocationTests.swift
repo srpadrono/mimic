@@ -74,8 +74,9 @@ struct StoreLocationTests {
         let store = try resolved
         let backups = StoreBackup.directoryURL(for: store)
 
-        #expect(backups.deletingLastPathComponent() == store.deletingLastPathComponent())
-        #expect(backups.lastPathComponent == "Backups")
+        #expect(backups.deletingLastPathComponent().deletingLastPathComponent() == store.deletingLastPathComponent())
+        #expect(backups.deletingLastPathComponent().lastPathComponent == "Backups")
+        #expect(backups.lastPathComponent == "mimic.sqlite")
         #expect(!backups.pathComponents.contains { $0.hasSuffix(".app") })
     }
 

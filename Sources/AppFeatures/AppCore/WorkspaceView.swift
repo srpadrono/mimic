@@ -133,19 +133,21 @@ struct WorkspaceView: View {
                     // editor, because it describes where you are, not what you are editing.
                     BreadcrumbJumpBar(
                         crumbs: breadcrumbs,
-                        canGoBack: endpointHistory.canGoBack,
-                        canGoForward: endpointHistory.canGoForward,
+                        canGoBack: endpointHistory.canGoBack(where: endpointExists),
+                        canGoForward: endpointHistory.canGoForward(where: endpointExists),
                         onSelectOption: handleBreadcrumbSelection,
                         onBack: {
-                            if let previous = endpointHistory.goBack() {
-                                isNavigatingHistory = true
-                                selectedEndpointID = previous
+                            if let previous = endpointHistory.goBack(where: endpointExists),
+                               let endpoint = currentEndpoints.first(where: { $0.id == previous }) {
+                                isNavigatingHistory = selectedEndpointID != previous
+                                revealEndpoint(endpoint)
                             }
                         },
                         onForward: {
-                            if let next = endpointHistory.goForward() {
-                                isNavigatingHistory = true
-                                selectedEndpointID = next
+                            if let next = endpointHistory.goForward(where: endpointExists),
+                               let endpoint = currentEndpoints.first(where: { $0.id == next }) {
+                                isNavigatingHistory = selectedEndpointID != next
+                                revealEndpoint(endpoint)
                             }
                         }
                     )
@@ -314,6 +316,7 @@ struct WorkspaceView: View {
                 existingEndpoints: currentEndpoints,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .sheet(isPresented: $showBackendSettings) {
             BackendSettingsView(configuration: appState.serverConfiguration)
@@ -326,6 +329,7 @@ struct WorkspaceView: View {
                 existingEndpoints: currentEndpoints,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         // Both moved here from the journeys window, which was their only presenter.
         .sheet(isPresented: $showNewJourneySheet) {
@@ -375,6 +379,7 @@ struct WorkspaceView: View {
         }
         .onChange(of: navigatorTab) { _, _ in selectedLogIDs = [] }
         .onChange(of: appState.selectedJourneyID) { _, _ in selectedLogIDs = [] }
+        .onChange(of: appState.currentProject?.id) { _, _ in resetProjectPresentation() }
         // A cleared log takes its selection with it; otherwise the inspector goes on showing a
         // request that is no longer in the list.
         .onChange(of: appState.requestLogs.isEmpty) { _, isEmpty in
@@ -409,6 +414,7 @@ struct WorkspaceView: View {
                 initialIsParsing: injected.state.isParsing,
                 onCommitImport: appState.commitImportedCandidates
             )
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .task { await presentInjectedImportIfNeeded() }
         #endif
@@ -768,7 +774,9 @@ struct WorkspaceView: View {
     private func handleBreadcrumbSelection(crumbID: String, optionID: UUID) {
         switch crumbID {
         case "group", "endpoint":
-            selectedEndpointID = optionID
+            if let endpoint = currentEndpoints.first(where: { $0.id == optionID }) {
+                revealEndpoint(endpoint)
+            }
         case "scenario":
             guard let endpointID = selectedEndpointID else { return }
             appState.setActiveScenario(endpointID: endpointID, scenarioID: optionID)
@@ -937,6 +945,7 @@ struct WorkspaceView: View {
         RequestLogDrawerView(
             requestLogs: appState.requestLogs,
             endpoints: currentEndpoints,
+            serverState: appState.serverState,
             onClear: { appState.requestLogs = [] },
             selectedLogIDs: $selectedLogIDs,
             unmatchedOnly: $showUnmatchedOnly,
@@ -967,8 +976,7 @@ struct WorkspaceView: View {
             onAddToNewJourney: { logs in
                 pendingCapture = CaptureJourneySheet.Capture(
                     logs: logs,
-                    suggestedName: AppState.journeyName(capturing: logs),
-                    stepCount: AppState.capturedStepCount(logs)
+                    suggestedName: AppState.journeyName(capturing: logs)
                 )
             }
         )
@@ -1018,9 +1026,40 @@ struct WorkspaceView: View {
 
     /// Creating a mock from traffic should reveal what was created even when Journeys is open.
     private func revealEndpoint(_ endpoint: Endpoint) {
+        endpointFilter = ""
+        endpointMethodScope = SidebarView.anyMethodScopeID
+        collapsedEndpointGroups.remove(SidebarView.sectionKey(for: endpoint))
         navigatorTab = .endpoints
         selectedEndpointID = endpoint.id
         selectedLogIDs = []
+    }
+
+    private func endpointExists(_ id: UUID) -> Bool {
+        currentEndpoints.contains { $0.id == id }
+    }
+
+    /// Draft sheets and navigation belong to the project that opened them; panel geometry is global.
+    private func resetProjectPresentation() {
+        selectedEndpointID = nil
+        selectedLogIDs = []
+        endpointHistory = NavigationHistory()
+        isNavigatingHistory = false
+        endpointFilter = ""
+        endpointMethodScope = SidebarView.anyMethodScopeID
+        collapsedEndpointGroups = []
+        journeyFilter = ""
+        collapsedJourneyGroups = []
+        navigatorTab = .endpoints
+        showUnmatchedOnly = false
+        renameEndpointTarget = nil
+        editEndpointRequestTarget = nil
+        pendingCapture = nil
+        showHARImport = false
+        showOpenAPIImport = false
+        showBackendSettings = false
+        showJourneyTemplatePicker = false
+        showNewJourneySheet = false
+        appState.showNewEndpointSheet = false
     }
 
     private func beginEndpointRename(_ id: UUID) {
@@ -1063,7 +1102,7 @@ struct WorkspaceView: View {
         return InspectorOverview.Summary(
             projectName: project?.name ?? "Mimic",
             serverState: appState.serverState,
-            port: project?.serverConfiguration.port ?? 0,
+            port: appState.serverState.runningPort ?? project?.serverConfiguration.port ?? 0,
             endpointCount: endpoints.count,
             scenarioCount: endpoints.reduce(0) { $0 + $1.scenarios.count },
             journeyCount: appState.journeys.count,

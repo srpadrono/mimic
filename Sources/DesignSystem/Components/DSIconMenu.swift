@@ -13,6 +13,7 @@ public struct DSIconMenu<Content: View>: View {
     private let identifier: String
     private let content: Content
 
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
     /// `label` names the chooser in accessibility and may differ from its hover `help` text.
@@ -43,7 +44,7 @@ public struct DSIconMenu<Content: View>: View {
                 // `labelSecondary` at rest, never `labelTertiary`: at 36% alpha an icon-only control
                 // is one you have to already know about to find. `DSPanelHeaderButton` records the
                 // same correction for the buttons this sits beside.
-                .foregroundStyle(isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+                .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                 .frame(width: DSControlHeight.field, height: DSControlHeight.field)
                 .contentShape(Rectangle())
         }
@@ -56,9 +57,12 @@ public struct DSIconMenu<Content: View>: View {
         .frame(width: DSControlHeight.field, height: DSControlHeight.field)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(isHovered ? DSColors.accentSubtle : Color.clear)
+                .fill(isEnabled && isHovered ? DSColors.accentSubtle : Color.clear)
         }
-        .onHover { isHovered = $0 }
+        .onHover { isHovered = isEnabled && $0 }
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled { isHovered = false }
+        }
         .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)

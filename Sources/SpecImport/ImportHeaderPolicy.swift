@@ -34,6 +34,7 @@ public enum ImportHeaderPolicy {
         "trailer",
         "proxy-authenticate",
         "proxy-authorization",
+        "proxy-connection",
     ]
 
     /// Headers describing the moment of capture, which would be stale and misleading if replayed.
@@ -77,6 +78,33 @@ public enum ImportHeaderPolicy {
 
     /// Keeps only the headers that describe the response itself.
     public static func replayable(_ headers: [String: String]) -> [String: String] {
-        headers.filter { !shouldDrop($0.key) }
+        let nominated = connectionOptions(headers.map { (name: $0.key, value: $0.value) })
+        return headers.filter { !shouldDrop($0.key) && !nominated.contains(normalizedName($0.key)) }
+    }
+
+    /// HAR can record repeated field lines. Preserve every Connection nomination before merging
+    /// other repeated names case-insensitively, with the final captured value and spelling winning.
+    public static func replayable(_ headers: [(name: String, value: String)]) -> [String: String] {
+        let nominated = connectionOptions(headers)
+        var result: [String: String] = [:]
+        var spellingByName: [String: String] = [:]
+        for header in headers {
+            let name = normalizedName(header.name)
+            guard !shouldDrop(header.name), !nominated.contains(name) else { continue }
+            if let oldSpelling = spellingByName.updateValue(header.name, forKey: name) {
+                result.removeValue(forKey: oldSpelling)
+            }
+            result[header.name] = header.value
+        }
+        return result
+    }
+
+    private static func connectionOptions(_ headers: [(name: String, value: String)]) -> Set<String> {
+        Set(headers.filter { normalizedName($0.name) == "connection" }
+            .flatMap { $0.value.split(separator: ",").map { normalizedName(String($0)) } })
+    }
+
+    private static func normalizedName(_ name: String) -> String {
+        name.lowercased().trimmingCharacters(in: .whitespaces)
     }
 }

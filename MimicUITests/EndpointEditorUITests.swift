@@ -21,12 +21,8 @@ import XCTest
 /// buttons; two "Add scenario" buttons once the sheet is up) the query names the identifier it must
 /// *not* have, so the two stay distinguishable instead of collapsing into a `firstMatch` coin toss.
 ///
-/// The first CI run of this file taught the same lesson in two more places, and both fixes are
-/// generalizations rather than one-offs. A **row of elements sharing one identifier** — the
-/// `DSTextField` validation row under a wrapper that lends its name to everything below it, the
-/// `DSJSONEditor` warning whose glyph and sentence both wear `ds.jsoneditor.<id>.error` — is read by
-/// *content*, never by `firstMatch`, which resolves to whichever of them the tree lists first (a
-/// glyph, whose AppKit label is the one word "Warning"). And a **`List` section header** does not
+/// The JSON warning's glyph and sentence can share one identifier, so its message is read from the
+/// row's content rather than the first element. A **`List` section header** does not
 /// keep the identifier its `HStack` was given the way `EndpointSidebarRow` keeps its own, because
 /// the row declares an accessibility element and the header does not — so the sidebar's group
 /// sections are found by identifier *or* by the header's text, polled together.
@@ -39,6 +35,12 @@ import XCTest
 /// `.accessibilityHidden(true)` on purpose; its colour mapping belongs to a `DSColors` unit test.
 final class EndpointEditorUITests: MimicUITestCase {
     private var usesDarkAppearance = false
+    private var usesControlFixture = false
+    private let controlFixtureID = UUID().uuidString
+    private let controlFixtureToken = UUID().uuidString + UUID().uuidString
+    private var controlFixturePort: Int?
+    private var controlFixturePreexistingPIDs: Set<pid_t> = []
+    private var verifiedControlFixture = false
 
     @MainActor
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
@@ -46,6 +48,70 @@ final class EndpointEditorUITests: MimicUITestCase {
             app.launchArguments += ["-AppleInterfaceStyle", "Dark",
                                     "-NSRequiresAquaSystemAppearance", "NO"]
         }
+        if usesControlFixture {
+            controlFixturePreexistingPIDs = Set(NSRunningApplication.runningApplications(
+                withBundleIdentifier: UITestApp.bundleIdentifier
+            ).map(\.processIdentifier))
+            let base = "~/Library/Application Support/devxa.Mimic/endpoint-editor-uitest-\(controlFixtureID)"
+            app.launchEnvironment["MIMIC_CONTROL_PORT"] = "0"
+            app.launchEnvironment["MIMIC_CONTROL_TOKEN"] = controlFixtureToken
+            app.launchEnvironment["MIMIC_CONTROL_FILE"] = base + ".json"
+            app.launchEnvironment["MIMIC_DATABASE_PATH"] = base + ".sqlite"
+        }
+    }
+
+    /// Read-only state is the only request allowed until a response identifies this test's freshly
+    /// launched process. All writes use an explicit per-test token and isolated store/discovery.
+    @MainActor
+    @discardableResult
+    private func controlResponse(_ command: [String: Any]) async throws -> [String: Any] {
+        guard verifiedControlFixture || (command.count == 1 && command["state"] != nil) else {
+            throw NSError(domain: "EndpointEditorFixture", code: 1)
+        }
+        let port = try XCTUnwrap(controlFixturePort)
+        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/v1/command"))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue(controlFixtureToken, forHTTPHeaderField: "X-Mimic-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: command)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              envelope["ok"] as? Bool == true,
+              let result = envelope["result"] as? [String: Any] else {
+            throw NSError(domain: "EndpointEditorFixture", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Fixture command was refused"])
+        }
+        return result
+    }
+
+    @MainActor
+    private func verifyControlFixture() async throws {
+        let launched = NSRunningApplication.runningApplications(withBundleIdentifier: UITestApp.bundleIdentifier)
+            .filter { !controlFixturePreexistingPIDs.contains($0.processIdentifier) }
+        guard launched.count == 1, let process = launched.first else {
+            throw NSError(domain: "EndpointEditorFixture", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not identify this test's app launch"])
+        }
+        var assignedPort: Int?
+        guard UITestApp.waitUntil(timeout: 10, {
+            assignedPort = UITestApp.listeningLoopbackPort(of: process.processIdentifier)
+            return assignedPort != nil
+        }), let assignedPort else {
+            throw NSError(domain: "EndpointEditorFixture", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "This test's control listener did not bind"])
+        }
+        controlFixturePort = assignedPort
+        let result = try await controlResponse(["state": [:]])
+        let state = try XCTUnwrap(result["state"] as? [String: Any])
+        let pid = try XCTUnwrap(state["pid"] as? Int)
+        guard pid == Int(process.processIdentifier) else {
+            throw NSError(domain: "EndpointEditorFixture", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "Refusing a control mutation outside this test's launch"])
+        }
+        verifiedControlFixture = true
     }
 
     // MARK: - Shared element resolution
@@ -101,24 +167,10 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     // MARK: - DSTextField validation messages
 
-    /// What the new-endpoint sheet's path field is complaining about, or `""` when it is not.
-    ///
-    /// **Not `ds.textfield.newEndpoint.path.error`, which is what `NewEndpointSheetPage.pathError`
-    /// asks for and why three suites failed on the same wall at once.** `DSTextField` does compose
-    /// that name for its validation row — but `NewEndpointSheet` then stamps
-    /// `.accessibilityIdentifier("newEndpoint.pathField")` on the whole field, and a container's
-    /// identifier overrides its descendants'. That propagation is the *point* of the wrapper: it is
-    /// what makes `app.textFields["newEndpoint.pathField"]` resolve the input at all, which is the
-    /// exception `DSTextField`'s own note asks callers to preserve. Its cost is that the field's
-    /// label, its input and its validation row all report the wrapper's name, and no
-    /// `ds.textfield.…` name reaches the tree. `NewProjectSheet` wraps `newProject.port` in
-    /// `serverPortField` exactly the same way, so the port message is reached the same way.
-    ///
-    /// The three are then told apart by what they carry rather than by their names — see
-    /// ``longestText(identified:)``.
+    /// The inline path note's words, or an empty string when the note is absent.
     @MainActor
     private func pathValidationMessage() -> String {
-        longestText(identified: "newEndpoint.pathField")
+        shownText(of: newEndpointSheet.pathError)
     }
 
     // MARK: - Editor scrolling
@@ -170,10 +222,10 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// `revealInEditor` stays as the backstop for a small screen.
     @MainActor
     private func hideRequestLogDrawer() {
-        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
         guard workspace.drawerEmptyHeading.exists else { return }
-        workspace.toggleDrawerButton.click()
-        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3),
+                      "The request log shortcut should close the drawer")
     }
 
     /// Check the inspector row's visible click point before asking XCTest to open its context menu.
@@ -444,21 +496,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         anyElement(identified: "endpointEditor.globalDelay.note")
     }
 
-    /// The JSON body's text view.
-    ///
-    /// `DSJSONEditor` tags its `CodeEditor` `ds.jsoneditor.editor.body`, but `CodeEditor` is an
-    /// `NSViewRepresentable` wrapping a scroll view around an `NSTextView`, so the name may land on
-    /// the wrapper with the typed content one level down. Both shapes are handled, and the untagged
-    /// text view is the last resort — the editor is the only text view in the workspace.
+    /// The native text view, separate from the identified scroll viewport used for layout checks.
     @MainActor
     private func bodyTextView() -> XCUIElement {
-        let container = anyElement(identified: "ds.jsoneditor.editor.body")
-        if container.exists {
-            let inner = container.descendants(matching: .textView).firstMatch
-            if inner.exists { return inner }
-            if container.elementType == .textView { return container }
-        }
-        return app.textViews.firstMatch
+        app.textViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
     }
 
     /// What the JSON editor's warning row is saying, or `""` while it is not showing one.
@@ -598,11 +639,8 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// EPCREATE-05, EPCREATE-06, EPCREATE-10.
     ///
-    /// `NewEndpointSheetPage.pathError` has existed unused since the page object was written, and its
-    /// own doc admits the identifier it originally carried never existed. Its replacement —
-    /// `ds.textfield.newEndpoint.path.error` — does not reach the tree either, for the reason
-    /// ``pathValidationMessage()`` records, which is what the first CI run of this test found. The
-    /// page object is left alone here; correcting it belongs with the page objects.
+    /// The path note and input have separate identifiers, so this checks the note's text and the
+    /// Create button's state as the path changes.
     @MainActor
     func testNewEndpointSheetRejectsAPathWithoutALeadingSlash() throws {
         launchApp()
@@ -625,9 +663,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
         newEndpointSheet.pathField.typeText("api/users")
 
-        // Raised on every keystroke by `NewEndpointSheet`'s `.onChange(of: path)` — there is nothing
-        // to submit and nothing to blur first — and read through `pathValidationMessage`, not
-        // through `NewEndpointSheetPage.pathError`, which cannot match. See that property's note.
+        // The validation note recomputes on each keystroke; no submit or blur is needed.
         let statesTheRule = UITestApp.waitUntil(timeout: 5) {
             self.pathValidationMessage().contains("must start with")
         }
@@ -660,6 +696,49 @@ final class EndpointEditorUITests: MimicUITestCase {
     }
 
     // MARK: - 3. New endpoint sheet: Cancel and Return
+
+    @MainActor
+    func testNewEndpointSheetRejectsUnservablePathsAndAcceptsEncodedParameters() throws {
+        launchApp()
+        createProjectViaUI(name: "Route validation")
+        workspace.addEndpointButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        newEndpointSheet.nameField.click()
+        newEndpointSheet.nameField.typeText("Encoded route")
+
+        let invalidPaths = [
+            ("/api/users?active=true", "without a query string or fragment"),
+            ("/api/users#latest", "without a query string or fragment"),
+            ("/api/user name", "whitespace or control characters"),
+            ("/api//users", "double slashes"),
+        ]
+        for (path, reason) in invalidPaths {
+            newEndpointSheet.pathField.click()
+            newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
+            newEndpointSheet.pathField.typeText(path)
+            XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+                self.pathValidationMessage().contains(reason)
+            }, "The form should explain why \(path) cannot be served")
+            XCTAssertFalse(newEndpointSheet.createButton.isEnabled)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(newEndpointSheet.nameField.exists, "An invalid route must stay in the sheet")
+        }
+
+        newEndpointSheet.pathField.click()
+        newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
+        newEndpointSheet.pathField.typeText("/api/users/")
+        // Literal colon typing is dropped on the British test keyboard.
+        newEndpointSheet.pathField.typeKey(";", modifierFlags: .shift)
+        newEndpointSheet.pathField.typeText("id/a%20b%3Fc%23d")
+        XCTAssertEqual(newEndpointSheet.pathField.value as? String, "/api/users/:id/a%20b%3Fc%23d")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.newEndpointSheet.createButton.isEnabled })
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForSidebarRowCount(1))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.shownText(of: self.endpointEditor.pathLabel).contains("/api/users/:id/a%20b%3Fc%23d")
+        }, "The accepted route must preserve both the parameter and its percent-encoded literals")
+    }
 
     /// EPCREATE-08, EPCREATE-09.
     @MainActor
@@ -861,25 +940,33 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "Format should be disabled while the body is empty")
 
-        setResponseBody(#"{"name":"Ada Lovelace","roles":["engineer"]}"#, expecting: "Lovelace")
+        let compact = #"{"name":"Ada Lovelace","roles":["engineer"]}"#
+        let formatted = """
+        {
+          "name": "Ada Lovelace",
+          "roles": [
+            "engineer"
+          ]
+        }
+        """
+        setResponseBody(compact, expecting: "Lovelace")
 
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 6) { self.prettyPrintButton.isEnabled },
             "Format should enable once the body is non-empty valid JSON"
         )
 
-        let beforeFormatting = bodyText()
+        XCTAssertEqual(bodyText(), compact)
         revealInEditor(prettyPrintButton)
         prettyPrintButton.click()
-
-        let reformatted = UITestApp.waitUntil(timeout: 5) { self.bodyText().contains("\n") }
-        let afterFormatting = bodyText()
-        XCTAssertTrue(reformatted,
-                      "Format should re-indent the body across lines — it reads \(afterFormatting)")
-        XCTAssertNotEqual(afterFormatting, beforeFormatting,
-                          "Format should actually rewrite the body, not sit there enabled and inert")
-        XCTAssertTrue(afterFormatting.contains("Lovelace"),
-                      "Formatting must not lose the payload")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == formatted },
+                      "Format must preserve the complete payload")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == compact },
+                      "Undo must restore the whole compact body, without leaving formatted fragments")
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == formatted },
+                      "Redo must restore the complete formatted body")
 
         waitForAsyncSave()
         closeProjectViaMenu()
@@ -894,10 +981,128 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(path.waitForExistence(timeout: 5))
         path.click()
 
-        let persisted = UITestApp.waitUntil(timeout: 8) { self.bodyText().contains("Lovelace") }
+        let persisted = UITestApp.waitUntil(timeout: 8) { self.bodyText() == formatted }
         let reopenedBody = bodyText()
         XCTAssertTrue(persisted,
                       "The body should have been committed to the active scenario — it reads \(reopenedBody)")
+    }
+
+    @MainActor
+    func testClearingTheBodyPersistsWithoutChangingAnotherScenario() throws {
+        launchApp()
+        createProjectViaUI(name: "Clear response body")
+        createEndpointViaUI(name: "Clear body", path: "/api/clear")
+        hideRequestLogDrawer()
+        setResponseBody(#"{"saved":"default"}"#, expecting: "default")
+        waitForAsyncSave()
+
+        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        addScenarioButton.click()
+        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        newScenarioSheet.nameField.click()
+        newScenarioSheet.nameField.typeText("Other response")
+        newScenarioSheet.createButton.click()
+        let other = inspector.scenarioRow(named: "Other response")
+        XCTAssertTrue(other.waitForExistence(timeout: 5))
+        other.click()
+        XCTAssertTrue(waitForScenarioValue("active", named: "Other response"))
+        setResponseBody(#"{"saved":"other"}"#, expecting: "other")
+        waitForAsyncSave()
+
+        inspector.scenarioRow(named: "Default").click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"saved":"default"}"# })
+        let editor = bodyTextView()
+        editor.click()
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"saved":"default"}"# },
+                      "A newly selected scenario must not undo into the other response's document")
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"saved":"default"}"# },
+                      "A scenario switch must also clear the previous document's redo history")
+        editor.typeKey("a", modifierFlags: .command)
+        editor.typeKey(.delete, modifierFlags: [])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyTextView().value as? String == "" })
+
+        other.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"saved":"other"}"# },
+                      "Clearing Default must not overwrite the other scenario")
+        inspector.scenarioRow(named: "Default").click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyTextView().value as? String == "" },
+                      "The clear must survive reselecting the scenario")
+        waitForAsyncSave()
+        closeProjectViaMenu()
+        XCTAssertTrue(welcome.assertVisible())
+        let recent = try XCTUnwrap(welcome.findRecentProject(named: "Clear response body"))
+        recent.click()
+        XCTAssertTrue(workspace.assertVisible())
+        let path = workspace.endpointPathText("/api/clear")
+        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        path.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyTextView().value as? String == "" },
+                      "Reopening must read the cleared body from the store")
+        inspector.scenarioRow(named: "Other response").click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"saved":"other"}"# })
+    }
+
+    @MainActor
+    func testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts() async throws {
+        usesControlFixture = true
+        launchApp()
+        try await verifyControlFixture()
+        createProjectViaUI(name: "Live editor updates")
+        createEndpointViaUI(name: "Live response", path: "/api/live")
+        hideRequestLogDrawer()
+
+        try await controlResponse(["scenarioUpdate": [
+            "endpoint": ["name": "Live response"], "scenario": ["name": "Default"],
+            "spec": ["statusCode": 418, "body": #"{"remote":true}"#,
+                     "headers": ["X-Source": "control"]],
+        ]])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            self.endpointEditor.statusCodeField.value as? String == "418"
+                && self.bodyText() == #"{"remote":true}"#
+        }, "A control update must refresh the visible response without changing the selection")
+        XCTAssertTrue(endpointEditor.headersToggle.waitForExistence(timeout: 5))
+        if endpointEditor.headersToggle.value as? String == "Collapsed" {
+            endpointEditor.headersToggle.click()
+        }
+        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForExistence(timeout: 5))
+        XCTAssertEqual(endpointEditor.headerKeyField(at: 0).value as? String, "X-Source")
+        XCTAssertEqual(endpointEditor.headerValueField(at: 0).value as? String, "control")
+
+        // An invalid value cannot autosave, so it remains a local draft while the control request
+        // updates another field. This is deterministic without racing the 300 ms debounce.
+        typeIntoEditorField(endpointEditor.statusCodeField, "invalid", "The response status field")
+        try await controlResponse(["scenarioUpdate": [
+            "endpoint": ["name": "Live response"], "scenario": ["name": "Default"],
+            "spec": ["statusCode": 419, "body": #"{"remote":"second"}"#],
+        ]])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyText() == #"{"remote":"second"}"# })
+        XCTAssertEqual(endpointEditor.statusCodeField.value as? String, "invalid",
+                       "A remote update must preserve the unfinished local field")
+    }
+
+    @MainActor
+    func testChangingProjectsDismissesThePreviousEndpointDraft() async throws {
+        usesControlFixture = true
+        launchApp()
+        try await verifyControlFixture()
+        createProjectViaUI(name: "Original draft project")
+        workspace.addEndpointButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        newEndpointSheet.nameField.click()
+        newEndpointSheet.nameField.typeText("Original unsaved endpoint")
+
+        try await controlResponse(["projectCreate": ["name": "Replacement project", "port": 62177]])
+        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5),
+                      "A draft opened for the old project must not remain actionable in the replacement")
+        XCTAssertTrue(app.windows["Replacement project"].waitForExistence(timeout: 5))
+
+        workspace.addEndpointButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertEqual(newEndpointSheet.nameField.value as? String, "",
+                       "The replacement project starts with its own empty endpoint draft")
+        newEndpointSheet.cancelButton.click()
     }
 
     /// The source is only 801 bytes, but 400 nested levels would expand beyond the formatter's

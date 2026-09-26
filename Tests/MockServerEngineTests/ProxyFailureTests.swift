@@ -8,12 +8,17 @@ import Testing
 
 @Suite("Proxy failures", .serialized, .timeLimit(.minutes(1)))
 struct ProxyFailureTests {
-    @Test("A backend pointed at this listener is refused once")
-    func selfLoop() async throws {
+    @Test("A backend pointed at this listener is refused once", arguments: ["127.0.0.1", "LOCALHOST."])
+    func selfLoop(host: String) async throws {
         try await Self.checkFailure(
-            .selfLoop,
+            .selfLoop(host),
             messagePrefix: "The real backend points back to a Mimic listener in this project."
         )
+    }
+
+    @Test("A failed proxied HEAD logs the empty body that reached the client")
+    func failedHeadHasNoLoggedBody() async throws {
+        try await Self.checkFailure(.selfLoop("127.0.0.1"), method: "HEAD", messagePrefix: "")
     }
 
     @Test("An unreachable backend returns 502 without stopping the listener")
@@ -24,9 +29,9 @@ struct ProxyFailureTests {
         )
     }
 
-    private enum Backend { case selfLoop, unreachable }
+    private enum Backend { case selfLoop(String), unreachable }
 
-    private static func checkFailure(_ backend: Backend, messagePrefix: String) async throws {
+    private static func checkFailure(_ backend: Backend, method: String = "GET", messagePrefix: String) async throws {
         let localPort = try #require(PlatformSocket.freePort())
         let engine = MockServerEngine()
         await engine.updateConfiguration(endpoints: [
@@ -37,13 +42,18 @@ struct ProxyFailureTests {
         do {
             // Pick the unused port only after the listener binds, so it cannot be the local port.
             let upstreamPort: Int
+            let upstreamHost: String
             switch backend {
-            case .selfLoop: upstreamPort = localPort
-            case .unreachable: upstreamPort = try #require(PlatformSocket.freePort())
+            case .selfLoop(let host):
+                upstreamPort = localPort
+                upstreamHost = host
+            case .unreachable:
+                upstreamPort = try #require(PlatformSocket.freePort())
+                upstreamHost = "127.0.0.1"
             }
             await engine.updateServerConfiguration(.init(
                 port: localPort, globalDelayMs: 0,
-                upstreamURL: "http://127.0.0.1:\(upstreamPort)"
+                upstreamURL: "http://\(upstreamHost):\(upstreamPort)"
             ))
 
             let baseURL = try #require(URL(string: "http://127.0.0.1:\(localPort)"))
@@ -51,9 +61,10 @@ struct ProxyFailureTests {
             let session = JourneyServingTests.session(timeout: 20)
             defer { session.invalidateAndCancel() }
 
-            let failure = try await JourneyServingTests.call("GET", "missing", baseURL: baseURL, session: session)
+            let failure = try await JourneyServingTests.call(method, "missing", baseURL: baseURL, session: session)
             #expect(failure.status == 502)
-            #expect(failure.body.hasPrefix(messagePrefix))
+            if method == "HEAD" { #expect(failure.body.isEmpty) }
+            else { #expect(failure.body.hasPrefix(messagePrefix)) }
 
             let alive = try await JourneyServingTests.call("GET", "alive", baseURL: baseURL, session: session)
             #expect(alive.status == 200)
@@ -72,6 +83,9 @@ struct ProxyFailureTests {
             #expect(aliveLog.path == "/alive")
             #expect(aliveLog.outcome == .endpoint)
             #expect(aliveLog.responseStatusCode == 200)
+            await engine.acknowledgeLog()
+            await engine.acknowledgeLog()
+            #expect(await engine.logGate.outstandingCount == 0)
 
             try await engine.stop()
         } catch {

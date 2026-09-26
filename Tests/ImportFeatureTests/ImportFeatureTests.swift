@@ -8,6 +8,11 @@ import SpecImport
 @Suite("ImportFeature Support")
 @MainActor
 struct ImportFeatureTests {
+    private actor ParseObservation {
+        private(set) var wasCancelled = false
+        func recordCancellation() { wasCancelled = true }
+    }
+
     private final class MockImportOpenPanel: ImportOpenPanel {
         var allowedContentTypes: [UTType] = []
         var allowsMultipleSelection = true
@@ -119,6 +124,43 @@ struct ImportFeatureTests {
         )
 
         #expect(events == ["commit:2", "dismiss"])
+    }
+
+    @Test("Dismissing an import cancels its parser without publishing an error or result")
+    func cancellingImportReachesTheParser() async throws {
+        let model = ImportWorkflow()
+        let observation = ParseObservation()
+        let started = AsyncStream<Void>.makeStream()
+        model.parseFile(
+            at: URL(fileURLWithPath: "/tmp/cancelled-import.har"),
+            existingEndpoints: [],
+            loadData: { _ in Data(#"{"log":{"entries":[]}}"#.utf8) },
+            parse: { _, _ in
+                started.continuation.yield(())
+                started.continuation.finish()
+                do {
+                    // A bound on the failure path, not a wait used to coordinate the test. The
+                    // start signal below proves the background parser is running before cancel.
+                    try await Task.sleep(for: .seconds(30))
+                    return []
+                } catch is CancellationError {
+                    await observation.recordCancellation()
+                    throw CancellationError()
+                }
+            }
+        )
+        let task = try #require(model.parseTask)
+        var iterator = started.stream.makeAsyncIterator()
+        _ = await iterator.next()
+
+        model.cancelParsing()
+        await task.value
+
+        #expect(await observation.wasCancelled)
+        #expect(model.parseTask == nil)
+        #expect(!model.isParsing)
+        #expect(model.parseError == nil)
+        #expect(model.candidates.isEmpty)
     }
 
     @Test("Import flow model commit and cancelled picker keep state consistent")

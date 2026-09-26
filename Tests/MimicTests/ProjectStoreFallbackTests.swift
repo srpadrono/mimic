@@ -38,12 +38,12 @@ struct ProjectStoreFallbackTests {
     }
 
     @Test("The failure explains what happened and what it means for the user's work")
-    func failureIsActionable() {
+    func failureIsActionable() throws {
         let opened = ProjectStore.open(
             makeOnDisk: { throw OpenFailure() },
             makeInMemory: { try DatabaseFactory.makeInMemoryDatabaseQueue() }
         )
-        let failure = try! #require(opened.failure)
+        let failure = try #require(opened.failure)
 
         // Vague is useless here: the user is about to lose work and needs to know why.
         #expect(failure.contains("nothing will be saved"))

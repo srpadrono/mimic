@@ -534,6 +534,7 @@ struct JourneyCommand: AsyncParsableCommand {
             @OptionGroup var options: GlobalOptions
 
             func run() async throws {
+                let resolvedFailure = try failure.resolve(response: response)
                 let spec = JourneyStepSpec(
                     name: newName,
                     backend: backend,
@@ -543,7 +544,7 @@ struct JourneyCommand: AsyncParsableCommand {
                     headers: try response.resolveHeaders(),
                     body: try response.resolveBody(),
                     contentType: try response.resolveContentType(),
-                    failure: try failure.resolve(),
+                    failure: resolvedFailure,
                     delayMs: delay,
                     repeatCount: repeatCount,
                     graphqlOperation: graphqlOperation
@@ -616,10 +617,10 @@ struct JourneyBehaviorOptions: ParsableArguments, Sendable {
         inversion: .prefixedNo,
         help: "Advance automatically as steps are served. Use --no-auto-advance to hold a step until `journey advance`."
     )
-    var autoAdvance: Bool = true
+    var autoAdvance: Bool?
 
-    /// Only writes fields the caller actually passed. `autoAdvance` has no natural "absent" value as a
-    /// flag, so it is only applied when one of the two spellings appears in the arguments.
+    /// Only writes fields the caller actually passed. The optional flag preserves the distinction
+    /// between an explicit on/off choice and leaving a journey's existing behavior unchanged.
     ///
     /// Throws rather than swallowing: these were `try?`, so `--match-mode sequential` — a plausible
     /// misremembering of `strict-sequence` — parsed to `nil`, wrote `nil` over the field, and exited
@@ -630,13 +631,7 @@ struct JourneyBehaviorOptions: ParsableArguments, Sendable {
         if let matchMode { spec.matchMode = try ArgumentParsing.matchMode(matchMode) }
         if let completion { spec.completion = try ArgumentParsing.completion(completion) }
         if let unmatched { spec.unmatchedBehavior = try ArgumentParsing.unmatchedBehavior(unmatched) }
-        if Self.autoAdvanceWasSpecified() { spec.autoAdvance = autoAdvance }
-    }
-
-    static func autoAdvanceWasSpecified(
-        arguments: [String] = CommandLine.arguments
-    ) -> Bool {
-        arguments.contains("--auto-advance") || arguments.contains("--no-auto-advance")
+        if let autoAdvance { spec.autoAdvance = autoAdvance }
     }
 }
 
@@ -784,12 +779,7 @@ enum StepBuilder {
         delay: Int?,
         repeatCount: Int?
     ) throws -> JourneyStepSpec {
-        let resolvedFailure = try failure.resolve()
-        if resolvedFailure != nil, response.status != nil || response.body != nil || response.bodyFile != nil {
-            throw CLIFailure.badArgument(
-                "A step either responds or fails: --fail cannot be combined with --status or --body."
-            )
-        }
+        let resolvedFailure = try failure.resolve(response: response)
         return JourneyStepSpec(
             name: name,
             method: try ArgumentParsing.method(method),

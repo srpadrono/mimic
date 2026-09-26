@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 import XCTest
@@ -413,6 +414,13 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").exists)
+        requestDetail.tab("Body").click()
+        let binaryBodyNote = element(identifiedBy: "requestDetail.body.response.empty")
+        XCTAssertTrue(binaryBodyNote.waitForExistence(timeout: 5))
+        XCTAssertTrue([binaryBodyNote.label, binaryBodyNote.value as? String ?? ""].contains(
+            "Binary or non-UTF-8 response body is not previewed"
+        ), "The full explanation must be accessible, got \(text(of: binaryBodyNote))")
+        requestDetail.tab("Summary").click()
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/profile"))).click()
         XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(poll { save.isEnabled }, app.debugDescription)
@@ -620,6 +628,18 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(allItem.waitForExistence(timeout: 5), "The method popup should offer All")
         allItem.click()
         XCTAssertTrue(waitForVisibleRowCount(3), "Choosing All should clear the method filter")
+
+        await sendRequest(port: port, path: "/api/probe", method: "HEAD", body: nil)
+        await sendRequest(port: port, path: "/api/probe", method: "OPTIONS", body: nil)
+        XCTAssertTrue(waitForRowsToArrive(5, timeout: 15))
+        for method in ["HEAD", "OPTIONS"] {
+            methodFilterControl.click()
+            let item = app.menuItems[method]
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "The method filter should offer \(method)")
+            item.click()
+            XCTAssertTrue(waitForVisibleRowCount(1), "Filtering by \(method) should leave its one request")
+            XCTAssertTrue(poll { self.firstRowLabel().hasPrefix("\(method) ") }, firstRowLabel())
+        }
     }
 
     // MARK: - LOGFILT (unmatched) and clearing the log
@@ -946,11 +966,10 @@ final class RequestLogUITests: MimicUITestCase {
             "Clearing the search should take the match count with it"
         )
 
-        search.click()
-        search.typeText("Lovelace")
+        app.typeText("Lovelace")
         XCTAssertTrue(
             poll { self.text(of: requestMatches).contains("1 match") },
-            "The find field should count the hits in the body"
+            "Clearing the find field should retain keyboard focus so typing immediately searches again"
         )
 
         // Selecting another request drops the term — carrying a search for a payload you are no
@@ -993,6 +1012,40 @@ final class RequestLogUITests: MimicUITestCase {
                 .localizedCaseInsensitiveContains("unmatched"),
             "Summary should state the unmatched outcome"
         )
+    }
+
+    @MainActor
+    func testTruncatedRequestBodyIsDisclosedAndCannotBeCopiedAsCompleteCurl() async throws {
+        let port = 62132
+        let payload = String(repeating: "x", count: 65_537)
+
+        launchApp()
+        startServer(projectNamed: "Truncated request", port: port)
+        await sendRequest(port: port, path: "/api/large", method: "POST", body: payload)
+        XCTAssertTrue(waitForRowsToArrive(1, timeout: 15))
+        logRow(try XCTUnwrap(rowIdentifier(forPath: "/api/large"))).click()
+        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"))
+
+        let bodySummary = element(identifiedBy: "requestDetail.summary.request body")
+        XCTAssertTrue(bodySummary.waitForExistence(timeout: 5))
+        XCTAssertTrue(text(of: bodySummary).contains("64.0 KB (truncated)"), text(of: bodySummary))
+        requestDetail.tab("Body").click()
+        let truncation = element(identifiedBy: "requestDetail.body.request.truncated")
+        XCTAssertTrue(truncation.waitForExistence(timeout: 5))
+        XCTAssertTrue(text(of: truncation).contains("Truncated at 64 KB."), text(of: truncation))
+
+        let curl = element(identifiedBy: "requestDetail.copy.curl")
+        XCTAssertTrue(curl.waitForExistence(timeout: 5))
+        XCTAssertFalse(curl.isEnabled, "A stored prefix cannot reproduce the original request")
+        XCTAssertTrue(curl.label.contains("request body was truncated"), curl.label)
+
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
+        element(identifiedBy: "requestDetail.copy.all").click()
+        XCTAssertTrue(poll {
+            NSPasteboard.general.string(forType: .string)?.contains("request body truncated at 64 KB") == true
+        }, "Copy All must disclose that the request payload is only a prefix")
+        XCTAssertFalse(NSPasteboard.general.string(forType: .string)?.contains(payload) == true)
     }
 
     // MARK: - LOGCTX create endpoint

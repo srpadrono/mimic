@@ -62,6 +62,9 @@ struct ProjectCommand: AsyncParsableCommand {
         }
 
         static func reference(name: String?, id: String?) throws -> ProjectRef {
+            guard name == nil || id == nil else {
+                throw CLIFailure.badArgument("Specify a project name or --id, not both.")
+            }
             if let id { return .id(try ArgumentParsing.uuid(id, flag: "--id")) }
             if let name { return .name(name) }
             throw CLIFailure.badArgument("Specify a project name, or --id.")
@@ -239,10 +242,10 @@ struct ProjectCommand: AsyncParsableCommand {
 /// Reading a JSON argument from a file or stdin.
 enum FileInput {
     static func read(_ path: String) throws -> Data {
-        if path == "-" {
-            return FileHandle.standardInput.readDataToEndOfFile()
-        }
         do {
+            if path == "-" {
+                return try FileHandle.standardInput.readToEnd() ?? Data()
+            }
             return try Data(contentsOf: URL(fileURLWithPath: path))
         } catch {
             throw CLIFailure.fileUnreadable(path: path, underlying: error.localizedDescription)

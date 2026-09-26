@@ -1,26 +1,7 @@
 import SwiftUI
 
-/// Spacing scale tokens — tighter than a stock scale, for dev-tool density.
-///
-/// **The scale had a hole between 6 and 12, and the redesign kept falling into it.** Its stated
-/// paddings include 8, 9, 10 and 11 — four numbers for what is really one tier, drawn slightly
-/// differently each time in a prototype where nothing enforced a scale. Rather than admit four new
-/// rungs, two were added at ``smPlus`` (8) and ``mdMinus`` (10) and the rest snap:
-///
-/// | Design says | Token | Why |
-/// |---|---|---|
-/// | 8 | ``smPlus`` | exact |
-/// | 9 | ``smPlus`` | a point is not a tier; 9 appears only as a card's internal padding |
-/// | 10 | ``mdMinus`` | exact |
-/// | 11 | ``mdMinus`` | ditto — 11 appears once, as a warning card's padding |
-/// | 14 | ``mdPlus`` | exact |
-/// | 20 | ``lgPlus`` | exact |
-/// | 22 | ``lgPlus`` | 22 appears once, as an editor's side padding |
-/// | 26 | ``xl`` | 26 appears once, as the journeys gallery's outer padding |
-///
-/// The general rule when a design hands you a number that is not here: if it is within a point of a
-/// rung, take the rung. If it is two or more away and it recurs, it is a tier and belongs in this
-/// file. If it is two or more away and appears once, it is a mistake in the drawing.
+/// Shared spacing scale for dense developer-tool layouts.
+/// Prefer the nearest existing token; add a new tier only for a recurring layout need.
 public enum DSSpacing {
     /// 2pt — tight inline gaps, micro adjustments
     public static let xxs: CGFloat = 2
@@ -29,8 +10,8 @@ public enum DSSpacing {
     /// 6pt — compact element spacing, form field row gaps
     public static let sm: CGFloat = 6
 
-    /// 8pt — a dense row's side inset: a navigator endpoint row, a group header. The tier between a
-    /// compact gap and a panel's own padding, and the one this scale was missing.
+    /// 8pt — a dense row's side inset: a navigator endpoint row, a group header. Between a
+    /// compact gap and a panel's own padding.
     public static let smPlus: CGFloat = 8
 
     /// 10pt — a card's internal gap, and the padding inside a small tinted card.

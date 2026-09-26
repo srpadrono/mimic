@@ -86,9 +86,15 @@ public struct JourneyRunState: Codable, Sendable, Equatable {
     public func recordingServe(of step: JourneyStep, in journey: Journey) -> JourneyRunState {
         var updated = self
         let key = step.id.uuidString
-        updated.servedCountsByStepID[key] = (updated.servedCountsByStepID[key] ?? 0) + 1
-        updated.totalServed += 1
+        updated.servedCountsByStepID[key] = Self.incrementing(updated.servedCountsByStepID[key] ?? 0)
+        updated.totalServed = Self.incrementing(updated.totalServed)
         return updated.normalized(in: journey)
+    }
+
+    /// Rehydrated counters can already be at the integer limit, especially for a held or looping
+    /// step. Saturate telemetry without stopping the request that the journey should still answer.
+    private static func incrementing(_ count: Int) -> Int {
+        count == Int.max ? Int.max : count + 1
     }
 
     /// Retires the step at the cursor without serving it — the manual "move on" control.
@@ -191,7 +197,7 @@ public struct JourneyStatus: Codable, Sendable, Equatable {
             isComplete: runState.isComplete,
             totalSteps: journey.steps.count,
             totalServed: runState.totalServed,
-            currentStepIndex: runState.isComplete || runState.cursor >= journey.steps.count ? nil : runState.cursor,
+            currentStepIndex: runState.isComplete || !journey.steps.indices.contains(runState.cursor) ? nil : runState.cursor,
             steps: steps
         )
     }

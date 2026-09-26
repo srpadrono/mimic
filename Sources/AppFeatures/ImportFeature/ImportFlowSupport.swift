@@ -168,13 +168,9 @@ final class ImportWorkflow {
 
     /// Which parse the state on screen belongs to.
     ///
-    /// Cancelling the task above cannot do this job on its own, twice over. Cancellation is
-    /// cooperative and nothing downstream observes it: `loadData` defaults to a synchronous
-    /// `Data(contentsOf:)`, and `HARParser.parse` and `OpenAPIParser.parse` each decode inside a
-    /// `Task.detached` of their own, which does not inherit cancellation from the task awaiting it.
-    /// And even where cancellation *is* observed, awaiting a cancelled task still hands back whatever
-    /// it computed, so a stale result would arrive and be committed regardless. The generation is
-    /// checked at the only point that settles it — after the await, immediately before the write.
+    /// Cancellation is forwarded to the background loader and parsers, but a synchronous read or
+    /// an injected parser may finish without observing it. Check the generation after awaiting
+    /// either outcome so an abandoned result cannot replace the current file's review.
     private var parseGeneration = 0
 
     init(
@@ -260,8 +256,6 @@ final class ImportWorkflow {
 
         parseGeneration &+= 1
         let generation = parseGeneration
-        // Best effort, and honestly so — see `parseGeneration` for why nothing downstream stops. It
-        // costs one line, and it starts working the day a parser learns to check `Task.isCancelled`.
         parseTask?.cancel()
 
         parseTask = Task { @MainActor [weak self, existingEndpoints, loadData, parse] in
@@ -271,14 +265,19 @@ final class ImportWorkflow {
                 // `@MainActor`, and `ImportCandidateLoader.load` calls `loadData` — synchronous, and
                 // over a file the importer allows to be 256 MB. That read must not happen on the main
                 // actor, whatever else moves around it.
-                let parsed = try await Task.detached(priority: .userInitiated) {
+                let loading = Task.detached(priority: .userInitiated) {
                     try await ImportCandidateLoader.load(
                         url: url,
                         existingEndpoints: existingEndpoints,
                         loadData: loadData,
                         parse: parse
                     )
-                }.value
+                }
+                let parsed = try await withTaskCancellationHandler {
+                    try await loading.value
+                } onCancel: {
+                    loading.cancel()
+                }
                 outcome = .success(parsed)
             } catch {
                 outcome = .failure(error)
@@ -288,7 +287,8 @@ final class ImportWorkflow {
             // written: a superseded parse must not report a failure either. Its error belongs to a
             // file the user has already moved on from, and showing it would replace the running
             // spinner with "Parse error" for a parse that is still going.
-            guard let self, generation == parseGeneration else { return }
+            guard let self, generation == parseGeneration, !Task.isCancelled else { return }
+            parseTask = nil
             switch outcome {
             case let .success(parsed):
                 finishParsing(with: parsed)
@@ -296,6 +296,13 @@ final class ImportWorkflow {
                 failParsing(error)
             }
         }
+    }
+
+    func cancelParsing() {
+        parseGeneration &+= 1
+        parseTask?.cancel()
+        parseTask = nil
+        isParsing = false
     }
 
     func commit(onCommit: ([ImportCandidate]) -> Void, dismiss: () -> Void) {
@@ -432,6 +439,7 @@ struct ImportWorkflowScreen: View {
         // progress view are leaves whose identifiers are the ones a test looks for.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(kind.rootAccessibilityIdentifier)
+        .onDisappear { workflow.cancelParsing() }
     }
 
     private var cancelButton: some View {
@@ -501,8 +509,14 @@ enum ImportCandidateLoader {
         loadData: @Sendable (URL) throws -> Data,
         parse: @Sendable (Data, [Endpoint]) async throws -> [ImportCandidate]
     ) async throws -> [ImportCandidate] {
+        try Task.checkCancellation()
         try checkSize(of: url)
         let data = try loadData(url)
+        try Task.checkCancellation()
+        // The file can grow after the metadata check, and injected readers may transform it.
+        guard data.count <= maxFileSizeBytes else {
+            throw ImportSizeError.tooLarge(bytes: data.count, limit: maxFileSizeBytes)
+        }
         return try await parse(data, existingEndpoints)
     }
 

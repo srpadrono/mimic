@@ -108,7 +108,7 @@ struct JourneyFeatureRenderingTests {
             RequestLog(
                 timestamp: Date(timeIntervalSince1970: 1_710_000_000 + TimeInterval(index)),
                 method: .get,
-                path: "/account-summary",
+                path: "/account-summary/\(min(index, steps - 1))",
                 responseStatusCode: 200,
                 outcome: .endpoint
             )
@@ -116,8 +116,7 @@ struct JourneyFeatureRenderingTests {
         return CaptureJourneySheet(
             capture: CaptureJourneySheet.Capture(
                 logs: logs,
-                suggestedName: "Account summary flow",
-                stepCount: steps
+                suggestedName: "Account summary flow"
             )
         ) { _, _ in }
     }
@@ -268,6 +267,59 @@ struct JourneyFeatureRenderingTests {
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)
+    }
+
+    @Test("The step form keeps its sheet margin when a scrollbar consumes width")
+    func stepFormAlignsWithSheetMargin() async throws {
+        let controller = NSHostingController(rootView: JourneyStepSheet(step: nil) { _ in })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 640),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        func scrollViews(in view: NSView) -> [NSScrollView] {
+            ((view as? NSScrollView).map { [$0] } ?? [])
+                + view.subviews.flatMap { scrollViews(in: $0) }
+        }
+
+        var outerScroll: NSScrollView?
+        var bodyScroll: NSScrollView?
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            try await Task.sleep(for: .milliseconds(10))
+            controller.view.layoutSubtreeIfNeeded()
+            let views = scrollViews(in: controller.view)
+            outerScroll = views.first { !($0.documentView is NSTextView) }
+            bodyScroll = views.first {
+                ($0.documentView as? NSTextView)?.accessibilityIdentifier() == "stepSheet.bodyField"
+            }
+            if let outerScroll, bodyScroll != nil {
+                // This is an owned test view, not a change to the developer's scrollbar defaults.
+                outerScroll.scrollerStyle = .legacy
+                outerScroll.autohidesScrollers = false
+                outerScroll.hasVerticalScroller = true
+                outerScroll.tile()
+                controller.view.layoutSubtreeIfNeeded()
+                if outerScroll.contentSize.width < outerScroll.bounds.width { break }
+            }
+        } while Date() < deadline
+
+        let outer = try #require(outerScroll)
+        let editor = try #require(bodyScroll)
+        try #require(outer.contentSize.width < outer.bounds.width, "The fixture must reserve scrollbar width")
+        // Let SwiftUI lay the form out with the narrower viewport before measuring its native child.
+        try await Task.sleep(for: .milliseconds(10))
+        controller.view.layoutSubtreeIfNeeded()
+        let frame = editor.convert(editor.bounds, to: outer.contentView)
+        let viewport = outer.contentView.bounds
+        // The native body interior starts at the 16pt sheet margin plus its own 4pt padding.
+        #expect(abs(frame.minX - viewport.minX - 20) < 0.5)
+        #expect(abs(viewport.maxX - frame.maxX - 20) < 0.5)
     }
 
     /// The capture sheet explains a collapse, and only a collapse.

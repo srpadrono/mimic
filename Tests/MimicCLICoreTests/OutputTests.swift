@@ -15,6 +15,24 @@ import Testing
 /// regression a substring match cannot see.
 @Suite("CLI text rendering")
 struct TextRendererTests {
+    @Test("Text update checks report the release instead of a generic success", arguments: [false, true])
+    func updateReportIsVisible(available: Bool) {
+        let report = UpdateReport(
+            installed: "1.0.0", latest: available ? "1.1.0" : "1.0.0", updateAvailable: available,
+            releaseURL: URL(string: "https://example.com/releases/1.1.0")!,
+            publishedAt: Date(timeIntervalSince1970: 0), assetName: "Mimic.pkg", assetSizeInBytes: 42, title: "Release"
+        )
+        #expect(TextRenderer.render(ControlResult(update: report)) == (available
+            ? "Update available: 1.1.0 (installed 1.0.0)\nhttps://example.com/releases/1.1.0"
+            : "No update available (installed 1.0.0, latest 1.0.0)."))
+    }
+
+    @Test("An invalid cursor from a response cannot overflow or invent a step", arguments: [-1, 2, Int.max])
+    func invalidJourneyCursorIsDisplayable(index: Int) {
+        let status = JourneyStatus(journeyID: UUID(), journeyName: "Flow", isComplete: false,
+            totalSteps: 2, totalServed: 0, currentStepIndex: index, steps: [])
+        #expect(TextRenderer.runPosition(status) == "no current step")
+    }
 
     // MARK: - Endpoints
 
@@ -56,8 +74,7 @@ struct TextRendererTests {
 
     @Test("An endpoint with nothing active says so rather than rendering a blank column")
     func endpointWithoutAnActiveScenario() {
-        // What `mimic endpoint create` leaves behind: the executor only sets `activeScenarioID`
-        // when a scenario is added.
+        // An imported or manually assembled endpoint can have no active scenario.
         let endpoint = Endpoint(name: "Sessions", method: .post, path: "/sessions")
         #expect(
             TextRenderer.render(ControlResult(endpoint: endpoint))
@@ -498,6 +515,10 @@ struct TextRendererTests {
 /// before it can print anything at all, so nothing but a payload ever reaches stdout.
 @Suite("CLI output contract")
 struct OutputContractTests {
+    @Test("Invalid global timeouts fail before command execution", arguments: ["nan", "inf", "-1", "0"])
+    func invalidTimeoutIsBadUsage(value: String) async {
+        #expect(await MimicCommand.run(arguments: ["ping", "--timeout", value]) == 2)
+    }
 
     @Test("A failed response never reaches stdout — it throws with the command's own error")
     func emitRejectsAFailedResponse() {

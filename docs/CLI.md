@@ -1,10 +1,12 @@
 # CLI and control API
 
-`mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, one diagnostic line on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
+`mimic` drives the running macOS app, including its headless mode. Use `mimic commands` to inspect the operations the current instance accepts and `mimic --help` for exact flags. The CLI prints a result JSON object on stdout, a diagnostic on stderr after a failure, and no JSON envelope. Add `--format text` for display output.
 
 Project edits (such as rename, endpoint, scenario, journey definition, and `log save-as-mock` changes) report success after the edited project has been saved. If the store refuses a save, the command returns `persistence.failure`; the edited project remains in the open session and the window shows the save failure. Inspect the open project before retrying a create command: repeating it can add a second item to that session. Project create, open, and duplicate retain their asynchronous window workflow; confirm their settled state with a follow-up command.
 
 HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
+
+While the app saves and backs up projects for installation, new control edits that can change the project store return `update.installing` (HTTP 409, CLI exit code 4). Read-only queries remain available. If installation cannot proceed, the app resumes accepting edits and the caller may retry.
 
 ## Exit codes
 
@@ -14,6 +16,7 @@ HAR and OpenAPI/Swagger spec import require the window. `mimic project import` a
 | `2` | Bad arguments or an unreadable input file. |
 | `3` | No usable Mimic instance or app to launch or stop. |
 | `4` | Mimic refused the command or returned an unreadable result. |
+| `130` | The command was interrupted or cancelled. |
 
 For code `4`, stderr starts with a stable dotted error code such as `endpoint.notFound` or `server.portInUse`. The CLI result is already unwrapped: `mimic journey status | jq -e '.journeyStatus.isComplete'`.
 
@@ -30,10 +33,14 @@ mimic app update-check          # returns updateAvailable; does not install
 
 `MIMIC_APP_PATH` selects a noninstalled app bundle. A headless run still requires `Mimic.app`; it uses the same `AppControlHost` as a visible run. `app stop` signals only the instance named by the discovery file after confirming its PID and ignores `--url` for that reason. If confirmation fails, stop the process manually after verifying it.
 `app start --wait-seconds` accepts a finite value greater than zero and at most 3600; invalid values fail before the app launches.
+The shared `--timeout` option has the same bounds. Cancelling a pending command stops its wait; a command already received by the app may still complete.
 
 ## Finding an instance
 
 For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, then `MIMIC_CONTROL_PORT` on loopback, then the discovery file. It skips stale discovery files. A token read from that file is sent only to `http://127.0.0.1` on the exact advertised port, because the control server binds that IPv4 address. Supply `MIMIC_CONTROL_TOKEN` explicitly for a `localhost` or IPv6 URL, a forwarded port, or a remote destination.
+
+A malformed explicit URL or a nonempty invalid `MIMIC_CONTROL_PORT` fails destination resolution. It cannot fall back to another discovered instance. Control ports must be between `1` and `65535`.
+Explicit destinations must be absolute HTTP(S) URLs without user information, query strings, or fragments. A path prefix is allowed for forwarding.
 
 | Variable | Purpose |
 | --- | --- |
@@ -44,7 +51,7 @@ For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, the
 | `MIMIC_DATABASE_PATH` | Project SQLite path. |
 | `MIMIC_APP_PATH` | App bundle to launch. |
 
-The discovery file contains the instance's port, PID, and token. It is written `0600`, with a `0700` parent directory. Set the path variables before starting the app. A signed app is sandboxed and cannot write arbitrary temporary paths outside its container; the [end-to-end harness](../Scripts/run_cli_e2e.sh) uses a disposable ad hoc signed app copy for this purpose. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
+The discovery file contains the instance's port, PID, and token. It is created privately with mode `0600` before publication. New parent directories request `0700`; existing directory permissions are preserved. Set the path variables before starting the app. A signed app is sandboxed and cannot write arbitrary temporary paths outside its container; the [end-to-end harness](../Scripts/run_cli_e2e.sh) uses a disposable ad hoc signed app copy for this purpose. Choose a nondefault `MIMIC_CONTROL_PORT` if another local instance may be running, and use a fresh token for each run.
 The control client refuses HTTP redirects so a listener cannot forward a token to another host or port after the initial destination check.
 
 Shutdown removes the discovery file only when it still contains this instance's record. Publication and cleanup use the same lock, so another instance cannot replace the record between that check and removal. A failed bind has no record to remove, and cleanup leaves an already replaced record alone. The default path advertises one instance at a time; give concurrent runs separate `MIMIC_CONTROL_FILE` paths.
@@ -162,7 +169,7 @@ mimic log save-as-mock <log-UUID>
 mimic log clear
 ```
 
-Each entry identifies the outcome (`endpoint`, `journey`, `passthrough`, `unmatched`, or `blockedByJourney`) and includes response status, headers, and a capped body preview. An intentional endpoint `404` is not `unmatched`. A transport failure has no fabricated status code.
+Each entry identifies the outcome (`endpoint`, `journey`, `passthrough`, `proxyFailure`, `unmatched`, or `blockedByJourney`) and includes response status, headers, and a capped body preview. An intentional endpoint `404` is not `unmatched`. A transport failure has no fabricated status code.
 
 ## A disposable test run
 
@@ -178,12 +185,21 @@ MIMIC_BIN="$products/mimic" MIMIC_APP_PATH="$products/Mimic.app" ./Scripts/run_c
 The control API listens only on loopback. Read the token from the current instance's discovery file; the sandboxed app normally writes under `~/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/`, while an unsandboxed build uses `~/Library/Application Support/devxa.Mimic/`. `MIMIC_CONTROL_FILE` overrides both.
 
 ```bash
-CONTROL="$HOME/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/control.json"
-TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$CONTROL")
-curl -H "X-Mimic-Token: $TOKEN" http://127.0.0.1:8787/v1/commands
-curl -X POST http://127.0.0.1:8787/v1/command \
+CONTROL="${MIMIC_CONTROL_FILE:-$HOME/Library/Containers/devxa.Mimic/Data/Library/Application Support/devxa.Mimic/control.json}"
+read -r CONTROL_PORT TOKEN < <(python3 -c '
+import json, sys
+record = json.load(sys.stdin)
+port = record["port"]
+if type(port) is not int or not 1 <= port <= 65535:
+    raise SystemExit("Invalid control port")
+print(port, record["token"])
+' < "$CONTROL")
+CONTROL_URL="http://127.0.0.1:$CONTROL_PORT"
+curl -H "X-Mimic-Token: $TOKEN" "$CONTROL_URL/v1/commands"
+curl -X POST "$CONTROL_URL/v1/command" \
   -H "X-Mimic-Token: $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"serverStop":{}}'
+  -d '{"ping":{}}'
 ```
 
 `POST /v1/command` accepts a single-key object named for a `ControlCommand` case. Every route, including health, returns an envelope: `{"ok":true,"result":{…}}` or `{"ok":false,"error":{"code":"…","message":"…"}}`. HTTP statuses distinguish bad requests, missing resources, conflicts, and authentication failures; scripts should also read `error.code`. See [Security](../SECURITY.md) for token and browser protections.
+Command bodies are limited to 4 MiB. An oversized upload returns HTTP `413` with `request.invalid`; malformed command JSON or UTF-8 returns `request.undecodable`.

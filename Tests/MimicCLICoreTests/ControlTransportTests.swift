@@ -281,10 +281,15 @@ struct EmittedCommandTests {
     @Test("`endpoint update` emits only the halves the invocation asked for")
     func endpointUpdateComposition() async {
         let endpointOnly = await Self.emitted(["endpoint", "update", "GET", "/a", "--delay", "100"])
-        #expect(endpointOnly.map(\.kind) == [.endpointUpdate, .endpointGet])
+        #expect(endpointOnly.map(\.kind) == [.endpointUpdate])
 
         let responseOnly = await Self.emitted(["endpoint", "update", "GET", "/a", "--status", "500"])
-        #expect(responseOnly.map(\.kind) == [.endpointGet, .scenarioUpdate, .endpointGet])
+        #expect(responseOnly.map(\.kind) == [.endpointGet, .endpointUpdateWithActiveScenario])
+        #expect(responseOnly.last == .endpointUpdateWithActiveScenario(
+            endpoint: .id(RecordingTransport.endpoint.id),
+            spec: EndpointSpec(),
+            scenarioSpec: ScenarioSpec(statusCode: 500)
+        ))
 
         let both = await Self.emitted(
             ["endpoint", "update", "GET", "/a", "--delay", "100", "--status", "500"]
@@ -617,13 +622,7 @@ struct EmittedCommandTests {
     }
 }
 
-/// The five ways `ControlClient.send` can read a reply, and the two ways `isReachable` can.
-///
-/// None of them had ever been executed. What `Tests/MimicCLICoreTests` asserted about them was the
-/// exit code each *failure value* carries — `CLIFailure.undecodable("x").exitCode == 4` — which is a
-/// statement about the enum, not about the decoding that decides which case is thrown. The seam under
-/// the transport is `ControlHTTPExchange`: it sits below every branch, so what runs here is the real
-/// `send`, not a reimplementation of it.
+/// Literal HTTP replies and injected exchange failures exercise the real client without a server.
 @Suite("Control client transport")
 struct ControlClientTransportTests {
 
@@ -667,10 +666,9 @@ struct ControlClientTransportTests {
 
     // MARK: - Reading a reply
 
-    @Test("A well-formed envelope is returned as it stands, whatever the status")
+    @Test("A well-formed success envelope is returned on HTTP 200")
     func envelopeIsReturned() async throws {
-        let payload = try ControlCoding.string(ControlResponse.success(.message("Done")))
-        let client = Self.client(Self.http(200, payload))
+        let client = Self.client(Self.http(200, #"{"ok":true,"result":{"message":"Done"}}"#))
 
         let response = try await client.send(.ping)
         #expect(response.ok)
@@ -682,12 +680,38 @@ struct ControlClientTransportTests {
     /// the status number does. `Output.emit` is what turns `ok: false` into exit code 4.
     @Test("A refusal carried in an envelope is not a transport failure")
     func envelopedRefusalIsReturned() async throws {
-        let payload = try ControlCoding.string(ControlResponse.failure(.noProjectOpen))
-        let client = Self.client(Self.http(409, payload))
+        let client = Self.client(Self.http(
+            409,
+            #"{"ok":false,"error":{"code":"project.noneOpen","message":"No project is open."}}"#
+        ))
 
         let response = try await client.send(.endpointList)
         #expect(response.ok == false)
         #expect(response.error?.code == "project.noneOpen")
+    }
+
+    @Test("A success envelope cannot override an HTTP refusal", arguments: [302, 307, 403, 409, 500, 502])
+    func aFailureStatusCannotClaimSuccess(status: Int) async throws {
+        let client = Self.client(Self.http(status, #"{"ok":true,"result":{"message":"Done"}}"#))
+        do {
+            _ = try await client.send(.ping)
+            Issue.record("An HTTP refusal was reported as success")
+        } catch let failure as CLIFailure {
+            guard case let .commandFailed(error) = failure else {
+                Issue.record("Expected an HTTP refusal, got \(failure)")
+                return
+            }
+            #expect(error.code == "http.\(status)")
+            #expect(failure.exitCode == 4)
+        }
+    }
+
+    @Test("An HTTP 401 is unauthorized even when its body claims success")
+    func unauthorizedCannotClaimSuccess() async {
+        let client = Self.client(Self.http(401, #"{"ok":true,"result":{}}"#))
+        await #expect(throws: CLIFailure.commandFailed(.unauthorized)) {
+            _ = try await client.send(.ping)
+        }
     }
 
     /// A `401` whose body is not an envelope — a proxy in front of the port, say. It used to be
@@ -733,6 +757,70 @@ struct ControlClientTransportTests {
         }
     }
 
+    @Test("Malformed response diagnostics redact reflected tokens", arguments: [200, 502])
+    func errorPreviewRedactsToken(status: Int) async throws {
+        let client = Self.client(token: "literal-private-token", Self.http(
+            status, "<html>X-Mimic-Token: literal-private-token</html>"
+        ))
+        do {
+            _ = try await client.send(.ping)
+            Issue.record("A non-envelope body was accepted")
+        } catch let failure as CLIFailure {
+            let diagnostic = try #require(failure.errorDescription)
+            #expect(diagnostic.contains("X-Mimic-Token: [redacted]"))
+            #expect(!diagnostic.contains("literal-private-token"))
+        }
+    }
+
+    @Test("Large error previews preserve UTF-8 and stop at 4 KiB")
+    func errorPreviewIsBoundedUTF8() async throws {
+        let prefix = String(repeating: "x", count: 4_095)
+        let client = Self.client(Self.http(200, prefix + "🦋" + String(repeating: "z", count: 8_192)))
+        await #expect(throws: CLIFailure.undecodable(prefix + "\n[Response body truncated]")) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("A reflected token crossing the preview cutoff is redacted in full")
+    func errorPreviewRedactsAcrossCutoff() async throws {
+        let prefix = String(repeating: "x", count: 4_080)
+        let client = Self.client(token: "literal-private-token", Self.http(
+            200, prefix + "literal-private-token" + String(repeating: "z", count: 32)
+        ))
+        await #expect(throws: CLIFailure.undecodable(prefix + "[redacted]\n[Response body truncated]")) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("Error previews escape terminal control characters while retaining tabs and newlines")
+    func errorPreviewEscapesTerminalControls() async {
+        let client = Self.client(Self.http(200, "before\u{1B}]52;payload\u{7}\rrewind\u{8}\u{7F}\tend\n"))
+        await #expect(throws: CLIFailure.undecodable(
+            "before\\u{1B}]52;payload\\u{7}\\u{D}rewind\\u{8}\\u{7F}\tend\n"
+        )) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("Escaping control characters cannot exceed the diagnostic byte budget")
+    func escapedErrorPreviewRemainsBounded() async {
+        let client = Self.client(Self.http(200, String(repeating: "\u{7}", count: 1_000)))
+        // Each literal \\u{7} consumes five bytes; 819 complete escapes fit within 4096 bytes.
+        let expected = String(repeating: "\\u{7}", count: 819) + "\n[Response body truncated]"
+        await #expect(throws: CLIFailure.undecodable(expected)) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("Successful response data remains complete even when it contains the supplied token")
+    func successPayloadIsNotRedactedOrTruncated() async throws {
+        let message = String(repeating: "x", count: 5_000) + "literal-private-token"
+        let client = Self.client(token: "literal-private-token", Self.http(
+            200, #"{"ok":true,"result":{"message":""# + message + #""}}"#
+        ))
+        #expect(try await client.send(.ping).result?.message == message)
+    }
+
     /// Nothing answered at all — the port is closed, the host is gone. The failure names where it was
     /// pointed, because "no instance" is the single most common reason a command cannot proceed.
     @Test("A transport error is reported as unreachable, naming the base URL")
@@ -761,7 +849,58 @@ struct ControlClientTransportTests {
         }
     }
 
+    @Test("Cancellation from the exchange remains cancellation")
+    func exchangeCancellationIsPreserved() async {
+        let client = Self.client { _ in throw CancellationError() }
+        await #expect(throws: CancellationError.self) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("URLSession cancellation remains cancellation")
+    func urlSessionCancellationIsPreserved() async {
+        let client = Self.client { _ in throw URLError(.cancelled) }
+        await #expect(throws: CancellationError.self) {
+            _ = try await client.send(.ping)
+        }
+    }
+
+    @Test("An already-cancelled command cannot start an exchange")
+    func cancelledCommandDoesNotSend() async {
+        let client = Self.client { request in
+            Issue.record("A cancelled command sent a request")
+            return try await Self.http(200, #"{"ok":true,"result":{}}"#)(request)
+        }
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await client.send(.ping)
+        }
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+    }
+
+    @Test("Cancellation during a non-cancellable exchange discards its response")
+    func cancellationBeforeDecodeIsPreserved() async {
+        let client = Self.client { request in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await Self.http(200, #"{"ok":true,"result":{}}"#)(request)
+        }
+        let task = Task { try await client.send(.ping) }
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+    }
+
     // MARK: - The token
+
+    @Test("A command uses the forwarded base path and the literal v1 JSON wire shape")
+    func forwardedCommandRequest() async throws {
+        let client = ControlClient(baseURL: URL(string: "https://forwarded.example/mimic")!) { request in
+            #expect(request.url?.absoluteString == "https://forwarded.example/mimic/v1/command")
+            #expect(request.httpMethod == "POST")
+            #expect(request.httpBody == Data(#"{"ping":{}}"#.utf8))
+            #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+            return try await Self.http(200, #"{"ok":true,"result":{}}"#)(request)
+        }
+        _ = try await client.send(.ping)
+    }
 
     @Test("The token is attached as X-Mimic-Token, and omitted when there is none")
     func tokenIsAttached() async throws {
@@ -802,5 +941,18 @@ struct ControlClientTransportTests {
         struct Dropped: Error {}
         let client = Self.client { _ in throw Dropped() }
         #expect(await client.isReachable() == false)
+    }
+
+    @Test("An already-cancelled health check cannot start an exchange")
+    func cancelledReadinessDoesNotSend() async {
+        let client = Self.client { request in
+            Issue.record("A cancelled health check sent a request")
+            return try await Self.http(200, "healthy")(request)
+        }
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await client.isReachable()
+        }
+        #expect(await task.value == false)
     }
 }

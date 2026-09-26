@@ -102,6 +102,31 @@ public enum CommandScope: String, Sendable {
 
 extension CommandKind {
 
+    /// Whether an admitted command can change the project store that an update snapshots.
+    /// This is deliberately exhaustive: a new command must decide whether installation waits for
+    /// it. Live-only changes (logs, server state and the journey cursor) do not hold up a backup.
+    public var mayMutateProjectStore: Bool {
+        switch self {
+        case .ping, .describeCommands, .state, .reset, .appUpdateCheck,
+             .projectList, .projectExport, .serverStop, .serverStatus,
+             .endpointList, .endpointGet, .scenarioList,
+             .journeyList, .journeyGet, .journeyTemplateList, .journeyRestart,
+             .journeyAdvance, .journeyStatus, .logList, .logClear:
+            false
+
+        case .projectCreate, .projectOpen, .projectClose, .projectDelete, .projectRename,
+             .projectDuplicate, .projectImport, .serverStart, .serverConfigure,
+             .backendUpsert, .backendDelete,
+             .endpointCreate, .endpointUpdate, .endpointUpdateWithActiveScenario,
+             .endpointDelete, .endpointDuplicate,
+             .scenarioCreate, .scenarioUpdate, .scenarioDelete, .scenarioActivate,
+             .journeyCreate, .journeyAddTemplate, .journeyUpdate, .journeyDelete,
+             .journeyDuplicate, .journeyStepAdd, .journeyStepsAdd, .journeyStepUpdate,
+             .journeyStepRemove, .journeyStepMove, .journeyActivate, .logSaveAsMock:
+            true
+        }
+    }
+
     /// Which side of the project/host line this command falls on.
     ///
     /// This used to be three hand-written case lists: the twenty-one host-scoped cases at the bottom

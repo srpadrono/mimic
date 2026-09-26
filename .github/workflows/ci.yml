@@ -35,7 +35,10 @@ jobs:
       - name: Install SQLite headers and Python
         run: |
           apt-get update
-          apt-get install -y libsqlite3-dev python3-minimal
+          apt-get install -y libsqlite3-dev python3
+
+      - name: Script regressions
+        run: python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
 
       - name: Swift version
         id: swift
@@ -44,13 +47,13 @@ jobs:
           echo "key=$(swift --version | head -1 | tr -c 'a-zA-Z0-9' '-' | tr -s '-')" >> "$GITHUB_OUTPUT"
 
       - name: Lockfiles agree
-        run: python3 Scripts/check_lockfiles.py
+        run: python3 Scripts/check_lockfiles.py --self-test
 
       - name: Compiler settings
-        run: python3 Scripts/check_compiler_settings.py
+        run: python3 Scripts/check_compiler_settings.py --self-test
 
       - name: Module edges
-        run: python3 Scripts/check_module_edges.py
+        run: python3 Scripts/check_module_edges.py --self-test
 
       - name: Documentation and test targets
         run: |
@@ -96,6 +99,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Script regressions (including macOS packaging fixtures)
+        run: python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
 
       - uses: ./.github/actions/macos-setup
 
@@ -167,20 +173,19 @@ jobs:
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
             -configuration Release -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGN_IDENTITY=- build \
-            | tee .artifacts/release-build.log
+            2>&1 | tee .artifacts/release-build.log
 
       - name: Release warnings (reported, never a gate)
         continue-on-error: true
         run: |
           warnings="$(grep -E ': warning: ' .artifacts/release-build.log \
-            | grep -vE 'SourcePackages/|Tuist/\.build/' | sort -u)"
+            | grep -vE 'SourcePackages/|Tuist/\.build/' | sort -u || true)"
           count="$(printf '%s\n' "$warnings" | grep -c . || true)"
           {
             echo "### Release warnings in first-party sources"
             echo
-            echo "**$count** distinct warning line(s). This step never fails the run — see the"
-            echo "comment above \`Build (Release)\` in \`.github/workflows/ci.yml\` for why"
-            echo "warnings-as-errors is not switched on from the command line."
+            echo "**$count** distinct warning line(s). This report is informational;"
+            echo 'compiler warning policy comes from the project settings.'
             if [ -n "$warnings" ]; then
               echo
               echo '```'
@@ -374,6 +379,9 @@ jobs:
             name: endpoint editor A
             only: >-
               -only-testing:MimicUITests/EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance
+              -only-testing:MimicUITests/EndpointEditorUITests/testClearingTheBodyPersistsWithoutChangingAnotherScenario
+              -only-testing:MimicUITests/EndpointEditorUITests/testChangingProjectsDismissesThePreviousEndpointDraft
+              -only-testing:MimicUITests/EndpointEditorUITests/testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts
               -only-testing:MimicUITests/EndpointEditorUITests/testDeleteScenarioIsDisabledForTheOnlyScenarioAndRemovesOneOfSeveral
               -only-testing:MimicUITests/EndpointEditorUITests/testEditorDeleteConfirmationCancelKeepsTheEndpoint
               -only-testing:MimicUITests/EndpointEditorUITests/testEndpointDelayCommitsOnBlurAndRejectsANonNumericValue
@@ -400,6 +408,7 @@ jobs:
               -only-testing:MimicUITests/EndpointEditorUITests/testMethodScopeFilterRestrictsTheListAndNamesTheEmptyScope
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetCancelsAndSubmitsOnReturn
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsAPathWithoutALeadingSlash
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsUnservablePathsAndAcceptsEncodedParameters
               -only-testing:MimicUITests/EndpointEditorUITests/testNewScenarioSheetCancelsAndSubmitsOnReturn
               -only-testing:MimicUITests/EndpointEditorUITests/testRemovingAMiddleHeaderRowKeepsTheOthersIntact
               -only-testing:MimicUITests/EndpointEditorUITests/testSidebarContextMenuDeleteConfirmationNamesTheEndpoint

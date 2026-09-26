@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 public enum ValidationError: Error, Sendable, LocalizedError {
     case invalidPath(String)
@@ -34,8 +39,13 @@ public enum EndpointValidator {
         guard path.hasPrefix("/") else {
             throw ValidationError.invalidPath("Path must start with '/': \(path)")
         }
-        guard path == path.trimmingCharacters(in: .whitespaces) else {
-            throw ValidationError.invalidPath("Path must not have leading or trailing whitespace: \(path)")
+        guard !path.unicodeScalars.contains(where: {
+            CharacterSet.whitespacesAndNewlines.contains($0) || $0.value < 0x20 || $0.value == 0x7F
+        }) else {
+            throw ValidationError.invalidPath("Path must not contain whitespace or control characters. Percent-encode them instead.")
+        }
+        guard !path.contains("?"), !path.contains("#") else {
+            throw ValidationError.invalidPath("Use only the route path, without a query string or fragment. Percent-encode literal '?' or '#' characters.")
         }
         guard !path.contains("//") else {
             throw ValidationError.invalidPath("Path must not contain double slashes: \(path)")
@@ -59,6 +69,36 @@ public enum EndpointValidator {
     public static func validatePort(_ port: Int) throws {
         guard (1...65535).contains(port) else {
             throw ValidationError.invalidPort(port)
+        }
+    }
+
+    /// Recognizes names and numeric spellings of the address Mimic binds. IPv4 numbers-and-dots
+    /// notation can have one to four decimal, octal, or hexadecimal components; for example,
+    /// `127.1` and `2130706433` both identify `127.0.0.1`. IPv4-mapped IPv6 addresses can reach
+    /// the same listener. This does not resolve DNS and must not authorize token disclosure.
+    public static func isLoopbackHost(_ host: String) -> Bool {
+        var normalized = host.lowercased()
+        if normalized.hasPrefix("["), normalized.hasSuffix("]") {
+            normalized = String(normalized.dropFirst().dropLast())
+        }
+        if normalized.hasSuffix(".") { normalized.removeLast() }
+        if normalized == "localhost" || normalized == "::1" { return true }
+        return isBoundIPv4Address(normalized) || isIPv4MappedLoopback(normalized)
+    }
+
+    private static func isBoundIPv4Address(_ host: String) -> Bool {
+        var address = in_addr()
+        guard inet_aton(host, &address) == 1 else { return false }
+        return UInt32(bigEndian: address.s_addr) == 0x7f00_0001
+    }
+
+    private static func isIPv4MappedLoopback(_ host: String) -> Bool {
+        var address = in6_addr()
+        guard inet_pton(AF_INET6, host, &address) == 1 else { return false }
+        return withUnsafeBytes(of: address) { bytes in
+            bytes.prefix(10).allSatisfy { $0 == 0 }
+                && bytes[10] == 0xff && bytes[11] == 0xff
+                && bytes[12] == 127 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] == 1
         }
     }
 
@@ -163,6 +203,8 @@ public enum ProjectValidator {
                     + "Mimic. This build understands up to \(MockProject.currentSchemaVersion)."
             )
         }
+
+        try validateIdentifiers(project)
 
         try EndpointValidator.validatePort(project.serverConfiguration.port)
         guard project.serverConfiguration.globalDelayMs >= 0 else {
@@ -332,6 +374,48 @@ public enum ProjectValidator {
     /// Shared so a field failure and a reference failure report the same endpoint the same way.
     private static func context(for endpoint: Endpoint) -> String {
         "endpoint \"\(endpoint.name)\" (\(endpoint.method.rawValue) \(endpoint.path))"
+    }
+
+    /// Each entity type has its own persistence key space. Scenario and step IDs are unique across
+    /// the project, not just within their parent; the same UUID in different entity types is valid.
+    private static func validateIdentifiers(_ project: MockProject) throws {
+        var endpointIDs: Set<UUID> = []
+        var scenarioIDs: Set<UUID> = []
+        for endpoint in project.endpoints {
+            guard endpointIDs.insert(endpoint.id).inserted else {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "Duplicate endpoint ID \(endpoint.id). Endpoint IDs must be unique across the project."
+                )
+            }
+            for scenario in endpoint.scenarios {
+                guard scenarioIDs.insert(scenario.id).inserted else {
+                    throw ValidationError.invalidDocument(
+                        context: "\(context(for: endpoint)), scenario \"\(scenario.name)\"",
+                        reason: "Duplicate scenario ID \(scenario.id). Scenario IDs must be unique across all endpoints."
+                    )
+                }
+            }
+        }
+
+        var journeyIDs: Set<UUID> = []
+        var stepIDs: Set<UUID> = []
+        for journey in project.journeys {
+            guard journeyIDs.insert(journey.id).inserted else {
+                throw ValidationError.invalidDocument(
+                    context: "journey \"\(journey.name)\"",
+                    reason: "Duplicate journey ID \(journey.id). Journey IDs must be unique across the project."
+                )
+            }
+            for step in journey.steps {
+                guard stepIDs.insert(step.id).inserted else {
+                    throw ValidationError.invalidDocument(
+                        context: "journey \"\(journey.name)\", step \"\(step.name)\"",
+                        reason: "Duplicate step ID \(step.id). Step IDs must be unique across all journeys."
+                    )
+                }
+            }
+        }
     }
 
     /// Rejects newly unsafe timing while allowing an older stored project to be opened and

@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+if [[ "${CI:-}" != true ]]; then
+  printf '%s\n' \
+    'Full UI tests run only in CI. No tests or artifacts were changed.' \
+    'For a local UI regression, select the affected method, for example:' \
+    "  xcodebuild -workspace Mimic.xcworkspace -scheme Mimic test -destination 'platform=macOS' -only-testing:MimicUITests/EndpointEditorUITests/testPrettyPrintFormatsTheJSONBodyAndTheResultPersists" >&2
+  exit 2
+fi
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE="$ROOT_DIR/Mimic.xcworkspace"
 RESULTS_DIR="$ROOT_DIR/.artifacts/full-suite-results"

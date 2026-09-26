@@ -4,6 +4,45 @@ import Testing
 
 @Suite("Safe response capture")
 struct ResponseCaptureTests {
+    @Test("Media type parameters allow whitespace before their semicolon", arguments: [
+        "application/json ; charset=utf-8",
+        "Application/Problem+JSON\t; charset=utf-8",
+        " application/xml ; charset=utf-8 ",
+        "text/plain ; charset=utf-8",
+    ])
+    func acceptsTextMediaTypeWhitespace(contentType: String) throws {
+        let log = RequestLog(method: .get, path: "/text", responseStatusCode: 200,
+            responseHeaders: ["Content-Type": contentType], responseBody: "42", outcome: .passthrough)
+        #expect(ResponseCapture.isTextMediaType(contentType))
+        #expect(try ResponseCapture.body(log) == "42")
+    }
+
+    @Test("Media type whitespace does not make binary data capturable", arguments: [
+        "application/octet-stream ; name=response",
+        "image/png\t; name=photo",
+    ])
+    func rejectsBinaryMediaTypeWhitespace(contentType: String) {
+        let log = RequestLog(method: .get, path: "/binary", responseStatusCode: 200,
+            responseHeaders: ["Content-Type": contentType], responseBody: "bytes", outcome: .passthrough)
+        #expect(!ResponseCapture.isTextMediaType(contentType))
+        #expect(throws: ControlError.self) { try ResponseCapture.body(log) }
+    }
+
+    @Test("A missing HTTP response cannot become a successful mock")
+    func refusesMissingResponses() {
+        let logs = [
+            RequestLog(method: .get, path: "/offline", failureLabel: "connection-drop", outcome: .journey),
+            RequestLog(method: .get, path: "/timeout", failureLabel: "timeout(30000ms)", outcome: .journey),
+            RequestLog(method: .get, path: "/unknown", outcome: .endpoint),
+            RequestLog(method: .get, path: "/failed", responseStatusCode: 200,
+                       failureLabel: "connection-drop", outcome: .journey),
+        ]
+        for log in logs {
+            #expect(throws: ControlError.self) { try ResponseCapture.validate(log) }
+            #expect(throws: ControlError.self) { try ResponseCapture.body(log) }
+        }
+    }
+
     @Test("Complete capture storage is independent of the 64 KiB preview and never serialized")
     func completeBodyAndPreviewAreSeparate() throws {
         let body = "{\"data\":\"" + String(repeating: "a", count: 70000) + "\"}"
@@ -120,6 +159,7 @@ struct ResponseCaptureTests {
             "Report-To": #"{"url":"https://upstream.example/reports"}"#,
             "Strict-Transport-Security": "max-age=31536000", "Alt-Svc": "h3=\":443\"",
             "Server-Timing": "origin;dur=42", "X-Request-ID": "one-request",
+            "Proxy-Connection": "keep-alive",
         ]
         let expected = ["Content-Type": "application/json", "Cache-Control": "no-store", "ETag": "v1"]
         #expect(ResponseCapture.headers(captured) == expected)

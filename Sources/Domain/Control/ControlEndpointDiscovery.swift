@@ -152,7 +152,11 @@ public enum ControlEndpointDiscovery {
             guard let data = try? Data(contentsOf: url),
                   let endpoint = try? ControlCoding.decode(ControlEndpoint.self, from: data)
             else { continue }
-            guard isProcessAlive(endpoint.pid) else { continue }
+            // Decoding an Int does not prove it fits the socket or process APIs. Skip malformed
+            // records before probing liveness so they cannot crash or hide a later valid instance.
+            guard (1...65535).contains(endpoint.port),
+                  endpoint.pid > 0, pid_t(exactly: endpoint.pid) != nil,
+                  isProcessAlive(endpoint.pid) else { continue }
             return endpoint
         }
         return nil
@@ -161,23 +165,24 @@ public enum ControlEndpointDiscovery {
     /// `kill(pid, 0)` succeeds for a live process and fails with `ESRCH` for a dead one.
     /// An `EPERM` means the process exists but is owned by someone else — still alive.
     public static func isProcessAlive(_ pid: Int) -> Bool {
-        guard pid > 0 else { return false }
-        if kill(pid_t(pid), 0) == 0 { return true }
+        guard pid > 0, let processID = pid_t(exactly: pid) else { return false }
+        if kill(processID, 0) == 0 { return true }
         return errno == EPERM
     }
 
     /// Resolves the base URL a client should use: an explicit URL, then the environment, then the
-    /// discovery file.
+    /// discovery file. A malformed nonempty override fails instead of selecting another instance.
     public static func resolveBaseURL(
         explicit: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         discovered: ControlEndpoint? = nil
     ) -> URL? {
-        if let explicit, let url = URL(string: explicit) { return url }
+        if let explicit { return URL(string: explicit) }
         if let override = environment[ControlAPI.urlEnvironmentKey], !override.isEmpty {
             return URL(string: override)
         }
-        if let port = environment[ControlAPI.portEnvironmentKey], let value = Int(port) {
+        if let port = environment[ControlAPI.portEnvironmentKey], !port.isEmpty {
+            guard let value = Int(port), (1...65535).contains(value) else { return nil }
             return URL(string: "http://127.0.0.1:\(value)")
         }
         // Derived from `port`, never read from `baseURL`.
@@ -189,7 +194,9 @@ public enum ControlEndpointDiscovery {
         // alongside still looking reassuringly local. The host is not something the file gets to
         // supply: the control plane binds `127.0.0.1` and nothing else, so the only thing worth
         // reading out of that file is which port it landed on.
-        if let discovered { return URL(string: "http://127.0.0.1:\(discovered.port)") }
+        if let discovered, (1...65535).contains(discovered.port) {
+            return URL(string: "http://127.0.0.1:\(discovered.port)")
+        }
         return nil
     }
 
@@ -242,6 +249,7 @@ public enum ControlEndpointDiscovery {
     /// loopback host.
     public static func namesDiscoveredInstance(_ url: URL, _ discovered: ControlEndpoint?) -> Bool {
         guard let discovered,
+              (1...65535).contains(discovered.port),
               url.scheme?.lowercased() == "http",
               url.host == "127.0.0.1"
         else { return false }

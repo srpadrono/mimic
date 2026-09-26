@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import GRDB
 @testable import Persistence
 import Domain
 
@@ -152,7 +153,9 @@ struct RecordRoundTripTests {
         name: "Round trip",
         serverConfiguration: ServerConfiguration(
             port: 9191, globalDelayMs: 250, upstreamURL: "https://api.example.com",
-            backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 9192, upstreamURL: "https://accounts.example.com")], primaryName: "Catalog", captureResponses: true
+            backends: [BackendConfiguration(id: backendID, name: "Accounts", port: 9192,
+                                           upstreamURL: "https://accounts.example.com", captureResponses: true)],
+            primaryName: "Catalog", captureResponses: true
         ),
         endpoints: [endpoint],
         journeys: [journey],
@@ -162,6 +165,31 @@ struct RecordRoundTripTests {
     )
 
     // MARK: - The round trip
+
+    @Test("Listener switches survive closing and reopening a file store", arguments: [false, true])
+    func listenerSwitchesSurviveReopening(primaryEnabled: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-record-round-trip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let environment = ["MIMIC_DATABASE_PATH": directory.appendingPathComponent("project.sqlite").path]
+        var original = Self.project
+        // Both listeners retain an upstream even when disabled. Dropping an explicit false on
+        // decode would infer true from that URL and begin forwarding requests after reopening.
+        original.serverConfiguration.passthroughEnabled = primaryEnabled
+        original.serverConfiguration.backends[0].passthroughEnabled = !primaryEnabled
+        do {
+            let queue = try DatabaseFactory.makeAppDatabaseQueue(environment: environment)
+            try await GRDBProjectRepository(dbQueue: queue).save(original)
+            try queue.close()
+        }
+        let reopened = try DatabaseFactory.makeAppDatabaseQueue(environment: environment)
+        defer { try? reopened.close() }
+        let loaded = try await GRDBProjectRepository(dbQueue: reopened).load(id: original.id)
+        #expect(loaded.serverConfiguration == original.serverConfiguration)
+        #expect(loaded.serverConfiguration.passthroughEnabled == primaryEnabled)
+        #expect(loaded.serverConfiguration.backends[0].passthroughEnabled == !primaryEnabled)
+        #expect(loaded.serverConfiguration.backends[0].captureResponses)
+    }
 
     @Test("Every stored property survives init(from:) → insert → fetch → toDomain")
     func everyStoredPropertySurvivesTheRoundTrip() async throws {
@@ -253,6 +281,8 @@ struct RecordRoundTripTests {
             // `aNewerSchemaVersionIsRefusedOnLoad`.
             (Self.project, MockProject(name: ""), "MockProject", ["schemaVersion"]),
             (Self.project.serverConfiguration, ServerConfiguration.default, "ServerConfiguration", []),
+            (Self.project.serverConfiguration.backends[0], BackendConfiguration(name: "", port: 0),
+             "BackendConfiguration", []),
             (Self.endpoint, Endpoint(name: "", path: ""), "Endpoint", []),
             (Self.activeScenario, Scenario(name: ""), "Scenario", []),
             (Self.journey, Journey(name: ""), "Journey", []),

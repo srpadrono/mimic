@@ -269,13 +269,109 @@ struct StoreBackupTests {
         let instant = Date(timeIntervalSince1970: 1_800_000_000)
 
         let first = try StoreBackup.snapshot(of: storeURL, version: "0.10.0", date: instant)
+        let queue = try DatabaseQueue(path: storeURL.path)
+        try queue.write { db in
+            try db.execute(sql: "UPDATE project SET name = 'Updated checkout' WHERE id = 'a'")
+        }
         let second = try StoreBackup.snapshot(of: storeURL, version: "0.10.0", date: instant)
 
         #expect(first != second)
         #expect(StoreBackup.snapshots(for: storeURL).count == 2)
-        let firstNames = try projectNames(in: first)
-        let secondNames = try projectNames(in: second)
-        #expect(firstNames == secondNames)
+        #expect(StoreBackup.latest(for: storeURL)?.resolvingSymlinksInPath() == second.resolvingSymlinksInPath())
+        #expect(try projectNames(in: first) == ["Checkout flow", "Payments sandbox"])
+        #expect(try projectNames(in: second) == ["Updated checkout", "Payments sandbox"])
+    }
+
+    @Test("Repeated same-second snapshots retain the newest copies across version changes")
+    func sameSecondPruningKeepsTheNewest() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        try seed(storeURL)
+        let instant = Date(timeIntervalSince1970: 1_800_000_000)
+        var written: [URL] = []
+        for index in 0..<12 {
+            written.append(try StoreBackup.snapshot(
+                of: storeURL, version: "0.10.\(11 - index)", date: instant, keeping: 3
+            ))
+        }
+
+        let remaining = StoreBackup.snapshots(for: storeURL).map { $0.resolvingSymlinksInPath() }
+        #expect(remaining == [written[11], written[10], written[9]].map { $0.resolvingSymlinksInPath() })
+        #expect(!FileManager.default.fileExists(atPath: written[8].path))
+        #expect(try projectNames(in: written[11]) == ["Checkout flow", "Payments sandbox"])
+    }
+
+    @Test("Pruning one store preserves a neighbor's snapshots and all unassigned legacy copies")
+    func storeRetentionIsIsolated() throws {
+        let firstStore = try makeScratch()
+        defer { remove(firstStore) }
+        let secondStore = firstStore.deletingLastPathComponent().appendingPathComponent("preview.sqlite")
+        try seed(firstStore)
+        try seed(secondStore)
+
+        let legacyDirectory = firstStore.deletingLastPathComponent().appendingPathComponent("Backups")
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        let legacy = legacyDirectory.appendingPathComponent("mimic-20260101-000000-0.9.0.sqlite")
+        try seed(legacy)
+
+        let instant = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = try StoreBackup.snapshot(of: firstStore, version: "0.10.0", date: instant, keeping: 1)
+        let neighbor = try StoreBackup.snapshot(of: secondStore, version: "0.10.0", date: instant, keeping: 1)
+        let newest = try StoreBackup.snapshot(of: firstStore, version: "0.10.0", date: instant, keeping: 1)
+
+        #expect(first.deletingLastPathComponent() != neighbor.deletingLastPathComponent())
+        #expect(StoreBackup.snapshots(for: firstStore).map { $0.resolvingSymlinksInPath() }
+                == [newest.resolvingSymlinksInPath()])
+        #expect(StoreBackup.snapshots(for: secondStore).map { $0.resolvingSymlinksInPath() }
+                == [neighbor.resolvingSymlinksInPath()])
+        #expect(!FileManager.default.fileExists(atPath: first.path))
+        #expect(try projectNames(in: neighbor) == ["Checkout flow", "Payments sandbox"])
+        #expect(try projectNames(in: legacy) == ["Checkout flow", "Payments sandbox"])
+    }
+
+    @Test("Snapshot-shaped directories and symlinks are never included in retention")
+    func pruningIgnoresDirectoriesAndSymlinks() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        try seed(storeURL)
+        let snapshot = try StoreBackup.snapshot(of: storeURL, version: "0.10.0")
+        let directory = StoreBackup.directoryURL(for: storeURL)
+        let foreignDirectory = directory.appendingPathComponent("mimic-20990101-000000-not-a-copy.sqlite")
+        try FileManager.default.createDirectory(at: foreignDirectory, withIntermediateDirectories: true)
+        let note = foreignDirectory.appendingPathComponent("notes.txt")
+        try Data("Keep this directory".utf8).write(to: note)
+        let link = directory.appendingPathComponent("mimic-20990101-000000-link.sqlite")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: storeURL)
+
+        #expect(StoreBackup.snapshots(for: storeURL).map { $0.resolvingSymlinksInPath() }
+                == [snapshot.resolvingSymlinksInPath()])
+        try StoreBackup.prune(for: storeURL, keeping: 0)
+        #expect(StoreBackup.snapshots(for: storeURL).isEmpty)
+        #expect(try String(contentsOf: note, encoding: .utf8) == "Keep this directory")
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == storeURL.path)
+        #expect(try projectNames(in: storeURL) == ["Checkout flow", "Payments sandbox"])
+    }
+
+    @Test("A failed snapshot leaves earlier copies and the corrupt source untouched")
+    func failedSnapshotDoesNotPublishOrPrune() throws {
+        let storeURL = try makeScratch()
+        defer { remove(storeURL) }
+        try seed(storeURL)
+        let prior = try StoreBackup.snapshot(of: storeURL, version: "0.10.0")
+        let corruptBytes = Data("Not a SQLite database".utf8)
+        try corruptBytes.write(to: storeURL)
+
+        #expect(throws: DatabaseError.self) {
+            try StoreBackup.snapshot(of: storeURL, version: "0.11.0", keeping: 0)
+        }
+        #expect(try Data(contentsOf: storeURL) == corruptBytes)
+        #expect(StoreBackup.snapshots(for: storeURL).map { $0.resolvingSymlinksInPath() }
+                == [prior.resolvingSymlinksInPath()])
+        #expect(try projectNames(in: prior) == ["Checkout flow", "Payments sandbox"])
+        let names = try FileManager.default.contentsOfDirectory(
+            atPath: StoreBackup.directoryURL(for: storeURL).path
+        )
+        #expect(!names.contains { $0.hasSuffix(".pending") })
     }
 
     /// The timestamp is UTC and fixed-width, both of which the sort depends on.

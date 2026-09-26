@@ -119,6 +119,44 @@ struct SchemaExampleGeneratorTests {
         #expect(result?.isEmpty == true)
     }
 
+    @Test(arguments: [
+        (#"{"type":"integer","enum":[7,9]}"#, "7"),
+        (#"{"type":"number","enum":[2.5,3.5]}"#, "2.5"),
+        (#"{"type":"boolean","enum":[true,false]}"#, "true"),
+    ])
+    func swaggerEnumsPreserveTheirValueType(schemaJSON: String, expected: String) throws {
+        let schema = try SwaggerSchemaObject.make(schemaJSON)
+        let value = try #require(SchemaExampleGenerator.generate(from: schema, definitions: nil))
+        #expect(SchemaExampleGenerator.toJSONString(value) == expected)
+    }
+
+    @Test func swaggerArrayReferencePreservesFieldsAndDecodesPointerEscapes() throws {
+        let schema = try SwaggerSchemaObject.make(##"{"type":"array","items":{"$ref":"#/definitions/User~1Profile~0v1%20copy"}}"##)
+        let user = try SwaggerSchemaObject.make(#"{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"}}}"#)
+        let value = SchemaExampleGenerator.generate(from: schema, definitions: ["User/Profile~v1 copy": user]) as? [[String: Any]]
+        #expect(value?.count == 1)
+        #expect(value?.first?["id"] as? Int == 0)
+        #expect(value?.first?["name"] as? String == "string")
+    }
+
+    @Test func swaggerDoesNotTreatBareNamesAsLocalReferences() throws {
+        let schema = try SwaggerSchemaObject.make(#"{"$ref":"User"}"#)
+        let user = try SwaggerSchemaObject.make(#"{"type":"string","example":"wrong local definition"}"#)
+        #expect(SchemaExampleGenerator.generate(from: schema, definitions: ["User": user]) == nil)
+    }
+
+    @Test func swaggerRecursiveReferencesKeepReachableFieldsAndTerminate() throws {
+        let node = try SwaggerSchemaObject.make(##"{"type":"object","properties":{"id":{"type":"integer"},"child":{"$ref":"#/definitions/Node"}}}"##)
+        let root = SchemaExampleGenerator.generate(from: node, definitions: ["Node": node]) as? [String: Any]
+        let child = root?["child"] as? [String: Any]
+        #expect(root?["id"] as? Int == 0)
+        #expect(child?["id"] as? Int == 0)
+        #expect(child?["child"] == nil)
+
+        let alias = try SwaggerSchemaObject.make(##"{"$ref":"#/definitions/Alias"}"##)
+        #expect(SchemaExampleGenerator.generate(from: alias, definitions: ["Alias": alias]) == nil)
+    }
+
     // MARK: - toJSONString
 
     @Test func toJSONStringHandlesDict() {
@@ -240,6 +278,145 @@ struct SchemaExampleGeneratorTests {
         #expect(arrayValue?.first as? String == "alpha")
     }
 
+    @Test func openAPIArrayReferenceRetainsRequiredResponseFields() throws {
+        let document = try OpenAPI.Document.make("""
+        {
+          "openapi": "3.0.0", "info": { "title": "Fixture", "version": "1" }, "paths": {},
+          "components": { "schemas": { "Password": {
+            "type": "string", "writeOnly": true, "example": "request-only-reference"
+          }, "User": {
+            "type": "object", "required": ["id", "password", "referencePassword"], "properties": {
+              "id": { "type": "integer" },
+              "password": { "type": "string", "writeOnly": true, "example": "request-only" },
+              "referencePassword": { "$ref": "#/components/schemas/Password" }
+            }
+          } } }
+        }
+        """)
+        let schema = try JSONSchema.make(##"{"type":"array","items":{"$ref":"#/components/schemas/User"}}"##)
+        let value = SchemaExampleGenerator.generate(from: schema, in: document) as? [[String: Any]]
+        #expect(value?.count == 1)
+        #expect(value?.first?["id"] as? Int == 0)
+        #expect(value?.first?["password"] == nil)
+        #expect(value?.first?["referencePassword"] == nil)
+    }
+
+    @Test func openAPIRequiredValuesAreNotSilentlyOmitted() throws {
+        let schema = try JSONSchema.make(#"{"type":"object","required":["opaque"],"properties":{"id":{"type":"integer"},"opaque":{"not":{"type":"string"}}}}"#)
+        #expect(SchemaExampleGenerator.generate(from: schema) == nil)
+
+        let nullable = try JSONSchema.make(#"{"type":"object","required":["code"],"properties":{"code":{"type":"string","nullable":true,"pattern":"^[A-Z]+$"}}}"#)
+        let value = SchemaExampleGenerator.generate(from: nullable) as? [String: Any]
+        #expect(value?["code"] is NSNull)
+    }
+
+    @Test func openAPINullEnumsAndDefaultsKeepTheirDeclaredValues() throws {
+        let nullable = try JSONSchema.make(#"{"type":"string","nullable":true,"enum":[null,"ready"]}"#)
+        let null = try #require(SchemaExampleGenerator.generate(from: nullable))
+        #expect(SchemaExampleGenerator.toJSONString(null) == "null")
+        let defaultValue = try JSONSchema.make(#"{"type":"integer","default":42}"#)
+        #expect(SchemaExampleGenerator.generate(from: defaultValue) as? Int == 42)
+        let enumArray = try JSONSchema.make(#"{"type":"array","items":{"type":"integer"},"enum":[[7,9]]}"#)
+        #expect(SchemaExampleGenerator.generate(from: enumArray) as? [Int] == [7, 9])
+    }
+
+    @Test func openAPIProgrammaticNullExamplesAndDefaultsAreJSONNull() throws {
+        let nullable = try JSONSchema.make(#"{"type":"string","nullable":true}"#)
+        let example = try nullable.with(example: .init(nil as String?))
+        let defaultValue = nullable.with(defaultValue: .init(nil as String?))
+        for schema in [example, defaultValue] {
+            let value = try #require(SchemaExampleGenerator.generate(from: schema))
+            #expect(value is NSNull)
+            #expect(SchemaExampleGenerator.toJSONString(value) == "null")
+        }
+        let object = try JSONSchema.make(#"{"type":"object"}"#)
+            .with(example: .init(["missing": ()]))
+        let value = try #require(SchemaExampleGenerator.generate(from: object) as? [String: Any])
+        #expect(value["missing"] is NSNull)
+        #expect(SchemaExampleGenerator.toJSONString(value) != nil)
+    }
+
+    @Test(arguments: [
+        (#"{"type":"integer","minimum":5,"multipleOf":3}"#, "6"),
+        (#"{"type":"integer","maximum":-5,"multipleOf":3}"#, "-6"),
+        (#"{"type":"integer","minimum":5,"exclusiveMinimum":true,"maximum":6}"#, "6"),
+        (#"{"type":"integer","maximum":-1,"exclusiveMaximum":true}"#, "-2"),
+        (#"{"type":"number","minimum":2.5}"#, "2.5"),
+        (#"{"type":"string","minLength":8}"#, #""stringaa""#),
+        (#"{"type":"string","maxLength":3}"#, #""str""#),
+    ])
+    func openAPISimpleBoundsShapePlaceholders(schemaJSON: String, expected: String) throws {
+        let schema = try JSONSchema.make(schemaJSON)
+        let value = try #require(SchemaExampleGenerator.generate(from: schema))
+        #expect(SchemaExampleGenerator.toJSONString(value) == expected)
+    }
+
+    @Test(arguments: [
+        #"{"type":"integer","minimum":7,"maximum":5}"#,
+        #"{"type":"integer","minimum":5,"maximum":5,"exclusiveMinimum":true}"#,
+        #"{"type":"integer","minimum":9223372036854775807,"exclusiveMinimum":true}"#,
+        #"{"type":"integer","maximum":-9223372036854775808,"exclusiveMaximum":true}"#,
+        #"{"type":"integer","minimum":9223372036854775807,"multipleOf":2}"#,
+        #"{"type":"number","minimum":1,"multipleOf":0.1}"#,
+        #"{"type":"string","minLength":1000000000}"#,
+        #"{"type":"string","minLength":8,"maxLength":2}"#,
+        #"{"type":"string","pattern":"^[A-Z]+$"}"#,
+        #"{"type":"string","format":"date","maxLength":4}"#,
+        #"{"type":"array","minItems":2,"items":{"type":"integer"}}"#,
+        #"{"type":"array","minItems":1,"maxItems":0,"items":{"type":"integer"}}"#,
+        #"{"type":"array","minItems":1,"items":{"not":{"type":"string"}}}"#,
+    ])
+    func openAPIUnrepresentableOrUnsupportedBoundsUseFallback(schemaJSON: String) throws {
+        let schema = try JSONSchema.make(schemaJSON)
+        #expect(SchemaExampleGenerator.generate(from: schema) == nil)
+    }
+
+    @Test func openAPIEmptyArrayLimitAndExclusiveNumberBounds() throws {
+        let empty = try JSONSchema.make(#"{"type":"array","maxItems":0,"items":{"type":"string"}}"#)
+        #expect((SchemaExampleGenerator.generate(from: empty) as? [Any])?.isEmpty == true)
+        let positive = try JSONSchema.make(#"{"type":"number","minimum":1,"exclusiveMinimum":true,"maximum":2}"#)
+        let value = try #require(SchemaExampleGenerator.generate(from: positive) as? Double)
+        #expect(value > 1 && value <= 2)
+        #expect(SchemaExampleGenerator.toJSONString(value) != nil)
+    }
+
+    @Test func openAPICompositionsDoNotDropMembersOrOverwriteConflicts() throws {
+        let missingMember = try JSONSchema.make(#"{"allOf":[{"type":"object","properties":{"id":{"type":"integer"}}},{"not":{"type":"string"}}]}"#)
+        let conflict = try JSONSchema.make(#"{"allOf":[{"type":"object","properties":{"id":{"type":"integer","enum":[1]}}},{"type":"object","properties":{"id":{"type":"integer","enum":[2]}}}]}"#)
+        let usableAlternative = try JSONSchema.make(#"{"anyOf":[{"not":{"type":"string"}},{"type":"string","enum":["ready"]}]}"#)
+        #expect(SchemaExampleGenerator.generate(from: missingMember) == nil)
+        #expect(SchemaExampleGenerator.generate(from: conflict) == nil)
+        #expect(SchemaExampleGenerator.generate(from: usableAlternative) as? String == "ready")
+    }
+
+    @Test func openAPIArrayCompositionsPreserveRequiredFields() throws {
+        let schema = try JSONSchema.make(#"{"type":"array","items":{"allOf":[{"type":"object","required":["id"],"properties":{"id":{"type":"integer"}}},{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}]}}"#)
+        let value = SchemaExampleGenerator.generate(from: schema) as? [[String: Any]]
+        #expect(value?.count == 1)
+        #expect(value?.first?["id"] as? Int == 0)
+        #expect(value?.first?["name"] as? String == "string")
+    }
+
+    @Test func openAPIOneOfRequiresAnExclusiveAlternative() throws {
+        let overlappingTypes = try JSONSchema.make(#"{"oneOf":[{"type":"integer"},{"type":"number"}]}"#)
+        let overlappingEnums = try JSONSchema.make(#"{"oneOf":[{"type":"integer","enum":[1]},{"type":"integer","enum":[1,2]}]}"#)
+        let disjointEnums = try JSONSchema.make(#"{"oneOf":[{"type":"integer","enum":[1]},{"type":"integer","enum":[2]}]}"#)
+        #expect(SchemaExampleGenerator.generate(from: overlappingTypes) == nil)
+        #expect(SchemaExampleGenerator.generate(from: overlappingEnums) == nil)
+        #expect(SchemaExampleGenerator.generate(from: disjointEnums) as? Int == 1)
+    }
+
+    @Test func openAPIParameterFallbackUsesDeclaredPrimitiveValues() throws {
+        let parameters = [
+            try OpenAPI.Parameter.make(#"{"name":"page","in":"query","schema":{"type":"integer","default":3}}"#),
+            try OpenAPI.Parameter.make(#"{"name":"enabled","in":"query","schema":{"type":"boolean","enum":[true]}}"#),
+        ]
+        let body = try #require(SchemaExampleGenerator.generateFallbackBody(description: nil, parameters: parameters))
+        let object = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+        #expect(object?["page"] as? Int == 3)
+        #expect(object?["enabled"] as? Bool == true)
+    }
+
     @Test func openAPIGeneratesComposedSchemas() throws {
         let allOf = try JSONSchema.make("""
         {
@@ -352,25 +529,19 @@ struct SchemaExampleGeneratorTests {
 
     // MARK: - AnyCodableValue
 
-    @Test func anyCodableValueRoundTrips() throws {
-        let values: [AnyCodableValue] = [
-            .string("hello"),
-            .int(42),
-            .double(3.14),
-            .bool(true),
-            .null,
-            .array([.int(1), .string("two")]),
-            .object(["key": .bool(false)]),
-        ]
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-        for value in values {
-            let data = try encoder.encode(value)
-            let decoded = try decoder.decode(AnyCodableValue.self, from: data)
-            let original = try encoder.encode(value)
-            let roundTripped = try encoder.encode(decoded)
-            #expect(original == roundTripped)
+    @Test(arguments: [#""hello""#, "42", "3.14", "true", "null", #"[1,"two"]"#, #"{"key":false}"#])
+    func anyCodableValueRoundTrips(json: String) throws {
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: Data(json.utf8))
+        let encoded = try JSONEncoder().encode(decoded)
+        let object = try JSONSerialization.jsonObject(with: encoded, options: [.fragmentsAllowed])
+        if let expectedNumber = Double(json) {
+            // JSON permits equivalent decimal spellings; 3.14 and 3.1400000000000001
+            // decode to the same Double. The expected value still comes from the literal input.
+            #expect(object as? Double == expectedNumber)
+            return
         }
+        let canonical = try JSONSerialization.data(withJSONObject: object, options: [.fragmentsAllowed, .sortedKeys])
+        #expect(String(decoding: canonical, as: UTF8.self) == json)
     }
 
     @Test func anyCodableToNativeValue() {
@@ -398,6 +569,10 @@ struct SchemaExampleGeneratorTests {
 // MARK: - Test Helpers
 
 extension SwaggerSchemaObject {
+    static func make(_ json: String) throws -> SwaggerSchemaObject {
+        try JSONDecoder().decode(SwaggerSchemaObject.self, from: Data(json.utf8))
+    }
+
     static func make(
         type: String? = nil,
         format: String? = nil,

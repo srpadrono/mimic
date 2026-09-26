@@ -5,8 +5,14 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
+import NIOHTTP1
 @testable import ControlPlane
 @testable import Domain
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 #if DEBUG
 private actor BindingGate {
@@ -80,7 +86,7 @@ struct ControlServerTests {
         try await server.stop()
     }
 
-    struct Reply {
+    struct Reply: Sendable {
         let status: Int
         let response: ControlResponse
     }
@@ -121,10 +127,88 @@ struct ControlServerTests {
             request.setValue(token, forHTTPHeaderField: ControlAPI.tokenHeaderName)
         }
         let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
         let http = try #require(response as? HTTPURLResponse)
         let decoded = try ControlCoding.decode(ControlResponse.self, from: data)
         return Reply(status: http.statusCode, response: decoded)
+    }
+
+    /// Sends exactly these bytes, including duplicate headers or an intentionally incomplete body.
+    /// Reads through peer closure, so a keep-alive upload must actually be closed after refusal.
+    /// Socket deadlines bound a missing rejection.
+    /// Call from a detached task so blocking BSD I/O does not occupy the test's actor executor.
+    private static func rawResponseBytes(_ bytes: Data, port: Int) throws -> Data {
+        #if canImport(Darwin)
+        let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        #else
+        let descriptor = Glibc.socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+        #endif
+        guard descriptor >= 0 else { throw SocketFailure(operation: "socket", code: errno) }
+        defer { _ = close(descriptor) }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        for option in [SO_SNDTIMEO, SO_RCVTIMEO] {
+            guard setsockopt(descriptor, SOL_SOCKET, option, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+                throw SocketFailure(operation: "timeout", code: errno)
+            }
+        }
+        #if canImport(Darwin)
+        var noSignal: Int32 = 1
+        guard setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw SocketFailure(operation: "signal suppression", code: errno)
+        }
+        #endif
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = try #require(UInt16(exactly: port)).bigEndian
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { throw SocketFailure(operation: "connect", code: errno) }
+        try bytes.withUnsafeBytes { buffer in
+            guard let start = buffer.baseAddress else { return }
+            var offset = 0
+            while offset < buffer.count {
+                #if canImport(Darwin)
+                let sent = Darwin.send(descriptor, start.advanced(by: offset), buffer.count - offset, 0)
+                #else
+                let sent = Glibc.send(descriptor, start.advanced(by: offset), buffer.count - offset, Int32(MSG_NOSIGNAL))
+                #endif
+                if sent < 0, errno == EINTR { continue }
+                // A rejected streaming upload may close before the final request bytes leave.
+                if sent < 0, errno == EPIPE || errno == ECONNRESET { break }
+                guard sent > 0 else { throw SocketFailure(operation: "send", code: errno) }
+                offset += sent
+            }
+        }
+        var received = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(descriptor, &buffer, buffer.count, 0)
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == ECONNRESET, !received.isEmpty { break }
+            if count == 0 { break }
+            guard count > 0 else { throw SocketFailure(operation: "receive", code: errno) }
+            received.append(contentsOf: buffer.prefix(count))
+        }
+        return received
+    }
+
+    private static func exchangeRaw(_ bytes: Data, port: Int) throws -> Reply {
+        let received = try rawResponseBytes(bytes, port: port)
+        let separator = try #require(received.range(of: Data("\r\n\r\n".utf8)))
+        let head = String(decoding: received[..<separator.lowerBound], as: UTF8.self)
+        let status = try #require(head.split(separator: " ").dropFirst().first.flatMap { Int($0) })
+        let response = try ControlCoding.decode(ControlResponse.self, from: Data(received[separator.upperBound...]))
+        return Reply(status: status, response: response)
+    }
+
+    private struct SocketFailure: Error {
+        let operation: String
+        let code: Int32
     }
 
     // MARK: - Reads
@@ -176,7 +260,7 @@ struct ControlServerTests {
             #expect(noProject.status == 409)
             #expect(noProject.response.error?.code == "project.noneOpen")
 
-            try await Self.post(.projectCreate(name: "Checkout", port: nil), baseURL: baseURL)
+            #expect(try await Self.post(.projectCreate(name: "Checkout", port: nil), baseURL: baseURL).status == 200)
 
             // Not found.
             let missing = try await Self.post(.endpointGet(endpoint: .route(.get, "/nope")), baseURL: baseURL)
@@ -199,7 +283,7 @@ struct ControlServerTests {
     /// codes each covered by whichever one it happened to name. That mattered while
     /// `ControlServer.httpStatus` switched over string literals it kept its own copies of: five of
     /// the six `*.notFound` codes reached `404` only through a suffix rule nothing exercised, and the
-    /// `409` arm listed four codes with one of them asserted. The switch is over ``ControlErrorCode``
+    /// `409` arm listed several codes with one of them asserted. The switch is over ``ControlErrorCode``
     /// now, so a rename cannot break the mapping — but a *reclassification* still can, and that is
     /// what this holds.
     ///
@@ -207,6 +291,7 @@ struct ControlServerTests {
     /// reason the server stopped typing them.
     @Test("Each family of error code answers with its own status")
     func errorFamiliesMapToStatuses() async throws {
+        #expect(ControlServer.httpStatus(for: .failure(.updateInstalling)).code == 409)
         try await Self.withServer { baseURL, _ in
             // A precondition the host reports rather than the executor, and the second member of the
             // 409 arm.
@@ -214,12 +299,12 @@ struct ControlServerTests {
             #expect(noJourney.status == 409)
             #expect(noJourney.response.error?.code == ControlErrorCode.noActiveJourney.rawValue)
 
-            _ = try await Self.post(.projectCreate(name: "Checkout", port: nil), baseURL: baseURL)
-            _ = try await Self.post(
+            #expect(try await Self.post(.projectCreate(name: "Checkout", port: nil), baseURL: baseURL).status == 200)
+            #expect(try await Self.post(
                 .endpointCreate(name: nil, method: .get, path: "/login", spec: nil),
                 baseURL: baseURL
-            )
-            _ = try await Self.post(.journeyCreate(name: "Retry", spec: nil), baseURL: baseURL)
+            ).status == 200)
+            #expect(try await Self.post(.journeyCreate(name: "Retry", spec: nil), baseURL: baseURL).status == 200)
 
             // One command per subject in the not-found family. Each resolves its parent successfully
             // first, so a 404 here is about the leaf named in the code.
@@ -247,6 +332,28 @@ struct ControlServerTests {
     }
 
     // MARK: - Lifecycle reentrancy
+
+    @Test("Invalid control ports fail before startup and leave the server reusable", arguments: [-1, 65_536, Int.min, Int.max])
+    func invalidPortDoesNotStart(port: Int) async throws {
+        let server = ControlServer(host: LoopbackTestHost(), token: ControlToken.generate())
+        var didStart = false
+        do {
+            _ = try await server.start(port: port, advertise: false)
+            didStart = true
+            Issue.record("An invalid port started the control server")
+        } catch {
+            if let validation = error as? ValidationError, case .invalidPort(let value) = validation {
+                #expect(value == port)
+            } else {
+                Issue.record("Expected an invalid-port error, got \(error)")
+            }
+        }
+        if didStart { try await server.stop() }
+        #expect(await server.boundPort == nil)
+        let assignedPort = try await server.start(port: 0, advertise: false)
+        #expect(assignedPort > 0)
+        try await server.stop()
+    }
 
     /// `stop()` clears `app` and *then* awaits the shutdown, and an actor admits another call at that
     /// suspension. So the eight lines of reasoning above `start`'s first guard — written for two
@@ -372,7 +479,9 @@ struct ControlServerTests {
     @Test("A hand-written command body works, which is what an agent using curl will send")
     func handWrittenJSON() async throws {
         try await Self.withServer { baseURL, _ in
-            try await Self.postRaw(#"{"projectCreate":{"name":"Hand written","port":9600}}"#, baseURL: baseURL)
+            #expect(try await Self.postRaw(
+                #"{"projectCreate":{"name":"Hand written","port":9600}}"#, baseURL: baseURL
+            ).status == 200)
             let reply = try await Self.postRaw(
                 #"{"endpointCreate":{"method":"POST","path":"/login","name":"Login"}}"#,
                 baseURL: baseURL
@@ -414,6 +523,7 @@ struct ControlServerTests {
             var request = URLRequest(url: try #require(URL(string: "http://\(routable):\(port)/\(ControlAPI.version)/health")))
             request.timeoutInterval = 2
             let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
             await #expect(throws: (any Error).self) {
                 _ = try await session.data(for: request)
             }
@@ -421,6 +531,65 @@ struct ControlServerTests {
     }
 
     // MARK: - Admission control
+
+    @Test("Empty tokens cannot authenticate and explicit empty configuration receives a fresh token")
+    func emptyTokensAreRefused() async {
+        #expect(ControlToken.matches("", expected: "") == false)
+        let server = ControlServer(host: LoopbackTestHost(), token: "")
+        let token = await server.token
+        #expect(token.utf8.count == 64)
+        #expect(ControlToken.matches("", expected: token) == false)
+    }
+
+    @Test("Admission rejects an incomplete upload before collecting its body", arguments: [false, true])
+    func incompleteUnauthenticatedUploadIsRejected(browserOrigin: Bool) async throws {
+        try await Self.withServer { baseURL, host in
+            let port = try #require(baseURL.port)
+            let token = try #require(Self.currentToken)
+            let credentials = browserOrigin ? "X-Mimic-Token: \(token)\r\nOrigin: https://example.com\r\n" : ""
+            let bytes = Data((
+                "POST /v1/command HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+                + credentials + "Content-Length: 1000\r\n\r\n{"
+            ).utf8)
+            let reply = try await Task.detached { try Self.exchangeRaw(bytes, port: port) }.value
+            #expect(reply.status == (browserOrigin ? 403 : 401))
+            #expect(reply.response.error?.code == (browserOrigin ? "request.forbiddenOrigin" : "request.unauthorized"))
+            #expect(await host.commandCount == 0)
+        }
+    }
+
+    @Test("An incomplete HEAD upload is refused without a body and its connection closes")
+    func incompleteHeadUploadIsRejected() async throws {
+        try await Self.withServer { baseURL, host in
+            let port = try #require(baseURL.port)
+            let bytes = Data((
+                "HEAD /v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+                + "Content-Length: 1000\r\n\r\n{"
+            ).utf8)
+            let received = try await Task.detached { try Self.rawResponseBytes(bytes, port: port) }.value
+            let separator = try #require(received.range(of: Data("\r\n\r\n".utf8)))
+            let head = String(decoding: received[..<separator.lowerBound], as: UTF8.self)
+            #expect(head.hasPrefix("HTTP/1.1 401 "))
+            #expect(received[separator.upperBound...].isEmpty)
+            #expect(await host.commandCount == 0)
+        }
+    }
+
+    @Test("Repeated Host and token headers are refused instead of using only the first", arguments: [false, true])
+    func ambiguousAdmissionHeadersAreRefused(duplicateHost: Bool) async throws {
+        try await Self.withServer { baseURL, host in
+            let port = try #require(baseURL.port)
+            let token = try #require(Self.currentToken)
+            let extra = duplicateHost ? "Host: attacker.example\r\n" : "X-Mimic-Token: wrong\r\n"
+            let bytes = Data((
+                "GET /v1/state HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n"
+                + "X-Mimic-Token: \(token)\r\n" + extra + "\r\n"
+            ).utf8)
+            let reply = try await Task.detached { try Self.exchangeRaw(bytes, port: port) }.value
+            #expect(reply.status == (duplicateHost ? 403 : 401))
+            #expect(await host.commandCount == 0)
+        }
+    }
 
     @Test("Every route refuses a caller with no token")
     func tokenIsRequiredOnEveryRoute() async throws {
@@ -465,7 +634,9 @@ struct ControlServerTests {
             request.setValue(Self.currentToken, forHTTPHeaderField: ControlAPI.tokenHeaderName)
             request.setValue("https://evil.example", forHTTPHeaderField: "Origin")
 
-            let (data, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            let (data, response) = try await session.data(for: request)
             let http = try #require(response as? HTTPURLResponse)
             let decoded = try ControlCoding.decode(ControlResponse.self, from: data)
 
@@ -494,7 +665,9 @@ struct ControlServerTests {
         try await Self.withServer { baseURL, _ in
             var request = URLRequest(url: baseURL.appendingPathComponent("\(ControlAPI.version)/health"))
             request.setValue(Self.currentToken, forHTTPHeaderField: ControlAPI.tokenHeaderName)
-            let (_, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            let (_, response) = try await session.data(for: request)
             let http = try #require(response as? HTTPURLResponse)
             let names = http.allHeaderFields.keys.compactMap { ($0 as? String)?.lowercased() }
             #expect(names.contains { $0.hasPrefix("access-control-") } == false)
@@ -541,6 +714,55 @@ struct ControlServerTests {
     }
 
     // MARK: - Request body size
+
+    @Test("Malformed UTF-8 is refused without executing a repaired command")
+    func malformedUTF8IsNotRepaired() async throws {
+        try await Self.withServer { baseURL, host in
+            var request = URLRequest(url: baseURL.appendingPathComponent("v1/command"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(#"{"projectCreate":{"name":""#.utf8)
+                + Data([0xFF]) + Data(#"","port":9600}}"#.utf8)
+            let reply = try await Self.send(request, token: Self.currentToken)
+            #expect(reply.status == 400)
+            #expect(reply.response.error?.code == "request.undecodable")
+            #expect(await host.commandCount == 0)
+        }
+    }
+
+    @Test("Oversized declared uploads return a control error without waiting for the body")
+    func oversizedDeclaredBodyIsRejected() async throws {
+        try await Self.withServer { baseURL, host in
+            let port = try #require(baseURL.port)
+            let token = try #require(Self.currentToken)
+            let bytes = Data((
+                "POST /v1/command HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+                + "X-Mimic-Token: \(token)\r\nContent-Length: 4194305\r\n\r\n{"
+            ).utf8)
+            let reply = try await Task.detached { try Self.exchangeRaw(bytes, port: port) }.value
+            #expect(reply.status == 413)
+            #expect(reply.response.error?.code == "request.invalid")
+            #expect(await host.commandCount == 0)
+        }
+    }
+
+    @Test("Chunked uploads cannot exceed the body limit and return a control error")
+    func oversizedStreamedBodyIsRejected() async throws {
+        try await Self.withServer { baseURL, host in
+            let port = try #require(baseURL.port)
+            let token = try #require(Self.currentToken)
+            // Valid command JSON padded beyond 4 MiB, with no Content-Length to preflight.
+            let body = Data(#"{"ping":{}}"#.utf8) + Data(repeating: 0x20, count: 4 * 1024 * 1024)
+            let head = "POST /v1/command HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+                + "X-Mimic-Token: \(token)\r\nTransfer-Encoding: chunked\r\n\r\n"
+            let bytes = Data((head + String(body.count, radix: 16) + "\r\n").utf8)
+                + body + Data("\r\n0\r\n\r\n".utf8)
+            let reply = try await Task.detached { try Self.exchangeRaw(bytes, port: port) }.value
+            #expect(reply.status == 413)
+            #expect(reply.response.error?.code == "request.invalid")
+            #expect(await host.commandCount == 0)
+        }
+    }
 
     /// The command route used to take Vapor's default body strategy — `.collect(maxSize: nil)`, which
     /// resolves to `Routes.defaultMaxBodySize`, **16 KB**. `projectImport` posts a whole `MockProject`,
@@ -592,7 +814,9 @@ struct ControlServerTests {
             // refused collect never reaches Mimic's code, so the reply is Vapor's own
             // `{"error":true,…}` and decoding it as a `ControlResponse` throws a `DecodingError` that
             // says nothing about the size. Read the status first and put the body in the message.
-            let (data, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            let (data, response) = try await session.data(for: request)
             let http = try #require(response as? HTTPURLResponse)
             #expect(
                 http.statusCode == 200,
@@ -696,7 +920,7 @@ struct ControlServerTests {
             )
             guard resolved == 0 else { continue }
 
-            let host = String(cString: name)
+            let host = String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             if !host.hasPrefix("127.") { return host }
         }
         return nil
@@ -718,6 +942,7 @@ struct ControlServerTests {
 /// shipped host's behaviour — persistence ordering, the engine, the write chain — is covered in
 /// `MimicTests`, against `AppControlHost` itself.
 actor LoopbackTestHost: ControlHost {
+    private(set) var commandCount = 0
     private var project: MockProject?
     private var logs: [RequestLog] = []
 
@@ -726,6 +951,7 @@ actor LoopbackTestHost: ControlHost {
     }
 
     func execute(_ command: ControlCommand) async -> ControlResponse {
+        commandCount += 1
         // The executor first, exactly as the shipped host orders it: it answers every project-scoped
         // command and returns nil for a host-scoped one.
         if var open = project {
@@ -872,7 +1098,7 @@ struct ControlEndpointFileTests {
         let discovered = try #require(ControlEndpointDiscovery.discover(environment: environment))
         #expect(discovered == endpoint)
 
-        ControlEndpointFile.remove(environment: environment)
+        ControlEndpointFile.remove(expected: endpoint, at: resolved)
         #expect(FileManager.default.fileExists(atPath: target.path) == false)
         #expect(ControlEndpointDiscovery.discover(environment: environment) == nil)
     }
@@ -896,7 +1122,7 @@ struct ControlEndpointFileTests {
         #expect(discovered == endpoint)
         #expect(discovered.baseURL == "http://127.0.0.1:8787")
 
-        ControlEndpointFile.remove(at: url)
+        ControlEndpointFile.remove(expected: endpoint, at: url)
         #expect(ControlEndpointDiscovery.discover(searchURLs: [url]) == nil)
     }
 
@@ -914,11 +1140,9 @@ struct ControlEndpointFileTests {
     /// because a write that lands at `0644` and stays there is still the failure worth catching
     /// first; what they are not is a guard on the ordering.
     ///
-    /// Two checks that *can* fail cover the rest: `publicationReplacesTheFileRatherThanRewritingIt`
-    /// below pins that the advertisement is published by replacing the directory entry rather than
-    /// by opening the real name and writing into it, and `writePathAppliesTheModeBeforePublishing`
-    /// reads the write path itself, because the ordering is a property of the code and not of its
-    /// output.
+    /// `publicationReplacesTheFileRatherThanRewritingIt` below separately verifies directory-entry
+    /// replacement. Creation ordering is reviewed in the exclusive-descriptor publication code;
+    /// searching source strings would couple this test to spellings without proving the behavior.
     @Test("The discovery file is 0600 on a first write and on an overwrite")
     func discoveryFileIsPrivate() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1006,91 +1230,4 @@ struct ControlEndpointFileTests {
         )
     }
 
-    /// The ordering the finding is actually about, read off the write path itself.
-    ///
-    /// Nothing observable about the finished file distinguishes "mode applied to the temporary, then
-    /// renamed" from "renamed, then chmod'd" — see the note on `discoveryFileIsPrivate`. So this
-    /// asserts the property where it lives: `ControlEndpointFile` never chmods a path at all, never
-    /// asks `Data.write` to publish atomically on its behalf, and puts `0o600` on the file at the
-    /// moment it is created, which is before the `rename` that gives it its real name.
-    ///
-    /// Whole-line comments are dropped before any of that is looked for, for the reason
-    /// `Scripts/check_compiler_settings.py` drops them from the two manifests it compares:
-    /// `ControlEndpointFile.write`'s own documentation spells out both `setAttributes` and `.atomic`
-    /// while explaining why neither belongs in the write path, and a check that read them would be
-    /// answering from the explanation instead of from the code.
-    @Test("The write path applies the mode before it publishes, not after")
-    func writePathAppliesTheModeBeforePublishing() throws {
-        let source = try Self.controlPlaneSource("ControlEndpointFile.swift")
-
-        #expect(
-            !source.contains("setAttributes"),
-            """
-            ControlEndpointFile now chmods a path. If that is the discovery file, it is the finding \
-            coming back: between the rename that publishes the token and the chmod that narrows it, \
-            the file sits at the final path at whatever the umask allows — and a throw in between \
-            leaves it there.
-            """
-        )
-        #expect(
-            !source.contains(".atomic"),
-            """
-            ControlEndpointFile asks Foundation to publish a file atomically. `.atomic` renames a \
-            temporary of Foundation's own making, created under the umask, so the mode can only be \
-            applied afterwards — which is the ordering this file exists to avoid.
-            """
-        )
-
-        let creation = try #require(
-            source.range(of: "createFile("),
-            "the write path no longer creates the file it will publish"
-        )
-        let publication = try #require(
-            source.range(of: "rename("),
-            "the write path no longer publishes by rename"
-        )
-        // A guard rather than an expectation: the slice below would trap on an inverted range, and a
-        // crash reports worse than a failure does.
-        guard creation.upperBound < publication.lowerBound else {
-            Issue.record("the file is created after it is published, which cannot be the intended order")
-            return
-        }
-        #expect(
-            source[creation.upperBound..<publication.lowerBound].contains("0o600"),
-            """
-            0o600 is no longer applied between creating the temporary and renaming it into place. \
-            The mode has to be on the file before it takes the real name; `rename(2)` carries it \
-            across, and anything applied afterwards is applied to a file that is already published.
-            """
-        )
-    }
-
-    /// The text of a file in `Sources/ControlPlane`, with whole-line `//` comments removed.
-    ///
-    /// Located from `#filePath` rather than from a bundle: this file is
-    /// `Tests/ControlPlaneTests/ControlServerTests.swift`, so the repository root is three
-    /// directories above it, and both CI jobs build from the checkout.
-    static func controlPlaneSource(
-        _ fileName: String,
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) throws -> String {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/ControlPlane", isDirectory: true)
-            .appendingPathComponent(fileName)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            Issue.record(
-                "no source at \(url.path), derived from #filePath three directories up",
-                sourceLocation: sourceLocation
-            )
-            return ""
-        }
-        let text = try String(contentsOf: url, encoding: .utf8)
-        return text
-            .components(separatedBy: "\n")
-            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
-            .joined(separator: "\n")
-    }
 }

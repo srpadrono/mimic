@@ -165,17 +165,23 @@ public enum JourneyResolver {
 /// segment matches anything. Returns the number of literal segments matched so callers can rank
 /// competing patterns by specificity.
 public enum PathPattern {
+    /// Identity for patterns that match the same paths with the same specificity. Empty slash
+    /// segments and wildcard names do not affect matching. Literal Unicode and its UTF-8 URL
+    /// encoding share an identity; encoded reserved characters retain their meaning as data.
+    public static func matchingKey(for pattern: String) -> [String] {
+        segments(in: pattern.utf8).map { $0.hasPrefix(":") ? ":" : literalKey($0) }
+    }
+
     public static func specificity(requestPath: String, pattern: String) -> Int? {
         // Query strings never participate in matching.
-        let cleanRequestPath = requestPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? requestPath
-        let requestSegments = cleanRequestPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        let patternSegments = pattern.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        let requestSegments = segments(in: requestPath.utf8.prefix { $0 != 0x3F })
+        let patternSegments = segments(in: pattern.utf8)
         guard requestSegments.count == patternSegments.count else { return nil }
 
         var literalMatches = 0
         for (requestSegment, patternSegment) in zip(requestSegments, patternSegments) {
             if patternSegment.hasPrefix(":") { continue }
-            if requestSegment != patternSegment { return nil }
+            if literalKey(requestSegment) != literalKey(patternSegment) { return nil }
             literalMatches += 1
         }
         return literalMatches
@@ -183,5 +189,49 @@ public enum PathPattern {
 
     public static func matches(requestPath: String, pattern: String) -> Bool {
         specificity(requestPath: requestPath, pattern: pattern) != nil
+    }
+
+    /// ASCII URL delimiters remain delimiters even beside a Unicode combining mark.
+    private static func segments<C: Collection>(in bytes: C) -> [String] where C.Element == UInt8 {
+        bytes.split(separator: 0x2F).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// URL clients encode Unicode and characters outside RFC 3986's pchar grammar. Normalize each
+    /// literal segment the same way, after splitting, so `%2F` can never create another segment and
+    /// `%3A` can never become a wildcard. Existing escapes are retained, with uppercase hex digits.
+    private static func literalKey<S: StringProtocol>(_ segment: S) -> String {
+        let input = Array(segment.utf8)
+        let hex = Array("0123456789ABCDEF".utf8)
+        var output: [UInt8] = []
+        output.reserveCapacity(input.count)
+        var index = 0
+        while index < input.count {
+            let byte = input[index]
+            if byte == 0x25, index + 2 < input.count,
+               let high = hexValue(input[index + 1]), let low = hexValue(input[index + 2]) {
+                output += [0x25, hex[Int(high)], hex[Int(low)]]
+                index += 3
+                continue
+            }
+            switch byte {
+            case 0x41...0x5A, 0x61...0x7A, 0x30...0x39,
+                 0x2D, 0x2E, 0x5F, 0x7E, // unreserved
+                 0x21, 0x24, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x3B, 0x3D, 0x3A, 0x40:
+                output.append(byte)
+            default:
+                output += [0x25, hex[Int(byte >> 4)], hex[Int(byte & 0xF)]]
+            }
+            index += 1
+        }
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    private static func hexValue(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x30...0x39: byte - 0x30
+        case 0x41...0x46: byte - 0x41 + 10
+        case 0x61...0x66: byte - 0x61 + 10
+        default: nil
+        }
     }
 }

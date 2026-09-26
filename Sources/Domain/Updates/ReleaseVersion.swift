@@ -43,9 +43,12 @@ public struct ReleaseVersion: Sendable, Equatable, Hashable, Comparable, Codable
         if text.hasPrefix("v") || text.hasPrefix("V") { text.removeFirst() }
         guard !text.isEmpty else { return nil }
 
-        // Build metadata is explicitly not part of ordering in SemVer, so it is dropped rather than
-        // compared. Two builds of one version are the same version.
-        if let plus = text.firstIndex(of: "+") { text = String(text[text.startIndex..<plus]) }
+        // Metadata does not affect ordering, but must still be a valid suffix.
+        if let plus = text.firstIndex(of: "+") {
+            let metadata = text[text.index(after: plus)...]
+            guard Self.validIdentifiers(metadata, numericLeadingZerosAllowed: true) else { return nil }
+            text = String(text[..<plus])
+        }
 
         let prereleaseText: String?
         if let dash = text.firstIndex(of: "-") {
@@ -62,7 +65,9 @@ public struct ReleaseVersion: Sendable, Equatable, Hashable, Comparable, Codable
             // `Int(...)` accepts a leading "+" and "-", which would make "1.-2.0" parse. Requiring
             // every character to be a digit is what keeps a malformed version unreadable rather than
             // quietly becoming a different number.
-            guard !component.isEmpty, component.allSatisfy(\.isNumber), let value = Int(component) else {
+            guard Self.isNumeric(component),
+                  component.count == 1 || component.first != "0",
+                  let value = Int(component) else {
                 return nil
             }
             numbers.append(value)
@@ -72,11 +77,25 @@ public struct ReleaseVersion: Sendable, Equatable, Hashable, Comparable, Codable
 
         var identifiers: [String] = []
         if let prereleaseText {
+            guard Self.validIdentifiers(prereleaseText[...], numericLeadingZerosAllowed: false) else { return nil }
             identifiers = prereleaseText.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-            guard !identifiers.isEmpty, identifiers.allSatisfy({ !$0.isEmpty }) else { return nil }
         }
 
         self.init(major: numbers[0], minor: numbers[1], patch: numbers[2], prerelease: identifiers)
+    }
+
+    private static func isNumeric(_ text: Substring) -> Bool {
+        !text.isEmpty && text.utf8.allSatisfy { (48...57).contains($0) }
+    }
+
+    private static func validIdentifiers(_ text: Substring, numericLeadingZerosAllowed: Bool) -> Bool {
+        text.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { identifier in
+            guard !identifier.isEmpty, identifier.utf8.allSatisfy({
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45
+            }) else { return false }
+            return numericLeadingZerosAllowed || !isNumeric(identifier)
+                || identifier.count == 1 || identifier.first != "0"
+        }
     }
 
     public var description: String {
@@ -101,12 +120,15 @@ public struct ReleaseVersion: Sendable, Equatable, Hashable, Comparable, Codable
         }
 
         for (left, right) in zip(lhs.prerelease, rhs.prerelease) where left != right {
-            switch (Int(left), Int(right)) {
-            case let (leftNumber?, rightNumber?): return leftNumber < rightNumber
+            switch (isNumeric(left[...]), isNumeric(right[...])) {
+            // Compare digit counts before text so identifiers larger than Int.max stay numeric.
+            case (true, true):
+                if left.count != right.count { return left.count < right.count }
+                return left < right
             // SemVer: numeric identifiers always rank below alphanumeric ones.
-            case (_?, nil): return true
-            case (nil, _?): return false
-            case (nil, nil): return left < right
+            case (true, false): return true
+            case (false, true): return false
+            case (false, false): return left < right
             }
         }
         return lhs.prerelease.count < rhs.prerelease.count

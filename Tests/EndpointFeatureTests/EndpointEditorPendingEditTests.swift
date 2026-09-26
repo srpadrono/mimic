@@ -103,6 +103,32 @@ struct EndpointEditorPendingEditTests {
 
     // MARK: - Losing the edit
 
+    @Test("Clearing a saved body sends an explicit empty update")
+    func clearingASavedBodySendsAnExplicitEmptyUpdate() {
+        let scenario = makeFirstScenario()
+        let endpoint = makeEndpoint(path: "/clear", scenario: scenario)
+        let writes = ScenarioWrites()
+        let pendingEdits = EndpointEditorPendingEdits()
+        let editing = editor(
+            endpoint: endpoint,
+            scenario: scenario,
+            writes: writes,
+            statusCodeField: "201",
+            bodyField: "",
+            headerFields: [("Content-Type", "application/json")],
+            sharing: pendingEdits
+        )
+
+        editing.debounceBody()
+        pendingEdits.flush()
+
+        // nil means "leave unchanged" at the command boundary. A recorded empty string is the
+        // only update that clears the persisted nonempty body.
+        #expect(writes.bodies == [""])
+        #expect(writes.statusCodes.isEmpty)
+        #expect(writes.headers.isEmpty)
+    }
+
     @Test("A body still settling when the selection moves reaches the endpoint it was typed into")
     func aSettlingBodyReachesTheEndpointItWasTypedInto() {
         let firstScenario = makeFirstScenario()

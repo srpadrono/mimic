@@ -88,6 +88,126 @@ struct ServingHardeningTests {
         #expect(Self.logEntry(statusCode: 503).responseStatusCode == 503)
     }
 
+    @Test("Bodyless status codes suppress configured content on the wire and in the log", arguments: [204, 205, 304])
+    func bodylessStatusesHaveNoContent(status: Int) async throws {
+        let scenario = Scenario(name: "Bodyless", statusCode: status,
+            headers: ["Content-Length": "999", "Transfer-Encoding": "chunked", "X-Safe": "kept"],
+            body: "hi 🎉")
+        let endpoint = Endpoint(name: "Bodyless", path: "/bodyless", scenarios: [scenario],
+            activeScenarioID: scenario.id)
+
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { engine, baseURL in
+            let collector = LogCollector()
+            let drain = Task {
+                for await entry in engine.logStream {
+                    await collector.append(entry)
+                    await engine.acknowledgeLog()
+                }
+            }
+            defer { drain.cancel() }
+
+            let port = try #require(baseURL.port)
+            let reply = try RawHTTPClient.send(method: "GET", path: "/bodyless", port: port)
+            #expect(Self.servedStatusCode(reply.statusLine) == status)
+            #expect(reply.didClose)
+            #expect(!reply.isTruncated)
+            let separator = try #require(reply.raw.range(of: "\r\n\r\n"))
+            #expect(reply.raw[separator.upperBound...].isEmpty)
+            #expect(!reply.raw.lowercased().contains("\r\ntransfer-encoding:"))
+            if status == 205 {
+                #expect(reply.raw.lowercased().contains("\r\ncontent-length: 0\r\n"))
+            } else {
+                #expect(!reply.raw.lowercased().contains("\r\ncontent-length:"))
+            }
+
+            try await collector.waitForCount(1)
+            let log = try #require(await collector.entries.first)
+            #expect(log.responseStatusCode == status)
+            #expect(log.responseBody == nil)
+            #expect(!log.responseBodyTruncated)
+            #expect(Self.header("Content-Length", in: log.responseHeaders) == (status == 205 ? "0" : nil))
+            #expect(Self.header("Transfer-Encoding", in: log.responseHeaders) == nil)
+            #expect(log.responseHeaders["X-Safe"] == "kept")
+        }
+    }
+
+    @Test("GET and HEAD log the served framing and content", arguments: [HTTPMethod.get, .head])
+    func responseFramingMatchesTheLog(method: HTTPMethod) async throws {
+        let scenario = Scenario(name: "Framed", statusCode: 200,
+            headers: ["Content-Length": "999", "Transfer-Encoding": "chunked"], body: "hi 🎉")
+        let endpoint = Endpoint(name: "Framed", method: method, path: "/framed", scenarios: [scenario],
+            activeScenarioID: scenario.id)
+
+        try await JourneyServingTests.withEngine(endpoints: [endpoint]) { engine, baseURL in
+            let collector = LogCollector()
+            let drain = Task {
+                for await entry in engine.logStream {
+                    await collector.append(entry)
+                    await engine.acknowledgeLog()
+                }
+            }
+            defer { drain.cancel() }
+
+            let port = try #require(baseURL.port)
+            let reply = try RawHTTPClient.send(method: method.rawValue, path: "/framed", port: port)
+            #expect(Self.servedStatusCode(reply.statusLine) == 200)
+            #expect(reply.didClose)
+            #expect(!reply.isTruncated)
+            // The literal body is seven UTF-8 bytes. HEAD preserves that representation length
+            // while sending no body; neither method may advertise the configured false framing.
+            #expect(reply.raw.lowercased().contains("\r\ncontent-length: 7\r\n"))
+            #expect(!reply.raw.lowercased().contains("\r\ntransfer-encoding:"))
+            let separator = try #require(reply.raw.range(of: "\r\n\r\n"))
+            #expect(String(reply.raw[separator.upperBound...]) == (method == .head ? "" : "hi 🎉"))
+
+            try await collector.waitForCount(1)
+            let log = try #require(await collector.entries.first)
+            #expect(log.method == method)
+            #expect(log.responseBody == (method == .head ? nil : "hi 🎉"))
+            #expect(!log.responseBodyTruncated)
+            #expect(Self.header("Content-Length", in: log.responseHeaders) == "7")
+            #expect(Self.header("Transfer-Encoding", in: log.responseHeaders) == nil)
+        }
+    }
+
+    @Test("HEAD transport failures close without a successful response", arguments: [NetworkFailure.connectionDrop, .timeout(holdMs: 30)])
+    func headTransportFailureDoesNotBecomeSuccess(failure: NetworkFailure) async throws {
+        let journey = Journey(name: "HEAD recovery", steps: [
+            JourneyStep(name: "Fail", method: .head, path: "/head-failure", outcome: .networkFailure(failure)),
+            JourneyStep(name: "Recover", method: .head, path: "/head-failure",
+                outcome: .respond(JourneyResponse(statusCode: 204, body: "suppressed"))),
+        ])
+
+        try await JourneyServingTests.withEngine(journey: journey) { engine, baseURL in
+            let collector = LogCollector()
+            let drain = Task {
+                for await entry in engine.logStream {
+                    await collector.append(entry)
+                    await engine.acknowledgeLog()
+                }
+            }
+            defer { drain.cancel() }
+
+            let port = try #require(baseURL.port)
+            let failed = try RawHTTPClient.send(method: "HEAD", path: "/head-failure", port: port)
+            #expect(failed.didClose, "the failure must close the socket, not wait for the read deadline")
+            #expect(failed.isEmpty, "a HEAD status line is already a complete response: \(failed.raw)")
+            #expect(failed.isTruncated)
+
+            let recovered = try RawHTTPClient.send(method: "HEAD", path: "/head-failure", port: port)
+            #expect(Self.servedStatusCode(recovered.statusLine) == 204)
+            #expect(!recovered.isTruncated)
+            try await collector.waitForCount(2)
+            let logs = await collector.entries
+            try #require(logs.count == 2)
+            #expect(logs[0].method == .head)
+            #expect(logs[0].responseStatusCode == nil)
+            #expect(logs[0].failureLabel != nil)
+            #expect(logs[0].responseBody == nil)
+            #expect(logs[1].responseStatusCode == 204)
+        }
+    }
+
     // MARK: - Header injection
 
     @Test("The HTTP decoder rejects an excessive cumulative header list before serving a mock")
@@ -193,9 +313,10 @@ struct ServingHardeningTests {
             "content-type": "application/xml",
         ]).responseHeaders
 
-        #expect(headers.count == 1, "one header on the wire must be one header in the log")
+        #expect(headers.count == 2, "the log includes one content type and the served byte count")
         #expect(headers["content-type"] == "application/xml")
         #expect(headers["Content-Type"] == nil, "the replaced spelling must not linger beside the scenario's")
+        #expect(Self.header("Content-Length", in: headers) == "2")
     }
 
     @Test("Header names and values are held to the RFC 9110 grammar")
@@ -249,9 +370,7 @@ struct ServingHardeningTests {
         let (capped, truncated) = RequestLog.cappedBody(filler + "🎉🎉")
 
         #expect(truncated)
-        let body = try? #require(capped)
-        #expect(body?.contains("\u{FFFD}") == false, "truncation produced a replacement character")
-        #expect((capped?.utf8.count ?? 0) <= RequestLog.maxLoggedBodyBytes)
+        #expect(capped == filler, "the incomplete emoji must be removed without altering the complete prefix")
     }
 
     // MARK: - Redaction
@@ -283,6 +402,10 @@ struct ServingHardeningTests {
     }
 
     // MARK: - Helpers
+
+    private static func header(_ name: String, in headers: [String: String]) -> String? {
+        headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
 
     /// The log entry the engine would write for a response resolved this way, without standing a
     /// server up — these assertions are about what `makeLog` records, not about routing.

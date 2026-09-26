@@ -143,10 +143,9 @@ public final class ControlPlaneCoordinator {
 
         let host = AppControlHost(appState: appState, repository: repository)
         let server = ControlServer(host: host, mode: HeadlessMode.isEnabled ? "headless" : "app")
-        self.host = host
         // Held for the shutdown flush below, which needs to know what to write and where — and has to
         // know it before the signal arrives, because there is no time to go looking afterwards.
-        prepareShutdownFlush(appState: appState, repository: repository)
+        prepareShutdownFlush(appState: appState, repository: repository, host: host)
 
         // Before the port is bound, and deliberately outside the `Task` below.
         //
@@ -162,7 +161,12 @@ public final class ControlPlaneCoordinator {
         // They need `appState` and `repository`, both assigned above, and nothing else.
         installTerminationHandlers()
 
-        launchControlServer(server, port: Self.resolvePort())
+        do {
+            launchControlServer(server, port: try Self.resolvePort())
+        } catch {
+            startupError = error.localizedDescription
+            self.host = nil
+        }
     }
 
     /// The single startup path for the app and for a disposable-server regression test. Returning
@@ -170,6 +174,7 @@ public final class ControlPlaneCoordinator {
     @discardableResult
     func launchControlServer(_ server: ControlServer, port: Int) -> Task<Void, Never> {
         self.server = server
+        startupError = nil
         let startup = Task { @MainActor [weak self] in
             guard let self, !self.terminationRequested, self.server === server else { return }
             do {
@@ -215,14 +220,16 @@ public final class ControlPlaneCoordinator {
         controlShutdownTask = Task.detached { _ = try? await server.stop() }
     }
 
-    /// Wires the session and store the shutdown flush reads, and nothing else.
-    ///
-    /// Split from `start(appState:repository:)` so a test can drive the flush paths without binding
-    /// a control server or installing signal handlers — the seam the twice-shipped quit data loss
-    /// never had. `start` routes through it, so the two cannot wire different things.
-    func prepareShutdownFlush(appState: AppState, repository: any ProjectRepository) {
+    /// Wires the session, store, and admitted command drain without binding a listener or installing
+    /// signal handlers. Production startup and flush tests use the same composition path.
+    func prepareShutdownFlush(
+        appState: AppState,
+        repository: any ProjectRepository,
+        host: AppControlHost? = nil
+    ) {
         self.appState = appState
         self.repository = repository
+        self.host = host
     }
 
     /// Removes the discovery file when the process goes away.
@@ -243,6 +250,7 @@ public final class ControlPlaneCoordinator {
     /// await a pending bind while AppKit is terminating. It requests shutdown and removes a known
     /// matching record, but a stalled startup can leave a record that discovery skips by dead pid.
     private func installTerminationHandlers() {
+        guard terminationSignalSources.isEmpty else { return }
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
@@ -466,6 +474,57 @@ public final class ControlPlaneCoordinator {
         }
     }
 
+    /// Installation must stop on a refused or unfinished save; normal termination remains bounded
+    /// and best-effort. The worker stays in the write chain if the deadline expires.
+    func flushPendingSaveForUpdate() async throws {
+        try Task.checkCancellation()
+        guard let appState else {
+            throw ControlError.internalFailure("The Mimic session is no longer available.")
+        }
+        // installNow set its installing phase before dispatching this task. No new store mutation
+        // can enter the host; finish mutations admitted before that change before taking the snapshot.
+        let commandDeadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
+        while (host?.activeSnapshotMutations ?? 0) > 0, ContinuousClock.now < commandDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard (host?.activeSnapshotMutations ?? 0) == 0 else {
+            throw ControlError(
+                code: .updateInstalling,
+                message: "A control command is still finishing. Wait before installing the update."
+            )
+        }
+        // The session's immutable store failure survives acknowledgement of its alert.
+        if let failure = appState.storeFailure {
+            throw ControlError(code: .persistenceFailure, message: failure)
+        }
+        let workspace = appState.projects
+        let importDispatch = appState.importTask
+        var result: Result<Void, ControlError>?
+        Task { @MainActor in
+            await importDispatch?.value
+            do {
+                try await workspace.saveBeforeUpdate()
+                result = .success(())
+            } catch let error as ControlError {
+                result = .failure(error)
+            } catch {
+                result = .failure(.persistenceFailure(error))
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(Self.shutdownFlushTimeoutSeconds))
+        while result == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try Task.checkCancellation()
+        guard let result else {
+            throw ControlError(
+                code: .persistenceFailure,
+                message: "Saving is still in progress. Wait for it to finish before installing the update."
+            )
+        }
+        try result.get()
+    }
+
     /// The last-resort flush, for a termination nothing drained.
     ///
     /// `willTerminate` is posted from inside `NSApplication.terminate`, and the process ends as soon
@@ -519,12 +578,14 @@ public final class ControlPlaneCoordinator {
 
     static func resolvePort(
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> Int {
-        guard let raw = environment[ControlAPI.portEnvironmentKey], let port = Int(raw) else {
+    ) throws -> Int {
+        guard let raw = environment[ControlAPI.portEnvironmentKey], !raw.isEmpty else {
             return ControlAPI.defaultPort
         }
         // `0` is a legitimate request for "any free port", which is how a test avoids collisions.
-        guard port == 0 || (1...65535).contains(port) else { return ControlAPI.defaultPort }
+        guard let port = Int(raw), (0...65535).contains(port) else {
+            throw ControlError.invalid("MIMIC_CONTROL_PORT must be a whole number from 0 to 65535.")
+        }
         return port
     }
 }

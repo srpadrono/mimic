@@ -71,7 +71,11 @@ struct ComposedControlServerTests {
             server: MockServerRuntime(engine: StubEngine()),
             projectRepository: GRDBProjectRepository(dbQueue: queue),
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
         return Session(
             host: AppControlHost(appState: appState, repository: appState.repository),
@@ -123,6 +127,7 @@ struct ComposedControlServerTests {
         var request = request
         request.setValue(token, forHTTPHeaderField: ControlAPI.tokenHeaderName)
         let urlSession = URLSession(configuration: .ephemeral)
+        defer { urlSession.invalidateAndCancel() }
         let (data, response) = try await urlSession.data(for: request)
         let http = try #require(response as? HTTPURLResponse)
         let decoded = try ControlCoding.decode(ControlResponse.self, from: data)

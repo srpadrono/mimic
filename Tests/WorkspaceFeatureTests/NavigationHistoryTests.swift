@@ -166,4 +166,43 @@ struct NavigationHistoryTests {
 
         #expect(previous == 79)
     }
+
+    @Test("History skips removed destinations in both directions")
+    func validNavigationSkipsDeletedEntries() {
+        var history = NavigationHistory<String>()
+        for item in ["first", "deleted", "last"] { history.visit(item) }
+        let valid = Set(["first", "last"])
+        #expect(history.canGoBack(where: valid.contains))
+        #expect(history.goBack(where: valid.contains) == "first")
+        #expect(!history.canGoBack(where: valid.contains))
+        #expect(history.canGoForward(where: valid.contains))
+        #expect(history.goForward(where: valid.contains) == "last")
+        #expect(!history.canGoForward(where: valid.contains))
+    }
+
+    @Test("Directions containing only removed destinations do not move the cursor")
+    func missingDirectionsLeaveHistoryUnchanged() {
+        var history = NavigationHistory<String>()
+        for item in ["removed before", "current", "removed after"] { history.visit(item) }
+        history.goBack()
+        let before = history
+        let valid: (String) -> Bool = { $0 == "current" }
+        #expect(!history.canGoBack(where: valid))
+        #expect(!history.canGoForward(where: valid))
+        #expect(history.goBack(where: valid) == nil)
+        #expect(history.goForward(where: valid) == nil)
+        #expect(history == before)
+    }
+
+    @Test("A removed current destination can return to a valid earlier visit")
+    func removedCurrentDestinationCanGoBack() {
+        var history = NavigationHistory<String>()
+        history.visit("remaining")
+        history.visit("removed")
+        #expect(history.goBack(where: { $0 == "remaining" }) == "remaining")
+        #expect(history.goForward(where: { $0 == "remaining" }) == nil)
+        history.visit("new")
+        #expect(!history.canGoForward)
+        #expect(history.goBack() == "remaining")
+    }
 }

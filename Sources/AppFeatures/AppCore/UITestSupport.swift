@@ -23,7 +23,7 @@ enum UITestSupport {
 
     private nonisolated struct UpdateInstallerFixture: UpdateInstalling {
         let fails: Bool
-        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) async -> Void) async throws -> URL {
             URL(fileURLWithPath: "/fixture/not-a-real-installer.pkg")
         }
         func verify(_ fileURL: URL, against release: UpdateRelease) throws {}

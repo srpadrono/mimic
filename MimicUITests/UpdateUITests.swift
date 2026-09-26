@@ -133,6 +133,12 @@ final class UpdateUITests: MimicUITestCase {
         updateSheet.skipButton.click()
 
         XCTAssertTrue(updateSheet.waitForDisappearance(of: updateSheet.title, timeout: 5))
+        updateSheet.openFromMenu()
+        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10),
+                      "A manual check must offer the newer version even after it was skipped")
+        XCTAssertTrue(updateSheet.text(of: updateSheet.title).contains("99.0.0"))
+        XCTAssertFalse(updateSheet.upToDate.exists)
+        captureUpdateEvidence("Skipped release offered by manual check")
     }
 
     // MARK: - Nothing to install

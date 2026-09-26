@@ -78,7 +78,7 @@ public enum GraphQLRequest {
         // A payload with neither is not a GraphQL request, whatever else it contains.
         guard document != nil || stated != nil else { return nil }
 
-        let parsed = document.flatMap(parseDocument)
+        let parsed = document.flatMap { parseDocument($0, operationName: stated) }
 
         if let stated {
             return GraphQLOperation(name: stated, kind: parsed?.kind ?? .query, isInferred: false)
@@ -99,68 +99,79 @@ public enum GraphQLRequest {
     /// Handles the three shapes real clients send: a named operation (`query GetX { … }`), an
     /// anonymous one (`query { … }`), and the shorthand (`{ … }`). For the latter two the name comes
     /// from the first root field, since that is the only thing distinguishing them.
-    static func parseDocument(_ document: String) -> ParsedDocument? {
-        var scanner = Scanner(stripping: document)
+    static func parseDocument(_ document: String, operationName: String? = nil) -> ParsedDocument? {
+        var scanner = Scanner(document)
 
-        // Fragment definitions come first in most documents a real client emits, and nothing below
-        // consumes a keyword it does not recognise, so a leading `fragment` used to sit in the buffer
-        // and derail everything after it: `Kind(rawValue: "fragment")` is `nil`, so the branch below
-        // declined it *without* advancing; `advanceToSelectionSet` then stopped at the fragment's own
-        // opening brace; and `takeRootField` named the document after the fragment's first field. A
-        // document reading `fragment fields on User { name }` ahead of `query GetUser { … }` resolved
-        // to the operation "name", so an endpoint declared for "GetUser" did not match it and a
-        // perfectly well-formed request 404'd.
-        while scanner.peekIdentifier() == "fragment" {
-            // A fragment whose braces never close leaves nothing trustworthy behind it. `nil` is the
-            // tolerant answer this scanner gives anything it cannot read: the request falls back to
-            // plain path routing rather than matching on a name guessed out of a broken document.
-            guard scanner.skipFragmentDefinition() else { return nil }
-        }
+        while scanner.skipDescriptions() {
+            if scanner.peekIdentifier() == "fragment" {
+                guard scanner.skipFragmentDefinition() else { return nil }
+                continue
+            }
 
-        var kind = GraphQLOperation.Kind.query
-        if let keyword = scanner.peekIdentifier(), let parsed = GraphQLOperation.Kind(rawValue: keyword) {
-            kind = parsed
-            _ = scanner.takeIdentifier()
+            var kind = GraphQLOperation.Kind.query
+            var name: String?
+            if let keyword = scanner.takeIdentifier() {
+                guard let parsed = GraphQLOperation.Kind(rawValue: keyword) else { return nil }
+                kind = parsed
+                name = scanner.takeIdentifier()
+            } else if !scanner.isAtSelectionSet {
+                return nil
+            }
 
-            // `query GetX(...)` — the identifier after the keyword is the operation's name.
-            if let name = scanner.takeIdentifier() {
+            if let name, operationName == nil || name == operationName {
                 return ParsedDocument(name: name, kind: kind)
             }
-        }
 
-        // Anonymous or shorthand: fall through to the first field being selected.
-        guard scanner.advanceToSelectionSet() else { return ParsedDocument(name: nil, kind: kind) }
-        return ParsedDocument(name: scanner.takeRootField(), kind: kind)
+            guard scanner.advanceToSelectionSet() else { return nil }
+            if operationName == nil {
+                return ParsedDocument(name: scanner.takeRootField(), kind: kind)
+            }
+
+            // A client can select a later definition. Its kind belongs to that operation,
+            // not to whichever query or mutation happened to appear first in the document.
+            guard scanner.skipToEndOfSelectionSet() else { return nil }
+        }
+        return nil
     }
 
-    /// A cursor over a GraphQL document with `#` comments removed.
+    /// A single forward scan over UTF-8. GraphQL names and delimiters are ASCII; string contents
+    /// remain opaque, so scanning does not expand a large captured body into a Character array.
     struct Scanner {
-        private let characters: [Character]
+        private let bytes: [UInt8]
         private var index: Int = 0
 
-        init(stripping document: String) {
-            characters = Array(Self.stripComments(document))
+        init(_ document: String) {
+            bytes = Array(document.utf8)
         }
 
-        /// Removes `#` comments, which may otherwise contain braces or the word `query`.
-        static func stripComments(_ document: String) -> String {
-            document
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .map { line -> Substring in
-                    guard let hash = line.firstIndex(of: "#") else { return line }
-                    return line[line.startIndex..<hash]
+        var isAtSelectionSet: Bool {
+            index < bytes.count && bytes[index] == UInt8(ascii: "{")
+        }
+
+        private mutating func skipIgnored() {
+            while index < bytes.count {
+                switch bytes[index] {
+                case UInt8(ascii: " "), UInt8(ascii: "\t"), UInt8(ascii: "\r"),
+                     UInt8(ascii: "\n"), UInt8(ascii: ","):
+                    index += 1
+                case UInt8(ascii: "#"):
+                    while index < bytes.count,
+                          bytes[index] != UInt8(ascii: "\n"), bytes[index] != UInt8(ascii: "\r") {
+                        index += 1
+                    }
+                case 0xEF where index + 2 < bytes.count
+                    && bytes[index + 1] == 0xBB && bytes[index + 2] == 0xBF:
+                    index += 3 // UTF-8 byte order mark, allowed between GraphQL tokens.
+                default:
+                    return
                 }
-                .joined(separator: "\n")
-        }
-
-        private mutating func skipWhitespaceAndCommas() {
-            while index < characters.count, characters[index].isWhitespace || characters[index] == "," {
-                index += 1
             }
         }
 
-        private static func isNameCharacter(_ character: Character) -> Bool {
-            character.isLetter || character.isNumber || character == "_"
+        private static func isNameStart(_ byte: UInt8) -> Bool {
+            (UInt8(ascii: "A")...UInt8(ascii: "Z")).contains(byte)
+                || (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(byte)
+                || byte == UInt8(ascii: "_")
         }
 
         mutating func peekIdentifier() -> String? {
@@ -169,26 +180,83 @@ public enum GraphQLRequest {
         }
 
         mutating func takeIdentifier() -> String? {
-            skipWhitespaceAndCommas()
-            guard index < characters.count, characters[index].isLetter || characters[index] == "_" else {
-                return nil
-            }
-            var name = ""
-            while index < characters.count, Self.isNameCharacter(characters[index]) {
-                name.append(characters[index])
+            skipIgnored()
+            guard index < bytes.count, Self.isNameStart(bytes[index]) else { return nil }
+            let start = index
+            while index < bytes.count,
+                  Self.isNameStart(bytes[index]) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[index]) {
                 index += 1
             }
-            return name.isEmpty ? nil : name
+            return String(decoding: bytes[start..<index], as: UTF8.self)
+        }
+
+        /// Descriptions may precede executable definitions. Their text is not part of the operation.
+        mutating func skipDescriptions() -> Bool {
+            skipIgnored()
+            while index < bytes.count, bytes[index] == UInt8(ascii: "\"") {
+                guard skipString() else { return false }
+                skipIgnored()
+            }
+            return index < bytes.count
+        }
+
+        private func isTripleQuote(at offset: Int) -> Bool {
+            offset + 2 < bytes.count
+                && bytes[offset] == UInt8(ascii: "\"")
+                && bytes[offset + 1] == UInt8(ascii: "\"")
+                && bytes[offset + 2] == UInt8(ascii: "\"")
+        }
+
+        /// Consumes a quoted or block string without interpreting its braces, comments, or escapes
+        /// as document structure. An unfinished string cannot yield a trustworthy operation.
+        private mutating func skipString() -> Bool {
+            let isBlock = isTripleQuote(at: index)
+            index += isBlock ? 3 : 1
+            while index < bytes.count {
+                if isBlock {
+                    if bytes[index] == UInt8(ascii: "\\"), isTripleQuote(at: index + 1) {
+                        index += 4
+                    } else if isTripleQuote(at: index) {
+                        index += 3
+                        return true
+                    } else {
+                        index += 1
+                    }
+                } else {
+                    switch bytes[index] {
+                    case UInt8(ascii: "\""):
+                        index += 1
+                        return true
+                    case UInt8(ascii: "\\"):
+                        guard index + 1 < bytes.count else { return false }
+                        index += 2
+                    case UInt8(ascii: "\n"), UInt8(ascii: "\r"):
+                        return false
+                    default:
+                        index += 1
+                    }
+                }
+            }
+            return false
         }
 
         /// Moves past variable definitions and directives to the opening brace of the selection set.
         mutating func advanceToSelectionSet() -> Bool {
             var depth = 0
-            while index < characters.count {
-                let character = characters[index]
-                if character == "(" { depth += 1 }
-                if character == ")" { depth -= 1 }
-                if character == "{", depth <= 0 {
+            while index < bytes.count {
+                skipIgnored()
+                guard index < bytes.count else { return false }
+                let byte = bytes[index]
+                if byte == UInt8(ascii: "\"") {
+                    guard skipString() else { return false }
+                    continue
+                }
+                if byte == UInt8(ascii: "(") { depth += 1 }
+                if byte == UInt8(ascii: ")") {
+                    guard depth > 0 else { return false }
+                    depth -= 1
+                }
+                if byte == UInt8(ascii: "{"), depth == 0 {
                     index += 1
                     return true
                 }
@@ -197,25 +265,27 @@ public enum GraphQLRequest {
             return false
         }
 
-        /// Consumes one whole fragment definition — the `fragment` keyword, its name, its `on Type`
-        /// condition, any directives and its selection set — leaving the cursor on whatever follows.
+        /// Consumes a fragment's header, directives, and complete nested selection set.
         mutating func skipFragmentDefinition() -> Bool {
             guard takeIdentifier() != nil else { return false }
             guard advanceToSelectionSet() else { return false }
             return skipToEndOfSelectionSet()
         }
 
-        /// Moves past the `}` that closes the selection set whose `{` has already been consumed.
-        ///
-        /// Brace-counted rather than run to the next `}`, because a fragment's selections nest:
-        /// `fragment f on User { profile { name } }` has to close twice before the operation begins.
+        /// Moves past the closing brace of a selection set whose opening brace was consumed.
         mutating func skipToEndOfSelectionSet() -> Bool {
             var depth = 1
-            while index < characters.count {
-                let character = characters[index]
+            while index < bytes.count {
+                skipIgnored()
+                guard index < bytes.count else { return false }
+                let byte = bytes[index]
+                if byte == UInt8(ascii: "\"") {
+                    guard skipString() else { return false }
+                    continue
+                }
                 index += 1
-                if character == "{" { depth += 1 }
-                if character == "}" {
+                if byte == UInt8(ascii: "{") { depth += 1 }
+                if byte == UInt8(ascii: "}") {
                     depth -= 1
                     if depth == 0 { return true }
                 }
@@ -223,14 +293,11 @@ public enum GraphQLRequest {
             return false
         }
 
-        /// The first field in the selection set, resolving `alias: field` to the field.
-        ///
-        /// The field is the stable half of that pair — an alias is whatever the caller felt like
-        /// typing — so matching on it survives a client renaming its locals.
+        /// The first field in the selection set, resolving an alias to its underlying field.
         mutating func takeRootField() -> String? {
             guard let first = takeIdentifier() else { return nil }
-            skipWhitespaceAndCommas()
-            guard index < characters.count, characters[index] == ":" else { return first }
+            skipIgnored()
+            guard index < bytes.count, bytes[index] == UInt8(ascii: ":") else { return first }
             index += 1
             return takeIdentifier() ?? first
         }

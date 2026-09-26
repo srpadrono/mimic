@@ -51,7 +51,7 @@ public struct DSStatusPill: View {
         if let statusCode {
             text = "\(statusCode)"
             color = DSColors.httpStatusColor(for: statusCode)
-            isFilled = statusCode >= 400
+            isFilled = (400..<600).contains(statusCode)
         } else {
             text = Self.failureGlyph
             color = DSColors.destructiveText
@@ -63,7 +63,7 @@ public struct DSStatusPill: View {
     public init(statusCode: Int, detail: String) {
         text = "\(statusCode) \(detail)"
         color = DSColors.httpStatusColor(for: statusCode)
-        isFilled = statusCode >= 400
+        isFilled = (400..<600).contains(statusCode)
     }
 
     /// A named failure ("drop", "timeout") in the failure arm's own styling: destructive text on a

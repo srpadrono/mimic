@@ -16,6 +16,7 @@ struct SwaggerDocument: Codable, Sendable {
     let produces: [String]?
     let paths: [String: SwaggerPathItem]?
     let definitions: [String: SwaggerSchemaObject]?
+    let responses: [String: SwaggerResponse]?
 }
 
 struct SwaggerInfo: Codable, Sendable {
@@ -24,6 +25,7 @@ struct SwaggerInfo: Codable, Sendable {
 }
 
 struct SwaggerPathItem: Codable, Sendable {
+    let ref: String?
     let get: SwaggerOperation?
     let post: SwaggerOperation?
     let put: SwaggerOperation?
@@ -31,6 +33,11 @@ struct SwaggerPathItem: Codable, Sendable {
     let delete: SwaggerOperation?
     let head: SwaggerOperation?
     let options: SwaggerOperation?
+
+    enum CodingKeys: String, CodingKey {
+        case ref = "$ref"
+        case get, post, put, patch, delete, head, options
+    }
 }
 
 struct SwaggerOperation: Codable, Sendable {
@@ -51,12 +58,18 @@ struct SwaggerParameter: Codable, Sendable {
 }
 
 struct SwaggerResponse: Codable, Sendable {
+    let ref: String?
     let description: String?
     let schema: SwaggerSchemaObject?
     let examples: [String: AnyCodableValue]?
+
+    enum CodingKeys: String, CodingKey {
+        case ref = "$ref"
+        case description, schema, examples
+    }
 }
 
-/// Full Swagger 2.0 schema object supporting properties, items, $ref, enum, format.
+/// Swagger 2.0 schema subset used for examples: properties, items, $ref, enum, and format.
 /// Uses a class to allow recursive structure (items, properties).
 final class SwaggerSchemaObject: Codable, Sendable {
     let type: String?
@@ -64,13 +77,57 @@ final class SwaggerSchemaObject: Codable, Sendable {
     let ref: String?
     let properties: [String: SwaggerSchemaObject]?
     let items: SwaggerSchemaObject?
-    let enumValues: [String]?
+    let enumValues: [AnyCodableValue]?
     let example: AnyCodableValue?
 
     enum CodingKeys: String, CodingKey {
         case type, format, properties, items, example
         case ref = "$ref"
         case enumValues = "enum"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        format = try container.decodeIfPresent(String.self, forKey: .format)
+        ref = try container.decodeIfPresent(String.self, forKey: .ref)
+        properties = try container.decodeIfPresent([String: SwaggerSchemaObject].self, forKey: .properties)
+        items = try container.decodeIfPresent(SwaggerSchemaObject.self, forKey: .items)
+        enumValues = try container.decodeIfPresent([AnyCodableValue].self, forKey: .enumValues)
+        // A JSON null is an explicit example, distinct from an absent example. The synthesized
+        // optional decoder uses decodeIfPresent and loses that distinction before generation.
+        if container.contains(.example) {
+            example = try container.decode(AnyCodableValue.self, forKey: .example)
+        } else {
+            example = nil
+        }
+    }
+}
+
+/// Resolves one name beneath a known local component section. References use URI-fragment
+/// percent encoding followed by JSON Pointer escaping; a nested pointer is not a component name.
+enum SwaggerReference {
+    static func localName(_ reference: String, section: String) -> String? {
+        guard reference.unicodeScalars.first == "#",
+              let pointer = String(String.UnicodeScalarView(reference.unicodeScalars.dropFirst())).removingPercentEncoding
+        else { return nil }
+        let parts = pointer.unicodeScalars.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0].isEmpty, parts[1].elementsEqual(section.unicodeScalars) else { return nil }
+
+        var name = ""
+        var scalars = parts[2].makeIterator()
+        while let scalar = scalars.next() {
+            guard scalar == "~" else {
+                name.unicodeScalars.append(scalar)
+                continue
+            }
+            switch scalars.next() {
+            case "0": name.unicodeScalars.append("~")
+            case "1": name.unicodeScalars.append("/")
+            default: return nil
+            }
+        }
+        return name
     }
 }
 

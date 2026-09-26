@@ -54,6 +54,14 @@ struct DSStatusPillTests {
         #expect(DSStatusPill(statusCode: 599).isFilled)
     }
 
+    @Test("Codes outside the defined error classes do not acquire an error fill", arguments: [99, 600, 999])
+    func unknownClassesRemainUnfilled(statusCode: Int) {
+        let pill = DSStatusPill(statusCode: statusCode)
+        #expect(!pill.isFilled)
+        #expect(pill.color == DSColors.labelSecondary)
+        #expect(!DSStatusPill(statusCode: statusCode, detail: "×2").isFilled)
+    }
+
     /// The label colour is `httpStatusColor(for:)`'s — the text variants, which are the tokens
     /// `DSContrastTests.statusPillTextClearsAAOnItsOwnFill` measures against this very fill.
     @Test("A coded pill takes its colour from httpStatusColor")

@@ -43,9 +43,11 @@ public struct PanelLayout: Equatable, Sendable {
 /// suite and cannot inherit — or corrupt — the developer's real window arrangement. That is the same
 /// arrangement `RecentProjectsStore` uses, and the reason `@AppStorage` is not used here: it binds to
 /// `.standard` unless every call site remembers to pass a store.
-// @unchecked Sendable: UserDefaults is documented as thread-safe for get/set, and every method here
-// is a stateless read or write.
+// @unchecked Sendable: the shared lock keeps each layout read/write coherent across store instances;
+// UserDefaults itself is thread-safe for the individual accesses.
 public final class PanelLayoutStore: @unchecked Sendable {
+
+    private static let lock = NSLock()
 
     private enum Key {
         static let requestLogHeight = "panel.requestLog.height"
@@ -96,34 +98,41 @@ public final class PanelLayoutStore: @unchecked Sendable {
     }
 
     public func load() -> PanelLayout {
-        PanelLayout(
-            requestLogHeight: size(
-                forKey: Key.requestLogHeight,
-                default: PanelLayout.default.requestLogHeight
-            ),
-            isRequestLogVisible: flag(
-                forKey: Key.requestLogVisible,
-                default: PanelLayout.default.isRequestLogVisible
-            ),
-            isInspectorVisible: flag(
-                forKey: Key.inspectorVisible,
-                default: PanelLayout.default.isInspectorVisible
+        Self.lock.withLock {
+            PanelLayout(
+                requestLogHeight: size(
+                    forKey: Key.requestLogHeight,
+                    default: PanelLayout.default.requestLogHeight
+                ),
+                isRequestLogVisible: flag(
+                    forKey: Key.requestLogVisible,
+                    default: PanelLayout.default.isRequestLogVisible
+                ),
+                isInspectorVisible: flag(
+                    forKey: Key.inspectorVisible,
+                    default: PanelLayout.default.isInspectorVisible
+                )
             )
-        )
+        }
     }
 
     /// Records the arrangement as chosen.
     ///
     /// Deliberately does not clamp to a usable range. The size that is right for a panel depends on
     /// the window it is in, and this store outlives any particular window — clamping here is how the
-    /// old implementation lost people's layouts when they resized. Only the sanity ceiling applies.
+    /// old implementation lost people's layouts when they resized. Invalid sizes use the default;
+    /// valid sizes are subject only to the sanity ceiling.
     public func save(_ layout: PanelLayout) {
-        defaults.set(
-            Double(layout.requestLogHeight.clamped(to: 0...Bounds.storedSizeLimit)),
-            forKey: Key.requestLogHeight
-        )
-        defaults.set(layout.isRequestLogVisible, forKey: Key.requestLogVisible)
-        defaults.set(layout.isInspectorVisible, forKey: Key.inspectorVisible)
+        Self.lock.withLock {
+            let height = layout.requestLogHeight.isFinite && layout.requestLogHeight > 0
+                ? layout.requestLogHeight : PanelLayout.default.requestLogHeight
+            defaults.set(
+                Double(height.clamped(to: 0...Bounds.storedSizeLimit)),
+                forKey: Key.requestLogHeight
+            )
+            defaults.set(layout.isRequestLogVisible, forKey: Key.requestLogVisible)
+            defaults.set(layout.isInspectorVisible, forKey: Key.inspectorVisible)
+        }
     }
 
     // MARK: - Reading
@@ -144,8 +153,18 @@ public final class PanelLayoutStore: @unchecked Sendable {
     }
 
     private func flag(forKey key: String, default fallback: Bool) -> Bool {
-        guard defaults.object(forKey: key) != nil else { return fallback }
-        return defaults.bool(forKey: key)
+        guard let value = defaults.object(forKey: key) else { return fallback }
+        if let number = value as? NSNumber { return number.boolValue }
+        // UserDefaults also accepts these string spellings. Keep that legacy compatibility while
+        // refusing unrelated text, arrays, and dictionaries instead of interpreting them as false.
+        if let text = value as? String {
+            switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "1": return true
+            case "false", "no", "0": return false
+            default: return fallback
+            }
+        }
+        return fallback
     }
 }
 

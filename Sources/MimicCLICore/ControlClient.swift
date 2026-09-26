@@ -22,35 +22,35 @@ public struct ControlClient: Sendable {
     /// logs and bug reports.
     let token: String?
     private let exchange: ControlHTTPExchange
+    private let timeout: TimeInterval
+
+    public static let maximumTimeoutSeconds: TimeInterval = 3_600
+
+    /// Keeps Foundation's request and resource timers finite and bounded.
+    public static func validatedTimeout(_ timeout: TimeInterval) throws -> TimeInterval {
+        guard timeout.isFinite, timeout > 0, timeout <= maximumTimeoutSeconds else {
+            throw CLIFailure.badArgument("--timeout must be greater than 0 and at most 3600 seconds.")
+        }
+        return timeout
+    }
 
     /// The production initialiser, which owns the one `URLSession` this client uses.
-    public init(baseURL: URL, timeout: TimeInterval = 30, token: String? = nil) {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        // The discovery token belongs to one advertised listener. URLSession normally follows
-        // redirects and forwards custom headers, including X-Mimic-Token, even to another port.
-        // A control endpoint has no redirect contract, so keep every request on its original URL.
-        let session = URLSession(
-            configuration: configuration,
-            delegate: ControlRedirectPolicy(),
-            delegateQueue: nil
-        )
-        // One session, captured once and reused by both `send` and `isReachable`, exactly as the
-        // stored property it replaces was.
-        self.init(baseURL: baseURL, token: token, exchange: { try await session.data(for: $0) })
+    public init(baseURL: URL, timeout: TimeInterval = 30, token: String? = nil) throws {
+        self.baseURL = try Self.validatedBaseURL(baseURL)
+        self.timeout = try Self.validatedTimeout(timeout)
+        self.token = token
+        let owner = ControlSession(timeout: self.timeout)
+        self.exchange = { try await owner.session.data(for: $0) }
     }
 
     /// The seam under the transport: everything above `exchange` — building the request, attaching
     /// the token, and the five ways `send` can read a reply — is reachable from a test through this.
     ///
-    /// Deliberately not the initialiser production calls. `init(baseURL:timeout:token:)` still builds
-    /// the same ephemeral session with the same three settings it always did, so nothing about a real
-    /// invocation changes shape.
+    /// Production uses the validated initializer above and an ephemeral session.
     public init(baseURL: URL, token: String? = nil, exchange: @escaping ControlHTTPExchange) {
         self.baseURL = baseURL
         self.token = token
+        self.timeout = 30
         self.exchange = exchange
     }
 
@@ -73,15 +73,43 @@ public struct ControlClient: Sendable {
         timeout: TimeInterval = 30,
         discovered: ControlEndpoint? = nil
     ) throws -> ControlClient {
+        let timeout = try validatedTimeout(timeout)
+        let overrideName: String?
+        if explicitURL != nil {
+            overrideName = "--url"
+        } else if let value = environment[ControlAPI.urlEnvironmentKey], !value.isEmpty {
+            overrideName = ControlAPI.urlEnvironmentKey
+        } else if let value = environment[ControlAPI.portEnvironmentKey], !value.isEmpty {
+            overrideName = ControlAPI.portEnvironmentKey
+        } else {
+            overrideName = nil
+        }
+
+        // Validate an explicit destination before reading a discovery file. A bad override is a
+        // usage error, not evidence that no instance is running (or a reason to launch another one).
+        let overrideURL: URL?
+        if let overrideName {
+            guard let url = ControlEndpointDiscovery.resolveBaseURL(
+                explicit: explicitURL,
+                environment: environment,
+                discovered: nil
+            ) else {
+                throw CLIFailure.badArgument("\(overrideName) does not name a valid control API destination.")
+            }
+            overrideURL = try validatedBaseURL(url, source: overrideName)
+        } else {
+            overrideURL = nil
+        }
+
         let endpoint = discovered ?? ControlEndpointDiscovery.discover(environment: environment)
-        guard let url = ControlEndpointDiscovery.resolveBaseURL(
-            explicit: explicitURL,
-            environment: environment,
+        guard let url = overrideURL ?? ControlEndpointDiscovery.resolveBaseURL(
+            explicit: nil,
+            environment: [:],
             discovered: endpoint
         ) else {
             throw CLIFailure.noInstance
         }
-        return ControlClient(
+        return try ControlClient(
             baseURL: url,
             timeout: timeout,
             // Destination and credential decided *together*, which is the whole of the fix. They
@@ -99,6 +127,7 @@ public struct ControlClient: Sendable {
     }
 
     public func send(_ command: ControlCommand) async throws -> ControlResponse {
+        try Task.checkCancellation()
         var request = URLRequest(url: baseURL.appendingPathComponent("\(ControlAPI.version)/command"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -110,10 +139,14 @@ public struct ControlClient: Sendable {
         do {
             (data, response) = try await exchange(request)
         } catch {
+            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                throw CancellationError()
+            }
             throw CLIFailure.unreachable(baseURL: baseURL, underlying: error.localizedDescription)
         }
+        try Task.checkCancellation()
 
-        // The envelope first, whatever the status. Mimic answers a refusal with the same
+        // A refusal envelope first. Mimic answers a refusal with the same
         // `ControlResponse` it answers a success with — a `401` carries `request.unauthorized`, a
         // `409` carries `project.noneOpen` — and that error names the problem far better than a bare
         // status number does. `Output.emit` turns `ok: false` into `.commandFailed`, which exits 4,
@@ -125,7 +158,15 @@ public struct ControlClient: Sendable {
         // proves nothing — see `ProjectCommand.Import` and `JourneyFile.readSpec`, both of which
         // were accepting the wrong document for exactly that reason. If `ok` ever gains a fallback,
         // this needs a discriminator of its own.
+        let status = (response as? HTTPURLResponse)?.statusCode
         if let decoded = try? ControlCoding.decode(ControlResponse.self, from: data) {
+            if decoded.ok, let status, !(200..<300).contains(status) {
+                if status == 401 { throw CLIFailure.commandFailed(.unauthorized) }
+                throw CLIFailure.commandFailed(.invalid(
+                    "\(baseURL.absoluteString) answered HTTP \(status) instead of a successful control response.",
+                    code: "http.\(status)"
+                ))
+            }
             return decoded
         }
 
@@ -136,7 +177,6 @@ public struct ControlClient: Sendable {
         // whoever hit it hunting through the wrong module, when the reply had already said exactly
         // what was wrong. The status is the one thing that separates "we were refused" from "the
         // answer was gibberish", so it gets read rather than discarded.
-        let status = (response as? HTTPURLResponse)?.statusCode
         if status == 401 {
             // Mimic's own wording, because the advice does not depend on who sent the 401: the token
             // is missing or wrong, and the CLI normally reads it out of the instance's control.json.
@@ -147,12 +187,12 @@ public struct ControlClient: Sendable {
         if let status, status < 200 || status >= 300 {
             throw CLIFailure.commandFailed(.invalid(
                 "\(baseURL.absoluteString) answered HTTP \(status) with a body this CLI could not "
-                    + "read: \(String(decoding: data, as: UTF8.self))",
+                    + "read: \(diagnosticPreview(data))",
                 code: "http.\(status)"
             ))
         }
         // A 2xx this CLI cannot read really is a decoding problem, and stays one.
-        throw CLIFailure.undecodable(String(decoding: data, as: UTF8.self))
+        throw CLIFailure.undecodable(diagnosticPreview(data))
     }
 
     /// True when an instance answers. Used by `mimic app start` to wait for readiness rather than
@@ -162,14 +202,15 @@ public struct ControlClient: Sendable {
     /// what is really a token mismatch would send the user off restarting an app that is already fine.
     /// `send` will then fail with the message that names the actual problem.
     public func isReachable() async -> Bool {
+        guard !Task.isCancelled else { return false }
         var request = URLRequest(url: baseURL.appendingPathComponent("\(ControlAPI.version)/health"))
         request.httpMethod = "GET"
-        request.timeoutInterval = 2
+        request.timeoutInterval = min(2, timeout)
         authorize(&request)
         do {
             let (_, response) = try await exchange(request)
             let status = (response as? HTTPURLResponse)?.statusCode
-            return status == 200 || status == 401
+            return !Task.isCancelled && (status == 200 || status == 401)
         } catch {
             return false
         }
@@ -178,6 +219,77 @@ public struct ControlClient: Sendable {
     private func authorize(_ request: inout URLRequest) {
         guard let token else { return }
         request.setValue(token, forHTTPHeaderField: ControlAPI.tokenHeaderName)
+    }
+
+    /// Error pages can echo request headers. Bound terminal output and hide this request's token,
+    /// looking just beyond the cutoff so a credential crossing that boundary is also redacted.
+    private func diagnosticPreview(_ data: Data) -> String {
+        let limit = 4_096
+        let count = min(limit, data.count)
+        let credential = Data((token ?? "").utf8)
+        let lookahead = min(data.count - count, max(0, credential.count - 1))
+        let sample = Data(data.prefix(count + lookahead))
+        var preview = Data()
+        var cursor = 0
+        if !credential.isEmpty {
+            while cursor < count,
+                  let range = sample.range(of: credential, in: cursor..<sample.endIndex),
+                  range.lowerBound < count {
+                preview.append(sample[cursor..<range.lowerBound])
+                preview.append(contentsOf: "[redacted]".utf8)
+                cursor = range.upperBound
+            }
+        }
+        if cursor < count { preview.append(sample[cursor..<count]) }
+
+        var truncated = data.count > count || preview.count > limit
+        preview = Data(preview.prefix(limit))
+        var text = String(data: preview, encoding: .utf8)
+        if text == nil, truncated, !preview.isEmpty {
+            // A UTF-8 scalar is at most four bytes. Preserve complete scalars when the byte limit
+            // cuts one; genuinely invalid upstream bytes still get replacement characters below.
+            for removed in 1...min(3, preview.count) {
+                if let complete = String(data: preview.dropLast(removed), encoding: .utf8) {
+                    text = complete
+                    break
+                }
+            }
+        }
+        var rendered = ""
+        var byteCount = 0
+        for scalar in (text ?? String(decoding: preview, as: UTF8.self)).unicodeScalars {
+            let escaped: String
+            switch scalar.value {
+            case 9, 10:
+                escaped = String(scalar)
+            case 0...31, 127:
+                escaped = "\\u{\(String(scalar.value, radix: 16, uppercase: true))}"
+            default:
+                escaped = String(scalar)
+            }
+            guard escaped.utf8.count <= limit - byteCount else {
+                truncated = true
+                break
+            }
+            rendered += escaped
+            byteCount += escaped.utf8.count
+        }
+        return rendered + (truncated ? "\n[Response body truncated]" : "")
+    }
+
+    private static func validatedBaseURL(_ url: URL, source: String = "Control API URL") throws -> URL {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = components.host, !host.isEmpty,
+              components.port.map({ (1...65_535).contains($0) }) ?? true,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else {
+            throw CLIFailure.badArgument(
+                "\(source) must be an absolute HTTP(S) URL with a host and a valid port, "
+                    + "without user information, a query, or a fragment."
+            )
+        }
+        return url.absoluteURL
     }
 }
 
@@ -195,6 +307,30 @@ public typealias ControlHTTPExchange = @Sendable (URLRequest) async throws -> (D
 /// The three members are already exactly what the protocol asks for, which is the point: the seam was
 /// added around the type rather than through it, so no production call path changed on the way in.
 extension ControlClient: ControlTransport {}
+
+/// The session retains its delegate until invalidation. Keeping ownership outside that delegate
+/// lets the last client copy release the session, including clients discarded by readiness polling.
+private final class ControlSession: Sendable {
+    let session: URLSession
+
+    init(timeout: TimeInterval) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // A control endpoint has no redirect contract. Never forward its custom token header to
+        // another listener, even if URLSession would normally follow that response.
+        session = URLSession(
+            configuration: configuration,
+            delegate: ControlRedirectPolicy(),
+            delegateQueue: nil
+        )
+    }
+
+    deinit {
+        session.invalidateAndCancel()
+    }
+}
 
 private final class ControlRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(

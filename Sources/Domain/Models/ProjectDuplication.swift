@@ -103,9 +103,9 @@ extension Endpoint {
     /// `scenarios.first` instead means an endpoint serving "Server error" duplicates into one serving
     /// "Default" — a difference nothing on screen explains.
     ///
-    /// Field list to track: of ``Endpoint``'s nine stored properties, `id` and `scenarios` are
+    /// Field list to track: of ``Endpoint``'s ten stored properties, `id` and `scenarios` are
     /// reminted and `activeScenarioID` is repointed; `name`, `method`, `path`, `delayMs`, `groupTag`
-    /// and `graphqlOperation` are carried across unchanged.
+    /// `graphqlOperation` and the project-local `backendID` are carried across unchanged.
     public func copyingWithFreshIdentifiers() -> Endpoint {
         let activeIndex = activeScenarioID.flatMap { active in
             scenarios.firstIndex { $0.id == active }
@@ -168,9 +168,9 @@ extension JourneyStep {
 
     /// This step with a new id, keeping its place in the script.
     ///
-    /// Field list to track: of ``JourneyStep``'s eight stored properties, `id` is reminted; `name`,
-    /// `method`, `path`, `outcome`, `delayMs`, `repeatCount` and `graphqlOperation` are carried across
-    /// unchanged.
+    /// Field list to track: of ``JourneyStep``'s nine stored properties, `id` is reminted; `name`,
+    /// `method`, `path`, `outcome`, `delayMs`, `repeatCount`, `graphqlOperation` and the project-local
+    /// `backendID` are carried across unchanged.
     public func copyingWithFreshIdentifiers() -> JourneyStep {
         JourneyStep(
             name: name,

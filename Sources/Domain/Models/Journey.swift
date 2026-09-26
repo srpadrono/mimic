@@ -199,8 +199,8 @@ public enum NetworkFailure: Codable, Sendable, Equatable {
     /// timeout fires first, which is exactly what a timeout test needs.
     case timeout(holdMs: Int)
 
-    /// The default hold for a timeout step: long enough to outlast typical client timeouts
-    /// (URLSession defaults to 60s) without stalling a test run forever.
+    /// The default hold for a timeout step. Set a longer hold when the client's configured timeout
+    /// exceeds 30 seconds, so its timeout fires before Mimic drops the connection.
     public static let defaultTimeoutHoldMs = 30_000
 
     public static var timeout: NetworkFailure { .timeout(holdMs: defaultTimeoutHoldMs) }

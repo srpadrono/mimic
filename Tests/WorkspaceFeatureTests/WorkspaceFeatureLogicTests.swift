@@ -28,6 +28,8 @@ struct WorkspaceFeatureLogicTests {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
         window.contentViewController = controller
         controller.view.frame = CGRect(origin: .zero, size: size)
         window.orderFront(nil)
@@ -111,11 +113,11 @@ struct WorkspaceFeatureLogicTests {
     }
 
     @Test("Request log query sorts using endpoint and scenario names")
-    func requestLogQuerySortsByDerivedNames() {
+    func requestLogQuerySortsByDerivedNames() throws {
         let beta = makeEndpoint(name: "Beta", path: "/beta", groupTag: "Beta")
         let alpha = makeEndpoint(name: "Alpha", path: "/alpha", groupTag: "Alpha")
-        let betaScenario = try! #require(beta.scenarios.last)
-        let alphaScenario = try! #require(alpha.scenarios.first)
+        let betaScenario = try #require(beta.scenarios.last)
+        let alphaScenario = try #require(alpha.scenarios.first)
 
         let logs = [
             makeLog(endpoint: beta, scenarioID: betaScenario.id, timestamp: 1_710_000_100),
@@ -196,12 +198,12 @@ struct WorkspaceFeatureLogicTests {
     /// belongs beside the component that owns it — `DSComponentRenderingTests` measures the panel
     /// chrome and the method badge — rather than being re-measured through a whole panel here.
     @Test("Hosting the request log and scenario views does not trap during layout")
-    func hostingRequestLogAndScenarioViewsDoesNotTrap() {
+    func hostingRequestLogAndScenarioViewsDoesNotTrap() throws {
         let endpoint = makeEndpoint()
         let log = makeLog(endpoint: endpoint, timestamp: 1_710_000_000)
         let emptyLog = makeLog(endpoint: endpoint, body: nil, timestamp: 1_710_000_010)
-        let activeScenario = try! #require(endpoint.scenarios.first)
-        let inactiveScenario = try! #require(endpoint.scenarios.last)
+        let activeScenario = try #require(endpoint.scenarios.first)
+        let inactiveScenario = try #require(endpoint.scenarios.last)
         let headerlessLog = RequestLog(
             timestamp: Date(timeIntervalSince1970: 1_710_000_200),
             method: endpoint.method,
@@ -492,16 +494,18 @@ struct WorkspaceFeatureLogicTests {
     func newScenarioNameSanitizer() {
         #expect(NewScenarioSheet.sanitizedName(from: "  Unauthorized  ") == "Unauthorized")
         #expect(NewScenarioSheet.sanitizedName(from: "   ") == nil)
+        #expect(NewScenarioSheet.sanitizedName(from: "\n\r\t ") == nil)
+        #expect(NewScenarioSheet.sanitizedName(from: "\n  Needs auth \r\n") == "Needs auth")
 
         var confirmedName: String?
         var dismissCount = 0
         NewScenarioSheet.performConfirm(
-            rawName: "  Needs auth  ",
+            rawName: "\n  Needs auth \r\n",
             onConfirm: { confirmedName = $0 },
             dismiss: { dismissCount += 1 }
         )
         NewScenarioSheet.performConfirm(
-            rawName: "   ",
+            rawName: "\n\r\t ",
             onConfirm: { confirmedName = $0 },
             dismiss: { dismissCount += 1 }
         )
@@ -570,6 +574,38 @@ struct WorkspaceFeatureLogicTests {
             ) == nil
         )
         #expect(deletedID == endpoint.id)
+        #expect(SidebarView.sectionKey(for: endpoint) == "group:Users")
+        #expect(SidebarView.sectionKey(for: makeEndpoint(groupTag: nil)) == "__ungrouped__")
+        #expect(SidebarView.sectionKey(for: makeEndpoint(groupTag: "")) == "__ungrouped__")
+        #expect(SidebarView.sectionKey(for: makeEndpoint(groupTag: "__ungrouped__")) == "group:__ungrouped__")
+    }
+
+    @Test("Breadcrumb choices carry native selected state and select the requested destination")
+    func breadcrumbOptionsUseNativeSelection() throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let secondID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        var selectedID: UUID?
+        let menu = NSHostingMenu(rootView: BreadcrumbJumpBar.Options(
+            crumb: .init(id: "group", title: "Accounts", options: [
+                .init(id: firstID, title: "Accounts", isSelected: true),
+                .init(id: secondID, title: "Orders"),
+            ]),
+            onSelect: { selectedID = $0 }
+        ))
+        menu.update()
+        func item(_ title: String, in menu: NSMenu) -> (menu: NSMenu, index: Int)? {
+            for (index, entry) in menu.items.enumerated() {
+                if entry.title == title, entry.submenu == nil { return (menu, index) }
+                if let submenu = entry.submenu, let found = item(title, in: submenu) { return found }
+            }
+            return nil
+        }
+        let first = try #require(item("Accounts", in: menu))
+        let second = try #require(item("Orders", in: menu))
+        #expect(first.menu.items[first.index].state == .on)
+        #expect(second.menu.items[second.index].state == .off)
+        second.menu.performActionForItem(at: second.index)
+        #expect(selectedID == secondID)
     }
 
     @Test("Request log copy helper writes formatted details to the pasteboard")

@@ -68,19 +68,30 @@ struct DSJSONEditorTests {
         let result = try #require(DSJSONEditor.prettyPrint(compact))
         #expect(result.contains("\n"))
 
-        // This assertion used to read `aIndex < bIndex` — it asserted the *bug*. The old
-        // implementation round-tripped through `JSONSerialization` with `.sortedKeys`, and because
-        // this is the editor's Format button, the alphabetised text was saved back as the response
-        // body the server then served. A mock written to mirror a real payload came back rearranged.
         let aIndex = try #require(result.range(of: "\"a\""))
         let bIndex = try #require(result.range(of: "\"b\""))
         #expect(bIndex.lowerBound < aIndex.lowerBound)
     }
 
+    @Test("Format preserves Unicode string contents and number spelling")
+    func prettyPrintPreservesLiteralBytes() throws {
+        let source = "{\"\u{0301}key\":\"\u{0301} a:b [c]\",\"number\":1.2300e+04,\"text\":\"e\u{0301}\"}"
+        let expected = """
+        {
+          "\u{0301}key": "\u{0301} a:b [c]",
+          "number": 1.2300e+04,
+          "text": "e\u{0301}"
+        }
+        """
+
+        #expect(DSJSONEditor.validateJSON(source))
+        let formatted = try #require(DSJSONEditor.prettyPrint(source))
+        #expect(Array(formatted.utf8) == Array(expected.utf8))
+        #expect(DSJSONEditor.validateJSON(formatted))
+    }
+
     @Test("Pretty-print refuses malformed and non-JSON text")
     func prettyPrintInvalid() {
-        // The traffic scanner accepts truncated captures, but the editor's Format action must not
-        // rewrite a malformed response body that a user is intentionally serving.
         #expect(DSJSONEditor.prettyPrint("hello") == nil)
         #expect(DSJSONEditor.prettyPrint("<html><body>hi</body></html>") == nil)
         #expect(DSJSONEditor.prettyPrint("{invalid}") == nil)
@@ -166,9 +177,48 @@ struct DSJSONEditorTests {
         #expect(valid == true)
         #expect(invalid == false)
     }
-}
 
-// MARK: - DSColors tests
+    @Test("Cancelled validation does not start a parse or publish a result")
+    @MainActor
+    func cancelledValidationSkipsWork() async {
+        var callbacks: [Bool] = []
+        let validation = Task {
+            await DSJSONEditor.resolvedValidationResult(
+                for: #"{"ok":true}"#,
+                sleep: { _ in },
+                validate: { _ in
+                    Issue.record("A cancelled editor validation must not start parsing")
+                    return true
+                },
+                onValidationChanged: { callbacks.append($0) }
+            )
+        }
+        validation.cancel()
+
+        #expect(await validation.value == nil)
+        #expect(callbacks.isEmpty)
+    }
+
+    @Test("Cancellation during a parse suppresses the obsolete result")
+    @MainActor
+    func cancellationDuringValidationDoesNotPublish() async {
+        var callbacks: [Bool] = []
+        let validation = Task {
+            await DSJSONEditor.resolvedValidationResult(
+                for: #"{"ok":true}"#,
+                sleep: { _ in },
+                validate: { _ in
+                    withUnsafeCurrentTask { $0?.cancel() }
+                    return true
+                },
+                onValidationChanged: { callbacks.append($0) }
+            )
+        }
+
+        #expect(await validation.value == nil)
+        #expect(callbacks.isEmpty)
+    }
+}
 
 @Suite("DSJSONEditor sizing")
 struct DSJSONEditorSizingTests {
@@ -177,8 +227,6 @@ struct DSJSONEditorSizingTests {
 
     @Test("An empty document is one line, not none")
     func emptyDocumentIsOneLine() {
-        // An empty editor still shows a caret sitting on a line, so zero would size the well to
-        // nothing and there would be nowhere to start typing.
         #expect(DSJSONEditor.lineCount(of: "") == 1)
     }
 
@@ -189,33 +237,17 @@ struct DSJSONEditorSizingTests {
         #expect(DSJSONEditor.lineCount(of: "{\n  \"a\": 1\n}") == 3)
     }
 
-    /// Every separator `NSString.lineRange(for:)` honours, because that is what `CodeEditorView`
-    /// builds its own line map with — and the well and the gutter have to agree on how many lines
-    /// there are.
-    ///
-    /// **This is the regression test for a bug the LF-only cases above could never catch.** The old
-    /// implementation compared `Character == "\n"`, which looks equivalent to splitting on newlines
-    /// and is not: `"\r\n"` is a *single* grapheme cluster that compares unequal to `"\n"`, so a
-    /// CRLF document counted as **one line no matter how long it was**. A HAR capture or any
-    /// Windows-authored fixture therefore sized its editor well to a single line. Measured before the
-    /// fix: a four-line CRLF document counted 1, and CR, U+2028, U+2029 and U+0085 each counted 1 for
-    /// a two-line document.
     @Test("Every newline the editor's own line map honours is counted")
     func lineCountHonoursEveryNewlineSeparator() {
-        // Literals, not derived from the function under test — reverting `isNewline` to the old
-        // `== "\n"` must turn every one of these red.
         #expect(DSJSONEditor.lineCount(of: "a\r\nb\r\nc\r\nd") == 4)
         #expect(DSJSONEditor.lineCount(of: "a\rb") == 2)
         #expect(DSJSONEditor.lineCount(of: "a\u{2028}b") == 2)
         #expect(DSJSONEditor.lineCount(of: "a\u{2029}b") == 2)
         #expect(DSJSONEditor.lineCount(of: "a\u{0085}b") == 2)
 
-        // And a CRLF document must be exactly as tall as the LF document that says the same thing.
         #expect(DSJSONEditor.lineCount(of: "a\r\nb") == DSJSONEditor.lineCount(of: "a\nb"))
     }
 
-    /// The consequence, stated in the units the view actually uses: a CRLF payload must not collapse
-    /// to a one-line well.
     @Test("A CRLF payload gets the height its lines deserve")
     func crlfPayloadIsNotSizedToOneLine() {
         let crlf = (0..<20).map { "  \"key\($0)\": \($0)" }.joined(separator: "\r\n")
@@ -227,8 +259,6 @@ struct DSJSONEditorSizingTests {
 
     @Test("A trailing newline opens a line rather than closing one")
     func trailingNewlineOpensALine() {
-        // The caret sits *after* the separator, on a line of its own, and the well has to have room
-        // for it. Counting separators alone would leave the caret against the bottom edge.
         #expect(DSJSONEditor.lineCount(of: "{}\n") == 2)
     }
 
@@ -241,26 +271,17 @@ struct DSJSONEditorSizingTests {
 
         #expect(one > 0)
         #expect(five > one)
-        // Linear in the line count: five lines is five times one line, because every line is laid
-        // out at the same height. A ratio rather than a literal, so a font-metrics change moves both
-        // sides together instead of failing on a number nobody chose.
         #expect(abs(five - one * 5) < 0.001)
     }
 
     @Test("A line count below one is floored rather than negated")
     func lineCountBelowOneIsFloored() {
-        // Defensive: a caller subtracting its way to zero should get one line's worth of well, not a
-        // zero-height frame or — with a negative — an inverted one that traps in layout.
         #expect(DSJSONEditor.height(forLines: 0) == DSJSONEditor.height(forLines: 1))
         #expect(DSJSONEditor.height(forLines: -3) == DSJSONEditor.height(forLines: 1))
     }
 
     @Test("One line of SF Mono at 13pt is a plausible line height")
     func oneLineIsAPlausibleHeight() {
-        // Deliberately a range, not a number. The point is that the measurement comes from the font
-        // rather than from a literal, so pinning it exactly would fail on a metrics change that is
-        // not a regression. Outside this range something has gone wrong — a missing face falling
-        // back to a display font, or a size read from the wrong theme.
         let height = DSJSONEditor.height(forLines: 1)
         #expect(height >= 12)
         #expect(height <= 22)
@@ -268,9 +289,6 @@ struct DSJSONEditorSizingTests {
 
     @Test("The two themes are built from one face")
     func themesShareOneFace() {
-        // The font name and size were written twice, once per theme. They are constants now, and
-        // `height(forLines:)` measures that same face — so a size that moved in one appearance and
-        // not the other would put the well's height and the text inside it out of step.
         #expect(DSJSONEditor.editorFontName == "SFMono-Regular")
         #expect(DSJSONEditor.editorFontSize == 13)
     }
@@ -278,11 +296,6 @@ struct DSJSONEditorSizingTests {
 
 @Suite("DSColors")
 struct DSColorsTests {
-
-    // Each arm returns the *text* variant, not the base semantic token. A pill draws this colour as
-    // its label and, at 12%, as its own fill, and the base tokens do not survive that composite —
-    // `DSContrastTests.statusPillTextClearsAAOnItsOwnFill` is where that is measured. These four
-    // tests pin the boundaries of each range; the palette question is settled next door.
 
     @Test("httpStatusColor returns the success text color for 2xx")
     func httpStatus2xx() {
@@ -335,55 +348,11 @@ struct DSColorsTests {
     }
 }
 
-// MARK: - Removed: `DSServerStateTests`
-
-// Four cases over `DSServerState`: its four labels, and the colour each state mapped to.
-//
-// The type is gone, and the suite is the reason it is worth saying why here rather than only in
-// `DSColors`. `DSServerState`'s only consumer was `DSStatusBadge`, which nothing in the window
-// drew — so a green suite over it was evidence about code the user never ran, which is the shape of
-// failure this repository has already paid for once at module scale. Three of the four cases also
-// restated a switch arm as an equality against the very token that arm returns.
-//
-// `DSColors` carries the note on what bringing the type back would have to answer first: five
-// states rather than four, since the server this app runs can be starting and stopping.
-
-// MARK: - Removed: `DSPanelHeaderTests`
-//
-// Two cases lived here and neither could fail.
-//
-// `headerHeightIsShared` asserted `DSPanelHeader<EmptyView>.height == DSPanelHeader<Text>.height`
-// and `> 0`. `height` is a `static var` returning `DSBarHeight.panelHeader`, so the two generic
-// specialisations read the same stored constant: the comparison is `x == x`, true for every possible
-// value of the token, including a value that would break every panel in the window. The `> 0`
-// companion excluded zero and negatives and nothing else.
-//
-// `headerRenders` constructed two `DSPanelHeader` values into `_` and asserted nothing at all. A
-// `View` initialiser stores its arguments; it does not lay anything out, so the only way that case
-// could have failed is by trapping inside a memberwise assignment.
-//
-// The claims they were reaching for are made properly in `DSComponentRenderingTests`, which is where
-// the hosting harness that can actually measure a view lives:
-//
-// - `laddersArePinned` pins `DSBarHeight.panelHeader == 36` — the assertion an equality between two
-//   reads of one constant cannot make — and `DSPanelHeader<EmptyView>.height ==
-//   DSBarHeight.panelHeader`, so the view keeps taking its number from the ladder.
-// - `panelChromeSharesOneHeight` renders a bare header, a header *with* a subtitle and a trailing
-//   `DSPanelHeaderButton`, and a `DSTabStrip`, and measures all three against a `Color` fixed to the
-//   token. That is `headerRenders`'s intent — both shapes survive layout — plus the cross-panel
-//   alignment neither case here checked.
-//
-// Nothing is left to move, which is why this file now ends at `DSColorsTests` and two notes about
-// what used to follow it.
-
 @Suite("DSPlainButtonStyle states")
 struct DSPlainButtonStyleTests {
 
     @Test("The three states are three different washes")
     func statesAreDistinct() {
-        // The defect this style exists for: twenty `.plain` call sites drew hover and nothing on
-        // press, so a click left no evidence it had landed. Rest, hover and pressed have to be three
-        // values a user can tell apart — which is a property of the style, not of any one alpha.
         let rest = DSPlainButtonStyle.wash(isPressed: false, isHovered: false)
         let hover = DSPlainButtonStyle.wash(isPressed: false, isHovered: true)
         let pressed = DSPlainButtonStyle.wash(isPressed: true, isHovered: false)
@@ -395,18 +364,12 @@ struct DSPlainButtonStyleTests {
 
     @Test("Pressing wins over hovering")
     func pressedWinsOverHovered() {
-        // The pointer is by definition on the control while it is being pressed, so both flags are
-        // true at once and the style has to answer with the pressed wash. Reading them in the other
-        // order would make a press look exactly like a hover.
         #expect(DSPlainButtonStyle.wash(isPressed: true, isHovered: true)
                 == DSPlainButtonStyle.wash(isPressed: true, isHovered: false))
     }
 
     @Test("Rest is clear, so a row and a button agree about not-hovered")
     func restIsClear() {
-        // `DSHoverHighlight` rests at `.clear` and these sit next to each other in every panel. A
-        // zero-alpha tint would read the same but compare differently, and the point of pinning it
-        // is that the two components cannot drift apart.
         #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: false) == Color.clear)
     }
 

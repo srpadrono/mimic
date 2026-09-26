@@ -31,20 +31,25 @@ public struct DSPlainButtonStyle: ButtonStyle {
     private struct Surface: View {
         let configuration: Configuration
         let cornerRadius: CGFloat
+        @Environment(\.isEnabled) private var isEnabled
         @State private var isHovered = false
 
         var body: some View {
             configuration.label
                 .background {
                     RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(DSPlainButtonStyle.wash(isPressed: configuration.isPressed,
-                                                      isHovered: isHovered))
+                        .fill(DSPlainButtonStyle.wash(isPressed: isEnabled && configuration.isPressed,
+                                                      isHovered: isEnabled && isHovered))
                 }
                 // An unfilled shape is not hit-testable, so without this a control only lights up
                 // while the pointer is over a glyph and flickers off in the gaps — the same
                 // correction `DSHoverHighlight` and `DSButton`'s ghost variant both needed.
                 .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
-                .onHover { isHovered = $0 }
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { isHovered = $0 && isEnabled }
+                .onChange(of: isEnabled) { _, enabled in
+                    if !enabled { isHovered = false }
+                }
                 .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
                 .animation(.easeOut(duration: DSAnimation.micro), value: configuration.isPressed)
         }

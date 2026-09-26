@@ -45,6 +45,13 @@ final class UpdateService {
 
     private(set) var phase: Phase = .idle
 
+    /// The install sheet is modal, but control clients and automatic capture can still edit a
+    /// project. They stop accepting new work from the moment installation preparation begins.
+    var isPreparingInstallation: Bool {
+        if case .installing = phase { return true }
+        return false
+    }
+
     /// Whether the update sheet is on screen.
     ///
     /// Separate from ``phase`` because they answer different questions: a background check that finds
@@ -85,15 +92,31 @@ final class UpdateService {
 
     /// Takes the pre-update snapshot. Given the store's location rather than resolving it, because
     /// resolving it is main-actor work and the copy itself must not be.
-    private let makeBackup: @Sendable (URL, String) -> Void
-    private let flushPendingSave: @MainActor () async -> Void
+    private let makeBackup: @Sendable (URL, String) throws -> Void
+    private let resolveStoreURL: @MainActor () -> URL?
+    private let flushPendingSave: @MainActor () async throws -> Void
     private let terminate: @MainActor () -> Void
     private var quitsAfterSheetDismissal = false
 
     private var work: Task<Void, Never>?
+    private var downloadID: UUID?
     /// A manual request can arrive while an automatic fetch is in flight. Its answer then belongs
     /// in the visible sheet even though the fetch began as a silent background check.
     private var announceCurrentCheck = false
+
+    private nonisolated enum PreparationError: Error, LocalizedError {
+        case missingStore
+        case backupFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingStore:
+                "Mimic could not locate your project store for backup. The update was not started."
+            case .backupFailed(let detail):
+                "Mimic could not back up your projects. The update was not started. " + detail
+            }
+        }
+    }
 
     init(
         installedVersion: @escaping @Sendable () -> ReleaseVersion,
@@ -103,9 +126,10 @@ final class UpdateService {
         },
         installer: any UpdateInstalling = UpdateInstaller(),
         now: @escaping @Sendable () -> Date = { Date() },
-        makeBackup: @escaping @Sendable (URL, String) -> Void = UpdateService.snapshot(of:version:),
-        flushPendingSave: @escaping @MainActor () async -> Void = {
-            await ControlPlaneCoordinator.shared.flushPendingSave()
+        makeBackup: @escaping @Sendable (URL, String) throws -> Void = UpdateService.snapshot(of:version:),
+        resolveStoreURL: @escaping @MainActor () -> URL? = { AppState.sessionStoreURL() },
+        flushPendingSave: @escaping @MainActor () async throws -> Void = {
+            try await ControlPlaneCoordinator.shared.flushPendingSaveForUpdate()
         },
         terminate: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) }
     ) {
@@ -115,6 +139,7 @@ final class UpdateService {
         self.installer = installer
         self.now = now
         self.makeBackup = makeBackup
+        self.resolveStoreURL = resolveStoreURL
         self.flushPendingSave = flushPendingSave
         self.terminate = terminate
     }
@@ -152,6 +177,8 @@ final class UpdateService {
         }
         guard !phase.isBusy else { return }
         work?.cancel()
+        discardPreparedInstaller()
+        downloadID = nil
         announceCurrentCheck = announceWhenUpToDate
         phase = .checking
         work = Task { [weak self] in
@@ -166,7 +193,7 @@ final class UpdateService {
                     UpdateCheck.outcome(
                         installed: installedVersion,
                         latest: release,
-                        skipping: preferences.skippedVersion
+                        skipping: announceCurrentCheck ? nil : preferences.skippedVersion
                     ),
                     announceWhenUpToDate: announceCurrentCheck
                 )
@@ -185,10 +212,9 @@ final class UpdateService {
             phase = .available(release)
             isShowingSheet = true
         case .skipped:
-            // Found, and deliberately not mentioned — unless this check was asked for by hand, which
-            // is a person going looking, and the previous "skip" was about not being interrupted.
+            // Only automatic checks honor a skipped version.
             phase = .upToDate(installed: installedVersion)
-            if announceWhenUpToDate { isShowingSheet = true }
+            isShowingSheet = false
         case .upToDate:
             phase = .upToDate(installed: installedVersion)
             if !announceWhenUpToDate { isShowingSheet = false }
@@ -208,6 +234,8 @@ final class UpdateService {
         if case .installing = phase { return }
         work?.cancel()
         work = nil
+        downloadID = nil
+        discardPreparedInstaller()
         isShowingSheet = false
         phase = .idle
     }
@@ -220,32 +248,61 @@ final class UpdateService {
         terminate()
     }
 
+    private func discardPreparedInstaller() {
+        guard case .readyToInstall(_, let file) = phase else { return }
+        Task.detached(priority: .utility) { [installer] in installer.discard(file) }
+    }
+
+    private func discardInstaller(_ file: URL) async {
+        await Task.detached(priority: .utility) { [installer] in installer.discard(file) }.value
+    }
+
     // MARK: - Downloading
 
     func downloadAndPrepare() {
         guard case .available(let release) = phase else { return }
+        let id = UUID()
+        downloadID = id
         phase = .downloading(release, fraction: 0)
         work = Task { [weak self] in
             guard let self else { return }
+            var downloadedFile: URL?
             do {
                 let file = try await installer.download(release) { [weak self] fraction in
-                    Task { @MainActor [weak self] in
-                        guard let self, case .downloading = phase else { return }
-                        phase = .downloading(release, fraction: fraction)
-                    }
+                    await self?.applyDownloadProgress(fraction, release: release, id: id)
                 }
-                guard !Task.isCancelled else { return }
-                // Verification is not a step the user can skip and not one they can see fail
-                // halfway: it happens before anything is offered as installable.
-                try installer.verify(file, against: release)
-                try installer.stampQuarantine(on: file, from: release)
-                guard !Task.isCancelled else { return }
+                downloadedFile = file
+                try Task.checkCancellation()
+                // Synchronous hashing and pkgutil must not block the sheet's main actor.
+                let preparation = Task.detached(priority: .userInitiated) { [installer] in
+                    try Task.checkCancellation()
+                    try installer.verify(file, against: release)
+                    try Task.checkCancellation()
+                    try installer.stampQuarantine(on: file, from: release)
+                }
+                try await withTaskCancellationHandler {
+                    try await preparation.value
+                } onCancel: {
+                    preparation.cancel()
+                }
+                try Task.checkCancellation()
+                downloadID = nil
                 phase = .readyToInstall(release, installer: file)
             } catch {
+                if let downloadedFile { await discardInstaller(downloadedFile) }
                 guard !Task.isCancelled else { return }
+                downloadID = nil
                 phase = .failed(error.localizedDescription)
             }
         }
+    }
+
+    private func applyDownloadProgress(_ fraction: Double, release: UpdateRelease, id: UUID) {
+        guard downloadID == id, case .downloading(_, let current) = phase,
+              fraction.isFinite else { return }
+        // URLSession delegate callbacks hop to this actor independently; late progress cannot go
+        // backwards, just as progress from a canceled attempt cannot reach its replacement.
+        phase = .downloading(release, fraction: max(current, min(1, max(0, fraction))))
     }
 
     // MARK: - Installing
@@ -263,21 +320,24 @@ final class UpdateService {
         let version = installedVersion.description
         work = Task { [weak self] in
             guard let self else { return }
-            // Save before taking the backup. Ordinary termination also drains any work that
-            // arrived during the handoff; do not bypass the app delegate's shutdown contract.
-            await flushPendingSave()
-
-            // Resolved here, on the main actor, and handed to the copy rather than looked up inside
-            // it: `AppState.sessionStoreURL` is main-actor isolated, and a detached task reaching
-            // for it would have to assume an isolation it does not have.
-            if let storeURL = AppState.sessionStoreURL() {
-                let backup = makeBackup
-                await Task.detached(priority: .userInitiated) { backup(storeURL, version) }.value
-            }
-
+            var handoffAttempted = false
             do {
+                // Failed or timed-out saves must leave Mimic open with the current work intact.
+                try await flushPendingSave()
+                guard let storeURL = resolveStoreURL() else { throw PreparationError.missingStore }
+                let backup = makeBackup
+                do {
+                    try await Task.detached(priority: .userInitiated) {
+                        try backup(storeURL, version)
+                    }.value
+                } catch {
+                    throw PreparationError.backupFailed(error.localizedDescription)
+                }
+                // A refused LaunchServices handoff reveals this file in Finder for a manual retry.
+                handoffAttempted = true
                 try await installer.handOff(file)
             } catch {
+                if !handoffAttempted { await discardInstaller(file) }
                 phase = .failed(error.localizedDescription)
                 return
             }
@@ -286,15 +346,8 @@ final class UpdateService {
         }
     }
 
-    /// Snapshots the store. Best effort, and deliberately quiet.
-    ///
-    /// A snapshot is insurance, not a precondition: refusing to install because a disk was too full
-    /// to copy the database would leave someone stuck on an old version *and* short of space — and
-    /// the update itself cannot harm the store, since the installer writes only `/Applications` and
-    /// `/usr/local/bin`. Only a migration in the *next* version could, which is what this is for.
-    nonisolated static func snapshot(of storeURL: URL, version: String) {
-        guard FileManager.default.fileExists(atPath: storeURL.path) else { return }
-        // `_ =` because `try?` wraps the discardable result in an Optional, which is not.
-        _ = try? StoreBackup.snapshot(of: storeURL, version: version)
+    /// Preserves the store before a later version can migrate it.
+    nonisolated static func snapshot(of storeURL: URL, version: String) throws {
+        _ = try StoreBackup.snapshot(of: storeURL, version: version)
     }
 }

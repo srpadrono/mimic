@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Report live test/command counts and check documentation links and test targets.
 
-Public docs deliberately avoid hand-maintained counts. This gate still catches a test
+Public docs deliberately avoid hand-maintained counts. Counts here are informational
+source declarations, not executed tests or a parsed Swift inventory. This gate catches a test
 folder that neither manifest builds, a manifest pointing at a missing folder, and
 broken local Markdown links. No Swift toolchain is required.
 """
@@ -57,16 +58,25 @@ def operation_count() -> int:
 
 def self_test() -> None:
     # Literal negative controls: changing the checker must make these fail.
-    assert suite_problems({"Alpha"}, {"Alpha"}, {"Alpha"}) == []
-    assert suite_problems({"Alpha"}, set(), set()) == ["Tests/Alpha is absent from Project.swift"]
-    assert suite_problems(set(), {"Beta"}, set()) == ["Tests/Beta is declared but has no folder"]
-    assert suite_problems({"Alpha"}, set(), {"Alpha"}) == [
+    # Do not use assert: PYTHONOPTIMIZE must not turn --self-test into an unchecked success.
+    def check(actual: list[str], expected: list[str]) -> None:
+        if actual != expected:
+            raise AssertionError(f"Expected {expected!r}, got {actual!r}")
+
+    check(suite_problems({"Alpha"}, {"Alpha"}, {"Alpha"}), [])
+    check(suite_problems({"Alpha"}, set(), set()), ["Tests/Alpha is absent from Project.swift"])
+    check(suite_problems(set(), {"Beta"}, set()), ["Tests/Beta is declared but has no folder"])
+    check(suite_problems({"Alpha"}, set(), {"Alpha"}), [
         "Tests/Alpha is absent from Project.swift",
         "Tests/Alpha is in Package.swift but absent from Project.swift",
-    ]
-    assert local_link_problems(ROOT / "README.md", "[good](LICENSE) [bad](missing.md)") == [
+    ])
+    check(local_link_problems(ROOT / "README.md", "[good](LICENSE) [bad](missing.md)"), [
         "README.md:1: missing missing.md"
-    ]
+    ])
+    check(local_link_problems(ROOT / "docs/CLI.md", "[parent](../README.md) [section](#finding-an-instance)"), [])
+    check(local_link_problems(ROOT / "README.md", "[web](https://example.com/missing)\n[bad](missing.md#section)"), [
+        "README.md:2: missing missing.md"
+    ])
     print("Documentation checker self-test passed.")
 
 
@@ -92,7 +102,7 @@ def main() -> int:
 
     total = sum(count_tests(ROOT / "Tests" / name, TEST_DECLARATION) for name in folders)
     total += count_tests(ROOT / "MimicUITests", UI_DECLARATION)
-    print(f"Live counts: {total} test declarations, {operation_count()} command kinds, {len(folders)} test folders.")
+    print(f"Source counts (not executed tests): {total} test declarations, {operation_count()} command kinds, {len(folders)} test folders.")
     if problems:
         print("\nDocumentation or test-target problems:")
         for problem in problems:

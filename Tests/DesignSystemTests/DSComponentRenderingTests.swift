@@ -3,9 +3,43 @@ import SwiftUI
 import Testing
 @testable import DesignSystem
 
-@Suite("DesignSystem Components")
+@Suite("DesignSystem Components", .serialized)
 @MainActor
 struct DSComponentRenderingTests {
+    /// Hosted rendering checks share AppKit's active window, so this suite is serial.
+    private func withHostedView<V: View>(
+        _ view: V,
+        size: CGSize = CGSize(width: 360, height: 160),
+        inspect: (NSView) throws -> Void
+    ) rethrows {
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        controller.view.frame = CGRect(origin: .zero, size: size)
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        controller.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        controller.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        try inspect(controller.view)
+    }
+
+    private func menuItem(_ title: String, in menu: NSMenu) -> (menu: NSMenu, index: Int)? {
+        for (index, item) in menu.items.enumerated() {
+            if item.title == title { return (menu, index) }
+            if let submenu = item.submenu, let found = menuItem(title, in: submenu) { return found }
+        }
+        return nil
+    }
+
     @discardableResult
     private func render<V: View>(
         _ view: V,
@@ -395,6 +429,90 @@ struct DSComponentRenderingTests {
 
         #expect(scoped.height == ruler.height)
         #expect(unscoped.height == ruler.height)
+    }
+
+    @Test("Filter scope choices show one native checkmark and write the chosen value", arguments: ["any", "body"])
+    func filterScopeIsANativeSelection(initial: String) throws {
+        var selection = initial
+        let menu = NSHostingMenu(rootView: DSFilterField.ScopeOptions(
+            scopes: [.init(id: "any", title: "Anything"), .init(id: "body", title: "Response bodies")],
+            scopeID: Binding(get: { selection }, set: { selection = $0 }),
+            identifier: "filter"
+        ))
+        menu.update()
+        let any = try #require(menuItem("Anything", in: menu))
+        let body = try #require(menuItem("Response bodies", in: menu))
+        #expect(any.menu.items[any.index].state == (initial == "any" ? .on : .off))
+        #expect(body.menu.items[body.index].state == (initial == "body" ? .on : .off))
+
+        let target = initial == "any" ? body : any
+        target.menu.performActionForItem(at: target.index)
+        #expect(selection == (initial == "any" ? "body" : "any"))
+    }
+
+    @Test("A custom plain button visibly dims when disabled", arguments: [1.0, 0.7])
+    func disabledPlainButtonDims(backgroundWhite: Double) throws {
+        struct UndimmedStyle: ButtonStyle {
+            func makeBody(configuration: Configuration) -> some View {
+                configuration.label
+            }
+        }
+
+        func brightness<Style: ButtonStyle>(
+            isEnabled: Bool,
+            hidesLabel: Bool = false,
+            style: Style
+        ) throws -> [Double] {
+            var pixels: [Double] = []
+            try withHostedView(
+                Button {} label: {
+                    Text("Refresh")
+                        .font(DSTypography.heading)
+                        .foregroundStyle(.black)
+                        .padding(8)
+                        .opacity(hidesLabel ? 0 : 1)
+                }
+                .buttonStyle(style)
+                .disabled(!isEnabled)
+                .allowsHitTesting(false)
+                .frame(width: 180, height: 48)
+                .background(Color(white: backgroundWhite))
+                .environment(\.colorScheme, .light),
+                size: CGSize(width: 180, height: 48)
+            ) { view in
+                let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                for y in 0..<bitmap.pixelsHigh {
+                    for x in 0..<bitmap.pixelsWide {
+                        let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                        pixels.append(Double((color.redComponent + color.greenComponent + color.blueComponent) / 3))
+                    }
+                }
+            }
+            return pixels
+        }
+
+        let background = try brightness(isEnabled: true, hidesLabel: true, style: .dsPlain)
+        let enabled = try brightness(isEnabled: true, style: .dsPlain)
+        let disabled = try brightness(isEnabled: false, style: .dsPlain)
+        let undimmed = try brightness(isEnabled: false, style: UndimmedStyle())
+        try #require([enabled.count, disabled.count, undimmed.count].allSatisfy { $0 == background.count })
+
+        // Subtract an identical blank-label render so host chrome and background cannot dilute
+        // the ratio. Sample the same visible glyph pixels in every image, avoiding antialias fringes.
+        let labelPixels = background.indices.filter { background[$0] - enabled[$0] > 0.1 }
+        func contrast(_ pixels: [Double]) -> Double {
+            labelPixels.reduce(0) { $0 + max(0, background[$1] - pixels[$1]) }
+        }
+        let enabledContrast = contrast(enabled)
+        try #require(enabledContrast > 1, "The hosted button label must actually be drawn")
+        let disabledRatio = contrast(disabled) / enabledContrast
+        #expect(disabledRatio > 0.1, "Disabled text must remain visible")
+        #expect(disabledRatio < 0.7, "Disabled text should visibly fade instead of looking actionable")
+        // This control omits the style's opacity, proving that native disabled state alone does
+        // not satisfy the dimming assertion. Reverting DSPlainButtonStyle to opacity 1 must fail it.
+        let undimmedRatio = contrast(undimmed) / enabledContrast
+        #expect(undimmedRatio > 0.9, "The undimmed reference must retain the enabled label's contrast")
     }
 
     /// The validation message is a row under the field, not an overlay on it.

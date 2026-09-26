@@ -216,9 +216,10 @@ struct JourneyResolutionTests {
 
     @Test("Wildcard steps match any value in that segment")
     func wildcardStepsMatch() {
-        let journey = Journey(name: "Wildcard", steps: [Self.step(.get, "/users/:id", 404)])
+        let journey = Journey(name: "Wildcard", steps: [Self.step(.get, "/users/:id", 201)])
         let observed = Self.replay([(.get, "/users/9182")], journey: journey)
-        #expect(observed[0].statusCode == 404)
+        #expect(observed[0].statusCode == 201)
+        #expect(observed[0].fromJourney)
     }
 
     @Test("Query strings do not affect step matching")
@@ -599,6 +600,7 @@ struct JourneyResolutionTests {
         """
         let decoded = try JSONDecoder().decode(JourneyRunState.self, from: Data(json.utf8))
         #expect(decoded.cursor == -1, "the synthesized decoder must not be running the clamp")
+        #expect(JourneyStatus.make(journey: journey, state: decoded).currentStepIndex == nil)
 
         let plan = MockResolver.plan(
             request: IncomingRequest(method: .get, path: "/one"),
@@ -611,5 +613,31 @@ struct JourneyResolutionTests {
         // The endpoint answers: the journey declined to match rather than subscripting with -1.
         #expect(plan.response.statusCode == 200)
         #expect(plan.response.matchedJourneyID == nil)
+    }
+
+    @Test("Rehydrated lifetime and held-step counts saturate instead of crashing the next request")
+    func countersAtTheIntegerLimitKeepServing() throws {
+        var journey = Journey(name: "Held", steps: [Self.step(.get, "/held", 503)])
+        journey.autoAdvance = false
+        let json = """
+        {
+          "journeyID": "\(journey.id.uuidString)",
+          "cursor": 0,
+          "servedCountsByStepID": {"\(journey.steps[0].id.uuidString)": 9223372036854775807},
+          "forceAdvancedStepIDs": [],
+          "isComplete": false,
+          "totalServed": 9223372036854775807
+        }
+        """
+        let state = try JSONDecoder().decode(JourneyRunState.self, from: Data(json.utf8))
+        let plan = MockResolver.plan(
+            request: IncomingRequest(method: .get, path: "/held"),
+            endpoints: [], globalDelayMs: 0, journey: journey, journeyState: state
+        )
+        #expect(plan.response.statusCode == 503)
+        #expect(plan.response.matchedJourneyStepID == journey.steps[0].id)
+        #expect(plan.journeyState?.totalServed == 9223372036854775807)
+        #expect(plan.journeyState?.servedCount(forStepID: journey.steps[0].id) == 9223372036854775807)
+        #expect(plan.journeyState?.cursor == 0)
     }
 }

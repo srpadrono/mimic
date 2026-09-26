@@ -37,17 +37,21 @@ struct RenameItemSheet: View {
 
             HStack(spacing: DSSpacing.md) {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                DSButton("Cancel", variant: .ghost, size: .medium,
+                         identifier: "\(identifier).cancel", action: dismiss.callAsFunction)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("\(identifier).cancel")
-                Button("Rename", action: renameIfValid)
+                    .accessibilityLabel("Cancel")
+                DSButton("Rename", variant: .primary, size: .medium,
+                         identifier: "\(identifier).confirm", action: renameIfValid)
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedName.isEmpty || trimmedName == initialName)
                     .accessibilityIdentifier("\(identifier).confirm")
+                    .accessibilityLabel("Rename")
             }
         }
         .padding(DSSpacing.lg)
-        .frame(width: 360)
+        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .onAppear { nameIsFocused = true }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)

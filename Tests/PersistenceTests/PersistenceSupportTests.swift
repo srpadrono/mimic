@@ -74,16 +74,30 @@ struct PersistenceSupportTests {
         #expect(restored == scenario)
     }
 
-    @Test("ScenarioRecord refuses malformed persisted data")
-    func scenarioRecordRejectsMalformedData() throws {
+    @Test("ScenarioRecord identifies each malformed field independently", arguments: [
+        "id", "headersJSON", "bodyContentType",
+    ])
+    func scenarioRecordRejectsMalformedData(field: String) throws {
         var record = ScenarioRecord(
             from: Scenario(name: "Broken", statusCode: 500),
             endpointID: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
         )
-        record.id = "not-a-uuid"
-        record.headersJSON = "{bad json"
-        record.bodyContentType = "not/a-real-type"
+        switch field {
+        case "id": record.id = "not-a-uuid"
+        case "headersJSON": record.headersJSON = "{bad json"
+        case "bodyContentType": record.bodyContentType = "not/a-real-type"
+        default:
+            Issue.record("No corruption fixture for \(field)")
+            return
+        }
 
-        #expect(throws: Persistence.PersistenceError.self) { try record.toDomain() }
+        do {
+            _ = try record.toDomain()
+            Issue.record("Accepted an invalid \(field)")
+        } catch let Persistence.PersistenceError.corruptedRecord(table, id, invalidField) {
+            #expect(table == "scenario")
+            #expect(id == record.id)
+            #expect(invalidField == field)
+        }
     }
 }

@@ -35,7 +35,7 @@ struct ProjectWorkspaceTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(predicate(), "Timed out waiting for condition")
     }
 
     /// The same poll for a predicate that has to ask the store, which is asynchronous. Named apart
@@ -53,7 +53,7 @@ struct ProjectWorkspaceTests {
             }
             try await Task.sleep(for: interval)
         }
-        Issue.record("Timed out waiting for condition")
+        try #require(await predicate(), "Timed out waiting for condition")
     }
 
     /// A store that refuses every write and holds nothing.
@@ -686,11 +686,20 @@ struct ProjectWorkspaceTests {
     private actor RefusingDeleteRepository: ProjectRepository {
         struct Refused: Error {}
         private var projects: [UUID: MockProject] = [:]
+        private var holdsDelete = false
+        private(set) var deleteEntered = false
+        private(set) var savedProjects: [MockProject] = []
+
+        func holdDelete() { holdsDelete = true }
+        func releaseDelete() { holdsDelete = false }
 
         func stored(_ id: UUID) -> MockProject? { projects[id] }
         func seed(_ project: MockProject) { projects[project.id] = project }
 
-        func save(_ project: MockProject) async throws { projects[project.id] = project }
+        func save(_ project: MockProject) async throws {
+            savedProjects.append(project)
+            projects[project.id] = project
+        }
 
         func load(id: UUID) async throws -> MockProject {
             guard let project = projects[id] else { throw PersistenceError.projectNotFound(id) }
@@ -699,7 +708,74 @@ struct ProjectWorkspaceTests {
 
         func allProjects() async throws -> [MockProject] { Array(projects.values) }
 
-        func delete(id: UUID) async throws { throw Refused() }
+        func delete(id: UUID) async throws {
+            deleteEntered = true
+            while holdsDelete { try await Task.sleep(for: .milliseconds(5)) }
+            throw Refused()
+        }
+    }
+
+    @Test("A burst of window edits writes only the final complete document")
+    func burstAutosaveWritesFinalSnapshotOnce() async throws {
+        let repository = RefusingDeleteRepository()
+        let defaults = try #require(UserDefaults(suiteName: "BurstAutosave.\(UUID().uuidString)"))
+        let workspace = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let project = MockProject(name: "Initial")
+        await repository.seed(project)
+        workspace.setCurrentProject(project, isRestoring: true)
+        for index in 1...20 {
+            workspace.mutateCurrentProject {
+                $0.name = "Edit \(index)"
+                $0.serverConfiguration.globalDelayMs = index
+            }
+            workspace.scheduleAutosave()
+        }
+        let expected = try #require(workspace.currentProject)
+        try await waitUntilAsync { await repository.savedProjects.count == 1 }
+        await workspace.awaitPendingStoreWrites()
+        #expect(await repository.savedProjects == [expected])
+        #expect(try await repository.load(id: project.id).name == "Edit 20")
+        #expect(try await repository.load(id: project.id).serverConfiguration.globalDelayMs == 20)
+        workspace.closeProject()
+        await workspace.awaitPendingStoreWrites()
+        #expect(await repository.savedProjects == [expected], "Closing must not owe another debounce write")
+    }
+
+    @Test("A refused delete preserves pending edits even if the window closes", arguments: [false, true])
+    func refusedDeleteRecoversPendingEdits(closeDuringDelete: Bool) async throws {
+        let repository = RefusingDeleteRepository()
+        await repository.holdDelete()
+        defer { Task { await repository.releaseDelete() } }
+        let defaults = try #require(UserDefaults(suiteName: "DeleteRecovery.\(UUID().uuidString)"))
+        let workspace = ProjectWorkspace(
+            projectRepository: repository,
+            recentProjectsStore: RecentProjectsStore(defaults: defaults)
+        )
+        let original = MockProject(name: "Original")
+        await repository.seed(original)
+        workspace.setCurrentProject(original, isRestoring: true)
+        workspace.mutateCurrentProject { $0.name = "Pending before delete" }
+        workspace.scheduleAutosave()
+        let deletion = Task { @MainActor in await workspace.deleteProjectAndWait(id: original.id) }
+        try await waitUntilAsync { await repository.deleteEntered }
+        if closeDuringDelete {
+            workspace.mutateCurrentProject { $0.name = "Edited during delete" }
+            workspace.scheduleAutosave()
+            workspace.closeProject()
+        }
+        await repository.releaseDelete()
+        guard case .failure = await deletion.value else {
+            Issue.record("The fixture must refuse deletion")
+            return
+        }
+        workspace.closeProject()
+        await workspace.awaitPendingStoreWrites()
+        let stored = try await repository.load(id: original.id)
+        #expect(stored.name == (closeDuringDelete ? "Edited during delete" : "Pending before delete"))
+        #expect(workspace.autosaveStatus == .failed("Could not delete the project."))
     }
 
     /// The failure arm the tombstone must not outlive. A refused delete leaves a live project, and

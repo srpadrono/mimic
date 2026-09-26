@@ -26,19 +26,9 @@ import XCTest
 /// closed in `tearDownWithError`, because a listener leaked out of one test breaks every later test
 /// that tries to bind a port.
 ///
-/// **A third rule was learned from the first CI run, and it is about what a query may assume.** Nine
-/// of these twelve tests failed on a handle that does not exist in the tree — an alert message
-/// addressed by the identifier its `Text` was given, a `DSTextField` validation note addressed by
-/// the identifier `DSTextField` builds for it, a warning row whose identifier resolves to the *icon*
-/// beside the sentence. Every one is the accessibility-tree rule the UI skill states: a container's
-/// `.accessibilityIdentifier` overrides its descendants'. `NewProjectSheet` stamps `serverPortField`
-/// on the whole `DSTextField` — which is how `app.textFields["serverPortField"]` finds the input —
-/// and that same stamp lands on the validation note underneath it, so
-/// `ds.textfield.newProject.port.error` is a name nothing in the window answers to. What survives
-/// the flattening is the element's **label**, which for all three of these is the sentence the user
-/// reads. So the queries here address a failure surface by what it *says*, falling back to the
-/// identifier rather than the other way round; the assertions are stronger for it, because a note
-/// found by its words has already proved it carries them.
+/// Alerts can lose a SwiftUI identifier when AppKit presents them, so their messages are read from
+/// the alert itself. The two `DSTextField` notes have separate identifiers from their inputs and are
+/// checked by identifier and content.
 final class ErrorAlertUITests: MimicUITestCase {
 
     // MARK: - Launch configuration
@@ -461,25 +451,22 @@ final class ErrorAlertUITests: MimicUITestCase {
         newProjectSheet.nameField.typeText("Port Note")
         replaceText(in: newProjectSheet.portField, with: "99999")
 
-        // Not `newProjectSheet.portValidationError`: that page object queries
-        // `ds.textfield.newProject.port.error`, and `NewProjectSheet` stamps `serverPortField` on the
-        // whole `DSTextField`, so the note reports the wrapper's name and the built one is in no
-        // tree. Matching the rule's own words is the handle that survives — and it asserts the
-        // content in the same breath, so there is no second assertion to forget.
+        let note = newProjectSheet.portValidationError
         XCTAssertTrue(
-            UITestApp.waitForAny(validationNotes(saying: "between 1 and 65535"), timeout: 5),
-            "A port above 65535 should be explained under the field, stating the rule"
+            note.waitForExistence(timeout: 5),
+            "A port above 65535 should show an inline validation note"
         )
+        XCTAssertTrue(combinedText(of: note).contains("between 1 and 65535"),
+                      "The note should state the permitted port range")
         XCTAssertFalse(
             newProjectSheet.createButton.isEnabled,
             "Create project should be disabled while the port is out of range"
         )
 
-        // ERRVALID-03: an unfinished form is not a mistake. `portValidationMessage` is deliberately
-        // silent on an empty field, and the button stays disabled without a complaint.
+        // ERRVALID-03: an unfinished form stays silent.
         replaceText(in: newProjectSheet.portField, with: "")
         XCTAssertTrue(
-            waitForNoValidationNote(saying: "between 1 and 65535"),
+            note.waitForNonExistence(timeout: 5),
             "An empty port field should say nothing at all"
         )
 
@@ -498,15 +485,13 @@ final class ErrorAlertUITests: MimicUITestCase {
         newEndpointSheet.nameField.typeText("Users")
         replaceText(in: newEndpointSheet.pathField, with: "api/users")
 
-        // `newEndpointSheet.pathError` documents that `newEndpoint.pathError` never existed and names
-        // `ds.textfield.newEndpoint.path.error` as the real identifier. That is half a correction:
-        // the sheet stamps `newEndpoint.pathField` on the whole `DSTextField`, which is what makes
-        // `app.textFields["newEndpoint.pathField"]` resolve, and the same stamp lands on the note. So
-        // neither identifier reaches the tree, and the note is matched by its sentence.
+        let note = newEndpointSheet.pathError
         XCTAssertTrue(
-            UITestApp.waitForAny(validationNotes(saying: "must start with"), timeout: 5),
-            "A path without a leading slash should be explained under the field, stating the rule"
+            note.waitForExistence(timeout: 5),
+            "A path without a leading slash should show an inline validation note"
         )
+        XCTAssertTrue(combinedText(of: note).contains("must start with"),
+                      "The note should explain the leading slash rule")
         XCTAssertFalse(
             newEndpointSheet.createButton.isEnabled,
             "Add endpoint should be disabled while the path lacks a leading slash"
@@ -1055,23 +1040,10 @@ final class ErrorAlertUITests: MimicUITestCase {
         return app.buttons["Add header"].firstMatch
     }
 
-    /// The response body's **text view**, not the scroll view wearing the identifier.
-    ///
-    /// `DSJSONEditor` puts `ds.jsoneditor.editor.body` on a `CodeEditor`, which is an
-    /// `NSViewRepresentable` wrapping a scroll view around an `NSTextView`, so the name lands on the
-    /// wrapper and the typed content is one level down. Clicking the wrapper is what this file did
-    /// for a round: it reported success and the keystrokes went nowhere, because the caret was never
-    /// in a text view. `EndpointEditorUITests.bodyTextView()` resolves the same control the same way,
-    /// and its JSON tests pass.
+    /// The editable native text view, separate from the scroll viewport's layout identifier.
     @MainActor
     private func bodyTextView() -> XCUIElement {
-        let container = element(identifier: "ds.jsoneditor.editor.body")
-        if container.exists {
-            let inner = container.descendants(matching: .textView).firstMatch
-            if inner.exists { return inner }
-            if container.elementType == .textView { return container }
-        }
-        return app.textViews.firstMatch
+        app.textViews.matching(identifier: "ds.jsoneditor.editor.body").firstMatch
     }
 
     /// What the body editor holds. `NSTextView` publishes its string as the element's value.
@@ -1184,9 +1156,8 @@ final class ErrorAlertUITests: MimicUITestCase {
     ///
     /// It answers a question about a *name*, and a name is exactly what a flattening container takes
     /// away — so it is the wrong tool for anything inside one. `alertText(messageIdentifier:)` and
-    /// `validationNotes(saying:)` exist because four alerts and two `DSTextField` notes are inside
-    /// one; this is still right for the elements that carry their own identifier, and every remaining
-    /// caller is one of those.
+    /// `alertText(messageIdentifier:)` reads the alert body; this remains right for elements that
+    /// carry their own identifier.
     @MainActor
     private func element(identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
@@ -1245,44 +1216,6 @@ final class ErrorAlertUITests: MimicUITestCase {
         UITestApp.waitUntil(timeout: timeout) {
             let status = self.combinedText(of: self.serverURLWell)
             return status.contains("localhost:") && status.contains("server running")
-        }
-    }
-
-    /// A `DSTextField`'s inline validation note, matched by the words it shows.
-    ///
-    /// **Not by `ds.textfield.<id>.error`.** `DSTextField` builds that name and hangs it on the note,
-    /// but every caller stamps its own identifier on the whole field — `NewProjectSheet` tags it
-    /// `serverPortField`, which is what makes `app.textFields["serverPortField"]` resolve, and
-    /// `DSTextField`'s own comment records that pairing it with `.accessibilityElement(children:)`
-    /// would break that lookup. A container's identifier overrides its descendants', so the note ends
-    /// up reporting the wrapper's name and the built one exists nowhere. Three suites failed on it in
-    /// the same CI run — here, `WelcomeProjectUITests` and `EndpointEditorUITests` — which is what
-    /// one shared cause looks like.
-    ///
-    /// What the note keeps is its **label**: `validationRow` is an `.accessibilityElement()` with
-    /// `.accessibilityLabel(message)`, and a flattened child keeps its own label and value even when
-    /// it loses its identifier. Which element *type* that lands as is not something to guess at — an
-    /// `.accessibilityElement()` over an icon and a sentence can realize as a static text, a group or
-    /// a plain element — so the three are polled together rather than chained. Typed queries, not a
-    /// predicate over `descendants(matching: .any)`, which scans the window and has timed this suite
-    /// out inside the query engine.
-    @MainActor
-    private func validationNotes(saying fragment: String) -> [XCUIElement] {
-        let predicate = NSPredicate(
-            format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@", fragment, fragment
-        )
-        return [
-            app.staticTexts.matching(predicate).firstMatch,
-            app.groups.matching(predicate).firstMatch,
-            app.otherElements.matching(predicate).firstMatch,
-        ]
-    }
-
-    /// Polls until no validation note is saying `fragment` — the negative of ``validationNotes(saying:)``.
-    @MainActor
-    private func waitForNoValidationNote(saying fragment: String, timeout: TimeInterval = 5) -> Bool {
-        UITestApp.waitUntil(timeout: timeout) {
-            self.validationNotes(saying: fragment).allSatisfy { !$0.exists }
         }
     }
 

@@ -1,0 +1,29 @@
+{
+  "log": {
+    "version": "1.2",
+    "entries": [
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/missing" },
+        "response": { "status": 200, "bodySize": 12,
+          "content": { "mimeType": "application/json", "size": 12 } }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/partial" },
+        "response": { "status": 206,
+          "headers": [{ "name": "Content-Range", "value": "bytes 0-3/10" }],
+          "content": { "mimeType": "text/plain", "text": "part" } }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/invalid" },
+        "response": { "status": 200,
+          "headers": [{ "name": "Bad Header", "value": "invalid" }],
+          "content": { "mimeType": "text/plain", "text": "invalid header" } }
+      },
+      {
+        "request": { "method": "GET", "url": "https://api.example.com/api/health" },
+        "response": { "status": 200,
+          "content": { "mimeType": "application/json", "text": "{\"ok\":true}" } }
+      }
+    ]
+  }
+}

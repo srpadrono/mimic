@@ -168,6 +168,16 @@ struct UpdateReleaseTests {
         }
     }
 
+    @Test("A prerelease tag is refused even when the feed calls it stable")
+    func refusesPrereleaseTagWithStableFlag() {
+        let payload = Self.realPayload.replacingOccurrences(
+            of: #""tag_name": "v0.10.0""#, with: #""tag_name": "v0.11.0-beta.1""#
+        )
+        #expect(throws: UpdateFeed.FeedError.notPublished(tag: "v0.11.0-beta.1")) {
+            try UpdateFeed.decodeLatest(Data(payload.utf8))
+        }
+    }
+
     // MARK: - The feed's own constants
 
     @Test("The feed points at this repository's releases")

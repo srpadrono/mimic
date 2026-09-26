@@ -413,21 +413,14 @@ final class MockServerRuntime {
     /// issues on its way out — see ``journeyStatusAfterPendingUpdates()`` for both halves of that
     /// argument.
     func restartJourneyReportingStatus() async -> JourneyStatus? {
-        await pendingMockUpdate?.value
-        let ticket = nextJourneyStatusTicket()
-        let status = await engine.restartJourney()
-        setJourneyStatus(status, ticket: ticket)
-        return status
+        await enqueueJourneyControl { await $0.restartJourney() }.value
     }
 
     /// The fire-and-forget form, for the run controls: they have nowhere to report a status to and
     /// are passed straight to a `Button` as a `() -> Void` action — the split ``advanceJourney()``
     /// makes, for the same reason.
     func restartJourney() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            _ = await restartJourneyReportingStatus()
-        }
+        _ = enqueueJourneyControl { await $0.restartJourney() }
     }
 
     /// Advances the cursor and reports where the engine moved it to.
@@ -442,20 +435,31 @@ final class MockServerRuntime {
     /// by `mimic journey advance` hopped to the engine ahead of the edit's push, advanced the
     /// pre-edit journey, and reported that stale cursor as the answer.
     func advanceJourneyReportingStatus() async -> JourneyStatus? {
-        await pendingMockUpdate?.value
-        let ticket = nextJourneyStatusTicket()
-        let status = await engine.advanceJourney()
-        setJourneyStatus(status, ticket: ticket)
-        return status
+        await enqueueJourneyControl { await $0.advanceJourney() }.value
     }
 
     /// The fire-and-forget form, for the menu item and the run controls: they have nowhere to report
     /// a status to and are passed straight to a `Button` as a `() -> Void` action.
     func advanceJourney() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            _ = await advanceJourneyReportingStatus()
+        _ = enqueueJourneyControl { await $0.advanceJourney() }
+    }
+
+    /// Runtime mutations join the same chain as project pushes, before their caller suspends.
+    /// A later activation or project switch must not change the target of an accepted control.
+    private func enqueueJourneyControl(
+        _ operation: @escaping @Sendable (any MockServerEngineProtocol) async -> JourneyStatus?
+    ) -> Task<JourneyStatus?, Never> {
+        let predecessor = pendingMockUpdate
+        let control = Task { @MainActor [weak self] in
+            await predecessor?.value
+            guard let self else { return nil as JourneyStatus? }
+            let ticket = nextJourneyStatusTicket()
+            let status = await operation(engine)
+            setJourneyStatus(status, ticket: ticket)
+            return status
         }
+        pendingMockUpdate = Task { @MainActor in _ = await control.value }
+        return control
     }
 
     func refreshJourneyStatus() {

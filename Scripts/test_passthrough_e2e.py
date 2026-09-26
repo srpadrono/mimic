@@ -5,12 +5,14 @@ Usage: python3 Scripts/test_passthrough_e2e.py --app /path/Mimic.app --cli /path
 Owns only its child process, temporary database/defaults, and loopback sockets.
 """
 import argparse
+from contextlib import ExitStack
 import gzip
 import http.client
 import http.server
 import json
 import os
 from pathlib import Path
+import plistlib
 import socket
 import shutil
 import subprocess
@@ -19,10 +21,12 @@ import threading
 import time
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def free_ports(count):
+    with ExitStack() as stack:
+        sockets = [stack.enter_context(socket.socket()) for _ in range(count)]
+        for sock in sockets:
+            sock.bind(("127.0.0.1", 0))
+        return [sock.getsockname()[1] for sock in sockets]
 
 
 class Backend(http.server.BaseHTTPRequestHandler):
@@ -39,7 +43,9 @@ class Backend(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"first\n")
             self.wfile.flush()
-            time.sleep(1)
+            # The client releases the second chunk only after receiving the first. A buffering
+            # proxy therefore times out instead of passing a machine-speed-dependent deadline.
+            self.server.release_stream.wait(5)
             self.wfile.write(b"last!\n")
             return
         body = b'{"ok":true}'
@@ -83,14 +89,23 @@ def run(app, cli):
         # Leave the supplied app untouched; UI tests exercise the normally sandboxed build.
         test_app = work / "Mimic.app"
         shutil.copytree(app, test_app, symlinks=True)
+        # Framework window preferences use the bundle's standard domain, even when app-owned
+        # preferences use MIMIC_DEFAULTS_SUITE. Keep both identities disposable.
+        bundle_id = "devxa.Mimic.Passthrough." + work.name.replace("_", "-") + ".App"
+        info_path = test_app / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info["CFBundleIdentifier"] = bundle_id
+        info_path.write_bytes(plistlib.dumps(info))
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(test_app)],
                        check=True, capture_output=True)
+        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
+        upstream.release_stream = threading.Event()
+        control, primary, secondary = free_ports(3)
         env = {**os.environ, "MIMIC_HEADLESS": "1", "MIMIC_DATABASE_PATH": str(work / "mimic.sqlite"),
-               "MIMIC_CONTROL_FILE": str(work / "control.json"), "MIMIC_CONTROL_PORT": str(free_port()),
+               "MIMIC_CONTROL_FILE": str(work / "control.json"), "MIMIC_CONTROL_PORT": str(control),
                "MIMIC_DEFAULTS_SUITE": "devxa.Mimic.Passthrough." + work.name}
         for key in ("MIMIC_CONTROL_URL", "MIMIC_CONTROL_TOKEN"):
             env.pop(key, None)
-        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
         threading.Thread(target=upstream.serve_forever, daemon=True).start()
         app_log = open(work / "app.log", "w")
         child = subprocess.Popen([str(test_app / "Contents/MacOS/Mimic")], env=env,
@@ -98,7 +113,8 @@ def run(app, cli):
         def command(*args, fail=False):
             result = subprocess.run([cli, *args], env=env, capture_output=True, text=True, timeout=15)
             if fail:
-                assert result.returncode != 0, "Capture should have been refused"
+                assert result.returncode == 4 and result.stderr.startswith("request.invalid:"), (
+                    "Expected the app's capture refusal, not a launch/transport error", result.returncode, result.stderr)
                 return
             assert result.returncode == 0, result.stderr
             return json.loads(result.stdout)
@@ -111,9 +127,10 @@ def run(app, cli):
             result = response.status, response.headers, data
             connection.close()
             return result
-        def logged(path):
+        def logged(path, excluding=()):
             for _ in range(100):
-                matches = [x for x in command("log", "list")["logs"] if x["path"] == path]
+                matches = [x for x in command("log", "list")["logs"]
+                           if x["path"] == path and x["id"] not in excluding]
                 if matches:
                     return matches[-1]
                 time.sleep(.02)
@@ -124,10 +141,22 @@ def run(app, cli):
                     break
                 assert child.poll() is None, "App exited before discovery"
                 time.sleep(.05)
-            primary, secondary = free_port(), free_port()
-            while secondary == primary:
-                secondary = free_port()
+            else:
+                raise AssertionError("App did not publish its discovery file")
+            discovery = json.loads((work / "control.json").read_text())
+            assert discovery["pid"] == child.pid and discovery["port"] == control, "Not this test's app"
+            assert (work / "control.json").stat().st_mode & 0o777 == 0o600
+            initial = command("state")["state"]
+            assert initial["pid"] == child.pid and not initial.get("storeFailure"), "Fixture is not isolated on disk"
+            with (work / "mimic.sqlite").open("rb") as database:
+                assert database.read(16) == b"SQLite format 3\0", "Requested temporary database was not created"
             command("project", "create", "Passthrough evidence", "--port", str(primary))
+            for _ in range(100):
+                if (command("state")["state"].get("project") or {}).get("name") == "Passthrough evidence":
+                    break
+                time.sleep(.05)
+            else:
+                raise AssertionError("Created project did not become active")
             url = f"http://127.0.0.1:{upstream.server_port}"
             command("server", "configure", "--name", "Catalog", "--upstream", url)
             command("server", "backend", "add", "--name", "Accounts", "--port", str(secondary), "--upstream", url)
@@ -159,16 +188,17 @@ def run(app, cli):
             command("log", "save-as-mock", large_log["id"])
             command("state")
             assert request(primary, "/large")[2] == b"a" * 100_000
+            assert logged("/large", excluding={large_log["id"]})["outcome"] == "endpoint", "Replay still used the upstream"
             assert len(request(primary, "/oversized")[2]) == 5_242_881
             command("log", "save-as-mock", logged("/oversized")["id"], fail=True)
             print("PASS large replies capture completely with bounded previews; compressed and over-5MiB capture refused")
-            connection = http.client.HTTPConnection("127.0.0.1", primary, timeout=5)
+            connection = http.client.HTTPConnection("127.0.0.1", primary, timeout=3)
             start = time.monotonic()
             connection.request("GET", "/stream")
             response = connection.getresponse()
             assert response.read(6) == b"first\n"
             first = time.monotonic() - start
-            assert first < .8, "Response was buffered instead of streamed"
+            upstream.release_stream.set()
             assert response.read() == b"last!\n"
             connection.close()
             print(f"PASS streaming first bytes in {first:.3f}s before the delayed second chunk")
@@ -200,8 +230,11 @@ def run(app, cli):
             journey = command("journey", "export", "Mixed")
             assert [step["backend"] for step in journey["steps"]] == ["primary", backend]
             print("PASS mixed-backend journey export preserves routing")
-            command("server", "configure", "--upstream", f"http://127.0.0.1:{free_port()}")
-            assert request(primary, "/offline")[0] == 502
+            # Bound but not listening: another process cannot steal the deliberately offline port.
+            with socket.socket() as offline:
+                offline.bind(("127.0.0.1", 0))
+                command("server", "configure", "--upstream", f"http://127.0.0.1:{offline.getsockname()[1]}")
+                assert request(primary, "/offline")[0] == 502
             assert logged("/offline")["outcome"] == "proxyFailure"
             command("log", "save-as-mock", logged("/offline")["id"], fail=True)
             assert not any(x["path"] == "/offline" for x in command("endpoint", "list")["endpoints"])
@@ -211,6 +244,7 @@ def run(app, cli):
             assert "is implemented in both" not in (work / "app.log").read_text(), "Duplicate runtime classes in app packaging"
             print("PASS shared HTTP client packaging has no duplicate runtime classes")
         finally:
+            upstream.release_stream.set()
             child.terminate()
             try:
                 child.wait(timeout=10)
@@ -218,7 +252,10 @@ def run(app, cli):
                 child.kill()
                 child.wait()
             upstream.shutdown()
+            upstream.server_close()
             app_log.close()
+            subprocess.run(["defaults", "delete", env["MIMIC_DEFAULTS_SUITE"]], capture_output=True)
+            subprocess.run(["defaults", "delete", bundle_id], capture_output=True)
 
 
 if __name__ == "__main__":

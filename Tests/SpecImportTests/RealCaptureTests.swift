@@ -88,7 +88,7 @@ struct RealCaptureTests {
         #expect(headersOut.count == 1)
     }
 
-    @Test("A duplicated header keeps the last value, as a client would have seen")
+    @Test("A duplicated header keeps the last value under the import policy")
     func duplicateHeaders() async throws {
         let headers = """
         { "name": "x-trace", "value": "first" },
@@ -124,6 +124,89 @@ struct RealCaptureTests {
         #expect(candidates.first?.responseContentType == .json)
     }
 
+    @Test("Transcoded HAR text declares UTF-8 while retaining other media-type parameters")
+    func transcodedTextUsesUTF8Charset() async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(
+            headers: #"{ "name": "Content-Type", "value": "text/plain; profile=\"keep; charset=windows-1252\"; charset=\"ISO-8859-1\"; format=flowed" }"#,
+            mimeType: "text/plain; charset=ISO-8859-1", text: "café"
+        )))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == "café")
+        #expect(candidate.bodySizeBytes == 5)
+        #expect(candidate.responseHeaders["Content-Type"]
+            == #"text/plain; profile="keep; charset=windows-1252"; charset=utf-8; format=flowed"#)
+    }
+
+    @Test("Content metadata retains HTML when an exporter omits response headers")
+    func contentMetadataSuppliesMediaType() async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(
+            headers: "", mimeType: "text/html; charset=windows-1252", text: "<p>Café</p>"
+        )))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == "<p>Café</p>")
+        #expect(candidate.responseHeaders["Content-Type"] == "text/html; charset=utf-8")
+        #expect(candidate.responseContentType == .plainText)
+    }
+
+    @Test("HTML and XML without a charset override stale in-document declarations with UTF-8")
+    func markupWithoutCharsetUsesUTF8() async throws {
+        let capture = #"""
+        {"log":{"entries":[
+          {"request":{"method":"GET","url":"https://api.test/page"},"response":{
+            "status":200,"headers":[{"name":"Content-Type","value":"text/html"}],
+            "content":{"mimeType":"text/html","text":"<meta charset=\"windows-1252\"><p>café</p>"}}},
+          {"request":{"method":"GET","url":"https://api.test/text-xml"},"response":{
+            "status":200,"headers":[{"name":"Content-Type","value":"text/xml"}],
+            "content":{"mimeType":"text/xml","text":"<?xml version=\"1.0\" encoding=\"windows-1252\"?><value>café</value>"}}},
+          {"request":{"method":"GET","url":"https://api.test/xml"},"response":{
+            "status":200,"headers":[{"name":"Content-Type","value":"application/xml"}],
+            "content":{"mimeType":"application/xml","text":"<?xml version=\"1.0\" encoding=\"windows-1252\"?><value>café</value>"}}},
+          {"request":{"method":"GET","url":"https://api.test/xhtml"},"response":{
+            "status":200,"headers":[{"name":"Content-Type","value":"application/xhtml+xml"}],
+            "content":{"mimeType":"application/xhtml+xml","text":"<?xml version=\"1.0\" encoding=\"windows-1252\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><body>café</body></html>"}}}
+        ]}}
+        """#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        #expect(candidates.map { $0.responseHeaders["Content-Type"] } == [
+            "text/html; charset=utf-8", "text/xml; charset=utf-8", "application/xml; charset=utf-8",
+            "application/xhtml+xml; charset=utf-8",
+        ])
+        #expect(candidates.map(\.responseBody) == [
+            #"<meta charset="windows-1252"><p>café</p>"#,
+            #"<?xml version="1.0" encoding="windows-1252"?><value>café</value>"#,
+            #"<?xml version="1.0" encoding="windows-1252"?><value>café</value>"#,
+            #"<?xml version="1.0" encoding="windows-1252"?><html xmlns="http://www.w3.org/1999/xhtml"><body>café</body></html>"#,
+        ])
+    }
+
+    @Test("JSON headers without a charset retain their captured spelling")
+    func jsonWithoutCharsetIsUnchanged() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"GET","url":"https://api.test/problem"},"response":{"status":400,"headers":[{"name":"content-type","value":"Application/Problem+JSON"}],"content":{"text":"{\"detail\":\"café\"}"}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseHeaders["content-type"] == "Application/Problem+JSON")
+        #expect(candidate.responseBody == #"{"detail":"café"}"#)
+    }
+
+    @Test("A captured Content-Type identifies JSON when content metadata is absent")
+    func responseHeaderSuppliesContentType() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":200,"headers":[{"name":"content-type","value":"application/problem+json"}],"content":{"text":"{\"detail\":\"missing\"}"}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseContentType == .json)
+        #expect(candidate.responseBody == #"{"detail":"missing"}"#)
+    }
+
+    @Test("All Connection fields nominate headers before duplicate merging")
+    func connectionNominationsAcrossDuplicateHeaders() async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(headers: #"{"name":"Connection","value":"X-Hop"},{"name":"connection","value":"X-Other"},{"name":"X-Hop","value":"do not replay"},{"name":"X-Other","value":"also private"},{"name":"X-Trace","value":"keep"}"#)))
+        let headers = try #require(candidates.first?.responseHeaders)
+        #expect(headers["X-Hop"] == nil)
+        #expect(headers["X-Other"] == nil)
+        #expect(headers["X-Trace"] == "keep")
+        #expect(headers.keys.allSatisfy { $0.lowercased() != "connection" })
+    }
+
     // MARK: - Bodies real captures contain
 
     @Test("A non-ASCII body survives import intact")
@@ -139,12 +222,10 @@ struct RealCaptureTests {
             existingEndpoints: []
         )
         let body = try #require(candidates.first?.responseBody)
-        #expect(body.contains("Ünïcodé"))
-        #expect(body.contains("日本語"))
-        #expect(body.contains("€10"))
+        #expect(body == #"{"name":"Ünïcodé ✅ 日本語","price":"€10"}"#)
     }
 
-    @Test("An empty body is imported as empty rather than as missing")
+    @Test("A no-content response has no payload and a zero byte count")
     func emptyBody() async throws {
         let candidates = try await HARParser.parse(
             data: Self.har(entries: Self.entry(
@@ -156,6 +237,8 @@ struct RealCaptureTests {
         )
         #expect(candidates.first?.statusCode == 204)
         #expect(candidates.first?.bodySizeBytes == 0)
+        #expect(candidates.first?.responseBody == nil)
+        #expect(candidates.first?.bodyIsBinary == false)
     }
 
     @Test("A base64 text capture is decoded rather than imported as literal base64")
@@ -169,7 +252,7 @@ struct RealCaptureTests {
         // decoded bytes are not UTF-8 fell through to exactly that literal import. The cases below
         // hold the rest — two genuinely binary bodies, the newline-wrapped form real exporters
         // write, and a declared-base64 body that will not decode at all.
-        let encoded = Data(#"{"ok":true}"#.utf8).base64EncodedString()
+        let encoded = "eyJvayI6dHJ1ZX0="
         let candidates = try await HARParser.parse(
             data: Self.har(entries: Self.entry(
                 headers: #"{ "name": "content-type", "value": "application/json" }"#,
@@ -189,9 +272,7 @@ struct RealCaptureTests {
         // start one — and that is the property every earlier base64 fixture lacked: each encoded
         // UTF-8 JSON, so the decode-to-text step always succeeded and the fall-through that
         // imported the literal base64 spelling as the body was unreachable from tests while being
-        // routine in use. The skill mimic-build-and-test (references/real-inputs.md) names this
-        // exact tell: a fixture whose every instance agrees
-        // on something the format does not require.
+        // routine in use. Both fixtures below contain bytes a String cannot reproduce.
         let pngHeader = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
         let gzipMagic = Data([0x1F, 0x8B, 0x08, 0x00])
         #expect(String(data: pngHeader, encoding: .utf8) == nil, "the PNG fixture must not be decodable text")
@@ -201,14 +282,14 @@ struct RealCaptureTests {
             url: "https://api.test/assets/logo.png",
             headers: #"{ "name": "content-type", "value": "image/png" }"#,
             mimeType: "image/png",
-            text: pngHeader.base64EncodedString(),
+            text: "iVBORw0KGgo=",
             extraContent: #", "encoding": "base64""#
         )
         let gzipEntry = Self.entry(
             url: "https://api.test/v1/report.gz",
             headers: #"{ "name": "content-type", "value": "application/gzip" }"#,
             mimeType: "application/gzip",
-            text: gzipMagic.base64EncodedString(),
+            text: "H4sIAA==",
             extraContent: #", "encoding": "base64""#
         )
         let candidates = try await HARParser.parse(
@@ -225,7 +306,7 @@ struct RealCaptureTests {
                 "\(candidate.path): a String body cannot reproduce these bytes — the base64 spelling must not stand in for them"
             )
             #expect(candidate.bodyIsBinary, "\(candidate.path): the review sheet must be told why there is no body")
-            #expect(candidate.isSelected, "\(candidate.path): flagged like an oversized body, not excluded")
+            #expect(!candidate.isSelected, "\(candidate.path): unavailable bytes must not be imported by default")
             #expect(candidate.bodySizeExceedsLimit == false)
         }
         // The size shown in review is the capture's, not zero — mirroring the oversized path,
@@ -280,6 +361,45 @@ struct RealCaptureTests {
         #expect(candidate.bodyIsBinary)
     }
 
+    @Test("Base64 punctuation is rejected instead of silently repaired", arguments: ["e3!0=", "e30=💡"])
+    func corruptBase64IsNotRepaired(encoded: String) async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(
+            headers: #"{ "name": "content-type", "value": "application/json" }"#,
+            text: encoded,
+            extraContent: #", "encoding": "base64""#
+        )))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == nil)
+        #expect(candidate.bodyIsBinary)
+        #expect(candidate.bodySizeBytes == encoded.utf8.count)
+    }
+
+    @Test("ASCII whitespace around base64 is accepted without changing the decoded text")
+    func base64Whitespace() async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(
+            headers: #"{ "name": "content-type", "value": "application/json" }"#,
+            text: #" e3\r\n\t0= "#,
+            extraContent: #", "encoding": "base64""#
+        )))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == "{}")
+        #expect(candidate.bodySizeBytes == 2)
+        #expect(!candidate.bodyIsBinary)
+    }
+
+    @Test("An unsupported HAR content encoding is flagged instead of replayed as text")
+    func unsupportedContentEncoding() async throws {
+        let candidates = try await HARParser.parse(data: Self.har(entries: Self.entry(
+            headers: #"{ "name": "content-type", "value": "text/plain" }"#,
+            mimeType: "text/plain", text: "aGVsbG8",
+            extraContent: #", "encoding": "base64url""#
+        )))
+        let candidate = try #require(candidates.first)
+        #expect(candidate.responseBody == nil)
+        #expect(candidate.bodyIsBinary)
+        #expect(candidate.bodySizeBytes == 7)
+    }
+
     @Test("A body past the size limit is dropped rather than silently truncated")
     func oversizedBody() async throws {
         let huge = String(repeating: "x", count: ImportCandidateBuilder.bodySizeLimit + 1_000)
@@ -293,6 +413,7 @@ struct RealCaptureTests {
         let candidate = try #require(candidates.first)
         #expect(candidate.bodySizeExceedsLimit)
         #expect(candidate.responseBody == nil, "a half-body would be worse than none")
+        #expect(!candidate.isSelected)
     }
 
     // MARK: - Statuses real captures contain
@@ -305,10 +426,8 @@ struct RealCaptureTests {
         // a status the app could have served, so nothing here could see what happens when one does
         // not.
         //
-        // The parser reports what it read, and the candidate arrives pre-selected. What keeps that 0
-        // out of the store is `AppState.commitImportedCandidates`, which now runs the same
-        // `EndpointValidator` an edit runs. Before it did, the 0 was stored verbatim and
-        // `clampedStatusCode` served 200 for it — the editor showing a status the wire never used.
+        // The parser reports what it read but does not select an unservable status by default.
+        // Import commit also validates it, so manually selecting the row cannot store a fake reply.
         let entries = """
         \(Self.entry(url: "https://api.test/v1/cancelled", status: 0, headers: "", text: "")),
         \(Self.entry(headers: #"{ "name": "content-type", "value": "application/json" }"#))
@@ -317,7 +436,7 @@ struct RealCaptureTests {
         let cancelled = try #require(candidates.first(where: { $0.path == "/v1/cancelled" }))
 
         #expect(cancelled.statusCode == 0)
-        #expect(cancelled.isSelected, "nothing but the commit path stands between this and the store")
+        #expect(!cancelled.isSelected)
         #expect(
             EndpointValidator.serveableStatusCodes.contains(cancelled.statusCode) == false,
             "0 is not a status a response can be completed with, so the commit path must refuse it"
@@ -337,6 +456,59 @@ struct RealCaptureTests {
         #expect(things?.statusCode == 200)
     }
 
+    @Test("An unusable first capture does not hide a later complete response on the same route")
+    func usableLaterCaptureKeepsItsRoute() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":0}},{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":200,"content":{"size":128,"mimeType":"application/json"}}},{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":200,"content":{"mimeType":"application/json","text":"{}"}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        try #require(candidates.count == 3)
+        #expect(!candidates[0].isSelected)
+        #expect(!candidates[1].isSelected)
+        #expect(candidates[1].bodyIsUnavailable)
+        #expect(!candidates[1].bodyIsBinary)
+        #expect(candidates[1].bodySizeBytes == 128)
+        #expect(candidates[1].responseBody == nil)
+        #expect(candidates[2].isSelected)
+        #expect(!candidates[2].isDuplicate)
+        #expect(candidates[2].responseBody == "{}")
+    }
+
+    @Test("A partial capture does not claim the route before a complete response")
+    func completeResponseAfterPartialCapture() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":206,"headers":[{"name":"Content-Range","value":"bytes 0-1/4"}],"content":{"size":2,"mimeType":"text/plain","text":"ab"}}},{"request":{"method":"GET","url":"https://api.test/report"},"response":{"status":200,"content":{"size":4,"mimeType":"text/plain","text":"abcd"}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        try #require(candidates.count == 2)
+        #expect(candidates[0].statusCode == 206)
+        #expect(!candidates[0].isSelected)
+        #expect(!candidates[0].bodyIsUnavailable)
+        #expect(!candidates[0].bodyIsBinary)
+        #expect(candidates[0].responseBody == "ab")
+        #expect(candidates[1].isSelected)
+        #expect(!candidates[1].isDuplicate)
+        #expect(candidates[1].responseBody == "abcd")
+    }
+
+    @Test("Missing content is distinguished from an explicitly empty captured body")
+    func missingAndEmptyBodies() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"GET","url":"https://api.test/missing"},"response":{"status":200,"bodySize":42}},{"request":{"method":"GET","url":"https://api.test/empty"},"response":{"status":200,"bodySize":42,"content":{"size":42,"text":""}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        try #require(candidates.count == 2)
+        #expect(candidates[0].bodyIsUnavailable)
+        #expect(candidates[0].bodySizeBytes == 42)
+        #expect(!candidates[0].isSelected)
+        #expect(!candidates[1].bodyIsUnavailable)
+        #expect(candidates[1].bodySizeBytes == 0)
+        #expect(candidates[1].isSelected)
+    }
+
+    @Test("Bodyless HTTP responses do not require captured representation content")
+    func bodylessResponsesAreNotMissing() async throws {
+        let capture = #"{"log":{"entries":[{"request":{"method":"HEAD","url":"https://api.test/head"},"response":{"status":200,"content":{"size":42}}},{"request":{"method":"GET","url":"https://api.test/no-content"},"response":{"status":204,"content":{"size":42}}},{"request":{"method":"GET","url":"https://api.test/reset"},"response":{"status":205,"content":{"size":42}}},{"request":{"method":"GET","url":"https://api.test/cached"},"response":{"status":304,"content":{"size":42}}}]}}"#
+        let candidates = try await HARParser.parse(data: Data(capture.utf8))
+        #expect(candidates.count == 4)
+        #expect(candidates.allSatisfy { !$0.bodyIsUnavailable })
+        #expect(candidates.allSatisfy { $0.bodySizeBytes == 0 })
+    }
+
     // MARK: - URLs real captures contain
 
     @Test("Query strings and fragments do not become part of the route")
@@ -351,7 +523,7 @@ struct RealCaptureTests {
         #expect(candidates.first?.path == "/v1/search")
     }
 
-    @Test("A port and a non-standard scheme do not leak into the path")
+    @Test("A non-standard port does not leak into the path")
     func hostAndPortStripped() async throws {
         let candidates = try await HARParser.parse(
             data: Self.har(entries: Self.entry(
@@ -378,6 +550,11 @@ struct RealCaptureTests {
         let entries = """
         { "request": { "method": "CONNECT", "url": "https://api.test/tunnel" },
           "response": { "status": 200, "headers": [], "content": { "mimeType": "text/plain", "text": "" } } },
+        \(Self.entry(url: "data:text/plain,hello", headers: "", mimeType: "text/plain", text: "hello")),
+        \(Self.entry(url: "blob:https://api.test/00000000-0000-0000-0000-000000000001", headers: "")),
+        \(Self.entry(url: "file:///tmp/captured.json", headers: "")),
+        \(Self.entry(url: "http:///missing-host", headers: "")),
+        \(Self.entry(url: "", headers: "")),
         \(Self.entry(headers: #"{ "name": "content-type", "value": "application/json" }"#))
         """
         let candidates = try await HARParser.parse(data: Self.har(entries: entries), existingEndpoints: [])

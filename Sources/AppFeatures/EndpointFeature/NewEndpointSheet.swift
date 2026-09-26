@@ -27,11 +27,19 @@ struct NewEndpointSheet: View {
     @State private var name = ""
     @State private var method: HTTPMethod = .get
     @State private var path = "/"
-    @State private var pathError: String?
     @FocusState private var focusedField: Field?
 
     private var canCreate: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty && path.hasPrefix("/")
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pathError == nil
+    }
+
+    private var pathError: String? {
+        do {
+            try EndpointValidator.validatePath(path)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     public var body: some View {
@@ -71,14 +79,12 @@ struct NewEndpointSheet: View {
                         text: $path,
                         placeholder: "/api/v1/users",
                         validation: pathError,
+                        validationIdentifier: "newEndpoint.path.error",
+                        inputIdentifier: "newEndpoint.pathField",
                         identifier: "newEndpoint.path"
                     )
-                    .accessibilityIdentifier("newEndpoint.pathField")
                     .focused($focusedField, equals: .path)
                     .onSubmit { confirmIfValid() }
-                    .onChange(of: path) {
-                        pathError = (path.isEmpty || path.hasPrefix("/")) ? nil : "Path must start with '/'"
-                    }
                 }
             }
 
@@ -115,7 +121,7 @@ struct NewEndpointSheet: View {
 
     private func confirmIfValid() {
         guard canCreate else { return }
-        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         dismiss()
         onConfirm(trimmedName, method, path)
     }

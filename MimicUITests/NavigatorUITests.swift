@@ -12,6 +12,7 @@ struct NavigatorPage {
     var header: XCUIElement { element("navigator.header") }
     var footer: XCUIElement { element("navigator.footer") }
     var endpointFilter: XCUIElement { app.textFields["sidebar.filter.field"] }
+    var endpointFilterClear: XCUIElement { app.buttons["sidebar.filter.clear"] }
     var journeyFilter: XCUIElement { app.textFields["journeys.filter.field"] }
     var noEndpointMatches: XCUIElement { element("sidebar.noMatches") }
     var noJourneyMatches: XCUIElement { element("journeys.noMatches") }
@@ -559,12 +560,58 @@ final class NavigatorUITests: MimicUITestCase {
         let navigator = NavigatorPage(app: app)
         let shell = WorkspaceShellPage(app: app)
         navigator.methodScope.click()
-        navigator.scopeOption("DELETE").click()
+        let delete = navigator.scopeOption("DELETE")
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        UITestApp.waitForStableFrame(delete)
+        delete.click()
         XCTAssertTrue(navigator.noEndpointMatches.waitForExistence(timeout: 5))
+        XCTAssertEqual(navigator.methodScope.value as? String, "DELETE")
         navigator.methodScope.click()
-        navigator.scopeOption("POST").click()
+        let post = navigator.scopeOption("POST")
+        XCTAssertTrue(post.waitForExistence(timeout: 5))
+        UITestApp.waitForStableFrame(post)
+        post.click()
         XCTAssertTrue(navigator.row(named: "Create order").waitForExistence(timeout: 5))
         XCTAssertFalse(navigator.row(named: "Current orders").exists)
+        UITestApp.assertAccessibleMenuName(navigator.methodScope, equals: "Filter scope")
+        XCTAssertEqual(navigator.methodScope.value as? String, "POST")
+
+        navigator.methodScope.click()
+        XCTAssertTrue(post.waitForExistence(timeout: 5))
+        UITestApp.waitForStableFrame(post)
+        // NSHostingMenu coverage asserts the native on/off check state directly. Preserve the
+        // real app's open menu too: XCTest's isSelected may describe menu highlighting instead.
+        let selectedScope = XCTAttachment(screenshot: app.screenshot())
+        selectedScope.name = "navigator-selected-POST-scope"
+        selectedScope.lifetime = .keepAlways
+        add(selectedScope)
+        let menuAccessibility = XCTAttachment(string: app.menus.debugDescription)
+        menuAccessibility.name = "navigator-filter-menu-accessibility"
+        menuAccessibility.lifetime = .keepAlways
+        add(menuAccessibility)
+        UITestApp.dismissAnyOpenMenu(in: app)
+
+        navigator.row(named: "Create order").click()
+        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5))
+        navigator.filter(navigator.endpointFilter, text: "missing-route")
+        XCTAssertTrue(navigator.noEndpointMatches.waitForExistence(timeout: 5))
+        // Move focus away before clearing. The next application keystrokes must return to the
+        // query without a field click or a test helper that would focus it on the user's behalf.
+        endpointEditor.statusCodeField.click()
+        XCTAssertTrue(navigator.endpointFilterClear.waitForExistence(timeout: 5))
+        XCTAssertEqual(navigator.endpointFilterClear.label, "Clear filter")
+        XCTAssertTrue(navigator.endpointFilterClear.isEnabled)
+        navigator.endpointFilterClear.click()
+        XCTAssertTrue(navigator.endpointFilterClear.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(navigator.endpointFilter.value as? String, "")
+        app.typeText("Create")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            navigator.endpointFilter.value as? String == "Create"
+        }, "Clearing a filter should return keyboard focus to its text field")
+        XCTAssertTrue(navigator.row(named: "Create order").waitForExistence(timeout: 5))
+        XCTAssertFalse(navigator.row(named: "Current orders").exists)
+        XCTAssertEqual(navigator.methodScope.value as? String, "POST", "Clearing text must preserve its method scope")
+
         shell.journeysTab.click()
         let name = "Payment succeeds after the second authorization attempt"
         navigator.row(named: name).click()
@@ -587,6 +634,45 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(navigator.activeJourney.waitForNonExistence(timeout: 5))
         shell.endpointsTab.click()
         XCTAssertTrue(navigator.row(named: "Create order").exists, "Endpoint method scope survives tab switching")
+        XCTAssertEqual(navigator.endpointFilter.value as? String, "Create")
+        XCTAssertEqual(navigator.methodScope.value as? String, "POST")
+    }
+
+    @MainActor
+    func testDisabledEndpointCreateRefusesMouseAndReturnUntilNamed() async throws {
+        try await launchFixture(populated: false)
+        let navigator = NavigatorPage(app: app)
+        workspace.addEndpointButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.createButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(newEndpointSheet.createButton.label, "Add endpoint")
+        XCTAssertFalse(newEndpointSheet.createButton.isEnabled)
+
+        // Send a real click to the disabled button's surface as well as the default shortcut.
+        // The control must stay disabled, keep the sheet open, and leave the project untouched.
+        newEndpointSheet.createButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(newEndpointSheet.nameField.exists)
+        XCTAssertFalse(newEndpointSheet.createButton.isEnabled)
+        let refused = try await command(["endpointList": [:]])
+        XCTAssertEqual(try XCTUnwrap(refused["endpoints"] as? [[String: Any]]).count, 0)
+        add(navigator.screenshot("navigator-disabled-create-endpoint"))
+
+        newEndpointSheet.nameField.click()
+        newEndpointSheet.nameField.typeText("Keyboard route")
+        newEndpointSheet.pathField.click()
+        newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
+        newEndpointSheet.pathField.typeText("/keyboard-route")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.newEndpointSheet.createButton.isEnabled })
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(navigator.endpointRow(named: "Keyboard route", path: "/keyboard-route").waitForExistence(timeout: 5))
+        let created = try await command(["endpointList": [:]])
+        let endpoints = try XCTUnwrap(created["endpoints"] as? [[String: Any]])
+        XCTAssertEqual(endpoints.count, 1, "The enabled default action must create exactly one endpoint")
+        XCTAssertEqual(endpoints.first?["name"] as? String, "Keyboard route")
+        XCTAssertEqual(endpoints.first?["method"] as? String, "GET")
+        XCTAssertEqual(endpoints.first?["path"] as? String, "/keyboard-route")
     }
 
     @MainActor

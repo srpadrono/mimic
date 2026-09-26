@@ -16,9 +16,9 @@ private enum ImportColumns {
     /// The name the endpoint will be created with.
     static let name: CGFloat = 120
     static let status: CGFloat = 42
-    static let size: CGFloat = 58
+    static let size: CGFloat = 80
     /// Seats the "Duplicate" pill and the binary/body-drop labels at the operational text size.
-    static let flag: CGFloat = 116
+    static let flag: CGFloat = 134
     /// The checkbox, plus the gap the list puts either side of it.
     static let toggle: CGFloat = 18
     // path is flexible — takes the remaining space
@@ -218,23 +218,44 @@ struct ImportReviewList: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack(spacing: DSSpacing.md) {
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
             // Multiple import notices must stack. In one HStack they competed with each other and
             // with the actions, so a capture containing binary, oversized, and duplicate entries
             // compressed every warning into an unreadable fragment at the sheet's minimum width.
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 if candidates.contains(where: { $0.bodySizeExceedsLimit }) {
-                    Label("Some entries exceed the 1 MB body limit", systemImage: "exclamationmark.triangle")
+                    Label("Bodies over 1 MB are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.warning)
                         .accessibilityIdentifier("import.bodySizeWarning")
                 }
 
                 if candidates.contains(where: { $0.bodyIsBinary }) {
-                    Label("Some entries have binary bodies, which import without one", systemImage: "exclamationmark.triangle")
+                    Label("Binary bodies are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
                         .font(DSTypography.label)
                         .foregroundStyle(DSColors.warning)
                         .accessibilityIdentifier("import.binaryBodyWarning")
+                }
+
+                if candidates.contains(where: { $0.bodyIsUnavailable }) {
+                    Label("Missing captured bodies are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warning)
+                        .accessibilityIdentifier("import.unavailableBodyWarning")
+                }
+
+                if candidates.contains(where: { $0.statusCode == 206 }) {
+                    Label("Partial responses cannot be imported; capture a complete response", systemImage: "exclamationmark.triangle")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warning)
+                        .accessibilityIdentifier("import.partialResponseWarning")
+                }
+
+                if candidates.contains(where: { $0.statusCode != 206 && ImportCommitter.rejection(for: $0) != nil }) {
+                    Label("Some entries cannot be imported; review the reason below each row", systemImage: "exclamationmark.triangle")
+                        .font(DSTypography.label)
+                        .foregroundStyle(DSColors.warning)
+                        .accessibilityIdentifier("import.invalidCandidateWarning")
                 }
 
                 // Duplicates are pre-answered, not erroneous and not a loss of data.
@@ -244,30 +265,38 @@ struct ImportReviewList: View {
                         .foregroundStyle(DSColors.labelSecondary)
                         .accessibilityIdentifier("import.duplicateWarning")
                 }
+
+                Text("Text bodies are saved as captured. Use the eye button to preview them before importing.")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .accessibilityIdentifier("import.capturedBodyNotice")
             }
             .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: DSSpacing.md)
+            HStack(spacing: DSSpacing.md) {
+                Spacer(minLength: DSSpacing.md)
 
-            DSButton("Cancel", variant: .ghost, size: .medium, identifier: "import.cancel") {
-                onCancel()
-            }
-            .accessibilityIdentifier(cancelIdentifier)
-            .accessibilityLabel("Cancel")
-            .keyboardShortcut(.cancelAction)
+                DSButton("Cancel", variant: .ghost, size: .medium, identifier: "import.cancel") {
+                    onCancel()
+                }
+                .accessibilityIdentifier(cancelIdentifier)
+                .accessibilityLabel("Cancel")
+                .keyboardShortcut(.cancelAction)
 
-            DSButton(
-                "Import \(selectedCount) endpoint\(selectedCount == 1 ? "" : "s")",
-                variant: .primary,
-                size: .medium,
-                identifier: "import.commit"
-            ) {
-                onImport()
+                DSButton(
+                    "Import \(selectedCount) endpoint\(selectedCount == 1 ? "" : "s")",
+                    variant: .primary,
+                    size: .medium,
+                    identifier: "import.commit"
+                ) {
+                    onImport()
+                }
+                .disabled(selectedCount == 0)
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("import.importButton")
+                .accessibilityLabel("Import selected endpoints")
+                .accessibilityValue("\(selectedCount) selected")
             }
-            .disabled(selectedCount == 0)
-            .keyboardShortcut(.defaultAction)
-            .accessibilityIdentifier("import.importButton")
-            .accessibilityLabel("Import selected endpoints")
         }
         .padding(DSSpacing.md)
     }
@@ -293,8 +322,33 @@ private struct ImportCandidateRow: View {
     let rowIndex: Int
 
     @State private var isHovered = false
+    @State private var showingBodyPreview = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cells
+            if let rejection = ImportCommitter.rejection(for: candidate) {
+                Text(rejection)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(ImportRow.warningInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DSSpacing.md)
+                    .padding(.bottom, DSSpacing.sm)
+                    .accessibilityIdentifier("import.candidate.index.\(rowIndex).validation")
+            }
+        }
+        .background(ImportRow.background(isHovered: isHovered, rowIndex: rowIndex))
+        .contentShape(Rectangle())
+        // The checkbox is the named keyboard action; clicking elsewhere on the row selects it too.
+        .onTapGesture { candidate.isSelected.toggle() }
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .help(helpText)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("import.candidate.\(candidate.id.uuidString)")
+    }
+
+    private var cells: some View {
         HStack(spacing: DSSpacing.sm) {
             // A real label rather than `Toggle("")`: with an empty string VoiceOver announced two
             // hundred unnamed checkboxes.
@@ -357,37 +411,37 @@ private struct ImportCandidateRow: View {
                 .frame(width: ImportColumns.status, alignment: .leading)
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
 
-            Text(candidate.bodySizeLabel)
-                .font(DSTypography.label)
-                .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
-                .lineLimit(1)
-                .frame(width: ImportColumns.size, alignment: .leading)
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).size")
+            HStack(spacing: DSSpacing.xs) {
+                Text(candidate.bodySizeLabel)
+                    .font(DSTypography.label)
+                    .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("import.candidate.index.\(rowIndex).size")
+
+                if let body = candidate.responseBody, !body.isEmpty {
+                    Button {
+                        showingBodyPreview = true
+                    } label: {
+                        Image(systemName: "eye")
+                            .font(.system(size: DSGlyph.control))
+                            .foregroundStyle(DSColors.accentText)
+                    }
+                    .buttonStyle(.dsPlain)
+                    .help("Preview response body")
+                    .accessibilityLabel("Preview response body for \(candidate.method.rawValue) \(candidate.path)")
+                    .accessibilityIdentifier("import.candidate.index.\(rowIndex).preview")
+                    .popover(isPresented: $showingBodyPreview) {
+                        ImportBodyPreview(responseBody: body) { showingBodyPreview = false }
+                    }
+                }
+            }
+            .frame(width: ImportColumns.size, alignment: .leading)
 
             flag
                 .frame(width: ImportColumns.flag, alignment: .leading)
         }
         .padding(.horizontal, DSSpacing.md)
         .frame(height: ImportRow.height)
-        .background(ImportRow.background(isHovered: isHovered, rowIndex: rowIndex))
-        .contentShape(Rectangle())
-        // The row lights up under the pointer, so the row answers the click — the whole line is the
-        // target, not the 18pt checkbox at its leading edge. A surface that answers the pointer and
-        // nothing else is a control you find by trial, and this one had the hover, the content shape
-        // and the cross-fade already: everything except the action.
-        //
-        // A tap target rather than a `Button`, and without the `.isButton` trait a bare tap target
-        // usually earns. A button here would swallow the checkbox inside itself, and the trait would
-        // announce this `.contain` group — which carries no label of its own — as an unnamed button
-        // beside the control it duplicates. The click and the checkbox are one action, and the
-        // checkbox is the half that is already named ("Import GET /orders"), so that is the half
-        // assistive technology keeps.
-        .onTapGesture { candidate.isSelected.toggle() }
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-        .help(helpText)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("import.candidate.\(candidate.id.uuidString)")
     }
 
     /// The one thing on the row that needs attention gets the one filled pill.
@@ -398,16 +452,26 @@ private struct ImportCandidateRow: View {
     /// size it is complaining about instead of adding a second badge.
     @ViewBuilder
     private var flag: some View {
-        if candidate.isDuplicate {
-            DSStateBadge("Duplicate", tone: .warning, systemImage: "doc.on.doc",
-                         identifier: "import.candidate.index.\(rowIndex).flag.duplicate")
-                // "Already covered", not "already exists": since `ImportRouteLedger`, a repeat is
-                // flagged whether the cover is an endpoint the project holds or an earlier row of
-                // this same import — and for a capture of real traffic the second is the common case.
-                .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
-                .accessibilityLabel("Duplicate — this method and path is already covered")
-                // A name per branch rather than one shared `…flag`: the branches are mutually
-                // exclusive, so which identifier is present *is* the assertion a test wants.
+        if candidate.statusCode == 206 {
+            Label("Partial response", systemImage: "exclamationmark.triangle")
+                .font(DSTypography.label)
+                .foregroundStyle(ImportRow.warningInk)
+                .lineLimit(1)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.partialResponse")
+        } else if ImportCommitter.rejection(for: candidate) != nil {
+            Label("Cannot import", systemImage: "exclamationmark.triangle")
+                .font(DSTypography.label)
+                .foregroundStyle(ImportRow.warningInk)
+                .lineLimit(1)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.invalid")
+        } else if candidate.bodyIsUnavailable {
+            Label("Body unavailable", systemImage: "exclamationmark.triangle")
+                .font(DSTypography.label)
+                .foregroundStyle(ImportRow.warningInk)
+                .lineLimit(1)
+                .help("The capture records a response body but omits its text. Selecting this endpoint imports without a body.")
+                .accessibilityLabel("Body unavailable — selecting this endpoint imports without a body")
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.bodyUnavailable")
         } else if candidate.bodyIsBinary {
             // Before the size branch, deliberately: a binary body's recorded size can also exceed
             // the limit, and binary is the more specific reason there is no body.
@@ -426,6 +490,11 @@ private struct ImportCandidateRow: View {
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")
                 .accessibilityLabel("Response body exceeds the limit and will not be imported")
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.bodyDropped")
+        } else if candidate.isDuplicate {
+            DSStateBadge("Duplicate", tone: .warning, systemImage: "doc.on.doc",
+                         identifier: "import.candidate.index.\(rowIndex).flag.duplicate")
+                .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
+                .accessibilityLabel("Duplicate — this method and path is already covered")
         } else {
             // Not decoration — this is what holds the column open, and without it the table's
             // headers sat above the wrong columns.
@@ -449,5 +518,50 @@ private struct ImportCandidateRow: View {
             text += "\nGroup: \(group)"
         }
         return text
+    }
+}
+
+/// A bounded, read-only view of the text that will be saved. The source file remains the place to
+/// edit an import before committing; this preview never rewrites or formats the captured body.
+private struct ImportBodyPreview: View {
+    let responseBody: String
+    let onClose: () -> Void
+
+    var body: some View {
+        // Bound text layout independently of the importer's larger body limit. Cutting at a Unicode
+        // scalar preserves valid text without letting one enormous combining sequence evade the cap.
+        let preview = String(String.UnicodeScalarView(responseBody.unicodeScalars.prefix(16_384)))
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
+            Text("Response body")
+                .font(DSTypography.heading)
+                .foregroundStyle(DSColors.labelPrimary)
+            ScrollView([.horizontal, .vertical]) {
+                Text(preview)
+                    .font(DSTypography.code)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("import.bodyPreview.text")
+            }
+            .frame(height: 240)
+            if preview.utf8.count < responseBody.utf8.count {
+                Text("Preview shortened. Review the original file for the complete body.")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .accessibilityIdentifier("import.bodyPreview.truncated")
+            }
+            Text("Read only. To change this body before importing, edit the source file.")
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelSecondary)
+            HStack {
+                Spacer()
+                DSButton("Close", variant: .secondary, size: .small, identifier: "import.bodyPreview.close", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(DSSpacing.lg)
+        .frame(width: DSSheetWidth.medium)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("import.bodyPreview")
     }
 }

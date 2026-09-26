@@ -1036,7 +1036,21 @@ final class WorkspaceShellUITests: MimicUITestCase {
         launchShell()
         createProjectViaUI(name: "History")
         createEndpointViaUI(name: "First", path: "/api/first")
+        setGroupTag("Accounts")
+        let navigator = NavigatorPage(app: app)
+        navigator.group("Accounts").click()
+        XCTAssertTrue(navigator.row(named: "First").waitForNonExistence(timeout: 5))
+        navigator.filter(navigator.endpointFilter, text: "no matching route")
+        XCTAssertTrue(navigator.noEndpointMatches.waitForExistence(timeout: 5))
+        navigator.methodScope.click()
+        let postScope = navigator.scopeOption("POST")
+        XCTAssertTrue(postScope.waitForExistence(timeout: 5))
+        postScope.click()
         createEndpointViaUI(name: "Second", path: "/api/second")
+        XCTAssertTrue(navigator.row(named: "Second").waitForExistence(timeout: 5),
+                      "Creating an endpoint must reveal it through any previous filter")
+        XCTAssertEqual(navigator.endpointFilter.value as? String, "")
+        XCTAssertEqual(navigator.methodScope.value as? String, "Any")
 
         let back = breadcrumb.back
         let forward = breadcrumb.forward
@@ -1048,12 +1062,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
         XCTAssertFalse(forward.isEnabled, "Nothing has been walked back from yet")
 
+        showJourneysNavigator()
         back.click()
         XCTAssertTrue(
             breadcrumb.waitForCrumb("endpoint", toRead: "First"),
             "Back should return to the endpoint viewed before — "
                 + breadcrumb.crumbDescription("endpoint", titled: "First")
         )
+        XCTAssertTrue(navigator.row(named: "First").waitForExistence(timeout: 5),
+                      "Back from Journeys must show Endpoints and expand the destination's group")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { forward.isEnabled },
             "Having gone back, forward should now be available"

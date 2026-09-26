@@ -2,22 +2,8 @@ import AppKit
 import Foundation
 import XCTest
 
-/// The launch contract and the state-building helpers, in one place a suite can inherit.
-///
-/// `MimicUITests` and `JourneyUITests` each grew their own copy of "make an `XCUIApplication`, point
-/// it at a throwaway defaults suite, launch it through `UITestApp`, then click through the welcome
-/// window to get a project on screen". That duplication is what let `JourneyUITests` ship without the
-/// activation retry and fail every test on a window that had launched but was not frontmost — the
-/// failure `UITestApp.launchAndBringToForeground` exists to prevent, reintroduced by a suite that
-/// simply did not know to call it.
-///
-/// The suites added for the coverage sweep inherit this instead. The two original files are left as
-/// they are: rewriting a passing 1,800-line suite to sit on a new base class is a large diff whose
-/// only benefit is uniformity, and the risk of breaking working coverage is not worth it.
-///
-/// Subclasses that need a launch environment key — the import injection, the failing store — override
-/// ``configureLaunchEnvironment(_:)``. It runs before `launch()`, because the environment binds at
-/// process spawn and a key set afterwards reaches nothing.
+/// Shared isolated launch, page objects, and UI state builders.
+/// Override `configureLaunchEnvironment` to choose fixtures before spawning the app.
 class MimicUITestCase: XCTestCase {
 
     /// The defaults suite every UI run reads and writes, and the only one a reset may clear.
@@ -186,12 +172,11 @@ class MimicUITestCase: XCTestCase {
     @MainActor
     func selectMethod(_ method: String) {
         let picker = newEndpointSheet.methodPicker
-        guard picker.waitForExistence(timeout: 2) else { return }
+        XCTAssertTrue(picker.waitForExistence(timeout: 2), "The requested HTTP method must be selectable")
         picker.click()
         let item = app.menuItems[method]
-        if item.waitForExistence(timeout: 2) {
-            item.click()
-        }
+        XCTAssertTrue(item.waitForExistence(timeout: 2), "The method picker must offer \(method)")
+        item.click()
     }
 
     /// Closes the open project via File ▸ Close Project, returning to the welcome window.

@@ -271,6 +271,11 @@ struct SidebarView: View {
     /// group `__ungrouped__`.
     static func groupSectionKey(_ name: String) -> String { "group:\(name)" }
 
+    static func sectionKey(for endpoint: Endpoint) -> String {
+        guard let group = endpoint.groupTag, !group.isEmpty else { return ungroupedSectionKey }
+        return groupSectionKey(group)
+    }
+
     @ViewBuilder
     private func endpointContextMenu(_ endpoint: Endpoint) -> some View {
         Button("Rename\u{2026}", systemImage: "pencil") { onRenameEndpoint(endpoint.id) }

@@ -39,6 +39,44 @@ struct EndpointValidationTests {
         }
     }
 
+    @Test("Routes reject query strings, fragments, whitespace, and control characters", arguments: [
+        "/users?active=1", "/users#details", "/user name", "/users\n", "/user\rname",
+        "/user\tname", "/user\u{0}name", "/user\u{1F}name", "/user\u{7F}name",
+    ])
+    func unservableRouteIsRefused(path: String) {
+        #expect(throws: ValidationError.self) {
+            try EndpointValidator.validatePath(path)
+        }
+    }
+
+    @Test("Parameter paths and percent-encoded reserved characters remain valid", arguments: [
+        "/", "/users/:id", "/users/", "/search%3Fq%3Dtest/%23details", "/user%20name",
+    ])
+    func routablePatternsAreAccepted(path: String) throws {
+        try EndpointValidator.validatePath(path)
+    }
+
+    @Test("Endpoint and journey commands refuse unservable routes without mutating the project", arguments: [
+        "/users?active=1", "/users#details", "/user\nname",
+    ])
+    func unservableRoutesCannotBeSaved(path: String) {
+        var project = MockProject(name: "Routes", journeys: [Journey(name: "Flow")])
+        let original = project
+        #expect(throws: ControlError.self) {
+            try ProjectCommandExecutor.apply(
+                .endpointCreate(name: nil, method: .get, path: path, spec: nil), to: &project
+            )
+        }
+        #expect(project == original)
+        #expect(throws: ControlError.self) {
+            try ProjectCommandExecutor.apply(
+                .journeyStepAdd(journey: .name("Flow"), step: .init(path: path), atIndex: nil),
+                to: &project
+            )
+        }
+        #expect(project == original)
+    }
+
     // MARK: - Status Code Validation
 
     @Test func validStatusCode200() throws {
@@ -124,6 +162,15 @@ struct EndpointValidationTests {
         #expect(throws: ValidationError.self) {
             try EndpointValidator.validatePort(-1)
         }
+    }
+
+    @Test("Only numeric spellings of the bound address count as a self-loop",
+          arguments: [
+            "127.0.0.2", "127.2", "2130706434", "0x7f000002", "127.0.0.256",
+            "127.0.0.08", "127.0.0.1.example", "localhost.example", "127.0.0.1..",
+          ])
+    func nonListenerHostIsNotALoopbackAlias(host: String) {
+        #expect(!EndpointValidator.isLoopbackHost(host))
     }
 
     // MARK: - LocalizedError
@@ -270,6 +317,93 @@ struct ProjectValidatorTests {
             journeys: [Journey(name: "Flow", steps: [step])]
         )
         try ProjectValidator.validate(project)
+    }
+
+    @Test("Duplicate endpoint IDs are refused before import reaches persistence")
+    func duplicateEndpointIDsAreRefused() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+        let project = MockProject(name: "Duplicate routes", endpoints: [
+            Endpoint(id: id, name: "First", path: "/first"),
+            Endpoint(id: id, name: "Second", path: "/second"),
+        ])
+        let refusal = try Self.refusal(project)
+        #expect(refusal.context.contains("Second"))
+        #expect(refusal.reason.contains("Duplicate endpoint ID"))
+        #expect(refusal.reason.contains(id.uuidString))
+    }
+
+    @Test("Scenario IDs are unique within and across endpoints", arguments: [false, true])
+    func duplicateScenarioIDsAreRefused(acrossEndpoints: Bool) throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+        let first = Scenario(id: id, name: "First")
+        let second = Scenario(id: id, name: "Second")
+        let endpoints = acrossEndpoints
+            ? [
+                Endpoint(name: "First route", path: "/first", scenarios: [first], activeScenarioID: id),
+                Endpoint(name: "Second route", path: "/second", scenarios: [second], activeScenarioID: id),
+            ]
+            : [Endpoint(name: "Route", path: "/", scenarios: [first, second], activeScenarioID: id)]
+        let refusal = try Self.refusal(MockProject(name: "Duplicate responses", endpoints: endpoints))
+        #expect(refusal.context.contains("scenario \"Second\""))
+        #expect(refusal.reason.contains("Duplicate scenario ID"))
+        #expect(refusal.reason.contains(id.uuidString))
+    }
+
+    @Test("Duplicate journey IDs are refused before import reaches persistence")
+    func duplicateJourneyIDsAreRefused() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000103")!
+        let project = MockProject(name: "Duplicate journeys", journeys: [
+            Journey(id: id, name: "First"), Journey(id: id, name: "Second"),
+        ])
+        let refusal = try Self.refusal(project)
+        #expect(refusal.context == "journey \"Second\"")
+        #expect(refusal.reason.contains("Duplicate journey ID"))
+        #expect(refusal.reason.contains(id.uuidString))
+    }
+
+    @Test("Step IDs are unique within and across journeys", arguments: [false, true])
+    func duplicateStepIDsAreRefused(acrossJourneys: Bool) throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000104")!
+        let first = JourneyStep(id: id, name: "First", path: "/first", outcome: .respond(.init()))
+        let second = JourneyStep(id: id, name: "Second", path: "/second", outcome: .respond(.init()))
+        let journeys = acrossJourneys
+            ? [Journey(name: "First flow", steps: [first]), Journey(name: "Second flow", steps: [second])]
+            : [Journey(name: "Flow", steps: [first, second])]
+        let refusal = try Self.refusal(MockProject(name: "Duplicate steps", journeys: journeys))
+        #expect(refusal.context.contains("step \"Second\""))
+        #expect(refusal.reason.contains("Duplicate step ID"))
+        #expect(refusal.reason.contains(id.uuidString))
+    }
+
+    @Test("Different entity types may share a UUID through export, import, and duplication")
+    func identifiersAreScopedByEntityType() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000105")!
+        let project = MockProject(
+            id: id, name: "Independent identities",
+            serverConfiguration: .init(port: 8080, globalDelayMs: 0, backends: [
+                BackendConfiguration(id: id, name: "Accounts", port: 8081),
+            ]),
+            endpoints: [
+                Endpoint(id: id, name: "Account", path: "/account",
+                         scenarios: [Scenario(id: id, name: "Success")], activeScenarioID: id, backendID: id),
+            ],
+            journeys: [
+                Journey(id: id, name: "Flow", steps: [
+                    JourneyStep(id: id, name: "Account", path: "/account",
+                                outcome: .respond(.init()), backendID: id),
+                ]),
+            ],
+            activeJourneyID: id
+        )
+        try ProjectValidator.validate(project)
+        let imported = try JSONDecoder().decode(MockProject.self, from: JSONEncoder().encode(project))
+        #expect(imported == project)
+        try ProjectValidator.validate(imported)
+        let copy = imported.duplicated(name: "Copy")
+        try ProjectValidator.validate(copy)
+        #expect(copy.endpoints.first?.backendID == id)
+        #expect(copy.activeJourney?.steps.first?.backendID == id)
+        #expect(copy.id != id)
     }
 
     @Test("An imported duplicate listener port is refused")

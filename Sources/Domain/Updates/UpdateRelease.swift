@@ -124,6 +124,9 @@ public enum UpdateFeed {
         guard let version = ReleaseVersion(release.tagName) else {
             throw FeedError.malformedVersion(release.tagName)
         }
+        guard version.prerelease.isEmpty else {
+            throw FeedError.notPublished(tag: release.tagName)
+        }
         guard let asset = release.assets.first(where: {
             ($0.name as NSString).pathExtension.lowercased() == installerExtension
         }) else {

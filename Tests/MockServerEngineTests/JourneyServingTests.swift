@@ -38,10 +38,13 @@ struct JourneyServingTests {
         let engine = MockServerEngine()
         await engine.updateConfiguration(endpoints: endpoints, globalDelayMs: globalDelayMs, journey: journey)
         try await engine.start(configuration: ServerConfiguration(port: port, globalDelayMs: globalDelayMs))
-        defer { Task { try? await engine.stop() } }
-
-        let baseURL = try #require(URL(string: "http://127.0.0.1:\(port)"))
-        try await body(engine, baseURL)
+        do {
+            let baseURL = try #require(URL(string: "http://127.0.0.1:\(port)"))
+            try await body(engine, baseURL)
+        } catch {
+            try? await engine.stop()
+            throw error
+        }
         try await engine.stop()
     }
 
@@ -783,6 +786,6 @@ actor LogCollector {
         while entries.count < count, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(entries.count >= count, "expected \(count) log entries, saw \(entries.count)")
+        try #require(entries.count >= count, "expected \(count) log entries, saw \(entries.count)")
     }
 }

@@ -5,6 +5,7 @@ import DesignSystem
 
 /// A stable two-line summary; every address is copied from the same server-details popover.
 struct ServerStatusWell: View {
+    @Environment(\.isEnabled) private var isEnabled
     let serverState: ServerState
     let projectName: String?
     let requestCount: Int
@@ -37,14 +38,15 @@ struct ServerStatusWell: View {
         Self.summarySubtitle(serverState: serverState, restartRequired: restartRequired,
                              requestCount: requestCount, unmatchedCount: unmatchedCount, compact: compact)
     }
-    private var statusColor: Color {
+    var statusColor: Color {
         if restartRequired { return DSColors.warningText }
         switch serverState {
         case .running: return DSColors.successText
-        case .stopped, .error: return DSColors.destructiveText
-        case .starting, .stopping: return DSColors.labelSecondary
+        case .error: return DSColors.destructiveText
+        case .stopped, .starting, .stopping: return DSColors.labelSecondary
         }
     }
+    private var canShowDetails: Bool { isEnabled && (configuration != nil || isRunning) }
     private var detailsDescription: String {
         let subject = projectName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = subject.flatMap { $0.isEmpty ? nil : $0 } ?? "No project"
@@ -96,8 +98,11 @@ struct ServerStatusWell: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(configuration == nil && !isRunning)
-        .onHover { isHovered = $0 }
+        .disabled(!canShowDetails)
+        .onHover { isHovered = $0 && canShowDetails }
+        .onChange(of: canShowDetails) { _, enabled in
+            if !enabled { isHovered = false }
+        }
         .help(detailsDescription)
         .accessibilityIdentifier("serverStatusWell.url")
         .accessibilityLabel("Server details, \(Self.stateDescription(serverState))")

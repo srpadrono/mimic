@@ -28,6 +28,31 @@ struct CaptureJourneySheet: View {
         let suggestedName: String
         /// How many steps the capture will actually produce, which is not `logs.count`.
         let stepCount: Int
+        let refusal: String?
+
+        init(logs: [RequestLog], suggestedName: String) {
+            self.logs = logs
+            self.suggestedName = suggestedName
+            let preview = JourneyCapture.preview(logs)
+            stepCount = preview.stepCount
+            refusal = preview.refusal
+        }
+
+        var summary: String {
+            if let refusal { return refusal }
+            if logs.count == 1 {
+                return "Captures this request as one step, reproducing the response it received."
+            }
+            let eligible = logs.filter { $0.outcome != .journey }.count
+            var text = "Captures \(eligible) requests in the order they arrived, as \(stepCount) \(stepCount == 1 ? "step" : "steps")."
+            if eligible < logs.count {
+                text += " Requests already answered by a journey are excluded."
+            }
+            if stepCount < eligible {
+                text += " Consecutive identical responses become one step that repeats."
+            }
+            return text
+        }
     }
 
     let capture: Capture
@@ -53,7 +78,7 @@ struct CaptureJourneySheet: View {
                     .font(DSTypography.title)
                     .foregroundStyle(DSColors.labelPrimary)
 
-                Text(summary)
+                Text(capture.summary)
                     .font(DSTypography.label)
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -92,7 +117,7 @@ struct CaptureJourneySheet: View {
                 )
                 .accessibilityIdentifier("captureJourney.createButton")
                 .accessibilityLabel("Create journey")
-                .disabled(trimmedName.isEmpty)
+                .disabled(trimmedName.isEmpty || capture.refusal != nil)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -101,29 +126,12 @@ struct CaptureJourneySheet: View {
         .defaultFocus($focusedField, .name)
     }
 
-    /// Says what the capture will produce, and — only when the two numbers differ — why they differ.
-    /// Explaining the collapse on a one-to-one capture would be noise about a rule that did not fire.
-    private var summary: String {
-        let requests = capture.logs.count
-        let steps = capture.stepCount
-
-        if requests == 1 {
-            return "Captures this request as one step, reproducing the response it received."
-        }
-        let opening = "Captures \(requests) requests in the order they arrived"
-        guard steps != requests else {
-            return "\(opening), as \(steps) steps."
-        }
-        return "\(opening), as \(steps) steps — consecutive calls that answered identically become "
-            + "one step that repeats."
-    }
-
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func create() {
-        guard !trimmedName.isEmpty else { return }
+        guard !trimmedName.isEmpty, capture.refusal == nil else { return }
         onCreate(trimmedName, capture.logs)
         dismiss()
     }

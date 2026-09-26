@@ -298,6 +298,23 @@ struct UpdateServiceTests {
         await settle(service) { $0 != .checking }
 
         #expect(service.isShowingSheet)
+        #expect(service.phase == .available(Self.release("0.11.0")))
+        #expect(preferences.skippedVersion == ReleaseVersion("0.11.0"))
+    }
+
+    @Test("A manual request promotes a pending skipped automatic release into an offer")
+    func manualCheckOverridesAnInFlightSkip() async throws {
+        let feed = HeldFeed()
+        let (service, preferences) = try makeService(latest: { try await feed.fetch() })
+        preferences.skippedVersion = ReleaseVersion("0.11.0")
+        service.checkAutomaticallyIfDue()
+        await feed.waitForFetch()
+        service.checkForUpdates()
+        await feed.complete(with: Self.release("0.11.0"))
+        await settle(service) { $0 != .checking }
+        #expect(service.phase == .available(Self.release("0.11.0")))
+        #expect(service.isShowingSheet)
+        #expect(await feed.fetchCount == 1)
     }
 
     @Test("Skipping one version does not skip the next")
@@ -316,22 +333,51 @@ struct UpdateServiceTests {
 @MainActor
 @Suite("Update installation lifecycle")
 struct UpdateInstallationTests {
+    private nonisolated final class BackupLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private let releaseSignal = DispatchSemaphore(value: 0)
+        private var started = false
+
+        var didStart: Bool { lock.withLock { started } }
+
+        func blockThenFail() throws {
+            lock.withLock { started = true }
+            releaseSignal.wait()
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+
+        func release() { releaseSignal.signal() }
+    }
+
+    private nonisolated final class DiscardedFiles: @unchecked Sendable {
+        private let lock = NSLock()
+        private var files: [URL] = []
+        var count: Int { lock.withLock { files.count } }
+        func record(_ file: URL) { lock.withLock { files.append(file) } }
+    }
+
     @MainActor
     private final class Recorder {
         var events: [String] = []
+        nonisolated let discardedFiles = DiscardedFiles()
     }
 
     private nonisolated struct Installer: UpdateInstalling {
         let recorder: Recorder
         let fails: Bool
         var quarantineFails = false
-        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        var verificationFails = false
+        func download(_ release: UpdateRelease, onProgress: @escaping @Sendable (Double) async -> Void) async throws -> URL {
             URL(fileURLWithPath: "/fixture/Mimic.pkg")
         }
-        func verify(_ fileURL: URL, against release: UpdateRelease) throws {}
+        func verify(_ fileURL: URL, against release: UpdateRelease) throws {
+            #expect(!Thread.isMainThread, "Package verification must leave the update sheet responsive")
+            if verificationFails { throw UpdateInstaller.InstallError.notSignedByMimic("Unexpected signer") }
+        }
         func stampQuarantine(on fileURL: URL, from release: UpdateRelease) throws {
             if quarantineFails { throw UpdateInstaller.InstallError.quarantineFailed("The file is read-only.") }
         }
+        func discard(_ fileURL: URL) { recorder.discardedFiles.record(fileURL) }
         @MainActor func handOff(_ fileURL: URL) async throws {
             #expect(fileURL.path == "/fixture/Mimic.pkg")
             recorder.events.append("handoff")
@@ -339,7 +385,13 @@ struct UpdateInstallationTests {
         }
     }
 
-    private func readyService(fails: Bool = false) async throws -> (UpdateService, Recorder) {
+    private func readyService(
+        fails: Bool = false,
+        saveFails: Bool = false,
+        backupFails: Bool = false,
+        missingStore: Bool = false,
+        backupOperation: (@Sendable () throws -> Void)? = nil
+    ) async throws -> (UpdateService, Recorder) {
         let recorder = Recorder()
         let defaults = try #require(UserDefaults(suiteName: "UpdateInstallationTests.\(UUID())"))
         let service = UpdateService(
@@ -347,8 +399,15 @@ struct UpdateInstallationTests {
             preferences: UpdatePreferences(defaults: defaults),
             fetchLatestRelease: { UpdateServiceTests.release("0.11.0") },
             installer: Installer(recorder: recorder, fails: fails),
-            makeBackup: { _, _ in },
-            flushPendingSave: { recorder.events.append("save") },
+            makeBackup: { _, _ in
+                try backupOperation?()
+                if backupFails { throw CocoaError(.fileWriteOutOfSpace) }
+            },
+            resolveStoreURL: { missingStore ? nil : URL(fileURLWithPath: "/fixture/mimic.sqlite") },
+            flushPendingSave: {
+                recorder.events.append("save")
+                if saveFails { throw CocoaError(.fileWriteNoPermission) }
+            },
             terminate: { recorder.events.append("quit") }
         )
         service.checkForUpdates()
@@ -363,7 +422,43 @@ struct UpdateInstallationTests {
             if predicate() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(predicate(), "Update lifecycle did not settle")
+        try #require(predicate(), "Update lifecycle did not settle")
+    }
+
+    @Test("Update preparation refuses late control edits and reopens commands after backup failure")
+    func backupPreparationClosesControlAdmission() async throws {
+        let latch = BackupLatch()
+        defer { latch.release() }
+        let (service, _) = try await readyService(backupOperation: { try latch.blockThenFail() })
+        let queue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let defaults = try #require(UserDefaults(suiteName: "UpdateAdmissionTests.\(UUID())"))
+        let state = AppState(
+            projectRepository: GRDBProjectRepository(dbQueue: queue),
+            recentProjectsStore: RecentProjectsStore(defaults: defaults),
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: service
+        )
+        state.currentProject = MockProject(name: "Before backup")
+        let host = AppControlHost(appState: state, repository: state.repository)
+
+        service.installNow()
+        try await waitUntil { latch.didStart }
+        let refused = await host.execute(.projectRename(name: "Late edit"))
+        #expect(refused.error?.code == ControlErrorCode.updateInstalling.rawValue)
+        #expect(state.currentProject?.name == "Before backup")
+        #expect((await host.execute(.ping)).ok)
+        let projectID = try #require(state.currentProject?.id)
+        state.renameProject(id: projectID, name: "Late window edit")
+        state.createProject(name: "Late window project")
+        #expect(state.currentProject?.id == projectID)
+        #expect(state.currentProject?.name == "Before backup")
+
+        latch.release()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+        #expect(!service.isPreparingInstallation)
+        let retried = await host.execute(.projectRename(name: "After failure"))
+        #expect(retried.ok)
+        #expect(state.currentProject?.name == "After failure")
     }
 
     @Test("Successful handoff waits for actual sheet dismissal before quitting, exactly once")
@@ -384,6 +479,7 @@ struct UpdateInstallationTests {
         service.sheetDidDismiss()
         service.sheetDidDismiss()
         #expect(recorder.events == ["save", "handoff", "quit"])
+        #expect(recorder.discardedFiles.count == 0)
     }
 
     @Test("A failed handoff never quits or hides the error sheet")
@@ -396,18 +492,54 @@ struct UpdateInstallationTests {
         service.dismiss()
         service.sheetDidDismiss()
         #expect(recorder.events == ["save", "handoff"])
+        #expect(recorder.discardedFiles.count == 0, "Finder's manual-install fallback still needs the package")
         #expect(service.phase == .idle)
     }
 
-    @Test("A failed quarantine stamp never offers the installer as ready")
-    func quarantineFailureStopsPreparation() async throws {
+    @Test("A failed save or backup preserves the window and never launches Installer",
+          arguments: [true, false])
+    func failedPreparationDoesNotInstall(saveFails: Bool) async throws {
+        let (service, recorder) = try await readyService(
+            saveFails: saveFails, backupFails: !saveFails
+        )
+        service.installNow()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+        #expect(service.isShowingSheet)
+        #expect(recorder.events == ["save"])
+        #expect(recorder.discardedFiles.count == 1)
+        if !saveFails, case .failed(let message) = service.phase {
+            #expect(message.contains("could not back up your projects"))
+        }
+        service.sheetDidDismiss()
+        #expect(recorder.events == ["save"])
+    }
+
+    @Test("An unavailable project store prevents installation even after a successful flush")
+    func missingStoreDoesNotInstall() async throws {
+        let (service, recorder) = try await readyService(missingStore: true)
+        service.installNow()
+        try await waitUntil { if case .failed = service.phase { true } else { false } }
+        #expect(service.isShowingSheet)
+        #expect(recorder.events == ["save"])
+        #expect(recorder.discardedFiles.count == 1)
+        if case .failed(let message) = service.phase {
+            #expect(message.contains("could not locate your project store"))
+        }
+        service.sheetDidDismiss()
+        #expect(recorder.events == ["save"])
+    }
+
+    @Test("Failed verification or quarantine stamping discards the package and prevents installation",
+          arguments: [true, false])
+    func failedDownloadPreparation(quarantineFails: Bool) async throws {
         let recorder = Recorder()
         let defaults = try #require(UserDefaults(suiteName: "UpdateQuarantineTests.\(UUID())"))
         let service = UpdateService(
             installedVersion: { ReleaseVersion(major: 0, minor: 10, patch: 0) },
             preferences: UpdatePreferences(defaults: defaults),
             fetchLatestRelease: { UpdateServiceTests.release("0.11.0") },
-            installer: Installer(recorder: recorder, fails: false, quarantineFails: true),
+            installer: Installer(recorder: recorder, fails: false, quarantineFails: quarantineFails,
+                                 verificationFails: !quarantineFails),
             makeBackup: { _, _ in },
             terminate: { recorder.events.append("quit") }
         )
@@ -417,11 +549,12 @@ struct UpdateInstallationTests {
         try await waitUntil { if case .failed = service.phase { true } else { false } }
 
         if case .failed(let message) = service.phase {
-            #expect(message.contains("macOS security checks"))
+            #expect(message.contains(quarantineFails ? "macOS security checks" : "not signed by Mimic"))
         } else {
             Issue.record("The failed quarantine stamp did not stop preparation")
         }
         #expect(service.isShowingSheet)
+        #expect(recorder.discardedFiles.count == 1)
         service.installNow()
         #expect(recorder.events.isEmpty)
     }
@@ -432,8 +565,18 @@ struct UpdateInstallationTests {
         service.dismiss()
         service.installNow()
         service.sheetDidDismiss()
+        try await waitUntil { recorder.discardedFiles.count == 1 }
         #expect(recorder.events.isEmpty)
         #expect(service.phase == .idle)
+    }
+
+    @Test("Checking again discards an unused prepared package")
+    func newCheckDiscardsPreparedPackage() async throws {
+        let (service, recorder) = try await readyService()
+        service.checkForUpdates()
+        try await waitUntil { recorder.discardedFiles.count == 1 }
+        try await waitUntil { if case .available = service.phase { true } else { false } }
+        #expect(recorder.events.isEmpty)
     }
 }
 

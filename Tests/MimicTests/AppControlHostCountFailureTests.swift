@@ -28,7 +28,11 @@ struct AppControlHostCountFailureTests {
         let appState = AppState(
             projectRepository: repository,
             recentProjectsStore: RecentProjectsStore(defaults: defaults),
-            panelLayoutStore: PanelLayoutStore(defaults: defaults)
+            panelLayoutStore: PanelLayoutStore(defaults: defaults),
+            updates: UpdateService(
+                installedVersion: { ReleaseVersion(major: 1, minor: 0, patch: 0) },
+                preferences: UpdatePreferences(defaults: defaults)
+            )
         )
         let host = AppControlHost(appState: appState, repository: repository)
 

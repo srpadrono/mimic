@@ -85,6 +85,10 @@ public struct EndpointSelector: ParsableArguments, Sendable {
     public init() {}
 
     public func resolve() throws -> EndpointRef {
+        let selections = [id != nil, name != nil, method != nil || path != nil]
+        guard selections.filter({ $0 }).count <= 1 else {
+            throw CLIFailure.badArgument("Select an endpoint by route, --id, or --name, not more than one.")
+        }
         if let id { return .id(try ArgumentParsing.uuid(id, flag: "--id")) }
         if let method, let path { return .route(try ArgumentParsing.method(method), path) }
         if let path { return EndpointRef(path: path) }
@@ -104,6 +108,9 @@ public struct JourneySelector: ParsableArguments, Sendable {
     public init() {}
 
     public func resolve() throws -> JourneyRef {
+        guard name == nil || id == nil else {
+            throw CLIFailure.badArgument("Specify a journey name or --id, not both.")
+        }
         if let id { return .id(try ArgumentParsing.uuid(id, flag: "--id")) }
         if let name { return .name(name) }
         throw CLIFailure.badArgument("Specify a journey name, or --id.")
@@ -130,6 +137,10 @@ public struct StepSelector: ParsableArguments, Sendable {
     public init() {}
 
     public func resolve() throws -> JourneyStepRef {
+        let selections = [stepID != nil, index != nil, step != nil]
+        guard selections.filter({ $0 }).count <= 1 else {
+            throw CLIFailure.badArgument("Select a step with --index, --step, or --step-id, not more than one.")
+        }
         if let stepID { return .id(try ArgumentParsing.uuid(stepID, flag: "--step-id")) }
         if let index { return .index(index) }
         if let step { return .name(step) }
@@ -158,11 +169,22 @@ public struct ResponseOptions: ParsableArguments, Sendable {
 
     /// Resolves the body from whichever source was given. `--body-file -` reads stdin, which is how a
     /// large JSON payload gets in without shell quoting problems.
-    public func resolveBody() throws -> String? {
+    public func resolveBody(standardInput: FileHandle = .standardInput) throws -> String? {
+        guard body == nil || bodyFile == nil else {
+            throw CLIFailure.badArgument("Specify --body or --body-file, not both.")
+        }
         if let bodyFile {
             if bodyFile == "-" {
-                let data = FileHandle.standardInput.readDataToEndOfFile()
-                return String(decoding: data, as: UTF8.self)
+                let data: Data
+                do {
+                    data = try standardInput.readToEnd() ?? Data()
+                } catch {
+                    throw CLIFailure.fileUnreadable(path: "-", underlying: error.localizedDescription)
+                }
+                guard let body = String(data: data, encoding: .utf8) else {
+                    throw CLIFailure.fileUnreadable(path: "-", underlying: "Response bodies must contain valid UTF-8.")
+                }
+                return body
             }
             do {
                 return try String(contentsOfFile: bodyFile, encoding: .utf8)
@@ -215,12 +237,17 @@ public struct FailureOption: ParsableArguments, Sendable {
 
     public init() {}
 
-    public func resolve() throws -> NetworkFailure? {
+    public func resolve(response: ResponseOptions? = nil) throws -> NetworkFailure? {
         guard let fail else {
             if holdMs != nil {
                 throw CLIFailure.badArgument("--hold-ms only applies with --fail timeout.")
             }
             return nil
+        }
+        if let response,
+           response.status != nil || response.body != nil || response.bodyFile != nil
+            || !response.headers.isEmpty || response.contentType != nil {
+            throw CLIFailure.badArgument("A step either responds or fails: --fail cannot be combined with response options.")
         }
         switch fail.lowercased() {
         case "drop", "connectiondrop", "connection-drop":

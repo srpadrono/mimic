@@ -40,7 +40,7 @@ enum RawHTTPClient {
         let socketFD = try open(method: method, path: path, port: port,
             additionalHeaders: additionalHeaders, bodyPrefix: bodyPrefix, connection: "close")
         defer { PlatformSocket.close(socketFD) }
-        return receive(on: socketFD, timeout: timeout)
+        return receive(on: socketFD, timeout: timeout, method: method)
     }
 
     /// Leaves an incomplete upload connected so a wire test can inspect the server's deadline.
@@ -96,12 +96,15 @@ enum RawHTTPClient {
     }
 
     /// Reads a response on a socket kept open by `open`. The caller still owns the descriptor.
-    static func receive(on socketFD: Int32, timeout: TimeInterval) -> Response {
-        PlatformSocket.setReceiveTimeout(socketFD, seconds: timeout)
+    static func receive(on socketFD: Int32, timeout: TimeInterval, method: String? = nil) -> Response {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var received = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         var closedCleanly = false
         while true {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { break }
+            PlatformSocket.setReceiveTimeout(socketFD, seconds: max(remaining, 0.001))
             let count = PlatformSocket.receive(socketFD, &buffer, buffer.count)
             if count > 0 {
                 received.append(contentsOf: buffer[0..<count])
@@ -115,29 +118,74 @@ enum RawHTTPClient {
         let raw = String(decoding: received, as: UTF8.self)
         return Response(
             raw: raw,
-            isTruncated: closedCleanly && !isComplete(raw),
+            isTruncated: closedCleanly && !isComplete(received, method: method),
             isEmpty: received.isEmpty,
             didClose: closedCleanly
         )
     }
 
-    /// A chunked message ends with a zero-length chunk; a length-declared message ends when the body
-    /// reaches `Content-Length`. Anything else is a message the server abandoned.
-    private static func isComplete(_ raw: String) -> Bool {
-        guard let separator = raw.range(of: "\r\n\r\n") else { return false }
-        let head = raw[raw.startIndex..<separator.lowerBound].lowercased()
-        let body = String(raw[separator.upperBound...])
+    /// Checks wire framing, not a lossy text rendering. Invalid UTF-8 must not inflate a short
+    /// binary body into the advertised byte count. Bodyless responses follow RFC 9112 section 6.3.
+    static func isComplete(_ data: Data, method: String? = nil) -> Bool {
+        guard let separator = data.range(of: Data("\r\n\r\n".utf8)) else { return false }
+        let lines = String(decoding: data[..<separator.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+        let statusParts = (lines.first ?? "").split(separator: " ")
+        guard statusParts.count >= 2, let status = Int(statusParts[1]) else { return false }
+        let body = Data(data[separator.upperBound...])
+        if (100..<200).contains(status), status != 101 {
+            // An informational response must be followed by the final response.
+            return isComplete(body, method: method)
+        }
+        if method?.uppercased() == "HEAD" || status == 101 || status == 204 || status == 304 { return true }
 
-        if head.contains("transfer-encoding: chunked") {
-            return body.hasSuffix("0\r\n\r\n")
+        var headers: [String: [String]] = [:]
+        for line in lines.dropFirst() {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return false }
+            headers[parts[0].lowercased(), default: []].append(parts[1].trimmingCharacters(in: .whitespaces))
         }
-        if let range = head.range(of: "content-length:") {
-            let value = head[range.upperBound...]
-                .prefix { $0 != "\r" }
+        if let transfer = headers["transfer-encoding"] {
+            let codings = transfer.joined(separator: ",").split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            return codings.last == "chunked" ? completeChunks(body) : true
+        }
+        if let lengths = headers["content-length"] {
+            let values = lengths.flatMap { $0.split(separator: ",", omittingEmptySubsequences: false) }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let first = values.first, !first.isEmpty,
+                  first.utf8.allSatisfy({ (48...57).contains($0) }),
+                  values.allSatisfy({ $0 == first }), let length = Int(first) else { return false }
+            return body.count >= length
+        }
+        return true // Close-delimited response; the caller only asks after EOF.
+    }
+
+    private static func completeChunks(_ body: Data) -> Bool {
+        let crlf = Data("\r\n".utf8)
+        var cursor = body.startIndex
+        while let line = body.range(of: crlf, in: cursor..<body.endIndex) {
+            let text = String(decoding: body[cursor..<line.lowerBound], as: UTF8.self)
+            let sizeText = text.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)[0]
                 .trimmingCharacters(in: .whitespaces)
-            return body.utf8.count >= (Int(value) ?? 0)
+            guard !sizeText.isEmpty, sizeText.utf8.allSatisfy({
+                (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+            }), let size = Int(sizeText, radix: 16) else { return false }
+            cursor = line.upperBound
+            if size == 0 {
+                // Consume optional trailers through the final empty line.
+                while let trailer = body.range(of: crlf, in: cursor..<body.endIndex) {
+                    if trailer.lowerBound == cursor { return true }
+                    guard body[cursor..<trailer.lowerBound].contains(UInt8(ascii: ":")) else { return false }
+                    cursor = trailer.upperBound
+                }
+                return false
+            }
+            guard size <= body.endIndex - cursor else { return false }
+            cursor += size
+            guard body.endIndex - cursor >= 2, body[cursor] == 13, body[cursor + 1] == 10 else { return false }
+            cursor += 2
         }
-        return true
+        return false
     }
 
     enum Failure: Error {

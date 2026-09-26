@@ -6,6 +6,99 @@ import Testing
 
 @Suite("Repository safety")
 struct RepositorySafetyTests {
+    @Test("A stale snapshot cannot overwrite a project upgraded by another build")
+    func staleSnapshotCannotOverwriteNewerSchema() async throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+        let scenario = Scenario(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000301")!,
+            name: "Response", body: "original body", bodyContentType: .plainText
+        )
+        let original = MockProject(name: "Originally opened", endpoints: [
+            Endpoint(name: "Account", path: "/account", scenarios: [scenario], activeScenarioID: scenario.id),
+        ])
+        try await repository.save(original)
+        var stale = try await repository.load(id: original.id)
+        stale.name = "Stale edit"
+        stale.endpoints[0].scenarios[0].body = "stale body"
+
+        let futureVersion = MockProject.currentSchemaVersion + 1
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE project SET schemaVersion = ?, name = ? WHERE id = ?",
+                arguments: [futureVersion, "Updated by newer build", original.id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE scenario SET body = ? WHERE id = ?",
+                arguments: ["newer body", scenario.id.uuidString]
+            )
+        }
+
+        do {
+            try await repository.save(stale)
+            Issue.record("A stale save must not replace a newer project schema")
+        } catch let error as Persistence.PersistenceError {
+            guard case let .unsupportedSchemaVersion(name, stored, supported) = error else {
+                Issue.record("Expected a schema-version refusal, got \(error)")
+                return
+            }
+            #expect(name == "Updated by newer build")
+            #expect(stored == futureVersion)
+            #expect(supported == MockProject.currentSchemaVersion)
+        }
+
+        let saved = try await dbQueue.read { db in
+            (
+                try Int.fetchOne(db, sql: "SELECT schemaVersion FROM project WHERE id = ?",
+                                 arguments: [original.id.uuidString]),
+                try String.fetchOne(db, sql: "SELECT name FROM project WHERE id = ?",
+                                    arguments: [original.id.uuidString]),
+                try String.fetchOne(db, sql: "SELECT body FROM scenario WHERE id = ?",
+                                    arguments: [scenario.id.uuidString])
+            )
+        }
+        #expect(saved.0 == futureVersion)
+        #expect(saved.1 == "Updated by newer build")
+        #expect(saved.2 == "newer body")
+
+        // A refused transaction does not prevent saving another, compatible project.
+        let compatible = MockProject(name: "Compatible project")
+        try await repository.save(compatible)
+        #expect(try await repository.load(id: compatible.id).name == "Compatible project")
+        #expect(try await repository.allProjects().count == 2)
+    }
+
+    @Test("The repository refuses an incoming document from a newer schema")
+    func incomingNewerSchemaIsRefusedBeforeWriting() async throws {
+        let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()
+        let repository = GRDBProjectRepository(dbQueue: dbQueue)
+        let json = """
+        {
+          "id": "00000000-0000-0000-0000-000000000302",
+          "schemaVersion": \(MockProject.currentSchemaVersion + 1),
+          "name": "Future import",
+          "endpoints": [],
+          "createdAt": 0,
+          "modifiedAt": 0
+        }
+        """
+        let future = try JSONDecoder().decode(MockProject.self, from: Data(json.utf8))
+
+        do {
+            try await repository.save(future)
+            Issue.record("The repository must not write a document it cannot understand")
+        } catch let error as Persistence.PersistenceError {
+            guard case let .unsupportedSchemaVersion(name, stored, supported) = error else {
+                Issue.record("Expected a schema-version refusal, got \(error)")
+                return
+            }
+            #expect(name == "Future import")
+            #expect(stored == MockProject.currentSchemaVersion + 1)
+            #expect(supported == MockProject.currentSchemaVersion)
+        }
+        #expect(try await repository.allProjects().isEmpty)
+    }
+
     @Test("One unreadable backend payload does not hide the other stored projects")
     func mixedProjectListingSurvivesDamagedBackendJSON() async throws {
         let dbQueue = try DatabaseFactory.makeInMemoryDatabaseQueue()

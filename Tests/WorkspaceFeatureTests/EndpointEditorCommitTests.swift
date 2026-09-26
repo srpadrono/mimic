@@ -169,8 +169,8 @@ struct EndpointEditorCommitTests {
 
     @Test("An absent body and an empty one are the same body")
     func missingBodyReadsAsEmpty() {
-        // `syncedValues` maps `nil` to "" and `bodyValue(from:)` maps "" back to `nil`, so an
-        // endpoint with no body must not look permanently edited.
+        // A missing model body is displayed as empty, so it must not look permanently edited.
+        // An explicit edit to empty text still uses "" at the command boundary to clear a body.
         let scenario = makeScenario(body: nil)
 
         #expect(EndpointEditorView.bodyIsDirty("", against: scenario) == false)

@@ -16,6 +16,7 @@ import SwiftUI
 /// use — so a row lit up visibly more slowly than a button sitting inside it.
 public struct DSHoverHighlight: ViewModifier {
     @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
     private let cornerRadius: CGFloat
 
     public init(cornerRadius: CGFloat = DSCornerRadius.sm) {
@@ -26,14 +27,17 @@ public struct DSHoverHighlight: ViewModifier {
         content
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(isHovered ? DSColors.accentSubtle : Color.clear)
+                    .fill(isEnabled && isHovered ? DSColors.accentSubtle : Color.clear)
             }
             // The whole rounded rect is the hover region, not just the glyphs inside it. An unfilled
             // shape is not hit-testable — the correction `DSButton`'s ghost variant needed — so on the
             // two call sites that do not set their own content shape, a row only lit up while the
             // pointer was over a word and flickered off in the gaps between them.
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .onHover { isHovered = $0 }
+            .onHover { isHovered = isEnabled && $0 }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { isHovered = false }
+            }
             .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
     }
 }

@@ -240,6 +240,7 @@ struct ControlErrorCodeTests {
             .unauthorized: "request.unauthorized",
             .forbiddenOrigin: "request.forbiddenOrigin",
             .updateCheckFailed: "update.checkFailed",
+            .updateInstalling: "update.installing",
             .persistenceFailure: "persistence.failure",
             .internalFailure: "internal.failure",
             .encodingFailure: "internal.encoding",

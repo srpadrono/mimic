@@ -21,7 +21,9 @@ import GRDB
 /// is only correct while that stays true is a trap for whoever changes it.
 public enum StoreBackup {
 
-    /// Where snapshots live, beside the store rather than inside it.
+    /// Snapshots live in Backups/<store filename>, so stores sharing one parent never prune
+    /// each other's history. Older copies directly in Backups have no source identity and remain
+    /// there untouched; they are not automatically assigned to any store's retention set.
     public static let directoryName = "Backups"
 
     /// How many snapshots survive a prune.
@@ -32,7 +34,9 @@ public enum StoreBackup {
     public static let keptSnapshots = 3
 
     public static func directoryURL(for storeURL: URL) -> URL {
-        storeURL.deletingLastPathComponent().appendingPathComponent(directoryName, isDirectory: true)
+        storeURL.deletingLastPathComponent()
+            .appendingPathComponent(directoryName, isDirectory: true)
+            .appendingPathComponent(storeURL.lastPathComponent, isDirectory: true)
     }
 
     /// Takes a snapshot of `storeURL` and prunes older ones, returning the file written.
@@ -59,7 +63,7 @@ public enum StoreBackup {
         let directory = directoryURL(for: storeURL)
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let destination = availableURL(in: directory, stamp: timestamp(date), version: version)
+        let destination = try availableURL(in: directory, stamp: timestamp(date), version: version)
         // SQLite may leave output behind if VACUUM INTO fails. Keep that output out of the
         // snapshot listing until the operation has returned successfully.
         let temporary = directory.appendingPathComponent(
@@ -69,6 +73,8 @@ public enum StoreBackup {
 
         var configuration = Configuration()
         configuration.busyMode = .timeout(DatabaseFactory.busyTimeoutSeconds)
+        // A source removed after the existence check must not be recreated as an empty store.
+        configuration.readonly = true
         let dbQueue = try DatabaseQueue(path: storeURL.path, configuration: configuration)
         try dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM INTO ?", arguments: [temporary.path])
@@ -84,21 +90,23 @@ public enum StoreBackup {
         return destination
     }
 
-    /// Every snapshot beside `storeURL`, newest first.
-    ///
-    /// Ordered by filename, which works only because the timestamp comes *before* the version in the
-    /// name. With the version first, `mimic-0.9.9-…` would sort after `mimic-0.10.0-…` for the same
-    /// reason `ReleaseVersion` exists at all, and "the newest backup" would start naming an old one
-    /// the first time a component reached double digits.
+    /// This store's completed snapshots, newest first. Names place the UTC timestamp and a
+    /// fixed-width sequence before the version, so repeated snapshots within one second stay
+    /// chronological even when an update changes the version string.
     public static func snapshots(for storeURL: URL) -> [URL] {
         let directory = directoryURL(for: storeURL)
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         return contents
-            .filter { $0.lastPathComponent.hasPrefix(filePrefix) && $0.pathExtension == fileExtension }
+            .filter { url in
+                guard url.lastPathComponent.hasPrefix(filePrefix), url.pathExtension == fileExtension,
+                      let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                else { return false }
+                return values.isRegularFile == true && values.isSymbolicLink != true
+            }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
@@ -144,28 +152,35 @@ public enum StoreBackup {
         return text.isEmpty ? "unknown" : text
     }
 
-    /// The first unused name for this timestamp and version.
-    ///
-    /// Two snapshots inside one second is not a normal sequence, but "overwrite the other one" is
-    /// the wrong answer to it in a type whose entire job is not losing copies of the database.
-    static func availableURL(in directory: URL, stamp: String, version: String) -> URL {
-        let base = "\(filePrefix)\(stamp)-\(sanitize(version))"
-        var candidate = directory.appendingPathComponent("\(base).\(fileExtension)")
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = directory.appendingPathComponent("\(base)-\(suffix).\(fileExtension)")
-            suffix += 1
+    /// Uses a sequence across all versions at this timestamp. Starting after the highest retained
+    /// value avoids reusing an old number after pruning has freed its filename.
+    static func availableURL(in directory: URL, stamp: String, version: String) throws -> URL {
+        let prefix = "\(filePrefix)\(stamp)-"
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let highest = names.compactMap { name -> UInt64? in
+            guard name.hasPrefix(prefix), name.hasSuffix(".\(fileExtension)") else { return nil }
+            let suffix = name.dropFirst(prefix.count)
+            guard suffix.count > 20, suffix.dropFirst(20).first == "-" else { return nil }
+            return UInt64(suffix.prefix(20))
+        }.max() ?? 0
+        guard highest < UInt64.max else {
+            throw StoreBackupError.sequenceExhausted(timestamp: stamp)
         }
-        return candidate
+        let sequence = String(highest + 1)
+        let padded = String(repeating: "0", count: 20 - sequence.count) + sequence
+        let name = "\(prefix)\(padded)-\(sanitize(version)).\(fileExtension)"
+        return directory.appendingPathComponent(name)
     }
 }
 
 public enum StoreBackupError: Error, LocalizedError, Equatable {
     case sourceMissing(path: String)
+    case sequenceExhausted(timestamp: String)
 
     public var errorDescription: String? {
         switch self {
         case let .sourceMissing(path): "No project store exists at \(path) to back up."
+        case let .sequenceExhausted(timestamp): "No snapshot sequence remains for \(timestamp)."
         }
     }
 }

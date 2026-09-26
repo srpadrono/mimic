@@ -130,10 +130,7 @@ struct ImportSheetPage {
 
     /// The commit button.
     ///
-    /// Its visible title tracks the selection ("Import 3 endpoints") but its accessibility label does
-    /// not — `ImportReviewList` sets `.accessibilityLabel("Import selected endpoints")` over it — so
-    /// the count is matched on nowhere in this file. See the note in `SpecImportUITests` about
-    /// IMPREV-13.
+    /// Its stable label names the action; its value announces the current selection count.
     var importButton: XCUIElement {
         app.buttons.matching(
             NSPredicate(
@@ -184,6 +181,12 @@ struct ImportSheetPage {
     var duplicateNote: XCUIElement { element(identifier: "import.duplicateWarning") }
     var bodySizeWarning: XCUIElement { element(identifier: "import.bodySizeWarning") }
     var binaryBodyWarning: XCUIElement { element(identifier: "import.binaryBodyWarning") }
+    var unavailableBodyWarning: XCUIElement { element(identifier: "import.unavailableBodyWarning") }
+    var partialResponseWarning: XCUIElement { element(identifier: "import.partialResponseWarning") }
+    var invalidCandidateWarning: XCUIElement { element(identifier: "import.invalidCandidateWarning") }
+    var capturedBodyNotice: XCUIElement { element(identifier: "import.capturedBodyNotice") }
+    var bodyPreviewText: XCUIElement { element(identifier: "import.bodyPreview.text") }
+    var closeBodyPreview: XCUIElement { element(identifier: "ds.button.import.bodyPreview.close") }
 
     // MARK: Parse error
 
@@ -500,6 +503,40 @@ enum SpecImportFixtures {
     }
     """
 
+    /// A missing body, a partial response, an invalid header, and a complete response. Only the
+    /// complete response is selected initially; missing text may be explicitly imported bodyless.
+    static let incompleteHAR = #"""
+    {
+      "log": {
+        "version": "1.2",
+        "entries": [
+          {
+            "request": { "method": "GET", "url": "https://api.example.com/api/missing" },
+            "response": { "status": 200, "bodySize": 12,
+              "content": { "mimeType": "application/json", "size": 12 } }
+          },
+          {
+            "request": { "method": "GET", "url": "https://api.example.com/api/partial" },
+            "response": { "status": 206,
+              "headers": [{ "name": "Content-Range", "value": "bytes 0-3/10" }],
+              "content": { "mimeType": "text/plain", "text": "part" } }
+          },
+          {
+            "request": { "method": "GET", "url": "https://api.example.com/api/invalid" },
+            "response": { "status": 200,
+              "headers": [{ "name": "Bad Header", "value": "invalid" }],
+              "content": { "mimeType": "text/plain", "text": "invalid header" } }
+          },
+          {
+            "request": { "method": "GET", "url": "https://api.example.com/api/health" },
+            "response": { "status": 200,
+              "content": { "mimeType": "application/json", "text": "{\"ok\":true}" } }
+          }
+        ]
+      }
+    }
+    """#
+
     /// Truncated JSON: the decoder fails on the bytes themselves, which is the common shape of the
     /// error state — a file saved half-written, or one that was never a HAR.
     static let malformedHAR = """
@@ -599,6 +636,11 @@ enum SpecImportFixtures {
         bytes: refusedHAR
     )
 
+    static let incomplete = SpecImportFixture(
+        resourceName: "mimic-uitest-incomplete.json",
+        bytes: incompleteHAR
+    )
+
     static let malformed = SpecImportFixture(
         resourceName: "mimic-uitest-broken.json",
         bytes: malformedHAR
@@ -637,13 +679,7 @@ enum SpecImportFixtures {
 /// megabyte of `x` and that does not belong in a repository or in a shipped bundle. The count is a
 /// literal here, not a number read from `SpecImport`, so the fixture is still the suite's.
 ///
-/// **Two steps this suite deliberately does not claim.**
-///
-/// - *IMPREV-13*, the commit button's label tracking the selection. `ImportReviewList` builds the
-///   title "Import 3 endpoints" and then sets `.accessibilityLabel("Import selected endpoints")` on
-///   the same button, which replaces it — the count is not in the tree at all. Asserting on it needs
-///   a production change (an `.accessibilityValue` carrying the count, or the count in the label),
-///   not a cleverer query.
+/// **One step this suite does not claim.**
 /// - *IMPERR-03/-04*, actually clicking "Choose another file". The click runs
 ///   `NSOpenPanel.runModal()`, which for a sandboxed app is a modal window in another process that
 ///   this suite can neither see nor dismiss; the app would sit in a modal loop for the rest of the
@@ -1178,6 +1214,7 @@ final class SpecImportUITests: MimicUITestCase {
         let sheet = ImportSheetPage.har(app)
         assertReviewList(sheet, "The file should parse and the review screen should appear")
         assertExists(sheet.selectionCount("3 of 4 selected"), "The initial selection count")
+        assertReads(sheet.importButton, "3 selected", "The commit button's accessible count")
 
         // Sheet actions belong together in the footer; a Cancel floating beside the heading
         // makes the primary and escape actions feel unrelated. Keep this an actual geometry check,
@@ -1198,6 +1235,7 @@ final class SpecImportUITests: MimicUITestCase {
         // IMPREV-11
         sheet.deselectAllButton.click()
         assertExists(sheet.selectionCount("0 of 4 selected"), "The count after Deselect all")
+        assertReads(sheet.importButton, "0 selected", "The disabled commit button's accessible count")
         // IMPREV-12 and IMPREV-14 — a control that cannot change anything says so.
         assertDisabled(sheet.deselectAllButton, "Deselect all, with nothing selected")
         assertDisabled(sheet.importButton, "The commit button, with nothing selected")
@@ -1223,6 +1261,7 @@ final class SpecImportUITests: MimicUITestCase {
         assertExists(sheet.selectionCount("2 of 4 selected"), "The count after clicking row 3")
         sheet.candidatePath(at: 2).click()
         assertExists(sheet.selectionCount("1 of 4 selected"), "The count after clicking row 2")
+        assertReads(sheet.importButton, "1 selected", "The commit button's accessible count after toggling")
     }
 
     /// The commit, and the endpoints it is supposed to leave behind.
@@ -1302,7 +1341,7 @@ final class SpecImportUITests: MimicUITestCase {
 
         let sheet = ImportSheetPage.har(app)
         assertReviewList(sheet, "The file should parse and the review screen should appear")
-        assertExists(sheet.selectionCount("3 of 3 selected"), "The selection count")
+        assertExists(sheet.selectionCount("1 of 3 selected"), "Only the complete text body starts selected")
 
         // IMPREV-19 — a binary body is flagged for being binary, not for its size: these four bytes
         // are nowhere near the limit, so this flag can only have come from the binary branch.
@@ -1328,6 +1367,9 @@ final class SpecImportUITests: MimicUITestCase {
         assertExists(sheet.binaryBodyWarning, "The \"binary bodies\" footer warning")
         // Nothing here repeats a route, so the third footer note must be absent.
         assertAbsent(sheet.duplicateNote, "The duplicates footer note")
+
+        sheet.selectAllButton.click()
+        assertExists(sheet.selectionCount("3 of 3 selected"), "Bodyless imports can be selected explicitly")
     }
 
     /// GraphQL: one route, two operations, two rows that can be told apart.
@@ -1368,9 +1410,13 @@ final class SpecImportUITests: MimicUITestCase {
 
         let sheet = ImportSheetPage.har(app)
         assertReviewList(sheet, "The file should parse and the review screen should appear")
-        // A browser writes `"status": 0` for a cancelled request; both rows arrive selected, because
-        // nothing in the *review* screen knows the executor will refuse one.
+        // A browser writes `"status": 0` for a cancelled request. Review explains the refusal before
+        // import and leaves it deselected, but selecting it explicitly still must not persist it.
         assertReads(sheet.candidateCell("status", at: 1), "0", "Row 1's status")
+        assertExists(sheet.candidateFlag("invalid", at: 1), "The invalid-status flag")
+        assertExists(sheet.staticText(containing: "Invalid status code: 0"), "The row's refusal reason")
+        assertExists(sheet.selectionCount("1 of 2 selected"), "Only the usable row starts selected")
+        sheet.candidatePath(at: 1).click()
         assertExists(sheet.selectionCount("2 of 2 selected"), "The selection count")
 
         sheet.importButton.click()
@@ -1396,6 +1442,56 @@ final class SpecImportUITests: MimicUITestCase {
         // The good candidate still landed: a refusal rolls back its own candidate, not the import.
         assertEndpointRowCount(1)
         assertExists(sidebarText("/api/good"), "The imported /api/good row in the sidebar")
+    }
+
+    @MainActor
+    func testIncompleteCapturesExplainTheirLimitsAndPreviewWithoutChangingSelection() throws {
+        launchWithInjectedImport(
+            fixture: SpecImportFixtures.incomplete,
+            kind: "har",
+            projectName: "HAR incomplete"
+        )
+        let sheet = ImportSheetPage.har(app)
+        assertReviewList(sheet, "The mixed capture should reach review")
+        assertExists(sheet.selectionCount("1 of 4 selected"), "Only the complete response starts selected")
+        assertReads(sheet.candidateCell("size", at: 0), "12 B", "The known size of the missing body")
+        assertExists(sheet.candidateFlag("bodyUnavailable", at: 0), "A missing body has its own flag")
+        assertAbsent(sheet.candidateFlag("binaryBody", at: 0), "Missing text is not binary data")
+        assertAbsent(sheet.candidateCell("preview", at: 0), "Missing text cannot offer a body preview")
+        assertExists(sheet.candidateFlag("partialResponse", at: 1), "The partial response flag")
+        assertExists(sheet.candidateFlag("invalid", at: 2), "The invalid header flag")
+        assertExists(sheet.staticText(containing: "Bad Header"), "The invalid header is named in the row")
+        assertExists(sheet.unavailableBodyWarning, "The bodyless-import disclosure")
+        assertExists(sheet.partialResponseWarning, "The partial-response refusal disclosure")
+        assertExists(sheet.invalidCandidateWarning, "The invalid-entry guidance")
+        assertExists(sheet.capturedBodyNotice, "The captured-text disclosure")
+        assertExists(sheet.importButton, "The footer action remains available with all warnings")
+        XCTAssertTrue(sheet.importButton.isHittable)
+        XCTAssertLessThan(sheet.cancelButton.frame.maxX, sheet.importButton.frame.minX)
+        XCTAssertLessThan(abs(sheet.cancelButton.frame.midY - sheet.importButton.frame.midY), 4)
+
+        let preview = sheet.candidateCell("preview", at: 3)
+        assertExists(preview, "The complete body's preview action")
+        preview.click()
+        assertReads(sheet.bodyPreviewText, #"{"ok":true}"#, "The literal captured response in the preview")
+        assertExists(sheet.closeBodyPreview, "The preview's Close action")
+        sheet.closeBodyPreview.click()
+        XCTAssertTrue(sheet.bodyPreviewText.waitForNonExistence(timeout: 5))
+        assertExists(sheet.selectionCount("1 of 4 selected"), "Previewing must not toggle the row")
+
+        sheet.candidatePath(at: 0).click()
+        sheet.candidatePath(at: 1).click()
+        assertExists(sheet.selectionCount("3 of 4 selected"), "The user's explicit bodyless and partial selections")
+        sheet.importButton.click()
+        XCTAssertTrue(sheet.waitForDismissal(showing: "Endpoints found"))
+        assertExists(sheet.staticText(containing: "Partial responses (206) cannot be imported"), "The partial row is refused")
+        let ok = app.buttons.matching(identifier: "commandError.okButton").firstMatch
+        assertExists(ok, "The import report's OK action")
+        ok.click()
+        assertEndpointRowCount(2)
+        assertExists(sidebarText("/api/missing"), "The explicitly requested bodyless endpoint")
+        assertExists(sidebarText("/api/health"), "The complete endpoint survives the partial refusal")
+        assertAbsent(sidebarText("/api/partial"), "The partial endpoint must not be created")
     }
 
     // MARK: - IMPAPI: the OpenAPI flow

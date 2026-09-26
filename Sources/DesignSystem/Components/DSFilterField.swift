@@ -18,6 +18,7 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
     private let focusRequest: Int
+    @Environment(\.isEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
 
     public init(text: Binding<String>, scopeID: Binding<String>, scopes: [Scope],
@@ -43,7 +44,12 @@ public struct DSFilterField: View {
                 .accessibilityLabel(placeholder)
 
             if !text.isEmpty {
-                DSClearButton(text: $text, identifier: "\(identifier).clear",
+                // Clearing through the keyboard removes the focused button. Return focus to the
+                // field so the next keystroke starts a new query without another Tab or click.
+                DSClearButton(text: Binding(get: { text }, set: {
+                    text = $0
+                    isFocused = true
+                }), identifier: "\(identifier).clear",
                               label: "Clear filter", help: "Clear the filter")
             }
         }
@@ -55,10 +61,10 @@ public struct DSFilterField: View {
                 .stroke(isFocused ? DSColors.borderFocused : DSColors.border,
                         lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
                 .contentShape(Capsule())
-                .onTapGesture { isFocused = true }
+                .onTapGesture { if isEnabled { isFocused = true } }
         }
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
-        .onChange(of: focusRequest) { _, _ in isFocused = true }
+        .onChange(of: focusRequest) { _, _ in if isEnabled { isFocused = true } }
         // Preserve the individual field, scope, and clear identifiers for keyboard and UI tests.
         .accessibilityElement(children: .contain)
     }
@@ -68,13 +74,12 @@ public struct DSFilterField: View {
         let scopes: [Scope]
         @Binding var scopeID: String
         let identifier: String
+        @Environment(\.isEnabled) private var isEnabled
         @State private var isHovered = false
 
         var body: some View {
             Menu {
-                ForEach(scopes) { scope in
-                    Button(scope.title) { scopeID = scope.id }
-                }
+                ScopeOptions(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             } label: {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "line.3.horizontal.decrease")
@@ -89,16 +94,19 @@ public struct DSFilterField: View {
                         .font(.system(size: DSGlyph.indicator, weight: .semibold))
                 }
                 .foregroundStyle(isScoped ? DSColors.accentText
-                                 : isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
+                                 : isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                 .padding(.horizontal, DSSpacing.xxs)
                 .frame(height: DSControlHeight.field)
                 .background {
                     RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(isHovered || isScoped ? DSColors.accentSubtle : .clear)
+                        .fill((isEnabled && isHovered) || isScoped ? DSColors.accentSubtle : .clear)
                 }
                 .contentShape(Rectangle())
             }
-            .onHover { isHovered = $0 }
+            .onHover { isHovered = isEnabled && $0 }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { isHovered = false }
+            }
             .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -115,5 +123,25 @@ public struct DSFilterField: View {
         }
         private var title: String { selection?.title ?? "" }
         private var isScoped: Bool { selection?.id != scopes.first?.id }
+    }
+
+    /// Native mutually exclusive choices, including the selected checkmark and keyboard behavior.
+    /// Shared with the hosted menu regression so it exercises AppKit's actual menu adaptation.
+    struct ScopeOptions: View {
+        let scopes: [Scope]
+        @Binding var scopeID: String
+        let identifier: String
+
+        var body: some View {
+            Picker("Filter scope", selection: $scopeID) {
+                ForEach(scopes) { scope in
+                    Text(scope.title)
+                        .tag(scope.id)
+                        .accessibilityIdentifier("\(identifier).scope.\(scope.id)")
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
     }
 }

@@ -162,4 +162,56 @@ struct ImportCommitTests {
         #expect(error.contains("GET /v1/cancelled"))
         #expect(error.contains("POST /v1/things"))
     }
+
+    @Test("An explicitly selected partial capture is refused while missing-body and complete rows import")
+    func partialCaptureDoesNotDisplaceCompleteOrExplicitBodylessImports() async throws {
+        let appState = try makeAppStateWithProject()
+        var candidates = try await HARParser.parse(data: Data(#"""
+        {
+          "log": { "version": "1.2", "entries": [
+            {
+              "request": { "method": "GET", "url": "https://example.com/missing" },
+              "response": { "status": 200, "bodySize": 12,
+                "content": { "mimeType": "application/json", "size": 12 } }
+            },
+            {
+              "request": { "method": "GET", "url": "https://example.com/report" },
+              "response": { "status": 206,
+                "headers": [{ "name": "Content-Range", "value": "bytes 0-3/10" }],
+                "content": { "mimeType": "text/plain", "text": "part" } }
+            },
+            {
+              "request": { "method": "GET", "url": "https://example.com/report" },
+              "response": { "status": 200,
+                "content": { "mimeType": "text/plain", "text": "complete report" } }
+            },
+            {
+              "request": { "method": "GET", "url": "https://example.com/health" },
+              "response": { "status": 200,
+                "content": { "mimeType": "application/json", "text": "{\"ok\":true}" } }
+            }
+          ] }
+        }
+        """#.utf8), existingEndpoints: [])
+        try #require(candidates.count == 4)
+        #expect(candidates.map(\.isSelected) == [false, false, true, true])
+        #expect(candidates[0].bodyIsUnavailable)
+        #expect(candidates[0].bodySizeBytes == 12)
+        #expect(!candidates[2].isDuplicate)
+        candidates[0].isSelected = true
+        candidates[1].isSelected = true
+
+        appState.commitImportedCandidates(candidates)
+
+        let endpoints = try #require(appState.currentProject?.endpoints)
+        try #require(endpoints.count == 3)
+        #expect(endpoints.map(\.path) == ["/missing", "/report", "/health"])
+        #expect(endpoints[0].scenarios.first?.body == nil)
+        #expect(endpoints[1].scenarios.first?.statusCode == 200)
+        #expect(endpoints[1].scenarios.first?.body == "complete report")
+        #expect(endpoints[2].scenarios.first?.body == #"{"ok":true}"#)
+        let error = try #require(appState.lastCommandError)
+        #expect(error.contains("Skipped 1 of 4"))
+        #expect(error.contains("GET /report — Partial responses (206) cannot be imported. Capture a complete response."))
+    }
 }

@@ -62,21 +62,88 @@ struct MockServerEngineTests {
     }
 
     @Test func doubleStartThrowsAlreadyRunning() async throws {
-        let engine = MockServerEngine()
-        let config = ServerConfiguration(port: try Self.freePort(), globalDelayMs: 0)
-        try await engine.start(configuration: config)
-        defer { Task { try? await engine.stop() } }
-
-        await #expect(throws: MockServerError.self) {
-            try await engine.start(configuration: config)
+        try await JourneyServingTests.withEngine { engine, baseURL in
+            let config = ServerConfiguration(port: try #require(baseURL.port), globalDelayMs: 0)
+            do {
+                try await engine.start(configuration: config)
+                Issue.record("A second start must be refused")
+            } catch let error as MockServerError {
+                guard case .alreadyRunning = error else {
+                    Issue.record("Expected alreadyRunning, got \(error)")
+                    return
+                }
+            }
         }
     }
 
     @Test func stopWhenNotRunningThrowsNotRunning() async {
         let engine = MockServerEngine()
-        await #expect(throws: MockServerError.self) {
+        do {
             try await engine.stop()
+            Issue.record("Stopping an idle engine must be refused")
+        } catch let error as MockServerError {
+            guard case .notRunning = error else {
+                Issue.record("Expected notRunning, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record(error)
         }
+    }
+
+    @Test("Invalid primary and named listener ports are refused before binding", arguments: [
+        Int.min, -1, 0, 65_536, Int.max,
+    ])
+    func invalidListenerPortsAreRefused(port: Int) async throws {
+        let validPort = try Self.freePort()
+        for isNamed in [false, true] {
+            let engine = MockServerEngine()
+            let configuration = ServerConfiguration(
+                port: isNamed ? validPort : port,
+                globalDelayMs: 0,
+                backends: isNamed ? [BackendConfiguration(name: "Accounts", port: port)] : []
+            )
+            var refused = false
+            do {
+                try await engine.start(configuration: configuration)
+            } catch let error as MockServerError {
+                if case .invalidConfiguration = error { refused = true }
+                else { Issue.record("Expected invalidConfiguration for port \(port), got \(error)") }
+            } catch {
+                Issue.record(error)
+            }
+            #expect(refused, "Invalid port \(port) must be refused for \(isNamed ? "named" : "primary") listener")
+            #expect(await engine.isRunning == false)
+            if await engine.isRunning { try await engine.stop() }
+        }
+    }
+
+    @Test("A refused named listener leaves the primary port available for a corrected start")
+    func validStartAfterInvalidListener() async throws {
+        let port = try Self.freePort()
+        let engine = MockServerEngine()
+        let invalid = ServerConfiguration(
+            port: port, globalDelayMs: 0,
+            backends: [BackendConfiguration(name: "Accounts", port: 0)]
+        )
+        await #expect(throws: MockServerError.self) {
+            try await engine.start(configuration: invalid)
+        }
+        guard await engine.isRunning == false else {
+            try await engine.stop()
+            return
+        }
+
+        try await engine.start(configuration: ServerConfiguration(port: port, globalDelayMs: 0))
+        do {
+            let url = try #require(URL(string: "http://127.0.0.1:\(port)/missing"))
+            let (_, response) = try await URLSession.shared.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 404)
+        } catch {
+            try? await engine.stop()
+            throw error
+        }
+        try await engine.stop()
     }
 
     /// This called `updateConfiguration` twice and asserted nothing at all — its whole claim was that
@@ -180,24 +247,20 @@ struct MockServerEngineTests {
     }
 
     @Test func logStreamYieldsEntryAfterHTTPRequest() async throws {
-        let engine = MockServerEngine()
-        let port = try Self.freePort()
-        let config = ServerConfiguration(port: port, globalDelayMs: 0)
-        try await engine.start(configuration: config)
-        defer { Task { try? await engine.stop() } }
+        try await JourneyServingTests.withEngine { engine, baseURL in
+            let stream = engine.logStream
+            let url = baseURL.appendingPathComponent("anything")
 
-        let stream = engine.logStream
-        let url = try #require(URL(string: "http://127.0.0.1:\(port)/anything"))
+            try await confirmation("the served request is yielded to the log stream") { logged in
+                // Attach before sending so this also covers delivery while a consumer is waiting.
+                async let entry = Self.firstLogEntry(from: stream, within: .seconds(5))
+                let (_, response) = try await URLSession.shared.data(from: url)
+                #expect((response as? HTTPURLResponse)?.statusCode == 404)
 
-        await confirmation("the served request is yielded to the log stream") { logged in
-            // Started before the request is issued, so the entry cannot be missed between the
-            // response landing and the consumer attaching.
-            async let entry = Self.firstLogEntry(from: stream, within: .seconds(5))
-            _ = try? await URLSession.shared.data(from: url)
-
-            let received = await entry
-            #expect(received?.path == "/anything")
-            if received != nil { logged() }
+                let received = await entry
+                #expect(received?.path == "/anything")
+                if received != nil { logged() }
+            }
         }
     }
 
@@ -252,6 +315,63 @@ struct MockServerEngineTests {
         }
     }
 
+    @Test("Stopping releases a delayed request while preserving its queued log across restart")
+    func stopCancelsRunDelaysWithoutDiscardingLogs() async throws {
+        let engine = MockServerEngine()
+        let port = try Self.freePort()
+        let configuration = ServerConfiguration(port: port, globalDelayMs: 0)
+        let scenario = Scenario(name: "Slow", statusCode: 200, body: "before restart")
+        var endpoint = Endpoint(
+            name: "Slow", path: "/slow", scenarios: [scenario],
+            activeScenarioID: scenario.id, delayMs: 30_000
+        )
+        let url = try #require(URL(string: "http://127.0.0.1:\(port)/slow"))
+        await engine.updateConfiguration(endpoints: [endpoint])
+        try await engine.start(configuration: configuration)
+        let session = JourneyServingTests.session()
+        defer { session.invalidateAndCancel() }
+        let pending = Task { try await session.data(from: url) }
+
+        do {
+            // The log is published before the artificial wait. Leave it unacknowledged while
+            // stopping, so the test distinguishes active-handler cleanup from discarding logs.
+            let first = try #require(await Self.firstLogEntry(from: engine.logStream, within: .seconds(5)))
+            #expect(first.responseBody == "before restart")
+            #expect(await engine.logGate.activeCount == 1)
+            #expect(await engine.logGate.outstandingCount == 1)
+            pending.cancel()
+            _ = try? await pending.value
+
+            try await engine.stop()
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while await engine.logGate.activeCount != 0, ContinuousClock.now < deadline {
+                await Task.yield()
+            }
+            #expect(await engine.logGate.activeCount == 0, "The stopped run retained its delayed handler")
+            #expect(await engine.logGate.outstandingCount == 1, "Stopping must preserve the queued log")
+
+            endpoint.delayMs = 0
+            endpoint.scenarios[0].body = "after restart"
+            await engine.updateConfiguration(endpoints: [endpoint])
+            try await engine.start(configuration: configuration)
+            let (data, response) = try await session.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(String(decoding: data, as: UTF8.self) == "after restart")
+            let second = try #require(await Self.firstLogEntry(from: engine.logStream, within: .seconds(5)))
+            #expect(second.responseBody == "after restart")
+            #expect(await engine.logGate.outstandingCount == 2)
+            await engine.acknowledgeLog()
+            await engine.acknowledgeLog()
+            #expect(await engine.logGate.outstandingCount == 0)
+            try await engine.stop()
+        } catch {
+            pending.cancel()
+            _ = try? await pending.value
+            try? await engine.stop()
+            throw error
+        }
+    }
+
     /// The two refusals name different problems, and the difference is what a caller does next:
     /// `alreadyRunning` means "you already have a server", `invalidState(.stopping)` means "ask again
     /// in a moment". They were the same message until the stop window was distinguished from a second
@@ -266,24 +386,19 @@ struct MockServerEngineTests {
     }
 
     @Test func appliesConfiguredDelayBeforeResponding() async throws {
-        let engine = MockServerEngine()
         let scenario = Scenario(name: "OK", statusCode: 200, body: "{}")
         let endpoint = Endpoint(name: "Slow", method: .get, path: "/slow",
                                 scenarios: [scenario], activeScenarioID: scenario.id, delayMs: 150)
         // global (120) + per-endpoint (150) = 270ms minimum
-        await engine.updateConfiguration(endpoints: [endpoint], globalDelayMs: 120)
+        try await JourneyServingTests.withEngine(endpoints: [endpoint], globalDelayMs: 120) { _, baseURL in
+            let url = baseURL.appendingPathComponent("slow")
+            let started = ContinuousClock.now
+            let (_, response) = try await URLSession.shared.data(from: url)
+            let elapsed = ContinuousClock.now - started
 
-        let port = try Self.freePort()
-        try await engine.start(configuration: ServerConfiguration(port: port, globalDelayMs: 120))
-        defer { Task { try? await engine.stop() } }
-
-        let url = try #require(URL(string: "http://127.0.0.1:\(port)/slow"))
-        let started = ContinuousClock.now
-        let (_, response) = try await URLSession.shared.data(from: url)
-        let elapsed = ContinuousClock.now - started
-
-        #expect((response as? HTTPURLResponse)?.statusCode == 200)
-        #expect(elapsed >= .milliseconds(250))
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(elapsed >= .milliseconds(250))
+        }
     }
 
     // MARK: - Error mapping
@@ -294,7 +409,11 @@ struct MockServerEngineTests {
             var description: String { "address already in use (EADDRINUSE)" }
         }
         let mapped = VaporConfigurator.mapStartError(FakeBindError(), port: 9090)
-        #expect(mapped is MockServerError)
+        guard let engineError = mapped as? MockServerError, case let .portInUse(port) = engineError else {
+            Issue.record("Expected portInUse, got \(mapped)")
+            return
+        }
+        #expect(port == 9090)
     }
 
     @Test func mapStartErrorPassesThroughUnrelatedErrors() {
@@ -306,25 +425,19 @@ struct MockServerEngineTests {
     // MARK: - Route matching integration
 
     @Test func updateConfigurationAffectsRouteMatching() async throws {
-        let engine = MockServerEngine()
-        let port = try Self.freePort()
-        let config = ServerConfiguration(port: port, globalDelayMs: 0)
-
         let scenario = Scenario(name: "OK", statusCode: 200, body: "{\"status\":\"ok\"}")
         let endpoint = Endpoint(name: "Health", method: .get, path: "/health",
                                 scenarios: [scenario], activeScenarioID: scenario.id)
-        await engine.updateConfiguration(endpoints: [endpoint])
+        try await JourneyServingTests.withEngine { engine, baseURL in
+            let url = baseURL.appendingPathComponent("health")
+            let (_, before) = try await URLSession.shared.data(from: url)
+            #expect((before as? HTTPURLResponse)?.statusCode == 404)
 
-        try await engine.start(configuration: config)
-        defer { Task { try? await engine.stop() } }
-
-        let url = try #require(URL(string: "http://127.0.0.1:\(port)/health"))
-        let (data, response) = try await URLSession.shared.data(from: url)
-        // `as!` aborts the whole runner on a surprise; `#require` fails this one test and says why.
-        let httpResponse = try #require(response as? HTTPURLResponse)
-
-        #expect(httpResponse.statusCode == 200)
-        let body = String(data: data, encoding: .utf8)
-        #expect(body == "{\"status\":\"ok\"}")
+            await engine.updateConfiguration(endpoints: [endpoint])
+            let (data, response) = try await URLSession.shared.data(from: url)
+            let httpResponse = try #require(response as? HTTPURLResponse)
+            #expect(httpResponse.statusCode == 200)
+            #expect(String(data: data, encoding: .utf8) == "{\"status\":\"ok\"}")
+        }
     }
 }

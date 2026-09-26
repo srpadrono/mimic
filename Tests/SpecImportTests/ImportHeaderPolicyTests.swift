@@ -35,10 +35,33 @@ struct ImportHeaderPolicyTests {
     func transportHeadersAreDropped() {
         for header in [
             "Content-Length", "Content-Range", "Transfer-Encoding", "Connection",
-            "Keep-Alive", "Upgrade", "TE", "Trailer", "Proxy-Authenticate",
+            "Keep-Alive", "Upgrade", "TE", "Trailer", "Proxy-Authenticate", "Proxy-Connection",
         ] {
             #expect(ImportHeaderPolicy.shouldDrop(header), "\(header) is hop-by-hop or framing")
         }
+    }
+
+    @Test("Connection-nominated response fields do not become permanent mock headers")
+    func connectionOptionsAreDropped() {
+        let kept = ImportHeaderPolicy.replayable([
+            "Connection": "keep-alive, X-Session-Hop",
+            "X-Session-Hop": "connection-specific",
+            "X-Safe": "retained",
+        ])
+        #expect(kept == ["X-Safe": "retained"])
+    }
+
+    @Test("Every repeated Connection field contributes exclusions before header merging")
+    func repeatedConnectionFieldsAreDropped() {
+        let kept = ImportHeaderPolicy.replayable([
+            (name: "Connection", value: "X-First"),
+            (name: "connection", value: " X-Second , keep-alive"),
+            (name: "x-first", value: "one"),
+            (name: "X-SECOND", value: "two"),
+            (name: "X-Safe", value: "old"),
+            (name: "x-safe", value: "new"),
+        ])
+        #expect(kept == ["x-safe": "new"])
     }
 
     @Test("HTTP/2 pseudo-headers are dropped — they are framing, not headers")

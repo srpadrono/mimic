@@ -143,6 +143,49 @@ struct BackendCommandTests {
         #expect(withStep == stepOriginal)
     }
 
+    @Test("A DNS root dot cannot bypass the upstream loop guard")
+    func fullyQualifiedLocalhostIsRejected() {
+        var project = Self.configuredProject
+        let original = project
+        #expect(throws: ControlError.self) {
+            _ = try ProjectCommandExecutor.apply(
+                .serverConfigure(port: nil, globalDelayMs: nil, upstreamURL: "http://LOCALHOST.:8080"),
+                to: &project
+            )
+        }
+        #expect(project == original)
+        #expect(EndpointValidator.isLoopbackHost("[::1]"))
+        #expect(!EndpointValidator.isLoopbackHost("localhost.example"))
+        #expect(!EndpointValidator.isLoopbackHost("127.0.0.1.example"))
+    }
+
+    @Test("Numeric aliases of the bound address cannot point an upstream at its own listener",
+          arguments: [
+            "127.1", "127.0.1", "2130706433", "0177.0.0.1", "0x7f.0.0.1", "0x7f000001",
+            "[::ffff:127.0.0.1]", "[0:0:0:0:0:ffff:7f00:1]",
+          ])
+    func numericSelfLoopIsRejected(host: String) {
+        var project = Self.configuredProject
+        let original = project
+        #expect(throws: ControlError.self) {
+            _ = try ProjectCommandExecutor.apply(
+                .serverConfigure(port: nil, globalDelayMs: nil, upstreamURL: "http://\(host):8080"),
+                to: &project
+            )
+        }
+        #expect(project == original)
+    }
+
+    @Test("Numeric addresses that do not name the bound address are not mistaken for self loops")
+    func otherNumericAddressIsAllowed() throws {
+        var project = Self.configuredProject
+        _ = try ProjectCommandExecutor.apply(
+            .serverConfigure(port: nil, globalDelayMs: nil, upstreamURL: "http://127.0.0.2:8080"),
+            to: &project
+        )
+        #expect(project.serverConfiguration.upstreamURL == "http://127.0.0.2:8080")
+    }
+
     @Test("Whole-project validation rolls back a backend edit that makes another upstream loop")
     func lateValidationFailureIsAtomic() {
         var project = MockProject(

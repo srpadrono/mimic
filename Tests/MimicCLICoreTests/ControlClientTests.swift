@@ -43,7 +43,7 @@ struct ControlClientTests {
         // does. The pid is this process, so the liveness check is the real one.
         let json = """
         {
-          "apiVersion": "\(ControlAPI.version)",
+          "apiVersion": "v1",
           "port": 18787,
           "pid": \(ProcessInfo.processInfo.processIdentifier),
           "mode": "headless",
@@ -63,15 +63,123 @@ struct ControlClientTests {
 
     @Test("An explicit --url is what the client ends up talking to")
     func explicitURLReachesTheClient() throws {
-        // `discover` reads the real search paths on the way past, which is harmless — it only reads,
-        // and an explicit URL wins over anything it finds, so this stays deterministic on a machine
-        // that happens to have Mimic running.
         let client = try ControlClient.discover(
             explicitURL: "http://127.0.0.1:9911",
             environment: [:],
-            timeout: 1
+            timeout: 1,
+            discovered: discovered()
         )
         #expect(client.baseURL.absoluteString == "http://127.0.0.1:9911")
+    }
+
+    @Test(
+        "Invalid explicit destinations are usage errors and never fall back to discovery",
+        arguments: [
+            "", "/relative", "mimic", "http://[", "http:///", "http:example.com",
+            "file:///tmp/control.json", "ftp://127.0.0.1:8787",
+            "http://127.0.0.1:0", "http://127.0.0.1:65536",
+            "http://127.0.0.1@evil.example:8787", "http://user:secret@localhost:8787",
+            "http://127.0.0.1:8787?key=secret", "http://127.0.0.1:8787#fragment",
+        ]
+    )
+    func invalidExplicitDestinationIsUsage(explicitURL: String) throws {
+        do {
+            _ = try ControlClient.discover(
+                explicitURL: explicitURL,
+                environment: ["MIMIC_CONTROL_URL": "http://127.0.0.1:8787"],
+                discovered: discovered()
+            )
+            Issue.record("An invalid explicit URL was accepted")
+        } catch let failure as CLIFailure {
+            guard case let .badArgument(message) = failure else {
+                Issue.record("Expected a usage error, got \(failure)")
+                return
+            }
+            #expect(message.contains("--url"))
+            #expect(!message.contains("secret"))
+            #expect(failure.exitCode == 2)
+        }
+    }
+
+    @Test(
+        "Invalid environment destinations are usage errors and never fall back to discovery",
+        arguments: [
+            ("MIMIC_CONTROL_URL", "http://["), ("MIMIC_CONTROL_URL", "/relative"),
+            ("MIMIC_CONTROL_URL", "file:///tmp/control.json"),
+            ("MIMIC_CONTROL_PORT", "not-a-port"), ("MIMIC_CONTROL_PORT", "0"),
+            ("MIMIC_CONTROL_PORT", "65536"),
+        ]
+    )
+    func invalidEnvironmentDestinationIsUsage(key: String, value: String) throws {
+        var environment = ["MIMIC_CONTROL_PORT": "8787"]
+        environment[key] = value
+        do {
+            _ = try ControlClient.discover(environment: environment, discovered: discovered())
+            Issue.record("An invalid environment destination was accepted")
+        } catch let failure as CLIFailure {
+            guard case let .badArgument(message) = failure else {
+                Issue.record("Expected a usage error, got \(failure)")
+                return
+            }
+            #expect(message.contains(key))
+            #expect(failure.exitCode == 2)
+        }
+    }
+
+    @Test("A forwarded HTTP(S) path remains usable and overrides malformed lower-priority settings")
+    func validForwardedPathWins() throws {
+        let client = try ControlClient.discover(
+            explicitURL: "https://forwarded.example:9443/mimic-control",
+            environment: [
+                "MIMIC_CONTROL_URL": "http://[", "MIMIC_CONTROL_PORT": "not-a-port",
+                "MIMIC_CONTROL_TOKEN": "explicit-forwarded-token",
+            ],
+            discovered: discovered()
+        )
+        #expect(client.baseURL.absoluteString == "https://forwarded.example:9443/mimic-control")
+        #expect(client.token == "explicit-forwarded-token")
+    }
+
+    @Test("No advertisement remains a no-instance failure")
+    func absentDiscoveryIsNotUsage() throws {
+        let missingFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-missing-control-\(UUID().uuidString).json")
+        #expect(throws: CLIFailure.noInstance) {
+            _ = try ControlClient.discover(environment: ["MIMIC_CONTROL_FILE": missingFile.path])
+        }
+    }
+
+    @Test(
+        "Direct network clients reject malformed destination shapes too",
+        arguments: [
+            "/relative", "file:///tmp/control.json", "http://localhost:0", "http://localhost:65536",
+            "http://user:secret@localhost:8787", "http://localhost:8787?query", "http://localhost:8787#fragment",
+        ]
+    )
+    func directClientValidatesDestination(destination: String) throws {
+        let url = try #require(URL(string: destination))
+        #expect(throws: CLIFailure.self) {
+            _ = try ControlClient(baseURL: url)
+        }
+    }
+
+    @Test(
+        "Invalid timeouts fail in direct construction and discovery before networking",
+        arguments: [0.0, -1, Double.nan, Double.infinity, -Double.infinity, 3_601, Double.greatestFiniteMagnitude]
+    )
+    func invalidTimeoutIsUsage(timeout: TimeInterval) throws {
+        let expected = CLIFailure.badArgument("--timeout must be greater than 0 and at most 3600 seconds.")
+        #expect(throws: expected) {
+            _ = try ControlClient(baseURL: URL(string: "http://127.0.0.1:8787")!, timeout: timeout)
+        }
+        #expect(throws: expected) {
+            _ = try ControlClient.discover(environment: [:], timeout: timeout, discovered: discovered())
+        }
+    }
+
+    @Test("Fractional and maximum control timeouts remain valid", arguments: [0.1, 30, 3_600])
+    func validTimeoutIsRetained(timeout: TimeInterval) throws {
+        #expect(try ControlClient.validatedTimeout(timeout) == timeout)
     }
 
     // MARK: - The destination and the credential, decided together
@@ -97,9 +205,8 @@ struct ControlClientTests {
             "http://attacker.example:8787",
             // Loopback-shaped and not loopback: reads as local at a glance, resolves to whatever its
             // owner wants. Matched against `url.host`, so a loopback spelling anywhere else in the URL
-            // — userinfo, path, query — is not a loopback host either.
+            // — including the path — is not a loopback host either.
             "http://127.0.0.1.evil.example:8787",
-            "http://127.0.0.1@evil.example:8787",
             "http://evil.example/127.0.0.1:8787",
             // This machine, but some other process: the token belongs to one instance, not to the
             // loopback interface.
@@ -109,6 +216,7 @@ struct ControlClientTests {
             // listener on IPv6 or a different loopback address at the same numeric port.
             "http://localhost:8787",
             "http://[::1]:8787",
+            "https://127.0.0.1:8787",
         ]
     )
     func aForeignURLCarriesNoToken(explicitURL: String) throws {
