@@ -192,9 +192,17 @@ struct ControlEndpointDiscoveryTests {
         )?.absoluteString == "http://127.0.0.1:1111")
 
         #expect(ControlEndpointDiscovery.resolveBaseURL(
-            environment: [ControlAPI.portEnvironmentKey: "not-a-number"],
+            environment: [ControlAPI.portEnvironmentKey: ""],
             discovered: discovered
         )?.absoluteString == "http://127.0.0.1:1111")
+    }
+
+    @Test("A malformed explicit URL does not fall through to another instance")
+    func invalidExplicitURLDoesNotSelectAnotherInstance() {
+        #expect(ControlEndpointDiscovery.resolveBaseURL(
+            explicit: "http://[invalid", environment: [ControlAPI.portEnvironmentKey: "8911"],
+            discovered: endpoint(port: 8787)
+        ) == nil)
     }
 
     // MARK: - The tampered file
@@ -265,6 +273,56 @@ struct ControlEndpointDiscoveryTests {
         #expect(ControlEndpointDiscovery.isProcessAlive(Int(ProcessInfo.processInfo.processIdentifier)))
         #expect(ControlEndpointDiscovery.isProcessAlive(0) == false)
         #expect(ControlEndpointDiscovery.isProcessAlive(-1) == false)
+    }
+
+    @Test("A PID outside the process API's range is rejected without trapping", arguments: [2_147_483_648, Int.max, Int.min])
+    func oversizedPIDIsNotAlive(pid: Int) {
+        #expect(ControlEndpointDiscovery.isProcessAlive(pid) == false)
+    }
+
+    @Test("Malformed instance numbers do not mask a later usable discovery file", arguments: [
+        (0, 4242), (-1, 4242), (65536, 4242),
+        (8787, 0), (8787, -1), (8787, 2_147_483_648),
+    ])
+    func malformedInstanceIsSkipped(port: Int, pid: Int) throws {
+        let directory = temporaryDirectory("invalid-instance")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let invalid = try writeDiscoveryFile(
+            in: directory, port: port, pid: pid, baseURL: "http://127.0.0.1:8787"
+        )
+        let valid = try writeDiscoveryFile(
+            in: directory.appendingPathComponent("valid"),
+            port: 8911, pid: 4242, baseURL: "http://127.0.0.1:8911"
+        )
+        var checkedPIDs: [Int] = []
+
+        let discovered = ControlEndpointDiscovery.discover(
+            searchURLs: [invalid, valid], environment: [:],
+            isProcessAlive: {
+                checkedPIDs.append($0)
+                return true
+            }
+        )
+
+        #expect(discovered?.port == 8911)
+        #expect(checkedPIDs == [4242])
+    }
+
+    @Test("An invalid explicit port does not fall through to another instance", arguments: [
+        "-1", "0", "65536", "9223372036854775807", "not-a-number",
+    ])
+    func invalidPortsDoNotSelectAnotherInstance(port: String) {
+        #expect(ControlEndpointDiscovery.resolveBaseURL(
+            environment: [ControlAPI.portEnvironmentKey: port],
+            discovered: endpoint(port: 8787)
+        ) == nil)
+    }
+
+    @Test("An invalid discovered port is not a destination", arguments: [-1, 0, 65536, Int.max])
+    func invalidDiscoveredPortsAreNotDestinations(port: Int) {
+        #expect(ControlEndpointDiscovery.resolveBaseURL(
+            environment: [:], discovered: endpoint(port: port)
+        ) == nil)
     }
 
     @Test("A file that is not a discovery file is stepped over, not fatal")

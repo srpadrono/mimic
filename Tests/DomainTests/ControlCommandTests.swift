@@ -129,6 +129,23 @@ struct ControlCommandExecutionTests {
         #expect(project.endpoints.first?.name == "GET /inbox")
     }
 
+    @Test("An unnamed endpoint describes the method and path selected by its spec")
+    func endpointNameUsesEffectiveRoute() throws {
+        let (project, outcome) = try Self.apply(
+            .endpointCreate(
+                name: nil, method: .get, path: "/fallback",
+                spec: EndpointSpec(method: .post, path: "/orders")
+            ),
+            to: Self.project
+        )
+
+        let endpoint = try #require(project.endpoints.first)
+        #expect(endpoint.method == .post)
+        #expect(endpoint.path == "/orders")
+        #expect(endpoint.name == "POST /orders")
+        #expect(outcome.result.endpoint?.name == "POST /orders")
+    }
+
     @Test("Endpoints resolve by route, so callers never need to track UUIDs")
     func endpointsResolveByRoute() throws {
         var project = Self.project
@@ -225,6 +242,37 @@ struct ControlCommandExecutionTests {
 
         project = try Self.apply(.endpointDuplicate(endpoint: .route(.post, "/login")), to: project).project
         #expect(project.endpoints[2].path == "/login/copy-2")
+    }
+
+    @Test("A duplicated endpoint avoids existing routes with trailing slashes")
+    func duplicateEndpointRemainsReachableAcrossTrailingSlashes() throws {
+        let sourceScenario = Scenario(name: "Created", statusCode: 201, body: "copied response")
+        let collisionScenario = Scenario(name: "Existing", statusCode: 409)
+        let source = Endpoint(
+            name: "Order", method: .post, path: "/orders/",
+            scenarios: [sourceScenario], activeScenarioID: sourceScenario.id
+        )
+        var project = MockProject(name: "Checkout", endpoints: [
+            source,
+            Endpoint(
+                name: "Existing copy", method: .post, path: "/orders/copy/",
+                scenarios: [collisionScenario], activeScenarioID: collisionScenario.id
+            ),
+            Endpoint(name: "Reserved copy", method: .post, path: "/orders/copy-2/"),
+        ])
+
+        let outcome = try #require(ProjectCommandExecutor.apply(
+            .endpointDuplicate(endpoint: .id(source.id)), to: &project
+        ))
+        let copy = try #require(outcome.result.endpoint)
+        #expect(copy.path == "/orders/copy-3")
+        let response = RequestMatcher.resolve(
+            request: IncomingRequest(method: .post, path: "/orders/copy-3"),
+            against: project.endpoints, globalDelayMs: 0
+        )
+        #expect(response.matchedEndpointID == copy.id)
+        #expect(response.statusCode == 201)
+        #expect(response.body == "copied response")
     }
 
     @Test("An empty group tag clears the group, since a shell cannot pass JSON null")

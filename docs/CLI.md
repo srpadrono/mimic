@@ -35,6 +35,8 @@ mimic app update-check          # returns updateAvailable; does not install
 
 For a command destination, the CLI checks `--url`, then `MIMIC_CONTROL_URL`, then `MIMIC_CONTROL_PORT` on loopback, then the discovery file. It skips stale discovery files. A token read from that file is sent only to `http://127.0.0.1` on the exact advertised port, because the control server binds that IPv4 address. Supply `MIMIC_CONTROL_TOKEN` explicitly for a `localhost` or IPv6 URL, a forwarded port, or a remote destination.
 
+A malformed explicit URL or a nonempty invalid `MIMIC_CONTROL_PORT` fails destination resolution. It cannot fall back to another discovered instance. Control ports must be between `1` and `65535`.
+
 | Variable | Purpose |
 | --- | --- |
 | `MIMIC_CONTROL_URL` | Explicit control API base URL. |

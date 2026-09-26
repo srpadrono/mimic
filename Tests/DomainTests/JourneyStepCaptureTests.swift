@@ -45,6 +45,19 @@ struct JourneyStepCaptureTests {
         #expect(spec.headers?["Retry-After"] == "5")
     }
 
+    @Test("Transport failures cannot silently capture as a default 200 response", arguments: [
+        "connection-drop", "timeout(30000ms)",
+    ])
+    func transportFailuresAreRefused(failureLabel: String) {
+        let log = RequestLog(
+            method: .get, path: "/account-summary",
+            matchedJourneyID: UUID(uuidString: "00000000-0000-0000-0000-000000000201"),
+            matchedJourneyStepID: UUID(uuidString: "00000000-0000-0000-0000-000000000202"),
+            failureLabel: failureLabel, outcome: .journey
+        )
+        #expect(throws: ControlError.self) { try JourneyStepSpec.capturing(log) }
+    }
+
     @Test("Content-Type is modelled once, not repeated as a header")
     func contentTypeIsNotDuplicated() throws {
         let spec = try JourneyStepSpec.capturing(Self.log())

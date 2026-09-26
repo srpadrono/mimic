@@ -77,6 +77,31 @@ struct ReleaseVersionTests {
 
     // MARK: - What must not parse
 
+    @Test("Numeric prerelease identifiers remain numeric beyond Int.max")
+    func arbitrarilyLargePrereleaseNumbers() throws {
+        let lower = try #require(ReleaseVersion("1.0.0-99999999999999999999"))
+        let higher = try #require(ReleaseVersion("1.0.0-100000000000000000000"))
+        let alphabetic = try #require(ReleaseVersion("1.0.0-alpha"))
+        let digitPrefixed = try #require(ReleaseVersion("1.0.0-0alpha"))
+        #expect(lower < higher)
+        #expect(higher < alphabetic)
+        #expect(higher < digitPrefixed)
+    }
+
+    @Test("Prerelease and build suffixes reject malformed identifiers", arguments: [
+        "1.2.3+", "1.2.3+build..1", "1.2.3+build+1", "1.2.3+build_1",
+        "1.2.3-beta_1", "1.2.3-beta 1", "1.2.3-β", "1.2.3-01", "01.2.3",
+    ])
+    func malformedSuffixes(text: String) {
+        #expect(ReleaseVersion(text) == nil)
+    }
+
+    @Test("Build identifiers allow leading zeros and hyphens")
+    func acceptsValidBuildIdentifiers() throws {
+        let version = try #require(ReleaseVersion("1.2.3-beta.1+001.build-info"))
+        #expect(version.description == "1.2.3-beta.1")
+    }
+
     /// Unreadable input must stay unreadable.
     ///
     /// The tempting alternative — defaulting to `0.0.0` — is the dangerous one: `0.0.0` is older

@@ -433,12 +433,13 @@ public enum ProjectCommandExecutor {
         spec: EndpointSpec?
     ) throws -> Endpoint {
         let resolvedPath = spec?.path ?? path
+        let resolvedMethod = spec?.method ?? method
         try validate { try EndpointValidator.validatePath(resolvedPath) }
 
         let scenario = Scenario(name: "Default", statusCode: 200, body: nil)
         var endpoint = Endpoint(
-            name: (name ?? spec?.name)?.nilIfEmpty ?? defaultName(method: method, path: resolvedPath),
-            method: spec?.method ?? method,
+            name: (name ?? spec?.name)?.nilIfEmpty ?? defaultName(method: resolvedMethod, path: resolvedPath),
+            method: resolvedMethod,
             path: resolvedPath,
             scenarios: [scenario],
             activeScenarioID: scenario.id
@@ -641,7 +642,7 @@ public enum ProjectCommandExecutor {
         var suffix = 2
         while endpoints.contains(where: {
             $0.backendID == source.backendID && $0.method == source.method
-                && $0.path.caseInsensitiveCompare(path) == .orderedSame
+                && MockProject.normalize($0.path) == MockProject.normalize(path)
         }) {
             path = "\(base)-\(suffix)"
             suffix += 1

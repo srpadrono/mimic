@@ -34,8 +34,13 @@ public enum EndpointValidator {
         guard path.hasPrefix("/") else {
             throw ValidationError.invalidPath("Path must start with '/': \(path)")
         }
-        guard path == path.trimmingCharacters(in: .whitespaces) else {
-            throw ValidationError.invalidPath("Path must not have leading or trailing whitespace: \(path)")
+        guard !path.unicodeScalars.contains(where: {
+            CharacterSet.whitespacesAndNewlines.contains($0) || $0.value < 0x20 || $0.value == 0x7F
+        }) else {
+            throw ValidationError.invalidPath("Path must not contain whitespace or control characters. Percent-encode them instead.")
+        }
+        guard !path.contains("?"), !path.contains("#") else {
+            throw ValidationError.invalidPath("Use only the route path, without a query string or fragment. Percent-encode literal '?' or '#' characters.")
         }
         guard !path.contains("//") else {
             throw ValidationError.invalidPath("Path must not contain double slashes: \(path)")
@@ -163,6 +168,8 @@ public enum ProjectValidator {
                     + "Mimic. This build understands up to \(MockProject.currentSchemaVersion)."
             )
         }
+
+        try validateIdentifiers(project)
 
         try EndpointValidator.validatePort(project.serverConfiguration.port)
         guard project.serverConfiguration.globalDelayMs >= 0 else {
@@ -332,6 +339,48 @@ public enum ProjectValidator {
     /// Shared so a field failure and a reference failure report the same endpoint the same way.
     private static func context(for endpoint: Endpoint) -> String {
         "endpoint \"\(endpoint.name)\" (\(endpoint.method.rawValue) \(endpoint.path))"
+    }
+
+    /// Each entity type has its own persistence key space. Scenario and step IDs are unique across
+    /// the project, not just within their parent; the same UUID in different entity types is valid.
+    private static func validateIdentifiers(_ project: MockProject) throws {
+        var endpointIDs: Set<UUID> = []
+        var scenarioIDs: Set<UUID> = []
+        for endpoint in project.endpoints {
+            guard endpointIDs.insert(endpoint.id).inserted else {
+                throw ValidationError.invalidDocument(
+                    context: context(for: endpoint),
+                    reason: "Duplicate endpoint ID \(endpoint.id). Endpoint IDs must be unique across the project."
+                )
+            }
+            for scenario in endpoint.scenarios {
+                guard scenarioIDs.insert(scenario.id).inserted else {
+                    throw ValidationError.invalidDocument(
+                        context: "\(context(for: endpoint)), scenario \"\(scenario.name)\"",
+                        reason: "Duplicate scenario ID \(scenario.id). Scenario IDs must be unique across all endpoints."
+                    )
+                }
+            }
+        }
+
+        var journeyIDs: Set<UUID> = []
+        var stepIDs: Set<UUID> = []
+        for journey in project.journeys {
+            guard journeyIDs.insert(journey.id).inserted else {
+                throw ValidationError.invalidDocument(
+                    context: "journey \"\(journey.name)\"",
+                    reason: "Duplicate journey ID \(journey.id). Journey IDs must be unique across the project."
+                )
+            }
+            for step in journey.steps {
+                guard stepIDs.insert(step.id).inserted else {
+                    throw ValidationError.invalidDocument(
+                        context: "journey \"\(journey.name)\", step \"\(step.name)\"",
+                        reason: "Duplicate step ID \(step.id). Step IDs must be unique across all journeys."
+                    )
+                }
+            }
+        }
     }
 
     /// Rejects newly unsafe timing while allowing an older stored project to be opened and

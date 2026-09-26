@@ -76,6 +76,87 @@ struct GraphQLOperationTests {
         #expect(operation?.name == "pay")
     }
 
+    @Test(
+        "The selected operation determines the kind in a document with multiple operations",
+        arguments: [
+            (
+                #"{"operationName":"Pay","query":"query Load { account { id } } mutation Pay { pay { id } }"}"#,
+                "Pay",
+                GraphQLOperation.Kind.mutation
+            ),
+            (
+                #"{"operationName":"OnTick","query":"mutation Pay { pay { id } } fragment Details on Event { id } subscription OnTick { tick { ...Details } }"}"#,
+                "OnTick",
+                GraphQLOperation.Kind.subscription
+            ),
+        ]
+    )
+    func selectedOperationDeterminesKind(body: String, name: String, kind: GraphQLOperation.Kind) {
+        #expect(GraphQLRequest.operation(inBody: body) == GraphQLOperation(name: name, kind: kind))
+    }
+
+    @Test(
+        "String values and executable descriptions cannot change document structure",
+        arguments: [
+            (
+                ##"{"query":"query ($text: String = \"#tag\") { search(text: $text) { id } }"}"##,
+                "search"
+            ),
+            (
+                ##"{"query":"query ($text: String = \") { decoy\") { search(text: $text) { id } }"}"##,
+                "search"
+            ),
+            (
+                ##"{"query":"query ($text: String = \"quote: \\\" # }\") { search(text: $text) { id } }"}"##,
+                "search"
+            ),
+            (
+                ##"{"query":"fragment Details on User { label(format: \"#tag\") } query GetUser { user { ...Details } }"}"##,
+                "GetUser"
+            ),
+            (
+                ##"{"query":"fragment Details on User { label(format: \"}\") } query GetUser { user { ...Details } }"}"##,
+                "GetUser"
+            ),
+            (
+                ##"{"query":"fragment Details on User { label(format: \"\"\"{ # text\nand \\\"\"\" quotes\"\"\") } query GetUser { user { ...Details } }"}"##,
+                "GetUser"
+            ),
+            (
+                ##"{"query":"\"\"\"Description with { decoy } and # text\"\"\" query GetUser { user { id } }"}"##,
+                "GetUser"
+            ),
+            (
+                ##"{"query":"# comment with query Decoy { x }\rquery GetUser { user { id } }"}"##,
+                "GetUser"
+            ),
+        ]
+    )
+    func lexicalContentsDoNotChangeOperation(body: String, name: String) {
+        #expect(GraphQLRequest.operation(inBody: body) == GraphQLOperation(
+            name: name, kind: .query, isInferred: true
+        ))
+    }
+
+    @Test("A byte order mark separates tokens without hiding the operation name or kind")
+    func byteOrderMarkIsIgnored() {
+        let body = #"{"query":"\uFEFFmutation\uFEFFPay { pay { id } }"}"#
+        #expect(GraphQLRequest.operation(inBody: body) == GraphQLOperation(
+            name: "Pay", kind: .mutation, isInferred: true
+        ))
+    }
+
+    @Test(
+        "An unfinished string in a leading fragment does not expose a fake operation",
+        arguments: [
+            ##"{"query":"fragment Details on User { label(format: \"unfinished } query Fake { x }"}"##,
+            ##"{"query":"fragment Details on User { label(format: \"\"\"unfinished } query Fake { x }"}"##,
+        ]
+    )
+    func unterminatedStringsDoNotExposeAnOperation(body: String) {
+        #expect(GraphQLRequest.operation(inBody: body) == nil)
+    }
+
     // MARK: - Document shapes that trip naive parsers
 
     @Test("Variable definitions do not swallow the operation name")
@@ -123,17 +204,7 @@ struct GraphQLOperationTests {
         #expect(operation?.name == "GetThing")
     }
 
-    /// This case could not fail, before the fragment fix or after it.
-    ///
-    /// It put the fragment *after* the query — which the scanner never reaches, because it stops at
-    /// the first selection set — and passed `operationName: "GetUser"`, which takes the `stated`
-    /// branch in `operation(inPayload:)` and returns without calling `parseDocument` at all. So the
-    /// name it asserted came from the payload's own field, and the parser under test was never run.
-    ///
-    /// Both halves of the fixture are now the opposite: the fragment comes first, which is where real
-    /// clients put it, and no `operationName` is sent, which is what forces the name to be read out
-    /// of the document. Before the fix this resolved to `"name"` — the fragment's first field — so an
-    /// endpoint declared for `GetUser` did not match and a well-formed request 404'd.
+    // No operationName is sent: the scanner must recover the name beyond the leading fragment.
     @Test("A fragment ahead of the operation does not become the operation")
     func fragmentsDoNotWin() {
         let operation = GraphQLRequest.operation(inBody: Self.body(
@@ -296,6 +367,21 @@ struct GraphQLEndpointMatchingTests {
         ]
         let plan = MockResolver.plan(request: Self.request("GetAccountSummary"), endpoints: endpoints, globalDelayMs: 0)
         #expect(plan.response.statusCode == 200, "the more specific mock must win")
+    }
+
+    @Test("A fragment containing literal punctuation still reaches the named endpoint")
+    func stringContentsCannotSendNamedOperationToCatchAll() {
+        let named = Self.endpoint(operation: "GetUser", status: 200, name: "user")
+        let catchAll = Self.endpoint(operation: nil, status: 500, name: "catch-all")
+        let request = IncomingRequest(
+            method: .post, path: "/graphql",
+            body: ##"{"query":"fragment Details on User { label(format: \"# }\") } query GetUser { user { ...Details } }"}"##
+        )
+        let plan = MockResolver.plan(
+            request: request, endpoints: [catchAll, named], globalDelayMs: 0
+        )
+        #expect(plan.response.statusCode == 200)
+        #expect(plan.response.matchedEndpointID == named.id)
     }
 
     @Test("Declaration order does not decide the winner")

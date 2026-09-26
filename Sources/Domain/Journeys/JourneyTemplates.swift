@@ -113,7 +113,7 @@ public enum JourneyTemplates {
     public static let sessionExpiry = Template(
         id: "session-expiry",
         title: "Session expires mid-flow",
-        summary: "Two calls succeed, then the session goes stale with a 401 until the token is refreshed.",
+        summary: "Login and the first load succeed, followed by an expired-token response, a refresh, and a successful load.",
         spec: JourneySpec(
             summary: "The session expires partway through a flow and recovers after a refresh.",
             steps: [
@@ -168,9 +168,9 @@ public enum JourneyTemplates {
     public static let maintenanceWindow = Template(
         id: "maintenance-window",
         title: "Backend maintenance mode",
-        summary: "Every call answers 503 with Retry-After until you advance the journey — a held state, not a sequence.",
+        summary: "Account-summary calls answer 503 with Retry-After until you advance the journey.",
         spec: JourneySpec(
-            summary: "Holds the backend in maintenance mode until the journey is advanced manually.",
+            summary: "Holds account-summary calls in maintenance mode until the journey is advanced manually.",
             // autoAdvance off: the step keeps answering, so the app stays in maintenance mode for as
             // long as the test needs, and `mimic journey advance` is the "bring it back up" switch.
             autoAdvance: false,

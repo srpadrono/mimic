@@ -17,6 +17,9 @@ public enum ResponseCapture {
         guard log.outcome != .proxyFailure else {
             throw ControlError.invalid("The backend did not return a complete response.")
         }
+        guard log.failureLabel == nil, log.responseStatusCode != nil else {
+            throw ControlError.invalid("This request has no HTTP response to capture. Add a connection-drop or timeout step to reproduce a transport failure.")
+        }
         guard log.requestBodyTruncated != true else {
             throw ControlError.invalid("The request preview is incomplete, so its operation cannot be captured safely.")
         }
@@ -62,7 +65,8 @@ public enum ResponseCapture {
     }
 
     public static func isTextMediaType(_ value: String) -> Bool {
-        let type = value.lowercased().split(separator: ";").first.map(String.init) ?? ""
+        let type = value.lowercased().split(separator: ";", maxSplits: 1)
+            .first?.trimmingCharacters(in: .whitespaces) ?? ""
         return type.isEmpty || type.hasPrefix("text/") || type == "application/json"
             || type.hasSuffix("+json") || type == "application/xml" || type.hasSuffix("+xml")
             || type == "application/javascript" || type == "application/x-www-form-urlencoded"
