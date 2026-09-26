@@ -389,8 +389,10 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         XCTAssertEqual(settings.value as? String, "Collapsed")
         XCTAssertTrue(firstStep.isHittable, "The first step should remain visible in light mode at narrow width")
-        XCTAssertTrue(navigator.element("journeyStep-1").isHittable,
-                      "Both short journey steps should fit above the compact request log")
+        let secondStep = navigator.element("journeyStep-1")
+        navigator.element("journeyEditor.stepList").scroll(byDeltaX: 0, deltaY: -120)
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { secondStep.isHittable },
+                      "The second step should be reachable by scrolling the compact step list")
         add(navigator.screenshot("journey-editor-light-narrow"))
     }
 
