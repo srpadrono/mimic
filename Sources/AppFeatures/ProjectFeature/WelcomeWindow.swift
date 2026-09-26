@@ -13,6 +13,7 @@ struct WelcomeWindow: View {
     let onOpenProject: (UUID) -> Void
     let onDuplicateProject: (UUID) -> Void
     let onDeleteProject: (UUID) -> Void
+    let onRequestRenameProject: (RecentProjectEntry) -> Void
     /// Asks the root to present the new-project sheet.
     ///
     /// The sheet used to live here, which made two presenters for one dialog once File ▸ New Project
@@ -58,6 +59,7 @@ struct WelcomeWindow: View {
         onOpenProject: @escaping (UUID) -> Void,
         onDuplicateProject: @escaping (UUID) -> Void,
         onDeleteProject: @escaping (UUID) -> Void,
+        onRequestRenameProject: @escaping (RecentProjectEntry) -> Void = { _ in },
         onRequestNewProject: @escaping () -> Void
     ) {
         self.init(
@@ -65,6 +67,7 @@ struct WelcomeWindow: View {
             onOpenProject: onOpenProject,
             onDuplicateProject: onDuplicateProject,
             onDeleteProject: onDeleteProject,
+            onRequestRenameProject: onRequestRenameProject,
             onRequestNewProject: onRequestNewProject,
             initialDeleteTarget: nil
         )
@@ -75,6 +78,7 @@ struct WelcomeWindow: View {
         onOpenProject: @escaping (UUID) -> Void,
         onDuplicateProject: @escaping (UUID) -> Void,
         onDeleteProject: @escaping (UUID) -> Void,
+        onRequestRenameProject: @escaping (RecentProjectEntry) -> Void = { _ in },
         onRequestNewProject: @escaping () -> Void,
         initialDeleteTarget: DeleteTarget?
     ) {
@@ -82,6 +86,7 @@ struct WelcomeWindow: View {
         self.onOpenProject = onOpenProject
         self.onDuplicateProject = onDuplicateProject
         self.onDeleteProject = onDeleteProject
+        self.onRequestRenameProject = onRequestRenameProject
         self.onRequestNewProject = onRequestNewProject
         _viewState = State(initialValue: ViewState(deleteTarget: initialDeleteTarget))
     }
@@ -279,6 +284,8 @@ struct WelcomeWindow: View {
                         Self.openProject(id: entry.id, onOpenProject: onOpenProject)
                     }
                     .accessibilityIdentifier("welcome.recents.contextMenu.open")
+                    Button("Rename\u{2026}") { onRequestRenameProject(entry) }
+                        .accessibilityIdentifier("welcome.recents.contextMenu.rename")
                     Divider()
                     Button("Duplicate") {
                         Self.duplicateProject(id: entry.id, onDuplicateProject: onDuplicateProject)

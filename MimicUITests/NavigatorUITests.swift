@@ -33,8 +33,11 @@ struct NavigatorPage {
         )).firstMatch
     }
     func rowHeight(named name: String) -> CGFloat {
+        outlineRow(named: name).frame.height
+    }
+    func outlineRow(named name: String) -> XCUIElement {
         app.descendants(matching: .outlineRow)
-            .containing(.any, identifier: row(named: name).identifier).firstMatch.frame.height
+            .containing(.any, identifier: row(named: name).identifier).firstMatch
     }
     func group(_ name: String) -> XCUIElement {
         let identified = element("sidebar.group.\(name)")
@@ -139,6 +142,141 @@ final class NavigatorUITests: MimicUITestCase {
         try await command(["journeyAddTemplate": ["templateID": "payment-retry", "name": "Payment succeeds after the second authorization attempt"]])
         try await command(["journeyCreate": ["name": "Empty journey"]])
         XCTAssertTrue(NavigatorPage(app: app).row(named: "Account summary").waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testInspectorIdentityFollowsEndpointSelection() async throws {
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        let identity = navigator.element("inspector.endpointIdentity")
+
+        navigator.row(named: "Account summary").click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            identity.label.contains("GET method /account-summary")
+        }, "The inspector must announce the selected GET route")
+
+        navigator.row(named: "Create order").click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            identity.label.contains("POST method /api/v1/orders")
+        }, "The inspector must not announce the previous endpoint's path")
+    }
+
+    @MainActor
+    func testEndpointKeyboardRenameAndRequestEditing() async throws {
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        app.typeKey("f", modifierFlags: .command)
+        app.typeText("Account")
+        XCTAssertEqual(navigator.endpointFilter.value as? String, "Account",
+                       "Command-F should focus the current navigator filter")
+        navigator.filter(navigator.endpointFilter, text: "")
+        let account = navigator.row(named: "Account summary")
+        account.click()
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(navigator.outlineRow(named: "Current orders").isSelected,
+                      "Down should select the next visible endpoint")
+        app.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(navigator.outlineRow(named: "Account summary").isSelected,
+                      "Up should return to the previous endpoint")
+
+        account.rightClick()
+        app.menuItems["sidebar.contextMenu.rename"].click()
+        let name = app.textFields["ds.textfield.endpointRename.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.click()
+        name.typeKey("a", modifierFlags: .command)
+        name.typeText("Account overview")
+        app.buttons["endpointRename.confirm"].click()
+        let renamed = navigator.row(named: "Account overview")
+        XCTAssertTrue(renamed.waitForExistence(timeout: 5))
+
+        renamed.rightClick()
+        app.menuItems["sidebar.contextMenu.editRequest"].click()
+        let path = app.textFields["ds.textfield.endpointRequest.path"]
+        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        path.click()
+        path.typeKey("a", modifierFlags: .command)
+        path.typeText("/account-overview")
+        app.buttons["endpointRequest.save"].click()
+        XCTAssertTrue(navigator.endpointRow(named: "Account overview", path: "/account-overview")
+            .waitForExistence(timeout: 5))
+        let identity = navigator.element("inspector.endpointIdentity")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            identity.label.contains("GET method /account-overview")
+        }, "The inspector should announce the edited path for the same endpoint")
+
+        let scenario = navigator.element("inspector.scenario.Default")
+        XCTAssertTrue(scenario.waitForExistence(timeout: 5))
+        scenario.rightClick()
+        app.menuItems["inspector.scenario.contextMenu.rename"].click()
+        let scenarioName = app.textFields["ds.textfield.scenarioRename.name"]
+        XCTAssertTrue(scenarioName.waitForExistence(timeout: 5))
+        scenarioName.click()
+        scenarioName.typeKey("a", modifierFlags: .command)
+        scenarioName.typeText("Success")
+        app.buttons["scenarioRename.confirm"].click()
+        XCTAssertTrue(navigator.element("inspector.scenario.Success").waitForExistence(timeout: 5))
+
+        let edited = navigator.row(named: "Account overview")
+        edited.click()
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(app.textFields["ds.textfield.endpointRename.name"].waitForExistence(timeout: 5),
+                      "Return should offer to rename the selected endpoint")
+        app.buttons["endpointRename.cancel"].click()
+        edited.click()
+        app.typeKey(.delete, modifierFlags: [])
+        let endpointDeleteSheet = app.sheets.firstMatch
+        XCTAssertTrue(endpointDeleteSheet.buttons["Delete"].waitForExistence(timeout: 5),
+                      "Delete should confirm before removing the selected endpoint")
+        endpointDeleteSheet.buttons["Cancel"].click()
+        XCTAssertTrue(edited.exists)
+    }
+
+    @MainActor
+    func testJourneyKeyboardNavigationAndContextRename() async throws {
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        app.radioButtons["navigator.tab.journeys"].click()
+        app.typeKey("f", modifierFlags: .command)
+        app.typeText("Empty")
+        XCTAssertEqual(navigator.journeyFilter.value as? String, "Empty",
+                       "Command-F should follow the selected navigator")
+        navigator.filter(navigator.journeyFilter, text: "")
+        let empty = navigator.row(named: "Empty journey")
+        XCTAssertTrue(empty.waitForExistence(timeout: 5))
+        empty.click()
+        app.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(navigator.outlineRow(named: "Payment succeeds").isSelected,
+                      "Up should select the previous visible journey")
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(navigator.outlineRow(named: "Empty journey").isSelected,
+                      "Down should return to the empty journey")
+
+        empty.rightClick()
+        app.menuItems["journeys.contextMenu.rename"].click()
+        let name = app.textFields["ds.textfield.journeyRename.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.click()
+        name.typeKey("a", modifierFlags: .command)
+        name.typeText("Renamed journey")
+        app.buttons["journeyRename.confirm"].click()
+        let renamed = navigator.row(named: "Renamed journey")
+        XCTAssertTrue(renamed.waitForExistence(timeout: 5))
+        renamed.click()
+        app.buttons["journeyEditor.settingsDisclosure"].click()
+        let summary = app.textFields["journeyEditor.summaryField"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        summary.click()
+        summary.typeText("Fallback sequence")
+        summary.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(summary.value as? String, "Fallback sequence")
+        renamed.click()
+        app.typeKey(.delete, modifierFlags: [])
+        let journeyDeleteSheet = app.sheets.firstMatch
+        XCTAssertTrue(journeyDeleteSheet.buttons["Delete"].waitForExistence(timeout: 5),
+                      "Delete should confirm before removing the selected journey")
+        journeyDeleteSheet.buttons["Cancel"].click()
+        XCTAssertTrue(renamed.exists)
     }
 
     @MainActor

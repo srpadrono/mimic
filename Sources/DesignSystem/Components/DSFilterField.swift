@@ -17,15 +17,17 @@ public struct DSFilterField: View {
     private let scopes: [Scope]
     private let placeholder: String
     private let identifier: String
+    private let focusRequest: Int
     @FocusState private var isFocused: Bool
 
     public init(text: Binding<String>, scopeID: Binding<String>, scopes: [Scope],
-                placeholder: String, identifier: String) {
+                placeholder: String, identifier: String, focusRequest: Int = 0) {
         self._text = text
         self._scopeID = scopeID
         self.scopes = scopes
         self.placeholder = placeholder
         self.identifier = identifier
+        self.focusRequest = focusRequest
     }
 
     public var body: some View {
@@ -56,6 +58,7 @@ public struct DSFilterField: View {
                 .onTapGesture { isFocused = true }
         }
         .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
+        .onChange(of: focusRequest) { _, _ in isFocused = true }
         // Preserve the individual field, scope, and clear identifiers for keyboard and UI tests.
         .accessibilityElement(children: .contain)
     }

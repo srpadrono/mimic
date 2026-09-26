@@ -111,6 +111,26 @@ struct ResponseCaptureTests {
         #expect(spec.headers == ["Content-Type": "application/problem+json", "ETag": "v1"])
     }
 
+    @Test("Saved mocks do not replay upstream telemetry, rate limits, or reporting destinations")
+    func dropsTransientUpstreamHeaders() throws {
+        let captured: [String: String] = [
+            "Content-Type": "application/json", "Cache-Control": "no-store", "ETag": "v1",
+            "CF-Ray": "one-request", "CF-Cache-Status": "HIT", "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": "123456", "NEL": #"{"report_to":"upstream"}"#,
+            "Report-To": #"{"url":"https://upstream.example/reports"}"#,
+            "Strict-Transport-Security": "max-age=31536000", "Alt-Svc": "h3=\":443\"",
+            "Server-Timing": "origin;dur=42", "X-Request-ID": "one-request",
+        ]
+        let expected = ["Content-Type": "application/json", "Cache-Control": "no-store", "ETag": "v1"]
+        #expect(ResponseCapture.headers(captured) == expected)
+
+        let log = RequestLog(method: .get, path: "/profile", responseStatusCode: 200,
+            responseHeaders: captured, responseBody: "{}", outcome: .passthrough)
+        let step = try JourneyStepSpec.capturing(log)
+        #expect(step.headers == ["Cache-Control": "no-store", "ETag": "v1"])
+        #expect(step.contentType == .json)
+    }
+
     @Test func failedConfigurationDoesNotPartiallyMutateProject() throws {
         var project = MockProject(name: "Atomic", serverConfiguration: .init(port: 8080, globalDelayMs: 0))
         let original = project

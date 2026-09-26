@@ -236,4 +236,23 @@ struct WorkspaceFeatureRenderingTests {
             size: CGSize(width: 320, height: 60)
         )
     }
+
+    @Test("Rows with the same route on different servers show their server names")
+    func duplicateRoutesAreDisambiguatedByServer() {
+        let accountsID = UUID()
+        let configuration = ServerConfiguration(
+            port: 18080, globalDelayMs: 0,
+            backends: [BackendConfiguration(id: accountsID, name: "Accounts", port: 18081)],
+            primaryName: "Catalog"
+        )
+        let catalog = Endpoint(name: "GET /users/1", method: .get, path: "/users/1")
+        let accounts = Endpoint(name: "GET /users/1", method: .get, path: "/users/1", backendID: accountsID)
+        let unrelated = Endpoint(name: "GET /users/2", method: .get, path: "/users/2")
+        let endpoints = [catalog, accounts, unrelated]
+
+        #expect(SidebarView.backendNameForAmbiguousRoute(catalog, among: endpoints, configuration: configuration) == "Catalog")
+        #expect(SidebarView.backendNameForAmbiguousRoute(accounts, among: endpoints, configuration: configuration) == "Accounts")
+        #expect(SidebarView.backendNameForAmbiguousRoute(unrelated, among: endpoints, configuration: configuration) == nil)
+        render(EndpointSidebarRow(endpoint: catalog, backendName: "Catalog"), size: CGSize(width: 260, height: 44))
+    }
 }

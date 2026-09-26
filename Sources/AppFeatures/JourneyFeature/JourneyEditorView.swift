@@ -63,6 +63,7 @@ struct JourneyEditorView: View {
 
     @ViewBuilder
     private var settingsContent: some View {
+        JourneySummaryField(journey: journey).id(journey.id)
         JourneyGroupField(journey: journey).id(journey.id)
         DSSectionHeader("Behavior", identifier: "journeyEditor.behavior")
         behaviorControls
@@ -391,6 +392,47 @@ private extension View {
                 content(value)
             }
         }
+    }
+}
+
+private struct JourneySummaryField: View {
+    @Environment(AppState.self) private var appState
+    let journey: Journey
+    @State private var draft: String
+    @FocusState private var isFocused: Bool
+
+    init(journey: Journey) {
+        self.journey = journey
+        _draft = State(initialValue: journey.summary ?? "")
+    }
+
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text("Description")
+                .foregroundStyle(DSColors.labelSecondary)
+            TextField("What this journey tests", text: $draft)
+                .textFieldStyle(.plain)
+                .font(DSTypography.label)
+                .dsFieldWell()
+                .focused($isFocused)
+                .onSubmit { commit() }
+                .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+                .accessibilityIdentifier("journeyEditor.summaryField")
+                .accessibilityLabel("Journey description")
+        }
+        .font(DSTypography.label)
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: DSBarHeight.controlRow)
+        .onChange(of: journey.summary) { _, value in
+            if !isFocused { draft = value ?? "" }
+        }
+        .onDisappear { commit() }
+    }
+
+    private func commit() {
+        let summary = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard summary != (journey.summary ?? ""), appState.journeys.contains(where: { $0.id == journey.id }) else { return }
+        appState.updateJourney(id: journey.id, spec: JourneySpec(summary: summary))
     }
 }
 

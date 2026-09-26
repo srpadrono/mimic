@@ -4,7 +4,10 @@ import Foundation
 /// and streamed request bodies are explicitly collected only after taking a slot. A rejected
 /// request has not resolved a route or advanced a journey.
 actor RequestLogGate {
+    /// Bounded concurrent handlers. Logs are allowed a larger short-lived backlog while the
+    /// app's main actor updates its request list and performs automatic capture.
     static let capacity = 32
+    static let pendingLogCapacity = 64
 
     private var activeRequests = 0
     private var outstanding = 0
@@ -14,7 +17,7 @@ actor RequestLogGate {
     var outstandingCount: Int { outstanding }
     func tryAcquireLease() -> RequestLogLease? {
         guard !isTerminated, activeRequests < Self.capacity,
-              outstanding < Self.capacity else { return nil }
+              outstanding < Self.pendingLogCapacity else { return nil }
         activeRequests += 1
         outstanding += 1
         return RequestLogLease(gate: self)
@@ -56,14 +59,26 @@ final class RequestLogLease: @unchecked Sendable {
         }
     }
 
-    func release() {
-        let unpublishedLog = lock.withLock { () -> Bool? in
+    private func takeRelease() -> Bool? {
+        lock.withLock { () -> Bool? in
             guard isActive else { return nil }
             isActive = false
             let unpublished = ownsLog
             ownsLog = false
             return unpublished
         }
+    }
+
+    /// A completed handler can return its slot before accepting another request. `release()`
+    /// remains synchronous for response writers and deinit, where awaiting is impossible.
+    func finish() async {
+        if let unpublishedLog = takeRelease() {
+            await gate.finishRequest(releaseUnpublishedLog: unpublishedLog)
+        }
+    }
+
+    func release() {
+        let unpublishedLog = takeRelease()
         if let unpublishedLog {
             let gate = gate
             Task { await gate.finishRequest(releaseUnpublishedLog: unpublishedLog) }

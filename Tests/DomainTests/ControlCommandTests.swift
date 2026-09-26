@@ -206,6 +206,8 @@ struct ControlCommandExecutionTests {
         let source = project.endpoints[0]
         let copy = project.endpoints[1]
 
+        #expect(copy.path == "/login/copy", "the duplicate needs its own reachable route")
+
         let originalScenarioIDs = Set(source.scenarios.map(\.id))
         let copyScenarioIDs = Set(copy.scenarios.map(\.id))
         #expect(originalScenarioIDs.isDisjoint(with: copyScenarioIDs))
@@ -220,6 +222,9 @@ struct ControlCommandExecutionTests {
         )
         #expect(copy.scenarios[copyActiveIndex].name == "Server error")
         #expect(copy.scenarios[copyActiveIndex].statusCode == 500)
+
+        project = try Self.apply(.endpointDuplicate(endpoint: .route(.post, "/login")), to: project).project
+        #expect(project.endpoints[2].path == "/login/copy-2")
     }
 
     @Test("An empty group tag clears the group, since a shell cannot pass JSON null")
