@@ -13,6 +13,9 @@ import Vapor
 /// `ControlCommand` case, not a route.
 public actor ControlServer {
 
+    /// Project-import commands carry captured bodies, but still need a finite collection limit.
+    static let commandBodyLimit = 4 << 20
+
     private let host: any ControlHost
     private let mode: String
     private var app: Application?
@@ -51,11 +54,9 @@ public actor ControlServer {
         self.mode = mode
         // An explicit token exists for the case where the caller must know it before the server
         // binds — `MIMIC_CONTROL_TOKEN` set by a CI job that configures both sides.
-        self.token = token
-            ?? ProcessInfo.processInfo.environment[ControlAPI.tokenEnvironmentKey].flatMap {
-                $0.isEmpty ? nil : $0
-            }
-            ?? ControlToken.generate()
+        self.token = (token ?? ProcessInfo.processInfo.environment[ControlAPI.tokenEnvironmentKey]).flatMap {
+            $0.isEmpty ? nil : $0
+        } ?? ControlToken.generate()
     }
 
     /// Binds the control API.
@@ -79,6 +80,7 @@ public actor ControlServer {
         // active server.
         guard !isStopping else { throw ControlServerError.shuttingDown }
         guard app == nil, !isStarting else { throw ControlServerError.alreadyRunning }
+        if port != 0 { try EndpointValidator.validatePort(port) }
         isStarting = true
         defer {
             isStarting = false
@@ -218,67 +220,39 @@ public actor ControlServer {
 
     private func register(on application: Application) {
         let host = self.host
-        let token = self.token
         let prefix = PathComponent(stringLiteral: ControlAPI.version)
+        // Middleware runs before each route's body collector, including GET and unknown routes.
+        application.middleware.use(ControlAdmissionMiddleware(token: token))
 
         // Liveness. Cheap enough for a CLI to call before every command.
         application.get(prefix, "health") { request async -> Response in
-            if let denial = Self.denial(for: request, token: token) { return denial }
             return await Self.encode(host.execute(.ping))
         }
 
         // The whole picture in one call: server, project, journey, counts.
         application.get(prefix, "state") { request async -> Response in
-            if let denial = Self.denial(for: request, token: token) { return denial }
             return await Self.encode(host.execute(.state))
         }
 
         // Runtime self-description, so an agent can discover the surface it is talking to.
         application.get(prefix, "commands") { request async -> Response in
-            if let denial = Self.denial(for: request, token: token) { return denial }
             return await Self.encode(host.execute(.describeCommands))
         }
 
-        // Everything else. One route, one command vocabulary — see `ControlCommand`.
-        //
-        // The explicit cap is the whole reason this is `on(.POST, …)` rather than `post(…)`. Vapor's
-        // default body strategy is `.collect(maxSize: nil)`, which resolves to
-        // `Routes.defaultMaxBodySize` — **16 KB**. `projectImport` posts a whole `MockProject`,
-        // captured response bodies and all, and those bodies are what make such a document big: one
-        // endpoint holding a 1.4 KB captured response costs about 2 KB encoded — JSON escaping of the
-        // body's own quotes is most of the difference — so 16 KB is roughly *eight endpoints*. The
-        // fixture in `ControlServerTests.largeProjectImportIsAccepted` measures it.
-        //
-        // Past the limit, `Request.BodyStream.consume` fails the collect with
-        // `Abort(.payloadTooLarge)` *before* this closure runs, so nothing here saw the request and the
-        // caller got a 413 carrying Vapor's own `{"error":true,…}` instead of a `ControlResponse` —
-        // which `ControlClient.send` reports as `http.413`, an exit-4 "Mimic refused it" that no
-        // `ControlCommand` can produce and no error code explains.
-        //
-        // 4 MB rather than the 10 MB `VaporConfigurator` gives the mock server, because the two are
-        // bounding different things: the engine has to absorb whatever the app under test uploads,
-        // while everything that reaches this route is a document Mimic itself wrote. At the ~2 KB an
-        // endpoint costs above, 4 MB is room for around two thousand of them — far past any project
-        // somebody configured by hand, and 256 times what the default allowed.
-        //
-        // And it stays a bound rather than becoming a bigger round number, because `collect`
-        // accumulates the entire body in memory before the handler is called, once per in-flight
-        // request, in a process the user opened to mock an API rather than to run a server. Loopback
-        // binding and the token keep the number of concurrent callers small; they are admission
-        // control, not a memory limit, and the two are not substitutes.
+        // One route, one command vocabulary. The 4 MiB cap permits realistic project imports
+        // while bounding each route collection; admission happens before that collector. Bodies
+        // Vapor already buffered are checked too, though their allocation has already happened.
         application.on(
             .POST, prefix, "command",
-            body: .collect(maxSize: "4mb")
+            body: .collect(maxSize: .init(value: Self.commandBodyLimit))
         ) { request async -> Response in
-            if let denial = Self.denial(for: request, token: token) { return denial }
-            // `request.body.string` rather than `Data(buffer:)`: the latter lives in
-            // NIOFoundationCompat, and this project builds with member-import visibility enabled, so a
-            // transitively-available initializer is not actually callable without importing it.
-            guard let json = request.body.string else {
+            guard request.body.data != nil else {
                 return Self.encode(.failure(.invalid("Expected a JSON command body.")))
             }
             do {
-                let command = try ControlCoding.decode(ControlCommand.self, from: Data(json.utf8))
+                // Decode the original bytes. Request.Body.string repairs malformed UTF-8 and
+                // could silently turn a damaged upload into a different valid command.
+                let command = try request.content.decode(ControlCommand.self, using: ControlCoding.decoder())
                 return await Self.encode(host.execute(command))
             } catch {
                 return Self.encode(.failure(ControlError(
@@ -305,8 +279,9 @@ public actor ControlServer {
         guard isNonBrowserLoopbackRequest(request) else {
             return encode(.failure(.forbiddenOrigin), status: .forbidden)
         }
-        guard ControlToken.matches(
-            request.headers.first(name: ControlAPI.tokenHeaderName),
+        let tokens = request.headers[ControlAPI.tokenHeaderName]
+        guard tokens.count == 1, ControlToken.matches(
+            tokens.first,
             expected: token
         ) else {
             return encode(.failure(.unauthorized), status: .unauthorized)
@@ -329,12 +304,13 @@ public actor ControlServer {
     /// `0600` file. These make the browser path fail early and for a legible reason.
     static func isNonBrowserLoopbackRequest(_ request: Request) -> Bool {
         if request.headers.first(name: .origin) != nil { return false }
-        guard let host = request.headers.first(name: .host) else {
+        let hosts = request.headers["Host"]
+        guard let host = hosts.first else {
             // HTTP/1.1 requires `Host`; HTTP/2 carries `:authority` instead and Vapor maps it here.
             // Absent entirely means a hand-rolled client, which is not a browser.
             return true
         }
-        return isLoopbackAuthority(host)
+        return hosts.count == 1 && isLoopbackAuthority(host)
     }
 
     /// `true` for `127.0.0.1`, `[::1]`, `localhost`, with or without a numeric port.
@@ -436,6 +412,68 @@ public actor ControlServer {
         }
     }
 }
+
+/// Authenticate before Vapor collects a body, then keep collection failures in the control wire
+/// format. Requests that already arrived in one buffer bypass Vapor's streaming size check.
+private struct ControlAdmissionMiddleware: AsyncMiddleware {
+    let token: String
+
+    func respond(to request: Request, chainingTo next: AsyncResponder) async throws -> Response {
+        if let denial = ControlServer.denial(for: request, token: token) {
+            return finishEarly(denial, for: request)
+        }
+        if let length = request.headers.first(name: .contentLength).flatMap(Int.init),
+           length > ControlServer.commandBodyLimit {
+            return finishEarly(oversizedBody(), for: request)
+        }
+        if let body = request.body.data, body.readableBytes > ControlServer.commandBodyLimit {
+            return oversizedBody()
+        }
+        do {
+            return try await next.respond(to: request)
+        } catch let error as AbortError where error.status == .payloadTooLarge {
+            return finishEarly(oversizedBody(), for: request)
+        }
+    }
+
+    /// Vapor derives keep-alive from the incoming request, so a Connection: close response alone
+    /// does not stop a refused upload. Flush the complete response before ending its stream with
+    /// an error; Vapor then closes the channel and releases the unfinished request stream.
+    private func finishEarly(_ response: Response, for request: Request) -> Response {
+        guard request.body.data == nil,
+              request.headers.first(name: .transferEncoding) != nil
+                || (request.headers.first(name: .contentLength).flatMap(Int.init) ?? 0) > 0,
+              let responseBuffer = response.body.buffer else { return response }
+        let wasHead = request.method == .HEAD
+        let body = wasHead ? request.byteBufferAllocator.buffer(capacity: 0) : responseBuffer
+        if wasHead {
+            // Vapor skips HEAD stream callbacks. Keep the wire body empty while allowing the
+            // callback that closes this rejected upload to run.
+            request.method = .GET
+        }
+        response.body = .init(stream: { writer in
+            let flushed = writer.eventLoop.makePromise(of: Void.self)
+            writer.write(.buffer(body), promise: flushed)
+            flushed.futureResult.whenComplete { _ in
+                writer.write(.error(RejectedControlUpload()), promise: nil)
+            }
+        }, count: body.readableBytes)
+        if wasHead {
+            response.headers.replaceOrAdd(name: .contentLength, value: String(responseBuffer.readableBytes))
+        }
+        response.headers.replaceOrAdd(name: .connection, value: "close")
+        return response
+    }
+
+    private func oversizedBody() -> Response {
+        ControlServer.encode(
+            .failure(.invalid("Request body exceeds the allowed size limit.")),
+            status: .payloadTooLarge
+        )
+    }
+}
+
+private struct RejectedControlUpload: Error { }
 
 public enum ControlServerError: Error, Sendable, LocalizedError, Equatable {
     case alreadyRunning

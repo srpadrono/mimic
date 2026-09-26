@@ -96,6 +96,24 @@ struct CLIParsingTests {
         #expect(try JourneySelector.parse(["Retry"]).resolveOptional() == .name("Retry"))
     }
 
+    @Test("Conflicting selectors are refused instead of silently choosing a different target")
+    func conflictingSelectorsFail() throws {
+        let id = "00000000-0000-0000-0000-000000000101"
+        for arguments in [["GET", "/inbox", "--id", id], ["GET", "/inbox", "--name", "Other"], ["--name", "Other", "--id", id]] {
+            let selector = try EndpointSelector.parse(arguments)
+            #expect(throws: CLIFailure.self) { _ = try selector.resolve() }
+        }
+        let journey = try JourneySelector.parse(["Retry", "--id", id])
+        #expect(throws: CLIFailure.self) { _ = try journey.resolveOptional() }
+        for arguments in [["--index", "0", "--step", "Other"], ["--step", "Other", "--step-id", id], ["--index", "0", "--step-id", id]] {
+            let selector = try StepSelector.parse(arguments)
+            #expect(throws: CLIFailure.self) { _ = try selector.resolve() }
+        }
+        #expect(throws: CLIFailure.self) {
+            _ = try ProjectCommand.Open.reference(name: "Other", id: id)
+        }
+    }
+
     // MARK: - Response options
 
     @Test("Headers are parsed as Name:Value, preserving colons in the value")
@@ -127,6 +145,55 @@ struct CLIParsingTests {
 
         let options = try ResponseOptions.parse(["--body-file", path])
         #expect(try options.resolveBody() == payload)
+    }
+
+    @Test("Inline and file bodies cannot silently override each other")
+    func conflictingBodySourcesFail() throws {
+        let path = NSTemporaryDirectory() + "mimic-body-\(UUID().uuidString).txt"
+        try "file body".write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let options = try ResponseOptions.parse(["--body", "inline body", "--body-file", path])
+
+        #expect(throws: CLIFailure.badArgument("Specify --body or --body-file, not both.")) {
+            _ = try options.resolveBody()
+        }
+    }
+
+    @Test("A body read from stdin preserves UTF-8 and rejects malformed bytes")
+    func stdinBodiesRequireUTF8() throws {
+        let options = try ResponseOptions.parse(["--body-file", "-"])
+        for (data, expected) in [(Data([0x63, 0x61, 0x66, 0xC3, 0xA9]), "café" as String?), (Data([0xC3, 0x28]), nil)] {
+            let pipe = Pipe()
+            try pipe.fileHandleForWriting.write(contentsOf: data)
+            try pipe.fileHandleForWriting.close()
+            defer { try? pipe.fileHandleForReading.close() }
+            if let expected {
+                #expect(try options.resolveBody(standardInput: pipe.fileHandleForReading) == expected)
+            } else {
+                #expect(throws: CLIFailure.fileUnreadable(path: "-", underlying: "Response bodies must contain valid UTF-8.")) {
+                    _ = try options.resolveBody(standardInput: pipe.fileHandleForReading)
+                }
+            }
+        }
+    }
+
+    @Test("A closed stdin handle reports an unreadable body")
+    func closedStdinBodyFails() throws {
+        let pipe = Pipe()
+        try pipe.fileHandleForReading.close()
+        try pipe.fileHandleForWriting.close()
+        let options = try ResponseOptions.parse(["--body-file", "-"])
+        do {
+            _ = try options.resolveBody(standardInput: pipe.fileHandleForReading)
+            Issue.record("Expected a closed handle to be unreadable.")
+        } catch let failure as CLIFailure {
+            guard case let .fileUnreadable(path, _) = failure else {
+                Issue.record("Expected an unreadable input, got \(failure).")
+                return
+            }
+            #expect(path == "-")
+            #expect(failure.exitCode == 2)
+        }
     }
 
     /// The exit code here said `4` and `CLIFailure.fileUnreadable` has been `2` since the two codes
@@ -189,6 +256,24 @@ struct CLIParsingTests {
                 repeatCount: nil
             )
         }
+    }
+
+    @Test("Adding or updating a failure step refuses every response option", arguments: [
+        ["--status", "503"], ["--body", "body"], ["--body-file", "missing-body.json"],
+        ["--header", "Retry-After: 10"], ["--content-type", "text"],
+    ])
+    func stepOutcomeOptionsAreExclusive(responseArguments: [String]) async {
+        let transport = CLICommandRecorder()
+        for prefix in [
+            ["journey", "step", "add", "Flow", "GET", "/a"],
+            ["journey", "step", "update", "Flow", "--index", "0"],
+        ] {
+            let status = await ControlTransportOverride.$current.withValue(transport) {
+                await MimicCommand.run(arguments: prefix + ["--fail", "drop"] + responseArguments)
+            }
+            #expect(status == 2)
+        }
+        #expect(await transport.commands().isEmpty)
     }
 
     @Test("A step spec carries every option through")
@@ -314,6 +399,26 @@ struct CLIParsingTests {
         #expect(await MimicCommand.run(arguments: ["--version"]) == 0)
     }
 
+    @Test("Cancellation from a command exits as an interruption")
+    func cancellationExitsAsInterrupted() async {
+        let transport = CLICommandRecorder(cancelOnSend: true)
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: ["ping"])
+        }
+        #expect(status == 130)
+        #expect(await transport.commands() == [.ping])
+    }
+
+    @Test("App status does not turn an invalid destination into a successful no-instance message")
+    func appStatusRejectsInvalidDestination() async {
+        // Discovery refuses this literal before reading discovery files or making a request.
+        // Keeping the real client path exercises Status.run's error handling, not parser validation.
+        let status = await ControlTransportOverride.$current.withValue(nil) {
+            await MimicCommand.run(arguments: ["app", "status", "--url", "http://["])
+        }
+        #expect(status == 2)
+    }
+
     @Test("\"No instance\" says how to start one")
     func noInstanceIsActionable() throws {
         let message = try #require(CLIFailure.noInstance.errorDescription)
@@ -337,6 +442,17 @@ struct CLIParsingTests {
         #expect(JourneyFile.spec(from: Journey(name: "Retry", groupTag: "Checkout")).groupTag == "Checkout")
     }
 
+    @Test("Journey auto-advance flags distinguish set, clear, and absent values")
+    func journeyAutoAdvanceOptions() throws {
+        var spec = JourneySpec(autoAdvance: true)
+        try JourneyBehaviorOptions.parse(["--no-auto-advance"]).apply(to: &spec)
+        #expect(spec.autoAdvance == false)
+        try JourneyBehaviorOptions.parse([]).apply(to: &spec)
+        #expect(spec.autoAdvance == false)
+        try JourneyBehaviorOptions.parse(["--auto-advance"]).apply(to: &spec)
+        #expect(spec.autoAdvance == true)
+    }
+
     /// `JourneyBehaviorOptions.apply` used `try?`, so a misremembered value parsed to `nil`, was
     /// written over the field, and the command exited 0 reporting a change it had not made. These are
     /// the spellings someone actually reaches for.
@@ -354,6 +470,23 @@ struct CLIParsingTests {
         spec.matchMode = try ArgumentParsing.matchMode("strict-sequence")
         #expect(spec.matchMode == .strictSequence)
     }
+}
+
+private actor CLICommandRecorder: ControlTransport {
+    nonisolated let baseURL = URL(string: "http://127.0.0.1:8787")!
+    private let cancelOnSend: Bool
+    private var received: [ControlCommand] = []
+
+    init(cancelOnSend: Bool = false) { self.cancelOnSend = cancelOnSend }
+
+    func send(_ command: ControlCommand) async throws -> ControlResponse {
+        received.append(command)
+        if cancelOnSend { throw CancellationError() }
+        return .success(.message("Done."))
+    }
+
+    func isReachable() async -> Bool { true }
+    func commands() -> [ControlCommand] { received }
 }
 
 @Suite("CLI output")

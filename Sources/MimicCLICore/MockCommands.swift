@@ -96,9 +96,12 @@ struct EndpointCommand: AsyncParsableCommand {
             }
 
             let touchesResponse = spec != ScenarioSpec()
-            guard touchesResponse, let endpoint = created.result?.endpoint else {
+            guard touchesResponse else {
                 try Output(options).emit(created)
                 return
+            }
+            guard let endpoint = created.result?.endpoint else {
+                throw CLIFailure.commandFailed(.internalFailure("Create returned no endpoint to configure."))
             }
 
             let updated = try await client.send(.scenarioUpdate(
@@ -202,10 +205,10 @@ struct EndpointCommand: AsyncParsableCommand {
                 )
             }
 
-            if endpointSpec != EndpointSpec(), responseSpec != ScenarioSpec() {
+            if responseSpec != ScenarioSpec() {
                 // Keep familiar local errors for malformed response options and an endpoint with no
-                // active scenario. The host checks again when it applies both edits as one command;
-                // a concurrent scenario change cannot leave only the endpoint half applied.
+                // active scenario. The host chooses the active scenario when it applies the edit;
+                // a concurrent activation must not redirect the edit to an inactive response.
                 do {
                     if let status = responseSpec.statusCode {
                         try EndpointValidator.validateStatusCode(status)
@@ -245,45 +248,14 @@ struct EndpointCommand: AsyncParsableCommand {
                 return
             }
 
-            var stableRef = ref
-            if endpointSpec != EndpointSpec() {
-                let result = try await client.send(.endpointUpdate(endpoint: ref, spec: endpointSpec))
-                guard result.ok else {
-                    throw CLIFailure.commandFailed(result.error ?? .internalFailure("Update failed."))
-                }
-                guard let endpoint = result.result?.endpoint else {
-                    throw CLIFailure.commandFailed(.internalFailure("Update returned no endpoint."))
-                }
-                // A route or name may have changed. Follow the endpoint returned by the host,
-                // rather than resolving the old selector again after the mutation.
-                stableRef = .id(endpoint.id)
+            let updated = try await client.send(.endpointUpdate(endpoint: ref, spec: endpointSpec))
+            guard updated.ok else {
+                throw CLIFailure.commandFailed(updated.error ?? .internalFailure("Update failed."))
             }
-
-            if responseSpec != ScenarioSpec() {
-                // Editing "the endpoint's response" means editing whichever scenario is active — the
-                // one a request would actually get.
-                let fetched = try await client.send(.endpointGet(endpoint: stableRef))
-                guard fetched.ok, let endpoint = fetched.result?.endpoint else {
-                    throw CLIFailure.commandFailed(fetched.error ?? .internalFailure("Endpoint not found."))
-                }
-                guard let activeID = endpoint.activeScenarioID else {
-                    throw CLIFailure.badArgument(
-                        "\(endpoint.method.rawValue) \(endpoint.path) has no active scenario to edit. "
-                            + "Create one with `mimic scenario create`."
-                    )
-                }
-                stableRef = .id(endpoint.id)
-                let result = try await client.send(.scenarioUpdate(
-                    endpoint: .id(endpoint.id),
-                    scenario: .id(activeID),
-                    spec: responseSpec
-                ))
-                guard result.ok else {
-                    throw CLIFailure.commandFailed(result.error ?? .internalFailure("Response update failed."))
-                }
+            guard let endpoint = updated.result?.endpoint else {
+                throw CLIFailure.commandFailed(.internalFailure("Update returned no endpoint."))
             }
-
-            try Output(options).emit(try await client.send(.endpointGet(endpoint: stableRef)))
+            try Output(options).emit(.success(.init(endpoint: endpoint)))
         }
     }
 

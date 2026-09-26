@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Designed for a program to drive: JSON on stdout by default, diagnostics on stderr, and exit codes
 /// that mean something (`0` ok, `2` bad usage, `3` no instance reachable, `4` command failed). Every
-/// operation the UI offers is here, and `mimic commands` lets a caller discover the surface from the
-/// running instance rather than from documentation that may not match it.
+/// supported control operation can be discovered with `mimic commands` from the running instance.
+/// Spec import and update installation remain window workflows.
 public struct MimicCommand: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "mimic",
@@ -18,7 +18,7 @@ public struct MimicCommand: AsyncParsableCommand {
         specific instance with MIMIC_CONTROL_URL or --url.
 
         Output is JSON unless --format text is given. Exit codes: 0 success, 2 bad usage,
-        3 no reachable instance, 4 the command failed.
+        3 no reachable instance, 4 the command failed, 130 interrupted.
 
         A journey scripts an ordered sequence of responses, so the same route can answer differently
         depending on where the request falls in a flow:
@@ -53,6 +53,7 @@ public struct MimicCommand: AsyncParsableCommand {
     /// parsing text.
     public static func run(arguments: [String]? = nil) async -> Int32 {
         do {
+            try Task.checkCancellation()
             var command = try parseAsRoot(arguments)
             if var asyncCommand = command as? any AsyncParsableCommand {
                 try await asyncCommand.run()
@@ -60,6 +61,9 @@ public struct MimicCommand: AsyncParsableCommand {
                 try command.run()
             }
             return 0
+        } catch is CancellationError {
+            FileHandle.standardError.write(Data("Mimic command interrupted.\n".utf8))
+            return 130
         } catch let error as CLIFailure {
             Output.writeError(error)
             return error.exitCode
@@ -172,7 +176,15 @@ struct AppCommand: AsyncParsableCommand {
 
         func run() async throws {
             let waitSeconds = try AppLauncher.validatedReadinessTimeout(waitSeconds)
-            if let existing = try? options.client(), await existing.isReachable() {
+            let existing: (any ControlTransport)?
+            do {
+                existing = try options.client()
+            } catch CLIFailure.noInstance {
+                existing = nil
+            }
+            let alreadyRunning = await existing?.isReachable() ?? false
+            try Task.checkCancellation()
+            if let existing, alreadyRunning {
                 Output(options).emitMessage("Mimic is already running at \(existing.baseURL.absoluteString).")
                 return
             }
@@ -209,6 +221,7 @@ struct AppCommand: AsyncParsableCommand {
             // A pid in a file is not evidence — see `AppLauncher.confirmRunningInstance`. Nothing is
             // signalled until the instance itself has answered that it is the process named there.
             try await AppLauncher.confirmRunningInstance(endpoint)
+            try Task.checkCancellation()
             try AppLauncher.terminate(pid: endpoint.pid)
             Output(options).emitMessage("Stopped Mimic (pid \(endpoint.pid)).")
         }
@@ -222,7 +235,15 @@ struct AppCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            guard let client = try? options.client(), await client.isReachable() else {
+            let client: (any ControlTransport)?
+            do {
+                client = try options.client()
+            } catch CLIFailure.noInstance {
+                client = nil
+            }
+            let reachable = await client?.isReachable() ?? false
+            try Task.checkCancellation()
+            guard let client, reachable else {
                 Output(options).emitMessage("No Mimic instance is reachable.")
                 return
             }

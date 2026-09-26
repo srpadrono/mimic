@@ -115,6 +115,19 @@ private final class RecordedSignals: @unchecked Sendable {
 
 @Suite("Readiness timeout validation")
 struct ReadinessTimeoutTests {
+    @Test("A searchable directory is skipped when resolving an executable")
+    func executableResolutionRequiresAFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimic-launcher-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("Mimic")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        #expect(try AppLauncher.resolveExecutable(environment: [:], candidates: [directory, executable]) == executable)
+    }
+
     @Test(
         "Invalid wait times fail before launch or an already-running shortcut",
         arguments: ["nan", "inf", "-1", "0", "3601"]
@@ -137,6 +150,28 @@ struct ReadinessTimeoutTests {
             #expect(failure.exitCode == 2)
         } catch {
             Issue.record("unexpected error: \(error)")
+        }
+    }
+
+    @Test("Cancelling readiness polling returns cancellation instead of retrying until timeout")
+    func cancelledReadinessStopsPolling() async {
+        let result = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await AppLauncher.waitForReadiness(explicitURL: "http://127.0.0.1:1", timeout: 0.1)
+        }
+        do {
+            _ = try await result.value
+            Issue.record("cancelled readiness succeeded")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("expected cancellation, got \(error)")
+        }
+    }
+
+    @Test("A nonpositive poll interval cannot start a busy readiness loop")
+    func invalidPollIntervalIsRefused() async {
+        await #expect(throws: CLIFailure.self) {
+            _ = try await AppLauncher.waitForReadiness(timeout: 0.1, pollInterval: .zero)
         }
     }
 }
@@ -163,6 +198,19 @@ struct ReadinessTimeoutTests {
 /// `SignalDeliveryOverride` is what makes that one safe to run at all.
 @Suite("Confirming an instance before it is signalled")
 struct InstanceConfirmationTests {
+    @Test("Cancelled confirmation never becomes an unreachable-instance error or a signal")
+    func cancelledConfirmationIsNotSignalled() async {
+        let signals = RecordedSignals()
+        let instance = StubInstance { _ in throw CancellationError() }
+        await #expect(throws: CancellationError.self) {
+            try await SignalDeliveryOverride.$current.withValue(signals.deliver) {
+                try await ControlTransportOverride.$current.withValue(instance) {
+                    try await AppLauncher.confirmRunningInstance(discoveredEndpoint(pid: 4242))
+                }
+            }
+        }
+        #expect(signals.delivered.isEmpty)
+    }
 
     /// Runs `confirmRunningInstance` against a stub instance and returns what it refused with, or
     /// `nil` when it confirmed. It binds the signal recorder as well, so every caller can assert that
@@ -316,7 +364,7 @@ struct InstanceConfirmationTests {
     /// delivery *was* `kill(2)`, so a guard that had stopped firing would have been reported by the
     /// signal rather than by the assertion. A non-positive pid is not a process id, which is why
     /// `ControlEndpointDiscovery.isProcessAlive` refuses one too.
-    @Test("A pid that is not a pid is refused before anything is signalled", arguments: [0, -1, -5])
+    @Test("A pid that is not a pid is refused before anything is signalled", arguments: [0, -1, -5, Int.max])
     func anInvalidPidIsNeverSignalled(pid: Int) {
         let signals = RecordedSignals()
 

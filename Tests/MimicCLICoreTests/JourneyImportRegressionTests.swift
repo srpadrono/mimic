@@ -53,6 +53,20 @@ struct JourneyImportRegressionTests {
         }
     }
 
+    @Test("Journey commands honor auto-advance flags passed to the public runner", arguments: [
+        ("--auto-advance", true), ("--no-auto-advance", false),
+    ])
+    func explicitAutoAdvanceReachesHost(flag: String, expected: Bool) async {
+        let instance = JourneyImportInstance { _ in .success(.init(journey: Self.journey)) }
+
+        #expect(await Self.run(["journey", "create", "Flow", flag], against: instance) == 0)
+        #expect(await Self.run(["journey", "update", "Flow", flag], against: instance) == 0)
+        #expect(instance.commands == [
+            .journeyCreate(name: "Flow", spec: JourneySpec(autoAdvance: expected)),
+            .journeyUpdate(journey: .name("Flow"), spec: JourneySpec(autoAdvance: expected)),
+        ])
+    }
+
     @Test("A lookup refusal other than journey.notFound does not create a journey")
     func lookupFailureDoesNotCreate() async throws {
         try await Self.withFile { path in

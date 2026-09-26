@@ -4,7 +4,7 @@ import Foundation
 
 /// How results reach the caller.
 ///
-/// JSON is the default because the primary caller is a program. `--text` exists for the human who is
+/// JSON is the default because the primary caller is a program. `--format text` exists for the human who is
 /// debugging what their agent just did, and never carries information the JSON lacks.
 public enum OutputFormat: String, ExpressibleByArgument, CaseIterable, Sendable {
     case json
@@ -27,17 +27,14 @@ public struct GlobalOptions: ParsableArguments, Sendable {
 
     public init() {}
 
-    /// The transport this invocation talks to — one funnel, so every subcommand resolves `--url` and
-    /// `--timeout` the same way.
-    ///
-    /// It returns `any ControlTransport` rather than `ControlClient` so a test can bind a recording
-    /// stub in `ControlTransportOverride` and drive the real subcommand tree. Without that there is
-    /// no way in at all: ArgumentParser builds each command from argv, so there is no call site to
-    /// hand a client to, and the emitted `ControlCommand` of every runnable verb — 55 of them, the
-    /// 65 `AsyncParsableCommand` types in this module less the 10 that only group others — was
-    /// unassertable in consequence. The production path is unchanged: with nothing bound, this is the
-    /// same `ControlClient.discover` call it always made.
+    public mutating func validate() throws {
+        _ = try ControlClient.validatedTimeout(timeout)
+    }
+
+    /// Resolves shared client options. The task-local transport lets tests drive the actual command
+    /// tree without making network requests; validation applies to both paths.
     public func client() throws -> any ControlTransport {
+        _ = try ControlClient.validatedTimeout(timeout)
         if let override = ControlTransportOverride.current { return override }
         return try ControlClient.discover(explicitURL: url, timeout: timeout)
     }
@@ -157,6 +154,11 @@ enum TextRenderer {
             lines.append(commands.map { "\($0.name.padded(to: 22))\($0.summary)\n\("".padded(to: 22))\($0.cli)" }
                 .joined(separator: "\n"))
         }
+        if let update = result.update {
+            lines.append(update.updateAvailable
+                ? "Update available: \(update.latest) (installed \(update.installed))\n\(update.releaseURL.absoluteString)"
+                : "No update available (installed \(update.installed), latest \(update.latest)).")
+        }
         if let message = result.message {
             lines.append(message)
         }
@@ -262,17 +264,9 @@ enum TextRenderer {
         return text
     }
 
-    /// Where a run stands, in one phrase. Shared because the two renderers that need it read the
-    /// same field two different ways, and both readings were wrong in the same place.
-    ///
-    /// A nil `currentStepIndex` says only that the cursor names no step. `renderStatus` defaulted it
-    /// to zero and printed `step 1/0`; `renderState` mapped it to `complete` and reported a journey
-    /// that had never run as finished. A journey with no steps is one command away —
-    /// `mimic journey create Flow --activate` sends `journeyCreate` with a spec carrying no steps and
-    /// then `journeyActivate`, whose reply is `JourneyStatus.make(journey:state: nil)`: `isComplete`
-    /// false, cursor `0`, `totalSteps` `0`, so the index is nil — and it renders through both.
+    /// A missing or invalid cursor does not imply completion; the explicit status owns that fact.
     static func runPosition(_ status: JourneyStatus) -> String {
-        guard let index = status.currentStepIndex else {
+        guard let index = status.currentStepIndex, index >= 0, index < status.totalSteps else {
             return status.isComplete ? "complete" : "no current step"
         }
         return "step \(index + 1)/\(status.totalSteps)"

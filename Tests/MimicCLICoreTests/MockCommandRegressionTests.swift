@@ -8,6 +8,7 @@ struct MockCommandRegressionTests {
     private static let endpointID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     private static let otherEndpointID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
     private static let scenarioID = UUID(uuidString: "00000000-0000-0000-0000-000000000201")!
+    private static let otherScenarioID = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
 
     /// The real project executor gives a renamed endpoint only its new route. This fixture pins the
     /// old route literally, so reverting the CLI's stable-ID follow-up makes the invocation fail.
@@ -107,6 +108,61 @@ struct MockCommandRegressionTests {
         #expect(await transport.projectSnapshot().endpoints.isEmpty)
         #expect(await transport.commandsSnapshot().map(\.kind) == [
             .endpointGet, .endpointUpdateWithActiveScenario,
+        ])
+    }
+
+    @Test("Response-only endpoint edits select the active scenario when the edit executes")
+    func responseOnlyUpdateFollowsConcurrentActivation() async throws {
+        let endpoint = Endpoint(
+            id: Self.endpointID,
+            name: "Original",
+            method: .get,
+            path: "/old",
+            scenarios: [
+                Scenario(id: Self.scenarioID, name: "Original", statusCode: 200),
+                Scenario(id: Self.otherScenarioID, name: "New active", statusCode: 201),
+            ],
+            activeScenarioID: Self.scenarioID
+        )
+        let transport = ProjectTransport(
+            project: MockProject(name: "Fixture", endpoints: [endpoint]),
+            activateOtherScenarioAfterRead: true
+        )
+
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: ["endpoint", "update", "GET", "/old", "--status", "503"])
+        }
+
+        #expect(status == 0)
+        let changed = try #require(await transport.projectSnapshot().endpoints.first)
+        #expect(changed.activeScenarioID == Self.otherScenarioID)
+        #expect(changed.scenarios.map(\.statusCode) == [200, 503])
+        #expect(await transport.commandsSnapshot() == [
+            .endpointGet(endpoint: .route(.get, "/old")),
+            .endpointUpdateWithActiveScenario(
+                endpoint: .id(Self.endpointID),
+                spec: EndpointSpec(),
+                scenarioSpec: ScenarioSpec(statusCode: 503)
+            ),
+        ])
+    }
+
+    @Test("A successful endpoint-only edit does not fail when the endpoint is then deleted")
+    func endpointOnlyUpdateDoesNotReadAfterSuccess() async {
+        let endpoint = Endpoint(id: Self.endpointID, name: "Original", method: .get, path: "/old")
+        let transport = ProjectTransport(
+            project: MockProject(name: "Fixture", endpoints: [endpoint]),
+            deleteEndpointAfterSimpleEdit: true
+        )
+
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: ["endpoint", "update", "GET", "/old", "--new-path", "/new"])
+        }
+
+        #expect(status == 0)
+        #expect(await transport.projectSnapshot().endpoints.isEmpty)
+        #expect(await transport.commandsSnapshot() == [
+            .endpointUpdate(endpoint: .route(.get, "/old"), spec: EndpointSpec(path: "/new")),
         ])
     }
 
@@ -238,7 +294,7 @@ struct MockCommandRegressionTests {
 
     @Test("Scenario create --activate refuses a success response without a scenario")
     func scenarioActivationNeedsCreatedScenario() async {
-        let transport = MissingScenarioTransport()
+        let transport = MissingPayloadTransport()
         let status = await ControlTransportOverride.$current.withValue(transport) {
             await MimicCommand.run(arguments: ["scenario", "create", "GET", "/target", "Other", "--activate"])
         }
@@ -249,13 +305,26 @@ struct MockCommandRegressionTests {
         ])
     }
 
-    private actor MissingScenarioTransport: ControlTransport {
+    @Test("Endpoint create cannot claim response configuration without the created endpoint")
+    func configuredEndpointNeedsCreatedEndpoint() async {
+        let transport = MissingPayloadTransport()
+        let status = await ControlTransportOverride.$current.withValue(transport) {
+            await MimicCommand.run(arguments: ["endpoint", "create", "GET", "/target", "--status", "201"])
+        }
+
+        #expect(status == 4)
+        #expect(await transport.commandsSnapshot() == [
+            .endpointCreate(name: nil, method: .get, path: "/target", spec: EndpointSpec()),
+        ])
+    }
+
+    private actor MissingPayloadTransport: ControlTransport {
         nonisolated let baseURL = URL(string: "http://127.0.0.1:8787")!
         private var commands: [ControlCommand] = []
 
         func send(_ command: ControlCommand) async throws -> ControlResponse {
             commands.append(command)
-            return .success(.message("Created scenario, but no scenario was returned."))
+            return .success(.message("Created, but no object was returned."))
         }
 
         func isReachable() async -> Bool { true }
@@ -269,17 +338,23 @@ struct MockCommandRegressionTests {
         private var deleteActiveScenarioBeforeEndpointEdit: Bool
         private var deleteEndpointAfterCombinedEdit: Bool
         private var replaceRouteOwnerBeforeCombinedEdit: Bool
+        private var activateOtherScenarioAfterRead: Bool
+        private var deleteEndpointAfterSimpleEdit: Bool
 
         init(
             project: MockProject,
             deleteActiveScenarioBeforeEndpointEdit: Bool = false,
             deleteEndpointAfterCombinedEdit: Bool = false,
-            replaceRouteOwnerBeforeCombinedEdit: Bool = false
+            replaceRouteOwnerBeforeCombinedEdit: Bool = false,
+            activateOtherScenarioAfterRead: Bool = false,
+            deleteEndpointAfterSimpleEdit: Bool = false
         ) {
             self.project = project
             self.deleteActiveScenarioBeforeEndpointEdit = deleteActiveScenarioBeforeEndpointEdit
             self.deleteEndpointAfterCombinedEdit = deleteEndpointAfterCombinedEdit
             self.replaceRouteOwnerBeforeCombinedEdit = replaceRouteOwnerBeforeCombinedEdit
+            self.activateOtherScenarioAfterRead = activateOtherScenarioAfterRead
+            self.deleteEndpointAfterSimpleEdit = deleteEndpointAfterSimpleEdit
         }
 
         func send(_ command: ControlCommand) async throws -> ControlResponse {
@@ -313,8 +388,22 @@ struct MockCommandRegressionTests {
                 guard let outcome = try ProjectCommandExecutor.apply(command, to: &project) else {
                     return .failure(.internalFailure("This test expected a project command."))
                 }
-                if deleteEndpointAfterCombinedEdit, command.kind == .endpointUpdateWithActiveScenario {
+                // Return the original read after another client has selected a different scenario.
+                // Both the old two-command path and the atomic edit encounter the same race.
+                if activateOtherScenarioAfterRead, command.kind == .endpointGet {
+                    activateOtherScenarioAfterRead = false
+                    _ = try ProjectCommandExecutor.apply(
+                        .scenarioActivate(
+                            endpoint: .id(MockCommandRegressionTests.endpointID),
+                            scenario: .id(MockCommandRegressionTests.otherScenarioID)
+                        ),
+                        to: &project
+                    )
+                }
+                if (deleteEndpointAfterCombinedEdit && command.kind == .endpointUpdateWithActiveScenario)
+                    || (deleteEndpointAfterSimpleEdit && command.kind == .endpointUpdate) {
                     deleteEndpointAfterCombinedEdit = false
+                    deleteEndpointAfterSimpleEdit = false
                     _ = try ProjectCommandExecutor.apply(
                         .endpointDelete(endpoint: .id(MockCommandRegressionTests.endpointID)),
                         to: &project
