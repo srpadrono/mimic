@@ -53,7 +53,9 @@ struct JourneyEditorView: View {
                 .accessibilityLabel("Add step")
             }
             stepList
-                .frame(minHeight: settingsExpanded ? DSRowHeight.listRow : 0, maxHeight: .infinity)
+                // Keep one complete two-line step visible, including the List's top inset.
+                .frame(minHeight: settingsExpanded ? DSRowHeight.journeyStep + DSSpacing.lgPlus : 0,
+                       maxHeight: .infinity)
         }
         // The centre pane tags this view with an identifier of its own, and a bare
         // `.accessibilityIdentifier` on a container renames every descendant to match it — which
