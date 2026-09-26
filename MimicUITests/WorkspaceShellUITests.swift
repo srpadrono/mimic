@@ -928,6 +928,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenarios")
         createEndpointViaUI(name: "Get users", path: "/api/users")
 
+        // The hosted runner can restore an 808pt window with its right edge beyond the 1024pt
+        // display. Move it back on screen before using the inspector's pointer controls.
+        workspace.compactWindow()
+
         XCTAssertTrue(
             breadcrumb.waitForCrumb("scenario", toRead: "Default"),
             "A new endpoint answers with its default scenario — "
@@ -942,6 +946,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(
             addScenario.waitForExistence(timeout: 5),
             "The Scenarios header should offer a way to add one"
+        )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { addScenario.isHittable },
+            "The Scenarios header action should be on screen and clickable"
         )
         addScenario.click()
 
