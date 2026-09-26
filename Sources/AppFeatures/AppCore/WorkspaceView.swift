@@ -7,6 +7,7 @@ nonisolated enum WorkspaceToolbarLayout: Equatable {
     case expanded
     case compactSummary
     case overflow
+    case iconStatus
 }
 
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
@@ -399,7 +400,8 @@ struct WorkspaceView: View {
 
     /// Shorten the summaries first; the actions remain visible while there is room for them.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
-        guard centerWidth.isFinite else { return .overflow }
+        guard centerWidth.isFinite else { return .iconStatus }
+        if centerWidth < DSToolbarGeometry.iconStatusCenterWidth { return .iconStatus }
         if centerWidth < DSToolbarGeometry.actionOverflowCenterWidth { return .overflow }
         if centerWidth < DSToolbarGeometry.expandedCenterWidth { return .compactSummary }
         return .expanded
@@ -411,7 +413,12 @@ struct WorkspaceView: View {
 
     /// Preserve project identity and server context; only editor actions move into overflow.
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) == .overflow
+        let layout = toolbarLayout(centerWidth: centerWidth)
+        return layout == .overflow || layout == .iconStatus
+    }
+
+    nonisolated static func toolbarUsesIconStatus(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) == .iconStatus
     }
 
     private var usesCompactToolbarSummary: Bool {
@@ -419,7 +426,11 @@ struct WorkspaceView: View {
     }
 
     private var usesToolbarOverflow: Bool {
-        centerToolbarLayout == .overflow
+        centerToolbarLayout == .overflow || centerToolbarLayout == .iconStatus
+    }
+
+    private var usesIconStatus: Bool {
+        centerToolbarLayout == .iconStatus
     }
 
     @ToolbarContentBuilder
@@ -501,6 +512,7 @@ struct WorkspaceView: View {
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             compact: usesCompactToolbarSummary,
+            iconOnly: usesIconStatus,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             onShowUnmatched: {
@@ -513,8 +525,9 @@ struct WorkspaceView: View {
                 showUnmatchedOnly = false
             }
         )
-        .frame(width: usesCompactToolbarSummary
-            ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth)
+        .frame(width: usesIconStatus
+            ? DSToolbarGeometry.iconStatusWidth
+            : (usesCompactToolbarSummary ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth))
     }
 
     @ToolbarContentBuilder

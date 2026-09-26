@@ -65,6 +65,8 @@ nonisolated public enum DSToolbarGeometry {
     public static let expandedCenterWidth: CGFloat = 600
     /// The shorter summaries keep both editor actions visible until the centre gets this narrow.
     public static let actionOverflowCenterWidth: CGFloat = 440
+    /// Below this width, a status icon keeps the project identity in the native toolbar.
+    public static let iconStatusCenterWidth: CGFloat = 380
     public static let projectTitleWidth: CGFloat = 160
     public static let compactProjectTitleWidth: CGFloat = 120
     public static let metadataHeight: CGFloat = 12
@@ -72,5 +74,6 @@ nonisolated public enum DSToolbarGeometry {
     public static let detailsListHeight: CGFloat = 320
     public static let copyButtonWidth: CGFloat = 100
     public static let compactStatusWidth: CGFloat = 104
+    public static let iconStatusWidth: CGFloat = height
     public static let statusWidth: CGFloat = 220
 }

@@ -10,6 +10,7 @@ struct ServerStatusWell: View {
     let requestCount: Int
     let unmatchedCount: Int
     var compact = false
+    var iconOnly = false
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
     var onShowUnmatched: (() -> Void)?
@@ -57,25 +58,41 @@ struct ServerStatusWell: View {
 
     var body: some View {
         Button { showingDetails.toggle() } label: {
-            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                HStack(spacing: DSSpacing.sm) {
-                    Text(verbatim: title)
-                        .font(DSTypography.bodyBold)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                        .accessibilityHidden(true)
+            Group {
+                if iconOnly {
+                    HStack(spacing: DSSpacing.xxs) {
+                        Image(systemName: restartRequired ? "exclamationmark.arrow.circlepath" : "server.rack")
+                            .font(.system(size: DSGlyph.controlProminent, weight: .regular))
+                            .foregroundStyle(statusColor)
+                            .accessibilityHidden(true)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                            .foregroundStyle(DSColors.labelSecondary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(width: DSToolbarGeometry.iconStatusWidth, height: DSToolbarGeometry.height)
+                } else {
+                    VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                        HStack(spacing: DSSpacing.sm) {
+                            Text(verbatim: title)
+                                .font(DSTypography.bodyBold)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(isHovered ? DSColors.accentText : DSColors.labelPrimary)
+                        Text(verbatim: subtitle)
+                            .font(DSTypography.label)
+                            .foregroundStyle(statusColor)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: DSToolbarGeometry.height)
                 }
-                .foregroundStyle(isHovered ? DSColors.accentText : DSColors.labelPrimary)
-                Text(verbatim: subtitle)
-                    .font(DSTypography.label)
-                    .foregroundStyle(statusColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: DSToolbarGeometry.height)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
