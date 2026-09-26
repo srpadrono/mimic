@@ -14,8 +14,15 @@ public struct GRDBProjectRepository: ProjectRepository {
 
     public func save(_ project: MockProject) async throws {
         try await dbQueue.write { db in
-            // Upsert the top-level project record
             let projectRecord = ProjectRecord(from: project)
+            try projectRecord.requireSupportedSchemaVersion()
+            // Another build may have upgraded the row after this snapshot was loaded. Check while
+            // holding the write transaction, before replacing any project or child data.
+            if let stored = try ProjectRecord.fetchOne(db, key: project.id.uuidString) {
+                try stored.requireSupportedSchemaVersion()
+            }
+
+            // Upsert the top-level project record
             try projectRecord.upsert(db)
 
             // Delete-all-then-reinsert strategy: simpler than diffing, and acceptable for

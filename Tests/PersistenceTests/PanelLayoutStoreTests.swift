@@ -7,16 +7,18 @@ import Testing
 struct PanelLayoutStoreTests {
 
     /// A throwaway suite per test, so cases cannot see each other's writes.
-    static func makeDefaults() -> UserDefaults {
+    static func makeDefaults() -> (UserDefaults, String) {
         let suite = "panel.layout.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return defaults
+        return (defaults, suite)
     }
 
     @Test("An empty store returns the shipped defaults rather than zeros")
     func emptyStoreUsesDefaults() {
-        let layout = PanelLayoutStore(defaults: Self.makeDefaults()).load()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let layout = PanelLayoutStore(defaults: defaults).load()
         #expect(layout == PanelLayout.default)
         // The trap this guards: `UserDefaults.double(forKey:)` returns 0 for a missing key, which
         // would collapse both panels to nothing on first launch.
@@ -25,7 +27,8 @@ struct PanelLayoutStoreTests {
 
     @Test("An arrangement survives a save and reload")
     func roundTrip() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         let saved = PanelLayout(
             requestLogHeight: 340,
             isRequestLogVisible: false,
@@ -39,7 +42,8 @@ struct PanelLayoutStoreTests {
 
     @Test("Hiding a panel is remembered — false is a value, not an absent key")
     func hiddenPanelsAreRemembered() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         PanelLayoutStore(defaults: defaults).save(
             PanelLayout(isRequestLogVisible: false, isInspectorVisible: false)
         )
@@ -52,7 +56,8 @@ struct PanelLayoutStoreTests {
 
     @Test("A large stored size is kept — the window decides what fits, not the store")
     func largeSizesSurviveTheStore() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         // Someone on a 6K display who dragged the panel out past 1000pt. The store used to clamp this
         // to 400 on the way in *and* on the way out, so the arrangement was not merely refused, it was
         // destroyed. Narrowing an oversized value to fit is now the split view's job, and it does it
@@ -65,7 +70,8 @@ struct PanelLayoutStoreTests {
 
     @Test("An absurd stored size is still refused")
     func absurdSizesHitTheSanityCeiling() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         // A hand-edited plist, not a drag. There is no window this could be right for.
         defaults.set(999_999.0, forKey: "panel.requestLog.height")
 
@@ -96,13 +102,15 @@ struct PanelLayoutStoreTests {
 
     @Test("A nonsensical stored size falls back to the default")
     func nonsenseSizesFallBack() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(0.0, forKey: "panel.requestLog.height")
 
         let layout = PanelLayoutStore(defaults: defaults).load()
         #expect(layout.requestLogHeight == PanelLayout.default.requestLogHeight)
 
-        let nonFinite = Self.makeDefaults()
+        let (nonFinite, nonFiniteSuite) = Self.makeDefaults()
+        defer { nonFinite.removePersistentDomain(forName: nonFiniteSuite) }
         nonFinite.set(Double.nan, forKey: "panel.requestLog.height")
         #expect(
             PanelLayoutStore(defaults: nonFinite).load().requestLogHeight
@@ -112,12 +120,14 @@ struct PanelLayoutStoreTests {
 
     @Test("Saving records what was chosen, bar the sanity ceiling")
     func savingKeepsTheChosenSize() {
-        let defaults = Self.makeDefaults()
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
         PanelLayoutStore(defaults: defaults).save(PanelLayout(requestLogHeight: 640))
         // 640 is a perfectly reasonable panel on a large display and comes back untouched.
         #expect(PanelLayoutStore(defaults: defaults).load().requestLogHeight == 640)
 
-        let absurd = Self.makeDefaults()
+        let (absurd, absurdSuite) = Self.makeDefaults()
+        defer { absurd.removePersistentDomain(forName: absurdSuite) }
         PanelLayoutStore(defaults: absurd).save(PanelLayout(requestLogHeight: 9_000))
         // 9000 is not a window anyone has.
         #expect(
@@ -129,9 +139,50 @@ struct PanelLayoutStoreTests {
     @Test("Two stores over different suites do not see each other")
     func suitesAreIsolated() {
         // This is what keeps a UI test run from overwriting the developer's real window arrangement.
-        let a = PanelLayoutStore(defaults: Self.makeDefaults())
-        let b = PanelLayoutStore(defaults: Self.makeDefaults())
+        let (firstDefaults, firstSuite) = Self.makeDefaults()
+        defer { firstDefaults.removePersistentDomain(forName: firstSuite) }
+        let (secondDefaults, secondSuite) = Self.makeDefaults()
+        defer { secondDefaults.removePersistentDomain(forName: secondSuite) }
+        let a = PanelLayoutStore(defaults: firstDefaults)
+        let b = PanelLayoutStore(defaults: secondDefaults)
         a.save(PanelLayout(requestLogHeight: 480))
         #expect(b.load().requestLogHeight == PanelLayout.default.requestLogHeight)
+    }
+
+    @Test("Malformed visibility preferences use defaults", arguments: ["panel.requestLog.visible", "panel.inspector.visible"])
+    func malformedVisibilityUsesDefault(key: String) {
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let invalidValues: [Any] = ["not-a-boolean", ["unexpected"], ["value": "false"]]
+        for invalid in invalidValues {
+            defaults.set(invalid, forKey: key)
+            let layout = PanelLayoutStore(defaults: defaults).load()
+            #expect(layout.isRequestLogVisible)
+            #expect(layout.isInspectorVisible)
+        }
+    }
+
+    @Test("Legacy boolean spellings keep hidden panels hidden", arguments: ["false", "NO", "0"])
+    func legacyFalseFlagsArePreserved(value: String) {
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(value, forKey: "panel.requestLog.visible")
+        defaults.set(0, forKey: "panel.inspector.visible")
+
+        let layout = PanelLayoutStore(defaults: defaults).load()
+        #expect(layout.isRequestLogVisible == false)
+        #expect(layout.isInspectorVisible == false)
+    }
+
+    @Test("Saving a nonfinite or nonpositive height stores a usable default", arguments: [
+        Double.nan, Double.infinity, -Double.infinity, 0, -20,
+    ])
+    func invalidSavedHeightUsesDefault(value: Double) {
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        PanelLayoutStore(defaults: defaults).save(PanelLayout(requestLogHeight: CGFloat(value)))
+
+        #expect(defaults.double(forKey: "panel.requestLog.height") == 220)
+        #expect(PanelLayoutStore(defaults: defaults).load().requestLogHeight == 220)
     }
 }
