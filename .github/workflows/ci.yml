@@ -348,9 +348,17 @@ jobs:
               -only-testing:MimicUITests/WorkspaceShellUITests/testViewMenuAndShortcutSwitchNavigators
 
           - id: 7
-            name: welcome projects
+            name: welcome projects A
             only: >-
-              -only-testing:MimicUITests/WelcomeProjectUITests
+              -only-testing:MimicUITests/WelcomeProjectUITests/testArrowKeysMoveTheRecentsSelectionAndReturnOpensIt
+              -only-testing:MimicUITests/WelcomeProjectUITests/testCloseProjectIsDisabledWhileNoProjectIsOpen
+              -only-testing:MimicUITests/WelcomeProjectUITests/testCreatingAProjectFromAnOpenProjectSwapsTheWorkspace
+              -only-testing:MimicUITests/WelcomeProjectUITests/testDeleteConfirmationNamesTheProjectAndKeepProjectCancels
+              -only-testing:MimicUITests/WelcomeProjectUITests/testDuplicateCarriesTheEndpointsIntoTheCopy
+              -only-testing:MimicUITests/WelcomeProjectUITests/testDuplicatingTwiceProducesTwoCopies
+              -only-testing:MimicUITests/WelcomeProjectUITests/testEscapeDismissesTheDeleteConfirmation
+              -only-testing:MimicUITests/WelcomeProjectUITests/testEscapeDismissesTheRecentsContextMenu
+              -only-testing:MimicUITests/WelcomeProjectUITests/testNewProjectSheetOpensFocusedOnTheNameFieldWithPortPrefilled
 
           - id: 8
             name: request log
@@ -424,6 +432,19 @@ jobs:
               -only-testing:MimicUITests/JourneyEditorUITests/testStepContextMenuReordersAndRemovesSteps
               -only-testing:MimicUITests/JourneyEditorUITests/testStepSheetKeepsSaveDisabledUntilAPathIsTypedAndCancelsCleanly
               -only-testing:MimicUITests/JourneyEditorUITests/testStepSheetNamesTheRuleThatRefusedEachTime
+
+          - id: 15
+            name: welcome projects B
+            only: >-
+              -only-testing:MimicUITests/WelcomeProjectUITests/testOpenFromTheRecentsContextMenuOpensTheProject
+              -only-testing:MimicUITests/WelcomeProjectUITests/testPortValidationMessageAppearsAndClearsWithTheField
+              -only-testing:MimicUITests/WelcomeProjectUITests/testRecentProjectRowStatesWhenItWasLastOpened
+              -only-testing:MimicUITests/WelcomeProjectUITests/testRecentsPanelHeaderCountsTheProjects
+              -only-testing:MimicUITests/WelcomeProjectUITests/testRecentsSelectionFallsBackAfterDeletingTheSelectedProject
+              -only-testing:MimicUITests/WelcomeProjectUITests/testRenameFromRecentsSurvivesReopeningProject
+              -only-testing:MimicUITests/WelcomeProjectUITests/testUpArrowMovesTheRecentsSelectionBackTowardTheTop
+              -only-testing:MimicUITests/WelcomeProjectUITests/testWelcomeWindowShowsHeroVersionAndEmptyRecentsGuidance
+              -only-testing:MimicUITests/WelcomeProjectUITests/testWhitespaceOnlyNameKeepsCreateDisabledAndReturnInert
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
@@ -548,7 +569,7 @@ jobs:
       coverage: ${{ steps.figures.outputs.json }}
 
     env:
-      EXPECTED_COVERAGE_BUNDLES: 15
+      EXPECTED_COVERAGE_BUNDLES: 16
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
