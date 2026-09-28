@@ -1,0 +1,82 @@
+name: Design review
+
+# Temporary tooling for the UI redesign branch: builds the app, walks every screen in light and dark
+# at wide and compact widths, and prints each screenshot into the job log so a reviewer without
+# artifact access can read them back. Remove once the redesign lands.
+
+on:
+  push:
+    branches: [claude/project-thread-2fx0fn]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: design-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    name: Screenshot every screen
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    env:
+      DERIVED_DATA: .artifacts/DerivedData
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/macos-setup
+
+      - name: Walk every screen
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .artifacts/shots
+          export TEST_RUNNER_MIMIC_DESIGN_SHOTS="$PWD/.artifacts/shots"
+          xcodebuild test -workspace Mimic.xcworkspace -scheme Mimic \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MimicUITests/DesignReviewUITests \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath .artifacts/DesignReview.xcresult \
+            CODE_SIGN_IDENTITY=- 2>&1 | tee .artifacts/design-review.log | grep -E "error:|DESIGN_|Test Case|failed|passed" || true
+
+      - name: Compiler errors
+        if: always()
+        run: grep -E "error:" .artifacts/design-review.log | sort -u | head -80 || true
+
+      - name: Collect from the result bundle when the runner could not write
+        if: always()
+        run: |
+          if [ -z "$(ls .artifacts/shots 2>/dev/null)" ] && [ -d .artifacts/DesignReview.xcresult ]; then
+            xcrun xcresulttool export attachments --path .artifacts/DesignReview.xcresult \
+              --output-path .artifacts/attachments || true
+            find .artifacts/attachments -name '*.png' -exec cp {} .artifacts/shots/ \; || true
+          fi
+          ls -la .artifacts/shots || true
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: design-shots
+          path: .artifacts/shots
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Print screenshots
+        if: always()
+        run: |
+          mkdir -p .artifacts/jpg
+          for f in .artifacts/shots/*.png; do
+            [ -e "$f" ] || continue
+            name="$(basename "$f" .png)"
+            sips -s format jpeg -s formatOptions 55 --resampleWidth 1440 "$f" \
+              --out ".artifacts/jpg/$name.jpg" >/dev/null
+            echo "=====SHOT $name"
+            base64 -b 120 -i ".artifacts/jpg/$name.jpg"
+            echo "=====END $name"
+          done
+          echo "=====DONE"

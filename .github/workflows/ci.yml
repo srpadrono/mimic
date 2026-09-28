@@ -314,6 +314,7 @@ jobs:
               -only-testing:MimicUITests/UpdateUITests
               -only-testing:MimicUITests/ControlPlaneIsolationTests
               -only-testing:MimicUITests/BackendSettingsUITests
+              -only-testing:MimicUITests/DesignReviewUITests
 
           - id: 5
             name: workspace shell A
