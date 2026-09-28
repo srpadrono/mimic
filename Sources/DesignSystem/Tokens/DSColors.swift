@@ -100,7 +100,7 @@ public nonisolated enum DSColors {
 
     /// Section headers, placeholders, units, and disabled content.
     public static let labelTertiary = Color(
-        light: Ink(red: 60 / 255, green: 60 / 255, blue: 67 / 255, alpha: 0.48),
+        light: Ink(red: 60 / 255, green: 60 / 255, blue: 67 / 255, alpha: 0.58),
         dark: Ink(red: 235 / 255, green: 235 / 255, blue: 245 / 255, alpha: 0.38),
         lightHighContrast: Ink(red: 60 / 255, green: 60 / 255, blue: 67 / 255, alpha: 0.72),
         darkHighContrast: Ink(red: 235 / 255, green: 235 / 255, blue: 245 / 255, alpha: 0.62)
@@ -131,7 +131,7 @@ public nonisolated enum DSColors {
 
     // MARK: - Status
 
-    static let successLightInk = Ink(0x1D8A3E)
+    static let successLightInk = Ink(0x157A36)
     static let successDarkInk = Ink(0x34D06C)
     /// 2xx, running, live.
     public static let success = Color(light: successLightInk, dark: successDarkInk)
@@ -139,7 +139,7 @@ public nonisolated enum DSColors {
     /// 3xx.
     public static let redirect = Color(light: Ink(0x0A62CC), dark: Ink(0x5AA9FF))
 
-    static let warningLightInk = Ink(0xA86400)
+    static let warningLightInk = Ink(0x965900)
     static let warningDarkInk = Ink(0xFFB340)
     /// 4xx, unmatched, restart needed.
     public static let warning = Color(light: warningLightInk, dark: warningDarkInk)

@@ -107,14 +107,9 @@ struct EndpointFeatureRenderingTests {
     /// Both sheets open at one width, which is the part of "the shared sheet convention" that is a
     /// number.
     ///
-    /// The convention each of these two views claims to follow in its own documentation — a
-    /// sentence-case heading, `DSSpacing.lg` between the blocks, a trailing button row — ends in
-    /// `.frame(minWidth: 420, idealWidth: 420)`, written out separately in both files. A convention
-    /// spelled out at each call site is one that drifts, and nothing checked that these two still
-    /// agreed.
-    ///
-    /// Compared with each other rather than against 420, so it is the agreement being asserted and
-    /// either sheet leaving it fails here.
+    /// Both views size themselves from `DSSheetWidth.compact`, one as a fixed width and one as a
+    /// minimum and ideal width. Compared with each other first, so it is the agreement being asserted
+    /// and either sheet leaving it fails here, then against the compact sheet's 440pt floor.
     @Test("The two creation sheets open at one width")
     func creationSheetsShareOneWidth() {
         let endpointSheet = render(NewEndpointSheet { _, _, _ in })
@@ -122,7 +117,7 @@ struct EndpointFeatureRenderingTests {
 
         #expect(endpointSheet.width == projectSheet.width)
         // And it is the stated floor, not whatever the fields happened to measure.
-        #expect(endpointSheet.width >= 420)
+        #expect(endpointSheet.width >= 440)
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.

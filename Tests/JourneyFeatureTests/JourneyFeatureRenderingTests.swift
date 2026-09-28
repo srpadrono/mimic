@@ -121,6 +121,8 @@ struct JourneyFeatureRenderingTests {
         ) { _, _ in }
     }
 
+    /// The sidebar footer stands 44pt tall, the same bar as the toolbar and each column header,
+    /// whichever accessory it carries.
     @Test("The shared bottom filter keeps its height with scope and active-state controls")
     func navigatorFooterKeepsOneHeightAcrossModes() {
         let endpoints = render(DSNavigatorFooter(
@@ -132,8 +134,8 @@ struct JourneyFeatureRenderingTests {
             text: .constant("Retry"), scopeID: .constant("any"), scopes: [],
             placeholder: "Filter journeys", identifier: "test.journeys"
         ) { Image(systemName: "play.circle.fill") }, size: CGSize(width: 240, height: 100))
-        #expect(endpoints.height == 48)
-        #expect(journeys.height == 48)
+        #expect(endpoints.height == 44)
+        #expect(journeys.height == 44)
     }
 
     /// An unrelated active identifier must not change an empty navigator.
@@ -178,13 +180,14 @@ struct JourneyFeatureRenderingTests {
         )
 
         #expect(active.height == inactive.height)
-        #expect(inactive.height == DSRowHeight.listRow)
+        // A navigator row is 28pt, the list rung.
+        #expect(inactive.height == 28)
     }
 
     // MARK: - The step row
 
-    /// Changing the outcome must not shift the two-line step sequence vertically. The status pill's
-    /// fill and padding are covered by DesignSystem tests; this tests the composed journey row.
+    /// Changing the outcome must not shift the step sequence vertically. The status label itself is
+    /// covered by DesignSystem tests; this tests the composed journey row.
     @Test("A step row keeps its height across successful and failing outcomes")
     func stepRowKeepsHeightAcrossOutcomes() {
         let measure = CGSize(width: 300, height: 60)
@@ -206,7 +209,8 @@ struct JourneyFeatureRenderingTests {
         )
 
         #expect(failing.height == succeeding.height)
-        #expect(failing.height >= DSRowHeight.journeyStep)
+        // A journey step is 36pt.
+        #expect(failing.height == 36)
     }
 
     /// A run moving through the list does not change the list.
@@ -246,12 +250,9 @@ struct JourneyFeatureRenderingTests {
 
     /// The four journey sheets open at widths suited to their content.
     ///
-    /// That convention — sentence-case heading, `DSSpacing.lg` between the blocks, cancel to the left
-    /// of the confirm action — ends in a `.frame(minWidth:idealWidth:)` written out separately in
-    /// every file. `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 420
-    /// floor. The template picker needs 520 for its list; the step editor uses the 540 medium width so the multiline
-    /// headers and body fields retain useful width. Equalizing those two would either squeeze the
-    /// editor again or add empty width to the picker.
+    /// `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 440pt compact
+    /// width. The template picker's list and the step editor's multi-section form both take the
+    /// 560pt medium width, so the step editor's multiline headers and body keep a useful width.
     @Test("Every journey sheet opens at the width its convention gives it")
     func journeySheetsShareTheSheetConvention() {
         let newJourney = render(NewJourneySheet { _ in })
@@ -260,10 +261,10 @@ struct JourneyFeatureRenderingTests {
         let templatePicker = render(JourneyTemplatePicker { _, _ in })
 
         #expect(newJourney.width == capture.width)
-        #expect(newJourney.width >= 420)
+        #expect(newJourney.width >= 440)
 
-        #expect(templatePicker.width == 520)
-        #expect(stepSheet.width == 540)
+        #expect(templatePicker.width == 560)
+        #expect(stepSheet.width == 560)
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)
@@ -272,7 +273,7 @@ struct JourneyFeatureRenderingTests {
     @Test("The step form keeps its sheet margin when a scrollbar consumes width")
     func stepFormAlignsWithSheetMargin() async throws {
         let controller = NSHostingController(rootView: JourneyStepSheet(step: nil) { _ in })
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 640),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
@@ -317,9 +318,10 @@ struct JourneyFeatureRenderingTests {
         controller.view.layoutSubtreeIfNeeded()
         let frame = editor.convert(editor.bounds, to: outer.contentView)
         let viewport = outer.contentView.bounds
-        // The native body interior starts at the 16pt sheet margin plus its own 4pt padding.
-        #expect(abs(frame.minX - viewport.minX - 20) < 0.5)
-        #expect(abs(viewport.maxX - frame.maxX - 20) < 0.5)
+        // The body sits in the field column: the 20pt sheet margin, the 104pt label column, then the
+        // well's own 8pt padding. On the trailing side it is the sheet margin plus that padding.
+        #expect(abs(frame.minX - viewport.minX - 132) < 0.5)
+        #expect(abs(viewport.maxX - frame.maxX - 28) < 0.5)
     }
 
     /// The capture sheet explains a collapse, and only a collapse.

@@ -87,16 +87,19 @@ struct WorkspaceFeatureRenderingTests {
         #expect(errored == stopped)
     }
 
-    @Test("Two-line server summaries retain their height across lifecycle and compact states")
+    /// The toolbar's status capsule stands on the 32pt prominent control rung in every lifecycle
+    /// state and at every width stage, so the toolbar never changes height while the server moves.
+    @Test("The server summary keeps one height across lifecycle and width stages")
     func serverSummaryKeepsItsHeight() {
         let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
-        for compact in [false, true] {
+        let stages: [(compact: Bool, iconOnly: Bool)] = [(false, false), (true, false), (true, true)]
+        for stage in stages {
             for state in states {
                 let well = render(ServerStatusWell(
                     serverState: state, projectName: "Toolbar Review", requestCount: 12,
-                    unmatchedCount: 2, compact: compact
+                    unmatchedCount: 2, compact: stage.compact, iconOnly: stage.iconOnly
                 ))
-                #expect(well.height == 36)
+                #expect(well.height == 32)
             }
         }
     }
@@ -163,6 +166,42 @@ struct WorkspaceFeatureRenderingTests {
                 initialSortField: .timestamp,
                 initialSortAscending: false
             )
+        )
+        // An empty log while the server runs offers a curl command to try.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [],
+                endpoints: [],
+                serverState: .running(port: 8080),
+                onClear: {}
+            )
+        )
+        // Below the header's collapse width and the full table's minimum: the filter moves onto its
+        // own row and the table drops Scenario, Duration and Size. The filter matches nothing, so the
+        // no-matches state draws too.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                unmatchedOnly: .constant(true),
+                initialFilterText: "zzz",
+                initialMethodFilter: .post,
+                initialSortField: .scenario,
+                initialSortAscending: true
+            ),
+            size: CGSize(width: 520, height: 300)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id])
+            ),
+            size: CGSize(width: 520, height: 300)
         )
 
         renderSidebarStates(endpoint: endpoint)

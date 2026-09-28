@@ -23,10 +23,10 @@ struct ServerStatusWellTests {
                                        requestCount: 0, unmatchedCount: 0,
                                        configuration: ServerConfiguration(port: 9090, globalDelayMs: 0),
                                        boundConfiguration: configuration)
-        #expect(stopped.statusColor == DSColors.labelSecondary)
-        #expect(failed.statusColor == DSColors.destructiveText)
-        #expect(running.statusColor == DSColors.successText)
-        #expect(pending.statusColor == DSColors.warningText)
+        #expect(stopped.statusColor == DSColors.labelTertiary)
+        #expect(failed.statusColor == DSColors.error)
+        #expect(running.statusColor == DSColors.success)
+        #expect(pending.statusColor == DSColors.warning)
         #expect(stopped.statusColor != failed.statusColor)
     }
 
@@ -131,6 +131,24 @@ struct ServerStatusWellTests {
             == "1 port listening: Primary: 8080.")
         #expect(ServerStatusWell.backendSummary(configuration: configured, boundConfiguration: nil, isRunning: false)
             == "1 port configured: Primary: 9090. Server is not running.")
+    }
+
+    @Test("The capsule's request count is short and still counts its subject")
+    func shortRequestCount() {
+        #expect(ServerStatusWell.requestCountShort(0) == "0 requests")
+        #expect(ServerStatusWell.requestCountShort(1) == "1 request")
+        #expect(ServerStatusWell.requestCountShort(24) == "24 requests")
+    }
+
+    @Test("A start error is cut to its first clause, and a long clause to 48 characters")
+    func shortErrorKeepsTheFirstClause() {
+        #expect(ServerStatusWell.shortError("Port 8080 is in use. Choose another port.") == "Port 8080 is in use")
+        #expect(ServerStatusWell.shortError("Address already in use\nerrno 48") == "Address already in use")
+        #expect(ServerStatusWell.shortError("Permission denied") == "Permission denied")
+        let exactly48 = String(repeating: "a", count: 48)
+        #expect(ServerStatusWell.shortError(exactly48) == exactly48)
+        #expect(ServerStatusWell.shortError(String(repeating: "a", count: 60))
+            == String(repeating: "a", count: 47) + "\u{2026}")
     }
 
     @Test("Traffic labels retain their subject and describe available actions")

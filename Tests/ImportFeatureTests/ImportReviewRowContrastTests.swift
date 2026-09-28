@@ -60,34 +60,23 @@ private nonisolated func contrastRatio(_ foreground: RGBA, _ background: RGBA) -
 
 /// What a candidate row is read against, and whether the warnings on it clear AA there.
 ///
-/// **The row draws its own bed, which is why this suite exists rather than another sweep in
-/// `DSContrastTests`.** That one measures palette tokens against palette surfaces and stops at the
-/// component boundary; `ImportCandidateRow` composes three things it owns — a zebra stripe, a hover
-/// wash, and a flag filled with a tint of its own ink — and until now nothing measured the result.
-/// The readings that mattered were the ones nobody took: base ``DSColors/warning``, which the flags
-/// and the oversized size label were drawn in, read **4.43** on the pointer's wash over the sheet
-/// token and **4.23** on a panel, against a palette that holds itself to 4.5 everywhere else. On the
-/// system material a sheet is really painted with it clears instead, by 0.02 at its worst — which is
-/// the reason the beds below are three surfaces rather than one. A flag whose readability turns on
-/// which material a sheet turns out to have is a flag measured on an assumption; the design system's
-/// own suite pins the same beds from the palette's side, and the two derivations agree to a
-/// hundredth on every reading they share.
+/// **The row draws its own bed, which is why this suite exists beside `DSContrastTests`.** That one
+/// measures palette roles against palette surfaces; `ImportCandidateRow` composes its own: the review
+/// list sits on the content surface, odd rows add the zebra stripe, the pointer adds the hover wash,
+/// and a warning note is a capsule of `warningBackground` with `ImportRow.warningInk` on it. Every bed
+/// here comes out of ``ImportRow/background(isHovered:rowIndex:)`` and every ink out of
+/// ``ImportRow/warningInk``, so a colour changed in the view is a colour measured here.
 ///
-/// Every bed here comes out of ``ImportRow/background(isHovered:rowIndex:)`` and every ink out of
-/// ``ImportRow/warningInk``, so a colour changed in the view is a colour measured here. A bed list
-/// hand-written into a test is the blind spot that shipped the four failures `DSContrastTests`
-/// records at length, and copying it into a second suite would be that mistake with a second owner.
+/// The warning text is 11pt, so it is held to 4.5:1, and it clears that on every bed in both
+/// appearances, plain and on its chip.
 ///
-/// **The compositing helpers above are a deliberate copy.** `DSContrastTests` keeps the same
-/// arithmetic and keeps it private, and a test target is a module: `MimicTests` cannot import
-/// `DesignSystemTests`. The copy is held to the same authority instead — the numbers are a pure
-/// function of the sRGB constants in `DSColors`, and where a reading here has a counterpart there
-/// (base amber on a panel at 4.60, its self-tint at 3.96) the two agree.
+/// **The compositing helpers above are a deliberate copy.** A test target is a module, and this one
+/// cannot import `DesignSystemTests`; the numbers are a pure function of the sRGB constants in
+/// `DSColors`, and where a reading here has a counterpart there the two agree.
 @Suite("Import review row contrast")
 @MainActor
 struct ImportReviewRowContrastTests {
-    /// Ratios are quoted to a hundredth and the eight-bit read-back can move the last digit by a few
-    /// thousandths — the same tolerance, for the same reason, as the design system's own suite.
+    /// Ratios are quoted to a hundredth and the eight-bit read-back can move the last digit.
     private let ratioTolerance = 0.05
 
     /// One eight-bit step is 0.0039, so this checks the right code value was reached.
@@ -99,7 +88,7 @@ struct ImportReviewRowContrastTests {
 
     // MARK: - Resolution
 
-    /// Resolves a token under one appearance. The conversion sits *inside*
+    /// Resolves a colour under one appearance. The conversion sits *inside*
     /// `performAsCurrentDrawingAppearance` because that is what invokes a dynamic colour's provider.
     private func resolve(_ color: Color, in appearance: Appearance) throws -> RGBA {
         let name: NSAppearance.Name = switch appearance {
@@ -124,182 +113,104 @@ struct ImportReviewRowContrastTests {
     }
 
     /// The ratio a reader actually gets: the ink is flattened onto its bed before it is measured.
-    private func contrast(
-        _ foreground: Color,
-        on background: RGBA,
-        in appearance: Appearance
-    ) throws -> Double {
+    private func contrast(_ foreground: Color, on background: RGBA, in appearance: Appearance) throws -> Double {
         let ink = try resolve(foreground, in: appearance).composited(over: background)
         return contrastRatio(ink, background)
     }
 
-    /// A label read against a fill that is a wash of the label's own colour — the "Duplicate" flag,
-    /// which draws `warningInk` over `warningInk` at the badge's pinned 10% tint.
-    private func selfTintedReading(
-        _ token: Color,
-        on surface: RGBA,
-        in appearance: Appearance
-    ) throws -> Double {
-        let fill = try resolve(token.opacity(0.10), in: appearance)
-            .composited(over: surface)
-        return try contrast(token, on: fill, in: appearance)
-    }
-
     // MARK: - Beds
 
-    /// The surfaces the review list can be read on, because the sheet's own material is **not** a
-    /// palette token and the two files that describe it disagree.
-    ///
-    /// `DSContrastTests` records the system sheet material as white in light and near `#1E1E1E` in
-    /// dark, measured off screen; `ImportReviewList` used to call the same surface "the elevated
-    /// surface this sheet is", which is the ``DSColors/surfaceElevated`` token. They are not the same
-    /// bed and the ink that survives one does not automatically survive the other — base amber on the
-    /// pointer's wash reads 4.79 on the first and 4.43 on the second, which straddles the floor.
-    ///
-    /// So all three are measured, the panel included: it is the hardest of them, it is what the
-    /// request log's identical rows sit on, and an ink that clears every one of them is an ink whose
-    /// readability does not depend on settling which material a sheet turns out to have.
-    private func materials(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
-        let sheetMaterial: Color = switch appearance {
-        case .light: .white
-        case .dark: Color(nsColor: NSColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1176, alpha: 1.0))
-        }
-        let sheet = try resolve(sheetMaterial, in: appearance)
-        let elevated = try resolve(DSColors.surfaceElevated, in: appearance)
-        let panel = try resolve(DSColors.secondary, in: appearance)
-        return [
-            ("the sheet's own material", sheet),
-            ("the surfaceElevated token", elevated),
-            ("a panel", panel)
-        ]
-    }
-
-    /// The three fills ``ImportRow/background(isHovered:rowIndex:)`` can produce, flattened onto a
-    /// material.
-    ///
-    /// The resting even row is the material itself: what the row draws there is *no fill*, so there
-    /// is nothing to composite and `Color.clear` is not resolved for it.
-    private func beds(over material: RGBA, in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
+    /// The three fills ``ImportRow/background(isHovered:rowIndex:)`` can produce, flattened onto the
+    /// content surface the review list is drawn on. A resting even row draws no fill, so it is the
+    /// surface itself.
+    private func beds(in appearance: Appearance) throws -> [(name: String, colour: RGBA)] {
+        let content = try resolve(DSColors.content, in: appearance)
         let stripe = try resolve(ImportRow.background(isHovered: false, rowIndex: 1), in: appearance)
         let hover = try resolve(ImportRow.background(isHovered: true, rowIndex: 0), in: appearance)
         return [
-            ("a resting row", material),
-            ("a striped row", stripe.composited(over: material)),
-            ("a hovered row", hover.composited(over: material))
+            ("a resting row", content),
+            ("a striped row", stripe.composited(over: content)),
+            ("a hovered row", hover.composited(over: content)),
         ]
     }
 
     // MARK: - Tests
 
-    /// Every warning on a candidate row — the "Duplicate" pill, the "Binary body" and "Body dropped"
-    /// flags, and the size of a body that will be dropped — measured on every bed the row paints.
-    ///
-    /// The second half is the part that cannot pass vacuously: the ink this row used to draw is put
-    /// back and shown failing on the beds it was failing on. That is the move `DSContrastTests` makes
-    /// for every token it replaces, and the reason it makes it is that "all eighteen readings clear
-    /// 4.5" is exactly the shape of assertion that stays green when the bed list is wrong.
-    @Test("Every warning on a candidate row clears AA on every bed the row paints")
-    func warningsOnACandidateRowClearAA() throws {
-        var worst = Double.greatestFiniteMagnitude
+    @Test("A row's fills are the palette's hover and zebra washes")
+    func rowFillsAreThePalettesWashes() throws {
+        #expect(ImportRow.background(isHovered: false, rowIndex: 0) == .clear)
+        #expect(ImportRow.background(isHovered: false, rowIndex: 1) == DSColors.zebra)
+        #expect(ImportRow.background(isHovered: true, rowIndex: 0) == DSColors.hover)
+        #expect(ImportRow.background(isHovered: true, rowIndex: 1) == DSColors.hover)
+        #expect(ImportRow.warningInk == DSColors.warning)
 
-        for appearance in Appearance.allCases {
-            for material in try materials(in: appearance) {
-                for bed in try beds(over: material.colour, in: appearance) {
-                    let plain = try contrast(ImportRow.warningInk, on: bed.colour, in: appearance)
-                    #expect(
-                        plain >= 4.5,
-                        "a flag on \(bed.name) over \(material.name), \(appearance): \(plain)"
-                    )
-                    worst = min(worst, plain)
-                }
-            }
-        }
-        // Dark, on the sheet token, under the pointer — the worst of the eighteen.
-        #expect(isClose(worst, 5.69, within: ratioTolerance))
-
-        // The ink these four used to be drawn in, put back on the bed the row paints today and on the
-        // stronger wash it painted then. It clears on the kindest material and fails on the other two
-        // either way, which is why this was a defect and not a judgement call about a sheet's colour.
-        let replaced: [(material: String, colour: Color, onTheWash: Double, onTheOldWash: Double, clears: Bool)] = [
-            ("the sheet's own material", .white, 4.79, 4.52, true),
-            ("the surfaceElevated token", DSColors.surfaceElevated, 4.43, 4.17, false),
-            ("a panel", DSColors.secondary, 4.23, 4.01, false)
+        // The pointer reads above the stripe and below an inactive selection, in both appearances.
+        let expected: [Appearance: (zebra: Double, hover: Double)] = [
+            .light: (0.025, 0.05),
+            .dark: (0.028, 0.06),
         ]
-        for entry in replaced {
-            let material = try resolve(entry.colour, in: .light)
-            let wash = try resolve(ImportRow.background(isHovered: true, rowIndex: 0), in: .light)
-                .composited(over: material)
-            let oldWash = try resolve(DSColors.accentSubtle, in: .light).composited(over: material)
-
-            let onTheWash = try contrast(DSColors.warning, on: wash, in: .light)
-            let onTheOldWash = try contrast(DSColors.warning, on: oldWash, in: .light)
-            #expect(
-                isClose(onTheWash, entry.onTheWash, within: ratioTolerance),
-                "base amber on the wash over \(entry.material): \(onTheWash)"
-            )
-            #expect(
-                isClose(onTheOldWash, entry.onTheOldWash, within: ratioTolerance),
-                "base amber on the old wash over \(entry.material): \(onTheOldWash)"
-            )
-            #expect((onTheWash >= 4.5) == entry.clears)
-            #expect((onTheOldWash >= 4.5) == entry.clears)
+        for appearance in Appearance.allCases {
+            let reading = try #require(expected[appearance])
+            let stripe = try resolve(ImportRow.background(isHovered: false, rowIndex: 1), in: appearance)
+            let hover = try resolve(ImportRow.background(isHovered: true, rowIndex: 0), in: appearance)
+            let selection = try resolve(DSColors.selectionInactive, in: appearance)
+            #expect(isClose(stripe.alpha, reading.zebra, within: componentTolerance))
+            #expect(isClose(hover.alpha, reading.hover, within: componentTolerance))
+            #expect(stripe.alpha < hover.alpha)
+            #expect(hover.alpha < selection.alpha)
         }
     }
 
-    /// The pointer's wash, and the two things that depend on its strength.
-    ///
-    /// The row used to light up with ``DSColors/accentSubtle`` at full strength — the wash
-    /// `RequestLogTableRow` reserves for a **selected** row, where a hovered one gets 60% of it. Two
-    /// rows in the same window saying different things with the same colour is the smaller half of
-    /// the problem; the larger is that the strongest statement a row can make was being spent on the
-    /// pointer passing over, in a list where selection is the entire point of the screen.
-    ///
-    /// The duplicate flag uses the shared semantic badge. Its lighter tint also clears AA on the
-    /// selected-strength wash, while the hover wash still communicates a weaker state.
-    @Test("The pointer's wash is the weaker of the app's two, and the duplicate flag needs it to be")
-    func hoverWashIsTheWeakerOfTheTwoWashes() throws {
+    /// The size of a body that will be dropped is drawn in `warningInk` straight on the row; a note
+    /// chip draws it on `warningBackground`. Both are 11pt text.
+    @Test("Warnings on a candidate row are the measured values on every bed the row paints")
+    func warningReadingsAreMeasured() throws {
+        // bed: (plain ink, ink on the warning chip)
+        let expected: [Appearance: [String: (Double, Double)]] = [
+            .light: [
+                "a resting row": (5.64, 5.15),
+                "a striped row": (5.35, 4.91),
+                "a hovered row": (5.04, 4.66),
+            ],
+            .dark: [
+                "a resting row": (9.64, 7.58),
+                "a striped row": (9.01, 6.95),
+                "a hovered row": (8.14, 6.35),
+            ],
+        ]
         for appearance in Appearance.allCases {
-            let hover = try resolve(ImportRow.background(isHovered: true, rowIndex: 0), in: appearance)
-            let hoveredRowElsewhere = try resolve(DSColors.accentSubtle.opacity(0.6), in: appearance)
-            let selectedRowElsewhere = try resolve(DSColors.accentSubtle, in: appearance)
-
-            #expect(isClose(hover.red, hoveredRowElsewhere.red, within: componentTolerance))
-            #expect(isClose(hover.green, hoveredRowElsewhere.green, within: componentTolerance))
-            #expect(isClose(hover.blue, hoveredRowElsewhere.blue, within: componentTolerance))
-            #expect(isClose(hover.alpha, hoveredRowElsewhere.alpha, within: componentTolerance))
-            // 60% of the 12% the accent wash carries, and strictly less than the selection's.
-            #expect(isClose(hover.alpha, 0.072, within: componentTolerance))
-            #expect(hover.alpha < selectedRowElsewhere.alpha)
-
-            // An odd row keeps the shared zebra rather than a wash of its own — the token four dense
-            // lists in this window stripe themselves with.
-            let stripe = try resolve(ImportRow.background(isHovered: false, rowIndex: 1), in: appearance)
-            let token = try resolve(DSColors.rowStripe, in: appearance)
-            #expect(isClose(stripe.red, token.red, within: componentTolerance))
-            #expect(isClose(stripe.alpha, token.alpha, within: componentTolerance))
-        }
-
-        #expect(DSStateBadge.fillOpacity == 0.10)
-
-        var worst = Double.greatestFiniteMagnitude
-        for appearance in Appearance.allCases {
-            for material in try materials(in: appearance) {
-                for bed in try beds(over: material.colour, in: appearance) {
-                    let pill = try selfTintedReading(ImportRow.warningInk, on: bed.colour, in: appearance)
-                    #expect(
-                        pill >= 4.5,
-                        "the duplicate flag on \(bed.name) over \(material.name), \(appearance): \(pill)"
-                    )
-                    worst = min(worst, pill)
-                }
+            for bed in try beds(in: appearance) {
+                let reading = try #require(expected[appearance]?[bed.name])
+                let chip = try resolve(DSColors.warningBackground, in: appearance).composited(over: bed.colour)
+                let plain = try contrast(ImportRow.warningInk, on: bed.colour, in: appearance)
+                let onChip = try contrast(ImportRow.warningInk, on: chip, in: appearance)
+                #expect(isClose(plain, reading.0, within: ratioTolerance), "plain on \(bed.name), \(appearance): \(plain)")
+                #expect(isClose(onChip, reading.1, within: ratioTolerance), "chip on \(bed.name), \(appearance): \(onChip)")
             }
         }
-        #expect(worst >= 4.5)
+    }
 
-        // Even the stronger selected-strength wash keeps the semantic badge readable.
-        let darkSheet = try resolve(DSColors.surfaceElevated, in: .dark)
-        let oldWash = try resolve(DSColors.accentSubtle, in: .dark).composited(over: darkSheet)
-        let onTheOldWash = try selfTintedReading(ImportRow.warningInk, on: oldWash, in: .dark)
-        #expect(onTheOldWash >= 4.5)
+    @Test("Warnings clear AA on every bed the row paints, plain and on their chip")
+    func warningsOnACandidateRowClearAA() throws {
+        for appearance in Appearance.allCases {
+            for bed in try beds(in: appearance) {
+                let chip = try resolve(DSColors.warningBackground, in: appearance).composited(over: bed.colour)
+                let plain = try contrast(ImportRow.warningInk, on: bed.colour, in: appearance)
+                let onChip = try contrast(ImportRow.warningInk, on: chip, in: appearance)
+                #expect(plain >= 4.5, "plain on \(bed.name), \(appearance): \(plain)")
+                #expect(onChip >= 4.5, "chip on \(bed.name), \(appearance): \(onChip)")
+            }
+        }
+    }
+
+    /// A neutral note chip is `labelSecondary` on the field fill, over the same beds.
+    @Test("Neutral notes clear AA on a resting row in both appearances")
+    func neutralNotesClearAAAtRest() throws {
+        for appearance in Appearance.allCases {
+            let content = try resolve(DSColors.content, in: appearance)
+            let chip = try resolve(DSColors.field, in: appearance).composited(over: content)
+            let ratio = try contrast(DSColors.labelSecondary, on: chip, in: appearance)
+            #expect(ratio >= 4.5, "neutral note, \(appearance): \(ratio)")
+        }
     }
 }

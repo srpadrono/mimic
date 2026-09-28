@@ -11,16 +11,14 @@ enum LogColumns {
     /// The table's own inset inside the pane; each cell adds `DSSpacing.sm` of padding on both sides.
     static let tableInset: CGFloat = 6
 
-    /// Fits a 12-hour timestamp with milliseconds in the mono figure face.
-    static let time: CGFloat = 110
+    /// Fits a 12-hour timestamp with milliseconds ("11:41:33.123 PM") in the mono figure face.
+    static let time: CGFloat = 128
     static let method: CGFloat = 64
     static let status: CGFloat = 84
     static let scenario: CGFloat = 150
     static let duration: CGFloat = 84
-    static let size: CGFloat = 76
-
-    /// No longer drawn: what answered now shares the Scenario column. Kept for existing callers.
-    static let endpoint: CGFloat = 130
+    /// Fits "1023.9 KB", the widest reading below a megabyte.
+    static let size: CGFloat = 84
 
     /// The narrowest Path worth drawing before the table scrolls sideways.
     static let minimumPath: CGFloat = 160
@@ -201,7 +199,8 @@ enum RequestLogQuery {
         return String(format: "%.1f s", Double(milliseconds) / 1000)
     }
 
-    /// The response's size, from its logged body or its Content-Length. `nil` when neither says.
+    /// The response's size, from its logged body or its Content-Length. `nil` when no response arrived
+    /// or neither says.
     nonisolated static func formattedSize(for log: RequestLog) -> String? {
         let bytes: Int
         if let body = log.responseBody, !body.isEmpty, !log.responseBodyTruncated {
@@ -210,7 +209,10 @@ enum RequestLogQuery {
             $0.key.caseInsensitiveCompare("Content-Length") == .orderedSame
         }), let length = Int(header.value.trimmingCharacters(in: .whitespaces)) {
             bytes = length
-        } else if log.responseBodyIsBinary == true || log.responseBodyTruncated {
+        } else if log.responseBodyIsBinary == true || log.responseBodyTruncated
+                    || log.responseStatusCode == nil {
+            // No status means no response arrived, so there is no size to report; an empty
+            // answer with a status (a 204) is genuinely zero bytes.
             return nil
         } else {
             bytes = log.responseBody?.utf8.count ?? 0

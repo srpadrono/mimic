@@ -178,4 +178,43 @@ struct JourneyFeatureLogicTests {
         #expect(JourneyStepRow.failureText(.timeout(holdMs: 3_600_000)) == "timeout 3600000ms")
         #expect(JourneyStepRow.failureText(.timeout(holdMs: 0)) == "timeout 0ms")
     }
+
+    /// The chip the row draws for a transport failure is sentence-case prose; the tooltip and spoken
+    /// label keep the short form above.
+    @Test("A failing step's chip reads as a sentence")
+    func describesFailuresForTheChip() {
+        #expect(JourneyStepRow.failureDisplayText(.connectionDrop) == "Drop connection")
+        #expect(JourneyStepRow.failureDisplayText(.timeout(holdMs: 30_000)) == "Time out after 30000 ms")
+    }
+
+    // MARK: - Run progress
+
+    private func progress(repeatCount: Int, servedCount: Int, isExhausted: Bool, isCurrent: Bool) -> JourneyStepProgress {
+        JourneyStepProgress(
+            id: UUID(),
+            index: 0,
+            name: "Recovers",
+            method: .get,
+            path: "/account-summary",
+            statusCode: 200,
+            failure: nil,
+            repeatCount: repeatCount,
+            servedCount: servedCount,
+            isExhausted: isExhausted,
+            isCurrent: isCurrent
+        )
+    }
+
+    /// A step the run has not reached, the one it is waiting on, and one that has answered.
+    @Test("A step's run progress reads as not reached, waiting or served")
+    func describesRunProgress() {
+        #expect(JourneyStepRow.progressText(progress(repeatCount: 1, servedCount: 0, isExhausted: false,
+                                                     isCurrent: false)) == "Not reached")
+        #expect(JourneyStepRow.progressText(progress(repeatCount: 1, servedCount: 0, isExhausted: false,
+                                                     isCurrent: true)) == "Waiting")
+        #expect(JourneyStepRow.progressText(progress(repeatCount: 3, servedCount: 1, isExhausted: false,
+                                                     isCurrent: true)) == "Served 1 of 3")
+        #expect(JourneyStepRow.progressText(progress(repeatCount: 3, servedCount: 3, isExhausted: true,
+                                                     isCurrent: false)) == "Served 3 of 3")
+    }
 }

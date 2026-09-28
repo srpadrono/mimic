@@ -280,7 +280,7 @@ struct DSJSONEditorSizingTests {
         #expect(DSJSONEditor.height(forLines: -3) == DSJSONEditor.height(forLines: 1))
     }
 
-    @Test("One line of SF Mono at 13pt is a plausible line height")
+    @Test("One line of SF Mono at 12pt is a plausible line height")
     func oneLineIsAPlausibleHeight() {
         let height = DSJSONEditor.height(forLines: 1)
         #expect(height >= 12)
@@ -290,40 +290,40 @@ struct DSJSONEditorSizingTests {
     @Test("The two themes are built from one face")
     func themesShareOneFace() {
         #expect(DSJSONEditor.editorFontName == "SFMono-Regular")
-        #expect(DSJSONEditor.editorFontSize == 13)
+        #expect(DSJSONEditor.editorFontSize == 12)
     }
 }
 
 @Suite("DSColors")
 struct DSColorsTests {
 
-    @Test("httpStatusColor returns the success text color for 2xx")
+    @Test("httpStatusColor returns the success colour for 2xx")
     func httpStatus2xx() {
-        let expected = DSColors.successText
+        let expected = DSColors.success
         #expect(DSColors.httpStatusColor(for: 200) == expected)
         #expect(DSColors.httpStatusColor(for: 201) == expected)
         #expect(DSColors.httpStatusColor(for: 299) == expected)
     }
 
-    @Test("httpStatusColor returns the accent text color for 3xx")
+    @Test("httpStatusColor returns the redirect colour for 3xx")
     func httpStatus3xx() {
-        let expected = DSColors.accentText
+        let expected = DSColors.redirect
         #expect(DSColors.httpStatusColor(for: 301) == expected)
         #expect(DSColors.httpStatusColor(for: 302) == expected)
         #expect(DSColors.httpStatusColor(for: 399) == expected)
     }
 
-    @Test("httpStatusColor returns the warning text color for 4xx")
+    @Test("httpStatusColor returns the warning colour for 4xx")
     func httpStatus4xx() {
-        let expected = DSColors.warningText
+        let expected = DSColors.warning
         #expect(DSColors.httpStatusColor(for: 400) == expected)
         #expect(DSColors.httpStatusColor(for: 404) == expected)
         #expect(DSColors.httpStatusColor(for: 499) == expected)
     }
 
-    @Test("httpStatusColor returns the destructive text color for 5xx")
+    @Test("httpStatusColor returns the error colour for 5xx")
     func httpStatus5xx() {
-        let expected = DSColors.destructiveText
+        let expected = DSColors.error
         #expect(DSColors.httpStatusColor(for: 500) == expected)
         #expect(DSColors.httpStatusColor(for: 503) == expected)
         #expect(DSColors.httpStatusColor(for: 599) == expected)
@@ -332,19 +332,9 @@ struct DSColorsTests {
     @Test("httpStatusColor returns the secondary label for other codes")
     func httpStatusOther() {
         #expect(DSColors.httpStatusColor(for: 100) == DSColors.labelSecondary)
+        #expect(DSColors.httpStatusColor(for: 199) == DSColors.labelSecondary)
         #expect(DSColors.httpStatusColor(for: 600) == DSColors.labelSecondary)
-    }
-
-    @Test("methodColor maps common HTTP verbs and falls back for unknown values")
-    func methodColors() {
-        #expect(DSColors.methodColor(for: "GET") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "post") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "PUT") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "PATCH") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "DELETE") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "HEAD") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "OPTIONS") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "TRACE") == DSColors.labelSecondary)
+        #expect(DSColors.httpStatusColor(for: 0) == DSColors.labelSecondary)
     }
 }
 
@@ -373,9 +363,9 @@ struct DSPlainButtonStyleTests {
         #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: false) == Color.clear)
     }
 
-    @Test("Both states reuse existing accent rungs rather than minting new ones")
-    func statesReuseAccentRungs() {
-        #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: true) == DSColors.accentSubtle)
-        #expect(DSPlainButtonStyle.wash(isPressed: true, isHovered: false) == DSColors.accentMuted)
+    @Test("Both states reuse the palette's row washes rather than minting new ones")
+    func statesReuseRowWashes() {
+        #expect(DSPlainButtonStyle.wash(isPressed: false, isHovered: true) == DSColors.hover)
+        #expect(DSPlainButtonStyle.wash(isPressed: true, isHovered: false) == DSColors.selectionInactive)
     }
 }

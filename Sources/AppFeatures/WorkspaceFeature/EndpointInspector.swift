@@ -174,7 +174,7 @@ struct EndpointTrafficSummary: View {
     let logs: [RequestLog]
     var onSelect: (UUID) -> Void = { _ in }
 
-    struct Bucket: Equatable {
+    nonisolated struct Bucket: Equatable {
         var served: Int
         var errors: Int
     }

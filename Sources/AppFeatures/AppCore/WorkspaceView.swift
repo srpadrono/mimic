@@ -1029,8 +1029,6 @@ struct WorkspaceView: View {
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],
-            onShowJourneys: { navigatorTab = .journeys },
-            onCloseRequestDetail: { selectedLogIDs = [] },
             endpointSettings: endpoint.map { endpoint in
                 EndpointInspectorSettings.Context(
                     editedScenarioID: appState.editedScenario(of: endpoint)?.id,
@@ -1042,6 +1040,8 @@ struct WorkspaceView: View {
                     onUpdateBackend: { appState.updateEndpointBackend(id: $0, backendID: $1) }
                 )
             },
+            onShowJourneys: { navigatorTab = .journeys },
+            onCloseRequestDetail: { selectedLogIDs = [] },
             onSelectTrafficLog: { selectedLogIDs = [$0] },
             onAddScenario: { endpointID, name in
                 if let scenario = appState.addScenario(endpointID: endpointID, name: name) {

@@ -214,6 +214,28 @@ struct WorkspaceFeatureLogicTests {
             matchedScenarioID: endpoint.activeScenarioID,
             responseStatusCode: 200
         )
+        let failedLog = RequestLog(
+            timestamp: Date(timeIntervalSince1970: 1_710_000_300),
+            method: .post,
+            path: "/api/orders?draft=true",
+            listenerPort: 8080,
+            durationMs: 30_000,
+            failureLabel: "timeout(30000ms)",
+            outcome: .proxyFailure
+        )
+        let passthroughLog = RequestLog(
+            timestamp: Date(timeIntervalSince1970: 1_710_000_400),
+            method: .get,
+            path: "/api/live",
+            backendName: "Staging",
+            listenerPort: 8080,
+            upstreamURL: "https://staging.example.test/api/live",
+            durationMs: 42,
+            responseStatusCode: 200,
+            responseHeaders: ["Content-Type": "application/json"],
+            responseBody: #"{"live":true}"#,
+            outcome: .passthrough
+        )
 
         render(
             VStack(spacing: 12) {
@@ -233,14 +255,43 @@ struct WorkspaceFeatureLogicTests {
                     scenarioName: nil,
                     onSelect: { _ in }
                 )
+                // Selected in an unfocused table, compact, at the measured path width the live
+                // table hands its rows.
+                RequestLogTableRow(
+                    log: log,
+                    rowIndex: 2,
+                    isSelected: true,
+                    isEmphasized: false,
+                    compact: true,
+                    pathWidth: LogColumns.minimumPath,
+                    endpointName: endpoint.name,
+                    scenarioName: nil,
+                    onSelect: { _ in }
+                )
+                // A request that reached no configuration and got no answer: the Scenario cell's
+                // unnamed arms, and the Duration and Size cells' em dashes.
+                RequestLogTableRow(
+                    log: failedLog,
+                    rowIndex: 3,
+                    isSelected: false,
+                    endpointName: nil,
+                    scenarioName: nil,
+                    onSelect: { _ in }
+                )
             },
-            size: CGSize(width: 900, height: 120)
+            size: CGSize(width: 900, height: 160)
         )
         render(RequestDetailInspector(log: log, initialTab: .summary))
         render(RequestDetailInspector(log: log, initialTab: .headers))
         render(RequestDetailInspector(log: log, initialTab: .body))
         render(RequestDetailInspector(log: emptyLog, initialTab: .body))
         render(RequestDetailInspector(log: log, initialTab: .body, initialSearchText: "queued"))
+        // A failed exchange draws its failure in the identity and the empty response sections.
+        render(RequestDetailInspector(log: failedLog, initialTab: .summary))
+        render(RequestDetailInspector(log: failedLog, initialTab: .headers))
+        render(RequestDetailInspector(log: failedLog, initialTab: .body))
+        // A passed-through request offers the capture control above every tab.
+        render(RequestDetailInspector(log: passthroughLog, port: 8080, onSaveAsMock: { _ in }, initialTab: .summary))
         // A request that arrived with no headers at all, in the tab whose whole content is headers —
         // and in a 300pt-wide panel, which is the width the inspector is actually dragged to.
         render(
@@ -251,6 +302,7 @@ struct WorkspaceFeatureLogicTests {
         render(
             ScenarioListView(
                 endpoint: endpoint,
+                editedScenarioID: inactiveScenario.id,
                 onSetActive: { _, _ in },
                 onDuplicate: { _, _ in },
                 onDelete: { _, _ in }
@@ -258,19 +310,24 @@ struct WorkspaceFeatureLogicTests {
         )
         render(
             VStack(spacing: 12) {
+                // Live and edited, then neither: the two states the redesigned row draws apart.
                 ScenarioRow(
                     scenario: activeScenario,
                     isActive: true,
+                    isEdited: true,
                     isOnlyScenario: false,
                     onTap: {},
+                    onMakeLive: {},
                     onDuplicate: {},
                     onDelete: {}
                 )
                 ScenarioRow(
                     scenario: inactiveScenario,
                     isActive: false,
+                    isEdited: false,
                     isOnlyScenario: true,
                     onTap: {},
+                    onMakeLive: {},
                     onDuplicate: {},
                     onDelete: {}
                 )
