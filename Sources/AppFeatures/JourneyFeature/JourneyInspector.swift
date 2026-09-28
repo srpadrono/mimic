@@ -16,7 +16,8 @@ struct JourneyInspector: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                DSInspectorSectionHeader("Journey", identifier: "journey.summary")
+                // The panel header already says "Journey"; the summary rows sit directly under it,
+                // as the design's inspector starts its first rows under the panel title.
                 DSInspectorValueRow("Steps", value: "\(context.selected.steps.count)",
                                     identifier: "inspector.journey.steps")
                 DSInspectorValueRow("Group", value: context.selected.groupTag ?? "Ungrouped",

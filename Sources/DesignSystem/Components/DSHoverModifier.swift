@@ -1,19 +1,14 @@
 import SwiftUI
 
-/// The hover highlight a list row wears: the accent tint every other control in the design system
-/// lights up with, and nothing else.
+/// The hover highlight a list row wears: the neutral `DSColors.hover` fill, and nothing else.
 ///
-/// **It no longer scales.** The row grew by 0.4% under the pointer, and two things were wrong with
-/// that. A 0.4% scale is sub-pixel, so its entire visible effect is resampling the row's text — the
-/// row does not look bigger, it looks briefly out of focus. And it is motion, in a modifier applied
-/// to four different lists, which made it the last place in the app where pointing at something moved
-/// it. `DSButton` removed its own hover scale for the same reason: AppKit controls do not change size
-/// when you point at them, they change colour. With the scale gone the remaining change is a
-/// cross-fade, which is what Reduce Motion asks for rather than something it has to suppress.
+/// **It does not scale.** A sub-pixel scale only resamples the row's text, and AppKit controls do not
+/// change size when you point at them, they change colour. With no motion the change is a cross-fade,
+/// which is what Reduce Motion asks for rather than something it has to suppress.
 ///
-/// **The duration is a token.** It was a hard-coded `0.12` — twice `DSAnimation.micro`, which is what
-/// `DSTabStrip`, `DSPanelHeaderButton`, `DSFilterField`'s clear button and the request log's rows all
-/// use — so a row lit up visibly more slowly than a button sitting inside it.
+/// **The duration is a token.** `DSAnimation.fast`, the same one `DSPanelHeaderButton`,
+/// `DSFilterField`'s clear button and the request log's rows use, so a row lights up at the same pace
+/// as a button sitting inside it.
 public struct DSHoverHighlight: ViewModifier {
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
@@ -43,7 +38,7 @@ public struct DSHoverHighlight: ViewModifier {
 }
 
 extension View {
-    /// Adds the design system's accent-tinted hover background, matched to the row's own shape.
+    /// Adds the design system's hover background, matched to the row's own shape.
     public func dsHoverHighlight(cornerRadius: CGFloat = DSCornerRadius.field) -> some View {
         modifier(DSHoverHighlight(cornerRadius: cornerRadius))
     }

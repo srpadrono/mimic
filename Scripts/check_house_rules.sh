@@ -444,7 +444,7 @@ WS='[[:space:]]*'
 DOT='[[:space:]]*\.[[:space:]]*'
 
 report \
-    'AGENTS.md "Project rules": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodBadge, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
+    'AGENTS.md "Project rules": sentence case inside the window — there is no .textCase() in this codebase, and the one deliberate exception, DSMethodLabel, uppercases its own string in Swift rather than shouting prose into shape with a modifier.' \
     "${DOT}textCase${WS}\(" \
     '' \
     'Text("Response headers").textCase(.uppercase)
@@ -525,7 +525,7 @@ report \
 # declares the type scale with thirteen of them and is the right place for a literal. Requiring the
 # enclosing `.font(` is what tells those apart, and `[^)]*` between them cannot cross a `)`, so it
 # admits a qualifier — `Font.system`, `SwiftUI.Font.system` — without reaching into a neighbouring
-# call. A size named symbolically (`DSGlyph.inline`, `size.glyphSize`) never matches, because the
+# call. A size named symbolically (`DSGlyph.field`, `size.glyphSize`) never matches, because the
 # rung after `size:` has to be a digit.
 #
 # Illustrations size their symbols inside DesignSystem components. AppFeatures has no exemption.
@@ -551,11 +551,11 @@ report \
     .foregroundStyle(.tertiary)' \
     "${PRODUCTION_SOURCES[@]}"
 
-# A platform rounded-border field is a different control family from DSTextField and DSFieldWell.
+# A platform rounded-border field is a different control family from DSTextField and dsFieldChrome.
 # A form may still use a native Picker or Toggle when its interaction is macOS-specific; text inputs
 # have shared geometry and focus treatment.
 report \
-    'Design-system inputs: use DSTextField or DSFieldWell instead of the native rounded-border field.' \
+    'Design-system inputs: use DSTextField or dsFieldChrome instead of the native rounded-border field.' \
     "${DOT}textFieldStyle${WS}\\(${WS}${DOT}roundedBorder${WS}\\)" \
     '' \
     '.textFieldStyle(.roundedBorder)

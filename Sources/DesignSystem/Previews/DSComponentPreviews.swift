@@ -3,9 +3,8 @@ import SwiftUI
 // Guarded so previews do not ship.
 //
 // `#Preview` expands to a `PreviewRegistry` conformance, which is compiled into whatever
-// configuration builds the file — and nothing here was gated, so 386 lines of preview scaffolding
-// went into the Release binary. Every `#Preview` elsewhere in this project is already inside
-// `#if DEBUG`; the design system's were the exception.
+// configuration builds the file, so ungated previews would ship in the Release binary. Every
+// `#Preview` in this project sits inside `#if DEBUG`.
 #if DEBUG
 // MARK: - DSButton
 
@@ -42,28 +41,58 @@ import SwiftUI
     .frame(width: 300)
 }
 
-// MARK: - DSMethodBadge
+// MARK: - DSMethodLabel and DSStatusLabel
 
-#Preview("DSMethodBadge — Standard") {
-    HStack(spacing: DSSpacing.sm) {
-        DSMethodBadge(method: "GET", identifier: "preview.get")
-        DSMethodBadge(method: "POST", identifier: "preview.post")
-        DSMethodBadge(method: "PUT", identifier: "preview.put")
-        DSMethodBadge(method: "PATCH", identifier: "preview.patch")
-        DSMethodBadge(method: "DELETE", identifier: "preview.delete")
+#Preview("DSMethodLabel") {
+    VStack(alignment: .leading, spacing: DSSpacing.xs) {
+        ForEach(["GET", "POST", "PUT", "PATCH", "DELETE"], id: \.self) { method in
+            DSMethodLabel(method, identifier: "preview.\(method.lowercased())")
+        }
     }
     .padding()
 }
 
-#Preview("DSMethodBadge — Compact") {
-    HStack(spacing: DSSpacing.sm) {
-        DSMethodBadge(method: "GET", size: .compact, identifier: "preview.compact.get")
-        DSMethodBadge(method: "POST", size: .compact, identifier: "preview.compact.post")
-        DSMethodBadge(method: "PUT", size: .compact, identifier: "preview.compact.put")
-        DSMethodBadge(method: "PATCH", size: .compact, identifier: "preview.compact.patch")
-        DSMethodBadge(method: "DELETE", size: .compact, identifier: "preview.compact.delete")
+#Preview("DSStatusLabel") {
+    VStack(alignment: .leading, spacing: DSSpacing.xs) {
+        DSStatusLabel(statusCode: 200)
+        DSStatusLabel(statusCode: 302)
+        DSStatusLabel(statusCode: 404, reason: "Not Found")
+        DSStatusLabel(statusCode: 503)
+        DSStatusLabel(statusCode: nil, reason: "timeout 30000ms")
+        DSStatusLabel("Running", color: DSColors.success)
     }
     .padding()
+}
+
+// MARK: - DSSegmentedControl
+
+#Preview("DSSegmentedControl") {
+    @Previewable @State var selection = "all"
+
+    DSSegmentedControl(
+        "Show",
+        segments: [
+            DSSegmentedControl<String>.Segment("All", value: "all", identifier: "preview.all"),
+            DSSegmentedControl<String>.Segment("Unmatched", value: "unmatched", count: 3, countColor: DSColors.warning,
+                  identifier: "preview.unmatched"),
+        ],
+        selection: $selection,
+        identifier: "preview.segments"
+    )
+    .padding()
+}
+
+// MARK: - DSBanner
+
+#Preview("DSBanner — Kinds") {
+    VStack(spacing: DSSpacing.sm) {
+        DSBanner(.info, message: "The server restarts when you change its port.", identifier: "preview.info")
+        DSBanner(.warning, message: "Two endpoints answer the same route.", actionTitle: "Show",
+                 identifier: "preview.warning") {}
+        DSBanner(.error, message: "Port 8080 is already in use.", identifier: "preview.error")
+    }
+    .padding()
+    .frame(width: 420)
 }
 
 // MARK: - DSEmptyState
@@ -119,48 +148,18 @@ import SwiftUI
     .frame(width: 400)
 }
 
-// MARK: - DSDrawer
+// MARK: - DSPanelHeader
 
-#Preview("DSDrawer — Edges") {
-    @Previewable @State var showRight = true
-    @Previewable @State var showBottom = true
-
+#Preview("DSPanelHeader") {
     VStack(spacing: 0) {
-        HStack(spacing: 0) {
-            VStack {
-                Text("Main content")
-                    .font(DSTypography.body)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                HStack(spacing: DSSpacing.md) {
-                    Button(showRight ? "Hide right" : "Show right") {
-                        withAnimation(DSAnimation.drawerToggle) { showRight.toggle() }
-                    }
-                    Button(showBottom ? "Hide bottom" : "Show bottom") {
-                        withAnimation(DSAnimation.drawerToggle) { showBottom.toggle() }
-                    }
-                }
-                .padding(.bottom, DSSpacing.md)
-            }
-
-            DSDrawer(edge: .trailing, isPresented: $showRight, identifier: "preview.right") {
-                Text("Right drawer")
-                    .font(DSTypography.body)
-                    .frame(width: 180)
-                    .frame(maxHeight: .infinity)
-                    .background(DSColors.secondary)
-            }
+        DSPanelHeader("Requests", subtitle: "12 requests", identifier: "preview.requests") {
+            DSPanelHeaderButton(systemImage: "trash", help: "Clear log", identifier: "preview.clear") {}
         }
-
-        DSDrawer(edge: .bottom, isPresented: $showBottom, identifier: "preview.bottom") {
-            Text("Bottom drawer")
-                .font(DSTypography.body)
-                .frame(maxWidth: .infinity)
-                .frame(height: 120)
-                .background(DSColors.secondary)
-        }
+        DSPanelHeader("Scenarios", subtitle: "/api/users/{id}", identifier: "preview.scenarios")
+        Spacer()
     }
-    .frame(width: 600, height: 400)
+    .frame(width: 360, height: 160)
+    .background(DSColors.content)
 }
 
 // MARK: - DSSplitPane
@@ -190,21 +189,23 @@ import SwiftUI
         Text("Secondary pane — drag the divider, or drag it shut")
             .font(DSTypography.body)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DSColors.secondary)
+            .background(DSColors.window)
     }
     .frame(width: 600, height: 400)
 }
 
 // MARK: - DSDivider
 
-#Preview("DSDivider — Styles") {
+#Preview("DSDivider") {
     VStack(spacing: DSSpacing.md) {
-        Text("Subtle").font(DSTypography.label)
-        DSDivider(style: .subtle)
-        Text("Standard").font(DSTypography.label)
-        DSDivider(style: .standard)
-        Text("Strong").font(DSTypography.label)
-        DSDivider(style: .strong)
+        Text("Above").font(DSTypography.body)
+        DSDivider()
+        HStack(spacing: DSSpacing.md) {
+            Text("Leading").font(DSTypography.body)
+            DSDivider(axis: .vertical)
+            Text("Trailing").font(DSTypography.body)
+        }
+        .frame(height: DSRowHeight.list)
     }
     .padding()
     .frame(width: 200)
@@ -215,7 +216,7 @@ import SwiftUI
 #Preview("DSHoverHighlight") {
     VStack(spacing: DSSpacing.sm) {
         Text("Hover over these rows")
-            .font(DSTypography.label)
+            .font(DSTypography.body)
             .foregroundStyle(DSColors.labelSecondary)
 
         ForEach(0..<3) { i in

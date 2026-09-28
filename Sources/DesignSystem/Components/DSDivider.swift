@@ -1,18 +1,11 @@
 import SwiftUI
 
-/// Kept for call sites that still pass a style; every style is now the one hairline.
-public enum DSDividerStyle {
-    case subtle
-    case standard
-    case strong
-}
-
 /// A one-pixel rule in the separator colour.
 public struct DSDivider: View {
     private let axis: Axis
     private let identifier: String
 
-    public init(style: DSDividerStyle = .standard, axis: Axis = .horizontal, identifier: String = "default") {
+    public init(axis: Axis = .horizontal, identifier: String = "default") {
         self.axis = axis
         self.identifier = identifier
     }

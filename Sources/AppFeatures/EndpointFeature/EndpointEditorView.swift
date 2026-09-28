@@ -160,20 +160,22 @@ struct EndpointEditorView: View {
                 .frame(width: DSStroke.hairline, height: 18)
                 .accessibilityHidden(true)
 
-            HStack(spacing: 0) {
+            // The path is what identifies the endpoint, so the base address gives way first: it is
+            // drawn only while address and path both fit whole, and the path alone takes a middle
+            // truncation after that.
+            ViewThatFits(in: .horizontal) {
                 if let baseAddress {
-                    Text(baseAddress)
-                        .foregroundStyle(DSColors.labelTertiary)
-                        .accessibilityHidden(true)
+                    HStack(spacing: 0) {
+                        Text(baseAddress)
+                            .foregroundStyle(DSColors.labelTertiary)
+                            .accessibilityHidden(true)
+                        requestPath
+                    }
                 }
-                Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : "\(endpoint.path) · \($0)" } ?? endpoint.path)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .help(endpoint.path)
-                    .accessibilityIdentifier("endpointEditor.path")
+                requestPath
             }
             .font(DSTypography.codeLarge)
             .lineLimit(1)
-            .truncationMode(.middle)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -196,6 +198,15 @@ struct EndpointEditorView: View {
             try? await Task.sleep(for: .seconds(1.5))
             didCopyURL = false
         }
+    }
+
+    private var requestPath: some View {
+        Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : "\(endpoint.path) · \($0)" } ?? endpoint.path)
+            .foregroundStyle(DSColors.labelPrimary)
+            .truncationMode(.middle)
+            .layoutPriority(1)
+            .help(endpoint.path)
+            .accessibilityIdentifier("endpointEditor.path")
     }
 
     private var endpointURL: String {
@@ -293,10 +304,35 @@ struct EndpointEditorView: View {
     private var responseFields: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs + 2) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: DSSpacing.xl) { statusField; delayField; contentTypeField }
+                // The design's one row.
+                HStack(spacing: DSSpacing.xl) {
+                    labeled("Status") { statusControl(width: EditorMetrics.statusFieldWidth) }
+                    labeled("Delay") { delayControl }
+                    labeled("Content type") { contentTypeControl }
+                }
+                // Status on its own row, Delay and Content type below it.
                 VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                    statusField
-                    HStack(spacing: DSSpacing.xl) { delayField; contentTypeField }
+                    labeled("Status") { statusControl(width: EditorMetrics.statusFieldWidth) }
+                    HStack(spacing: DSSpacing.xl) {
+                        labeled("Delay") { delayControl }
+                        labeled("Content type") { contentTypeControl }
+                    }
+                }
+                // Narrowest: one field a row, labels in a column, and Status gives up its fixed
+                // width so the reason phrase truncates instead of the field running off the pane.
+                Grid(alignment: .leading, horizontalSpacing: DSSpacing.sm, verticalSpacing: DSSpacing.sm) {
+                    GridRow {
+                        fieldLabel("Status")
+                        statusControl(width: nil)
+                    }
+                    GridRow {
+                        fieldLabel("Delay")
+                        delayControl
+                    }
+                    GridRow {
+                        fieldLabel("Content type")
+                        contentTypeControl
+                    }
                 }
             }
             if let statusCodeError {
@@ -308,6 +344,13 @@ struct EndpointEditorView: View {
         }
     }
 
+    private func labeled<Control: View>(_ title: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            fieldLabel(title)
+            control()
+        }
+    }
+
     private func fieldLabel(_ title: String) -> some View {
         Text(title)
             .font(DSTypography.callout)
@@ -316,116 +359,110 @@ struct EndpointEditorView: View {
             .fixedSize()
     }
 
-    private var statusField: some View {
+    /// The status well at the design's `width`, or, with `nil`, filling what the row offers.
+    private func statusControl(width: CGFloat?) -> some View {
         let code = Self.statusCodeValue(from: statusCodeString)
-        return HStack(spacing: DSSpacing.sm) {
-            fieldLabel("Status")
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-                TextField("200", text: $statusCodeString)
-                    .textFieldStyle(.plain)
-                    .font(DSTypography.status)
-                    .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
-                    .frame(width: 30)
-                    .focused($isStatusFocused)
-                    .accessibilityIdentifier("endpointEditor.statusCode")
-                    .accessibilityLabel("Status code")
-                    .onSubmit { commitStatusCode() }
-                if let code {
-                    Text(Self.reasonPhrase(for: code))
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("endpointEditor.statusDescription")
-                }
-                Spacer(minLength: 0)
-                Menu {
-                    ForEach(EditorMetrics.commonStatusCodes, id: \.self) { option in
-                        Button("\(option) \(Self.reasonPhrase(for: option))") {
-                            statusCodeString = String(option)
-                            commitStatusCode()
-                        }
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                        .foregroundStyle(DSColors.labelTertiary)
-                        .frame(width: 16, height: DSControlHeight.regular)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Choose a common status code")
-                .accessibilityIdentifier("endpointEditor.statusMenu")
-                .accessibilityLabel("Common status codes")
-            }
-            .dsFieldChrome(isFocused: isStatusFocused, isInvalid: statusCodeError != nil)
-            .frame(width: EditorMetrics.statusFieldWidth)
-        }
-    }
-
-    private var delayField: some View {
-        HStack(spacing: DSSpacing.sm) {
-            fieldLabel("Delay")
-            HStack(spacing: DSSpacing.xs) {
-                TextField("0", text: $delayString)
-                    .textFieldStyle(.plain)
-                    .font(DSTypography.Figure.regular)
-                    .focused($isDelayFocused)
-                    .accessibilityIdentifier("endpointEditor.delay")
-                    .accessibilityLabel("Endpoint delay in milliseconds")
-                    .onChange(of: delayString) { delayError = nil }
-                    .onChange(of: isDelayFocused) { _, focused in
-                        if !focused { commitDelay() }
-                    }
-                    .onSubmit { commitDelay() }
-                Text("ms")
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            TextField("200", text: $statusCodeString)
+                .textFieldStyle(.plain)
+                .font(DSTypography.status)
+                .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
+                .frame(width: 30)
+                .focused($isStatusFocused)
+                .accessibilityIdentifier("endpointEditor.statusCode")
+                .accessibilityLabel("Status code")
+                .onSubmit { commitStatusCode() }
+            if let code {
+                Text(Self.reasonPhrase(for: code))
                     .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .accessibilityHidden(true)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityIdentifier("endpointEditor.statusDescription")
             }
-            .dsFieldChrome(isFocused: isDelayFocused, isInvalid: delayError != nil)
-            .frame(width: EditorMetrics.delayFieldWidth)
-            .help(globalDelayMs > 0
-                  ? "The project adds \(globalDelayMs) ms to this delay"
-                  : "Wait this long before answering")
-        }
-    }
-
-    private var contentTypeField: some View {
-        HStack(spacing: DSSpacing.sm) {
-            fieldLabel("Content type")
+            Spacer(minLength: 0)
             Menu {
-                Button("JSON") { actions.onUpdateContentType(.json) }
-                    .accessibilityIdentifier("endpointEditor.contentType.json")
-                Button("Plain text") { actions.onUpdateContentType(.plainText) }
-                    .accessibilityIdentifier("endpointEditor.contentType.plainText")
-            } label: {
-                HStack(spacing: DSSpacing.xs) {
-                    Text(activeScenario?.bodyContentType == .plainText ? "Plain text" : "JSON")
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                        .foregroundStyle(DSColors.labelTertiary)
+                ForEach(EditorMetrics.commonStatusCodes, id: \.self) { option in
+                    Button("\(option) \(Self.reasonPhrase(for: option))") {
+                        statusCodeString = String(option)
+                        commitStatusCode()
+                    }
                 }
-                .dsFieldChrome(isFocused: false)
-                .contentShape(Rectangle())
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .frame(width: 16, height: DSControlHeight.regular)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .frame(width: EditorMetrics.contentTypeFieldWidth)
-            .accessibilityIdentifier("endpointEditor.contentType")
-            .accessibilityLabel("Content type")
+            .fixedSize()
+            .help("Choose a common status code")
+            .accessibilityIdentifier("endpointEditor.statusMenu")
+            .accessibilityLabel("Common status codes")
         }
+        .dsFieldChrome(isFocused: isStatusFocused, isInvalid: statusCodeError != nil)
+        .frame(width: width)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+
+    private var delayControl: some View {
+        HStack(spacing: DSSpacing.xs) {
+            TextField("0", text: $delayString)
+                .textFieldStyle(.plain)
+                .font(DSTypography.Figure.regular)
+                .focused($isDelayFocused)
+                .accessibilityIdentifier("endpointEditor.delay")
+                .accessibilityLabel("Endpoint delay in milliseconds")
+                .onChange(of: delayString) { delayError = nil }
+                .onChange(of: isDelayFocused) { _, focused in
+                    if !focused { commitDelay() }
+                }
+                .onSubmit { commitDelay() }
+            Text("ms")
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelTertiary)
+                .accessibilityHidden(true)
+        }
+        .dsFieldChrome(isFocused: isDelayFocused, isInvalid: delayError != nil)
+        .frame(width: EditorMetrics.delayFieldWidth)
+        .help(globalDelayMs > 0
+              ? "The project adds \(globalDelayMs) ms to this delay"
+              : "Wait this long before answering")
+    }
+
+    private var contentTypeControl: some View {
+        Menu {
+            Button("JSON") { actions.onUpdateContentType(.json) }
+                .accessibilityIdentifier("endpointEditor.contentType.json")
+            Button("Plain text") { actions.onUpdateContentType(.plainText) }
+                .accessibilityIdentifier("endpointEditor.contentType.plainText")
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                Text(activeScenario?.bodyContentType == .plainText ? "Plain text" : "JSON")
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                    .foregroundStyle(DSColors.labelTertiary)
+            }
+            .dsFieldChrome(isFocused: false)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .frame(width: EditorMetrics.contentTypeFieldWidth)
+        .accessibilityIdentifier("endpointEditor.contentType")
+        .accessibilityLabel("Content type")
     }
 
     // MARK: - Body and headers
@@ -442,11 +479,24 @@ struct EndpointEditorView: View {
                 selection: $pane,
                 identifier: "endpointEditor.pane"
             )
+            .layoutPriority(1)
             Spacer(minLength: DSSpacing.sm)
+            // Labelled while there is room, icon-only below that: a label cut to "…" says nothing.
+            // Both variants keep the identifiers, accessibility labels and tooltips.
+            ViewThatFits(in: .horizontal) {
+                paneActions(showsTitles: true)
+                paneActions(showsTitles: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paneActions(showsTitles: Bool) -> some View {
+        HStack(spacing: DSSpacing.sm) {
             switch pane {
             case .body:
                 DSButton("Format", systemImage: "text.alignleft", variant: .ghost, size: .medium,
-                         identifier: "endpointEditor.format") {
+                         showsTitle: showsTitles, identifier: "endpointEditor.format") {
                     if let formatCandidate, formatCandidate.source == responseBody {
                         responseBody = formatCandidate.output
                         commitBody()
@@ -457,7 +507,7 @@ struct EndpointEditorView: View {
                 .accessibilityIdentifier("endpointEditor.prettyPrintButton")
                 .accessibilityLabel("Pretty-print JSON")
                 DSButton("Copy", systemImage: "doc.on.doc", variant: .ghost, size: .medium,
-                         identifier: "endpointEditor.copyBody") {
+                         showsTitle: showsTitles, identifier: "endpointEditor.copyBody") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(responseBody, forType: .string)
                 }
@@ -465,7 +515,7 @@ struct EndpointEditorView: View {
                 .help("Copy the response body")
             case .headers:
                 DSButton("Add header", systemImage: "plus", variant: .ghost, size: .medium,
-                         identifier: "endpointEditor.addHeader") {
+                         showsTitle: showsTitles, identifier: "endpointEditor.addHeader") {
                     headers.append(HeaderEntry(key: "", value: ""))
                 }
                 .help("Add a response header")
@@ -473,6 +523,7 @@ struct EndpointEditorView: View {
                 .accessibilityLabel("Add header")
             }
         }
+        .fixedSize()
     }
 
     private var bodyEditor: some View {

@@ -13,8 +13,8 @@ import XCTest
 /// `delayField`, `groupTagField`, the whole of `NewScenarioSheetPage`), which is what "declared but
 /// never used" looks like when nobody checks.
 ///
-/// **Targeting rules this file obeys, because the tree does not.** A leaf inside `DSTabStrip`,
-/// `DSPanelHeader`, `DSSectionHeader` or `DSEmptyState` loses its own identifier to the container's
+/// **Targeting rules this file obeys, because the tree does not.** A leaf inside
+/// `DSSegmentedControl`, `DSPanelHeader`, `DSSectionHeader` or `DSEmptyState` loses its own identifier to the container's
 /// — `.accessibilityElement(children: .contain)` keeps the child as its own element with its own
 /// *label and value*, which is not the same thing. So "Add header", "Pretty-print JSON" and "Add
 /// scenario" are matched by **label**, and where two controls share a label (two "Add endpoint"
@@ -696,6 +696,64 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "Escape should dismiss the new-endpoint sheet")
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 3),
                       "Dismissing the sheet should leave the project without endpoints")
+    }
+
+    // MARK: - 2b. New endpoint sheet: group, status and content type
+
+    /// The sheet's second half: a group, a status and a content type chosen before the endpoint
+    /// exists, and all three landing on the endpoint and its default scenario.
+    @MainActor
+    func testNewEndpointSheetAppliesGroupStatusAndContentType() throws {
+        launchApp()
+        createProjectViaUI(name: "Sheet fields")
+
+        workspace.showSidebarIfNeeded()
+        workspace.addEndpointButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
+                      "The new-endpoint sheet should appear")
+        newEndpointSheet.nameField.click()
+        newEndpointSheet.nameField.typeText("Get product")
+        newEndpointSheet.pathField.click()
+        newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
+        newEndpointSheet.pathField.typeText("/products/:id")
+
+        XCTAssertTrue(newEndpointSheet.groupField.waitForExistence(timeout: 3), "The sheet should offer a group")
+        newEndpointSheet.groupField.click()
+        newEndpointSheet.groupField.typeText("Catalog")
+
+        XCTAssertTrue(newEndpointSheet.statusMenu.waitForExistence(timeout: 3), "The sheet should offer a status")
+        newEndpointSheet.statusMenu.click()
+        let notFound = app.menuItems["404 Not Found"].firstMatch
+        XCTAssertTrue(notFound.waitForExistence(timeout: 3), "The status menu should offer 404")
+        notFound.click()
+
+        XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitForExistence(timeout: 3),
+                      "The sheet should offer a content type")
+        newEndpointSheet.contentTypeMenu.click()
+        let plainText = app.menuItems["Plain text"].firstMatch
+        XCTAssertTrue(plainText.waitForExistence(timeout: 3), "The content type menu should offer plain text")
+        plainText.click()
+
+        newEndpointSheet.createButton.click()
+        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5),
+                      "Adding the endpoint should close the sheet")
+
+        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                (self.endpointEditor.statusCodeField.value as? String) == "404"
+            },
+            "The default scenario should answer with the status chosen in the sheet"
+        )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                self.shownText(of: self.endpointEditor.contentTypeMenu).contains("Plain text")
+                    || self.app.staticTexts["Plain text"].exists
+            },
+            "The default scenario should carry the content type chosen in the sheet"
+        )
+        XCTAssertTrue(waitForGroupSection(named: "Catalog", showing: "Catalog"),
+                      "The endpoint should be listed under the group chosen in the sheet")
     }
 
     // MARK: - 3. New endpoint sheet: Cancel and Return

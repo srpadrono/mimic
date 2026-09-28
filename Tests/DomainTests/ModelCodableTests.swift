@@ -73,4 +73,16 @@ struct ModelCodableTests {
         #expect(a == b)
         #expect(a != c)
     }
+
+    // MARK: - Project document check
+
+    @Test("A project document is recognised by any one of its own keys")
+    func projectDocumentIsRecognisedByItsKeys() {
+        #expect(MockProject.namesProjectDocument(Data(#"{"id":"x","name":"A","endpoints":[]}"#.utf8)))
+        #expect(MockProject.namesProjectDocument(Data(#"{"schemaVersion":6}"#.utf8)))
+        // A serialized journey has an id and a name and none of the four.
+        #expect(MockProject.namesProjectDocument(Data(#"{"id":"x","name":"Checkout","steps":[]}"#.utf8)) == false)
+        #expect(MockProject.namesProjectDocument(Data(#"[{"endpoints":[]}]"#.utf8)) == false)
+        #expect(MockProject.namesProjectDocument(Data("not json".utf8)) == false)
+    }
 }

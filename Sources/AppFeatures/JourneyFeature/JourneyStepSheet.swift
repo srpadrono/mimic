@@ -141,12 +141,11 @@ struct JourneyStepSheet: View {
     private var footer: some View {
         HStack(spacing: DSSpacing.sm) {
             if step != nil, let onRemove {
-                DSButton("Remove step", variant: .destructive, size: .large, identifier: "stepSheet.remove") {
+                DSButton("Remove step", variant: .destructive, size: .large, identifier: "stepSheet.removeButton") {
                     onRemove()
                     dismiss()
                 }
                 .help("Remove this step from the journey")
-                .accessibilityIdentifier("stepSheet.removeButton")
             }
             Spacer(minLength: DSSpacing.sm)
             DSButton("Cancel", variant: .secondary, size: .large,

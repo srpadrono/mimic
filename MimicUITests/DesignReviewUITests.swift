@@ -300,8 +300,8 @@ final class DesignReviewUITests: MimicUITestCase {
     /// Cancels the injected import sheet if it is up, so it does not cover the next screen.
     @MainActor
     private func dismissInjectedImport() {
-        let cancel = element("import.cancel")
-        guard cancel.waitForExistence(timeout: 3) else { return }
+        let cancel = element("harImport.cancelButton")
+        guard cancel.waitForExistence(timeout: 8) else { return }
         cancel.click()
         _ = element("import.candidateList").waitForNonExistence(timeout: 3)
     }

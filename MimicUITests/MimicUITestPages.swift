@@ -12,6 +12,7 @@ struct WelcomePage {
     private var heroTitleByIdentifier: XCUIElement { app.staticTexts["welcomeHeroTitle"] }
     private var heroTitleByLabel: XCUIElement { app.staticTexts["Mimic"].firstMatch }
     var newProjectButton: XCUIElement { app.buttons["newProjectButton"] }
+    var openExportButton: XCUIElement { app.buttons["welcome.openExport"] }
     private var noRecentProjectsLabelByIdentifier: XCUIElement {
         app.staticTexts["ds.empty.welcome.recents.heading"]
     }
@@ -363,6 +364,17 @@ struct NewEndpointSheetPage {
     var pathField: XCUIElement { app.textFields["newEndpoint.pathField"] }
     var createButton: XCUIElement { app.buttons["newEndpoint.createButton"] }
     var cancelButton: XCUIElement { app.buttons["newEndpoint.cancelButton"] }
+    var groupField: XCUIElement { app.textFields["newEndpoint.group"] }
+    /// Present only when the project already has groups.
+    var groupMenu: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "newEndpoint.groupMenu").firstMatch
+    }
+    var statusMenu: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "newEndpoint.status").firstMatch
+    }
+    var contentTypeMenu: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "newEndpoint.contentType").firstMatch
+    }
     var pathError: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "newEndpoint.path.error").firstMatch
     }
@@ -699,6 +711,9 @@ struct RequestDetailPage {
     var copyConfirmation: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.copyConfirmation").firstMatch
     }
+    var requestBody: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "requestLog.body.request").firstMatch
+    }
     var responseBody: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestLog.body.response").firstMatch
     }
@@ -706,7 +721,7 @@ struct RequestDetailPage {
         app.descendants(matching: .any).matching(identifier: "requestLog.body.response.matches").firstMatch
     }
 
-    /// A segment of the Summary/Headers/Body picker.
+    /// A segment of the Request/Response/Timing picker.
     ///
     /// A SwiftUI `.segmented` picker realizes as a radio group on macOS, so the segments are
     /// `radioButton`s rather than `button`s — the element type a `app.buttons[…]` query would never

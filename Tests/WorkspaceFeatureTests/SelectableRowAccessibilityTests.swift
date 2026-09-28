@@ -55,9 +55,8 @@ struct SelectableRowAccessibilityTests {
 
     // MARK: - The request and its answer
 
-    /// The opening clause follows `EndpointTrafficRow.spokenLabel` exactly, so the same request is
-    /// announced the same way in the drawer and in the inspector's traffic list. Three arms, and the
-    /// ordering between them matters: a failed request carries a `failureLabel` and no status code,
+    /// The opening clause is method, path, then what came back. Three arms, and the ordering between
+    /// them matters: a failed request carries a `failureLabel` and no status code,
     /// so the failure arm must only be reachable when there is genuinely no code to speak.
     @Test("A row opens with the request and what came back")
     func speaksTheRequestAndItsAnswer() {

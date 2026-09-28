@@ -27,7 +27,7 @@ struct CenterPaneView: View {
         }
         // The canvas belongs to the pane, not to the editors inside it.
         //
-        // Both editors used to paint `dominant` on their own roots and the two empty states painted
+        // Both editors used to paint their own background on their roots and the two empty states painted
         // nothing at all — `DSEmptyState` has no background — so the centre column was one colour
         // when something was selected and whatever the window happened to be behind it when nothing
         // was. Selecting an endpoint changed the pane's colour, which reads as a redraw glitch

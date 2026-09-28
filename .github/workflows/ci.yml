@@ -410,6 +410,7 @@ jobs:
               -only-testing:MimicUITests/EndpointEditorUITests/testFormatStaysDisabledWhenValidDeepJSONExceedsOutputBudget
               -only-testing:MimicUITests/EndpointEditorUITests/testMethodScopeFilterRestrictsTheListAndNamesTheEmptyScope
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetCancelsAndSubmitsOnReturn
+              -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetAppliesGroupStatusAndContentType
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsAPathWithoutALeadingSlash
               -only-testing:MimicUITests/EndpointEditorUITests/testNewEndpointSheetRejectsUnservablePathsAndAcceptsEncodedParameters
               -only-testing:MimicUITests/EndpointEditorUITests/testNewScenarioSheetCancelsAndSubmitsOnReturn

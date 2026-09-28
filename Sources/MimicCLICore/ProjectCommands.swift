@@ -188,34 +188,16 @@ struct ProjectCommand: AsyncParsableCommand {
 
         @OptionGroup var options: GlobalOptions
 
-        /// Keys a Mimic project document carries and no other JSON this CLI reads does.
-        ///
-        /// All four name non-optional properties of ``MockProject``, which declares no `encode(to:)`
-        /// of its own — so the synthesized encoder writes every one of them and every document
-        /// `mimic project export` produces carries all four. **Any one is enough**, rather than all
-        /// four, because `MockProject`'s hand-written decoder deliberately tolerates each of them
-        /// being absent so that older exports still load; demanding one specific key would refuse a
-        /// document that decoder was written to accept.
-        ///
-        /// The check is needed because that same tolerance makes the decode itself prove nothing:
-        /// `init(from:)` requires only `id` and `name` and reads everything else with
-        /// `decodeIfPresent`. A serialized `Journey` — an element of `journeys` in an exported
-        /// project, or the value under `journey` in `mimic journey get`'s output — carries both of
-        /// those and none of the four above, so `mimic project import some-journey.json` decoded it
-        /// as a project with no endpoints and no journeys, wearing the journey's own name and id, and
-        /// sent it on as a `projectImport`. Exit 0. A successful decode into a type whose fields
-        /// nearly all have fallbacks is never evidence that the input was that type.
-        private static let projectDocumentKeys = ["schemaVersion", "serverConfiguration", "endpoints", "journeys"]
-
+        /// The document check lives on ``MockProject/documentKeys``, shared with the window's Open
+        /// project export: a successful decode into a type whose fields nearly all have fallbacks is
+        /// never evidence that the input was that type, so `mimic project import some-journey.json`
+        /// once decoded a journey as a project with no endpoints and exited 0.
         func run() async throws {
             let data = try FileInput.read(file)
 
-            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let namesAProject = Self.projectDocumentKeys.contains { key in
-                object?.keys.contains(key) == true
-            }
+            let namesAProject = MockProject.namesProjectDocument(data)
             guard namesAProject else {
-                let expected = Self.projectDocumentKeys.joined(separator: ", ")
+                let expected = MockProject.documentKeys.joined(separator: ", ")
                 throw CLIFailure.badArgument(
                     """
                     \(file) is not a Mimic project document: one carries \(expected), and this file \

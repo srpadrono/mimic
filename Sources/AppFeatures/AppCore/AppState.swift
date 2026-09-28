@@ -450,6 +450,47 @@ final class AppState {
         run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
     }
 
+    /// Creates an endpoint with its group, and sets what its default scenario answers with, as one
+    /// edit: both commands go through `ProjectCommandExecutor` against one copy of the project, so a
+    /// refused status leaves no half-made endpoint behind and the autosave runs once.
+    func addEndpoint(
+        name: String,
+        method: HTTPMethod,
+        path: String,
+        groupTag: String?,
+        statusCode: Int,
+        contentType: Scenario.ContentType
+    ) -> Endpoint? {
+        guard !updates.isPreparingInstallation, var project = currentProject else { return nil }
+        do {
+            let created = try ProjectCommandExecutor.apply(.endpointCreate(
+                name: name,
+                method: method,
+                path: path,
+                spec: EndpointSpec(groupTag: groupTag ?? "")
+            ), to: &project)
+            guard let endpoint = created?.result.endpoint, let scenarioID = endpoint.activeScenarioID else {
+                return nil
+            }
+            _ = try ProjectCommandExecutor.apply(.scenarioUpdate(
+                endpoint: .id(endpoint.id),
+                scenario: .id(scenarioID),
+                spec: ScenarioSpec(statusCode: statusCode, contentType: contentType)
+            ), to: &project)
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+            lastCommandError = nil
+            return project.endpoints.first { $0.id == endpoint.id }
+        } catch let error as ControlError {
+            lastCommandError = error.message
+            return nil
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
+    }
+
     @discardableResult
     func updateEndpoint(id: UUID, spec: EndpointSpec) -> Bool {
         run(.endpointUpdate(endpoint: .id(id), spec: spec)) != nil
@@ -881,6 +922,33 @@ final class AppState {
             guard stored, activate else { return }
             openProjectAdmitted(id: document.id)
         }
+    }
+
+    /// Opens a project export chosen in the window, held to what `mimic project import` is held to:
+    /// the same document check before decoding, the same whole-document validation the control host
+    /// runs on `projectImport`, then the same store-then-open path. A refusal goes to
+    /// `lastCommandError`, which the window presents.
+    @discardableResult
+    func openProjectExport(_ data: Data, fileName: String) -> Bool {
+        guard !updates.isPreparingInstallation else { return false }
+        guard MockProject.namesProjectDocument(data) else {
+            lastCommandError = "\(fileName) is not a Mimic project export. Write one with `mimic project export`."
+            return false
+        }
+        let document: MockProject
+        do {
+            document = try ControlCoding.decode(MockProject.self, from: data)
+            try ProjectValidator.validate(document)
+        } catch let error as ControlError {
+            lastCommandError = error.message
+            return false
+        } catch {
+            lastCommandError = "\(fileName) could not be opened: \(error.localizedDescription)"
+            return false
+        }
+        lastCommandError = nil
+        importProject(document, activate: true)
+        return true
     }
 
     /// The server serves *the open project*, so it cannot outlive one.

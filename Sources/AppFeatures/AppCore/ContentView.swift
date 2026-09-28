@@ -28,7 +28,10 @@ struct ContentView: View {
                     onRequestRenameProject: { entry in
                         appState.projectRenameTarget = .init(id: entry.id, name: entry.name)
                     },
-                    onRequestNewProject: { appState.showNewProjectSheet = true }
+                    onRequestNewProject: { appState.showNewProjectSheet = true },
+                    // The same picker File ▸ Open Project Export… (⌘O) runs. Import and the sample
+                    // project have no window-level backing yet, so their rows stay hidden.
+                    onRequestOpenExport: { ProjectExportPicker.choose(for: appState) }
                 )
             }
         }

@@ -831,19 +831,19 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "Request detail should show the status")
         XCTAssertEqual(requestDetail.closeButton.label, "Back", "The header's back button should say where it goes")
 
-        // Body tab: the payload has to be visible and searchable.
-        requestDetail.tab("Body").click()
+        // Request tab: the payload has to be visible and searchable.
+        requestDetail.tab("Request").click()
         XCTAssertTrue(
             UITestApp.waitForAny(
-                [requestDetail.responseBody, requestDetail.bodySearchField],
+                [requestDetail.requestBody, requestDetail.bodySearchField],
                 timeout: 5
             ),
-            "The Body tab should render the exchange"
+            "The Request tab should render the payload"
         )
 
         XCTAssertTrue(
             requestDetail.bodySearchField.waitForExistence(timeout: 5),
-            "The Body tab should offer a find field"
+            "The Request tab should offer a find field"
         )
         requestDetail.bodySearchField.click()
         requestDetail.bodySearchField.typeText("Lovelace")

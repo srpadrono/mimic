@@ -156,10 +156,14 @@ struct EndpointInspectorSettings: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: DSSpacing.md) {
+            // The design's 88pt column holds "When unmatched" at 12pt only just; tighten and, as a
+            // last resort, scale a little rather than cut the label to "When unmatc…".
             Text(label)
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
+                .allowsTightening(true)
+                .minimumScaleFactor(0.85)
                 .frame(width: DSInspectorMetrics.labelColumn, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)

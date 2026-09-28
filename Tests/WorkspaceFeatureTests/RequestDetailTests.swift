@@ -233,4 +233,47 @@ struct RequestDetailTests {
         #expect(RequestLogExport.formattedBody(#"{"a":1}"#) == "{\n  \"a\": 1\n}")
         #expect(RequestLogExport.formattedBody("plain") == "plain")
     }
+
+    // MARK: - Request, Response and Timing tabs
+
+    @Test("The tabs are Request, Response and Timing, and the first two offer the find field")
+    func tabsFollowTheDesign() {
+        #expect(RequestDetailTab.allCases.map(\.rawValue) == ["Request", "Response", "Timing"])
+        #expect(RequestDetailTab.request.showsBodySearch)
+        #expect(RequestDetailTab.response.showsBodySearch)
+        #expect(RequestDetailTab.timing.showsBodySearch == false)
+    }
+
+    @Test("The request URL prefers the port the request arrived on")
+    func requestURLUsesTheListenerPort() {
+        let logged = RequestLog(method: .get, path: "/recommendations?limit=4", listenerPort: 18086)
+        let unlogged = RequestLog(method: .get, path: "/recommendations?limit=4")
+
+        #expect(RequestDetailInspector.requestURL(for: logged, port: 8080)
+                == "http://localhost:18086/recommendations?limit=4")
+        #expect(RequestDetailInspector.requestURL(for: unlogged, port: 8080)
+                == "http://localhost:8080/recommendations?limit=4")
+        #expect(RequestDetailInspector.requestURL(for: unlogged, port: nil) == "/recommendations?limit=4")
+    }
+
+    @Test("The port row names the listener and its number")
+    func portSummaryNamesTheListener() {
+        let named = RequestLog(method: .get, path: "/", backendName: "Storefront", listenerPort: 18086)
+        let bare = RequestLog(method: .get, path: "/", listenerPort: 18086)
+        let unknown = RequestLog(method: .get, path: "/")
+
+        #expect(RequestDetailInspector.portSummary(for: named) == "Storefront \u{00B7} 18086")
+        #expect(RequestDetailInspector.portSummary(for: bare) == "18086")
+        #expect(RequestDetailInspector.portSummary(for: unknown) == nil)
+    }
+
+    @Test("Query items keep their order, duplicates, bracketed names and decoding")
+    func queryItemsAreSplitInOrder() {
+        let items = RequestDetailInspector.queryItems(in: "/a?item[0]=one&item[1]=two&q=caf%C3%A9&flag&item[0]=again#top")
+
+        #expect(items.map(\.name) == ["item[0]", "item[1]", "q", "flag", "item[0]"])
+        #expect(items.map(\.value) == ["one", "two", "caf\u{00E9}", nil, "again"])
+        #expect(RequestDetailInspector.queryItems(in: "/products/42").isEmpty)
+        #expect(RequestDetailInspector.queryItems(in: "/products?").isEmpty)
+    }
 }

@@ -57,6 +57,12 @@ public struct MimicScene: Scene {
                 }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(appState.updates.isPreparingInstallation)
+                // Opens a `mimic project export` document — the window's half of `mimic project
+                // import`, and the action the welcome window's ⌘O row names.
+                Button("Open Project Export\u{2026}") { ProjectExportPicker.choose(for: appState) }
+                    .keyboardShortcut("o", modifiers: .command)
+                    .disabled(appState.updates.isPreparingInstallation)
+                    .accessibilityIdentifier("menu.openProjectExport")
                 Button("New Endpoint\u{2026}") { appState.showNewEndpointSheet = true }
                     .keyboardShortcut("n", modifiers: [.command, .option])
                     .disabled(appState.currentProject == nil)

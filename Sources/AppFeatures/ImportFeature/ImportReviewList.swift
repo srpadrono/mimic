@@ -78,16 +78,16 @@ struct ImportReviewList: View {
                 .padding(.horizontal, DSSpacing.xl)
                 .padding(.bottom, DSSpacing.md)
 
-            DSDivider(style: .standard, identifier: "import.summary")
+            DSDivider(identifier: "import.summary")
 
             VStack(spacing: 0) {
                 columnHeader(visible: visible)
-                DSDivider(style: .standard, identifier: "import.columns")
+                DSDivider(identifier: "import.columns")
                 candidateList(visible: visible)
             }
             .background(DSColors.content)
 
-            DSDivider(style: .standard, identifier: "import.footer")
+            DSDivider(identifier: "import.footer")
 
             footer
         }
@@ -253,11 +253,10 @@ struct ImportReviewList: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            DSButton("Cancel", variant: .secondary, size: .large, identifier: "import.cancel") {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: cancelIdentifier) {
                 onCancel()
             }
             .keyboardShortcut(.cancelAction)
-            .accessibilityIdentifier(cancelIdentifier)
             .accessibilityLabel("Cancel")
 
             DSButton(

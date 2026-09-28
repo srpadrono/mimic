@@ -23,7 +23,7 @@ struct InspectorPanelView: View {
     let endpointSettings: EndpointInspectorSettings.Context?
 
     @State private var addScenarioTarget: ScenarioTarget?
-    @State private var requestDetailTab: RequestDetailTab = .summary
+    @State private var requestDetailTab: RequestDetailTab = .request
 
     struct ScenarioTarget: Identifiable {
         let id: UUID

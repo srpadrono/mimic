@@ -91,6 +91,14 @@ final class WelcomeProjectUITests: MimicUITestCase {
             shownText(of: hint).contains("Create one"),
             "The empty-state hint should tell the user to create a project, got '\(shownText(of: hint))'"
         )
+        // The start actions: New project, and Open project export beside it. Import and the sample
+        // project have no backing outside an open project, so their rows are not offered.
+        XCTAssertTrue(welcome.openExportButton.waitForExistence(timeout: 3),
+                      "The welcome window should offer to open a project export")
+        XCTAssertEqual(welcome.openExportButton.label, "Open project export\u{2026}")
+        XCTAssertFalse(app.buttons["welcome.import"].exists, "Import is not offered without a project")
+        XCTAssertFalse(app.buttons["welcome.sampleProject"].exists, "There is no sample project to offer")
+
         let screenshot = XCTAttachment(screenshot: app.windows["Mimic"].firstMatch.screenshot())
         screenshot.name = "welcome-empty"
         screenshot.lifetime = .keepAlways

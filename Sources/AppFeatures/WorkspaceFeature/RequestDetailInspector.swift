@@ -3,13 +3,16 @@ import AppKit
 import Domain
 import DesignSystem
 
-/// Which half of the exchange the detail view is showing.
+/// Which part of the exchange the detail view is showing: what arrived, what answered, and when.
 enum RequestDetailTab: String, CaseIterable, Identifiable {
-    case summary = "Summary"
-    case headers = "Headers"
-    case body = "Body"
+    case request = "Request"
+    case response = "Response"
+    case timing = "Timing"
 
     var id: String { rawValue }
+
+    /// Only the two halves that carry a body offer the find field.
+    var showsBodySearch: Bool { self != .timing }
 }
 
 /// Everything about one logged request, shown in the inspector.
@@ -64,7 +67,7 @@ struct RequestDetailInspector: View {
         scenarioName: String? = nil,
         port: Int? = nil,
         onSaveAsMock: ((UUID) -> Void)? = nil,
-        initialTab: RequestDetailTab = .summary,
+        initialTab: RequestDetailTab = .request,
         initialSearchText: String = "",
         tabSelection: Binding<RequestDetailTab>? = nil
     ) {
@@ -78,7 +81,7 @@ struct RequestDetailInspector: View {
         _searchText = State(initialValue: initialSearchText)
     }
 
-    init(context: Context, onSaveAsMock: ((UUID) -> Void)? = nil, initialTab: RequestDetailTab = .summary, initialSearchText: String = "", tabSelection: Binding<RequestDetailTab>? = nil) {
+    init(context: Context, onSaveAsMock: ((UUID) -> Void)? = nil, initialTab: RequestDetailTab = .request, initialSearchText: String = "", tabSelection: Binding<RequestDetailTab>? = nil) {
         self.init(
             log: context.log,
             endpointName: context.endpointName,
@@ -112,7 +115,7 @@ struct RequestDetailInspector: View {
             .padding(.horizontal, DSInspectorMetrics.inset)
             .padding(.bottom, DSSpacing.md)
 
-            if activeTab == .body {
+            if activeTab.showsBodySearch {
                 bodySearchField
             }
 
@@ -120,9 +123,9 @@ struct RequestDetailInspector: View {
                 VStack(alignment: .leading, spacing: 0) {
                     captureControls
                     switch activeTab {
-                    case .summary: summaryContent
-                    case .headers: headersContent
-                    case .body: bodyContent
+                    case .request: requestContent
+                    case .response: responseContent
+                    case .timing: timingContent
                     }
                 }
                 .padding(.bottom, DSSpacing.lg)
@@ -260,35 +263,61 @@ struct RequestDetailInspector: View {
         }
     }
 
-    // MARK: - Summary
+    // MARK: - Request
 
+    /// Where the request arrived, its query, its headers and its body.
     @ViewBuilder
-    private var summaryContent: some View {
+    private var requestContent: some View {
+        // Not lazy: rows not yet materialised would simply be missing.
+        VStack(alignment: .leading, spacing: 0) {
+            DSInspectorSectionHeader("Summary", identifier: "requestDetail.request.summary")
+
+            valueRow("URL", value: Self.requestURL(for: log, port: port))
+            if let portSummary = Self.portSummary(for: log) { valueRow("Port", value: portSummary) }
+
+            let query = Self.queryItems(in: log.path)
+            if !query.isEmpty {
+                DSInspectorSectionHeader("Query", identifier: "requestDetail.query")
+                ForEach(Array(query.enumerated()), id: \.offset) { index, item in
+                    pairRow(name: item.name, value: item.value, index: index,
+                            identifier: "requestDetail.query.\(index)")
+                }
+            }
+
+            headerSection(
+                title: "Headers",
+                identifier: "request",
+                headers: log.requestHeaders,
+                emptyMessage: "No request headers"
+            )
+
+            DSInspectorSectionHeader("Body", identifier: "requestDetail.body.request")
+
+            if let requestBody = log.requestBody, !requestBody.isEmpty {
+                RequestBodyView(payload: requestBody, searchText: searchText, identifier: "request")
+            } else {
+                emptyNote("No request body", identifier: "requestDetail.body.request.empty")
+            }
+            if log.requestBodyTruncated == true {
+                truncationNote(identifier: "request")
+            }
+        }
+    }
+
+    // MARK: - Response
+
+    /// What answered, then the response's headers and body.
+    @ViewBuilder
+    private var responseContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             DSInspectorSectionHeader("Answered by", identifier: "requestDetail.answeredBy")
 
-            summaryRow("Outcome", value: log.outcome.label, valueColor: outcomeColor)
-            if let name = log.backendName { summaryRow("Backend", value: name) }
-            if let port = log.listenerPort { summaryRow("Local URL", value: "http://localhost:\(port)") }
-            if let upstream = log.upstreamURL { summaryRow("Forwarded to", value: upstream) }
-            if let duration = log.durationMs { summaryRow("Duration", value: RequestLogQuery.formattedDuration(duration)) }
-            summaryRow("Endpoint", value: endpointName ?? "\u{2014}")
-            summaryRow("Scenario", value: scenarioName ?? "\u{2014}",
-                       valueColor: scenarioName != nil ? DSColors.accent : DSColors.labelSecondary)
-
-            DSInspectorSectionHeader("Sizes", identifier: "requestDetail.sizes")
-
-            summaryRow("Request body", value: Self.byteSummary(log.requestBody)
-                       + (log.requestBodyTruncated == true ? " (truncated)" : ""))
-            summaryRow(
-                "Response body",
-                value: (log.responseBodyIsBinary == true
-                        ? "Binary or non-UTF-8 (not previewed)"
-                        : Self.byteSummary(log.responseBody))
-                    + (log.responseBodyTruncated ? " (truncated)" : "")
-            )
-            summaryRow("Request headers", value: "\(log.requestHeaders.count)")
-            summaryRow("Response headers", value: "\(log.responseHeaders.count)")
+            valueRow("Outcome", value: log.outcome.label, valueColor: outcomeColor)
+            if let name = log.backendName { valueRow("Backend", value: name) }
+            if let upstream = log.upstreamURL { valueRow("Forwarded to", value: upstream) }
+            valueRow("Endpoint", value: endpointName ?? "\u{2014}")
+            valueRow("Scenario", value: scenarioName ?? "\u{2014}",
+                     valueColor: scenarioName != nil ? DSColors.accent : DSColors.labelSecondary)
 
             if log.outcome.isMissingConfiguration {
                 Text("Nothing was configured for this call, so Mimic answered with its fallback. Right-click the row in the request log to create an endpoint for it.")
@@ -300,12 +329,66 @@ struct RequestDetailInspector: View {
                     .padding(.top, DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.unmatchedHint")
             }
+
+            headerSection(
+                title: responseSectionTitle("headers"),
+                identifier: "response",
+                headers: log.responseHeaders,
+                emptyMessage: log.failureLabel.map { "No response. The connection was \($0)." }
+                    ?? "No response headers"
+            )
+
+            DSInspectorSectionHeader(responseSectionTitle("body"), identifier: "requestDetail.body.response")
+
+            if log.responseBodyIsBinary == true {
+                emptyNote("Binary or non-UTF-8 response body is not previewed",
+                          identifier: "requestDetail.body.response.empty")
+            } else if let responseBody = log.responseBody, !responseBody.isEmpty {
+                RequestBodyView(payload: responseBody, searchText: searchText, identifier: "response")
+
+                if log.responseBodyTruncated {
+                    truncationNote(identifier: "response")
+                }
+            } else {
+                emptyNote(
+                    log.failureLabel.map { "No response. The connection was \($0)." } ?? "No response body",
+                    identifier: "requestDetail.body.response.empty"
+                )
+            }
         }
     }
 
-    /// Summary, journey and project fields share the same label/value alignment.
+    // MARK: - Timing
+
+    /// When the request arrived, how long the answer took, and how much each half carried.
     @ViewBuilder
-    private func summaryRow(_ label: String, value: String, valueColor: Color? = nil) -> some View {
+    private var timingContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DSInspectorSectionHeader("Timing", identifier: "requestDetail.timing")
+
+            valueRow("Received", value: Self.receivedText(for: log.timestamp))
+            valueRow("Duration", value: log.durationMs.map(RequestLogQuery.formattedDuration) ?? "\u{2014}")
+
+            DSInspectorSectionHeader("Sizes", identifier: "requestDetail.sizes")
+
+            valueRow("Request body", value: Self.byteSummary(log.requestBody)
+                     + (log.requestBodyTruncated == true ? " (truncated)" : ""))
+            valueRow(
+                "Response body",
+                value: (log.responseBodyIsBinary == true
+                        ? "Binary or non-UTF-8 (not previewed)"
+                        : Self.byteSummary(log.responseBody))
+                    + (log.responseBodyTruncated ? " (truncated)" : "")
+            )
+            valueRow("Request headers", value: "\(log.requestHeaders.count)")
+            valueRow("Response headers", value: "\(log.responseHeaders.count)")
+        }
+    }
+
+    /// Every tab's label/value rows share one alignment and one identifier scheme,
+    /// `requestDetail.summary.<label>`, which the UI tests address by name.
+    @ViewBuilder
+    private func valueRow(_ label: String, value: String, valueColor: Color? = nil) -> some View {
         DSInspectorValueRow(label, value: value, color: valueColor ?? DSColors.labelPrimary,
                             identifier: "requestDetail.summary.\(label.lowercased())")
     }
@@ -324,27 +407,6 @@ struct RequestDetailInspector: View {
     // MARK: - Headers
 
     @ViewBuilder
-    private var headersContent: some View {
-        // Not lazy: rows not yet materialised would simply be missing.
-        VStack(alignment: .leading, spacing: 0) {
-            headerSection(
-                title: "Request headers",
-                identifier: "request",
-                headers: log.requestHeaders,
-                emptyMessage: "No request headers"
-            )
-
-            headerSection(
-                title: responseSectionTitle("headers"),
-                identifier: "response",
-                headers: log.responseHeaders,
-                emptyMessage: log.failureLabel.map { "No response. The connection was \($0)." }
-                    ?? "No response headers"
-            )
-        }
-    }
-
-    @ViewBuilder
     private func headerSection(
         title: String,
         identifier: String,
@@ -357,30 +419,36 @@ struct RequestDetailInspector: View {
             emptyNote(emptyMessage, identifier: "requestDetail.headers.\(identifier).empty")
         } else {
             ForEach(Array(headers.sorted(by: { $0.key < $1.key }).enumerated()), id: \.element.key) { index, header in
-                // Name above value: the inspector is too narrow for two useful columns.
-                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                    Text(header.key)
-                        .font(DSTypography.code)
-                        .foregroundStyle(DSColors.labelSecondary)
-                    Text(header.value)
-                        .font(DSTypography.code)
-                        .foregroundStyle(DSColors.labelPrimary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DSSpacing.sm)
-                .padding(.vertical, DSSpacing.xs)
-                .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.mark)
-                        .fill(index % 2 == 0 ? Color.clear : DSColors.zebra)
-                }
-                .padding(.horizontal, DSSpacing.sm)
-                .accessibilityElement(children: .combine)
                 // Keyed by the header's name, so the row keeps its identity when the sort moves it.
-                .accessibilityIdentifier("requestDetail.headers.\(identifier).\(header.key)")
+                pairRow(name: header.key, value: header.value, index: index,
+                        identifier: "requestDetail.headers.\(identifier).\(header.key)")
             }
         }
+    }
+
+    /// A header or query item: name above value, because the inspector is too narrow for two useful
+    /// columns. Alternate rows are striped.
+    private func pairRow(name: String, value: String?, index: Int, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+            Text(name)
+                .font(DSTypography.code)
+                .foregroundStyle(DSColors.labelSecondary)
+            Text(value ?? "")
+                .font(DSTypography.code)
+                .foregroundStyle(DSColors.labelPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DSSpacing.sm)
+        .padding(.vertical, DSSpacing.xs)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.mark)
+                .fill(index % 2 == 0 ? Color.clear : DSColors.zebra)
+        }
+        .padding(.horizontal, DSSpacing.sm)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
     }
 
     // MARK: - Body
@@ -418,41 +486,6 @@ struct RequestDetailInspector: View {
                        isFocused: searchFieldIsFocused)
         .padding(.horizontal, DSInspectorMetrics.inset)
         .padding(.bottom, DSSpacing.sm)
-    }
-
-    @ViewBuilder
-    private var bodyContent: some View {
-        // Two sections; laziness would only risk one of them not appearing.
-        VStack(alignment: .leading, spacing: 0) {
-            DSInspectorSectionHeader("Request body", identifier: "requestDetail.body.request")
-
-            if let requestBody = log.requestBody, !requestBody.isEmpty {
-                RequestBodyView(payload: requestBody, searchText: searchText, identifier: "request")
-            } else {
-                emptyNote("No request body", identifier: "requestDetail.body.request.empty")
-            }
-            if log.requestBodyTruncated == true {
-                truncationNote(identifier: "request")
-            }
-
-            DSInspectorSectionHeader(responseSectionTitle("body"), identifier: "requestDetail.body.response")
-
-            if log.responseBodyIsBinary == true {
-                emptyNote("Binary or non-UTF-8 response body is not previewed",
-                          identifier: "requestDetail.body.response.empty")
-            } else if let responseBody = log.responseBody, !responseBody.isEmpty {
-                RequestBodyView(payload: responseBody, searchText: searchText, identifier: "response")
-
-                if log.responseBodyTruncated {
-                    truncationNote(identifier: "response")
-                }
-            } else {
-                emptyNote(
-                    log.failureLabel.map { "No response. The connection was \($0)." } ?? "No response body",
-                    identifier: "requestDetail.body.response.empty"
-                )
-            }
-        }
     }
 
     private func truncationNote(identifier: String) -> some View {
@@ -604,6 +637,41 @@ struct RequestDetailInspector: View {
     static func write(_ text: String, to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    /// The address the client called: the listener's port when the log recorded one, otherwise the
+    /// server's current port, otherwise the path alone rather than a guessed port.
+    nonisolated static func requestURL(for log: RequestLog, port: Int?) -> String {
+        guard let resolved = log.listenerPort ?? port else { return log.path }
+        return "http://localhost:\(resolved)\(log.path)"
+    }
+
+    /// "Storefront · 18086": the listener that received the request, as the settings sheet names it.
+    nonisolated static func portSummary(for log: RequestLog) -> String? {
+        let parts = [log.backendName, log.listenerPort.map { String($0) }].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// The query string's items in the order they were sent, duplicates kept.
+    ///
+    /// Split by hand rather than through `URLComponents`, which refuses a whole target over one
+    /// character it considers illegal — `item[0]=one` is a query clients really send, and the log
+    /// stores the target exactly as it arrived.
+    nonisolated static func queryItems(in path: String) -> [URLQueryItem] {
+        guard let start = path.firstIndex(of: "?") else { return [] }
+        var query = path[path.index(after: start)...]
+        if let fragment = query.firstIndex(of: "#") { query = query[..<fragment] }
+        return query.split(separator: "&", omittingEmptySubsequences: true).map { pair in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let decode = { (text: Substring) in String(text).removingPercentEncoding ?? String(text) }
+            return URLQueryItem(name: decode(parts[0]), value: parts.count > 1 ? decode(parts[1]) : nil)
+        }
+    }
+
+    /// The arrival time to the millisecond, with its date, for the Timing tab.
+    nonisolated static func receivedText(for date: Date) -> String {
+        date.formatted(.dateTime.year().month(.abbreviated).day()) + ", "
+            + date.formatted(RequestLogQuery.timestampFormat)
     }
 
     /// A body's size in the units a person reads, or a dash when there is no body.

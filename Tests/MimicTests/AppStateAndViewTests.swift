@@ -465,6 +465,49 @@ struct AppStateAndViewTests {
         )
     }
 
+    @Test("A new endpoint takes its group, status and content type in one edit")
+    func addEndpointAppliesGroupStatusAndContentType() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Catalog API", port: 9000)
+
+        let endpoint = try #require(appState.addEndpoint(
+            name: "Get product",
+            method: .get,
+            path: "/products/:id",
+            groupTag: "Catalog",
+            statusCode: 404,
+            contentType: .plainText
+        ))
+
+        #expect(endpoint.name == "Get product")
+        #expect(endpoint.path == "/products/:id")
+        #expect(endpoint.groupTag == "Catalog")
+        let scenario = try #require(endpoint.scenarios.first { $0.id == endpoint.activeScenarioID })
+        #expect(scenario.statusCode == 404)
+        #expect(scenario.bodyContentType == .plainText)
+        #expect(appState.currentProject?.endpoints.map(\.id) == [endpoint.id])
+        #expect(appState.lastCommandError == nil)
+    }
+
+    @Test("A refused status leaves no half-made endpoint behind")
+    func addEndpointWithRefusedStatusAddsNothing() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Catalog API", port: 9000)
+
+        let endpoint = appState.addEndpoint(
+            name: "Broken",
+            method: .get,
+            path: "/broken",
+            groupTag: nil,
+            statusCode: 99,
+            contentType: .json
+        )
+
+        #expect(endpoint == nil)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+        #expect(appState.lastCommandError != nil)
+    }
+
     @Test("AppState coordinates endpoint and scenario mutations")
     func appStateCoordinatesEndpointFlow() async throws {
         let appState = try makeAppState()
@@ -1771,6 +1814,36 @@ struct AppStateAndViewTests {
             "the unreconciled session's autosave overwrote the imported document"
         )
         #expect(appState.currentProject?.name == "Imported over the open project")
+    }
+
+    // MARK: - Open project export
+
+    @Test("Opening a project export stores the document and opens it")
+    func openProjectExportImportsAndActivates() async throws {
+        let appState = try makeAppState()
+        let json = #"{"id":"6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B","name":"Exported storefront","endpoints":[],"journeys":[]}"#
+
+        #expect(appState.openProjectExport(Data(json.utf8), fileName: "storefront.json"))
+        #expect(appState.lastCommandError == nil)
+
+        let id = try #require(UUID(uuidString: "6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B"))
+        try await waitUntil { appState.currentProject?.id == id }
+        #expect(appState.currentProject?.name == "Exported storefront")
+        #expect(try await appState.repository.load(id: id).name == "Exported storefront")
+    }
+
+    @Test("A file that only decodes as a project is refused, as the CLI refuses it")
+    func openProjectExportRefusesANonProjectDocument() throws {
+        let appState = try makeAppState()
+        // A serialized journey: it carries `id` and `name`, and none of a project's own keys.
+        let journey = #"{"id":"6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B","name":"Checkout","steps":[]}"#
+
+        #expect(appState.openProjectExport(Data(journey.utf8), fileName: "checkout.json") == false)
+        #expect(appState.lastCommandError == "checkout.json is not a Mimic project export. Write one with `mimic project export`.")
+        #expect(appState.currentProject == nil)
+
+        #expect(appState.openProjectExport(Data("not json".utf8), fileName: "notes.txt") == false)
+        #expect(appState.lastCommandError?.hasPrefix("notes.txt is not a Mimic project export") == true)
     }
 
     // MARK: - An open the store refuses

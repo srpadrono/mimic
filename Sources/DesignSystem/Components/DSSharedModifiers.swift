@@ -41,16 +41,7 @@ extension View {
 
 // MARK: - Selected list row
 
-/// The navigator's selected row: a lifted card, not a tint.
-///
-/// Two selections are live in this window at once — the navigator's endpoint and the request log's
-/// row — and they must not compete, because the one the user is actually tracking is the log's. So
-/// they are deliberately different mechanisms: the log takes an accent wash plus a 3pt rail, and the
-/// navigator takes elevation.
-///
-/// Elevation here means all three of fill, hairline and shadow. The fill alone is not enough in dark,
-/// where `surfaceElevated` and `surfacePanelHeader` are the same value on purpose — there, the shadow
-/// and the border *are* the selection.
+/// The navigator's selected row: a `DSColors.selectionSoft` fill in the row's own rounded shape.
 public struct DSSelectedListRow: ViewModifier {
     private let isSelected: Bool
 

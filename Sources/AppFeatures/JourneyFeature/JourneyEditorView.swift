@@ -502,8 +502,8 @@ private struct JourneySummaryField: View {
             TextField("What this journey tests", text: $draft)
                 .textFieldStyle(.plain)
                 .font(DSTypography.body)
-                .dsFieldWell()
                 .focused($isFocused)
+                .dsFieldChrome(isFocused: isFocused)
                 .onSubmit { commit() }
                 .onChange(of: isFocused) { _, focused in if !focused { commit() } }
                 .accessibilityIdentifier("journeyEditor.summaryField")
@@ -538,8 +538,8 @@ private struct JourneyGroupField: View {
             TextField("None", text: $draft)
                 .textFieldStyle(.plain)
                 .font(DSTypography.body)
-                .dsFieldWell()
                 .focused($isFocused)
+                .dsFieldChrome(isFocused: isFocused)
                 .onSubmit { commit() }
                 .onChange(of: isFocused) { _, focused in if !focused { commit() } }
                 .accessibilityIdentifier("journeyEditor.groupTag")

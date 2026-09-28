@@ -13,6 +13,8 @@ enum LogColumns {
 
     /// Fits a 12-hour timestamp with milliseconds ("11:41:33.123 PM") in the mono figure face.
     static let time: CGFloat = 128
+    /// The compact table's time: seconds, no milliseconds and no day period ("11:41:33").
+    static let compactTime: CGFloat = 76
     static let method: CGFloat = 64
     static let status: CGFloat = 84
     static let scenario: CGFloat = 150
@@ -20,21 +22,28 @@ enum LogColumns {
     /// Fits "1023.9 KB", the widest reading below a megabyte.
     static let size: CGFloat = 84
 
-    /// The narrowest Path worth drawing before the table scrolls sideways.
+    /// The narrowest Path worth drawing before the full table gives way to the compact one.
     static let minimumPath: CGFloat = 160
+    /// The narrowest Path the compact table draws, middle-truncated, before it scrolls sideways.
+    /// Small on purpose: in a narrow drawer Status staying on screen matters more than more path.
+    static let compactMinimumPath: CGFloat = 56
 
-    /// Below this the table drops Scenario, Duration and Size.
+    /// Below this the table drops Scenario, Duration and Size and shortens Time.
     static let minimumTableWidth = time + method + minimumPath + status + scenario + duration + size
         + tableInset * 2
 
     /// Below this even the compact table scrolls sideways.
-    static let compactMinimumTableWidth = time + method + minimumPath + status + tableInset * 2
+    static let compactMinimumTableWidth = compactTime + method + compactMinimumPath + status + tableInset * 2
+
+    static func timeWidth(compact: Bool) -> CGFloat {
+        compact ? compactTime : time
+    }
 
     /// Header and rows must receive the same resolved path width, or a vertical scrollbar in the
     /// rows would shift every column after Path.
     static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
         let fixedWidth = compact
-            ? time + method + status
+            ? compactTime + method + status
             : time + method + status + scenario + duration + size
         return max(0, tableWidth - fixedWidth - tableInset * 2)
     }
@@ -192,6 +201,11 @@ enum RequestLogQuery {
     /// Hours, minutes, seconds and milliseconds, in the reader's 12- or 24-hour convention.
     nonisolated static let timestampFormat: Date.FormatStyle = .dateTime
         .hour().minute().second().secondFraction(.fractional(3))
+
+    /// The compact table's time: hours, minutes and seconds, without the day period, so a narrow
+    /// drawer keeps room for Path and Status. The full reading is in the request's inspector.
+    nonisolated static let compactTimestampFormat: Date.FormatStyle = .dateTime
+        .hour(.defaultDigits(amPM: .omitted)).minute().second()
 
     /// "8 ms", or "1.2 s" from a second up.
     nonisolated static func formattedDuration(_ milliseconds: Int) -> String {
@@ -449,18 +463,41 @@ struct RequestLogDrawerView: View {
 
     /// Title, count, the All / Unmatched / Errors control, the filter field and the clear button.
     ///
+    /// The title never truncates. As the pane narrows the count goes first, then the segmented
+    /// control drops onto a row of its own below the title.
+    ///
     /// Carries the identifiers `DSPanelHeader` gives a panel header, which the UI suite addresses.
     @ViewBuilder
     private func header(narrow: Bool) -> some View {
+        ViewThatFits(in: .horizontal) {
+            headerRow(narrow: narrow, showsCount: true, showsScope: true)
+            headerRow(narrow: narrow, showsCount: false, showsScope: true)
+            VStack(alignment: .leading, spacing: 0) {
+                headerRow(narrow: narrow, showsCount: true, showsScope: false)
+                if !requestLogs.isEmpty {
+                    // Under the title, on the header's own leading inset.
+                    scopeControl
+                        .padding(.leading, 14)
+                        .padding(.trailing, DSSpacing.md)
+                        .padding(.bottom, DSSpacing.sm)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.panelheader.requestLog")
+    }
+
+    private func headerRow(narrow: Bool, showsCount: Bool, showsScope: Bool) -> some View {
         HStack(spacing: DSSpacing.sm) {
             Text("Request log")
                 .font(DSTypography.bodySemibold)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
+                .fixedSize()
                 .layoutPriority(1)
                 .accessibilityIdentifier("ds.panelheader.title.requestLog")
 
-            if let countSubtitle {
+            if showsCount, let countSubtitle {
                 Text(countSubtitle)
                     .font(DSTypography.callout)
                     .monospacedDigit()
@@ -469,14 +506,9 @@ struct RequestLogDrawerView: View {
                     .accessibilityIdentifier("ds.panelheader.subtitle.requestLog")
             }
 
-            if !requestLogs.isEmpty {
-                DSSegmentedControl(
-                    "Show requests",
-                    segments: scopeSegments,
-                    selection: scopeSelection,
-                    identifier: "drawer.scope"
-                )
-                .padding(.leading, DSSpacing.xs)
+            if showsScope, !requestLogs.isEmpty {
+                scopeControl
+                    .padding(.leading, DSSpacing.xs)
             }
 
             Spacer(minLength: DSSpacing.sm)
@@ -499,8 +531,15 @@ struct RequestLogDrawerView: View {
         .padding(.leading, 14)
         .padding(.trailing, DSSpacing.md)
         .frame(height: DSBarHeight.paneHeader)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ds.panelheader.requestLog")
+    }
+
+    private var scopeControl: some View {
+        DSSegmentedControl(
+            "Show requests",
+            segments: scopeSegments,
+            selection: scopeSelection,
+            identifier: "drawer.scope"
+        )
     }
 
     private var scopeSegments: [DSSegmentedControl<LogScope>.Segment] {
@@ -667,7 +706,7 @@ struct RequestLogDrawerView: View {
     @ViewBuilder
     private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            columnHeader("Time", field: .timestamp, width: LogColumns.time)
+            columnHeader("Time", field: .timestamp, width: LogColumns.timeWidth(compact: compact))
             columnHeader("Method", field: .method, width: LogColumns.method)
             columnHeader("Path", field: .path, width: pathWidth)
             columnHeader("Status", field: .status, width: LogColumns.status)
@@ -1224,21 +1263,22 @@ struct RequestLogTableRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text(log.timestamp, format: RequestLogQuery.timestampFormat)
+            Text(log.timestamp, format: compact ? RequestLogQuery.compactTimestampFormat : RequestLogQuery.timestampFormat)
                 .font(DSTypography.Figure.regular)
                 .foregroundStyle(ink(DSColors.labelSecondary))
                 .lineLimit(1)
-                .cell(width: LogColumns.time)
+                .cell(width: LogColumns.timeWidth(compact: compact))
 
             // Keyed by the log entry, not the method, so every GET row has its own identifier.
             DSMethodLabel(log.method.rawValue, fixedWidth: false, identifier: log.id.uuidString)
                 .cell(width: LogColumns.method)
 
+            // Middle truncation keeps both the route's head and its last segment (often the id).
             Text(log.path)
                 .font(DSTypography.code)
                 .foregroundStyle(ink(DSColors.labelPrimary))
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .truncationMode(.middle)
                 .cell(width: pathWidth)
 
             // `nil` is a transport failure, which the label draws as "Failed" in the error colour.
@@ -1408,10 +1448,9 @@ struct RequestLogTableRow: View {
     /// it is in the selection. `static` so `WorkspaceFeatureTests` can hold every arm without
     /// hosting a window.
     ///
-    /// It opens on `EndpointTrafficRow.spokenLabel`'s composition — method, path, then the status or
-    /// the failure — so the same request is announced the same way in both panels. It then says what
-    /// that panel has no room to: this table's endpoint and scenario columns, whose distinction is
-    /// the one the panel exists for. A row reading nothing after the status is a row where an em
+    /// It opens with the request — method, path, then the status or the failure — and then says what
+    /// the table's endpoint and scenario columns show, whose distinction is the one the panel exists
+    /// for. A row reading nothing after the status is a row where an em
     /// dash meaning *"nothing is configured for this call"* and one meaning *"a journey answered
     /// it"* are the same silence.
     ///

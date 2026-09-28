@@ -112,12 +112,54 @@ struct EndpointFeatureRenderingTests {
     /// and either sheet leaving it fails here, then against the compact sheet's 440pt floor.
     @Test("The two creation sheets open at one width")
     func creationSheetsShareOneWidth() {
-        let endpointSheet = render(NewEndpointSheet { _, _, _ in })
+        let endpointSheet = render(NewEndpointSheet(existingGroups: ["Account", "Catalog"]) { _ in })
         let projectSheet = render(NewProjectSheet { _, _ in })
 
         #expect(endpointSheet.width == projectSheet.width)
         // And it is the stated floor, not whatever the fields happened to measure.
         #expect(endpointSheet.width >= 440)
+    }
+
+    @Test("The new-endpoint draft trims its name and group and keeps the response choices")
+    func newEndpointDraftNormalisesInput() {
+        let draft = NewEndpointSheet.draft(
+            name: "  Get product ",
+            method: .get,
+            path: "/products/:id",
+            groupTag: "  Catalog  ",
+            statusCode: 201,
+            contentType: .plainText
+        )
+
+        #expect(draft == NewEndpointDraft(
+            name: "Get product",
+            method: .get,
+            path: "/products/:id",
+            groupTag: "Catalog",
+            statusCode: 201,
+            contentType: .plainText
+        ))
+    }
+
+    @Test("A blank group is no group, and a blank name or bad path is no draft")
+    func newEndpointDraftRefusesIncompleteInput() {
+        let ungrouped = NewEndpointSheet.draft(
+            name: "Health", method: .get, path: "/health", groupTag: "   ", statusCode: 200, contentType: .json
+        )
+        #expect(ungrouped?.groupTag == nil)
+
+        #expect(NewEndpointSheet.draft(
+            name: "  ", method: .get, path: "/health", groupTag: "", statusCode: 200, contentType: .json
+        ) == nil)
+        #expect(NewEndpointSheet.draft(
+            name: "Health", method: .get, path: "health", groupTag: "", statusCode: 200, contentType: .json
+        ) == nil)
+    }
+
+    @Test("The content type menu names each type the way the editor does")
+    func newEndpointContentTypeTitles() {
+        #expect(NewEndpointSheet.contentTypeTitle(.json) == "JSON")
+        #expect(NewEndpointSheet.contentTypeTitle(.plainText) == "Plain text")
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.

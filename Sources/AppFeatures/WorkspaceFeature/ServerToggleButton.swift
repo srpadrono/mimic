@@ -45,6 +45,8 @@ struct ServerToggleButton: View {
                 Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
+                    // play.fill and stop.fill differ in width; a fixed slot keeps the capsule still.
+                    .frame(width: DSGlyph.control)
             }
             .labelStyle(.titleAndIcon)
             .font(DSTypography.bodyMedium)

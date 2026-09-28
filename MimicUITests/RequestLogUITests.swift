@@ -42,8 +42,8 @@ final class RequestLogUITests: MimicUITestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
-    /// For a control whose identifier has two possible spellings — a `DSMethodBadge` prefixes the
-    /// name it is handed, so the request line's badge is either `requestDetail.method` or
+    /// For a control whose identifier has two possible spellings — a `DSMethodLabel` prefixes the
+    /// name it is handed, so the request line's method is either `requestDetail.method` or
     /// `ds.method.requestDetail.method` depending on which modifier won.
     @MainActor
     private func element(identifiedByAnyOf identifiers: [String]) -> XCUIElement {
@@ -65,7 +65,7 @@ final class RequestLogUITests: MimicUITestCase {
     /// Label and value as one string.
     ///
     /// Which of the two a `StaticText` carries its text in depends on how SwiftUI realized it — a
-    /// `DSEmptyState`'s heading arrives as the value, a `DSStatusPill`'s code as the label — and the
+    /// `DSEmptyState`'s heading arrives as the value, a `DSStatusLabel`'s code as the label — and the
     /// sort headers deliberately put their state in the value while keeping a fixed label. Reading
     /// both is the only form that survives all three.
     @MainActor
@@ -79,10 +79,9 @@ final class RequestLogUITests: MimicUITestCase {
     ///
     /// A control that is one view in the source is not always one element in the tree: a wrapper can
     /// take the identifier while the words stay on the `Text` beneath it, and then the handle a test
-    /// holds reads as empty while the string it is asserting on is one level down. The traffic
-    /// header's status chip is the case that proved it — `endpointTraffic.status.200` resolved, and
-    /// its `label` was "". Reading the subtree is what makes an assertion about what a control says
-    /// independent of how SwiftUI split it up.
+    /// holds reads as empty while the string it is asserting on is one level down. Reading the
+    /// subtree is what makes an assertion about what a control says independent of how SwiftUI split
+    /// it up.
     @MainActor
     private func speech(of element: XCUIElement) -> String {
         guard element.exists else { return "" }
@@ -377,13 +376,12 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").exists)
-        requestDetail.tab("Body").click()
+        requestDetail.tab("Response").click()
         let binaryBodyNote = element(identifiedBy: "requestDetail.body.response.empty")
         XCTAssertTrue(binaryBodyNote.waitForExistence(timeout: 5))
         XCTAssertTrue([binaryBodyNote.label, binaryBodyNote.value as? String ?? ""].contains(
             "Binary or non-UTF-8 response body is not previewed"
         ), "The full explanation must be accessible, got \(text(of: binaryBodyNote))")
-        requestDetail.tab("Summary").click()
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/profile"))).click()
         XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(poll { save.isEnabled }, app.debugDescription)
@@ -732,8 +730,8 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - LOGVIEW rows and REQDET summary/headers
 
-    /// What a row says out loud, what the header counts, and the two tabs of the request detail that
-    /// no test has opened: Summary and Headers.
+    /// What a row says out loud, what the header counts, and all three tabs of the request detail:
+    /// Request, Response and Timing.
     @MainActor
     func testRowLabelsAndRequestDetailSummaryAndHeaders() async throws {
         let port = 62104
@@ -801,50 +799,20 @@ final class RequestLogUITests: MimicUITestCase {
             "The outcome sentence should name the endpoint — it read \(text(of: outcomeSentence))"
         )
 
-        // Summary is the tab a selection opens on.
+        // Request is the tab a selection opens on: where the call arrived, then its headers.
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.answeredBy").waitForExistence(timeout: 5),
-            "The Summary tab should head its first section 'Answered by'"
+            element(identifiedBy: "ds.sectionheader.requestDetail.request.summary").waitForExistence(timeout: 5),
+            "The Request tab should head its first section 'Summary'"
         )
-        let outcomeRow = element(identifiedBy: "requestDetail.summary.outcome")
-        XCTAssertTrue(outcomeRow.waitForExistence(timeout: 5), "Summary should state the outcome")
-        XCTAssertTrue(
-            text(of: outcomeRow).localizedCaseInsensitiveContains("endpoint"),
-            "An endpoint answered this call — the row read \(text(of: outcomeRow))"
-        )
-        XCTAssertTrue(
-            text(of: element(identifiedBy: "requestDetail.summary.endpoint")).contains("Users"),
-            "Summary should name the endpoint that answered"
-        )
-        XCTAssertTrue(
-            text(of: element(identifiedBy: "requestDetail.summary.scenario")).contains("Default"),
-            "Summary should name the scenario that answered"
-        )
-
-        XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.sizes").waitForExistence(timeout: 5),
-            "The Summary tab should head its second section 'Sizes'"
-        )
-        for row in ["request body", "response body", "request headers", "response headers"] {
-            XCTAssertTrue(
-                element(identifiedBy: "requestDetail.summary.\(row)").exists,
-                "Summary should report the \(row)"
-            )
-        }
-
-        // Headers.
-        requestDetail.tab("Headers").click()
+        let urlRow = element(identifiedBy: "requestDetail.summary.url")
+        XCTAssertTrue(urlRow.waitForExistence(timeout: 5), "The Request tab should show the URL the client called")
+        XCTAssertTrue(text(of: urlRow).contains("/api/users"), "The URL should carry the path — it read \(text(of: urlRow))")
         XCTAssertTrue(
             element(identifiedBy: "ds.sectionheader.requestDetail.headers.request").waitForExistence(timeout: 5),
-            "The Headers tab should head the request half"
+            "The Request tab should list the request headers"
         )
-        XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.headers.response").exists,
-            "The Headers tab should head the response half, naming what answered"
-        )
-
-        // Assert on the rows rather than only on the section titles — and pair each count with the
-        // absence of that section's empty note, because "no headers" renders under the same prefix.
+        // Assert on the rows rather than only on the section title — and pair the count with the
+        // absence of the empty note, because "no headers" renders under the same prefix.
         XCTAssertFalse(
             element(identifiedBy: "requestDetail.headers.request.empty").exists,
             "A request carrying headers should not show the empty note"
@@ -852,6 +820,31 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(
             poll { self.elements(identifierPrefix: "requestDetail.headers.request.").count > 0 },
             "The request headers the client actually sent should be listed"
+        )
+
+        // Response: what answered, then the response's own headers.
+        requestDetail.tab("Response").click()
+        XCTAssertTrue(
+            element(identifiedBy: "ds.sectionheader.requestDetail.answeredBy").waitForExistence(timeout: 5),
+            "The Response tab should head its first section 'Answered by'"
+        )
+        let outcomeRow = element(identifiedBy: "requestDetail.summary.outcome")
+        XCTAssertTrue(outcomeRow.waitForExistence(timeout: 5), "Response should state the outcome")
+        XCTAssertTrue(
+            text(of: outcomeRow).localizedCaseInsensitiveContains("endpoint"),
+            "An endpoint answered this call — the row read \(text(of: outcomeRow))"
+        )
+        XCTAssertTrue(
+            text(of: element(identifiedBy: "requestDetail.summary.endpoint")).contains("Users"),
+            "Response should name the endpoint that answered"
+        )
+        XCTAssertTrue(
+            text(of: element(identifiedBy: "requestDetail.summary.scenario")).contains("Default"),
+            "Response should name the scenario that answered"
+        )
+        XCTAssertTrue(
+            element(identifiedBy: "ds.sectionheader.requestDetail.headers.response").exists,
+            "The Response tab should head the response headers, naming what answered"
         )
         XCTAssertFalse(
             element(identifiedBy: "requestDetail.headers.response.empty").exists,
@@ -862,18 +855,39 @@ final class RequestLogUITests: MimicUITestCase {
             "The response headers the client received should be listed"
         )
 
+        // Timing: when it arrived, how long it took, and what each half carried.
+        requestDetail.tab("Timing").click()
+        XCTAssertTrue(
+            element(identifiedBy: "ds.sectionheader.requestDetail.timing").waitForExistence(timeout: 5),
+            "The Timing tab should head its first section 'Timing'"
+        )
+        XCTAssertTrue(
+            element(identifiedBy: "requestDetail.summary.received").exists,
+            "Timing should say when the request arrived"
+        )
+        XCTAssertTrue(
+            element(identifiedBy: "ds.sectionheader.requestDetail.sizes").exists,
+            "The Timing tab should head its second section 'Sizes'"
+        )
+        for row in ["request body", "response body", "request headers", "response headers"] {
+            XCTAssertTrue(
+                element(identifiedBy: "requestDetail.summary.\(row)").exists,
+                "Timing should report the \(row)"
+            )
+        }
+
         // And back — the tab is a segmented picker, so this is a different control from the close
         // button that leaves request detail altogether.
-        requestDetail.tab("Summary").click()
+        requestDetail.tab("Response").click()
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.summary.outcome").waitForExistence(timeout: 5),
-            "Switching back to Summary should show the answered-by rows again"
+            "Switching back to Response should show the answered-by rows again"
         )
     }
 
     // MARK: - REQDET body tab and copy actions
 
-    /// The Body tab across the two shapes a logged exchange actually takes — a matched call whose
+    /// The request and response bodies across the two shapes a logged exchange actually takes — a matched call whose
     /// default scenario returns nothing, and an unmatched one whose body is Mimic's own fallback —
     /// plus the find field's zero-match state, its clear button, and the two copy buttons no test
     /// has clicked.
@@ -895,17 +909,13 @@ final class RequestLogUITests: MimicUITestCase {
 
         logRow(matchedID).click()
         XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "The inspector should show the clicked request")
-        requestDetail.tab("Body").click()
+        requestDetail.tab("Response").click()
 
         // A new endpoint's default scenario has no body, so this is the empty arm — the one a reader
         // meets most often and which nothing covered.
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.body.response.empty").waitForExistence(timeout: 5),
             "A scenario with no body should say 'No response body' rather than rendering nothing"
-        )
-        XCTAssertTrue(
-            element(identifiedBy: "requestLog.body.request").waitForExistence(timeout: 5),
-            "The POST payload should be rendered in the request half"
         )
 
         // Copy Response is gated on there being one.
@@ -921,9 +931,16 @@ final class RequestLogUITests: MimicUITestCase {
             "Copying everything should confirm it happened"
         )
 
+        // The payload is on the Request tab.
+        requestDetail.tab("Request").click()
+        XCTAssertTrue(
+            element(identifiedBy: "requestLog.body.request").waitForExistence(timeout: 5),
+            "The POST payload should be rendered on the Request tab"
+        )
+
         // A term the payload does not contain is an answer, not a failed search.
         let search = requestDetail.bodySearchField
-        XCTAssertTrue(search.waitForExistence(timeout: 5), "The Body tab should offer a find field")
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "The Request tab should offer a find field")
         search.click()
         search.typeText("zzzznothing")
         let requestMatches = element(identifiedBy: "requestLog.body.request.matches")
@@ -961,6 +978,7 @@ final class RequestLogUITests: MimicUITestCase {
             element(identifiedBy: "requestDetail.body.request.empty").waitForExistence(timeout: 5),
             "A GET with no payload should say 'No request body'"
         )
+        requestDetail.tab("Response").click()
         XCTAssertTrue(
             element(identifiedBy: "requestLog.body.response").waitForExistence(timeout: 5),
             "The fallback response body should be rendered"
@@ -977,8 +995,8 @@ final class RequestLogUITests: MimicUITestCase {
             "Copying the response should confirm it happened"
         )
 
-        // The hint that explains what an unmatched request is and what to do about it.
-        requestDetail.tab("Summary").click()
+        // The hint that explains what an unmatched request is and what to do about it, on the
+        // Response tab beside what answered.
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.unmatchedHint").waitForExistence(timeout: 5),
             "An unmatched request should explain that Mimic answered with its fallback"
@@ -986,7 +1004,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(
             text(of: element(identifiedBy: "requestDetail.summary.outcome"))
                 .localizedCaseInsensitiveContains("unmatched"),
-            "Summary should state the unmatched outcome"
+            "Response should state the unmatched outcome"
         )
     }
 
@@ -1002,10 +1020,11 @@ final class RequestLogUITests: MimicUITestCase {
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/api/large"))).click()
         XCTAssertTrue(requestDetail.waitForPanelTitle("Request"))
 
+        requestDetail.tab("Timing").click()
         let bodySummary = element(identifiedBy: "requestDetail.summary.request body")
         XCTAssertTrue(bodySummary.waitForExistence(timeout: 5))
         XCTAssertTrue(text(of: bodySummary).contains("64.0 KB (truncated)"), text(of: bodySummary))
-        requestDetail.tab("Body").click()
+        requestDetail.tab("Request").click()
         let truncation = element(identifiedBy: "requestDetail.body.request.truncated")
         XCTAssertTrue(truncation.waitForExistence(timeout: 5))
         XCTAssertTrue(text(of: truncation).contains("Truncated at 64 KB."), text(of: truncation))
@@ -1104,7 +1123,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[0])), "The first request must be visible")
         logRow(identifiers[0]).click()
         // Selecting a row opens the inspector, and `WorkspaceView` opens it inside
-        // `withAnimation(DSAnimation.drawerToggle)` — so the drawer beneath it narrows while that
+        // `withAnimation(DSAnimation.panel)` — so the drawer beneath it narrows while that
         // runs and every row moves. Wait for the unselected row's frame to settle before clicking.
         UITestApp.waitForStableFrame(logRow(identifiers[1]))
         XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[1])), "The second request must be visible")

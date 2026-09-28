@@ -455,9 +455,8 @@ final class DSHairlineSplitView: NSSplitView {
         NSColor(DSColors.content).setFill()
         rect.fill()
 
-        // `DSStroke.seam`, which is the weight `DSDivider` pairs with `panelSeparator` — the colour
-        // filled below. Written as a bare `1` this was the one place in the module where the two
-        // halves of that pairing could drift apart without anything noticing.
+        // `DSStroke.hairline` in `DSColors.separator`, the same pairing `DSDivider` draws, so the
+        // seam and every other rule in the window stay the same weight and colour.
         let seam = isVertical
             ? NSRect(x: rect.minX, y: rect.minY, width: DSStroke.hairline, height: rect.height)
             : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: DSStroke.hairline)

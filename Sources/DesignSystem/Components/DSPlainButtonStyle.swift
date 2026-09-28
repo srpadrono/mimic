@@ -57,9 +57,9 @@ public struct DSPlainButtonStyle: ButtonStyle {
 
     /// The wash for a given state.
     ///
-    /// Pressed is ``DSColors/accentMuted`` — the *existing* 25% rung — rather than a new alpha minted
-    /// for this control. Hover is ``DSColors/accentSubtle`` at 12%, which is what every row in these
-    /// panels already lights up with, so a button and the row beneath it agree.
+    /// Pressed is ``DSColors/selectionInactive``, the neutral selection fill; hover is
+    /// ``DSColors/hover``, the same wash ``DSHoverHighlight`` gives a row, so a button and the row
+    /// beneath it agree.
     ///
     /// Exposed so a test can compare the three states without rendering: they have to be three
     /// distinguishable values, and "pressed is stronger than hover is stronger than rest" is the
@@ -74,7 +74,7 @@ extension ButtonStyle where Self == DSPlainButtonStyle {
     /// `.buttonStyle(.dsPlain)` — plain chrome that answers hover and press.
     public static var dsPlain: DSPlainButtonStyle { DSPlainButtonStyle() }
 
-    /// The same, matched to a row or control whose corner is not ``DSCornerRadius/sm``.
+    /// The same, matched to a row or control whose corner is not ``DSCornerRadius/field``.
     public static func dsPlain(cornerRadius: CGFloat) -> DSPlainButtonStyle {
         DSPlainButtonStyle(cornerRadius: cornerRadius)
     }

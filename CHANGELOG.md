@@ -5,6 +5,17 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Open a `mimic project export` document from the welcome window or File ▸ Open Project Export…
+  (⌘O). It is checked and validated as `mimic project import` checks it.
+- Choose a new endpoint's group, status, and content type in the new-endpoint sheet.
+
+### Improved
+
+- Request detail is organized into Request, Response, and Timing tabs. The Request tab shows the
+  called URL, listener, and query parameters.
+
 ## [0.13.0] — 2026-09-26
 
 ### Added

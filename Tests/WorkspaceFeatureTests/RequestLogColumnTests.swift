@@ -26,8 +26,9 @@ struct RequestLogColumnTests {
 
     @Test("Every fixed column has a positive width")
     func widthsArePositive() {
-        for width in [LogColumns.time, LogColumns.method, LogColumns.status, LogColumns.scenario,
-                      LogColumns.duration, LogColumns.size, LogColumns.minimumPath] {
+        for width in [LogColumns.time, LogColumns.compactTime, LogColumns.method, LogColumns.status, LogColumns.scenario,
+                      LogColumns.duration, LogColumns.size, LogColumns.minimumPath,
+                      LogColumns.compactMinimumPath] {
             #expect(width > 0)
         }
     }
@@ -38,6 +39,17 @@ struct RequestLogColumnTests {
         // figure face. The widest reading it has to hold is a 12-hour one: "11:41:33.123 PM",
         // fifteen characters.
         #expect(LogColumns.time >= Self.columnWidth(forMonoCharacters: "11:41:33.123 PM".count))
+    }
+
+    @Test("The compact time column fits seconds without the day period")
+    func compactTimeColumnFitsSeconds() {
+        // The compact table draws `.hour(.defaultDigits(amPM: .omitted)).minute().second()`:
+        // "11:41:33" in a 12-hour locale and "23:41:33" in a 24-hour one, eight characters either way.
+        #expect(LogColumns.compactTime >= Self.columnWidth(forMonoCharacters: "23:41:33".count))
+        #expect(LogColumns.timeWidth(compact: true) == LogColumns.compactTime)
+        #expect(LogColumns.timeWidth(compact: false) == LogColumns.time)
+        // Shortening the time is the point of the compact column.
+        #expect(LogColumns.compactTime < LogColumns.time)
     }
 
     @Test("The numeric columns fit their widest ordinary figure")
@@ -63,7 +75,7 @@ struct RequestLogColumnTests {
         #expect(LogColumns.pathWidth(tableWidth: LogColumns.minimumTableWidth, compact: false)
             == LogColumns.minimumPath)
         #expect(LogColumns.pathWidth(tableWidth: LogColumns.compactMinimumTableWidth, compact: true)
-            == LogColumns.minimumPath)
+            == LogColumns.compactMinimumPath)
         // The compact table is the narrower one: it is what the pane falls back to.
         #expect(LogColumns.compactMinimumTableWidth < LogColumns.minimumTableWidth)
     }
@@ -72,8 +84,8 @@ struct RequestLogColumnTests {
     func pathTakesTheRemainder() {
         // Full: 128 + 64 + 84 + 150 + 84 + 84 = 594 fixed, plus 6 of inset each side.
         #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: false) == 394)
-        // Compact: 128 + 64 + 84 = 276 fixed, plus the same inset.
-        #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: true) == 712)
+        // Compact: 76 + 64 + 84 = 224 fixed, plus the same inset.
+        #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: true) == 764)
         // Never negative, however narrow the proposal.
         #expect(LogColumns.pathWidth(tableWidth: 0, compact: false) == 0)
         #expect(LogColumns.pathWidth(tableWidth: 0, compact: true) == 0)
@@ -92,8 +104,18 @@ struct RequestLogColumnTests {
         #expect(centrePaneAtFloor < LogColumns.minimumTableWidth)
 
         let path = LogColumns.pathWidth(tableWidth: centrePaneAtFloor, compact: true)
-        #expect(path == 260)
+        #expect(path == 312)
         #expect(path >= LogColumns.minimumPath)
         #expect(path >= 135)
+    }
+
+    @Test("A narrow drawer keeps Status on screen")
+    func narrowDrawerKeepsStatus() {
+        // With the inspector open in a compact window the centre column is about 296pt of table, as
+        // measured from the compact screenshot. The compact table must fit there without scrolling
+        // sideways, or Status is the column pushed off the edge.
+        let narrowDrawer: CGFloat = 296
+        #expect(LogColumns.compactMinimumTableWidth <= narrowDrawer)
+        #expect(LogColumns.pathWidth(tableWidth: narrowDrawer, compact: true) >= LogColumns.compactMinimumPath)
     }
 }

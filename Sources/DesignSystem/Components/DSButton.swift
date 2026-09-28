@@ -50,14 +50,18 @@ public struct DSButton: View {
     private let systemImage: String?
     private let variant: DSButtonVariant
     private let size: DSButtonSize
+    private let showsTitle: Bool
     private let action: () -> Void
     private let identifier: String
 
+    /// `showsTitle: false` draws the symbol alone, for a narrow bar; the title stays the button's
+    /// accessibility label, so give such a button a `.help` tooltip as well.
     public init(
         _ title: String,
         systemImage: String? = nil,
         variant: DSButtonVariant = .primary,
         size: DSButtonSize = .medium,
+        showsTitle: Bool = true,
         identifier: String,
         action: @escaping () -> Void
     ) {
@@ -65,13 +69,14 @@ public struct DSButton: View {
         self.systemImage = systemImage
         self.variant = variant
         self.size = size
+        self.showsTitle = showsTitle || systemImage == nil
         self.identifier = identifier
         self.action = action
     }
 
     public var body: some View {
         Button(role: variant == .destructive ? .destructive : nil, action: action) {
-            DSButtonLabel(title: title, systemImage: systemImage)
+            DSButtonLabel(title: title, systemImage: systemImage, showsTitle: showsTitle)
         }
         .buttonStyle(DSButtonStyle(variant, size: size))
         .accessibilityIdentifier("ds.button.\(identifier)")
@@ -83,10 +88,12 @@ public struct DSButton: View {
 public struct DSButtonLabel: View {
     let title: String
     let systemImage: String?
+    let showsTitle: Bool
 
-    public init(title: String, systemImage: String? = nil) {
+    public init(title: String, systemImage: String? = nil, showsTitle: Bool = true) {
         self.title = title
         self.systemImage = systemImage
+        self.showsTitle = showsTitle || systemImage == nil
     }
 
     public var body: some View {
@@ -96,8 +103,10 @@ public struct DSButtonLabel: View {
                     .font(.system(size: DSGlyph.button - 1, weight: .medium))
                     .accessibilityHidden(true)
             }
-            Text(title)
-                .lineLimit(1)
+            if showsTitle {
+                Text(title)
+                    .lineLimit(1)
+            }
         }
     }
 }

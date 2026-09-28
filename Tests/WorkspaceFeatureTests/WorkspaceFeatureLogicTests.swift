@@ -281,21 +281,22 @@ struct WorkspaceFeatureLogicTests {
             },
             size: CGSize(width: 900, height: 160)
         )
-        render(RequestDetailInspector(log: log, initialTab: .summary))
-        render(RequestDetailInspector(log: log, initialTab: .headers))
-        render(RequestDetailInspector(log: log, initialTab: .body))
-        render(RequestDetailInspector(log: emptyLog, initialTab: .body))
-        render(RequestDetailInspector(log: log, initialTab: .body, initialSearchText: "queued"))
+        render(RequestDetailInspector(log: log, initialTab: .request))
+        render(RequestDetailInspector(log: log, initialTab: .response))
+        render(RequestDetailInspector(log: log, initialTab: .timing))
+        render(RequestDetailInspector(log: emptyLog, initialTab: .request))
+        render(RequestDetailInspector(log: emptyLog, initialTab: .response))
+        render(RequestDetailInspector(log: log, initialTab: .response, initialSearchText: "queued"))
         // A failed exchange draws its failure in the identity and the empty response sections.
-        render(RequestDetailInspector(log: failedLog, initialTab: .summary))
-        render(RequestDetailInspector(log: failedLog, initialTab: .headers))
-        render(RequestDetailInspector(log: failedLog, initialTab: .body))
+        render(RequestDetailInspector(log: failedLog, initialTab: .request))
+        render(RequestDetailInspector(log: failedLog, initialTab: .response))
+        render(RequestDetailInspector(log: failedLog, initialTab: .timing))
         // A passed-through request offers the capture control above every tab.
-        render(RequestDetailInspector(log: passthroughLog, port: 8080, onSaveAsMock: { _ in }, initialTab: .summary))
-        // A request that arrived with no headers at all, in the tab whose whole content is headers —
+        render(RequestDetailInspector(log: passthroughLog, port: 8080, onSaveAsMock: { _ in }, initialTab: .response))
+        // A request that arrived with no headers at all, in the tab that lists request headers —
         // and in a 300pt-wide panel, which is the width the inspector is actually dragged to.
         render(
-            RequestDetailInspector(log: headerlessLog, initialTab: .headers),
+            RequestDetailInspector(log: headerlessLog, initialTab: .request),
             size: CGSize(width: 300, height: 700)
         )
 

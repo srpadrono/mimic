@@ -88,3 +88,23 @@ public struct MockProject: Identifiable, Codable, Sendable, Equatable {
         modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt) ?? Date()
     }
 }
+
+extension MockProject {
+    /// Keys a Mimic project document carries and no other JSON Mimic reads does.
+    ///
+    /// All four name non-optional properties, which the synthesized encoder always writes, so every
+    /// export carries all four. **Any one is enough**, because the hand-written decoder tolerates
+    /// each being absent so that older exports still load. The check is needed because that same
+    /// tolerance makes a successful decode prove nothing: a serialized `Journey` carries `id` and
+    /// `name` and decodes as a project with no endpoints and no journeys.
+    public static let documentKeys = ["schemaVersion", "serverConfiguration", "endpoints", "journeys"]
+
+    /// Whether `data` is a JSON object naming at least one of ``documentKeys``. `mimic project import`
+    /// and the window's Open project export both ask this before decoding.
+    public static func namesProjectDocument(_ data: Data) -> Bool {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return false
+        }
+        return documentKeys.contains { object.keys.contains($0) }
+    }
+}

@@ -273,8 +273,17 @@ struct WorkspaceView: View {
         }
         // New endpoint sheet
         .sheet(isPresented: $appState.showNewEndpointSheet) {
-            NewEndpointSheet { name, method, path in
-                if let endpoint = appState.addEndpoint(name: name, method: method, path: path) {
+            NewEndpointSheet(
+                existingGroups: Set(currentEndpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+            ) { draft in
+                if let endpoint = appState.addEndpoint(
+                    name: draft.name,
+                    method: draft.method,
+                    path: draft.path,
+                    groupTag: draft.groupTag,
+                    statusCode: draft.statusCode,
+                    contentType: draft.contentType
+                ) {
                     revealEndpoint(endpoint)
                 }
             }
