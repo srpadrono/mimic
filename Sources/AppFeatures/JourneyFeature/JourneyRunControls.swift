@@ -4,13 +4,8 @@ import SwiftUI
 
 /// Activate, rewind, and step a journey while it is serving.
 ///
-/// These are the controls a test driver needs between cases: activate the flow, run it, rewind. They
-/// sit above the step list because they act on the run, not on the definition.
-///
-/// **The row assumes no particular width.** It renders in the journeys window's detail pane and in
-/// the main window's centre pane, which a user can drag down to around 300pt. Nothing here is given a
-/// fixed size: the full readout gives way to a shorter label in a narrow pane. Only a width too
-/// small for that compact label stacks the readout below the buttons.
+/// These act on the run, not the definition, so they sit beside the journey's title. Restart and
+/// Next step are always present and disabled until the journey is active.
 struct JourneyRunControls: View {
     @Environment(AppState.self) private var appState
 
@@ -19,149 +14,129 @@ struct JourneyRunControls: View {
     let status: JourneyStatus?
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: DSSpacing.sm) {
-                runButtons
-
-                // `Spacer()` would report an ideal width of zero, so this candidate would always
-                // claim to fit and the stacked one below would never be chosen — `ViewThatFits`
-                // measures ideal sizes, and a flexible spacer's ideal size is nothing. `minLength`
-                // is what makes the measurement honest.
-                Spacer(minLength: DSSpacing.md)
-
-                progressReadout
-            }
-
-            HStack(spacing: DSSpacing.sm) {
-                runButtons
-                Spacer(minLength: DSSpacing.md)
-                Text(compactProgressText)
-                    .font(isActive ? DSTypography.labelMedium : DSTypography.label)
-                    .monospacedDigit()
-                    .foregroundStyle(isActive ? DSColors.labelPrimary : DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .help(progressText)
-                    .accessibilityLabel(progressText)
-                    .accessibilityIdentifier("journeyRun.progress")
-            }
-
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                HStack(spacing: DSSpacing.sm) {
-                    runButtons
-                    Spacer(minLength: 0)
-                }
-
-                progressReadout
-            }
-        }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
-        // A floor rather than a fixed height: the shared small-control size may grow, and the
-        // narrowest `ViewThatFits` candidate places the readout below the buttons.
-        .frame(minHeight: DSBarHeight.controlRow)
-    }
-
-    // MARK: - Controls
-
-    /// One set of buttons, laid out by whichever candidate above wins.
-    ///
-    /// `DSButton`, like every other worded action in the window. These four were bordered system
-    /// buttons at `.controlSize(.small)`, rendering directly below a header whose own button had
-    /// already been moved across — and whose comment claimed it had been "the only bordered system
-    /// button in any header", with these four sitting a few lines underneath it in the same file. A
-    /// system button draws AppKit's shape at ≈19pt beside the 20pt siblings elsewhere and takes the
-    /// system accent rather than `DSColors.accent`.
-    ///
-    /// **The glyphs went with them, and nothing was lost.** `DSButton` is worded-only, which is the
-    /// house idiom for a bar — "Add step" above this row carries no glyph either, nor do the import
-    /// review's header actions. "Activate", "Restart" and "Advance" are words that say what they do;
-    /// the icons stay where they are load-bearing, on the navigator's activation ring and in the
-    /// context menus, where there is no room for a word.
-    ///
-    /// **They are not all the same weight.** Activating is what you came to this row to do, so it is
-    /// the one slab. The other three act on a run that is already going and are recessed wells.
-    @ViewBuilder
-    private var runButtons: some View {
-        if isActive {
-            // Secondary, not destructive. Deactivating is the consequential one — it stops a journey
-            // answering for every endpoint in the project — but a red button in a control row you sit
-            // beside for a whole testing session reads as an error rather than as the way out. The
-            // tooltip carries the consequence instead.
+        HStack(spacing: DSSpacing.sm) {
             DSButton(
-                "Deactivate",
+                "Restart",
+                systemImage: "arrow.counterclockwise",
                 variant: .secondary,
-                size: .small,
-                identifier: "journeyRun.deactivate"
+                size: .medium,
+                identifier: "journeyRun.restart"
             ) {
-                appState.activateJourney(id: nil)
+                appState.restartActiveJourney()
             }
-            .help("Stop the journey. Endpoints answer for themselves again.")
-            .accessibilityIdentifier("journeyRun.deactivateButton")
-            .accessibilityLabel("Deactivate journey")
-        } else {
+            .disabled(!isActive)
+            .help(isPrepared
+                  ? "Set the next run to start at the first step."
+                  : "Rewind the run to the first step.")
+            .accessibilityIdentifier("journeyRun.restartButton")
+            .accessibilityLabel(isPrepared ? "Restart next journey run" : "Restart journey")
+
             DSButton(
-                "Activate",
-                variant: .primary,
-                size: .small,
-                identifier: "journeyRun.activate"
+                "Next step",
+                systemImage: "forward.end",
+                variant: .secondary,
+                size: .medium,
+                identifier: "journeyRun.advance"
             ) {
-                appState.activateJourney(id: journey.id)
+                appState.advanceActiveJourney()
             }
-            .disabled(journey.steps.isEmpty)
-            .help("Serve this journey's steps instead of the endpoints' own responses.")
-            .accessibilityIdentifier("journeyRun.activateButton")
-            .accessibilityLabel("Activate journey")
-        }
+            .disabled(!isActive || status?.isComplete == true)
+            .help(isPrepared
+                  ? "Set the next run to start at the following step."
+                  : "Retire the current step without serving it.")
+            .accessibilityIdentifier("journeyRun.advanceButton")
+            .accessibilityLabel(isPrepared ? "Advance next journey run" : "Advance journey")
 
-        DSButton(
-            "Restart",
-            variant: .secondary,
-            size: .small,
-            identifier: "journeyRun.restart"
-        ) {
-            appState.restartActiveJourney()
+            if isActive {
+                // Secondary rather than destructive: this is the everyday way out of a run.
+                DSButton(
+                    "Deactivate",
+                    systemImage: "stop.fill",
+                    variant: .secondary,
+                    size: .medium,
+                    identifier: "journeyRun.deactivate"
+                ) {
+                    appState.activateJourney(id: nil)
+                }
+                .help("Stop the journey. Endpoints answer for themselves again.")
+                .accessibilityIdentifier("journeyRun.deactivateButton")
+                .accessibilityLabel("Deactivate journey")
+            } else {
+                DSButton(
+                    "Activate",
+                    systemImage: "play.fill",
+                    variant: .primary,
+                    size: .medium,
+                    identifier: "journeyRun.activate"
+                ) {
+                    appState.activateJourney(id: journey.id)
+                }
+                .disabled(journey.steps.isEmpty)
+                .help("Serve this journey's steps instead of the endpoints' own responses.")
+                .accessibilityIdentifier("journeyRun.activateButton")
+                .accessibilityLabel("Activate journey")
+            }
         }
-        .disabled(!isActive)
-        .help(appState.serverState.runningPort == nil
-              ? "Set the next run to start at the first step."
-              : "Rewind the run to the first step.")
-        .accessibilityIdentifier("journeyRun.restartButton")
-        .accessibilityLabel(appState.serverState.runningPort == nil
-                            ? "Restart next journey run" : "Restart journey")
-
-        DSButton(
-            "Advance",
-            variant: .secondary,
-            size: .small,
-            identifier: "journeyRun.advance"
-        ) {
-            appState.advanceActiveJourney()
-        }
-        .disabled(!isActive || status?.isComplete == true)
-        .help(appState.serverState.runningPort == nil
-              ? "Set the next run to start at the following step."
-              : "Retire the current step without serving it.")
-        .accessibilityIdentifier("journeyRun.advanceButton")
-        .accessibilityLabel(appState.serverState.runningPort == nil
-                            ? "Advance next journey run" : "Advance journey")
     }
 
-    // MARK: - Readout
+    /// Active, but the server is stopped: the controls set up the next run.
+    private var isPrepared: Bool {
+        appState.serverState.runningPort == nil
+    }
+}
 
-    /// Where the run has got to — or, when nothing is running, that nothing is.
-    private var progressReadout: some View {
-        Text(progressText)
-            .font(isActive ? DSTypography.labelMedium : DSTypography.label)
+/// Where the run has got to: one segment per step, then a short readout.
+struct JourneyRunProgress: View {
+    @Environment(AppState.self) private var appState
+
+    let journey: Journey
+    let isActive: Bool
+    let status: JourneyStatus?
+
+    var body: some View {
+        HStack(spacing: DSSpacing.md) {
+            if !journey.steps.isEmpty {
+                segments
+                    .frame(minWidth: 40, maxWidth: .infinity)
+            }
+            ViewThatFits(in: .horizontal) {
+                readout(progressText)
+                readout(compactProgressText)
+            }
+            .layoutPriority(1)
+            .frame(maxWidth: journey.steps.isEmpty ? .infinity : nil, alignment: .leading)
+        }
+    }
+
+    private var segments: some View {
+        HStack(spacing: 6) {
+            ForEach(journey.steps) { step in
+                Capsule()
+                    .fill(segmentColor(for: step))
+                    .frame(height: 4)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func segmentColor(for step: JourneyStep) -> Color {
+        guard isActive, let progress = status?.steps.first(where: { $0.id == step.id }) else {
+            return DSColors.field
+        }
+        if progress.isExhausted { return DSColors.success }
+        if progress.isCurrent { return DSColors.accent }
+        return DSColors.field
+    }
+
+    private func readout(_ text: String) -> some View {
+        Text(text)
+            .font(DSTypography.callout)
             .monospacedDigit()
-            // Never `labelTertiary`. This line answers "is something overriding my endpoints right
-            // now", which is the first thing you check when a response surprises you, and 36% alpha
-            // is not where you put an answer somebody has to read.
+            // Never tertiary: this answers "is something overriding my endpoints right now".
             .foregroundStyle(isActive ? DSColors.labelPrimary : DSColors.labelSecondary)
             .lineLimit(1)
-            .truncationMode(.tail)
-            // The stacked layout gives this line the full width, so it truncates only in the gap
-            // between the two candidates. The tooltip covers that gap.
             .help(progressText)
+            .accessibilityLabel(progressText)
             .accessibilityIdentifier("journeyRun.progress")
     }
 
@@ -199,8 +174,6 @@ struct JourneyRunControls: View {
 }
 
 #if DEBUG
-/// Both widths, because the single-row layout is only correct at one of them. 300pt is roughly as
-/// narrow as the centre pane goes with both side panels open.
 #Preview("Run controls — wide") {
     let journey = Journey(
         name: "Retry after failure",
@@ -209,19 +182,24 @@ struct JourneyRunControls: View {
             JourneyStep(name: "Recovers", path: "/account", outcome: .respond(JourneyResponse(statusCode: 200)))
         ]
     )
+    let status = JourneyStatus.make(journey: journey, state: nil)
 
-    JourneyRunControls(
-        journey: journey,
-        isActive: true,
-        status: JourneyStatus.make(journey: journey, state: nil)
-    )
+    VStack(alignment: .leading, spacing: DSSpacing.lg) {
+        JourneyRunControls(journey: journey, isActive: true, status: status)
+        JourneyRunProgress(journey: journey, isActive: true, status: status)
+    }
     .environment(AppState.preview())
+    .padding()
     .frame(width: 640)
 }
 
 #Preview("Run controls — 300pt") {
-    JourneyRunControls(journey: Journey(name: "Scratch flow"), isActive: false, status: nil)
-        .environment(AppState.preview())
-        .frame(width: 300)
+    VStack(alignment: .leading, spacing: DSSpacing.lg) {
+        JourneyRunControls(journey: Journey(name: "Scratch flow"), isActive: false, status: nil)
+        JourneyRunProgress(journey: Journey(name: "Scratch flow"), isActive: false, status: nil)
+    }
+    .environment(AppState.preview())
+    .padding()
+    .frame(width: 300)
 }
 #endif

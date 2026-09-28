@@ -57,6 +57,9 @@ public struct MimicScene: Scene {
                 }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(appState.updates.isPreparingInstallation)
+                Button("New Endpoint\u{2026}") { appState.showNewEndpointSheet = true }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(appState.currentProject == nil)
 
                 // Closing is its own command now, and says so. ⇧⌘W rather than ⌘W, because ⌘W is
                 // AppKit's close-the-window and taking it would leave no way to close the window.
@@ -103,6 +106,17 @@ public struct MimicScene: Scene {
                 Button("Filter Navigator") { appState.navigatorFilterRequest += 1 }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(appState.currentProject == nil)
+                Divider()
+                Button(appState.isRequestLogVisible ? "Hide Request Log" : "Show Request Log") {
+                    appState.requestLogToggleRequest += 1
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(appState.currentProject == nil)
+                Button(appState.isInspectorVisible ? "Hide Inspector" : "Show Inspector") {
+                    appState.inspectorToggleRequest += 1
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(appState.currentProject == nil)
             }
 
             CommandMenu("Journeys") {

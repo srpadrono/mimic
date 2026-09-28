@@ -4,65 +4,70 @@ import SwiftUI
 
 /// One step, as both a definition and a progress indicator.
 ///
-/// The leading marker is the run state (▶ current, ✓ exhausted) and the trailing text is what the
-/// step does. Reading down the column tells you where the flow is without a second panel.
-///
-/// Three things carry "this is the step the run is on", because one of them is never enough: the
-/// glyph (a shape, not a colour), the accent on the number, and the weight of the path. Colour alone
-/// would leave the marker invisible to a third of the people reading it, and the marker is the whole
-/// reason the run is shown in the list you edit.
+/// The numbered node carries the run state by shape as well as colour: a tick when served, a ring
+/// with a halo when current, a plain ring otherwise. The current row also gets a tinted fill.
 struct JourneyStepRow: View {
     let step: JourneyStep
     let index: Int
     /// Run progress for this step, when a run is in flight.
     let progress: JourneyStepProgress?
 
-    var body: some View {
-        HStack(alignment: .center, spacing: DSSpacing.md) {
-            VStack(spacing: DSSpacing.xs) {
-                marker
-                Text("\(index + 1)")
-                    .font(DSTypography.metaBold)
-                    .monospacedDigit()
-                    .foregroundStyle(isCurrent ? DSColors.accentText : DSColors.labelSecondary)
-                    .lineLimit(1)
-            }
-            .frame(width: DSSpacing.xl)
+    @State private var isHovered = false
 
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                HStack(spacing: DSSpacing.sm) {
+    var body: some View {
+        HStack(spacing: DSSpacing.md) {
+            node
+            DSMethodLabel(step.method.rawValue, fixedWidth: false, identifier: step.id.uuidString)
+                .frame(width: 44, alignment: .leading)
+
+            HStack(spacing: DSSpacing.sm) {
+                Text(routeLabel)
+                    .font(DSTypography.code)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(routeHelp)
+                    .layoutPriority(1)
+                if showsName {
                     Text(step.name)
-                        .font(isCurrent ? DSTypography.bodyBold : DSTypography.bodyMedium)
-                        .foregroundStyle(DSColors.labelPrimary)
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelTertiary)
                         .lineLimit(1)
                         .help(step.name)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    outcomeLabel
-                }
-                HStack(spacing: DSSpacing.sm) {
-                    DSMethodBadge(method: step.method.rawValue, size: .compact, identifier: step.id.uuidString)
-                    Text(routeLabel)
-                        .font(DSTypography.codePath)
-                        .fontWeight(isCurrent ? .semibold : .regular)
-                        .foregroundStyle(isCurrent ? DSColors.labelPrimary : DSColors.labelSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(routeHelp)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if step.delayMs > 0 { annotation("+\(step.delayMs)ms") }
-                    if step.repeatCount > 1 { annotation(servedAnnotation) }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if step.delayMs > 0 { chip("+\(step.delayMs) ms", systemImage: "clock") }
+            if step.repeatCount > 1 { chip("\u{00D7} \(step.repeatCount)") }
+            outcomeLabel
+
+            if let progress {
+                Text(Self.progressText(progress))
+                    .font(DSTypography.Figure.regular)
+                    .foregroundStyle(progress.isCurrent ? DSColors.labelSecondary : DSColors.labelTertiary)
+                    .lineLimit(1)
+                    .frame(minWidth: 0, idealWidth: 120, maxWidth: 120, alignment: .trailing)
+                    // First to give way in a narrow pane; the node and route matter more.
+                    .layoutPriority(-1)
+            }
         }
-        .padding(.horizontal, DSSpacing.smPlus)
-        .padding(.vertical, DSSpacing.smPlus)
-        .frame(minHeight: DSRowHeight.journeyStep)
-        // The row opens the step editor on tap, so it says so on hover like every other tappable
-        // row — the sidebar's, the journeys navigator's, the scenario list's. It was the one
-        // clickable row in the app with no pointer feedback at all.
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
-        // A served step recedes while its route and outcome remain legible at the shared text scale.
-        .opacity(isExhausted ? 0.82 : 1)
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: DSRowHeight.step)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                .fill(isCurrent ? DSColors.selectionSoft : (isHovered ? DSColors.hover : Color.clear))
+        }
+        .overlay {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                    .strokeBorder(DSColors.accent, lineWidth: DSStroke.emphasis)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: DSCornerRadius.card))
+        .onHover { isHovered = $0 }
+        // A served step recedes; its route and outcome stay legible.
+        .opacity(isExhausted ? 0.6 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("journeyStep-\(index)")
         .accessibilityLabel(accessibilityDescription)
@@ -70,106 +75,113 @@ struct JourneyStepRow: View {
 
     private var isCurrent: Bool { progress?.isCurrent == true }
     private var isExhausted: Bool { progress?.isExhausted == true }
+
+    /// A name that only restates the route adds nothing beside it.
+    private var showsName: Bool {
+        let name = step.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.isEmpty && name != step.path && name != routeLabel
+    }
+
     private var routeLabel: String {
         guard let operation = step.graphqlOperation, !operation.isEmpty else { return step.path }
         return operation
     }
+
     private var routeHelp: String {
         guard let operation = step.graphqlOperation, !operation.isEmpty else { return step.path }
         return "\(operation) · \(step.path)"
     }
 
-    @ViewBuilder
-    private var marker: some View {
-        Group {
-            if isCurrent {
-                Image(systemName: "play.fill")
-                    // `inline`, the tier for a mark on a line of text — this one annotates the step
-                    // beside it rather than being something you press.
-                    .font(.system(size: DSGlyph.inline, weight: .semibold))
-                    .foregroundStyle(DSColors.accentText)
-            } else if isExhausted {
+    // MARK: - Node
+
+    /// One 22pt box whatever the state, so rows keep their height as a run moves through them.
+    private var node: some View {
+        ZStack {
+            if isExhausted {
+                Circle().fill(DSColors.success)
                 Image(systemName: "checkmark")
-                    .font(.system(size: DSGlyph.inline, weight: .semibold))
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .font(.system(size: DSGlyph.disclosure, weight: .bold))
+                    .foregroundStyle(.white)
+            } else if isCurrent {
+                Circle()
+                    .strokeBorder(DSColors.accent, lineWidth: 1.5)
+                    .background(Circle().stroke(DSColors.selectionSoft, lineWidth: 6))
+                Text("\(index + 1)")
+                    .font(DSTypography.captionSemibold)
+                    .monospacedDigit()
+                    .foregroundStyle(DSColors.accent)
             } else {
-                Color.clear
+                Circle().strokeBorder(DSColors.labelTertiary, lineWidth: 1.5)
+                Text("\(index + 1)")
+                    .font(DSTypography.captionSemibold)
+                    .monospacedDigit()
+                    .foregroundStyle(DSColors.labelSecondary)
             }
         }
-        // One box whatever the state, so rows do not change height as a run moves through them.
-        .frame(width: 10, height: 10)
+        .frame(width: 22, height: 22)
         .accessibilityHidden(true)
     }
+
+    // MARK: - Outcome
 
     @ViewBuilder
     private var outcomeLabel: some View {
         switch step.outcome {
         case let .respond(response):
-            // Coloured text, and a fill once the code is one you would stop on — `DSStatusPill`
-            // carries that `>= 400` seam for the request log and the endpoint traffic list too. The
-            // old note here argued against "a badge that is always on", which is right, but that is
-            // exactly what the component's gate prevents: withholding the fill at 500 too meant a
-            // failing step was the one row in the app where a failure did *not* announce itself.
-            DSStatusPill(statusCode: response.statusCode)
-                // The one `.fixedSize()` left in this row, and the only one that is bounded:
-                // `EndpointValidator.serveableStatusCodes` runs 200–599, so this is three
-                // monospaced digits — 20.4pt — whatever the step does. It cannot be the thing that
-                // overflows the row, and a status code truncated to "5…" would be worse than useless.
-                .fixedSize()
+            // Three monospaced digits at most (200–599), so it never needs to truncate.
+            DSStatusLabel(statusCode: response.statusCode)
         case let .networkFailure(failure):
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: failure == .connectionDrop ? "bolt.horizontal.circle" : "clock.badge.exclamationmark")
-                    .font(.system(size: DSGlyph.inline))
-                Text(Self.failureText(failure))
-                    .font(DSTypography.meta)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(DSColors.labelSecondary)
-            // No `.fixedSize()`. The note that used to sit here said it was what stopped
-            // "timeout 30000ms" wrapping to a second line and doubling the row's height — but
-            // `.lineLimit(1)` above is what does that. What `.fixedSize()` actually did was forbid
-            // *truncation*, and this string is unbounded: the hold is any number of milliseconds a
-            // user types, so "timeout 3600000ms" measures 101pt against "drop"'s 23.
-            //
-            // Rendered at 300pt — the centre pane with both drawers open — the rigid version pushed
-            // the row's leading edge clean out of its own bounds: the run marker drew outside the
-            // row and the path column collapsed to nothing. That is the `DSPanelHeader` "narios"
-            // defect exactly. The tooltip carries the full string for the narrow case.
-            .help(Self.failureText(failure))
+            chip(Self.failureDisplayText(failure),
+                 systemImage: failure == .connectionDrop ? "bolt.horizontal" : "hourglass")
+                .help(Self.failureText(failure))
         }
     }
 
-    /// A quiet trailing fact about the step — the extra delay it adds, or how far through its repeat
-    /// count the run is.
-    ///
-    /// Text, not a capsule. Two neutral pills and a coloured one on every row read as three controls
-    /// you could press, and none of them is.
-    ///
-    /// Quiet also means first to yield. Both strings are unbounded — the delay is whatever
-    /// millisecond count was typed, the served ratio whatever the repeat count is — so "+3600000ms"
-    /// and "1000/1000" together claim 120pt of a row that has 300 to spend at centre-pane width.
-    /// With `.fixedSize()` here they took it, and the marker, the number and the path were the ones
-    /// that gave way instead. Priority in this row runs the other way round: the marker is the whole
-    /// reason a run is shown in the list you edit.
-    @ViewBuilder
-    private func annotation(_ text: String) -> some View {
-        Text(text)
-            .font(DSTypography.caption)
-            .foregroundStyle(DSColors.labelSecondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .help(text)
+    /// A quiet neutral fact about the step. Unbounded strings, so it truncates before the route does.
+    private func chip(_ text: String, systemImage: String? = nil) -> some View {
+        HStack(spacing: DSSpacing.xs) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: DSGlyph.disclosure))
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(DSTypography.caption)
+        .foregroundStyle(DSColors.labelSecondary)
+        .padding(.horizontal, 7)
+        .frame(height: 18)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.card).fill(DSColors.field)
+        }
+        .help(text)
     }
 
-    private var servedAnnotation: String {
-        guard let progress else { return "\u{00D7}\(step.repeatCount)" }
-        return "\(progress.servedCount)/\(step.repeatCount)"
+    // MARK: - Text
+
+    /// The run column: what this step has done so far.
+    static func progressText(_ progress: JourneyStepProgress) -> String {
+        if progress.isExhausted || progress.servedCount > 0 {
+            return "Served \(progress.servedCount) of \(progress.repeatCount)"
+        }
+        return progress.isCurrent ? "Waiting" : "Not reached"
     }
 
+    /// Short prose for a transport failure, used by the step's spoken label and its tooltip.
     static func failureText(_ failure: NetworkFailure) -> String {
         switch failure {
         case .connectionDrop: "drop"
         case let .timeout(holdMs): "timeout \(holdMs)ms"
+        }
+    }
+
+    /// The visible chip text for a transport failure.
+    static func failureDisplayText(_ failure: NetworkFailure) -> String {
+        switch failure {
+        case .connectionDrop: "Drop connection"
+        case let .timeout(holdMs): "Time out after \(holdMs) ms"
         }
     }
 
@@ -190,8 +202,7 @@ struct JourneyStepRow: View {
 }
 
 #if DEBUG
-/// The worst row this list can hold: a timeout, a delay and a repeat count all at once, so every
-/// optional trailing element is present and every unbounded string is long.
+/// Every optional trailing element at once, with long values.
 private let widestStep = JourneyStep(
     name: "Poll stays pending",
     method: .post,
@@ -217,15 +228,9 @@ private func progress(for step: JourneyStep, servedCount: Int) -> JourneyStepPro
     )
 }
 
-/// Both widths, for the reason `JourneyRunControls` keeps two previews: the row is only correct at
-/// one of them by accident. 300pt is roughly as narrow as the centre pane goes with both drawers
-/// open, and it is where the trailing elements used to shove the marker off the leading edge.
-///
-/// **What to look at is where the ink starts.** The marker, the step number and the method badge
-/// must all begin inside the row; if the play glyph is clipped or missing, something in the row has
-/// gone rigid again.
+/// 300pt is roughly the narrowest centre pane. The node and method must start inside the row.
 #Preview("Step row — 300pt") {
-    VStack(spacing: 0) {
+    VStack(spacing: 2) {
         JourneyStepRow(step: widestStep, index: 11, progress: progress(for: widestStep, servedCount: 42))
         JourneyStepRow(
             step: JourneyStep(name: "Recovers", path: "/account-summary", outcome: .respond(JourneyResponse(statusCode: 200))),

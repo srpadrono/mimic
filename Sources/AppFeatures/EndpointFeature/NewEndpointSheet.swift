@@ -2,12 +2,10 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Sheet for creating a new endpoint — method, name, and path.
+/// Sheet for creating a new endpoint: the request (method and path in one field), then a name.
 ///
-/// Follows the shared sheet convention: a sentence-case heading inside the sheet, `DSSpacing.lg`
-/// between the heading, the fields and the button row, `DSSpacing.md` between field rows,
-/// `DSSpacing.lg` of outer padding, and a trailing button row with cancel to the left of the
-/// confirm action. Errors are shown under the field that caused them rather than in an alert.
+/// Sheet anatomy: 15pt title, form rows with a right-aligned label column, and Cancel and the
+/// confirm action trailing. Errors show under the field that caused them, not in an alert.
 struct NewEndpointSheet: View {
     let onConfirm: (String, HTTPMethod, String) -> Void
 
@@ -17,17 +15,11 @@ struct NewEndpointSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    /// Which field the sheet opens on. Typing has to work the moment the sheet appears; making the
-    /// user click into the first field first is a step macOS never asks for.
-    private enum Field: Hashable {
-        case name
-        case path
-    }
-
     @State private var name = ""
     @State private var method: HTTPMethod = .get
     @State private var path = "/"
-    @FocusState private var focusedField: Field?
+    /// The sheet opens with the request field focused, so typing works at once.
+    @FocusState private var pathIsFocused: Bool
 
     private var canCreate: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pathError == nil
@@ -45,78 +37,74 @@ struct NewEndpointSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text("New endpoint")
-                .font(DSTypography.title)
+                .font(DSTypography.headline)
                 .foregroundStyle(DSColors.labelPrimary)
+                .accessibilityAddTraits(.isHeader)
 
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                // No `.accessibilityLabel` here on purpose: `DSTextField` already labels its own
-                // input, and a label on the wrapper would shadow the validation text underneath it —
-                // VoiceOver would repeat the field name instead of reading the error.
-                DSTextField(
-                    "Name",
-                    text: $name,
-                    placeholder: "e.g. Get users",
-                    identifier: "newEndpoint.name"
-                )
-                .accessibilityIdentifier("newEndpoint.nameField")
-                .focused($focusedField, equals: .name)
-                .onSubmit { confirmIfValid() }
-
-                // Method and path share a row: the two of them are one answer to "which request?".
-                HStack(alignment: .top, spacing: DSSpacing.md) {
-                    DSFormPicker("Method", selection: $method, identifier: "newEndpoint.methodPicker") {
-                        ForEach(HTTPMethod.allCases, id: \.self) { method in
-                            Text(method.rawValue).tag(method)
-                        }
-                    }
-                    // AppKit's regular picker draws at 24pt beside the field's 26pt well. A 26pt
-                    // frame would not resize the popup chrome; keeping their top edges aligned is
-                    // the cleaner native arrangement.
-                    .accessibilityLabel("HTTP method")
-
-                    DSTextField(
-                        "Path",
-                        text: $path,
-                        placeholder: "/api/v1/users",
+            VStack(alignment: .leading, spacing: 6) {
+                DSFormRow("Request", alignment: .top) {
+                    SheetRequestField(
+                        method: $method,
+                        path: $path,
                         validation: pathError,
+                        pickerIdentifier: "newEndpoint.methodPicker",
+                        fieldIdentifier: "newEndpoint.pathField",
                         validationIdentifier: "newEndpoint.path.error",
-                        inputIdentifier: "newEndpoint.pathField",
-                        identifier: "newEndpoint.path"
+                        isFocused: $pathIsFocused,
+                        onSubmit: confirmIfValid
                     )
-                    .focused($focusedField, equals: .path)
-                    .onSubmit { confirmIfValid() }
+                }
+                if pathError == nil {
+                    DSFormHint("Use :name for a path parameter, like :id.")
                 }
             }
 
-            HStack(spacing: DSSpacing.md) {
-                Spacer()
-                DSButton(
-                    "Cancel",
-                    variant: .ghost,
-                    size: .medium,
-                    identifier: "newEndpoint.cancel",
-                    action: dismiss.callAsFunction
-                )
-                .accessibilityIdentifier("newEndpoint.cancelButton")
-                .accessibilityLabel("Cancel")
-                .keyboardShortcut(.cancelAction)
+            // No `.accessibilityLabel` on the wrapper: `DSTextField` labels its own input, and a
+            // label here would hide the validation text under it.
+            DSTextField(
+                "Name",
+                text: $name,
+                placeholder: "Get product",
+                identifier: "newEndpoint.name"
+            )
+            .accessibilityIdentifier("newEndpoint.nameField")
+            .onSubmit { confirmIfValid() }
 
-                DSButton(
-                    "Add endpoint",
-                    variant: .primary,
-                    size: .medium,
-                    identifier: "newEndpoint.create",
-                    action: confirmIfValid
-                )
-                .accessibilityIdentifier("newEndpoint.createButton")
-                .accessibilityLabel("Add endpoint")
-                .disabled(!canCreate)
-                .keyboardShortcut(.defaultAction)
-            }
+            footer
+                .padding(.top, DSSpacing.sm)
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
-        .defaultFocus($focusedField, .name)
+        .background(DSColors.sheet)
+        .defaultFocus($pathIsFocused, true)
+    }
+
+    private var footer: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Spacer()
+            DSButton(
+                "Cancel",
+                variant: .secondary,
+                size: .large,
+                identifier: "newEndpoint.cancel",
+                action: dismiss.callAsFunction
+            )
+            .accessibilityIdentifier("newEndpoint.cancelButton")
+            .accessibilityLabel("Cancel")
+            .keyboardShortcut(.cancelAction)
+
+            DSButton(
+                "Add endpoint",
+                variant: .primary,
+                size: .large,
+                identifier: "newEndpoint.create",
+                action: confirmIfValid
+            )
+            .accessibilityIdentifier("newEndpoint.createButton")
+            .accessibilityLabel("Add endpoint")
+            .disabled(!canCreate)
+            .keyboardShortcut(.defaultAction)
+        }
     }
 
     private func confirmIfValid() {
@@ -124,5 +112,60 @@ struct NewEndpointSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         dismiss()
         onConfirm(trimmedName, method, path)
+    }
+}
+
+/// Method and path in one field, as the request sheets show them: a borderless method menu, a
+/// hairline, then the path in SF Mono. The validation message sits under the field.
+struct SheetRequestField: View {
+    @Binding var method: HTTPMethod
+    @Binding var path: String
+    let validation: String?
+    let pickerIdentifier: String
+    let fieldIdentifier: String
+    let validationIdentifier: String
+    var isFocused: FocusState<Bool>.Binding
+    let onSubmit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: DSSpacing.sm) {
+                Picker("HTTP method", selection: $method) {
+                    ForEach(HTTPMethod.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .buttonStyle(.borderless)
+                .fixedSize()
+                .font(DSTypography.method)
+                .tint(DSColors.methodColor(for: method.rawValue))
+                .accessibilityIdentifier(pickerIdentifier)
+                .accessibilityLabel("HTTP method")
+
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(width: DSStroke.hairline)
+                    .padding(.vertical, 6)
+                    .accessibilityHidden(true)
+
+                TextField("/api/v1/users", text: $path)
+                    .textFieldStyle(.plain)
+                    .font(DSTypography.codeLarge)
+                    .focused(isFocused)
+                    .onSubmit(onSubmit)
+                    .accessibilityIdentifier(fieldIdentifier)
+                    .accessibilityLabel("Path")
+            }
+            // Same radius as `DSTextField` at sheet height, so stacked rows line up.
+            .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
+                           isFocused: isFocused.wrappedValue, isInvalid: validation != nil,
+                           horizontalPadding: DSSpacing.sm)
+
+            if let validation {
+                DSValidationMessage(validation, identifier: validationIdentifier)
+            }
+        }
     }
 }

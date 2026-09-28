@@ -1,67 +1,59 @@
+import AppKit
 import SwiftUI
 import Domain
 import DesignSystem
 
-/// Shared columns for endpoint options and the editable header table.
-private enum EditorRowMetrics {
-    static let labelColumn: CGFloat = 80
-    static let numericFieldWidth: CGFloat = 72
-    static let textFieldWidth: CGFloat = 240
+private enum EditorMetrics {
+    static let statusFieldWidth: CGFloat = 196
+    static let delayFieldWidth: CGFloat = 92
+    static let contentTypeFieldWidth: CGFloat = 120
     static let headerKeyWidth: CGFloat = 200
-    static let valueInset: CGFloat = DSSpacing.md + labelColumn + DSSpacing.sm
+    static let bodyMinHeight: CGFloat = 120
+    /// Codes offered by the status field's menu; any other code can be typed.
+    static let commonStatusCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]
 }
 
-private enum EditorBody {
-    /// Keep a usable text viewport when a short window requires the whole form to scroll.
-    static let minHeight: CGFloat = 180
-}
-
-/// Center pane endpoint editor — method, path, response config, headers, body, and settings.
+/// The endpoint editor: the request it answers, the scenario being edited, and that scenario's response.
 struct EndpointEditorView: View {
+    enum Pane: Hashable {
+        case body
+        case headers
+    }
+
     let endpoint: Endpoint
+    /// The scenario being edited. It is live only when it is the endpoint's active scenario.
     let activeScenario: Scenario?
     let globalDelayMs: Int
     var backends: [BackendConfiguration] = []
+    /// `localhost:8080`, shown before the path in the request bar.
+    var baseAddress: String?
     let actions: EndpointEditorActions
 
     @State private var statusCodeString = ""
     @State private var responseBody = ""
-    /// Identity of the body actually hydrated into the draft. Fresh selection IDs arrive before
-    /// onChange synchronizes these State values, so passing those directly would mix documents in
-    /// the native editor's undo history for one render.
     @State private var bodyDocumentID: String?
     @State private var delayString = ""
     @State private var groupTag = ""
     @State private var headers: [HeaderEntry] = []
-    @State private var headersExpanded = false
-    @State private var optionsExpanded = false
-    @State private var responseHeight = DSBarHeight.controlRow
-    @State private var headersHeight = DSBarHeight.controlRow
-    @State private var optionsHeight = DSBarHeight.controlRow
-    /// The message under the status code field, or `nil` when there is nothing to say.
-    ///
-    /// Written only when a value has *settled* — see `debounceStatusCode()`. A status code is typed
-    /// one digit at a time and "6" and "60" are both prefixes of a perfectly good "600", so
-    /// validating on every keystroke would flash a complaint at someone who is still typing.
+    @State private var pane: Pane = .body
     @State private var statusCodeError: String?
     @State private var delayError: String?
-    /// The Format button only enables for the body whose bounded output was checked.
     @State private var formatCandidate: (source: String, output: String)?
     @State private var showDeleteConfirmation = false
-    /// The edits that have been typed and not yet written — one object rather than three more
-    /// `@State` values, for the reason in `EndpointEditorPendingEdits`' own note.
+    @State private var renameScenarioTarget: Scenario?
+    @State private var didCopyURL = false
     @State private var pendingEdits: EndpointEditorPendingEdits
-    /// Focus for the two fields that commit on blur rather than on every keystroke. A delay of "5"
-    /// is a valid prefix of "500", so debouncing these would write a value nobody asked for.
-    @FocusState private var isGroupTagFocused: Bool
     @FocusState private var isDelayFocused: Bool
+    @FocusState private var isStatusFocused: Bool
 
-    init(endpoint: Endpoint, activeScenario: Scenario?, globalDelayMs: Int, backends: [BackendConfiguration] = [], actions: EndpointEditorActions) {
+    init(endpoint: Endpoint, activeScenario: Scenario?, globalDelayMs: Int, backends: [BackendConfiguration] = [],
+         baseAddress: String? = nil, actions: EndpointEditorActions) {
         self.init(
             endpoint: endpoint,
             activeScenario: activeScenario,
             globalDelayMs: globalDelayMs,
             backends: backends,
+            baseAddress: baseAddress,
             actions: actions,
             initialStatusCodeString: "",
             initialResponseBody: "",
@@ -76,6 +68,7 @@ struct EndpointEditorView: View {
         activeScenario: Scenario?,
         globalDelayMs: Int,
         backends: [BackendConfiguration] = [],
+        baseAddress: String? = nil,
         actions: EndpointEditorActions,
         initialStatusCodeString: String,
         initialResponseBody: String,
@@ -88,6 +81,7 @@ struct EndpointEditorView: View {
         self.activeScenario = activeScenario
         self.globalDelayMs = globalDelayMs
         self.backends = backends
+        self.baseAddress = baseAddress
         self.actions = actions
         _statusCodeString = State(initialValue: initialStatusCodeString)
         _responseBody = State(initialValue: initialResponseBody)
@@ -100,315 +94,393 @@ struct EndpointEditorView: View {
         _pendingEdits = State(initialValue: pendingEdits ?? EndpointEditorPendingEdits())
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // No `DSDivider` under this: the header draws its own hairline, and the two together laid
-            // 1.5pt of rule under the row — three times the weight every other bar in the window ends
-            // with, in a lighter colour than any of them.
-            endpointHeader
+    private var isLive: Bool {
+        activeScenario != nil && activeScenario?.id == endpoint.activeScenarioID
+    }
 
-            if activeScenario == nil {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            requestBar
+
+            if let scenario = activeScenario {
+                scenarioTitleRow(scenario)
+                responseFields
+                paneBar
+                switch pane {
+                case .body: bodyEditor
+                case .headers: headersEditor
+                }
+            } else {
                 DSEmptyState(
-                    systemImage: "exclamationmark.bubble",
-                    heading: "No active scenario",
-                    message: "Activate or add a scenario from the inspector to edit this endpoint's response.",
+                    heading: "No live scenario",
+                    message: "Add a scenario in the inspector, or make one live, to edit this endpoint's response.",
                     identifier: "editor.noActiveScenario"
                 )
-            } else {
-                // Measure the controls, then give the body all remaining height. The outer scroll
-                // view keeps every option reachable when a short window hits the body’s minimum.
-                GeometryReader { geometry in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            responseSection
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { responseHeight = $0 }
-                            headersSection
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headersHeight = $0 }
-                            bodySection(height: max(
-                                EditorBody.minHeight,
-                                geometry.size.height - responseHeight - headersHeight - optionsHeight
-                                    - DSBarHeight.controlRow - DSSpacing.md
-                            ))
-                            settingsSection
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { optionsHeight = $0 }
-                        }
-                    }
-                }
             }
         }
-        // A narrow split pane must compress the fields rather than grow past its leading edge.
-        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.vertical, DSSpacing.lg)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
-        .onChange(of: endpoint.activeScenarioID) { scenarioSelectionChanged() }
+        .onChange(of: activeScenario?.id) { scenarioSelectionChanged() }
         .onChange(of: endpoint) { previous, current in
-            guard previous.id == current.id,
-                  previous.activeScenarioID == current.activeScenarioID else { return }
+            guard previous.id == current.id else { return }
             refreshUneditedFields(from: previous)
         }
         .onChange(of: statusCodeString) { debounceStatusCode() }
-        .accessibilityIdentifier("endpointEditor")
-        // The mandatory partner to the identifier above. On its own it renames every descendant, so
-        // `endpointEditor.statusCode`, `.delay`, `.groupTag` and every header field would report
-        // "endpointEditor" instead of their own names and stop being addressable.
-        .accessibilityElement(children: .contain)
-    }
-
-    // MARK: - Header
-
-    /// Method, path, and the endpoint's own actions — the identity of what is being edited.
-    ///
-    /// The group tag used to be repeated above the path as a dead caption. It is a crumb in the jump
-    /// bar now, where it is also a menu you can steer with.
-    @ViewBuilder
-    private var endpointHeader: some View {
-        DSEditorHeader(identifier: "endpoint") {
-            DSMethodBadge(method: endpoint.method.rawValue, identifier: "editor.method")
-
-            // `.lineLimit(1)` and `.truncationMode(.middle)`, and no layout priority. A negative one
-            // looks like the way to say "yield first", but the `Spacer` claims slack at default
-            // priority, so the path lost every contest and a narrow editor showed a badge, a gap, and
-            // no path at all. Plain compression truncates only once the row genuinely runs out of
-            // room — which is the behaviour wanted, and the same fix `DSPanelHeader` took.
-            Text(endpoint.path)
-                .font(DSTypography.codeHeading)
-                .foregroundStyle(DSColors.labelPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(endpoint.path)
-                .accessibilityIdentifier("endpointEditor.path")
-
-        } action: {
-            moreMenu
-        }
-    }
-
-    /// The endpoint's own actions use the shared 26pt icon menu. The delete confirmation remains
-    /// here because it belongs to this endpoint, not to the menu component.
-    @ViewBuilder
-    private var moreMenu: some View {
-        DSIconMenu(
-            systemImage: "ellipsis",
-            help: "More actions for this endpoint",
-            identifier: "endpointEditor.moreMenu"
-        ) {
-            Button("Rename\u{2026}", systemImage: "pencil", action: actions.onRename)
-                .accessibilityIdentifier("endpointEditor.moreMenu.rename")
-            Button("Edit request\u{2026}", action: actions.onEditRequest)
-                .accessibilityIdentifier("endpointEditor.moreMenu.editRequest")
-            Divider()
-            Button {
-                actions.onDuplicate()
-            } label: {
-                Label("Duplicate", systemImage: "doc.on.doc")
-            }
-            .accessibilityIdentifier("endpointEditor.moreMenu.duplicate")
-            Divider()
-            Button(role: .destructive) {
-                showDeleteConfirmation = true
-            } label: {
-                Label("Delete endpoint\u{2026}", systemImage: "trash")
-            }
-            .accessibilityIdentifier("endpointEditor.moreMenu.delete")
-        }
-        .alert(
-            "Delete endpoint?",
-            isPresented: $showDeleteConfirmation
-        ) {
-            Button("Delete", role: .destructive) {
-                actions.onDelete()
-            }
+        .alert("Delete endpoint?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) { actions.onDelete() }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will remove the endpoint and all its scenarios. This can't be undone.")
         }
+        .sheet(item: $renameScenarioTarget) { scenario in
+            RenameItemSheet(
+                title: "Rename scenario", fieldLabel: "Scenario name",
+                identifier: "scenarioRename", initialName: scenario.name
+            ) { name in
+                actions.onRenameScenario(scenario.id, name)
+            }
+        }
+        .accessibilityIdentifier("endpointEditor")
+        .accessibilityElement(children: .contain)
     }
 
-    // MARK: - Sections
+    // MARK: - Request bar
 
-    private var responseSection: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            HStack(spacing: DSSpacing.sm) {
-                Text("Status")
-                    .font(DSTypography.label)
+    /// The request this endpoint answers: method, address, and path, with the endpoint's actions
+    /// behind the method.
+    private var requestBar: some View {
+        HStack(spacing: 10) {
+            endpointMenu
+
+            Rectangle()
+                .fill(DSColors.separator)
+                .frame(width: DSStroke.hairline, height: 18)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 0) {
+                if let baseAddress {
+                    Text(baseAddress)
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .accessibilityHidden(true)
+                }
+                Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : "\(endpoint.path) · \($0)" } ?? endpoint.path)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .help(endpoint.path)
+                    .accessibilityIdentifier("endpointEditor.path")
+            }
+            .font(DSTypography.codeLarge)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: copyURL) {
+                Image(systemName: didCopyURL ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: DSGlyph.button - 1))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
+            }
+            .buttonStyle(DSIconButtonStyle())
+            .help("Copy the URL")
+            .accessibilityIdentifier("endpointEditor.copyURL")
+            .accessibilityLabel(didCopyURL ? "Copied URL" : "Copy URL")
+        }
+        .dsFieldChrome(height: DSControlHeight.prominent, cornerRadius: DSCornerRadius.card,
+                       isFocused: false, horizontalPadding: 10)
+        .padding(.trailing, 0)
+        .task(id: didCopyURL) {
+            guard didCopyURL else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            didCopyURL = false
+        }
+    }
+
+    private var endpointURL: String {
+        "http://\(baseAddress ?? "localhost")\(endpoint.path)"
+    }
+
+    private func copyURL() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(endpointURL, forType: .string)
+        didCopyURL = true
+    }
+
+    /// The method, which opens the endpoint's own actions.
+    private var endpointMenu: some View {
+        Menu {
+            Button("Edit request\u{2026}", systemImage: "pencil.line", action: actions.onEditRequest)
+                .accessibilityIdentifier("endpointEditor.moreMenu.editRequest")
+            Button("Rename endpoint\u{2026}", systemImage: "pencil", action: actions.onRename)
+                .accessibilityIdentifier("endpointEditor.moreMenu.rename")
+            Button("Duplicate endpoint", systemImage: "doc.on.doc", action: actions.onDuplicate)
+                .accessibilityIdentifier("endpointEditor.moreMenu.duplicate")
+            Divider()
+            Button("Delete endpoint\u{2026}", systemImage: "trash", role: .destructive) {
+                showDeleteConfirmation = true
+            }
+            .accessibilityIdentifier("endpointEditor.moreMenu.delete")
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                    .foregroundStyle(DSColors.labelTertiary)
+            }
+            .frame(height: DSControlHeight.regular)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Endpoint actions")
+        .accessibilityIdentifier("endpointEditor.moreMenu")
+        .accessibilityLabel("Endpoint actions, \(endpoint.method.rawValue)")
+    }
+
+    // MARK: - Scenario
+
+    private func scenarioTitleRow(_ scenario: Scenario) -> some View {
+        HStack(spacing: 10) {
+            Text(scenario.name)
+                .font(DSTypography.headline)
+                .foregroundStyle(DSColors.labelPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityIdentifier("endpointEditor.scenarioName")
+                .accessibilityAddTraits(.isHeader)
+
+            HStack(spacing: 5) {
+                DSLiveIndicator(isLive: isLive, size: 12)
+                Text(isLive ? "Live" : "Not live")
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
+            }
+            .fixedSize()
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("endpointEditor.liveState")
+
+            Spacer(minLength: DSSpacing.sm)
+
+            if !isLive {
+                DSButton("Make live", variant: .secondary, size: .medium, identifier: "endpointEditor.makeLive") {
+                    actions.onMakeLive(scenario.id)
+                }
+                .help("Serve this scenario on every request")
+            }
+
+            DSIconMenu(systemImage: "ellipsis", help: "Scenario actions", identifier: "endpointEditor.scenarioMenu") {
+                Button("Rename scenario\u{2026}", systemImage: "pencil") { renameScenarioTarget = scenario }
+                    .accessibilityIdentifier("endpointEditor.scenarioMenu.rename")
+                Button("Duplicate scenario", systemImage: "doc.on.doc") { actions.onDuplicateScenario(scenario.id) }
+                    .accessibilityIdentifier("endpointEditor.scenarioMenu.duplicate")
+                Divider()
+                Button("Delete scenario", systemImage: "trash", role: .destructive) {
+                    actions.onDeleteScenario(scenario.id)
+                }
+                .disabled(endpoint.scenarios.count <= 1)
+                .accessibilityIdentifier("endpointEditor.scenarioMenu.delete")
+            }
+        }
+        .frame(minHeight: DSControlHeight.large)
+    }
+
+    // MARK: - Response fields
+
+    private var responseFields: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs + 2) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DSSpacing.xl) { statusField; delayField; contentTypeField }
+                VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                    statusField
+                    HStack(spacing: DSSpacing.xl) { delayField; contentTypeField }
+                }
+            }
+            if let statusCodeError {
+                DSValidationMessage(statusCodeError, identifier: "endpointEditor.statusCode.error")
+            }
+            if let delayError {
+                DSValidationMessage(delayError, identifier: "endpointEditor.delay.error")
+            }
+        }
+    }
+
+    private func fieldLabel(_ title: String) -> some View {
+        Text(title)
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelSecondary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var statusField: some View {
+        let code = Self.statusCodeValue(from: statusCodeString)
+        return HStack(spacing: DSSpacing.sm) {
+            fieldLabel("Status")
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
                 TextField("200", text: $statusCodeString)
                     .textFieldStyle(.plain)
-                    .font(DSTypography.code)
-                    .dsFieldWell(
-                        width: EditorRowMetrics.numericFieldWidth,
-                        isInvalid: statusCodeError != nil
-                    )
+                    .font(DSTypography.status)
+                    .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
+                    .frame(width: 30)
+                    .focused($isStatusFocused)
                     .accessibilityIdentifier("endpointEditor.statusCode")
                     .accessibilityLabel("Status code")
                     .onSubmit { commitStatusCode() }
-                if let code = Self.statusCodeValue(from: statusCodeString) {
-                    Text(code == 200 ? "OK" : HTTPURLResponse.localizedString(forStatusCode: code).localizedCapitalized)
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.httpStatusColor(for: code))
+                if let code {
+                    Text(Self.reasonPhrase(for: code))
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
                         .lineLimit(1)
                         .accessibilityIdentifier("endpointEditor.statusDescription")
                 }
                 Spacer(minLength: 0)
-            }
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.controlRow)
-
-            if let statusCodeError {
-                validationNote(statusCodeError, identifier: "endpointEditor.statusCode.error", leadingInset: DSSpacing.md)
-                    .padding(.bottom, DSSpacing.sm)
-            }
-        }
-        .overlay(alignment: .bottom) { sectionDivider }
-    }
-
-    private var headersSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                sectionDisclosure("Headers", isExpanded: headersExpanded, identifier: "endpointEditor.toggleHeaders") {
-                    headersExpanded.toggle()
-                }
-                Text(headers.isEmpty ? "No custom headers" : "\(headers.count)")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier(headers.isEmpty ? "endpointEditor.headers.empty" : "endpointEditor.headers.count")
-                Spacer(minLength: DSSpacing.sm)
-                Button {
-                    headersExpanded = true
-                    headers.append(HeaderEntry(key: "", value: ""))
+                Menu {
+                    ForEach(EditorMetrics.commonStatusCodes, id: \.self) { option in
+                        Button("\(option) \(Self.reasonPhrase(for: option))") {
+                            statusCodeString = String(option)
+                            commitStatusCode()
+                        }
+                    }
                 } label: {
-                    Label("Add", systemImage: "plus")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.accentText)
-                        .padding(.horizontal, DSSpacing.xs)
-                        .frame(height: DSControlHeight.field)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .frame(width: 16, height: DSControlHeight.regular)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.dsPlain)
-                .help("Add a response header")
-                .accessibilityIdentifier("endpointEditor.addHeaderButton")
-                .accessibilityLabel("Add header")
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Choose a common status code")
+                .accessibilityIdentifier("endpointEditor.statusMenu")
+                .accessibilityLabel("Common status codes")
             }
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.controlRow)
+            .dsFieldChrome(isFocused: isStatusFocused, isInvalid: statusCodeError != nil)
+            .frame(width: EditorMetrics.statusFieldWidth)
+        }
+    }
 
-            if headersExpanded && !headers.isEmpty {
-                VStack(spacing: DSSpacing.sm) {
-                    // Bind by identity so removing an earlier row never leaves a stale index.
-                    ForEach($headers) { header in
-                        headerRow(header)
+    private var delayField: some View {
+        HStack(spacing: DSSpacing.sm) {
+            fieldLabel("Delay")
+            HStack(spacing: DSSpacing.xs) {
+                TextField("0", text: $delayString)
+                    .textFieldStyle(.plain)
+                    .font(DSTypography.Figure.regular)
+                    .focused($isDelayFocused)
+                    .accessibilityIdentifier("endpointEditor.delay")
+                    .accessibilityLabel("Endpoint delay in milliseconds")
+                    .onChange(of: delayString) { delayError = nil }
+                    .onChange(of: isDelayFocused) { _, focused in
+                        if !focused { commitDelay() }
                     }
-                }
-                .padding(.horizontal, DSSpacing.md)
-                .padding(.bottom, DSSpacing.sm)
+                    .onSubmit { commitDelay() }
+                Text("ms")
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .accessibilityHidden(true)
             }
+            .dsFieldChrome(isFocused: isDelayFocused, isInvalid: delayError != nil)
+            .frame(width: EditorMetrics.delayFieldWidth)
+            .help(globalDelayMs > 0
+                  ? "The project adds \(globalDelayMs) ms to this delay"
+                  : "Wait this long before answering")
         }
-        .overlay(alignment: .bottom) { sectionDivider }
-        .onChange(of: headers) { debounceHeaders() }
     }
 
-    /// One header row: name, value, and the control that takes the row away.
-    ///
-    /// The entry arrives as a binding rather than as an index, so nothing here can be stale. The
-    /// number in the identifiers is looked up fresh on every body evaluation — `MimicUITests` reaches
-    /// these fields as `endpointEditor.headerKey.0`, so the label has to keep meaning "the first row",
-    /// which is a question about *position* and not about which entry this is.
-    @ViewBuilder
-    private func headerRow(_ header: Binding<HeaderEntry>) -> some View {
-        let index = position(of: header.wrappedValue)
-
-        HStack(spacing: DSSpacing.xs) {
-            TextField("Name", text: header.key)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .dsFieldWell(maxWidth: EditorRowMetrics.headerKeyWidth)
-                .accessibilityIdentifier("endpointEditor.headerKey.\(index)")
-                .accessibilityLabel("Header name")
-                .onSubmit { commitHeaders() }
-
-            TextField("Value", text: header.value)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .dsFieldWell()
-                .accessibilityIdentifier("endpointEditor.headerValue.\(index)")
-                .accessibilityLabel("Header value")
-                .onSubmit { commitHeaders() }
-
-            Button {
-                removeHeader(id: header.wrappedValue.id)
+    private var contentTypeField: some View {
+        HStack(spacing: DSSpacing.sm) {
+            fieldLabel("Content type")
+            Menu {
+                Button("JSON") { actions.onUpdateContentType(.json) }
+                    .accessibilityIdentifier("endpointEditor.contentType.json")
+                Button("Plain text") { actions.onUpdateContentType(.plainText) }
+                    .accessibilityIdentifier("endpointEditor.contentType.plainText")
             } label: {
-                // Not destructive-red. A column of red circles down the side of a form shouts
-                // at you about rows you are not removing; the colour is for the things that
-                // need attention, and "remove this header" says what it does in its tooltip.
-                Image(systemName: "minus.circle")
-                    .font(.system(size: DSGlyph.controlLarge))
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .frame(width: DSControlHeight.field, height: DSControlHeight.field)
-                    .contentShape(Rectangle())
+                HStack(spacing: DSSpacing.xs) {
+                    Text(activeScenario?.bodyContentType == .plainText ? "Plain text" : "JSON")
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                        .foregroundStyle(DSColors.labelTertiary)
+                }
+                .dsFieldChrome(isFocused: false)
+                .contentShape(Rectangle())
             }
-            // The same well the two section-header actions above it wear, and now the same pressed
-            // state. This button sat between them with neither: the one control in the row that
-            // destroys something was also the only one that never acknowledged being pointed at.
-            .buttonStyle(.dsPlain)
-            .help("Remove this header")
-            .accessibilityIdentifier("endpointEditor.removeHeader.\(index)")
-            .accessibilityLabel("Remove header")
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .frame(width: EditorMetrics.contentTypeFieldWidth)
+            .accessibilityIdentifier("endpointEditor.contentType")
+            .accessibilityLabel("Content type")
         }
     }
 
-    /// Where an entry currently sits. `0` is unreachable rather than a default: a row is only ever
-    /// built from an entry `headers` is holding at that moment.
-    private func position(of entry: HeaderEntry) -> Int {
-        headers.firstIndex { $0.id == entry.id } ?? 0
-    }
+    // MARK: - Body and headers
 
-    /// By `id`, never by index. The button that removes a row is inside that row, so an index taken
-    /// when the row was built is exactly the one the removal invalidates.
-    private func removeHeader(id: HeaderEntry.ID) {
-        headers.removeAll { $0.id == id }
-        commitHeaders()
-    }
-
-    private func bodySection(height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Response body")
-                    .font(DSTypography.controlLabel)
-                    .foregroundStyle(DSColors.labelPrimary)
-                Spacer(minLength: DSSpacing.sm)
-                Button {
+    private var paneBar: some View {
+        HStack(spacing: DSSpacing.sm) {
+            DSSegmentedControl(
+                "Response part",
+                segments: [
+                    .init("Body", value: Pane.body, identifier: "endpointEditor.tab.body"),
+                    .init("Headers", value: Pane.headers, count: headers.isEmpty ? nil : headers.count,
+                          identifier: "endpointEditor.toggleHeaders"),
+                ],
+                selection: $pane,
+                identifier: "endpointEditor.pane"
+            )
+            Spacer(minLength: DSSpacing.sm)
+            switch pane {
+            case .body:
+                DSButton("Format", systemImage: "text.alignleft", variant: .ghost, size: .medium,
+                         identifier: "endpointEditor.format") {
                     if let formatCandidate, formatCandidate.source == responseBody {
                         responseBody = formatCandidate.output
                         commitBody()
                     }
-                } label: {
-                    Label("Format", systemImage: "text.alignleft")
-                        .font(DSTypography.label)
-                        .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
-                        .padding(.horizontal, DSSpacing.xs)
-                        .frame(height: DSControlHeight.field)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.dsPlain)
                 .disabled(!canFormatBody)
                 .help("Pretty-print the JSON body")
                 .accessibilityIdentifier("endpointEditor.prettyPrintButton")
                 .accessibilityLabel("Pretty-print JSON")
+                DSButton("Copy", systemImage: "doc.on.doc", variant: .ghost, size: .medium,
+                         identifier: "endpointEditor.copyBody") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(responseBody, forType: .string)
+                }
+                .disabled(responseBody.isEmpty)
+                .help("Copy the response body")
+            case .headers:
+                DSButton("Add header", systemImage: "plus", variant: .ghost, size: .medium,
+                         identifier: "endpointEditor.addHeader") {
+                    headers.append(HeaderEntry(key: "", value: ""))
+                }
+                .help("Add a response header")
+                .accessibilityIdentifier("endpointEditor.addHeaderButton")
+                .accessibilityLabel("Add header")
             }
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.controlRow)
+        }
+    }
 
-            // Fill the available workspace regardless of payload length. Formatting a long payload
-            // changes the document, never the height of the editor or the position of its options.
-            DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID)
-            .frame(height: height)
-            .padding(.horizontal, DSSpacing.md)
-            .padding(.bottom, DSSpacing.md)
+    private var bodyEditor: some View {
+        DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID)
+            .frame(minHeight: EditorMetrics.bodyMinHeight, maxHeight: .infinity)
             .onChange(of: responseBody) { debounceBody() }
             .task(id: responseBody) {
                 let source = responseBody
-                // Typing cancels this task before it starts a new parse and bounded reflow.
                 do { try await Task.sleep(for: Self.settling) } catch { return }
                 let output = await Task.detached(priority: .userInitiated) {
                     DSJSONEditor.prettyPrint(source)
@@ -416,239 +488,85 @@ struct EndpointEditorView: View {
                 guard !Task.isCancelled, responseBody == source else { return }
                 formatCandidate = output.map { (source: source, output: $0) }
             }
-        }
     }
 
-    private var settingsSection: some View {
+    private var headersEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                sectionDisclosure("Endpoint options", isExpanded: optionsExpanded, identifier: "endpointEditor.toggleOptions") {
-                    // Commit before removing a focused field from the view hierarchy.
-                    if optionsExpanded {
-                        if isGroupTagFocused { commitGroupTag() }
-                        if isDelayFocused { commitDelay() }
-                        isGroupTagFocused = false
-                        isDelayFocused = false
+            if headers.isEmpty {
+                Text("No custom headers")
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, DSSpacing.xxl)
+                    .accessibilityIdentifier("endpointEditor.headers.empty")
+            } else {
+                ScrollView {
+                    VStack(spacing: DSSpacing.sm) {
+                        ForEach($headers) { header in
+                            headerRow(header)
+                        }
                     }
-                    optionsExpanded.toggle()
+                    .padding(DSSpacing.md)
                 }
-                Spacer(minLength: DSSpacing.sm)
+                .accessibilityIdentifier("endpointEditor.headers.count")
             }
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.controlRow)
-            if optionsExpanded {
-                VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                    endpointOptions
-                }
-                .padding(.bottom, DSSpacing.md)
-            }
-        }
-        .overlay(alignment: .top) { sectionDivider }
-    }
-
-    @ViewBuilder
-    private var endpointOptions: some View {
-        formRow("Backend") {
-            Picker("Backend", selection: Binding<UUID?>(
-                get: { endpoint.backendID },
-                set: { actions.onUpdateBackend($0) }
-            )) {
-                Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag(nil as UUID?)
-                ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
-                    Text(backend.name).tag(backend.id as UUID?)
-                }
-            }
-            .labelsHidden()
-            .accessibilityIdentifier("endpointEditor.backend")
-            .accessibilityLabel("Backend")
-        }
-
-        formRow("Group tag") {
-            TextField("e.g. Users, Auth", text: $groupTag)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .dsFieldWell(maxWidth: EditorRowMetrics.textFieldWidth)
-                .accessibilityIdentifier("endpointEditor.groupTag")
-                // Committed when focus leaves, not only on Return. Typing a value and clicking
-                // somewhere else is the ordinary way to fill a form; without this the edit was
-                // dropped, and `syncFromModel` then quietly restored the old value the next time you
-                // switched endpoints — a change that looked accepted and never was.
-                .onChange(of: isGroupTagFocused) { _, focused in
-                    if !focused { commitGroupTag() }
-                }
-                .accessibilityLabel("Group tag")
-                .focused($isGroupTagFocused)
-                .onSubmit { commitGroupTag() }
-        }
-
-        formRow("Delay") {
-            TextField("0", text: $delayString)
-                .textFieldStyle(.plain)
-                .font(DSTypography.code)
-                .dsFieldWell(width: EditorRowMetrics.numericFieldWidth)
-                .accessibilityIdentifier("endpointEditor.delay")
-                .onChange(of: delayString) { delayError = nil }
-                .onChange(of: isDelayFocused) { _, focused in
-                    if !focused { commitDelay() }
-                }
-                .accessibilityLabel("Endpoint delay in milliseconds")
-                .focused($isDelayFocused)
-                .onSubmit { commitDelay() }
-
-            unitLabel("ms")
-        }
-        if let delayError {
-            validationNote(delayError, identifier: "endpointEditor.delay.error")
-        }
-
-        formRow("Global delay") {
-            // Not a disabled text field. A greyed-out well in a row of live ones reads as a control
-            // that failed rather than as a value belonging to something else, and there is nothing to
-            // type into: this number is the project's, shown here because it is added to the delay
-            // above before any response goes out. The padding puts its digits at the same x as the
-            // digits in the field above rather than 6pt to their left.
-            Text("\(globalDelayMs)")
-                .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelSecondary)
-                .padding(.horizontal, DSSpacing.sm)
-                .frame(width: EditorRowMetrics.numericFieldWidth, alignment: .leading)
-                .accessibilityIdentifier("endpointEditor.globalDelay")
-                .accessibilityLabel("Global delay in milliseconds")
-                // The number, said as the row's value. An explicit `.accessibilityLabel` *replaces*
-                // what a `Text` would otherwise expose, so naming this row took its digits out of
-                // the accessibility tree entirely: VoiceOver announced "Global delay in
-                // milliseconds" with nothing under it, and a test could read the label back but
-                // never the value it labels. Found by the UI sweep, which could assert the row
-                // exists and not what it says.
-                .accessibilityValue("\(globalDelayMs)")
-
-            unitLabel("ms")
-        }
-
-        note(
-            "Project delay is added to this endpoint’s delay.",
-            identifier: "endpointEditor.globalDelay.note"
-        )
-    }
-
-    private var sectionDivider: some View {
-        Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
-    }
-
-    private func sectionDisclosure(
-        _ title: String,
-        isExpanded: Bool,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: DSSpacing.sm) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                    .frame(width: DSGlyph.control)
-                    .accessibilityHidden(true)
-                Text(title).font(DSTypography.metaBold)
-            }
-            .foregroundStyle(DSColors.labelSecondary)
-            .frame(height: DSControlHeight.field)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.dsPlain)
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(title)
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .help(isExpanded ? "Collapse \(title.lowercased())" : "Expand \(title.lowercased())")
-    }
-
-    // MARK: - Row furniture
-
-    /// Label right-aligned in a fixed column, value flush left in what is left — the macOS inspector
-    /// convention, and the one `InspectorOverview` already draws. Labels used to sit *above* their
-    /// fields in one section and in a three-column grid in another, so the same pane answered "beside
-    /// or above?" two different ways and no two fields started at the same x.
-    @ViewBuilder
-    private func formRow<Content: View>(
-        _ label: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: DSSpacing.sm) {
-            Text(label)
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-                .frame(width: EditorRowMetrics.labelColumn, alignment: .trailing)
-
-            content()
-
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, DSSpacing.md)
-        // At least a control tall, so a row whose value is text keeps the rhythm of one holding a
-        // field.
-        .frame(minHeight: DSControlHeight.field)
-    }
-
-    /// The unit a number is in, beside the value rather than inside the label. "Delay (ms)" spent
-    /// 27pt of the label column on two characters that belong to the value, and made the two delay
-    /// labels the widest things in a column sized for all four.
-    @ViewBuilder
-    private func unitLabel(_ unit: String) -> some View {
-        Text(unit)
-            .font(DSTypography.label)
-            .foregroundStyle(DSColors.labelSecondary)
-            // The field's own label already says "in milliseconds"; VoiceOver does not need it twice.
-            .accessibilityHidden(true)
-    }
-
-    /// Why the row above it was not accepted, in `DSTextField`'s language: a filled
-    /// `exclamationmark.circle.fill` beside `DSColors.destructive` text.
-    ///
-    /// The glyph is not decoration. Red 13pt text alone is one channel of meaning, and with
-    /// Differentiate Without Color on, in a greyscale screenshot, or to a reader with a red
-    /// deficiency, a complaint and a hint look identical. It sits at the value seam like `note()`,
-    /// so it reads as belonging to the field it is about rather than to the section.
-    @ViewBuilder
-    private func validationNote(_ message: String, identifier: String, leadingInset: CGFloat = EditorRowMetrics.valueInset) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
-            Image(systemName: "exclamationmark.circle.fill")
-                // `inline`, the rung `DSTextField` and `DSJSONEditor` draw their validation marks at
-                // — this row is the third of the three and was the one still writing the number.
-                .font(.system(size: DSGlyph.inline, weight: .semibold))
-
-            // Wraps rather than truncates: a validation message that ends in an ellipsis is a
-            // validation message that has stopped explaining itself.
-            Text(message)
-                .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: EditorMetrics.bodyMinHeight, maxHeight: .infinity)
+        .background(DSColors.code)
+        .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
         }
-        .font(DSTypography.label)
-        .foregroundStyle(DSColors.destructive)
-        .padding(.leading, leadingInset)
-        .padding(.trailing, DSSpacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // One reading, not a glyph and a sentence read separately.
-        .accessibilityElement()
-        .accessibilityLabel(message)
-        .accessibilityIdentifier(identifier)
+        .onChange(of: headers) { debounceHeaders() }
     }
 
-    /// Prose explaining the row above it, starting at the value seam so it reads as part of that row
-    /// rather than as a footnote to the section.
-    ///
-    /// The identifier is a parameter, the way ``validationNote(_:identifier:)`` above takes one: this
-    /// sentence is the only thing telling you the number above it is the project's rather than this
-    /// endpoint's, so a test asserts the note is there without pinning the prose word for word.
     @ViewBuilder
-    private func note(_ message: String, identifier: String) -> some View {
-        Text(message)
-            .font(DSTypography.caption)
-            // `labelSecondary`, not `labelTertiary`: 36% is the alpha for a timestamp you glance at,
-            // and this is the sentence that explains why the number above it cannot be typed into.
-            .foregroundStyle(DSColors.labelSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, EditorRowMetrics.valueInset)
-            .padding(.trailing, DSSpacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier(identifier)
+    private func headerRow(_ header: Binding<HeaderEntry>) -> some View {
+        let index = position(of: header.wrappedValue)
+
+        HStack(spacing: DSSpacing.sm) {
+            TextField("Name", text: header.key)
+                .textFieldStyle(.plain)
+                .font(DSTypography.code)
+                .dsFieldChrome(isFocused: false)
+                .frame(maxWidth: EditorMetrics.headerKeyWidth)
+                .accessibilityIdentifier("endpointEditor.headerKey.\(index)")
+                .accessibilityLabel("Header name")
+                .onSubmit { commitHeaders() }
+
+            TextField("Value", text: header.value)
+                .textFieldStyle(.plain)
+                .font(DSTypography.code)
+                .dsFieldChrome(isFocused: false)
+                .accessibilityIdentifier("endpointEditor.headerValue.\(index)")
+                .accessibilityLabel("Header value")
+                .onSubmit { commitHeaders() }
+
+            DSIconButton("Remove header", systemImage: "minus.circle",
+                         identifier: "endpointEditor.removeHeader.\(index)") {
+                removeHeader(id: header.wrappedValue.id)
+            }
+        }
+    }
+
+    private func position(of entry: HeaderEntry) -> Int {
+        headers.firstIndex { $0.id == entry.id } ?? 0
+    }
+
+    private func removeHeader(id: HeaderEntry.ID) {
+        headers.removeAll { $0.id == id }
+        commitHeaders()
+    }
+
+    /// `Not Found`, `OK`: the standard phrase, in title case as HTTP spells it.
+    nonisolated static func reasonPhrase(for code: Int) -> String {
+        switch code {
+        case 200: "OK"
+        case 429: "Too Many Requests"
+        default: HTTPURLResponse.localizedString(forStatusCode: code).localizedCapitalized
+        }
     }
 
     // MARK: - Derived state
@@ -720,7 +638,6 @@ struct EndpointEditorView: View {
         delayString = synced.delayString
         groupTag = synced.groupTag
         headers = synced.headers.map { HeaderEntry(key: $0.0, value: $0.1) }
-        headersExpanded = !headers.isEmpty
         delayError = nil
         // A complaint about the endpoint you just navigated away from is not about anything on
         // screen any more.
@@ -732,8 +649,8 @@ struct EndpointEditorView: View {
     /// screen, while a local draft (including an invalid status or an unfinished header row) stays
     /// intact. Selection changes still take the separate flush-and-sync path above.
     private func refreshUneditedFields(from previous: Endpoint) {
-        guard let previousScenario = previous.scenarios.first(where: { $0.id == previous.activeScenarioID }),
-              let activeScenario else { return }
+        guard let activeScenario,
+              let previousScenario = previous.scenarios.first(where: { $0.id == activeScenario.id }) else { return }
 
         if previousScenario.statusCode != activeScenario.statusCode,
            statusCodeString == String(previousScenario.statusCode) {

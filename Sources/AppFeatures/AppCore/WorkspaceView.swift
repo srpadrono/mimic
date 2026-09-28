@@ -133,24 +133,13 @@ struct WorkspaceView: View {
                     // editor, because it describes where you are, not what you are editing.
                     BreadcrumbJumpBar(
                         crumbs: breadcrumbs,
-                        canGoBack: endpointHistory.canGoBack(where: endpointExists),
-                        canGoForward: endpointHistory.canGoForward(where: endpointExists),
-                        onSelectOption: handleBreadcrumbSelection,
-                        onBack: {
-                            if let previous = endpointHistory.goBack(where: endpointExists),
-                               let endpoint = currentEndpoints.first(where: { $0.id == previous }) {
-                                isNavigatingHistory = selectedEndpointID != previous
-                                revealEndpoint(endpoint)
-                            }
-                        },
-                        onForward: {
-                            if let next = endpointHistory.goForward(where: endpointExists),
-                               let endpoint = currentEndpoints.first(where: { $0.id == next }) {
-                                isNavigatingHistory = selectedEndpointID != next
-                                revealEndpoint(endpoint)
-                            }
-                        }
+                        autosaveStatus: appState.autosaveStatus,
+                        onSelectOption: handleBreadcrumbSelection
                     )
+                    Rectangle()
+                        .fill(DSColors.separator)
+                        .frame(height: DSStroke.hairline)
+                        .accessibilityHidden(true)
 
                     // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
                     // pair — so the divider between them is the same divider the navigator and the
@@ -172,7 +161,10 @@ struct WorkspaceView: View {
                                 journeyID: appState.selectedJourneyID
                             ),
                             onRenameEndpoint: beginEndpointRename,
-                            onEditEndpointRequest: beginEndpointRequestEdit
+                            onEditEndpointRequest: beginEndpointRequestEdit,
+                            onAddEndpoint: { appState.showNewEndpointSheet = true },
+                            onImportHAR: { showHARImport = true },
+                            onImportOpenAPI: { showOpenAPIImport = true }
                         )
                         // Anchored to the top, not centred. A pane is exactly as tall as the split
                         // view gives it, and an editor taller than that — the journey editor has no
@@ -196,6 +188,16 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
+                // The one content surface: a rounded card inset from the window, under the toolbar.
+                .background(DSColors.content)
+                .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous)
+                        .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+                }
+                .padding(.top, DSSpacing.xs)
+                .padding([.horizontal, .bottom], DSLayout.panelInset)
+                .background(DSColors.window.ignoresSafeArea())
                 .onGeometryChange(for: WorkspaceToolbarLayout.self) {
                     Self.toolbarLayout(centerWidth: $0.size.width)
                 } action: { layout in
@@ -217,11 +219,10 @@ struct WorkspaceView: View {
                     .inspectorColumnWidth(
                         min: PanelLayoutStore.Bounds.minimumInspectorWidth,
                         ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
-                        max: 640
+                        max: DSLayout.inspectorMaximumWidth
                     )
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector")
-                    .toolbar { panelToolbar }
             }
         }
     }
@@ -362,7 +363,7 @@ struct WorkspaceView: View {
         // happens to be collapsed.
         .onChange(of: selectedLogIDs) { _, newValue in
             guard !newValue.isEmpty, !showInspector else { return }
-            withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) {
+            withAnimation(reduceMotion ? nil : DSAnimation.panel) {
                 showInspector = true
             }
         }
@@ -388,8 +389,17 @@ struct WorkspaceView: View {
         }
         // Panel arrangement is a preference, so it is written as it changes.
         .onChange(of: drawerHeight) { _, _ in persistLayout() }
-        .onChange(of: showDrawer) { _, _ in persistLayout() }
-        .onChange(of: showInspector) { _, _ in persistLayout() }
+        .onChange(of: showDrawer, initial: true) { _, visible in
+            appState.isRequestLogVisible = visible
+            persistLayout()
+        }
+        .onChange(of: showInspector, initial: true) { _, visible in
+            appState.isInspectorVisible = visible
+            persistLayout()
+        }
+        // ⌥⌘L and ⌥⌘I live in the View menu, so they work whether the toggles are inline or folded.
+        .onChange(of: appState.requestLogToggleRequest) { _, _ in toggleRequestLog() }
+        .onChange(of: appState.inspectorToggleRequest) { _, _ in inspectorPresentation.wrappedValue.toggle() }
         // ⌘1 / ⌘2 from the menu bar, which lives above this window and so cannot bind to its state.
         // Journeys ▸ Show Journeys arrives the same way, now that it selects a tab rather than
         // opening a window.
@@ -422,23 +432,24 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// Shorten the summaries first; the actions remain visible while there is room for them.
+    /// Collapse in stages as the centre column narrows: first the secondary actions fold into one
+    /// menu, then the status capsule drops its request count, then it keeps only its dot.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
         guard centerWidth.isFinite else { return .iconStatus }
-        if centerWidth < DSToolbarGeometry.iconStatusCenterWidth { return .iconStatus }
-        if centerWidth < DSToolbarGeometry.actionOverflowCenterWidth { return .overflow }
-        if centerWidth < DSToolbarGeometry.expandedCenterWidth { return .compactSummary }
+        if centerWidth < 460 { return .iconStatus }
+        if centerWidth < 620 { return .compactSummary }
+        if centerWidth < 780 { return .overflow }
         return .expanded
     }
 
     nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) != .expanded
+        let layout = toolbarLayout(centerWidth: centerWidth)
+        return layout == .compactSummary || layout == .iconStatus
     }
 
-    /// Preserve project identity and server context; only editor actions move into overflow.
+    /// Import, server settings, and both panel toggles move into one menu; Run never does.
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
-        let layout = toolbarLayout(centerWidth: centerWidth)
-        return layout == .overflow || layout == .iconStatus
+        toolbarLayout(centerWidth: centerWidth) != .expanded
     }
 
     nonisolated static func toolbarUsesIconStatus(centerWidth: CGFloat) -> Bool {
@@ -446,11 +457,11 @@ struct WorkspaceView: View {
     }
 
     private var usesCompactToolbarSummary: Bool {
-        centerToolbarLayout != .expanded
+        centerToolbarLayout == .compactSummary || centerToolbarLayout == .iconStatus
     }
 
     private var usesToolbarOverflow: Bool {
-        centerToolbarLayout == .overflow || centerToolbarLayout == .iconStatus
+        centerToolbarLayout != .expanded
     }
 
     private var usesIconStatus: Bool {
@@ -459,31 +470,30 @@ struct WorkspaceView: View {
 
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItem(id: "workspace.run", placement: .navigation) {
+        ToolbarItemGroup(placement: .navigation) {
+            historyButton(forward: false)
+            historyButton(forward: true)
+        }
+
+        ToolbarItem(id: "workspace.identity", placement: .navigation) {
+            projectIdentity
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarItem(id: "workspace.status", placement: .principal) {
+            serverSummary
+        }
+
+        ToolbarItem(id: "workspace.run", placement: .primaryAction) {
             ServerToggleButton(
                 serverState: appState.serverState,
                 onStart: appState.startServer,
                 onStop: appState.stopServer
             )
         }
-        .sharedBackgroundVisibility(.hidden)
 
-        ToolbarItem(id: "workspace.identityAndServer", placement: .navigation) {
-            HStack(spacing: usesCompactToolbarSummary ? DSSpacing.sm : DSSpacing.md) {
-                projectIdentity
-                Rectangle()
-                    .fill(DSColors.border)
-                    .frame(width: DSStroke.seam, height: DSSpacing.xl)
-                    .accessibilityHidden(true)
-                serverSummary
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityElement(children: .contain)
-        }
-        .sharedBackgroundVisibility(.hidden)
+        ToolbarSpacer(.fixed, placement: .primaryAction)
 
-        ToolbarSpacer(.flexible, placement: .primaryAction)
-        // Keep one native group installed when the workspace first opens in compact mode.
         ToolbarItemGroup(placement: .primaryAction) {
             if usesToolbarOverflow {
                 overflowMenu
@@ -492,41 +502,72 @@ struct WorkspaceView: View {
                 serverSettingsButton.labelStyle(.iconOnly)
             }
         }
+
+        if !usesToolbarOverflow {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItemGroup(placement: .primaryAction) {
+                drawerToolbarButton.labelStyle(.iconOnly)
+                inspectorToolbarButton.labelStyle(.iconOnly)
+            }
+        }
     }
 
+    /// Back and forward across endpoints you have looked at, the way Xcode's editor history works.
+    private func historyButton(forward: Bool) -> some View {
+        let enabled = forward
+            ? endpointHistory.canGoForward(where: endpointExists)
+            : endpointHistory.canGoBack(where: endpointExists)
+        return Button {
+            let target = forward
+                ? endpointHistory.goForward(where: endpointExists)
+                : endpointHistory.goBack(where: endpointExists)
+            if let target, let endpoint = currentEndpoints.first(where: { $0.id == target }) {
+                isNavigatingHistory = selectedEndpointID != target
+                revealEndpoint(endpoint)
+            }
+        } label: {
+            Label(forward ? "Forward" : "Back", systemImage: forward ? "chevron.forward" : "chevron.backward")
+                .labelStyle(.iconOnly)
+        }
+        .disabled(!enabled)
+        .help(forward ? "Go forward" : "Go back")
+        .accessibilityIdentifier(forward ? "breadcrumb.forward" : "breadcrumb.back")
+        .accessibilityLabel(forward ? "Go forward" : "Go back")
+    }
+
+    /// The project's name over the address it serves on.
     private var projectIdentity: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(appState.currentProject?.name ?? "Mimic")
-                .font(DSTypography.bodyBold)
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(appState.currentProject?.name ?? "Mimic")
                 .accessibilityIdentifier("toolbar.projectName")
-            ZStack(alignment: .leading) {
-                Label {
-                    Text("Local mock").font(DSTypography.label)
-                } icon: {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: DSGlyph.inline, weight: .regular))
-                }
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(DSColors.labelSecondary)
-                .opacity(appState.autosaveStatus == .idle ? 1 : 0)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("toolbar.projectKind")
-                .accessibilityLabel("Local mock")
-                .accessibilityHidden(appState.autosaveStatus != .idle)
-                AutosaveStatusIndicator(status: appState.autosaveStatus)
-                    .fixedSize(horizontal: true, vertical: false)
+            if let address = projectAddress {
+                Text(address)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .accessibilityIdentifier("toolbar.projectKind")
+                    .accessibilityLabel("Local mock at \(address)")
             }
-            .frame(height: DSToolbarGeometry.metadataHeight, alignment: .leading)
         }
-        .frame(maxWidth: usesCompactToolbarSummary
-            ? DSToolbarGeometry.compactProjectTitleWidth : DSToolbarGeometry.projectTitleWidth,
-               alignment: .leading)
-        .frame(height: DSToolbarGeometry.height, alignment: .leading)
+        .frame(maxWidth: usesCompactToolbarSummary ? 140 : 220, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, DSSpacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("toolbar.projectIdentity")
+    }
+
+    /// `localhost:18086`, plus how many other listeners the project has.
+    private var projectAddress: String? {
+        guard let configuration = appState.currentProject?.serverConfiguration else { return nil }
+        let port = appState.serverState.runningPort ?? configuration.port
+        let others = configuration.listeners.count - 1
+        return others > 0 ? "localhost:\(port) +\(others)" : "localhost:\(port)"
     }
 
     private var serverSummary: some View {
@@ -547,29 +588,28 @@ struct WorkspaceView: View {
             onShowTraffic: {
                 showDrawer = true
                 showUnmatchedOnly = false
+            },
+            onToggleServer: {
+                if appState.serverState.runningPort != nil {
+                    appState.stopServer()
+                } else {
+                    appState.startServer()
+                }
             }
         )
-        .frame(width: usesIconStatus
-            ? DSToolbarGeometry.iconStatusWidth
-            : (usesCompactToolbarSummary ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth))
     }
 
-    @ToolbarContentBuilder
-    private var panelToolbar: some ToolbarContent {
-        ToolbarSpacer(.flexible, placement: .primaryAction)
-        ToolbarItemGroup(placement: .primaryAction) {
-            drawerToolbarButton.labelStyle(.iconOnly)
-            inspectorToolbarButton.labelStyle(.iconOnly)
-        }
-    }
-
+    /// Everything but Run, folded into one menu when the centre column is narrow.
     private var overflowMenu: some View {
         let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
         let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
         return Menu {
             importMenu()
             serverSettingsButton
-            if !appState.requestLogs.isEmpty {
+            Divider()
+            drawerToolbarButton
+            inspectorToolbarButton
+            if unmatchedCount > 0 {
                 Divider()
                 Button("Show unmatched requests (\(unmatchedCount))") {
                     showDrawer = true
@@ -579,19 +619,12 @@ struct WorkspaceView: View {
                 .accessibilityLabel("Show unmatched requests")
             }
         } label: {
-            Label("More actions", systemImage: appState.server.restartRequired
-                  ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+            Label("More", systemImage: appState.server.restartRequired
+                  ? "exclamationmark.arrow.circlepath" : "ellipsis")
                 .labelStyle(.iconOnly)
-                .font(.system(size: DSGlyph.toolbar, weight: .regular))
         }
-        .menuStyle(.button)
         .menuIndicator(.hidden)
-        // A native toolbar otherwise measures this menu as zero on the first compact layout.
-        .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
-        .help(unmatchedCount > 0
-            ? "More actions; \(unmatchedDescription)"
-            : "More actions: import and server settings")
-        .accessibilityElement(children: .combine)
+        .help("Import, server settings, and panels")
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
         .accessibilityValue(unmatchedCount > 0
@@ -602,11 +635,10 @@ struct WorkspaceView: View {
     private var serverSettingsButton: some View {
         Button { showBackendSettings = true } label: {
             Label(
-                appState.server.restartRequired ? "Server settings — restart required" : "Server settings",
-                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "server.rack"
+                appState.server.restartRequired ? "Server settings, restart required" : "Server settings\u{2026}",
+                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "slider.horizontal.3"
             )
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
         .disabled(appState.currentProject == nil)
         .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
         .accessibilityIdentifier("backend.settingsButton")
@@ -617,17 +649,15 @@ struct WorkspaceView: View {
         Binding(
             get: { showInspector },
             set: { value in
-                withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) { showInspector = value }
+                withAnimation(reduceMotion ? nil : DSAnimation.panel) { showInspector = value }
             }
         )
     }
 
     private var drawerToolbarButton: some View {
-        Button { showDrawer.toggle() } label: {
-            Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomhalf.inset.filled")
+        Button { toggleRequestLog() } label: {
+            Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomthird.inset.filled")
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
-        .keyboardShortcut("l", modifiers: [.command, .option])
         .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
         .accessibilityIdentifier("toggleDrawerButton")
         .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
@@ -637,11 +667,13 @@ struct WorkspaceView: View {
         Button { inspectorPresentation.wrappedValue.toggle() } label: {
             Label(showInspector ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
-        .keyboardShortcut("i", modifiers: [.command, .option])
         .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
         .accessibilityIdentifier("toggleInspectorButton")
         .accessibilityLabel(showInspector ? "Hide inspector" : "Show inspector")
+    }
+
+    private func toggleRequestLog() {
+        showDrawer.toggle()
     }
 
     /// Shared by the full toolbar and its compact overflow menu.
@@ -662,7 +694,6 @@ struct WorkspaceView: View {
             if inToolbar {
                 Label("Import", systemImage: "square.and.arrow.down")
                     .labelStyle(.iconOnly)
-                    .font(.system(size: DSGlyph.toolbar, weight: .regular))
             } else {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
@@ -682,13 +713,7 @@ struct WorkspaceView: View {
     /// Every level past the first is a menu over its siblings, so moving to another endpoint in the
     /// same group — or another scenario on this endpoint — never means a round trip to the sidebar.
     private var breadcrumbs: [BreadcrumbJumpBar.Crumb] {
-        var crumbs: [BreadcrumbJumpBar.Crumb] = [
-            BreadcrumbJumpBar.Crumb(
-                id: "project",
-                title: appState.currentProject?.name ?? "Mimic",
-                systemImage: "shippingbox"
-            )
-        ]
+        var crumbs: [BreadcrumbJumpBar.Crumb] = []
 
         switch navigatorTab {
         case .journeys:
@@ -723,7 +748,7 @@ struct WorkspaceView: View {
 
             // The group crumb only earns its place when there are groups to move between.
             let groups = Set(endpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
-            if let group = endpoint.groupTag, !group.isEmpty, groups.count > 1 {
+            if let group = endpoint.groupTag, !group.isEmpty {
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(
                         id: "group",
@@ -743,24 +768,25 @@ struct WorkspaceView: View {
             crumbs.append(
                 BreadcrumbJumpBar.Crumb(
                     id: "endpoint",
-                    title: endpoint.name,
+                    title: "\(endpoint.method.rawValue) \(endpoint.path)",
                     options: siblings.map {
-                        BreadcrumbJumpBar.Option(id: $0.id, title: $0.name, isSelected: $0.id == endpoint.id)
+                        BreadcrumbJumpBar.Option(id: $0.id, title: "\($0.method.rawValue) \($0.path)",
+                                                 isSelected: $0.id == endpoint.id)
                     }
                 )
             )
 
             if !endpoint.scenarios.isEmpty {
+                let edited = appState.editedScenario(of: endpoint)
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(
                         id: "scenario",
-                        title: endpoint.scenarios.first { $0.id == endpoint.activeScenarioID }?.name
-                            ?? "No scenario",
+                        title: edited?.name ?? "No scenario",
                         options: endpoint.scenarios.map {
                             BreadcrumbJumpBar.Option(
                                 id: $0.id,
                                 title: $0.name,
-                                isSelected: $0.id == endpoint.activeScenarioID
+                                isSelected: $0.id == edited?.id
                             )
                         }
                     )
@@ -779,7 +805,7 @@ struct WorkspaceView: View {
             }
         case "scenario":
             guard let endpointID = selectedEndpointID else { return }
-            appState.setActiveScenario(endpointID: endpointID, scenarioID: optionID)
+            appState.editScenario(endpointID: endpointID, scenarioID: optionID)
         case "journey":
             appState.selectedJourneyID = optionID
         default:
@@ -834,24 +860,7 @@ struct WorkspaceView: View {
                     DSNavigatorMode(id: $0.id, title: $0.title, help: $0.help)
                 },
                 selection: navigatorTabBinding
-            ) {
-                switch navigatorTab {
-                case .endpoints:
-                    DSPanelHeaderButton(
-                        systemImage: "plus",
-                        help: "Add endpoint",
-                        identifier: "sidebar.addEndpointButton"
-                    ) {
-                        appState.showNewEndpointSheet = true
-                    }
-                case .journeys:
-                    // A menu, not a button, because there are two ways to start a journey and the
-                    // templates were the ones about to be stranded: they had no entry point outside
-                    // the journeys window, so removing that window would have removed the feature.
-                    // The window offered exactly this menu from its own "+".
-                    addJourneyMenu
-                }
-            }
+            )
 
             Group {
                 switch navigatorTab {
@@ -897,17 +906,17 @@ struct WorkspaceView: View {
                 text: navigatorTab == .endpoints ? $endpointFilter : $journeyFilter,
                 scopeID: $endpointMethodScope,
                 scopes: navigatorTab == .endpoints ? SidebarView.methodScopes : [],
-                placeholder: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
+                placeholder: "Filter",
+                label: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
                 identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
-                focusRequest: appState.navigatorFilterRequest,
-                showsStatus: appState.activeJourney != nil
+                focusRequest: appState.navigatorFilterRequest
             ) {
                 if let active = appState.activeJourney {
                     DSPanelHeaderButton(
                         systemImage: "play.circle.fill",
                         help: "Show active journey: \(active.name)",
                         identifier: "navigator.activeJourney",
-                        tint: DSColors.accent
+                        tint: DSColors.success
                     ) {
                         journeyFilter = ""
                         if let group = active.groupTag {
@@ -917,6 +926,18 @@ struct WorkspaceView: View {
                         appState.selectedJourneyID = active.id
                     }
                     .accessibilityValue("\(active.name), \(activeJourneyProgress ?? "Active")")
+                }
+                switch navigatorTab {
+                case .endpoints:
+                    DSPanelHeaderButton(
+                        systemImage: "plus",
+                        help: "Add endpoint",
+                        identifier: "sidebar.addEndpointButton"
+                    ) {
+                        appState.showNewEndpointSheet = true
+                    }
+                case .journeys:
+                    addJourneyMenu
                 }
             }
         }
@@ -1010,8 +1031,23 @@ struct WorkspaceView: View {
             } ?? [],
             onShowJourneys: { navigatorTab = .journeys },
             onCloseRequestDetail: { selectedLogIDs = [] },
+            endpointSettings: endpoint.map { endpoint in
+                EndpointInspectorSettings.Context(
+                    editedScenarioID: appState.editedScenario(of: endpoint)?.id,
+                    onEditScenario: { appState.editScenario(endpointID: $0, scenarioID: $1) },
+                    globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                    backends: appState.serverConfiguration.listeners,
+                    groups: Set(currentEndpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted(),
+                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: $0, groupTag: $1) },
+                    onUpdateBackend: { appState.updateEndpointBackend(id: $0, backendID: $1) }
+                )
+            },
             onSelectTrafficLog: { selectedLogIDs = [$0] },
-            onAddScenario: { _ = appState.addScenario(endpointID: $0, name: $1) },
+            onAddScenario: { endpointID, name in
+                if let scenario = appState.addScenario(endpointID: endpointID, name: name) {
+                    appState.editScenario(endpointID: endpointID, scenarioID: scenario.id)
+                }
+            },
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
             onDeleteScenario: appState.deleteScenario,

@@ -62,13 +62,8 @@ public struct DSSelectedListRow: ViewModifier {
         content
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.mdPlus)
-                        .fill(DSColors.surfaceElevated)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: DSCornerRadius.mdPlus)
-                                .stroke(DSColors.border, lineWidth: 0.5)
-                        }
-                        .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
+                        .fill(DSColors.selectionSoft)
                 }
             }
     }
@@ -111,7 +106,7 @@ public struct DSProgressSegments: View {
         HStack(spacing: 3) {
             ForEach(Array(states.enumerated()), id: \.offset) { pair in
                 RoundedRectangle(cornerRadius: height / 2)
-                    .fill(pair.element ? DSColors.Journey.accent : DSColors.Journey.accent.opacity(0.22))
+                    .fill(pair.element ? DSColors.accent : DSColors.field)
                     .frame(height: height)
             }
         }

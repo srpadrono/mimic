@@ -452,16 +452,16 @@ final class DSHairlineSplitView: NSSplitView {
         // The band belongs to the pane after it, so it takes that pane's surface and the seam is the
         // hairline closing the pane before it. Drawn rather than left to `dividerColor`, because
         // AppKit would paint the whole band as divider and the window would grow a gutter.
-        NSColor(DSColors.secondary).setFill()
+        NSColor(DSColors.content).setFill()
         rect.fill()
 
         // `DSStroke.seam`, which is the weight `DSDivider` pairs with `panelSeparator` — the colour
         // filled below. Written as a bare `1` this was the one place in the module where the two
         // halves of that pairing could drift apart without anything noticing.
         let seam = isVertical
-            ? NSRect(x: rect.minX, y: rect.minY, width: DSStroke.seam, height: rect.height)
-            : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: DSStroke.seam)
-        NSColor(DSColors.panelSeparator).setFill()
+            ? NSRect(x: rect.minX, y: rect.minY, width: DSStroke.hairline, height: rect.height)
+            : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: DSStroke.hairline)
+        NSColor(DSColors.separator).setFill()
         seam.fill()
     }
 }

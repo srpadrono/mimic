@@ -47,8 +47,8 @@ public struct DSLoadingPlaceholder: View {
     }
 
     private func placeholderBar(width: CGFloat?, height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: DSCornerRadius.xs)
-            .fill(DSColors.tertiary)
+        RoundedRectangle(cornerRadius: DSCornerRadius.mark)
+            .fill(DSColors.field)
             .frame(maxWidth: width ?? .infinity, minHeight: height, maxHeight: height)
     }
 }

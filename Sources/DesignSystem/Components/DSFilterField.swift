@@ -18,11 +18,13 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
     private let focusRequest: Int
+    private let label: String
     @Environment(\.isEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
 
     public init(text: Binding<String>, scopeID: Binding<String>, scopes: [Scope],
-                placeholder: String, identifier: String, focusRequest: Int = 0) {
+                placeholder: String, label: String? = nil, identifier: String, focusRequest: Int = 0) {
+        self.label = label ?? placeholder
         self._text = text
         self._scopeID = scopeID
         self.scopes = scopes
@@ -32,20 +34,23 @@ public struct DSFilterField: View {
     }
 
     public var body: some View {
-        HStack(spacing: DSSpacing.sm) {
-            if !scopes.isEmpty {
+        HStack(spacing: DSSpacing.xs + 2) {
+            if scopes.isEmpty {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: DSGlyph.field, weight: .regular))
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .accessibilityHidden(true)
+            } else {
                 ScopeMenu(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             }
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(DSTypography.label)
+                .font(DSTypography.callout)
                 .focused($isFocused)
                 .accessibilityIdentifier("\(identifier).field")
-                .accessibilityLabel(placeholder)
+                .accessibilityLabel(label)
 
             if !text.isEmpty {
-                // Clearing through the keyboard removes the focused button. Return focus to the
-                // field so the next keystroke starts a new query without another Tab or click.
                 DSClearButton(text: Binding(get: { text }, set: {
                     text = $0
                     isFocused = true
@@ -53,23 +58,14 @@ public struct DSFilterField: View {
                               label: "Clear filter", help: "Clear the filter")
             }
         }
-        .padding(.horizontal, DSSpacing.smPlus)
-        .frame(height: DSControlHeight.search)
-        .background {
-            Capsule()
-                .fill(DSColors.tertiary)
-                .stroke(isFocused ? DSColors.borderFocused : DSColors.border,
-                        lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
-                .contentShape(Capsule())
-                .onTapGesture { if isEnabled { isFocused = true } }
-        }
-        .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
+        .dsFieldChrome(height: DSControlHeight.regular, cornerRadius: DSControlHeight.regular / 2,
+                       isFocused: isFocused)
+        .contentShape(Capsule())
+        .onTapGesture { if isEnabled { isFocused = true } }
         .onChange(of: focusRequest) { _, _ in if isEnabled { isFocused = true } }
-        // Preserve the individual field, scope, and clear identifiers for keyboard and UI tests.
         .accessibilityElement(children: .contain)
     }
 
-    /// The field supplies the bezel; this menu needs only a readable glyph and a full-height target.
     private struct ScopeMenu: View {
         let scopes: [Scope]
         @Binding var scopeID: String
@@ -81,33 +77,27 @@ public struct DSFilterField: View {
             Menu {
                 ScopeOptions(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             } label: {
-                HStack(spacing: DSSpacing.xs) {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: DSGlyph.control, weight: .medium))
+                HStack(spacing: 2) {
+                    Image(systemName: isScoped ? "line.3.horizontal.decrease.circle.fill" : "magnifyingglass")
+                        .font(.system(size: DSGlyph.field, weight: .regular))
                     if isScoped {
                         Text(title)
-                            .font(DSTypography.caption)
+                            .font(DSTypography.caption.weight(.semibold))
                             .lineLimit(1)
-                            .truncationMode(.tail)
                     }
                     Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                        .font(.system(size: DSGlyph.minimum, weight: .bold))
                 }
-                .foregroundStyle(isScoped ? DSColors.accentText
-                                 : isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .padding(.horizontal, DSSpacing.xxs)
-                .frame(height: DSControlHeight.field)
-                .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill((isEnabled && isHovered) || isScoped ? DSColors.accentSubtle : .clear)
-                }
+                .foregroundStyle(isScoped ? DSColors.accent
+                                 : isEnabled && isHovered ? DSColors.labelSecondary : DSColors.labelTertiary)
+                .frame(height: DSControlHeight.regular)
                 .contentShape(Rectangle())
             }
             .onHover { isHovered = isEnabled && $0 }
             .onChange(of: isEnabled) { _, enabled in
                 if !enabled { isHovered = false }
             }
-            .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+            .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)

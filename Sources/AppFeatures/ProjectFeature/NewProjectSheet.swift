@@ -31,17 +31,14 @@ struct NewProjectFormState {
 
 /// Sheet for creating a new project with name and port fields.
 ///
-/// Follows the shared sheet convention: a sentence-case heading inside the sheet, `DSSpacing.lg`
-/// between the heading, the fields and the button row, `DSSpacing.md` between field rows,
-/// `DSSpacing.lg` of outer padding, and a trailing button row with cancel to the left of the
-/// confirm action. A bad port is explained under the port field rather than in an alert.
+/// Headline title, form rows with right-aligned labels, and a trailing Cancel / Create row. A bad
+/// port is explained under the port field rather than in an alert.
 struct NewProjectSheet: View {
     let onConfirm: (String, Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    /// Which field the sheet opens on. Typing has to work the moment the sheet appears; making the
-    /// user click into the first field first is a step macOS never asks for.
+    /// Typing has to work the moment the sheet appears.
     private enum Field: Hashable {
         case name
         case port
@@ -69,15 +66,15 @@ struct NewProjectSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text("New project")
-                .font(DSTypography.title)
+                .font(DSTypography.headline)
                 .foregroundStyle(DSColors.labelPrimary)
+                .accessibilityAddTraits(.isHeader)
 
             VStack(alignment: .leading, spacing: DSSpacing.md) {
-                // No `.accessibilityLabel` here on purpose: `DSTextField` already labels its own
-                // input, and a label on the wrapper would shadow the validation text underneath it —
-                // VoiceOver would repeat the field name instead of reading the error.
+                // `DSTextField` labels its own input; a label on the wrapper would hide the
+                // validation text from VoiceOver.
                 DSTextField(
-                    "Project name",
+                    "Name",
                     text: $form.projectName,
                     placeholder: "My API Mock",
                     identifier: "newProject.name"
@@ -86,25 +83,32 @@ struct NewProjectSheet: View {
                 .focused($focusedField, equals: .name)
                 .onSubmit { confirmIfValid() }
 
-                DSTextField(
-                    "Server port",
-                    text: $form.portString,
-                    placeholder: "8080",
-                    validation: portValidationMessage,
-                    validationIdentifier: "newProject.port.error",
-                    inputIdentifier: "serverPortField",
-                    identifier: "newProject.port"
-                )
-                .focused($focusedField, equals: .port)
-                .onSubmit { confirmIfValid() }
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                    DSTextField(
+                        "Port",
+                        text: $form.portString,
+                        placeholder: "8080",
+                        validation: portValidationMessage,
+                        validationIdentifier: "newProject.port.error",
+                        controlWidth: DSFormMetrics.portFieldWidth,
+                        inputIdentifier: "serverPortField",
+                        monospaced: true,
+                        identifier: "newProject.port"
+                    )
+                    .focused($focusedField, equals: .port)
+                    .onSubmit { confirmIfValid() }
+
+                    DSFormHint(portHint)
+                        .accessibilityIdentifier("newProject.port.hint")
+                }
             }
 
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.sm) {
                 Spacer()
                 DSButton(
                     "Cancel",
-                    variant: .ghost,
-                    size: .medium,
+                    variant: .secondary,
+                    size: .large,
                     identifier: "newProject.cancel",
                     action: dismiss.callAsFunction
                 )
@@ -115,7 +119,7 @@ struct NewProjectSheet: View {
                 DSButton(
                     "Create project",
                     variant: .primary,
-                    size: .medium,
+                    size: .large,
                     identifier: "newProject.create",
                     action: confirmIfValid
                 )
@@ -124,10 +128,20 @@ struct NewProjectSheet: View {
                 .disabled(!form.canCreate)
                 .keyboardShortcut(.defaultAction)
             }
+            .padding(.top, DSSpacing.sm)
         }
-        .padding(DSSpacing.lg)
-        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .padding(DSSpacing.xl)
+        .frame(width: DSSheetWidth.compact)
+        .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
+    }
+
+    /// Where the app under test should point, once the port is usable.
+    private var portHint: String {
+        guard form.isPortValid, let port = form.portValue else {
+            return "Your app connects to this port on localhost."
+        }
+        return "Your app connects to http://localhost:\(port)."
     }
 
     /// Silent until there is something to complain about: an empty port field is a form you have not

@@ -7,9 +7,9 @@ public struct DSHeaderChrome: ViewModifier {
 
     public func body(content: Content) -> some View {
         content
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSBarHeight.panelHeader)
-            .background(DSColors.secondary)
+            .padding(.leading, 14)
+            .padding(.trailing, DSSpacing.md)
+            .frame(height: DSBarHeight.paneHeader)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(DSColors.separator)

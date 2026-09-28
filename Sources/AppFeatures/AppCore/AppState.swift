@@ -20,6 +20,26 @@ final class AppState {
 
     var projectRenameTarget: ProjectRenameTarget?
     var navigatorFilterRequest = 0
+    /// View menu requests for the workspace's panels. The menu lives above the window that owns
+    /// the panels, so it bumps a counter and the window mirrors back what is showing.
+    var requestLogToggleRequest = 0
+    var inspectorToggleRequest = 0
+    var isRequestLogVisible = true
+    var isInspectorVisible = true
+    /// The scenario open in the editor for each endpoint, when it is not the live one.
+    var editedScenarioIDs: [UUID: UUID] = [:]
+
+    /// The scenario the editor shows: the one picked in the inspector, else the live one.
+    func editedScenario(of endpoint: Endpoint) -> Scenario? {
+        if let id = editedScenarioIDs[endpoint.id], let scenario = endpoint.scenarios.first(where: { $0.id == id }) {
+            return scenario
+        }
+        return endpoint.scenarios.first { $0.id == endpoint.activeScenarioID }
+    }
+
+    func editScenario(endpointID: UUID, scenarioID: UUID) {
+        editedScenarioIDs[endpointID] = scenarioID
+    }
 
     let server: MockServerRuntime
     let projects: ProjectWorkspace
@@ -457,12 +477,13 @@ final class AppState {
         scenarioID: UUID,
         statusCode: Int? = nil,
         headers: [String: String]? = nil,
-        body: String? = nil
+        body: String? = nil,
+        contentType: Scenario.ContentType? = nil
     ) {
         _ = run(.scenarioUpdate(
             endpoint: .id(endpointID),
             scenario: .id(scenarioID),
-            spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body)
+            spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body, contentType: contentType)
         ))
     }
 
@@ -584,6 +605,7 @@ final class AppState {
 
     func setActiveScenario(endpointID: UUID, scenarioID: UUID) {
         _ = run(.scenarioActivate(endpoint: .id(endpointID), scenario: .id(scenarioID)))
+        editedScenarioIDs[endpointID] = scenarioID
     }
 
     func duplicateScenario(endpointID: UUID, scenarioID: UUID) -> Scenario? {

@@ -1,4 +1,5 @@
 import SwiftUI
+import Domain
 import DesignSystem
 
 /// The jump bar above the centre pane: where you are, and a way to go somewhere else without
@@ -27,13 +28,12 @@ import DesignSystem
 ///   from VoiceOver: they are the `▸` in the path, not something you can press.
 /// - **The bar never widens the window.** At narrow centre widths, parent locations move into a
 ///   menu so the current endpoint and scenario remain readable without losing sideways navigation.
+/// The one bar under the toolbar: where you are, as a trail of menus, with the autosave state at the
+/// end. Back and forward live in the toolbar.
 struct BreadcrumbJumpBar: View {
     @State private var isEarlierHovered = false
-    /// Deliberately shorter than `DSBarHeight.panelHeader`, but tall enough for 13pt crumbs. See the
-    /// type's note — `secondaryBar` is the rung that exists for this bar.
-    static var height: CGFloat { DSBarHeight.secondaryBar }
+    static var height: CGFloat { DSBarHeight.jumpBar }
 
-    /// One level of the path.
     struct Crumb: Identifiable, Equatable {
         /// Stable per *level*, not per value — "group", "endpoint", "scenario". The bar hands it back
         /// with the chosen option so the caller knows which level moved, and it keeps the
@@ -67,27 +67,17 @@ struct BreadcrumbJumpBar: View {
     }
 
     let crumbs: [Crumb]
-    let canGoBack: Bool
-    let canGoForward: Bool
-    /// (crumb id, chosen option id)
     let onSelectOption: (String, UUID) -> Void
-    let onBack: () -> Void
-    let onForward: () -> Void
+    let autosaveStatus: AutosaveStatus
 
     init(
         crumbs: [Crumb],
-        canGoBack: Bool = false,
-        canGoForward: Bool = false,
-        onSelectOption: @escaping (String, UUID) -> Void,
-        onBack: @escaping () -> Void = {},
-        onForward: @escaping () -> Void = {}
+        autosaveStatus: AutosaveStatus = .idle,
+        onSelectOption: @escaping (String, UUID) -> Void
     ) {
         self.crumbs = crumbs
-        self.canGoBack = canGoBack
-        self.canGoForward = canGoForward
+        self.autosaveStatus = autosaveStatus
         self.onSelectOption = onSelectOption
-        self.onBack = onBack
-        self.onForward = onForward
     }
 
     var body: some View {
@@ -95,61 +85,33 @@ struct BreadcrumbJumpBar: View {
             barContent(compact: geometry.size.width < 440 && crumbs.count > 2)
         }
         .frame(height: Self.height)
-        .background(DSColors.band)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(DSColors.separator)
-                .frame(height: DSStroke.hairline)
-        }
         .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("breadcrumb")
     }
 
     private func barContent(compact: Bool) -> some View {
-        HStack(spacing: DSSpacing.xs) {
-            BreadcrumbHistoryButton(
-                systemImage: "chevron.left",
-                label: "Go back",
-                identifier: "breadcrumb.back",
-                isEnabled: canGoBack,
-                action: onBack
-            )
-
-            BreadcrumbHistoryButton(
-                systemImage: "chevron.right",
-                label: "Go forward",
-                identifier: "breadcrumb.forward",
-                isEnabled: canGoForward,
-                action: onForward
-            )
-
-            HStack(spacing: DSSpacing.xs) {
-                if compact {
-                    earlierLocationsMenu
+        HStack(spacing: 6) {
+            if compact {
+                earlierLocationsMenu
+                BreadcrumbSeparator()
+            }
+            ForEach(Array(crumbs.enumerated()).filter { !compact || $0.offset >= crumbs.count - 2 }, id: \.element.id) { pair in
+                if pair.offset > (compact ? crumbs.count - 2 : 0) {
                     BreadcrumbSeparator()
                 }
-                ForEach(Array(crumbs.enumerated()).filter { !compact || $0.offset >= crumbs.count - 2 }, id: \.element.id) { pair in
-                    if pair.offset > (compact ? crumbs.count - 2 : 0) {
-                        BreadcrumbSeparator()
-                    }
-                    BreadcrumbCrumbView(
-                        crumb: pair.element,
-                        isLast: pair.offset == crumbs.count - 1,
-                        onSelect: { optionID in onSelectOption(pair.element.id, optionID) }
-                    )
-                }
+                BreadcrumbCrumbView(
+                    crumb: pair.element,
+                    isLast: pair.offset == crumbs.count - 1,
+                    onSelect: { optionID in onSelectOption(pair.element.id, optionID) }
+                )
+                .layoutPriority(pair.offset == crumbs.count - 1 ? 1 : 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: DSSpacing.sm)
+            AutosaveStatusIndicator(status: autosaveStatus)
+                .fixedSize()
         }
-        // `md`, matching every other bar's inset. At `sm` this one was inset 6 while everything
-        // under it was inset 12, which read as the bar being slightly out of true.
-        //
-        // Note what this does *not* claim: the first crumb does not land on the editor header's x.
-        // The two history arrows come first, so the trail starts ~44pt further in. That is Xcode's
-        // jump bar too — its path also begins after its back/forward pair — so the offset is the
-        // shape of the control, not a misalignment to chase.
-        .padding(.horizontal, DSSpacing.md)
+        .padding(.horizontal, 14)
         .frame(height: Self.height)
     }
 
@@ -166,13 +128,12 @@ struct BreadcrumbJumpBar: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(DSTypography.label)
+                .font(DSTypography.callout)
                 .foregroundStyle(isEarlierHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: DSBarHeight.secondaryBar - DSSpacing.xs,
-                       height: DSBarHeight.secondaryBar - DSSpacing.xs)
+                .frame(width: 22, height: 22)
                 .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm, style: .continuous)
-                        .fill(isEarlierHovered ? DSColors.accentSubtle : Color.clear)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
+                        .fill(isEarlierHovered ? DSColors.hover : Color.clear)
                 }
                 .contentShape(.rect)
         }
@@ -180,7 +141,7 @@ struct BreadcrumbJumpBar: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .onHover { isEarlierHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isEarlierHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isEarlierHovered)
         .help("Earlier locations")
         .accessibilityIdentifier("breadcrumb.earlierLocations")
         .accessibilityLabel("Earlier locations")
@@ -252,7 +213,7 @@ private struct BreadcrumbCrumbView: View {
             // the trail read as widely-spaced words rather than a path. Without it the crumb takes
             // its natural width and the cap only bites on a genuinely long name.
             .onHover { isHovered = $0 }
-            .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+            .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
             .help(crumb.title)
             .accessibilityIdentifier("breadcrumb.crumb.\(crumb.id)")
             .accessibilityLabel(crumb.title)
@@ -264,54 +225,33 @@ private struct BreadcrumbCrumbView: View {
     }
 
     private func content(color: Color) -> some View {
-        HStack(spacing: DSSpacing.xxs) {
-            if let systemImage = crumb.systemImage {
-                Image(systemName: systemImage)
-                    // `inlineSmall`: this qualifies the crumb's title rather than being what makes
-                    // the crumb pressable — the chevron below is that.
-                    .font(.system(size: DSGlyph.inlineSmall, weight: .medium))
-                    .accessibilityHidden(true)
-            }
-
-            // 13pt label, above the 11pt caption: a path you cannot read at a glance is decoration. The
-            // crumb you are on carries medium weight so the end of the path is the part that reads
-            // first — the one place in this file `fontWeight` earns itself.
+        HStack(spacing: 4) {
             Text(crumb.title)
-                .font(isLast ? DSTypography.labelMedium : DSTypography.label)
+                .font(isLast ? DSTypography.calloutMedium : DSTypography.callout)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                // No `.frame(maxWidth:)`. `maxWidth` caps *and* expands: given a row with slack it
-                // made every crumb 200pt wide, and the path rendered as widely-spaced words rather
-                // than a trail. A plain `Text` with `.lineLimit(1)` already does what is wanted —
-                // it reports its ideal width, takes no more, and truncates when the row runs out.
-                // The bar's `.clipped()` is what stops a very long name overflowing.
 
-            // The affordance, drawn only where there is somewhere to go. Deliberately tertiary and
-            // 8pt: it marks the crumb as pressable without competing with the title it follows.
-            if crumb.options.isEmpty == false {
+            if isLast, crumb.options.isEmpty == false {
                 Image(systemName: "chevron.up.chevron.down")
-                    // `indicator`, which sits on `DSGlyph.minimum` — the floor. At 7 the affordance
-                    // that says "this crumb is a menu" was a smudge, which is the same as not having
-                    // it. `DSFilterField`'s scope pill draws the identical mark at the identical rung.
-                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
+                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
                     .foregroundStyle(DSColors.labelTertiary)
                     .accessibilityHidden(true)
             }
         }
         .foregroundStyle(color)
+        .padding(.horizontal, 3)
+        .frame(height: 22)
+        .contentShape(.rect)
     }
 }
 
-// MARK: - Separator
 
-/// The `▸` between two crumbs. Punctuation, not a control — hence hidden from VoiceOver, which
-/// would otherwise read "chevron right" between every level of the path.
 private struct BreadcrumbSeparator: View {
     var body: some View {
         Image(systemName: "chevron.right")
             // `indicator` — a mark that annotates something else and never speaks on its own, which
             // is exactly what punctuation between two crumbs is.
-            .font(.system(size: DSGlyph.indicator, weight: .semibold))
+            .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
             .foregroundStyle(DSColors.labelTertiary)
             .accessibilityHidden(true)
     }
@@ -324,64 +264,6 @@ private struct BreadcrumbSeparator: View {
 /// The icon is a `Label` with the text styled away rather than a bare `Image`, so VoiceOver and Voice
 /// Control still have something to say, and the 18pt frame plus `contentShape` gives it a hit target
 /// rather than the ~10pt the glyph would offer on its own.
-private struct BreadcrumbHistoryButton: View {
-    let systemImage: String
-    let label: String
-    let identifier: String
-    let isEnabled: Bool
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Label(label, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-                // `inline`, a rung below the `control` a panel-header button takes: this bar is
-                // `DSBarHeight.secondaryBar` and its arrows sit in an 18pt frame rather than a 26pt
-                // one, so a glyph at the control tier would stand proud of the chrome around it.
-                .font(.system(size: DSGlyph.inline, weight: .semibold))
-                .foregroundStyle(foreground)
-                .frame(width: 18, height: 18)
-                .background(
-                    // `sm`, like every other hover well in the window — `DSHoverModifier`, the sidebar rows,
-                // the scenario rows, `DSPanelHeaderButton` and the editor's more menu all use it. This
-                // was the only one at `xs`.
-                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(isHovered && isEnabled ? DSColors.accentSubtle : Color.clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-        .help(label)
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(label)
-    }
-
-    private var foreground: Color {
-        // `labelTertiary` alone. Compounding it with `.opacity(0.4)` gave 14% effective alpha —
-        // below AppKit's own ~25% `disabledControlTextText`, where a control stops reading as
-        // disabled and starts reading as a drawing glitch.
-        guard isEnabled else { return DSColors.labelTertiary }
-        return isHovered ? DSColors.labelPrimary : DSColors.labelSecondary
-    }
-}
-
-// MARK: - Navigation history
-
-/// Back/forward history for the centre pane, in the shape a browser uses.
-///
-/// `nonisolated` because this is arithmetic over an array: it has no actor affinity, and keeping it
-/// off the main actor means it can be exercised as a plain value in tests rather than through a view.
-///
-/// Two rules make it feel like a browser rather than an undo stack: a new visit throws away
-/// everything ahead of the cursor, and re-visiting the item you are already on does nothing at all.
-/// Without the second rule, clicking the selected sidebar row — which the app does on every
-/// re-selection, including the ones it triggers itself — would stack duplicates until "back" walked
-/// you through the same endpoint a dozen times.
 nonisolated struct NavigationHistory<Item: Equatable>: Equatable {
     /// Enough to retrace a working session, small enough that the array never becomes a leak.
     static var capacity: Int { 50 }
@@ -472,28 +354,16 @@ nonisolated struct NavigationHistory<Item: Equatable>: Equatable {
 #Preview("Breadcrumb jump bar") {
     BreadcrumbJumpBar(
         crumbs: [
-            .init(
-                id: "group",
-                title: "Checkout",
-                systemImage: "folder",
-                options: [
-                    .init(title: "Checkout", isSelected: true),
-                    .init(title: "Accounts"),
-                ]
-            ),
-            .init(
-                id: "endpoint",
-                title: "POST /v1/orders",
-                options: [
-                    .init(title: "POST /v1/orders", isSelected: true),
-                    .init(title: "GET /v1/orders/{id}"),
-                ]
-            ),
-            .init(id: "scenario", title: "Happy path"),
+            .init(id: "group", title: "Checkout",
+                  options: [.init(title: "Checkout", isSelected: true), .init(title: "Accounts")]),
+            .init(id: "endpoint", title: "POST /v1/orders",
+                  options: [.init(title: "POST /v1/orders", isSelected: true), .init(title: "GET /v1/orders/{id}")]),
+            .init(id: "scenario", title: "Happy path",
+                  options: [.init(title: "Happy path", isSelected: true), .init(title: "Declined")]),
         ],
-        canGoBack: true,
+        autosaveStatus: .saved,
         onSelectOption: { _, _ in }
     )
-    .frame(width: 420)
-    .background(DSColors.dominant)
+    .frame(width: 520)
+    .background(DSColors.content)
 }

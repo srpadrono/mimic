@@ -5,80 +5,59 @@ import SpecImport
 
 // MARK: - Column geometry
 
-/// The one place the review table's column widths live.
-///
-/// Same shape as `LogColumns` in the request log, and for the same reason: a header row and a
-/// hundred body rows have to agree on where a column starts, and they only stay agreeing if the
-/// numbers are written once.
+/// The review table's column widths, written once so the header and every row agree.
 private enum ImportColumns {
-    /// Matches the sidebar's method column, so a candidate and the endpoint it becomes line up.
-    static let method: CGFloat = 58
-    /// The name the endpoint will be created with.
-    static let name: CGFloat = 120
-    static let status: CGFloat = 42
-    static let size: CGFloat = 80
-    /// Seats the "Duplicate" pill and the binary/body-drop labels at the operational text size.
-    static let flag: CGFloat = 134
-    /// The checkbox, plus the gap the list puts either side of it.
-    static let toggle: CGFloat = 18
-    // path is flexible — takes the remaining space
+    static let toggle: CGFloat = 16
+    static let method: CGFloat = DSLayout.methodColumn
+    static let name: CGFloat = 144
+    static let status: CGFloat = 56
+    static let size: CGFloat = 64
+    static let note: CGFloat = 144
+    // path is flexible and takes the remaining space
 }
 
-/// One row of a dense table — ``DSRowHeight/importRow`` — and the fills and the ink that row
-/// draws. Its height is the review table's own rung, with enough room for method and flag labels.
+/// One row of the review table: its height, its fills, and the ink its warnings use.
 ///
-/// Internal rather than private so the contrast tests can measure *what the window paints* rather
-/// than a copy of it. A bed list written out inside a test is the blind spot every contrast failure
-/// in this repository has come through, and both values below are load-bearing.
+/// Internal so the contrast tests measure what the window paints.
 enum ImportRow {
-    static let height = DSRowHeight.importRow
+    static let height = DSRowHeight.list
 
-    /// The ink every warning on a candidate row is drawn in: the "Duplicate" pill, the "Binary body"
-    /// and "Body dropped" flags, and the size of a body that will be dropped.
-    ///
-    /// ``DSColors/warningText``, not ``DSColors/warning``, for all four. The base amber is measured
-    /// as a plain word on a plain surface, and a candidate row is neither — it stripes, it washes
-    /// under the pointer, and the duplicate flag fills itself with a tint of its own colour. Read on
-    /// the wash below, base amber lands at **4.43** against the ``DSColors/surfaceElevated`` token
-    /// and **4.23** on a panel, both under the 4.5 this palette holds itself to, and it was 4.17 and
-    /// 4.01 while that wash was drawn at full strength.
-    ///
-    /// On the system material a sheet is really painted with, the same word *clears* — by **0.02** at
-    /// its worst, which is the thinnest margin anything in this palette passes on, and a margin that
-    /// belongs to a surface no token in this app names. That is the whole argument for moving: the
-    /// readability of a flag should not turn on which material a sheet turns out to have. This
-    /// token's worst reading anywhere on the row is **5.69**, and
-    /// `ImportReviewRowContrastTests` takes all of them, on every bed
-    /// ``background(isHovered:rowIndex:)`` can produce, over each of the three candidate surfaces.
-    ///
-    /// The footer's two summary labels keep the base ``DSColors/warning``: nothing stripes or washes
-    /// beneath them, which is the plain word on a plain surface that token is measured for.
-    static let warningInk = DSColors.warningText
+    /// The ink for every warning on a candidate row: the note chips and an oversized body's size.
+    static let warningInk = DSColors.warning
 
     /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing.
-    ///
-    /// Striped like the request log — at this density the eye needs help tracking one row across six
-    /// columns — and hovered at the same strength, ``DSColors/accentSubtle`` at 60%. Full strength is
-    /// what the request log reserves for a *selected* row, which is the strongest statement a row can
-    /// make and not one to spend on the pointer passing over. The weaker wash is also what keeps the
-    /// duplicate flag above AA on a dark sheet, where the full-strength bed reads 4.43.
     static func background(isHovered: Bool, rowIndex: Int) -> Color {
-        if isHovered { return DSColors.accentSubtle.opacity(0.6) }
-        return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
+        if isHovered { return DSColors.hover }
+        return rowIndex % 2 == 0 ? .clear : DSColors.zebra
+    }
+
+    /// Whether a candidate carries anything the reviewer should look at before importing.
+    static func needsReview(_ candidate: ImportCandidate) -> Bool {
+        candidate.isDuplicate
+            || candidate.bodyIsBinary
+            || candidate.bodySizeExceedsLimit
+            || candidate.bodyIsUnavailable
+            || candidate.statusCode == 206
+            || ImportCommitter.rejection(for: candidate) != nil
     }
 }
 
-/// Shared review list for import flows (HAR and OpenAPI).
-///
-/// Built for two hundred rows rather than three. A real HAR is a browsing session, so this is a
-/// table, not a form: one line per candidate, a header naming the columns, and the four facts that
-/// decide whether a row is wanted — method, path, status, and whether it already exists — each in a
-/// fixed column you can scan down.
+/// Shared review list for import flows (HAR and OpenAPI): a filter bar, a dense table with one
+/// line per candidate, and a footer with the notes and the commit action.
 struct ImportReviewList: View {
     @Binding var candidates: [ImportCandidate]
     let cancelIdentifier: String
     let onCancel: () -> Void
     let onImport: () -> Void
+
+    private enum Scope: Hashable {
+        case all
+        case selected
+        case needsReview
+    }
+
+    @State private var filterText = ""
+    @State private var scope: Scope = .all
 
     public init(
         candidates: Binding<[ImportCandidate]>,
@@ -93,216 +72,256 @@ struct ImportReviewList: View {
     }
 
     public var body: some View {
-        // A `VStack`, because this used to be a bare `TupleView`: five siblings with no container,
-        // laid out correctly only because the one caller happened to embed it in a stack. Rendered
-        // anywhere else — a preview, a test host — the pieces landed on top of each other.
+        let visible = visibleIndices
         VStack(spacing: 0) {
-            header
-            columnHeader
+            toolbar
+                .padding(.horizontal, DSSpacing.xl)
+                .padding(.bottom, DSSpacing.md)
 
-            // `.standard`, like the rule four lines below it and like every other band closer in the
-            // window. This was the one the divider sweep missed.
             DSDivider(style: .standard, identifier: "import.summary")
 
-            candidateList
+            VStack(spacing: 0) {
+                columnHeader(visible: visible)
+                DSDivider(style: .standard, identifier: "import.columns")
+                candidateList(visible: visible)
+            }
+            .background(DSColors.content)
 
-            DSDivider(identifier: "import.footer")
+            DSDivider(style: .standard, identifier: "import.footer")
 
             footer
         }
     }
 
-    // MARK: - Chrome
+    // MARK: - Toolbar
 
-    /// The panel's own controls, in the panel's own header — title left, controls right, like
-    /// every other panel in the app.
-    ///
-    /// "Select all" and "Deselect all" used to be `.plain` buttons in accent text sitting next to a
-    /// label in the same size: nothing said they were controls except their colour, and they had no
-    /// hit target beyond the width of the words.
-    ///
-    /// `.secondary` at `.small` is the panel-row well — 24pt, `DSCornerRadius.sm`, a 0.5pt hairline
-    /// — so these two match each other and match the controls in the request log's header. Not
-    /// `.ghost`: a ghost button is a link, which is what these already looked like and the reason
-    /// nobody could find them.
-    private var header: some View {
-        DSPanelHeader("Endpoints found", identifier: "import.review") {
-            HStack(spacing: DSSpacing.sm) {
-                Text("\(selectedCount) of \(candidates.count) selected")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .accessibilityIdentifier("import.selectionCount")
+    private var toolbar: some View {
+        HStack(spacing: DSSpacing.md) {
+            DSFilterField(
+                text: $filterText,
+                scopeID: .constant(""),
+                scopes: [],
+                placeholder: "Filter by path",
+                label: "Filter endpoints by path",
+                identifier: "import.filter"
+            )
+            .frame(minWidth: 140, maxWidth: 240)
 
-                DSButton(
-                    "Select all",
-                    variant: .secondary,
-                    size: .small,
-                    identifier: "import.selectAll"
-                ) {
-                    setAll(selected: true)
-                }
-                // A control that cannot change anything should say so rather than click emptily.
-                .disabled(selectedCount == candidates.count)
-                .accessibilityIdentifier("import.selectAll")
-                .accessibilityLabel("Select all endpoints")
+            DSSegmentedControl(
+                "Show",
+                segments: [
+                    .init("All", value: Scope.all, identifier: "import.scope.all"),
+                    .init("Selected", value: Scope.selected, count: selectedCount,
+                          identifier: "import.scope.selected"),
+                    .init("Needs review", value: Scope.needsReview, count: needsReviewCount,
+                          countColor: needsReviewCount > 0 ? DSColors.warning : nil,
+                          help: "Duplicates, bodies that will not import, and rows that cannot import",
+                          identifier: "import.scope.needsReview")
+                ],
+                selection: $scope,
+                identifier: "import.scope"
+            )
 
-                DSButton(
-                    "Deselect all",
-                    variant: .secondary,
-                    size: .small,
-                    identifier: "import.deselectAll"
-                ) {
-                    setAll(selected: false)
-                }
-                .disabled(selectedCount == 0)
-                .accessibilityIdentifier("import.deselectAll")
-                .accessibilityLabel("Deselect all endpoints")
+            Spacer(minLength: DSSpacing.sm)
+
+            Text("\(selectedCount) of \(candidates.count) selected")
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelSecondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+                .accessibilityIdentifier("import.selectionCount")
+
+            DSButton("Select all", variant: .secondary, size: .medium, identifier: "import.selectAll") {
+                setAll(selected: true)
             }
+            .disabled(selectedCount == candidates.count)
+            .accessibilityIdentifier("import.selectAll")
+            .accessibilityLabel("Select all endpoints")
+
+            DSButton("Deselect all", variant: .secondary, size: .medium, identifier: "import.deselectAll") {
+                setAll(selected: false)
+            }
+            .disabled(selectedCount == 0)
+            .accessibilityIdentifier("import.deselectAll")
+            .accessibilityLabel("Deselect all endpoints")
         }
     }
 
-    /// Names the columns. Five unlabelled ones read as a row of unrelated fragments — is "200" a
-    /// status or a count? — and at two hundred rows you scan a column, not a row.
-    private var columnHeader: some View {
+    // MARK: - Table
+
+    private func columnHeader(visible: [Int]) -> some View {
         HStack(spacing: DSSpacing.sm) {
-            Color.clear
-                .frame(width: ImportColumns.toggle, height: 1)
-                .accessibilityHidden(true)
+            // Selects or clears the rows currently shown; mixed when only some are selected.
+            Toggle(sources: visible.map { $candidates[$0] }, isOn: \.isSelected) {
+                Text("Select shown endpoints")
+            }
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .controlSize(.small)
+            .disabled(visible.isEmpty)
+            .frame(width: ImportColumns.toggle, alignment: .leading)
+            .help("Select or clear the endpoints shown")
+            .accessibilityIdentifier("import.selectShown")
+
             columnTitle("Method", width: ImportColumns.method)
             columnTitle("Path", width: nil)
             columnTitle("Name", width: ImportColumns.name)
             columnTitle("Status", width: ImportColumns.status)
-            columnTitle("Size", width: ImportColumns.size)
-            columnTitle("", width: ImportColumns.flag)
+            columnTitle("Size", width: ImportColumns.size, alignment: .trailing)
+            columnTitle("Note", width: ImportColumns.note)
         }
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: DSBarHeight.columnHeader)
-        // The same band the request log's column strip wears — the two are the same row doing the
-        // same job, and until now they were the same magic `0.6` written out twice.
-        .background(DSColors.band)
-        .accessibilityHidden(true)
+        .padding(.horizontal, DSSpacing.md + DSSpacing.sm)
+        .frame(height: DSRowHeight.table + 2)
     }
 
-    private func columnTitle(_ title: String, width: CGFloat?) -> some View {
+    private func columnTitle(_ title: String, width: CGFloat?, alignment: Alignment = .leading) -> some View {
         Text(title)
-            .font(DSTypography.label)
-            // Column titles carry the meaning of the numbers under them — see the note above.
+            .font(DSTypography.captionSemibold)
             .foregroundStyle(DSColors.labelSecondary)
-            .frame(width: width, alignment: .leading)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .lineLimit(1)
+            .frame(width: width, alignment: alignment)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: alignment)
+            .accessibilityHidden(true)
     }
 
-    // MARK: - List
-
-    /// A `ScrollView` over a `LazyVStack` rather than a `List`, matching the request log. A `List`
-    /// applies its own row insets, which a header row outside it cannot see — so the columns and
-    /// their titles drifted apart by however much the platform felt like inserting that release.
-    private var candidateList: some View {
+    /// A `ScrollView` over a `LazyVStack` rather than a `List`, so rows share the header's insets.
+    private func candidateList(visible: [Int]) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // Identity from the candidate, position from the enumeration — the same pairing the
-                // request log uses, so a row keeps its state when the list is re-parsed and the
-                // stripe still knows whether it is odd or even.
-                ForEach(Array(candidates.enumerated()), id: \.element.id) { index, _ in
-                    ImportCandidateRow(candidate: $candidates[index], rowIndex: index)
+                // `index` is the candidate's position in the full list, so row identifiers stay
+                // stable while filtering; `position` drives the zebra stripe.
+                ForEach(Array(visible.enumerated()), id: \.element) { position, index in
+                    ImportCandidateRow(candidate: $candidates[index], rowIndex: index, stripeIndex: position)
+                        .id(candidates[index].id)
                 }
             }
+            .padding(.horizontal, DSSpacing.md)
         }
         .frame(maxHeight: .infinity)
+        .overlay {
+            if visible.isEmpty {
+                DSEmptyState(
+                    heading: "No matching endpoints",
+                    message: "Try a different filter.",
+                    prominence: .compact,
+                    identifier: "import.noMatches"
+                )
+            }
+        }
         .accessibilityIdentifier("import.candidateList")
-        // Paired: the identifier above would otherwise be reported by every row inside it, and the
-        // per-row `import.toggle.<id>` identifiers would vanish from the accessibility tree.
+        // Paired so rows keep their own identifiers inside the list.
         .accessibilityElement(children: .contain)
     }
 
     // MARK: - Footer
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            // Multiple import notices must stack. In one HStack they competed with each other and
-            // with the actions, so a capture containing binary, oversized, and duplicate entries
-            // compressed every warning into an unreadable fragment at the sheet's minimum width.
+        HStack(alignment: .center, spacing: DSSpacing.sm) {
+            // Notes stack so several can show at the sheet's minimum width.
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 if candidates.contains(where: { $0.bodySizeExceedsLimit }) {
-                    Label("Bodies over 1 MB are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warning)
-                        .accessibilityIdentifier("import.bodySizeWarning")
+                    note("Bodies over 1 MB are deselected; selecting them imports without a body",
+                         identifier: "import.bodySizeWarning")
                 }
-
                 if candidates.contains(where: { $0.bodyIsBinary }) {
-                    Label("Binary bodies are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warning)
-                        .accessibilityIdentifier("import.binaryBodyWarning")
+                    note("Binary bodies are deselected; selecting them imports without a body",
+                         identifier: "import.binaryBodyWarning")
                 }
-
                 if candidates.contains(where: { $0.bodyIsUnavailable }) {
-                    Label("Missing captured bodies are deselected; selecting them imports without a body", systemImage: "exclamationmark.triangle")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warning)
-                        .accessibilityIdentifier("import.unavailableBodyWarning")
+                    note("Missing captured bodies are deselected; selecting them imports without a body",
+                         identifier: "import.unavailableBodyWarning")
                 }
-
                 if candidates.contains(where: { $0.statusCode == 206 }) {
-                    Label("Partial responses cannot be imported; capture a complete response", systemImage: "exclamationmark.triangle")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warning)
-                        .accessibilityIdentifier("import.partialResponseWarning")
+                    note("Partial responses cannot be imported; capture a complete response",
+                         identifier: "import.partialResponseWarning")
                 }
-
                 if candidates.contains(where: { $0.statusCode != 206 && ImportCommitter.rejection(for: $0) != nil }) {
-                    Label("Some entries cannot be imported; review the reason below each row", systemImage: "exclamationmark.triangle")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warning)
-                        .accessibilityIdentifier("import.invalidCandidateWarning")
+                    note("Some entries cannot be imported; review the reason below each row",
+                         identifier: "import.invalidCandidateWarning")
                 }
-
-                // Duplicates are pre-answered, not erroneous and not a loss of data.
+                // Duplicates are pre-answered, not an error, so the note is neutral.
                 if candidates.contains(where: { $0.isDuplicate }) {
-                    Label("Duplicates are deselected by default", systemImage: "doc.on.doc")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .accessibilityIdentifier("import.duplicateWarning")
+                    note("Duplicates are deselected by default", systemImage: "doc.on.doc",
+                         tint: DSColors.labelTertiary, identifier: "import.duplicateWarning")
                 }
-
                 Text("Text bodies are saved as captured. Use the eye button to preview them before importing.")
                     .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("import.capturedBodyNotice")
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: DSSpacing.md) {
-                Spacer(minLength: DSSpacing.md)
-
-                DSButton("Cancel", variant: .ghost, size: .medium, identifier: "import.cancel") {
-                    onCancel()
-                }
-                .accessibilityIdentifier(cancelIdentifier)
-                .accessibilityLabel("Cancel")
-                .keyboardShortcut(.cancelAction)
-
-                DSButton(
-                    "Import \(selectedCount) endpoint\(selectedCount == 1 ? "" : "s")",
-                    variant: .primary,
-                    size: .medium,
-                    identifier: "import.commit"
-                ) {
-                    onImport()
-                }
-                .disabled(selectedCount == 0)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("import.importButton")
-                .accessibilityLabel("Import selected endpoints")
-                .accessibilityValue("\(selectedCount) selected")
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "import.cancel") {
+                onCancel()
             }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityIdentifier(cancelIdentifier)
+            .accessibilityLabel("Cancel")
+
+            DSButton(
+                "Import \(selectedCount) endpoint\(selectedCount == 1 ? "" : "s")",
+                variant: .primary,
+                size: .large,
+                identifier: "import.commit"
+            ) {
+                onImport()
+            }
+            .disabled(selectedCount == 0)
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("import.importButton")
+            .accessibilityLabel("Import selected endpoints")
+            .accessibilityValue("\(selectedCount) selected")
         }
-        .padding(DSSpacing.md)
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.vertical, DSSpacing.md)
+    }
+
+    private func note(
+        _ text: String,
+        systemImage: String = "exclamationmark.triangle.fill",
+        tint: Color = DSColors.warning,
+        identifier: String
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: DSGlyph.field))
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
+    }
+
+    // MARK: - Model
+
+    private var visibleIndices: [Int] {
+        let query = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return candidates.indices.filter { index in
+            let candidate = candidates[index]
+            switch scope {
+            case .all: break
+            case .selected: if !candidate.isSelected { return false }
+            case .needsReview: if !ImportRow.needsReview(candidate) { return false }
+            }
+            guard !query.isEmpty else { return true }
+            return candidate.path.localizedCaseInsensitiveContains(query)
+                || candidate.suggestedName.localizedCaseInsensitiveContains(query)
+                || (candidate.graphqlOperation?.localizedCaseInsensitiveContains(query) ?? false)
+        }
     }
 
     private var selectedCount: Int {
         candidates.filter(\.isSelected).count
+    }
+
+    private var needsReviewCount: Int {
+        candidates.filter(ImportRow.needsReview).count
     }
 
     private func setAll(selected: Bool) {
@@ -312,14 +331,13 @@ struct ImportReviewList: View {
     }
 }
 
-/// Single row in the import review list.
-///
-/// The path is the row's identity, so it is the row's headline. It used to be the quietest thing on
-/// the line — 36% alpha under a 13pt name that the importer had derived from that same path — which
-/// meant the one fact that told two candidates apart was the one you had to squint at.
+/// Single row in the import review table.
 private struct ImportCandidateRow: View {
     @Binding var candidate: ImportCandidate
+    /// Position in the full candidate list; used for the stable `import.candidate.index.<n>` handles.
     let rowIndex: Int
+    /// Position among the rows shown; drives the zebra stripe.
+    let stripeIndex: Int
 
     @State private var isHovered = false
     @State private var showingBodyPreview = false
@@ -332,17 +350,17 @@ private struct ImportCandidateRow: View {
                     .font(DSTypography.caption)
                     .foregroundStyle(ImportRow.warningInk)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, DSSpacing.md)
+                    .padding(.leading, ImportColumns.toggle + ImportColumns.method + DSSpacing.sm * 2 + DSSpacing.sm)
+                    .padding(.trailing, DSSpacing.sm)
                     .padding(.bottom, DSSpacing.sm)
                     .accessibilityIdentifier("import.candidate.index.\(rowIndex).validation")
             }
         }
-        .background(ImportRow.background(isHovered: isHovered, rowIndex: rowIndex))
+        .background(ImportRow.background(isHovered: isHovered, rowIndex: stripeIndex))
         .contentShape(Rectangle())
-        // The checkbox is the named keyboard action; clicking elsewhere on the row selects it too.
+        // The checkbox is the named keyboard action; clicking elsewhere on the row toggles it too.
         .onTapGesture { candidate.isSelected.toggle() }
         .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
         .help(helpText)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("import.candidate.\(candidate.id.uuidString)")
@@ -350,20 +368,16 @@ private struct ImportCandidateRow: View {
 
     private var cells: some View {
         HStack(spacing: DSSpacing.sm) {
-            // A real label rather than `Toggle("")`: with an empty string VoiceOver announced two
-            // hundred unnamed checkboxes.
+            // A real label so VoiceOver does not announce unnamed checkboxes.
             Toggle("Import \(candidate.method.rawValue) \(candidate.path)", isOn: $candidate.isSelected)
                 .toggleStyle(.checkbox)
                 .labelsHidden()
+                .controlSize(.small)
                 .frame(width: ImportColumns.toggle, alignment: .leading)
                 .accessibilityIdentifier("import.toggle.\(candidate.id.uuidString)")
 
-            DSMethodBadge(
-                method: candidate.method.rawValue,
-                size: .compact,
-                identifier: candidate.id.uuidString
-            )
-            .frame(width: ImportColumns.method, alignment: .leading)
+            DSMethodLabel(candidate.method.rawValue, identifier: candidate.id.uuidString)
+                .frame(width: ImportColumns.method, alignment: .leading)
 
             HStack(spacing: DSSpacing.xs) {
                 Text(candidate.path)
@@ -371,60 +385,29 @@ private struct ImportCandidateRow: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    // The row's stable, index-addressable handle. Every other identifier on this
-                    // row is suffixed with a UUID the parser minted this run, so a test cannot name
-                    // a row before it has read one out of the tree; `rowIndex` is the position the
-                    // table actually presents. It goes on the path rather than on the row group
-                    // above, because that group already carries `import.candidate.<uuid>` and one
-                    // view holds one identifier — a second modifier would take the UUID's place
-                    // rather than sit beside it. The path is the row's identity anyway, which is
-                    // what the type's own note says, so `import.candidate.index.3` reads out the
-                    // path of the fourth row.
+                    // The row's stable, index-addressable handle for tests.
                     .accessibilityIdentifier("import.candidate.index.\(rowIndex)")
 
-                // Every GraphQL candidate in a capture shares one path; without the operation the
-                // review is a column of identical rows. Same rule the sidebar follows.
+                // GraphQL candidates share one path; the operation tells them apart.
                 if let operation = candidate.graphqlOperation, !operation.isEmpty {
                     Text(operation)
                         .font(DSTypography.code)
-                        .foregroundStyle(DSColors.accentText)
+                        .foregroundStyle(DSColors.accent)
                         .lineLimit(1)
                         .accessibilityIdentifier("import.candidate.index.\(rowIndex).operation")
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // What the endpoint will be called once imported — the only thing on the row that is
-            // about the result rather than the capture.
-            Text(candidate.suggestedName)
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-                .frame(width: ImportColumns.name, alignment: .leading)
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).name")
-
-            // Coloured text, not a filled pill. A 200 is an ordinary value, and a row where every
-            // field is a chip has no emphasis left for the field that needs it.
-            Text("\(candidate.statusCode)")
-                .font(DSTypography.code)
-                .foregroundStyle(DSColors.httpStatusColor(for: candidate.statusCode))
-                .frame(width: ImportColumns.status, alignment: .leading)
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
-
-            HStack(spacing: DSSpacing.xs) {
-                Text(candidate.bodySizeLabel)
-                    .font(DSTypography.label)
-                    .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("import.candidate.index.\(rowIndex).size")
+                Spacer(minLength: 0)
 
                 if let body = candidate.responseBody, !body.isEmpty {
                     Button {
                         showingBodyPreview = true
                     } label: {
                         Image(systemName: "eye")
-                            .font(.system(size: DSGlyph.control))
-                            .foregroundStyle(DSColors.accentText)
+                            .font(.system(size: DSGlyph.field))
+                            .foregroundStyle(isHovered ? DSColors.accent : DSColors.labelTertiary)
+                            .frame(width: DSControlHeight.small, height: DSControlHeight.small)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.dsPlain)
                     .help("Preview response body")
@@ -435,83 +418,65 @@ private struct ImportCandidateRow: View {
                     }
                 }
             }
-            .frame(width: ImportColumns.size, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            flag
-                .frame(width: ImportColumns.flag, alignment: .leading)
+            // What the endpoint will be called once imported.
+            Text(candidate.suggestedName)
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+                .frame(width: ImportColumns.name, alignment: .leading)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).name")
+
+            DSStatusLabel(statusCode: candidate.statusCode)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).status")
+                .frame(width: ImportColumns.status, alignment: .leading)
+
+            Text(candidate.bodySizeLabel)
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(candidate.bodySizeExceedsLimit ? ImportRow.warningInk : DSColors.labelSecondary)
+                .lineLimit(1)
+                .accessibilityIdentifier("import.candidate.index.\(rowIndex).size")
+                .frame(width: ImportColumns.size, alignment: .trailing)
+
+            note
+                .frame(width: ImportColumns.note, alignment: .leading)
         }
-        .padding(.horizontal, DSSpacing.md)
+        .padding(.horizontal, DSSpacing.sm)
         .frame(height: ImportRow.height)
     }
 
-    /// The one thing on the row that needs attention gets the one filled pill.
-    ///
-    /// It was an amber `doc.on.doc` glyph whose only explanation was a tooltip, sitting beside an
-    /// amber `exclamationmark.triangle` that meant something completely different. Now the duplicate
-    /// says the word, so it survives being read in greyscale, and the oversized body colours the
-    /// size it is complaining about instead of adding a second badge.
+    /// The one fact on the row that needs attention, as a small chip.
     @ViewBuilder
-    private var flag: some View {
+    private var note: some View {
         if candidate.statusCode == 206 {
-            Label("Partial response", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.label)
-                .foregroundStyle(ImportRow.warningInk)
-                .lineLimit(1)
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.partialResponse")
+            ImportNoteChip("Partial response", identifier: "import.candidate.index.\(rowIndex).flag.partialResponse")
         } else if ImportCommitter.rejection(for: candidate) != nil {
-            Label("Cannot import", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.label)
-                .foregroundStyle(ImportRow.warningInk)
-                .lineLimit(1)
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.invalid")
+            ImportNoteChip("Cannot import", identifier: "import.candidate.index.\(rowIndex).flag.invalid")
         } else if candidate.bodyIsUnavailable {
-            Label("Body unavailable", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.label)
-                .foregroundStyle(ImportRow.warningInk)
-                .lineLimit(1)
+            ImportNoteChip("Body unavailable", identifier: "import.candidate.index.\(rowIndex).flag.bodyUnavailable")
                 .help("The capture records a response body but omits its text. Selecting this endpoint imports without a body.")
                 .accessibilityLabel("Body unavailable — selecting this endpoint imports without a body")
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.bodyUnavailable")
         } else if candidate.bodyIsBinary {
-            // Before the size branch, deliberately: a binary body's recorded size can also exceed
-            // the limit, and binary is the more specific reason there is no body.
-            Label("Binary body", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.label)
-                .foregroundStyle(ImportRow.warningInk)
-                .lineLimit(1)
+            // Before the size branch: binary is the more specific reason there is no body.
+            ImportNoteChip("Binary body", identifier: "import.candidate.index.\(rowIndex).flag.binaryBody")
                 .help("The captured body is binary, which a text mock cannot serve — the endpoint imports without it")
                 .accessibilityLabel("Binary body — the endpoint imports without it")
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.binaryBody")
         } else if candidate.bodySizeExceedsLimit {
-            Label("Body dropped", systemImage: "exclamationmark.triangle")
-                .font(DSTypography.label)
-                .foregroundStyle(ImportRow.warningInk)
-                .lineLimit(1)
+            ImportNoteChip("Over 1 MB", identifier: "import.candidate.index.\(rowIndex).flag.bodyDropped")
                 .help("Response body exceeds the 1 MB limit — the endpoint imports without it")
                 .accessibilityLabel("Response body exceeds the limit and will not be imported")
-                .accessibilityIdentifier("import.candidate.index.\(rowIndex).flag.bodyDropped")
         } else if candidate.isDuplicate {
-            DSStateBadge("Duplicate", tone: .warning, systemImage: "doc.on.doc",
-                         identifier: "import.candidate.index.\(rowIndex).flag.duplicate")
+            ImportNoteChip("Duplicate", isWarning: false, identifier: "import.candidate.index.\(rowIndex).flag.duplicate")
                 .help("This method and path is already covered — by an existing endpoint or an earlier row of this import")
                 .accessibilityLabel("Duplicate — this method and path is already covered")
         } else {
-            // Not decoration — this is what holds the column open, and without it the table's
-            // headers sat above the wrong columns.
-            //
-            // Most rows are none of duplicate, binary or oversized, so every branch above was absent
-            // and the builder produced an `EmptyView`. An `HStack` drops an `EmptyView` entirely,
-            // taking the `.frame(width: ImportColumns.flag)` wrapped around it with it — so the row
-            // gave its flexible path column 92pt the header never gave its own, and Name, Status and
-            // Size each rendered about ninety points to the right of the title naming them. Only the
-            // columns *before* the flexible one lined up, which is why it read as the headers being
-            // wrong rather than the rows.
+            // Holds the column open; an empty branch would collapse its frame and shift the columns.
             Color.clear
         }
     }
 
-    /// Carries what the row cannot: the group the endpoint will be filed under, which is derived
-    /// from the path and so would only repeat it on screen.
+    /// Carries the group the endpoint will be filed under, which would only repeat the path on screen.
     private var helpText: String {
         var text = "\(candidate.method.rawValue) \(candidate.path)"
         if let group = candidate.suggestedGroupTag, !group.isEmpty {
@@ -521,19 +486,41 @@ private struct ImportCandidateRow: View {
     }
 }
 
-/// A bounded, read-only view of the text that will be saved. The source file remains the place to
-/// edit an import before committing; this preview never rewrites or formats the captured body.
+/// A small note in the review table's last column: amber for a warning, neutral otherwise.
+private struct ImportNoteChip: View {
+    let title: String
+    let isWarning: Bool
+    let identifier: String
+
+    init(_ title: String, isWarning: Bool = true, identifier: String) {
+        self.title = title
+        self.isWarning = isWarning
+        self.identifier = identifier
+    }
+
+    var body: some View {
+        Text(title)
+            .font(DSTypography.caption.weight(.medium))
+            .foregroundStyle(isWarning ? ImportRow.warningInk : DSColors.labelSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .frame(height: 18)
+            .background(Capsule().fill(isWarning ? DSColors.warningBackground : DSColors.field))
+            .accessibilityIdentifier(identifier)
+    }
+}
+
+/// A bounded, read-only view of the text that will be saved.
 private struct ImportBodyPreview: View {
     let responseBody: String
     let onClose: () -> Void
 
     var body: some View {
-        // Bound text layout independently of the importer's larger body limit. Cutting at a Unicode
-        // scalar preserves valid text without letting one enormous combining sequence evade the cap.
+        // Bound text layout; cutting at a Unicode scalar keeps the preview valid text.
         let preview = String(String.UnicodeScalarView(responseBody.unicodeScalars.prefix(16_384)))
         VStack(alignment: .leading, spacing: DSSpacing.md) {
             Text("Response body")
-                .font(DSTypography.heading)
+                .font(DSTypography.headline)
                 .foregroundStyle(DSColors.labelPrimary)
             ScrollView([.horizontal, .vertical]) {
                 Text(preview)
@@ -541,21 +528,29 @@ private struct ImportBodyPreview: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(DSSpacing.sm)
                     .accessibilityIdentifier("import.bodyPreview.text")
             }
             .frame(height: 240)
+            .background(
+                RoundedRectangle(cornerRadius: DSCornerRadius.field).fill(DSColors.code)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DSCornerRadius.field)
+                    .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+            )
             if preview.utf8.count < responseBody.utf8.count {
                 Text("Preview shortened. Review the original file for the complete body.")
-                    .font(DSTypography.caption)
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .accessibilityIdentifier("import.bodyPreview.truncated")
             }
             Text("Read only. To change this body before importing, edit the source file.")
-                .font(DSTypography.caption)
+                .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
             HStack {
                 Spacer()
-                DSButton("Close", variant: .secondary, size: .small, identifier: "import.bodyPreview.close", action: onClose)
+                DSButton("Close", variant: .secondary, size: .medium, identifier: "import.bodyPreview.close", action: onClose)
                     .keyboardShortcut(.cancelAction)
             }
         }

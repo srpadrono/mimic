@@ -1,16 +1,13 @@
 import CoreGraphics
 
-/// Width roles for modal sheets. Forms of the same complexity should not change width when a
-/// person moves from creating a project to adding an endpoint or configuring a journey.
+/// Sheet widths. Forms of the same complexity keep one width.
 public enum DSSheetWidth {
-    /// A short, single-column creation form.
-    public static let compact: CGFloat = 420
-    /// A detail sheet with one longer explanation or selection list.
-    public static let medium: CGFloat = 540
-    /// A multi-section configuration form with aligned columns.
-    public static let wide: CGFloat = 640
-    /// A compact backend list beside a single settings detail pane.
-    public static let backendSettings: CGFloat = 760
-    /// A review table that needs several readable columns.
-    public static let review: CGFloat = 760
+    /// A short creation form: new project, new endpoint, rename.
+    public static let compact: CGFloat = 440
+    /// A sheet with one list or explanation: update notes, templates.
+    public static let medium: CGFloat = 560
+    /// A multi-section form: journey step, server settings.
+    public static let wide: CGFloat = 680
+    /// A review table: import.
+    public static let review: CGFloat = 860
 }

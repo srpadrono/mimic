@@ -40,12 +40,12 @@ public struct DSIconMenu<Content: View>: View {
             Label(label, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .accessibilityLabel(label)
-                .font(.system(size: DSGlyph.controlProminent, weight: .medium))
+                .font(.system(size: DSGlyph.control, weight: .regular))
                 // `labelSecondary` at rest, never `labelTertiary`: at 36% alpha an icon-only control
                 // is one you have to already know about to find. `DSPanelHeaderButton` records the
                 // same correction for the buttons this sits beside.
                 .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: DSControlHeight.field, height: DSControlHeight.field)
+                .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
                 .contentShape(Rectangle())
         }
         // `.plain` keeps the explicit glyph colour; the label's frame supplies the hit target.
@@ -54,16 +54,16 @@ public struct DSIconMenu<Content: View>: View {
         // The label above draws the whole control; the system indicator would be a second glyph in a
         // 26pt box that already holds one.
         .menuIndicator(.hidden)
-        .frame(width: DSControlHeight.field, height: DSControlHeight.field)
+        .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
         .background {
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(isEnabled && isHovered ? DSColors.accentSubtle : Color.clear)
+            RoundedRectangle(cornerRadius: DSCornerRadius.field)
+                .fill(isEnabled && isHovered ? DSColors.hover : Color.clear)
         }
         .onHover { isHovered = isEnabled && $0 }
         .onChange(of: isEnabled) { _, enabled in
             if !enabled { isHovered = false }
         }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(label)

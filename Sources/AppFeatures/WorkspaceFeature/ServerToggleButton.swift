@@ -2,7 +2,7 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Xcode-style Run/Stop control: one target whose symbol changes in place.
+/// Run and Stop carry a word, not just a glyph. Native toolbar glass draws the capsule.
 struct ServerToggleButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let serverState: ServerState
@@ -32,27 +32,23 @@ struct ServerToggleButton: View {
         }
     }
 
-    private var isRunning: Bool { serverState.runningPort != nil }
-
     var body: some View {
         Button(action: stopIsCurrentAction ? onStop : onStart) {
-            Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
-                .font(.system(size: DSGlyph.toolbar, weight: .semibold))
-                .foregroundStyle(DSColors.labelPrimary)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.downUp.byLayer))
-                .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
-                .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
-                .opacity(isTransitioning ? 0.6 : 1)
-                .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
-                .contentShape(.circle)
+            Label {
+                Text(stopIsCurrentAction ? "Stop" : "Run")
+            } icon: {
+                Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                    .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
+            }
+            .labelStyle(.titleAndIcon)
+            .font(DSTypography.bodyMedium)
+            .opacity(isTransitioning ? 0.6 : 1)
+            .padding(.horizontal, DSSpacing.xs)
         }
-        // Keep the label hosted in SwiftUI so the symbol replacement can animate in the toolbar.
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(isRunning ? DSColors.success : .clear).interactive(), in: .circle)
         .disabled(isTransitioning)
-        .help(stopIsCurrentAction ? "Stop server" : "Start server")
+        .help(stopIsCurrentAction ? "Stop server (⇧⌘R)" : "Start server (⇧⌘R)")
         .accessibilityLabel(stopIsCurrentAction ? "Stop server" : "Start server")
         .accessibilityIdentifier("serverToggleButton")
-        .animation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.normal), value: serverState)
     }
 }

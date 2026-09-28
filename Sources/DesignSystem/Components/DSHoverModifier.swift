@@ -19,7 +19,7 @@ public struct DSHoverHighlight: ViewModifier {
     @Environment(\.isEnabled) private var isEnabled
     private let cornerRadius: CGFloat
 
-    public init(cornerRadius: CGFloat = DSCornerRadius.sm) {
+    public init(cornerRadius: CGFloat = DSCornerRadius.field) {
         self.cornerRadius = cornerRadius
     }
 
@@ -27,7 +27,7 @@ public struct DSHoverHighlight: ViewModifier {
         content
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(isEnabled && isHovered ? DSColors.accentSubtle : Color.clear)
+                    .fill(isEnabled && isHovered ? DSColors.hover : Color.clear)
             }
             // The whole rounded rect is the hover region, not just the glyphs inside it. An unfilled
             // shape is not hit-testable — the correction `DSButton`'s ghost variant needed — so on the
@@ -38,13 +38,13 @@ public struct DSHoverHighlight: ViewModifier {
             .onChange(of: isEnabled) { _, enabled in
                 if !enabled { isHovered = false }
             }
-            .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+            .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
     }
 }
 
 extension View {
     /// Adds the design system's accent-tinted hover background, matched to the row's own shape.
-    public func dsHoverHighlight(cornerRadius: CGFloat = DSCornerRadius.sm) -> some View {
+    public func dsHoverHighlight(cornerRadius: CGFloat = DSCornerRadius.field) -> some View {
         modifier(DSHoverHighlight(cornerRadius: cornerRadius))
     }
 }

@@ -54,12 +54,12 @@ struct ImportView: View {
             initialState: initialState,
             onCommitImport: onCommitImport
         )
-        // Keep the footer on screen even on a compact display. The review list owns scrolling;
-        // a 560pt minimum on the whole sheet made the actions impossible to reach on a 540pt screen.
-        .frame(minWidth: DSSheetWidth.review, minHeight: 360, idealHeight: preferredHeight, maxHeight: preferredHeight)
+        // The review list owns scrolling, so the footer stays reachable on a compact display.
+        .frame(minWidth: DSSheetWidth.review, idealWidth: DSSheetWidth.review, minHeight: 360,
+               idealHeight: preferredHeight, maxHeight: preferredHeight)
     }
 
     private var preferredHeight: CGFloat {
-        min(560, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 120))
+        min(640, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 120))
     }
 }

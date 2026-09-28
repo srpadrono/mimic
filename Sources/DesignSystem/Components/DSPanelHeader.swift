@@ -23,7 +23,7 @@ public struct DSPanelHeader<Accessory: View>: View {
     /// Kept as an alias so `DSPanelHeader.height` still reads naturally from inside this file, but the
     /// number belongs to `DSBarHeight` — a bar that wants this tier should ask the ladder for it
     /// rather than reach through a generic view type for a constant.
-    public static var height: CGFloat { DSBarHeight.panelHeader }
+    public static var height: CGFloat { DSBarHeight.paneHeader }
 
     private let title: String
     private let subtitle: String?
@@ -51,7 +51,7 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // "Scenarios" and "/account-summary" arrived with equal weight, so nothing in the row
                 // said which was the heading. The current 13pt semibold title sits above the 11pt
                 // medium count without competing with the content below.
-                .font(DSTypography.controlLabel)
+                .font(DSTypography.bodySemibold)
                 .foregroundStyle(DSColors.labelPrimary)
                 // `.lineLimit(1)` with priority, not `.fixedSize()`.
                 //
@@ -87,12 +87,13 @@ public struct DSPanelHeader<Accessory: View>: View {
                 // header stopped reporting its count. Plain compression truncates only when the row
                 // genuinely runs out of room, which is the behaviour wanted.
                 Text(subtitle)
-                    .font(DSTypography.caption)
+                    .font(DSTypography.callout)
+                    .monospacedDigit()
                     // `labelSecondary`, not tertiary. This slot is where a panel states its count —
                     // "5 requests", "3 scenarios" — and `DSTabStrip` justifies its number-less badge
                     // on exactly that. It is text a user reads, and 36% alpha measures 2.48:1 on
                     // `secondary` in light mode, against the 4.5:1 this palette holds itself to.
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .foregroundStyle(DSColors.labelTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .accessibilityIdentifier("ds.panelheader.subtitle.\(identifier)")
@@ -158,7 +159,7 @@ public struct DSPanelHeaderButton: View {
             Image(systemName: systemImage)
                 // `control`, the rung for a glyph that *is* the control. There is no title beside it
                 // to carry the meaning, which is the whole reason this tier sits above the inline one.
-                .font(.system(size: DSGlyph.control, weight: .medium))
+                .font(.system(size: DSGlyph.control, weight: .regular))
                 // `labelSecondary` at rest, not `labelTertiary`. At 36% alpha the "add endpoint" and
                 // "clear log" buttons were nearly invisible until the pointer found them — a control
                 // you have to hunt for is one most people never discover. Same correction
@@ -167,10 +168,10 @@ public struct DSPanelHeaderButton: View {
                 // `field`, the rung a single prominent control in a header stands on. This was a bare
                 // `22` in the module that declares the ladder, which is the one place a literal has no
                 // excuse: `DSTabStrip` wrote the same number for the same target a file away.
-                .frame(width: DSControlHeight.field, height: DSControlHeight.field)
+                .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
                 .background(
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(isEnabled && isHovered ? DSColors.accentSubtle : Color.clear)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.field)
+                        .fill(isEnabled && isHovered ? DSColors.hover : Color.clear)
                 )
                 .contentShape(Rectangle())
         }
@@ -179,7 +180,7 @@ public struct DSPanelHeaderButton: View {
         .onChange(of: isEnabled) { _, enabled in
             if !enabled { isHovered = false }
         }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(help)

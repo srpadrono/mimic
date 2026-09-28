@@ -53,9 +53,9 @@ public struct DSClearButton: View {
             // `DSGlyph.control` is the bottom of the control tier — at `inline` this sat level with
             // the annotations around it rather than above them, and this glyph is a control.
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: DSGlyph.control))
-                .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: 18, height: 18)
+                .font(.system(size: DSGlyph.field))
+                .foregroundStyle(isEnabled && isHovered ? DSColors.labelSecondary : DSColors.labelTertiary)
+                .frame(width: 16, height: 16)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -63,7 +63,7 @@ public struct DSClearButton: View {
         .onChange(of: isEnabled) { _, enabled in
             if !enabled { isHovered = false }
         }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(label)

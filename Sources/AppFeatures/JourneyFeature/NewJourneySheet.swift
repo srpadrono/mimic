@@ -3,10 +3,8 @@ import SwiftUI
 
 /// Names a new, empty journey. Steps are added afterwards in the editor.
 ///
-/// Follows the shared sheet convention: a sentence-case heading inside the sheet, `DSSpacing.lg`
-/// between the heading, the fields and the button row, `DSSpacing.lg` of outer padding, and a
-/// trailing button row with cancel to the left of the confirm action. The explanatory line sits
-/// `DSSpacing.sm` under the heading, the way a macOS dialog puts its message under its title.
+/// Sheet anatomy: 15pt title with a 12pt explanation under it, a form row, and Cancel and the
+/// confirm action trailing.
 struct NewJourneySheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -23,40 +21,40 @@ struct NewJourneySheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 Text("New journey")
-                    .font(DSTypography.title)
+                    .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("newJourney.title")
 
                 Text("A journey scripts an ordered sequence of responses, so the same endpoint can answer "
                     + "differently depending on where the request falls in the flow.")
-                    .font(DSTypography.label)
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .lineSpacing(DSTypography.Leading.callout)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("newJourney.explanation")
             }
 
-            // The design system's field rather than a bare `.roundedBorder` one, so this sheet's
-            // input looks like the input in every other sheet. No `.accessibilityLabel` on the
-            // wrapper: `DSTextField` already labels its own input, and a label here would shadow the
-            // validation text it shows underneath.
+            // No `.accessibilityLabel` on the wrapper: `DSTextField` labels its own input, and a
+            // label here would hide the validation text under it.
             DSTextField(
                 "Name",
                 text: $name,
-                placeholder: "e.g. Checkout retries",
+                placeholder: "Checkout retries",
                 identifier: "newJourney.name"
             )
             .accessibilityIdentifier("newJourney.nameField")
             .focused($focusedField, equals: .name)
             .onSubmit(create)
 
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.sm) {
                 Spacer()
                 DSButton(
                     "Cancel",
-                    variant: .ghost,
-                    size: .medium,
+                    variant: .secondary,
+                    size: .large,
                     identifier: "newJourney.cancel",
                     action: dismiss.callAsFunction
                 )
@@ -67,7 +65,7 @@ struct NewJourneySheet: View {
                 DSButton(
                     "Create journey",
                     variant: .primary,
-                    size: .medium,
+                    size: .large,
                     identifier: "newJourney.create",
                     action: create
                 )
@@ -76,9 +74,11 @@ struct NewJourneySheet: View {
                 .disabled(trimmedName.isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
+            .padding(.top, DSSpacing.sm)
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
     }
 

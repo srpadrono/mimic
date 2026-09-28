@@ -2,15 +2,13 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Inspector for the current selection. Request details temporarily cover the selected endpoint
-/// or journey; returning restores that context. With no selection the project overview is shown.
+/// The right-hand column. It shows one thing at a time: a request, an endpoint's scenarios, a journey,
+/// or the project overview.
 struct InspectorPanelView: View {
-    /// The logged request to show. Takes precedence over `endpoint` and `overview` when set.
     let requestDetail: RequestDetailInspector.Context?
     let endpoint: Endpoint?
     let journey: JourneyInspector.Context?
     let selectedRequestCount: Int
-    /// Project-level facts, shown when nothing is selected so the panel is never dead space.
     let overview: InspectorOverview.Summary?
     let onSaveAsMock: ((UUID) -> Void)?
     let onShowJourneys: () -> Void
@@ -20,63 +18,15 @@ struct InspectorPanelView: View {
     let onDuplicateScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDeleteScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onRenameScenario: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void
-    /// Every request the selected endpoint answered. Already filtered by the caller.
     let endpointTraffic: [RequestLog]
-    /// Opens one of those requests in the request detail.
     let onSelectTrafficLog: (UUID) -> Void
+    let endpointSettings: EndpointInspectorSettings.Context?
 
-    /// The endpoint the add-scenario sheet is adding to, captured when the sheet opens.
-    ///
-    /// Not a `Bool` read back against `endpoint`. The sheet used to be
-    /// `.sheet(isPresented:) { if let endpoint { … } }`, which is fine right up until the endpoint
-    /// stops existing while the sheet is up — and in this app it can: the control plane and the
-    /// `mimic` CLI drive the same store the window does, so `mimic endpoint delete` lands whether or
-    /// not a sheet is open. The `if let` then produced an `EmptyView`, which presents as a blank
-    /// sheet with no controls at all — including no cancel button, since Escape was bound inside the
-    /// view that no longer exists. Carrying the id makes the sheet a function of what was clicked
-    /// rather than of what is still selected.
     @State private var addScenarioTarget: ScenarioTarget?
-    @State private var endpointTab: EndpointTab = .scenarios
     @State private var requestDetailTab: RequestDetailTab = .summary
 
-    /// `sheet(item:)` wants an `Identifiable`, and a bare `UUID` is not one.
     struct ScenarioTarget: Identifiable {
         let id: UUID
-    }
-
-    /// Which question the inspector is answering about the selected endpoint.
-    ///
-    /// Xcode's inspector does this: same selection, several tabs, because "what is this" and "what
-    /// has happened to this" are different questions. Mimic already recorded which endpoint answered
-    /// each request — `RequestLog.matchedEndpointID` — but never offered a way to ask. Finding out
-    /// whether anything had actually called the endpoint in front of you meant going to the log and
-    /// filtering by hand.
-    enum EndpointTab: String, CaseIterable, Identifiable {
-        case scenarios
-        case traffic
-
-        var id: String { rawValue }
-
-        var systemImage: String {
-            switch self {
-            case .scenarios: "square.stack.3d.up"
-            case .traffic: "waveform.path.ecg"
-            }
-        }
-
-        var title: String {
-            switch self {
-            case .scenarios: "Scenarios"
-            case .traffic: "Traffic"
-            }
-        }
-
-        var help: String {
-            switch self {
-            case .scenarios: "Show this endpoint's scenarios"
-            case .traffic: "Show the requests this endpoint answered"
-            }
-        }
     }
 
     public init(
@@ -86,6 +36,7 @@ struct InspectorPanelView: View {
         journey: JourneyInspector.Context? = nil,
         selectedRequestCount: Int = 0,
         endpointTraffic: [RequestLog] = [],
+        endpointSettings: EndpointInspectorSettings.Context? = nil,
         onShowJourneys: @escaping () -> Void = {},
         onCloseRequestDetail: @escaping () -> Void = {},
         onSelectTrafficLog: @escaping (UUID) -> Void = { _ in },
@@ -94,8 +45,7 @@ struct InspectorPanelView: View {
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in },
-        onSaveAsMock: ((UUID) -> Void)? = nil,
-        initialEndpointTab: EndpointTab = .scenarios
+        onSaveAsMock: ((UUID) -> Void)? = nil
     ) {
         self.onSaveAsMock = onSaveAsMock
         self.endpoint = endpoint
@@ -104,6 +54,7 @@ struct InspectorPanelView: View {
         self.journey = journey
         self.selectedRequestCount = selectedRequestCount
         self.endpointTraffic = endpointTraffic
+        self.endpointSettings = endpointSettings
         self.onShowJourneys = onShowJourneys
         self.onCloseRequestDetail = onCloseRequestDetail
         self.onSelectTrafficLog = onSelectTrafficLog
@@ -112,10 +63,8 @@ struct InspectorPanelView: View {
         self.onDuplicateScenario = onDuplicateScenario
         self.onDeleteScenario = onDeleteScenario
         self.onRenameScenario = onRenameScenario
-        _endpointTab = State(initialValue: initialEndpointTab)
     }
 
-    /// What the panel is showing, so the header and the content cannot disagree about it.
     enum Mode: Equatable {
         case request
         case scenarios
@@ -164,49 +113,30 @@ struct InspectorPanelView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             DSInspectorHeader {
-                if mode == .scenarios {
-                    Picker("Endpoint inspector", selection: $endpointTab) {
-                        ForEach(EndpointTab.allCases) { tab in
-                            Text(tab == .traffic && !endpointTraffic.isEmpty ? "Traffic · \(endpointTraffic.count)" : tab.title).tag(tab)
-                                .help(tab.help)
-                                .accessibilityIdentifier("inspector.tab.\(tab.id)")
-                                .accessibilityLabel(tab == .traffic ? "\(tab.help), \(endpointTraffic.count) requests" : tab.help)
-                        }
+                if mode == .request {
+                    DSPanelHeaderButton(
+                        systemImage: "chevron.left",
+                        help: "Back",
+                        identifier: "inspector.closeRequestDetailButton",
+                        action: onCloseRequestDetail
+                    )
+                    .padding(.leading, -6)
+                }
+                Text(mode.title)
+                    .font(DSTypography.bodySemibold)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("ds.panelheader.title.inspector")
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                if mode == .scenarios, let endpoint {
+                    DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
+                                        identifier: "inspector.addScenarioButton") {
+                        addScenarioTarget = ScenarioTarget(id: endpoint.id)
                     }
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .accessibilityIdentifier("inspector.mode")
-                    .accessibilityLabel("Endpoint inspector")
-                    Spacer(minLength: 0)
-                    Group {
-                        if endpointTab == .scenarios, let endpoint {
-                            DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
-                                                identifier: "inspector.addScenarioButton") {
-                                addScenarioTarget = ScenarioTarget(id: endpoint.id)
-                            }
-                        } else { Color.clear }
-                    }
-                    .frame(width: DSControlHeight.field, height: DSControlHeight.field)
-                } else {
-                    if mode == .request {
-                        DSPanelHeaderButton(
-                            systemImage: "chevron.left",
-                            help: endpoint != nil && endpointTab == .traffic ? "Back to traffic" : "Back to selection",
-                            identifier: "inspector.closeRequestDetailButton",
-                            action: onCloseRequestDetail
-                        )
-                    }
-                    Text(mode.title)
-                        .font(DSTypography.controlLabel)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("ds.panelheader.title.inspector")
-                    Spacer(minLength: 0)
                 }
             }
 
-            // Keep endpoint content mounted under request details. Returning to Traffic restores
-            // the same scroll position instead of constructing a new list at its first request.
             ZStack(alignment: .topLeading) {
                 if let endpoint {
                     endpointContent(endpoint)
@@ -217,13 +147,12 @@ struct InspectorPanelView: View {
                 switch mode {
                 case .request:
                     if let requestDetail {
-                        // Rebuild for a different log while keeping the inspector's chosen tab.
                         RequestDetailInspector(
                             context: requestDetail,
                             onSaveAsMock: onSaveAsMock,
                             tabSelection: $requestDetailTab
                         )
-                            .id(requestDetail.log.id)
+                        .id(requestDetail.log.id)
                     }
                 case .journey:
                     if let journey { JourneyInspector(context: journey).id(journey.selected.id) }
@@ -231,13 +160,14 @@ struct InspectorPanelView: View {
                     DSEmptyState(
                         heading: "\(selectedRequestCount) requests selected",
                         message: "Select one request to inspect its headers and body.",
+                        prominence: .compact,
                         identifier: "inspector.multipleRequests"
                     )
                 case .overview:
                     if let overview { InspectorOverview(summary: overview, onShowJourneys: onShowJourneys) }
                 case .empty:
                     DSEmptyState(heading: "No selection", message: "Select an endpoint or journey to inspect it.",
-                                 identifier: "inspector.empty")
+                                 prominence: .compact, identifier: "inspector.empty")
                 case .scenarios:
                     EmptyView()
                 }
@@ -251,77 +181,71 @@ struct InspectorPanelView: View {
     }
 
     private func endpointContent(_ endpoint: Endpoint) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                DSMethodBadge(method: endpoint.method.rawValue, size: .compact,
-                              identifier: "inspector.endpointMethod")
-                Text(endpoint.path)
-                    .font(DSTypography.codeSmall)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-            .help("\(endpoint.name) — \(endpoint.method.rawValue) \(endpoint.path)")
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, DSInspectorMetrics.inset)
-            .frame(height: DSBarHeight.controlRow)
-            // AppKit can retain the selectable path's old accessibility value when the row is
-            // reused, including after editing this endpoint's request identity.
-            .id("\(endpoint.id)-\(endpoint.method.rawValue)-\(endpoint.path)")
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("inspector.endpointIdentity")
-            .accessibilityLabel("\(endpoint.method.rawValue) method \(endpoint.path)")
-            switch endpointTab {
-            case .scenarios:
-                ScenarioListView(endpoint: endpoint, onSetActive: onSetActiveScenario,
-                                 onDuplicate: onDuplicateScenario, onDelete: onDeleteScenario,
-                                 onRename: onRenameScenario)
-                HStack {
-                    Text("\(endpoint.scenarios.count) \(endpoint.scenarios.count == 1 ? "scenario" : "scenarios")")
-                    Spacer(minLength: DSSpacing.sm)
-                    Text("Click a row to activate")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ScenarioListView(
+                    endpoint: endpoint,
+                    editedScenarioID: endpointSettings?.editedScenarioID ?? endpoint.activeScenarioID,
+                    onSetActive: onSetActiveScenario,
+                    onDuplicate: onDuplicateScenario, onDelete: onDeleteScenario,
+                    onRename: onRenameScenario,
+                    onEdit: endpointSettings?.onEditScenario ?? { _, _ in }
+                )
+                HStack(spacing: 6) {
+                    DSLiveIndicator(isLive: true, size: 10)
+                    Text("Live scenario, served on every request")
                 }
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelTertiary)
                 .padding(.horizontal, DSInspectorMetrics.inset)
-                .frame(height: DSInspectorMetrics.footerHeight)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+                .padding(.top, DSSpacing.sm)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("inspector.liveNote")
+
+                if let endpointSettings {
+                    EndpointInspectorSettings(endpoint: endpoint, context: endpointSettings)
                 }
-            case .traffic:
-                EndpointTrafficList(logs: endpointTraffic, onSelect: onSelectTrafficLog)
+
+                EndpointTrafficSummary(logs: endpointTraffic, onSelect: onSelectTrafficLog)
             }
+            .padding(.bottom, DSSpacing.lg)
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inspector.endpointIdentity")
+        .accessibilityLabel("\(endpoint.method.rawValue) method \(endpoint.path)")
     }
 }
 
-/// List of scenarios for an endpoint with active indicator and context menu.
+/// The endpoint's scenarios. The radio makes one live; clicking a row opens it in the editor.
 struct ScenarioListView: View {
     let endpoint: Endpoint
+    var editedScenarioID: UUID?
     let onSetActive: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDuplicate: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDelete: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     var onRename: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in }
+    var onEdit: (_ endpointID: UUID, _ scenarioID: UUID) -> Void = { _, _ in }
     @State private var renameTarget: Scenario?
 
     var body: some View {
-        List(endpoint.scenarios) { scenario in
-            ScenarioRow(
-                scenario: scenario,
-                isActive: scenario.id == endpoint.activeScenarioID,
-                isOnlyScenario: endpoint.scenarios.count == 1,
-                onTap: { onSetActive(endpoint.id, scenario.id) },
-                onRename: { renameTarget = scenario },
-                onDuplicate: { onDuplicate(endpoint.id, scenario.id) },
-                onDelete: { onDelete(endpoint.id, scenario.id) }
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
+        VStack(spacing: DSSpacing.xxs) {
+            ForEach(endpoint.scenarios) { scenario in
+                ScenarioRow(
+                    scenario: scenario,
+                    isActive: scenario.id == endpoint.activeScenarioID,
+                    isEdited: scenario.id == (editedScenarioID ?? endpoint.activeScenarioID),
+                    isOnlyScenario: endpoint.scenarios.count == 1,
+                    onTap: { onEdit(endpoint.id, scenario.id) },
+                    onMakeLive: { onSetActive(endpoint.id, scenario.id) },
+                    onRename: { renameTarget = scenario },
+                    onDuplicate: { onDuplicate(endpoint.id, scenario.id) },
+                    onDelete: { onDelete(endpoint.id, scenario.id) }
+                )
+            }
         }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, DSInspectorMetrics.rowHeight)
-        .contentMargins(.all, 0, for: .scrollContent)
+        .padding(.horizontal, DSInspectorMetrics.rowInset)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inspector.scenarioList")
         .sheet(item: $renameTarget) { scenario in
             RenameItemSheet(
@@ -334,43 +258,64 @@ struct ScenarioListView: View {
     }
 }
 
-/// One checkmark identifies the active response; status codes share a fixed trailing column.
 struct ScenarioRow: View {
     let scenario: Scenario
     let isActive: Bool
+    var isEdited: Bool = false
     let isOnlyScenario: Bool
     let onTap: () -> Void
+    var onMakeLive: () -> Void = {}
     var onRename: () -> Void = {}
     let onDuplicate: () -> Void
     let onDelete: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: DSSpacing.sm) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: DSGlyph.control, weight: .semibold))
-                    .foregroundStyle(DSColors.accentText)
-                    .opacity(isActive ? 1 : 0)
-                    .frame(width: DSInspectorMetrics.iconSlot)
-                    .accessibilityHidden(true)
-                Text(scenario.name)
-                    .font(DSTypography.controlLabelQuiet)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                DSInspectorStatus(statusCode: scenario.statusCode)
-                    .frame(width: DSInspectorMetrics.statusColumn, alignment: .trailing)
+        HStack(spacing: 10) {
+            Button(action: onMakeLive) {
+                DSLiveIndicator(isLive: isActive)
+                    .frame(width: 20, height: DSRowHeight.list)
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, DSInspectorMetrics.inset)
-            .frame(height: DSInspectorMetrics.rowHeight)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help(isActive ? "Live" : "Make live")
+            .accessibilityIdentifier("inspector.scenario.\(scenario.name).live")
+            .accessibilityLabel(isActive ? "\(scenario.name) is live" : "Make \(scenario.name) live")
+
+            Button(action: onTap) {
+                HStack(spacing: DSSpacing.sm) {
+                    Text(scenario.name)
+                        .font(isEdited ? DSTypography.bodyMedium : DSTypography.body)
+                        .foregroundStyle(DSColors.labelPrimary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DSStatusLabel(statusCode: scenario.statusCode)
+                }
+                .frame(height: DSRowHeight.list)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(Self.spokenLabel(scenario: scenario, isActive: isActive))
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(rowTraits)
+            .accessibilityIdentifier("inspector.scenario.\(scenario.name)")
+            .accessibilityLabel(Self.spokenLabel(scenario: scenario, isActive: isActive))
+            .accessibilityValue(isActive ? "active" : "inactive")
         }
-        .buttonStyle(.dsPlain)
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
-        .help(Self.spokenLabel(scenario: scenario, isActive: isActive))
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(rowTraits)
+        .padding(.leading, DSSpacing.xs)
+        .padding(.trailing, DSSpacing.sm)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
+                .fill(isEdited ? DSColors.selectionSoft : (isHovered ? DSColors.hover : Color.clear))
+        }
+        .onHover { isHovered = $0 }
         .contextMenu {
+            if !isActive {
+                Button(action: onMakeLive) { Label("Make live", systemImage: "dot.radiowaves.left.and.right") }
+                    .accessibilityIdentifier("inspector.scenario.contextMenu.makeLive")
+                Divider()
+            }
             Button(action: onRename) { Label("Rename\u{2026}", systemImage: "pencil") }
                 .accessibilityIdentifier("inspector.scenario.contextMenu.rename")
             Button(action: onDuplicate) { Label("Duplicate", systemImage: "doc.on.doc") }
@@ -380,32 +325,17 @@ struct ScenarioRow: View {
                 .disabled(isOnlyScenario)
                 .accessibilityIdentifier("inspector.scenario.contextMenu.delete")
         }
-        .accessibilityIdentifier("inspector.scenario.\(scenario.name)")
-        .accessibilityLabel(Self.spokenLabel(scenario: scenario, isActive: isActive))
-        .accessibilityValue(isActive ? "active" : "inactive")
     }
 
-    /// The active checkmark also carries a selected trait for assistive technology.
     var rowTraits: AccessibilityTraits {
-        isActive ? [.isButton, .isSelected] : .isButton
+        isEdited ? [.isButton, .isSelected] : .isButton
     }
 
-    /// What VoiceOver reads for the row. `static` so the composition can be pinned without hosting a
-    /// window, the way the request log's row label is.
-    ///
-    /// The active clause is said as well as carried in the trait and the value, because the trait is
-    /// what an assistive technology *queries* and this row sits in a plain `List` cell that does not
-    /// announce a selection on its behalf.
     nonisolated static func spokenLabel(scenario: Scenario, isActive: Bool) -> String {
         "\(scenario.name), status \(scenario.statusCode)\(isActive ? ", active" : "")"
     }
 }
 
-/// Sheet for adding a new scenario.
-///
-/// Follows the shared sheet convention: a sentence-case heading inside the sheet, `DSSpacing.lg`
-/// between the heading, the fields and the button row, `DSSpacing.lg` of outer padding, and a
-/// trailing button row with cancel to the left of the confirm action.
 struct NewScenarioSheet: View {
     let onConfirm: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -422,8 +352,9 @@ struct NewScenarioSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text("New scenario")
-                .font(DSTypography.title)
+                .font(DSTypography.headline)
                 .foregroundStyle(DSColors.labelPrimary)
+                .accessibilityAddTraits(.isHeader)
 
             // No `.accessibilityLabel` on the wrapper: `DSTextField` already labels its own input,
             // and a label here would shadow the validation text it shows underneath.
@@ -437,12 +368,12 @@ struct NewScenarioSheet: View {
             .focused($focusedField, equals: .name)
             .onSubmit(confirmIfValid)
 
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.sm) {
                 Spacer()
                 DSButton(
                     "Cancel",
-                    variant: .ghost,
-                    size: .medium,
+                    variant: .secondary,
+                    size: .large,
                     identifier: "newScenario.cancel",
                     action: dismiss.callAsFunction
                 )
@@ -453,7 +384,7 @@ struct NewScenarioSheet: View {
                 DSButton(
                     "Add scenario",
                     variant: .primary,
-                    size: .medium,
+                    size: .large,
                     identifier: "newScenario.create",
                     action: confirmIfValid
                 )
@@ -465,8 +396,9 @@ struct NewScenarioSheet: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
     }
 

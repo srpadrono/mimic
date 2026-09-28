@@ -17,6 +17,7 @@ struct ServerStatusWell: View {
     var onShowUnmatched: (() -> Void)?
     var onShowSettings: (() -> Void)?
     var onShowTraffic: (() -> Void)?
+    var onToggleServer: (() -> Void)?
 
     @State private var showingDetails = false
     @State private var isHovered = false
@@ -39,11 +40,11 @@ struct ServerStatusWell: View {
                              requestCount: requestCount, unmatchedCount: unmatchedCount, compact: compact)
     }
     var statusColor: Color {
-        if restartRequired { return DSColors.warningText }
+        if restartRequired { return DSColors.warning }
         switch serverState {
-        case .running: return DSColors.successText
-        case .error: return DSColors.destructiveText
-        case .stopped, .starting, .stopping: return DSColors.labelSecondary
+        case .running: return DSColors.success
+        case .error: return DSColors.error
+        case .stopped, .starting, .stopping: return DSColors.labelTertiary
         }
     }
     private var canShowDetails: Bool { isEnabled && (configuration != nil || isRunning) }
@@ -60,42 +61,10 @@ struct ServerStatusWell: View {
 
     var body: some View {
         Button { showingDetails.toggle() } label: {
-            Group {
-                if iconOnly {
-                    HStack(spacing: DSSpacing.xxs) {
-                        Image(systemName: restartRequired ? "exclamationmark.arrow.circlepath" : "server.rack")
-                            .font(.system(size: DSGlyph.controlProminent, weight: .regular))
-                            .foregroundStyle(statusColor)
-                            .accessibilityHidden(true)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(width: DSToolbarGeometry.iconStatusWidth, height: DSToolbarGeometry.height)
-                } else {
-                    VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                        HStack(spacing: DSSpacing.sm) {
-                            Text(verbatim: title)
-                                .font(DSTypography.bodyBold)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                                .accessibilityHidden(true)
-                        }
-                        .foregroundStyle(isHovered ? DSColors.accentText : DSColors.labelPrimary)
-                        Text(verbatim: subtitle)
-                            .font(DSTypography.label)
-                            .foregroundStyle(statusColor)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: DSToolbarGeometry.height)
-                }
-            }
-            .contentShape(.rect)
+            summary
+                .padding(.horizontal, iconOnly ? DSSpacing.xs : DSSpacing.sm)
+                .frame(height: DSControlHeight.prominent)
+                .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .disabled(!canShowDetails)
@@ -112,77 +81,145 @@ struct ServerStatusWell: View {
         .onDisappear { copyResetTask?.cancel() }
     }
 
+    /// The capsule's content: state, then counts while there is room for them.
+    @ViewBuilder
+    private var summary: some View {
+        HStack(spacing: DSSpacing.sm) {
+            stateLabel
+            if !iconOnly, isRunning, !restartRequired {
+                if !compact {
+                    separatorDot
+                    Text(Self.requestCountShort(requestCount))
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                if unmatchedCount > 0 {
+                    separatorDot
+                    DSStatusLabel("\(unmatchedCount) unmatched", color: DSColors.warning)
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var stateLabel: some View {
+        switch serverState {
+        case .starting, .stopping:
+            HStack(spacing: DSSpacing.sm) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 10, height: 10)
+                if !iconOnly {
+                    Text(Self.shortState(serverState))
+                        .font(DSTypography.calloutMedium)
+                        .foregroundStyle(DSColors.labelSecondary)
+                }
+            }
+        default:
+            if iconOnly {
+                Circle().fill(statusColor).frame(width: 8, height: 8)
+                    .frame(width: 16, height: 16)
+            } else {
+                DSStatusLabel(stateTitle, color: statusColor)
+                    .foregroundStyle(statusColor)
+            }
+        }
+    }
+
+    private var separatorDot: some View {
+        Text(verbatim: "·")
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelTertiary)
+            .accessibilityHidden(true)
+    }
+
+    private var stateTitle: String {
+        if restartRequired { return "Restart required" }
+        if case .error(let message) = serverState {
+            return compact ? "Server error" : "Couldn\u{2019}t start: \(Self.shortError(message))"
+        }
+        return Self.shortState(serverState)
+    }
+
     private var serverDetails: some View {
         VStack(alignment: .leading, spacing: DSSpacing.md) {
-            Text("Local servers")
-                .font(DSTypography.bodyBold)
-            Text(isRunning ? "Listening now" : "Configured addresses")
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
+            HStack(spacing: DSSpacing.sm) {
+                DSStatusLabel(restartRequired ? "Restart required" : Self.shortState(serverState),
+                              color: statusColor)
+                Spacer(minLength: DSSpacing.sm)
+                if let onToggleServer {
+                    DSButton(isRunning ? "Stop" : "Run", variant: .secondary, size: .medium,
+                             identifier: "serverStatusWell.toggle") {
+                        onToggleServer()
+                    }
+                }
+            }
 
-            // A long backend list scrolls; the settings and traffic actions remain reachable.
+            if case .error(let message) = serverState {
+                Text(verbatim: message)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.error)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("serverStatusWell.error")
+            }
+
+            DSDivider()
+
             ScrollView {
-                VStack(alignment: .leading, spacing: DSSpacing.md) {
+                VStack(alignment: .leading, spacing: DSSpacing.sm) {
                     ForEach(backends) { backend in
                         backendRow(backend)
-                        Divider()
                     }
                     if restartRequired, let configuration {
-                        Label("Configured — restart required", systemImage: "exclamationmark.arrow.circlepath")
-                            .font(DSTypography.label)
-                            .foregroundStyle(DSColors.warningText)
+                        Text("After a restart")
+                            .font(DSTypography.captionSemibold)
+                            .foregroundStyle(DSColors.labelTertiary)
+                            .padding(.top, DSSpacing.xs)
                         ForEach(configuration.listeners) { backend in
-                            Text(verbatim: "\(backend.name): \(backend.port)")
-                                .font(DSTypography.label)
-                                .accessibilityIdentifier("serverStatusWell.configuredPort.\(backend.port)")
+                            HStack {
+                                Text(verbatim: backend.name)
+                                Spacer(minLength: DSSpacing.sm)
+                                Text(verbatim: "localhost:\(backend.port)")
+                                    .font(DSTypography.code)
+                                    .foregroundStyle(DSColors.warning)
+                            }
+                            .font(DSTypography.body)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("serverStatusWell.configuredPort.\(backend.port)")
                         }
                     }
                 }
             }
-            .frame(maxHeight: DSToolbarGeometry.detailsListHeight)
+            .frame(maxHeight: 180)
             .fixedSize(horizontal: false, vertical: true)
 
-            if case .error(let message) = serverState {
-                Text(verbatim: message)
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.destructive)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("serverStatusWell.error")
-            }
+            DSDivider()
 
-            HStack {
-                Text(Self.requestCountLabel(requestCount))
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
+            HStack(alignment: .bottom, spacing: 18) {
+                figure("\(requestCount)", caption: requestCount == 1 ? "request" : "requests",
+                       color: DSColors.labelPrimary)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.requestCountLabel(requestCount))
                     .accessibilityIdentifier("serverStatusWell.requestCount")
+                figure("\(unmatchedCount)", caption: "unmatched",
+                       color: unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary)
                 Spacer(minLength: DSSpacing.sm)
                 if unmatchedCount > 0, let onShowUnmatched {
-                    Button {
+                    DSButton("Show unmatched", variant: .secondary, size: .medium,
+                             identifier: "serverStatusWell.unmatchedButton") {
                         showingDetails = false
                         onShowUnmatched()
-                    } label: {
-                        Label("\(unmatchedCount) unmatched", systemImage: "exclamationmark.triangle")
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(DSColors.warningText)
                     .accessibilityIdentifier("serverStatusWell.unmatched")
                     .accessibilityLabel(Self.unmatchedLabel(unmatchedCount, actionable: true))
                     .help("Show requests no endpoint or journey answered")
-                }
-            }
-            Divider()
-            HStack {
-                if let onShowSettings {
-                    Button("Server settings…") {
-                        showingDetails = false
-                        onShowSettings()
-                    }
-                    .accessibilityIdentifier("serverStatusWell.settings")
-                    .accessibilityLabel("Server settings")
-                }
-                Spacer(minLength: DSSpacing.md)
-                if let onShowTraffic {
-                    Button("View traffic") {
+                } else if let onShowTraffic {
+                    DSButton("View traffic", variant: .secondary, size: .medium,
+                             identifier: "serverStatusWell.trafficButton") {
                         showingDetails = false
                         onShowTraffic()
                     }
@@ -190,48 +227,60 @@ struct ServerStatusWell: View {
                     .accessibilityLabel("View traffic")
                 }
             }
-            .buttonStyle(.borderless)
+
+            if let onShowSettings {
+                DSDivider()
+                Button("Server settings\u{2026}") {
+                    showingDetails = false
+                    onShowSettings()
+                }
+                .buttonStyle(.plain)
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.accent)
+                .accessibilityIdentifier("serverStatusWell.settings")
+                .accessibilityLabel("Server settings")
+            }
         }
         .padding(DSSpacing.lg)
-        .frame(width: DSToolbarGeometry.detailsWidth)
+        .frame(width: DSLayout.popoverWidth)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("serverStatusWell.portList")
     }
 
+    private func figure(_ value: String, caption: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(verbatim: value)
+                .font(DSTypography.Figure.large)
+                .foregroundStyle(color)
+            Text(caption)
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelSecondary)
+        }
+    }
+
     private func backendRow(_ backend: BackendConfiguration) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            HStack {
-                Text(verbatim: backend.name)
-                    .font(DSTypography.bodyMedium)
-                Spacer(minLength: DSSpacing.md)
-                Button { copyURL(for: backend) } label: {
-                    HStack(spacing: DSSpacing.xs) {
-                        Image(systemName: copiedPort == backend.port ? "checkmark" : "doc.on.doc")
-                        Text(copiedPort == backend.port ? "Copied" : "Copy URL")
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    .font(DSTypography.label)
-                    .frame(minWidth: DSToolbarGeometry.copyButtonWidth, alignment: .trailing)
-                }
-                .buttonStyle(.borderless)
-                .layoutPriority(1)
-                .disabled(!isRunning)
-                .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
-                .accessibilityLabel("Copy \(backend.name) URL, port \(String(backend.port))")
-                .accessibilityValue(copiedPort == backend.port ? "Copied" : "")
-                .help("Copy \(backend.localURL)")
-            }
-            Text(verbatim: backend.localURL)
-                .font(DSTypography.label)
+        HStack(spacing: DSSpacing.sm) {
+            Text(verbatim: backend.name)
+                .font(DSTypography.body)
+                .lineLimit(1)
+            Spacer(minLength: DSSpacing.sm)
+            Text(verbatim: "localhost:\(backend.port)")
+                .font(DSTypography.code)
                 .foregroundStyle(DSColors.labelSecondary)
                 .textSelection(.enabled)
                 .accessibilityIdentifier(isRunning
                     ? "serverStatusWell.listeningPort.\(backend.port)"
                     : "serverStatusWell.configuredPort.\(backend.port)")
-            Text(isRunning ? "Running" : Self.shortState(serverState))
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
+            Button { copyURL(for: backend) } label: {
+                Text(copiedPort == backend.port ? "Copied" : "Copy")
+                    .frame(minWidth: 40)
+            }
+            .buttonStyle(.ds(.secondary, size: .small))
+            .disabled(!isRunning)
+            .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
+            .accessibilityLabel("Copy \(backend.name) URL, port \(String(backend.port))")
+            .accessibilityValue(copiedPort == backend.port ? "Copied" : "")
+            .help("Copy \(backend.localURL)")
         }
     }
 
@@ -321,6 +370,16 @@ struct ServerStatusWell: View {
             return "\(backends.count) \(backends.count == 1 ? "port" : "ports") listening: \(listening)."
         }
         return "\(configuration.listeners.count) \(configuration.listeners.count == 1 ? "port" : "ports") configured: \(configured). Server is not running."
+    }
+
+    nonisolated static func requestCountShort(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "request" : "requests")"
+    }
+
+    /// The first clause of a start error, short enough for the toolbar.
+    nonisolated static func shortError(_ message: String) -> String {
+        let clause = message.split(whereSeparator: { ".\n".contains($0) }).first.map(String.init) ?? message
+        return clause.count > 48 ? String(clause.prefix(47)) + "\u{2026}" : clause
     }
 
     nonisolated static func requestCountLabel(_ count: Int) -> String {

@@ -40,10 +40,12 @@ public struct DSJSONEditor: View {
                     .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
                     .environment(\.colorScheme, colorScheme)
             }
-            .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.sm))
+            .padding(.vertical, DSSpacing.sm)
+            .background(DSColors.code)
+            .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(DSColors.border, lineWidth: DSStroke.hairline)
+                RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                    .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
                     .allowsHitTesting(false)
             )
             .accessibilityIdentifier("ds.jsoneditor.\(identifier)")
@@ -52,11 +54,11 @@ public struct DSJSONEditor: View {
             if let error = Self.validationErrorMessage(text: text, isValid: isValid) {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(DSColors.destructive)
-                        .font(.system(size: DSGlyph.inline))
+                        .foregroundStyle(DSColors.error)
+                        .font(.system(size: DSGlyph.field - 1))
                     Text(error)
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.destructive)
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.error)
                 }
                 .padding(.top, DSSpacing.xs)
                 .accessibilityIdentifier("ds.jsoneditor.\(identifier).error")
@@ -76,7 +78,7 @@ public struct DSJSONEditor: View {
 
     // Font metrics and both native editor themes share this face.
     static let editorFontName = "SFMono-Regular"
-    static let editorFontSize: CGFloat = 13
+    static let editorFontSize: CGFloat = 12
 
     /// Height for logical lines. Wrapped lines may need more room; callers provide a minimum height.
     public static func height(forLines lines: Int) -> CGFloat {
@@ -94,8 +96,8 @@ public struct DSJSONEditor: View {
     // MARK: - Themes — warm, cohesive with Ink & Electric palette
 
     // Exposed internally so contrast tests use the surfaces the native editor actually draws.
-    static let lightCanvas = DSColors.dominantLightInk.nsColor()
-    static let darkCanvas = DSColors.dominantDarkInk.nsColor()
+    static let lightCanvas = DSColors.codeLightInk.nsColor()
+    static let darkCanvas = DSColors.codeDarkInk.nsColor()
 
     // Syntax colors and surfaces share DSColors; other native editor roles are explicit here.
     private static let darkTheme = Theme(
@@ -115,9 +117,9 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.60, green: 0.42, blue: 0.92, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.78, green: 0.64, blue: 1.0, alpha: 1.0),
         backgroundColour: darkCanvas,
-        currentLineColour: DSColors.secondaryDarkInk.nsColor(),
-        selectionColour: DSColors.accentInk.nsColor(opacity: 0.25),
-        cursorColour: DSColors.accentInk.nsColor(),
+        currentLineColour: NSColor(white: 1, alpha: 0.035),
+        selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.3),
+        cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.30, green: 0.33, blue: 0.38, alpha: 1.0)
     )
 
@@ -162,9 +164,9 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.36, green: 0.15, blue: 0.60, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.18, green: 0.05, blue: 0.43, alpha: 1.0),
         backgroundColour: lightCanvas,
-        currentLineColour: DSColors.secondaryLightInk.nsColor(),
-        selectionColour: DSColors.accentInk.nsColor(opacity: 0.18),
-        cursorColour: DSColors.accentInk.nsColor(),
+        currentLineColour: NSColor(white: 0, alpha: 0.03),
+        selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.2),
+        cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.84, green: 0.84, blue: 0.86, alpha: 1.0)
     )
 

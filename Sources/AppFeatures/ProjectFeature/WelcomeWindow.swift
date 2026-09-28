@@ -2,31 +2,23 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Welcome screen — Xcode-style two-column layout with branding + actions on
-/// the left and recent projects on the right.
-///
-/// This is the first thing anyone sees, so it follows the same rules as the workspace rather than
-/// inventing its own: the recents pane is a panel and wears `DSPanelHeader`, every size and weight
-/// comes from `DSTypography`, and the list is a list — selectable, arrow-navigable, Return to open.
+/// Welcome window: the app's identity and start actions on the left, projects on the right.
 struct WelcomeWindow: View {
     let recentProjects: [RecentProjectEntry]
     let onOpenProject: (UUID) -> Void
     let onDuplicateProject: (UUID) -> Void
     let onDeleteProject: (UUID) -> Void
     let onRequestRenameProject: (RecentProjectEntry) -> Void
-    /// Asks the root to present the new-project sheet.
-    ///
-    /// The sheet used to live here, which made two presenters for one dialog once File ▸ New Project
-    /// could open it from an open workspace too. `ContentView` owns it now, so the menu and this
-    /// button reach the same sheet whichever branch is on screen.
+    /// Asks the root to present the new-project sheet. `ContentView` owns the sheet so the menu and
+    /// this button open the same one.
     let onRequestNewProject: () -> Void
+    /// Optional start actions. A row is shown only when its handler is provided.
+    let onRequestImport: (() -> Void)?
+    let onRequestOpenExport: (() -> Void)?
+    let onRequestSampleProject: (() -> Void)?
 
     @State private var viewState: ViewState
-    /// The row the keyboard is on.
-    ///
-    /// Deliberately outside `ViewState`: that type is the window's *modal* state, and a selection
-    /// that survives a sheet being presented is not part of it. Without a selection there was no
-    /// keyboard path to a recent project at all — the list could only be reached with the pointer.
+    /// The row the keyboard is on. Kept out of `ViewState`, which holds only modal state.
     @State private var selectedRecentID: UUID?
 
     struct DeleteTarget: Identifiable {
@@ -60,7 +52,10 @@ struct WelcomeWindow: View {
         onDuplicateProject: @escaping (UUID) -> Void,
         onDeleteProject: @escaping (UUID) -> Void,
         onRequestRenameProject: @escaping (RecentProjectEntry) -> Void = { _ in },
-        onRequestNewProject: @escaping () -> Void
+        onRequestNewProject: @escaping () -> Void,
+        onRequestImport: (() -> Void)? = nil,
+        onRequestOpenExport: (() -> Void)? = nil,
+        onRequestSampleProject: (() -> Void)? = nil
     ) {
         self.init(
             recentProjects: recentProjects,
@@ -69,6 +64,9 @@ struct WelcomeWindow: View {
             onDeleteProject: onDeleteProject,
             onRequestRenameProject: onRequestRenameProject,
             onRequestNewProject: onRequestNewProject,
+            onRequestImport: onRequestImport,
+            onRequestOpenExport: onRequestOpenExport,
+            onRequestSampleProject: onRequestSampleProject,
             initialDeleteTarget: nil
         )
     }
@@ -80,6 +78,9 @@ struct WelcomeWindow: View {
         onDeleteProject: @escaping (UUID) -> Void,
         onRequestRenameProject: @escaping (RecentProjectEntry) -> Void = { _ in },
         onRequestNewProject: @escaping () -> Void,
+        onRequestImport: (() -> Void)? = nil,
+        onRequestOpenExport: (() -> Void)? = nil,
+        onRequestSampleProject: (() -> Void)? = nil,
         initialDeleteTarget: DeleteTarget?
     ) {
         self.recentProjects = recentProjects
@@ -88,31 +89,29 @@ struct WelcomeWindow: View {
         self.onDeleteProject = onDeleteProject
         self.onRequestRenameProject = onRequestRenameProject
         self.onRequestNewProject = onRequestNewProject
+        self.onRequestImport = onRequestImport
+        self.onRequestOpenExport = onRequestOpenExport
+        self.onRequestSampleProject = onRequestSampleProject
         _viewState = State(initialValue: ViewState(deleteTarget: initialDeleteTarget))
     }
 
     public var body: some View {
         GeometryReader { geometry in
-            let heroWidth = min(360, max(280, geometry.size.width * 0.26))
+            let heroWidth = min(400, max(300, geometry.size.width * 0.45))
+            // 112 at the design's 560pt height, smaller in a short window so the actions still fit.
+            let iconSize = min(112, max(64, geometry.size.height * 0.2))
 
             HStack(spacing: 0) {
-                // Keep the launcher compact at its usual size, then give its existing action and
-                // identity a little more room when returning from a maximized workspace.
-                leftColumn(iconSize: 96 + (heroWidth - 280) * 0.2)
+                leftColumn(iconSize: iconSize)
                     .frame(width: heroWidth)
                     .frame(maxHeight: .infinity)
-                    .background(DSColors.dominant)
+                    .background(DSColors.content)
 
-                // This separates the two full-height columns, which is the heaviest job a rule in
-                // this app does. `.standard` reads as an in-panel hairline.
-                DSDivider(style: .strong, axis: .vertical)
+                DSDivider(axis: .vertical, identifier: "welcome.columns")
 
-                // A recent-project row should stay readable in a wide retained workspace window;
-                // it should not become a full-width stripe with its timestamp at the far edge.
                 rightColumn
-                    .frame(maxWidth: 840, maxHeight: .infinity, alignment: .topLeading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(DSColors.secondary)
+                    .background(DSColors.sheet)
             }
         }
         .frame(minWidth: 640, minHeight: 380)
@@ -129,9 +128,7 @@ struct WelcomeWindow: View {
             }
             Button("Keep project", role: .cancel) { }
         } message: { _ in
-            // The title beside it takes a `String`, not a view, so there is nowhere to hang an
-            // identifier on it; the message is the half of the alert that is a view, and it is the
-            // half that says what deleting actually does.
+            // The title is a `String`, so the message carries the identifier.
             Text(ViewState.deleteMessage)
                 .accessibilityIdentifier("welcome.deleteAlert.message")
         }
@@ -141,72 +138,94 @@ struct WelcomeWindow: View {
         viewState
     }
 
-    // MARK: - Left Column
+    // MARK: - Left column
 
     private func leftColumn(iconSize: CGFloat) -> some View {
-        VStack(spacing: DSSpacing.xxxl) {
-            Spacer(minLength: 0)
+        VStack(spacing: 0) {
+            Spacer(minLength: DSSpacing.xl)
             hero(iconSize: iconSize)
             actions
-            Spacer(minLength: 0)
+                .padding(.top, DSSpacing.xxl + DSSpacing.xs)
+            Spacer(minLength: DSSpacing.xl)
         }
-        .padding(.horizontal, DSSpacing.lg)
+        .padding(.horizontal, DSSpacing.xxxl)
     }
 
     private func hero(iconSize: CGFloat) -> some View {
-        VStack(spacing: DSSpacing.lg) {
+        VStack(spacing: 0) {
             Image("MimicLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: iconSize, height: iconSize)
-                // The app-icon squircle is not a control corner, so it stays local to this image.
-                // Deliberately not a `DSCornerRadius` token — those are for controls and panels, and
-                // rounding an app icon to 12 would make it look like a button.
-                .clipShape(RoundedRectangle(cornerRadius: 21))
-                .shadow(color: .black.opacity(0.16), radius: 8, y: 2)
-                // The title underneath says "Mimic"; without this VoiceOver says it twice, the
-                // second time as the asset's filename.
+                // App-icon squircle, not a control corner, so it scales with the icon.
+                .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 15, y: 10)
+                // The title below says "Mimic"; VoiceOver should not read it twice.
                 .accessibilityHidden(true)
 
-            VStack(spacing: DSSpacing.xs) {
-                // `DSTypography.display`, not `.system(size: 32, weight: .bold)`. 32pt bold existed
-                // nowhere else in the app, so the one piece of type a new user reads first was the
-                // one piece drawn outside the scale.
-                Text("Mimic")
-                    .font(DSTypography.display)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .accessibilityIdentifier("welcomeHeroTitle")
+            Text("Mimic")
+                .font(DSTypography.largeTitle)
+                .foregroundStyle(DSColors.labelPrimary)
+                .padding(.top, DSSpacing.lg)
+                .accessibilityIdentifier("welcomeHeroTitle")
 
-                if let versionText {
-                    Text(versionText)
-                        .font(DSTypography.label)
-                        // Not `labelTertiary`. At 36% alpha a version string is decoration; it is
-                        // the first thing anyone quotes in a bug report.
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .accessibilityIdentifier("welcomeVersionLabel")
-                }
+            if let versionText {
+                Text(versionText)
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .padding(.top, DSSpacing.xs)
+                    .accessibilityIdentifier("welcomeVersionLabel")
             }
         }
     }
 
     private var actions: some View {
         VStack(spacing: DSSpacing.xxs) {
-            ActionRow(
-                icon: "plus.rectangle",
-                title: "Create new project\u{2026}",
+            WelcomeActionRow(
+                icon: "plus",
+                title: "New project\u{2026}",
+                shortcut: "\u{2318}N",
                 help: "Create a new mock server project",
-                identifier: "newProjectButton"
-            ) {
-                onRequestNewProject()
+                identifier: "newProjectButton",
+                action: onRequestNewProject
+            )
+
+            if let onRequestImport {
+                WelcomeActionRow(
+                    icon: "square.and.arrow.down",
+                    title: "Import HAR or OpenAPI\u{2026}",
+                    shortcut: nil,
+                    help: "Create a project from a HAR file or an OpenAPI spec",
+                    identifier: "welcome.import",
+                    action: onRequestImport
+                )
+            }
+
+            if let onRequestOpenExport {
+                WelcomeActionRow(
+                    icon: "folder",
+                    title: "Open project export\u{2026}",
+                    shortcut: "\u{2318}O",
+                    help: "Open a Mimic project export",
+                    identifier: "welcome.openExport",
+                    action: onRequestOpenExport
+                )
+            }
+
+            if let onRequestSampleProject {
+                WelcomeActionRow(
+                    icon: "star",
+                    title: "Try the sample project",
+                    shortcut: nil,
+                    help: "Open a sample project with endpoints and a journey",
+                    identifier: "welcome.sampleProject",
+                    action: onRequestSampleProject
+                )
             }
         }
     }
 
-    /// Read from the bundle rather than typed into the view.
-    ///
-    /// This line said "Version 1.0" while `MARKETING_VERSION` had moved on to 1.6.0 — the only
-    /// number on the first screen, and it was wrong. `nil` (and so no line at all) when the key is
-    /// missing, which is what a unit-test host looks like: a bare "Version" reads as a bug.
+    /// Read from the bundle. `nil` (no line) when the key is missing, as in a unit-test host.
     private var versionText: String? {
         guard
             let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
@@ -217,23 +236,11 @@ struct WelcomeWindow: View {
         return "Version \(version)"
     }
 
-    // MARK: - Right Column
+    // MARK: - Right column
 
-    /// The recents pane is a panel, so it wears the same chrome the workspace panels do: one 36pt
-    /// row, title left, count in the subtitle slot — and it stays when the list is empty, because
-    /// chrome that disappears with its content reads as a rendering glitch.
     private var rightColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // "Projects", not "Recent projects". The list is reconciled against the store now rather
-            // than read from the ten-entry `UserDefaults` cache, so it holds everything you have —
-            // recency only decides the order. Calling it "recent" would promise less than it shows,
-            // and would suggest there is somewhere else to look for the rest. There is not: this
-            // window is the only way into a project.
-            DSPanelHeader(
-                "Projects",
-                subtitle: recentCountSubtitle,
-                identifier: "welcome.recents"
-            )
+            recentsHeader
 
             if recentProjects.isEmpty {
                 emptyRecents
@@ -241,10 +248,31 @@ struct WelcomeWindow: View {
                 recentsList
             }
         }
+        .padding(.top, DSSpacing.xxxl + DSSpacing.md)
     }
 
-    /// `nil` rather than "0" when there is nothing to count — an empty panel does not need a number
-    /// to tell you it is empty.
+    /// "Projects" rather than "Recent projects": the list holds every stored project, ordered by
+    /// recency. The count is left out when the list is empty.
+    private var recentsHeader: some View {
+        HStack(spacing: DSSpacing.xs) {
+            Text("Projects")
+                .font(DSTypography.captionSemibold)
+                .foregroundStyle(DSColors.labelTertiary)
+                .accessibilityAddTraits(.isHeader)
+            if let recentCountSubtitle {
+                Text(recentCountSubtitle)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DSSpacing.xl + DSSpacing.xs)
+        .padding(.bottom, DSSpacing.sm)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("welcome.recents.header")
+    }
+
     private var recentCountSubtitle: String? {
         guard !recentProjects.isEmpty else { return nil }
         return "\(recentProjects.count)"
@@ -263,19 +291,17 @@ struct WelcomeWindow: View {
         List(recentProjects, selection: $selectedRecentID) { entry in
             RecentProjectRow(entry: entry)
                 .listRowInsets(EdgeInsets(
-                    top: DSSpacing.xxs,
-                    leading: DSSpacing.smPlus,
-                    bottom: DSSpacing.xxs,
-                    trailing: DSSpacing.smPlus
+                    top: DSSpacing.xxs / 2,
+                    leading: DSSpacing.md,
+                    bottom: DSSpacing.xxs / 2,
+                    trailing: DSSpacing.md
                 ))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-                // Without this the row responded to a click only where a glyph or a word happened to
-                // be drawn: the gap between the name and the timestamp — most of the row — was dead.
+                // The whole row is clickable, not only its text.
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    // Selection follows the pointer as well as the keyboard, so Return afterwards
-                    // acts on the row you last touched rather than on wherever the arrows were.
+                    // Selection follows the pointer too, so Return acts on the row last touched.
                     selectedRecentID = entry.id
                     Self.openProject(id: entry.id, onOpenProject: onOpenProject)
                 }
@@ -299,20 +325,16 @@ struct WelcomeWindow: View {
                 }
         }
         .listStyle(.plain)
-        .padding(.top, DSSpacing.smPlus)
-        // `.contain` before the identifier, so naming the list does not rename the rows —
-        // `recentProject-<name>` is what a test clicks, and this is what it sends arrow keys to.
+        // `.contain` before the identifier so naming the list does not rename the rows.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("welcome.recents.list")
         .scrollContentBackground(.hidden)
-        // Arrow keys move the selection because the list has one; this is the other half of the
-        // contract. A launcher you cannot open from the keyboard is a launcher you have to aim at.
+        // Arrow keys move the selection; Return opens it.
         .onKeyPress(.return) { openSelectedRecent() }
         .onAppear {
             selectedRecentID = Self.validSelection(selectedRecentID, in: recentProjects)
         }
-        // Deleting the selected project would otherwise leave the selection pointing at a row that
-        // no longer exists, and Return would do nothing with no visible reason why.
+        // Keep the selection on a row that still exists after a delete.
         .onChange(of: recentProjects) { _, entries in
             selectedRecentID = Self.validSelection(selectedRecentID, in: entries)
         }
@@ -324,15 +346,13 @@ struct WelcomeWindow: View {
         return .handled
     }
 
-    /// Keeps the selection on a row that exists: the current one if it survived, otherwise the top
-    /// of the list, so the arrow keys always have somewhere to start.
+    /// Keeps the selection on a row that exists: the current one if it survived, otherwise the top.
     static func validSelection(_ current: UUID?, in entries: [RecentProjectEntry]) -> UUID? {
         if let current, entries.contains(where: { $0.id == current }) {
             return current
         }
         return entries.first?.id
     }
-
 
     static func openProject(id: UUID, onOpenProject: (UUID) -> Void) {
         onOpenProject(id)
@@ -345,14 +365,15 @@ struct WelcomeWindow: View {
     static func deleteProject(target: DeleteTarget, onDeleteProject: (UUID) -> Void) {
         onDeleteProject(target.id)
     }
-
 }
 
-// MARK: - Action Row
+// MARK: - Action row
 
-private struct ActionRow: View {
+/// A start action: an icon tile, a title and an optional shortcut hint.
+private struct WelcomeActionRow: View {
     let icon: String
     let title: String
+    let shortcut: String?
     let help: String
     let identifier: String
     let action: () -> Void
@@ -360,127 +381,159 @@ private struct ActionRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        Button {
-            action()
-        } label: {
-            HStack(spacing: DSSpacing.mdMinus) {
+        Button(action: action) {
+            HStack(spacing: DSSpacing.md) {
                 Image(systemName: icon)
-                    .font(.system(size: DSGlyph.controlProminent))
-                    .foregroundStyle(DSColors.accentText)
-                    .frame(width: DSControlHeight.row)
+                    .font(.system(size: DSGlyph.button, weight: .medium))
+                    .foregroundStyle(DSColors.accent)
+                    .frame(width: DSControlHeight.large, height: DSControlHeight.large)
+                    .background(
+                        RoundedRectangle(cornerRadius: DSCornerRadius.field)
+                            .fill(DSColors.field)
+                    )
+                    .accessibilityHidden(true)
 
                 Text(title)
                     .font(DSTypography.bodyMedium)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .lineLimit(1)
 
-                Spacer()
+                Spacer(minLength: DSSpacing.sm)
+
+                if let shortcut {
+                    Text(shortcut)
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .accessibilityHidden(true)
+                }
             }
-            .padding(.horizontal, DSSpacing.lg)
-            .frame(minHeight: 40)
+            .padding(.horizontal, DSSpacing.md)
+            .frame(height: 40)
             .background(
-                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .fill(isHovered ? DSColors.accentSubtle : DSColors.surfaceElevated)
+                RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                    .fill(isHovered ? DSColors.hover : .clear)
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
-            }
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: DSCornerRadius.card))
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        // The highlight used to snap on and off. Every other hover in the app eases, and the one
-        // that does not is the one on the first screen.
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(title)
     }
 }
 
-// MARK: - Recent Project Row
+// MARK: - Recent project row
 
 private struct RecentProjectRow: View {
     let entry: RecentProjectEntry
     @State private var isHovered = false
+    /// `.increased` while the native list selection is drawn behind the row.
+    @Environment(\.backgroundProminence) private var prominence
+
+    private var isEmphasized: Bool { prominence == .increased }
 
     var body: some View {
         HStack(spacing: DSSpacing.md) {
-            Image("MimicLogo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 28, height: 28)
-                // The squircle follows the hero icon's proportion. Both are app-icon
-                // masks rather than control corners, which is why neither is a token.
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text(Self.initials(for: entry.name))
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(.white)
+                .frame(width: DSControlHeight.prominent, height: DSControlHeight.prominent)
+                .background(
+                    RoundedRectangle(cornerRadius: DSCornerRadius.segment)
+                        .fill(Self.tileColor(for: entry.name))
+                )
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                 Text(entry.name)
-                    .font(DSTypography.bodyMedium)
-                    .foregroundStyle(DSColors.labelPrimary)
+                    .font(DSTypography.bodySemibold)
+                    .foregroundStyle(isEmphasized ? Color.white : DSColors.labelPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                // Was `Text(date, style: .relative)`, which is a live-updating timer: every row in
-                // the list re-rendered once a second to move a number nobody was watching. This is
-                // a formatted string, resolved once.
-                Text("Last opened \(Self.relativeText(for: entry.lastOpenedAt))")
-                    .font(DSTypography.metaSmall)
-                    // Not `labelTertiary`: at 36% alpha this was the only thing distinguishing two
-                    // rows and you could barely read it.
-                    .foregroundStyle(DSColors.labelSecondary)
+                Text("Last opened \(Self.timeText(for: entry.lastOpenedAt))")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(isEmphasized ? Color.white.opacity(0.8) : DSColors.labelSecondary)
                     .lineLimit(1)
             }
 
             Spacer(minLength: DSSpacing.sm)
 
-            // The exact moment, in a column of its own. Two projects last opened "3 days ago" are
-            // the same row until one says 09:41 and the other says 17:02 — and with five similar
-            // names in the list that is the only thing left to tell them apart, since a project
-            // here is a row in the store rather than a file with a path to show.
-            //
-            // Monospaced so the column reads as tabular data rather than as a second sentence; that
-            // is what distinguishes it from the line to its left, not a fainter grey. Nothing a user
-            // has to read is set at `labelTertiary`.
             Text(Self.stampText(for: entry.lastOpenedAt))
-                .font(DSTypography.codeSmall)
-                .foregroundStyle(DSColors.labelSecondary)
+                .font(DSTypography.caption)
+                .foregroundStyle(isEmphasized ? Color.white.opacity(0.8) : DSColors.labelTertiary)
                 .lineLimit(1)
         }
         .padding(.horizontal, DSSpacing.md)
-        .frame(minHeight: 44)
+        .frame(minHeight: DSRowHeight.recent + DSSpacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                // `accentSubtle` (12%), the app's one hover fill, rather than a hand-rolled 15%.
-                .fill(isHovered ? DSColors.accentSubtle : .clear)
+            RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                .fill(isHovered && !isEmphasized ? DSColors.hover : .clear)
         )
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(Self.fullStampText(for: entry.lastOpenedAt))
-        // Paired deliberately: an identifier on a container overrides its descendants', so without
-        // `.contain` the name and the timestamp inside this row would both report
-        // "recentProject-<name>" and vanish as addressable text.
+        // `.contain` keeps the name and dates addressable inside the row.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recentProject-\(entry.name)")
         .accessibilityLabel("\(entry.name), last opened \(Self.relativeText(for: entry.lastOpenedAt))")
     }
 
-    /// "yesterday", "3 days ago" — the reading you want while scanning.
+    /// Up to two letters: the first letter of the first two words, or the first two letters.
+    static func initials(for name: String) -> String {
+        let words = name.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        let letters: String
+        if words.count >= 2 {
+            letters = String(words[0].prefix(1)) + String(words[1].prefix(1))
+        } else if let word = words.first {
+            letters = String(word.prefix(2))
+        } else {
+            letters = "?"
+        }
+        return letters.uppercased()
+    }
+
+    /// A stable colour per name. `hashValue` changes between launches, so this sums scalars instead.
+    static func tileColor(for name: String) -> Color {
+        let palette: [Color] = [
+            DSColors.accent,
+            DSColors.success,
+            DSColors.Syntax.key,
+            DSColors.warning,
+            DSColors.Syntax.string,
+            DSColors.error,
+        ]
+        let sum = name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+        return palette[abs(sum) % palette.count]
+    }
+
+    /// "yesterday", "3 days ago": used in the spoken label.
     static func relativeText(for date: Date) -> String {
         date.formatted(.relative(presentation: .named))
     }
 
-    /// Time for today, date otherwise — the convention Finder and Mail use for a date column, and
-    /// the reason the column stays narrow enough to sit beside the name.
+    /// The time of day, shown under the name.
+    static func timeText(for date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// "Today", "Yesterday", "Sep 21", or a numeric date in another year.
     static func stampText(for date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         if calendar.isDate(date, inSameDayAs: now) {
-            return date.formatted(date: .omitted, time: .shortened)
+            return "Today"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
         return date.formatted(date: .numeric, time: .omitted)
     }
 
-    /// The unabbreviated version, for the tooltip.
+    /// The full date and time, for the tooltip.
     static func fullStampText(for date: Date) -> String {
         "Last opened \(date.formatted(date: .long, time: .shortened))"
     }

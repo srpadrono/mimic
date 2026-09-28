@@ -12,6 +12,9 @@ struct CenterPaneView: View {
     let content: CenterPaneContent
     var onRenameEndpoint: (UUID) -> Void = { _ in }
     var onEditEndpointRequest: (UUID) -> Void = { _ in }
+    var onAddEndpoint: () -> Void = {}
+    var onImportHAR: () -> Void = {}
+    var onImportOpenAPI: () -> Void = {}
 
     var body: some View {
         Group {
@@ -34,7 +37,7 @@ struct CenterPaneView: View {
         // future third branch cannot forget to.
         // Keep the leading edge visible when a form's fixed controls exceed a narrow pane.
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(DSColors.dominant)
+        .background(DSColors.content)
     }
 
     // MARK: - Endpoints
@@ -43,54 +46,99 @@ struct CenterPaneView: View {
     private func endpointEditor(for endpointID: UUID?) -> some View {
         if let endpointID,
            let endpoint = appState.currentProject?.endpoints.first(where: { $0.id == endpointID }) {
-            let activeScenario: Scenario? = {
-                guard let activeID = endpoint.activeScenarioID else { return nil }
-                return endpoint.scenarios.first { $0.id == activeID }
-            }()
-            // No `.id(endpointID)` here, and that is a decision rather than an omission. One view
-            // identity across a selection change is what gives the editor the same `@State` boxes on
-            // both sides of the click, which is what
-            // `EndpointEditorView.endpointSelectionChanged()` needs in order to finish an edit that
-            // was still settling when the click landed. Adding an id would hand the new endpoint a
-            // fresh editor and take that flush out of the picture without changing a line of it.
+            let scenario = appState.editedScenario(of: endpoint)
+            let configuration = appState.serverConfiguration
+            let listener = configuration.backend(id: endpoint.backendID) ?? configuration.listeners.first
             EndpointEditorView(
                 endpoint: endpoint,
-                activeScenario: activeScenario,
-                globalDelayMs: appState.serverConfiguration.globalDelayMs,
-                backends: appState.serverConfiguration.listeners,
+                activeScenario: scenario,
+                globalDelayMs: configuration.globalDelayMs,
+                backends: configuration.listeners,
+                baseAddress: "localhost:\(listener?.port ?? configuration.port)",
                 actions: EndpointEditorActions(
                     onRename: { onRenameEndpoint(endpointID) },
                     onEditRequest: { onEditEndpointRequest(endpointID) },
                     onDuplicate: { _ = appState.duplicateEndpoint(id: endpointID) },
                     onDelete: { appState.deleteEndpoint(id: endpointID) },
-                    // Capture the scenario shown when the edit was typed. The pending edit closure
-                    // survives a selection change, so resolving "active" at commit time can write
-                    // the old text into the newly selected scenario.
                     onUpdateScenario: { status, headers, body in
-                        guard let scenarioID = activeScenario?.id else { return }
+                        guard let scenarioID = scenario?.id else { return }
                         appState.updateScenario(
                             endpointID: endpointID, scenarioID: scenarioID,
                             statusCode: status, headers: headers, body: body
                         )
                     },
+                    onUpdateContentType: { contentType in
+                        guard let scenarioID = scenario?.id else { return }
+                        appState.updateScenario(endpointID: endpointID, scenarioID: scenarioID, contentType: contentType)
+                    },
                     onUpdateDelay: { appState.updateEndpointDelay(id: endpointID, delayMs: $0) },
                     onUpdateGroupTag: { appState.updateEndpointGroupTag(id: endpointID, groupTag: $0) },
-                    onUpdateBackend: { appState.updateEndpointBackend(id: endpointID, backendID: $0) }
+                    onUpdateBackend: { appState.updateEndpointBackend(id: endpointID, backendID: $0) },
+                    onMakeLive: { appState.setActiveScenario(endpointID: endpointID, scenarioID: $0) },
+                    onRenameScenario: { appState.renameScenario(endpointID: endpointID, scenarioID: $0, name: $1) },
+                    onDuplicateScenario: {
+                        if let copy = appState.duplicateScenario(endpointID: endpointID, scenarioID: $0) {
+                            appState.editScenario(endpointID: endpointID, scenarioID: copy.id)
+                        }
+                    },
+                    onDeleteScenario: { appState.deleteScenario(endpointID: endpointID, scenarioID: $0) }
                 )
             )
         } else {
-            DSEmptyState(
-                systemImage: NavigatorTab.endpoints.systemImage,
-                heading: "No endpoint selected",
-                message: (appState.currentProject?.endpoints.isEmpty ?? true)
-                    ? "Add an endpoint or import a HAR file or OpenAPI spec to get started."
-                    : "Select an endpoint from the sidebar to view and edit its configuration.",
-                identifier: "center.noSelection"
-            )
+            if appState.currentProject?.endpoints.isEmpty ?? true {
+                firstEndpointChooser
+            } else {
+                DSEmptyState(
+                    heading: "No endpoint selected",
+                    message: "Select an endpoint from the sidebar to view and edit its configuration.",
+                    identifier: "center.noSelection"
+                )
+            }
         }
     }
 
     // MARK: - Journeys
+
+    /// A new project's centre: three ways to get a first endpoint.
+    private var firstEndpointChooser: some View {
+        let port = appState.serverState.runningPort ?? appState.serverConfiguration.port
+        return VStack(spacing: 28) {
+            VStack(spacing: DSSpacing.sm) {
+                Text("Mock your first endpoint")
+                    .font(DSTypography.title)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityIdentifier("ds.empty.center.noSelection.heading")
+                    .accessibilityAddTraits(.isHeader)
+                Text("Add one by hand, or bring in traffic you already have. Mimic serves it on localhost:\(String(port)) when you press Run.")
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(DSTypography.Leading.callout)
+                    .frame(maxWidth: 460)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("ds.empty.center.noSelection.message")
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: DSSpacing.lg) { chooserCards }
+                VStack(spacing: DSSpacing.md) { chooserCards }
+            }
+        }
+        .padding(DSSpacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.empty.center.noSelection")
+    }
+
+    @ViewBuilder
+    private var chooserCards: some View {
+        DSOptionCard("Add endpoint", message: "Choose a method and path, then write the response.",
+                     shortcut: ["⌥", "⌘", "N"], isDefault: true, identifier: "empty.center.noSelection.cta",
+                     action: onAddEndpoint)
+        DSOptionCard("Import HAR", message: "From Proxyman, Charles or browser DevTools.",
+                     footnote: "A .har file", identifier: "center.importHAR", action: onImportHAR)
+        DSOptionCard("Import OpenAPI", message: "Each operation becomes an endpoint with its example response.",
+                     footnote: "JSON or YAML", identifier: "center.importOpenAPI", action: onImportOpenAPI)
+    }
 
     @ViewBuilder
     private func journeyEditor(for journeyID: UUID?) -> some View {

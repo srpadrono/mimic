@@ -1,36 +1,34 @@
 import SwiftUI
 
-/// Shared surface for compact fields that already have a label beside them. Full form fields use
-/// `DSTextField`; this gives inline editor fields the same inset, height, radius and border.
+/// Field chrome for a bare `TextField` whose focus the well tracks itself.
 public struct DSFieldWell: ViewModifier {
     private let width: CGFloat?
     private let maxWidth: CGFloat?
     private let isInvalid: Bool
+    private let height: CGFloat
     @FocusState private var isFocused: Bool
 
-    public init(width: CGFloat? = nil, maxWidth: CGFloat? = nil, isInvalid: Bool = false) {
+    public init(width: CGFloat? = nil, maxWidth: CGFloat? = nil, isInvalid: Bool = false,
+                height: CGFloat = DSControlHeight.regular) {
         self.width = width
         self.maxWidth = maxWidth
         self.isInvalid = isInvalid
+        self.height = height
     }
 
     public func body(content: Content) -> some View {
         content
+            .textFieldStyle(.plain)
             .focused($isFocused)
-            .dsControlWell(
-                height: DSControlHeight.field,
-                fill: DSColors.tertiary,
-                stroke: isInvalid ? DSColors.destructive : isFocused ? DSColors.borderFocused : DSColors.border,
-                strokeWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline,
-                width: width,
-                maxWidth: maxWidth
-            )
-            .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
+            .dsFieldChrome(height: height, isFocused: isFocused, isInvalid: isInvalid)
+            .frame(width: width)
+            .frame(maxWidth: maxWidth)
     }
 }
 
 public extension View {
-    func dsFieldWell(width: CGFloat? = nil, maxWidth: CGFloat? = nil, isInvalid: Bool = false) -> some View {
-        modifier(DSFieldWell(width: width, maxWidth: maxWidth, isInvalid: isInvalid))
+    func dsFieldWell(width: CGFloat? = nil, maxWidth: CGFloat? = nil, isInvalid: Bool = false,
+                     height: CGFloat = DSControlHeight.regular) -> some View {
+        modifier(DSFieldWell(width: width, maxWidth: maxWidth, isInvalid: isInvalid, height: height))
     }
 }

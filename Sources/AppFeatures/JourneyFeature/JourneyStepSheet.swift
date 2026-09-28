@@ -6,10 +6,7 @@ import SwiftUI
 /// Adds or edits one journey step.
 ///
 /// A step either answers or fails at the transport level, so the form asks that first and then shows
-/// only the fields that apply — a status code and a timeout hold are not fields you fill in together.
-///
-/// Common request and response fields stay visible. Headers and timing are available in compact
-/// disclosures, so a new step does not open as a full settings page with its last section hidden.
+/// only the fields that apply. Status, delay and repeat share one row; headers stay behind a disclosure.
 struct JourneyStepSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -19,6 +16,8 @@ struct JourneyStepSheet: View {
     var backends: [BackendConfiguration] = []
     var globalDelayMs: Int = 0
     let onCommit: (JourneyStepSpec) -> Void
+    /// Offered only when editing an existing step.
+    var onRemove: (() -> Void)? = nil
 
     private enum Kind: String, CaseIterable, Identifiable {
         case respond
@@ -36,11 +35,8 @@ struct JourneyStepSheet: View {
         }
     }
 
-    /// The form's inputs, named so focus and validation can both point at one.
-    ///
-    /// A complaint belongs under the input that caused it. This sheet used to print every message in
-    /// one slot above the buttons, which meant a bad status code was explained three rows away from
-    /// the status code.
+    /// The form's inputs, named so focus and validation can both point at one. A complaint is shown
+    /// under the input that caused it.
     private enum Field: Hashable {
         case name
         case path
@@ -69,36 +65,36 @@ struct JourneyStepSheet: View {
     @State private var repeatCount = "1"
     @State private var holdMs = String(NetworkFailure.defaultTimeoutHoldMs)
     @State private var headersExpanded = false
-    @State private var timingExpanded = false
     @State private var validation: Validation?
     @State private var scrollPresentationID = UUID()
     @FocusState private var focusedField: Field?
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 Text(step == nil ? "Add step" : "Edit step")
-                    .font(DSTypography.title)
+                    .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
                     .accessibilityIdentifier("stepSheet.title")
-                Text("Match a request, then choose what the client receives.")
-                    .font(DSTypography.label)
+                Text("Match a request, then choose what the client gets.")
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(DSSpacing.lg)
-
-            DSDivider(identifier: "stepSheet.heading")
+            .padding(.horizontal, DSSpacing.xl)
+            .padding(.top, DSSpacing.xl)
 
             ScrollViewReader { scroll in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                        requestFields
+                    VStack(alignment: .leading, spacing: DSSpacing.md) {
+                        matchFields
+                        DSDivider(identifier: "stepSheet.outcome")
+                            .padding(.vertical, DSSpacing.xxs)
                         outcomeFields
-                        timingFields
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(DSSpacing.lg)
+                    .padding(.horizontal, DSSpacing.xl)
+                    .padding(.vertical, DSSpacing.lg)
                 }
                 .task(id: validation) {
                     guard let validation else { return }
@@ -120,86 +116,118 @@ struct JourneyStepSheet: View {
                         scroll.scrollTo(Field.headers, anchor: .bottom)
                     }
                 }
-                .task(id: timingExpanded) {
-                    guard timingExpanded else { return }
-                    do { try await Task.sleep(for: .milliseconds(100)) }
-                    catch { return }
-                    guard !Task.isCancelled else { return }
-                    withAnimation(reduceMotion ? nil : .default) {
-                        scroll.scrollTo(Field.delay, anchor: .bottom)
-                    }
-                }
             }
             .id(scrollPresentationID)
 
             DSDivider(identifier: "stepSheet.footer")
-            HStack(spacing: DSSpacing.md) {
-                Spacer()
-                DSButton("Cancel", variant: .ghost, size: .medium,
-                         identifier: "stepSheet.cancel", action: dismiss.callAsFunction)
-                    .accessibilityIdentifier("stepSheet.cancelButton")
-                    .accessibilityLabel("Cancel")
-                    .keyboardShortcut(.cancelAction)
-                DSButton(step == nil ? "Add step" : "Save step", variant: .primary, size: .medium,
-                         identifier: "stepSheet.save", action: commit)
-                    .accessibilityIdentifier("stepSheet.saveButton")
-                    .accessibilityLabel(step == nil ? "Add step" : "Save step")
-                    .disabled(trimmedPath.isEmpty)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(DSSpacing.lg)
+            footer
         }
         .frame(width: DSSheetWidth.medium,
                height: min(DSFormMetrics.journeyStepHeight,
                            (NSScreen.main?.visibleFrame.height ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
+        .background(DSColors.sheet)
         .defaultFocus($focusedField, .path)
         .onAppear {
             loadExistingStep()
-            // AppKit may reuse the same scroll view when switching between Add and Edit sheets.
-            // Recreate only the scroll container for each presentation so its old offset is not restored.
+            // AppKit may reuse the scroll view between Add and Edit sheets; recreate it so its old
+            // offset is not restored.
             scrollPresentationID = UUID()
         }
     }
 
-    private var requestFields: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            sectionHeading("Request", detail: "Match this call")
-            DSTextField("Step name (optional)", text: $name, placeholder: "e.g. Charge declined",
-                        identifier: "stepSheet.nameField")
-                .focused($focusedField, equals: .name)
-                .accessibilityIdentifier("stepSheet.nameField")
-                .accessibilityLabel("Step name")
-            HStack(alignment: .top, spacing: DSSpacing.md) {
-                DSFormPicker("Method", selection: $method, identifier: "stepSheet.methodPicker") {
-                    ForEach(HTTPMethod.allCases, id: \.self) { method in
-                        Text(method.rawValue).tag(method)
-                    }
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: DSSpacing.sm) {
+            if step != nil, let onRemove {
+                DSButton("Remove step", variant: .destructive, size: .large, identifier: "stepSheet.remove") {
+                    onRemove()
+                    dismiss()
                 }
-                .frame(width: DSFormMetrics.compactFieldWidth)
-                DSTextField("Path", text: $path, placeholder: "/account-summary",
-                            validation: validationText(for: .path),
-                            validationIdentifier: "stepSheet.validationMessage",
-                            inputIdentifier: "stepSheet.pathField",
-                            identifier: "stepSheet.pathField")
-                    .focused($focusedField, equals: .path)
-                    .onChange(of: path) { clearValidation(for: .path) }
-                    .id(Field.path)
+                .help("Remove this step from the journey")
+                .accessibilityIdentifier("stepSheet.removeButton")
             }
-            if backends.count > 1 {
-                DSFormPicker("Server", selection: $selectedBackend, identifier: "stepSheet.backendPicker") {
-                    Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
-                    ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
-                        Text(backend.name).tag(backend.id.uuidString)
+            Spacer(minLength: DSSpacing.sm)
+            DSButton("Cancel", variant: .secondary, size: .large,
+                     identifier: "stepSheet.cancel", action: dismiss.callAsFunction)
+                .accessibilityIdentifier("stepSheet.cancelButton")
+                .accessibilityLabel("Cancel")
+                .keyboardShortcut(.cancelAction)
+            DSButton(step == nil ? "Add step" : "Save step", variant: .primary, size: .large,
+                     identifier: "stepSheet.save", action: commit)
+                .accessibilityIdentifier("stepSheet.saveButton")
+                .accessibilityLabel(step == nil ? "Add step" : "Save step")
+                .disabled(trimmedPath.isEmpty)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.vertical, DSSpacing.md)
+    }
+
+    // MARK: - Match
+
+    private var matchFields: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
+            sectionTitle("Match")
+            DSFormRow("Request", alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: DSSpacing.sm) {
+                        Picker("HTTP method", selection: $method) {
+                            ForEach(HTTPMethod.allCases, id: \.self) { method in
+                                Text(method.rawValue).tag(method)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize()
+                        .accessibilityIdentifier("stepSheet.methodPicker")
+                        .accessibilityLabel("HTTP method")
+
+                        TextField("/account-summary", text: $path)
+                            .textFieldStyle(.plain)
+                            .font(DSTypography.codeLarge)
+                            .focused($focusedField, equals: .path)
+                            .accessibilityIdentifier("stepSheet.pathField")
+                            .accessibilityLabel("Path")
+                            .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
+                                           isFocused: focusedField == .path,
+                                           isInvalid: validation?.field == .path,
+                                           horizontalPadding: 10)
+                            .onChange(of: path) { clearValidation(for: .path) }
                     }
+                    validationMessage(under: .path)
+                }
+            }
+            .id(Field.path)
+
+            DSTextField("Name", text: $name, placeholder: "Optional, for example \u{201C}Charge declined\u{201D}",
+                        inputIdentifier: "stepSheet.nameField", identifier: "stepSheet.name")
+                .focused($focusedField, equals: .name)
+
+            if backends.count > 1 {
+                DSFormRow("Server") {
+                    Picker("Server", selection: $selectedBackend) {
+                        Text(backends.first { $0.id == ServerConfiguration.primaryID }?.name ?? "Primary").tag("primary")
+                        ForEach(backends.filter { $0.id != ServerConfiguration.primaryID }) { backend in
+                            Text(backend.name).tag(backend.id.uuidString)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityIdentifier("stepSheet.backendPicker")
+                    .accessibilityLabel("Server")
                 }
             }
         }
     }
 
+    // MARK: - Outcome
+
     private var outcomeFields: some View {
         VStack(alignment: .leading, spacing: DSSpacing.md) {
-            sectionHeading("Outcome", detail: "What the client sees")
+            sectionTitle("Outcome")
             Picker("Outcome", selection: $kind) {
                 ForEach(Kind.allCases) { kind in Text(kind.title).tag(kind) }
             }
@@ -212,147 +240,215 @@ struct JourneyStepSheet: View {
 
             switch kind {
             case .respond:
-                DSTextField("Status code", text: $statusCode,
-                            validation: validationText(for: .statusCode),
-                            validationIdentifier: "stepSheet.validationMessage",
-                            controlWidth: DSFormMetrics.compactFieldWidth,
-                            inputIdentifier: "stepSheet.statusField",
-                            identifier: "stepSheet.statusField")
-                    .focused($focusedField, equals: .statusCode)
-                    .onChange(of: statusCode) { clearValidation(for: .statusCode) }
-                    .id(Field.statusCode)
-                DSMultilineField("Response body", text: $responseBody,
-                                 height: DSControlHeight.field * 5,
-                                 identifier: "stepSheet.bodyField", isFocused: focusBinding(for: .body)) {
-                    Button {
-                        if let formatted = DSJSONEditor.prettyPrint(responseBody) {
-                            responseBody = formatted
+                DSFormRow("Status", alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: DSSpacing.md) {
+                            statusField
+                            inlineTimingFields
                         }
-                    } label: {
-                        Label("Format", systemImage: "text.alignleft")
-                            .font(DSTypography.label)
-                            .foregroundStyle(canFormatBody ? DSColors.accentText : DSColors.labelTertiary)
-                            .padding(.horizontal, DSSpacing.xs)
-                            .frame(height: DSControlHeight.field)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.dsPlain)
-                    .disabled(!canFormatBody)
-                    .help("Pretty-print the JSON body")
-                    .accessibilityIdentifier("stepSheet.prettyPrintButton")
-                    .accessibilityLabel("Pretty-print JSON")
-                }
-                disclosureRow("Response headers", summary: headerText.isEmpty ? "None" : "Custom",
-                              expanded: $headersExpanded, identifier: "stepSheet.headersDisclosure")
-                if headersExpanded {
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        DSMultilineField("Headers", text: $headerText,
-                                         height: DSControlHeight.field * 3,
-                                         identifier: "stepSheet.headersField", isFocused: focusBinding(for: .headers))
-                            .accessibilityLabel("Response headers, one per line")
-                            .onChange(of: headerText) { clearValidation(for: .headers) }
-                            .id(Field.headers)
-                        Text("Name: Value, one per line.")
-                            .font(DSTypography.label)
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .accessibilityIdentifier("stepSheet.headersHint")
-                        validationMessage(under: .headers)
+                        validationMessage(under: [.statusCode, .delay, .repeatCount])
                     }
                 }
+                bodyFields
             case .drop:
-                Text("The connection closes without a response. The client sees a network failure.")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                DSFormRow("Delay", alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        timingFields(showsDelayLabel: false)
+                        validationMessage(under: [.delay, .repeatCount])
+                    }
+                }
+                DSFormHint("The connection closes without a response. The client sees a network failure.")
                     .accessibilityIdentifier("stepSheet.dropHint")
             case .timeout:
-                DSTextField("Hold for (ms)", text: $holdMs,
-                            validation: validationText(for: .hold),
-                            validationIdentifier: "stepSheet.validationMessage",
-                            controlWidth: DSFormMetrics.compactFieldWidth,
-                            inputIdentifier: "stepSheet.holdField",
-                            identifier: "stepSheet.holdField")
-                    .focused($focusedField, equals: .hold)
-                    .onChange(of: holdMs) { clearValidation(for: .hold) }
-                    .id(Field.hold)
-                Text("Nothing is sent while the client waits for its own timeout.")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                DSFormRow("Hold for", alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: DSSpacing.md) {
+                            numberField("Hold for (ms)", text: $holdMs, field: .hold, unit: "ms",
+                                        width: 112, identifier: "stepSheet.holdField")
+                            inlineTimingFields
+                        }
+                        validationMessage(under: [.hold, .delay, .repeatCount])
+                    }
+                }
+                DSFormHint("Nothing is sent while the client waits for its own timeout. "
+                           + "Repeat keeps the step current for several requests.")
                     .accessibilityIdentifier("stepSheet.timeoutHint")
             }
         }
     }
 
-    private var timingFields: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            DSDivider(identifier: "stepSheet.timing")
-            disclosureRow("Timing & repeats", summary: timingSummary,
-                          expanded: $timingExpanded, identifier: "stepSheet.timingDisclosure")
-            if timingExpanded {
-                HStack(alignment: .top, spacing: DSSpacing.md) {
-                    DSTextField("Delay (ms)", text: $delayMs,
-                                validation: validationText(for: .delay),
-                                validationIdentifier: "stepSheet.validationMessage",
-                                inputIdentifier: "stepSheet.delayField",
-                                identifier: "stepSheet.delayField")
-                        .focused($focusedField, equals: .delay)
-                        .onChange(of: delayMs) { clearValidation(for: .delay) }
-                        .id(Field.delay)
-                    DSTextField("Serve count", text: $repeatCount,
-                                validation: validationText(for: .repeatCount),
-                                validationIdentifier: "stepSheet.validationMessage",
-                                inputIdentifier: "stepSheet.repeatField",
-                                identifier: "stepSheet.repeatField")
-                        .focused($focusedField, equals: .repeatCount)
-                        .onChange(of: repeatCount) { clearValidation(for: .repeatCount) }
-                        .id(Field.repeatCount)
-                }
-                Text("Use repeats to keep a polling response current for several requests.")
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+    /// Code, reason phrase and a status dot, in one 28pt field.
+    private var statusField: some View {
+        let code = Int(statusCode)
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            TextField("200", text: $statusCode)
+                .textFieldStyle(.plain)
+                .font(DSTypography.status)
+                .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
+                .frame(width: 32)
+                .focused($focusedField, equals: .statusCode)
+                .accessibilityIdentifier("stepSheet.statusField")
+                .accessibilityLabel("Status code")
+                .onChange(of: statusCode) { clearValidation(for: .statusCode) }
+            Text(Self.reasonPhrase(for: code))
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true)
         }
+        .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
+                       isFocused: focusedField == .statusCode,
+                       isInvalid: validation?.field == .statusCode, horizontalPadding: 10)
+        .frame(width: 136)
+        .id(Field.statusCode)
     }
 
-    private func sectionHeading(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(DSTypography.controlLabel).foregroundStyle(DSColors.labelPrimary)
-                Spacer()
-                Text(detail).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
-            }
-            DSDivider(identifier: "stepSheet.section.\(title)")
-        }
+    private var inlineTimingFields: some View {
+        timingFields(showsDelayLabel: true)
     }
 
-    private func disclosureRow(_ title: String, summary: String, expanded: Binding<Bool>,
-                               identifier: String) -> some View {
-        Button { expanded.wrappedValue.toggle() } label: {
+    private func timingFields(showsDelayLabel: Bool) -> some View {
+        HStack(spacing: DSSpacing.md) {
             HStack(spacing: DSSpacing.sm) {
-                Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                    .frame(width: DSGlyph.control)
-                    .accessibilityHidden(true)
-                Text(title).font(DSTypography.bodyMedium)
-                Spacer()
-                Text(summary).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
+                if showsDelayLabel { inlineLabel("Delay") }
+                numberField("Delay (ms)", text: $delayMs, field: .delay, unit: "ms",
+                            width: 80, identifier: "stepSheet.delayField")
             }
-            .foregroundStyle(DSColors.labelPrimary)
-            .frame(minHeight: DSControlHeight.navigation)
-            .contentShape(Rectangle())
+            HStack(spacing: DSSpacing.sm) {
+                inlineLabel("Repeat")
+                numberField("Serve count", text: $repeatCount, field: .repeatCount, unit: "\u{00D7}",
+                            width: 64, identifier: "stepSheet.repeatField")
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(title)
-        .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
+        .fixedSize()
     }
 
-    private var timingSummary: String {
-        let delay = delayMs == "0" ? "No delay" : "\(delayMs) ms delay"
-        let repeats = repeatCount == "1" ? "Once" : "\(repeatCount) times"
-        return "\(delay) · \(repeats)"
+    private func inlineLabel(_ text: String) -> some View {
+        Text(text)
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelSecondary)
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+
+    private func numberField(_ label: String, text: Binding<String>, field: Field, unit: String,
+                             width: CGFloat, identifier: String) -> some View {
+        HStack(spacing: DSSpacing.xs) {
+            TextField("0", text: text)
+                .textFieldStyle(.plain)
+                .font(DSTypography.Figure.regular)
+                .focused($focusedField, equals: field)
+                .accessibilityIdentifier(identifier)
+                .accessibilityLabel(label)
+                .onChange(of: text.wrappedValue) { clearValidation(for: field) }
+            Text(unit)
+                .font(DSTypography.callout)
+                .foregroundStyle(DSColors.labelTertiary)
+                .accessibilityHidden(true)
+        }
+        .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
+                       isFocused: focusedField == field,
+                       isInvalid: validation?.field == field, horizontalPadding: 10)
+        .frame(width: width)
+        .id(field)
+    }
+
+    /// Body and headers, aligned with the field column.
+    private var bodyFields: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            DSMultilineField("Body", text: $responseBody,
+                             height: 176,
+                             identifier: "stepSheet.bodyField", isFocused: focusBinding(for: .body)) {
+                Button {
+                    if let formatted = DSJSONEditor.prettyPrint(responseBody) {
+                        responseBody = formatted
+                    }
+                } label: {
+                    Text("Format")
+                        .font(DSTypography.callout)
+                        .foregroundStyle(canFormatBody ? DSColors.accent : DSColors.labelTertiary)
+                        .padding(.horizontal, 6)
+                        .frame(height: DSControlHeight.small)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.dsPlain)
+                .disabled(!canFormatBody)
+                .help("Pretty-print the JSON body")
+                .accessibilityIdentifier("stepSheet.prettyPrintButton")
+                .accessibilityLabel("Pretty-print JSON")
+            }
+            .id(Field.body)
+
+            Button { headersExpanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: DSGlyph.minimum, weight: .semibold))
+                        .rotationEffect(.degrees(headersExpanded ? 0 : -90))
+                        .frame(width: DSGlyph.disclosure)
+                        .accessibilityHidden(true)
+                    Text("Headers")
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
+                    if headerCount > 0 {
+                        Text("\(headerCount)")
+                            .font(DSTypography.callout)
+                            .monospacedDigit()
+                            .foregroundStyle(DSColors.labelTertiary)
+                    }
+                }
+                .foregroundStyle(DSColors.labelSecondary)
+                .frame(height: DSControlHeight.regular)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("stepSheet.headersDisclosure")
+            .accessibilityLabel("Response headers")
+            .accessibilityValue(headersExpanded ? "Expanded" : "Collapsed")
+
+            if headersExpanded {
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                    DSMultilineField("Headers", text: $headerText,
+                                     height: DSControlHeight.large * 3,
+                                     identifier: "stepSheet.headersField", isFocused: focusBinding(for: .headers))
+                        .accessibilityLabel("Response headers, one per line")
+                        .onChange(of: headerText) { clearValidation(for: .headers) }
+                    Text("Name: Value, one per line.")
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .accessibilityIdentifier("stepSheet.headersHint")
+                    validationMessage(under: .headers)
+                }
+                .id(Field.headers)
+            }
+        }
+        .padding(.leading, DSLayout.sheetLabelWidth)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(DSTypography.captionSemibold)
+            .foregroundStyle(DSColors.labelTertiary)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("stepSheet.section.\(title)")
+    }
+
+    private var headerCount: Int {
+        headerText.split(whereSeparator: \.isNewline)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .count
+    }
+
+    /// "Created" for 201; empty for a code HTTP does not name.
+    private static func reasonPhrase(for code: Int?) -> String {
+        guard let code, (100..<600).contains(code) else { return "" }
+        let phrase = HTTPURLResponse.localizedString(forStatusCode: code)
+        guard let first = phrase.first else { return "" }
+        return first.uppercased() + phrase.dropFirst()
     }
 
     private var trimmedPath: String {
@@ -370,25 +466,18 @@ struct JourneyStepSheet: View {
         })
     }
 
-    private func validationText(for field: Field) -> String? {
-        validation?.field == field ? validation?.message : nil
-    }
-
     /// The complaint about one field, shown directly under it.
     @ViewBuilder
     private func validationMessage(under field: Field) -> some View {
-        if let validation, validation.field == field {
-            Text(validation.message)
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.destructive)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("stepSheet.validationMessage")
-                .accessibilityLabel(validation.message)
-                // Six different rules refuse through this one view, so the identifier alone says
-                // only "something was rejected". The value carries *which* — the same string the
-                // label reads — so a test can assert the sheet refused for the reason it meant to
-                // test rather than for whichever complaint happened to fire first.
-                .accessibilityValue(validation.message)
+        validationMessage(under: [field])
+    }
+
+    /// One message slot for a row of fields. The value repeats the message so a test can tell
+    /// which rule refused.
+    @ViewBuilder
+    private func validationMessage(under fields: [Field]) -> some View {
+        if let validation, fields.contains(validation.field) {
+            DSValidationMessage(validation.message, identifier: "stepSheet.validationMessage")
         }
     }
 
@@ -409,7 +498,6 @@ struct JourneyStepSheet: View {
         path = step.path
         delayMs = String(step.delayMs)
         repeatCount = String(step.repeatCount)
-        timingExpanded = step.delayMs != 0 || step.repeatCount != 1
 
         switch step.outcome {
         case let .respond(response):
@@ -447,13 +535,8 @@ struct JourneyStepSheet: View {
             return
         }
 
-        // Checked, not coerced. `Int(delayMs) ?? 0` turned "abc" into a step that answers instantly
-        // and `max(1, …)` turned "0" into 1, both without a word — and since `commit()` ends in
-        // `onCommit` then `dismiss()` unconditionally, anything the executor rejected afterwards had
-        // no sheet left to report against. In the main window there is no alert at all, so the step
-        // simply never appeared. The `.timeout` branch below already guards its own field this way.
+        // Checked, not coerced: a bad value is refused here, while the sheet can still explain it.
         guard let delay = Self.validatedWaitValue(delayMs, existingValue: step?.delayMs) else {
-            timingExpanded = true
             validation = Validation(
                 field: .delay,
                 message: "Delay must be a whole number from 0 to \(ResponseDelay.maximumMilliseconds) ms."
@@ -462,7 +545,6 @@ struct JourneyStepSheet: View {
         }
 
         guard let repeats = Int(repeatCount), repeats >= 1 else {
-            timingExpanded = true
             validation = Validation(field: .repeatCount, message: "Serve count must be 1 or more.")
             return
         }
@@ -527,7 +609,6 @@ struct JourneyStepSheet: View {
         guard unchanged || correction || ResponseDelay.isWithinLimit(
             globalMs: globalDelayMs, localMs: delay, holdMs: requestedHold
         ) else {
-            timingExpanded = true
             validation = Validation(
                 field: kind == .timeout ? .hold : .delay,
                 message: "Total wait must not exceed \(ResponseDelay.maximumDescription)."

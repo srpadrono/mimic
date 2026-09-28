@@ -18,7 +18,7 @@ import SwiftUI
 public struct DSPlainButtonStyle: ButtonStyle {
     private let cornerRadius: CGFloat
 
-    public init(cornerRadius: CGFloat = DSCornerRadius.sm) {
+    public init(cornerRadius: CGFloat = DSCornerRadius.field) {
         self.cornerRadius = cornerRadius
     }
 
@@ -50,8 +50,8 @@ public struct DSPlainButtonStyle: ButtonStyle {
                 .onChange(of: isEnabled) { _, enabled in
                     if !enabled { isHovered = false }
                 }
-                .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-                .animation(.easeOut(duration: DSAnimation.micro), value: configuration.isPressed)
+                .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
+                .animation(.easeOut(duration: DSAnimation.fast), value: configuration.isPressed)
         }
     }
 
@@ -65,8 +65,8 @@ public struct DSPlainButtonStyle: ButtonStyle {
     /// distinguishable values, and "pressed is stronger than hover is stronger than rest" is the
     /// property, not any particular alpha.
     public static func wash(isPressed: Bool, isHovered: Bool) -> Color {
-        if isPressed { return DSColors.accentMuted }
-        return isHovered ? DSColors.accentSubtle : .clear
+        if isPressed { return DSColors.selectionInactive }
+        return isHovered ? DSColors.hover : .clear
     }
 }
 
