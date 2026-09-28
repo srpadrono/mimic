@@ -22,6 +22,7 @@ final class DesignReviewUITests: MimicUITestCase {
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
         app.launchArguments += ["-AppleInterfaceStyle", usesLightAppearance ? "Light" : "Dark",
                                 "-NSRequiresAquaSystemAppearance", usesLightAppearance ? "YES" : "NO"]
+        app.launchEnvironment["MIMIC_APPEARANCE"] = usesLightAppearance ? "light" : "dark"
         app.launchEnvironment["MIMIC_CONTROL_PORT"] = String(controlPort)
         app.launchEnvironment["MIMIC_CONTROL_TOKEN"] = fixtureToken
         let base = "~/Library/Application Support/devxa.Mimic/design-uitest-\(fixtureID)"
@@ -68,15 +69,33 @@ final class DesignReviewUITests: MimicUITestCase {
         try await command(["projectCreate": ["name": "Empty project", "port": mockPort + 1]])
         workspace.fillWindow()
         workspace.showSidebarIfNeeded()
+        // The injected HAR import opens its review sheet whenever a workspace appears.
+        if element("import.candidateList").waitForExistence(timeout: 8) {
+            capture("13-import-review")
+        } else {
+            missing("13-import-review")
+        }
+        dismissInjectedImport()
         capture("03-empty-workspace")
 
         try await seedStorefront()
         workspace.fillWindow()
         workspace.showSidebarIfNeeded()
+        dismissInjectedImport()
         let product = row(named: "Get product")
         if product.waitForExistence(timeout: 5) { product.click() }
         _ = endpointEditor.pathLabel.waitForExistence(timeout: 5)
         capture("04-workspace-editor")
+
+        let outOfStock = element("inspector.scenario.Out of stock")
+        if outOfStock.waitForExistence(timeout: 3) {
+            outOfStock.click()
+            capture("04b-editor-not-live")
+            let defaultRow = element("inspector.scenario.Default")
+            if defaultRow.waitForExistence(timeout: 2) { defaultRow.click() }
+        } else {
+            missing("04b-editor-not-live")
+        }
 
         if workspace.addEndpointButton.waitForExistence(timeout: 3) {
             workspace.addEndpointButton.click()
@@ -94,6 +113,14 @@ final class DesignReviewUITests: MimicUITestCase {
             await sendRequest(port: mockPort, path: path, method: method,
                               body: method == "POST" ? #"{"productId":42,"quantity":1}"# : nil)
         }
+        let firstLog = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-")).firstMatch
+        if !firstLog.waitForExistence(timeout: 3) {
+            // The log is shown by default now; open it only when a toggle hid it.
+            workspace.toggleDrawerButton.click()
+            workspace.closeToolbarMenu()
+        }
+        _ = firstLog.waitForExistence(timeout: 5)
         capture("06-server-running")
 
         let statusWell = element("serverStatusWell.url")
@@ -103,10 +130,6 @@ final class DesignReviewUITests: MimicUITestCase {
             app.typeKey(.escape, modifierFlags: [])
         }
 
-        workspace.toggleDrawerButton.click()
-        workspace.closeToolbarMenu()
-        let firstLog = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-")).firstMatch
         if firstLog.waitForExistence(timeout: 5) {
             capture("08-request-log")
             firstLog.click()
@@ -115,8 +138,6 @@ final class DesignReviewUITests: MimicUITestCase {
         } else {
             missing("08-request-log")
         }
-        workspace.toggleDrawerButton.click()
-        workspace.closeToolbarMenu()
 
         app.typeKey("2", modifierFlags: .command)
         let journey = app.descendants(matching: .any)
@@ -146,19 +167,6 @@ final class DesignReviewUITests: MimicUITestCase {
             if cancel.waitForExistence(timeout: 2) { cancel.click() } else { app.typeKey(.escape, modifierFlags: []) }
         } else {
             missing("12-server-settings")
-        }
-
-        let importMenu = workspace.importMenuButton
-        if importMenu.waitForExistence(timeout: 3) {
-            importMenu.click()
-            let har = workspace.importHARMenuItem
-            if har.waitForExistence(timeout: 3) {
-                har.click()
-                if element("import.candidateList").waitForExistence(timeout: 8) {
-                    capture("13-import-review")
-                }
-                app.typeKey(.escape, modifierFlags: [])
-            }
         }
 
         workspace.compactWindow()
@@ -287,6 +295,15 @@ final class DesignReviewUITests: MimicUITestCase {
         app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", name
         )).firstMatch
+    }
+
+    /// Cancels the injected import sheet if it is up, so it does not cover the next screen.
+    @MainActor
+    private func dismissInjectedImport() {
+        let cancel = element("import.cancel")
+        guard cancel.waitForExistence(timeout: 3) else { return }
+        cancel.click()
+        _ = element("import.candidateList").waitForNonExistence(timeout: 3)
     }
 
     @MainActor

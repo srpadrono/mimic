@@ -531,10 +531,10 @@ final class ErrorAlertUITests: MimicUITestCase {
             "An empty status code should ask for one — read: " + combinedText(of: statusCodeNote)
         )
 
-        // ERRVALID-08. The delay commits on blur, so the complaint arrives when focus leaves.
-        endpointEditor.showOptions()
+        // ERRVALID-08. The delay commits on blur, so the complaint arrives when focus leaves. The
+        // inspector's group tag field is the neighbouring text field focus is moved to.
         replaceText(in: endpointEditor.delayField, with: "abc")
-        endpointEditor.groupTagField.click()
+        inspector.groupTagField.click()
         XCTAssertTrue(
             delayNote.waitForExistence(timeout: 10),
             "A delay that is not a whole number should be explained under the field"
@@ -551,7 +551,7 @@ final class ErrorAlertUITests: MimicUITestCase {
             delayNote.waitForNonExistence(timeout: 5),
             "Editing the field should drop the previous complaint"
         )
-        endpointEditor.groupTagField.click()
+        inspector.groupTagField.click()
         XCTAssertTrue(
             delayNote.waitForExistence(timeout: 10),
             "A negative delay should be refused the same way"
@@ -643,7 +643,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         let disabledWithoutAPath = waitForEnabled(stepSheet.saveButton, isEnabled: false)
         XCTAssertTrue(disabledWithoutAPath, "Clearing the path should disable Add step again")
         replaceText(in: stepSheet.pathField, with: "/ok")
-        stepSheet.timingDisclosure.click()
+        // The delay field is always visible now; there is no timing disclosure to open.
         stepSheet.reveal(delayField, byScrollingUp: true)
 
         // ERRVALID-13. Checked, not coerced: `Int(delayMs) ?? 0` used to turn "abc" into a step that
@@ -742,6 +742,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         // ERRDEAD-11.
         endpointsTab.click()
         createEndpointViaUI(name: "Users", path: "/api/users")
+        // The headers are the editor's second pane, behind the Body/Headers switch.
+        endpointEditor.showHeaders()
         XCTAssertTrue(
             UITestApp.waitForAny(
                 [
@@ -753,11 +755,15 @@ final class ErrorAlertUITests: MimicUITestCase {
             "An endpoint with no response headers should say so"
         )
 
-        // ERRDEAD-08. The page object handles the tab's label and request-count suffix.
-        InspectorPage(app: app).tab("traffic").click()
+        // ERRDEAD-08. The endpoint's traffic is a section of the inspector, under its scenarios.
+        let trafficEmpty = InspectorPage(app: app).trafficEmpty
         XCTAssertTrue(
-            waitForEmptyState(identifier: "endpointTraffic.empty", heading: "No traffic yet"),
-            "An endpoint nothing has called should say so in the Traffic tab"
+            trafficEmpty.waitForExistence(timeout: 10),
+            "An endpoint nothing has called should say so in the inspector's Traffic section"
+        )
+        XCTAssertTrue(
+            waitForText(trafficEmpty, containing: "No requests yet"),
+            "The Traffic section should say nothing has arrived — read: " + combinedText(of: trafficEmpty)
         )
     }
 
@@ -797,12 +803,28 @@ final class ErrorAlertUITests: MimicUITestCase {
             filterFieldHandles.first(where: { $0.exists }),
             "A non-empty log should offer a filter"
         )
+        XCTAssertTrue(filter.isEnabled, "A non-empty log's filter should be usable")
         filter.click()
         filter.typeText("no-such-route")
 
         XCTAssertTrue(
             waitForEmptyState(identifier: "drawer.noMatches", heading: "No matching requests"),
             "A filter that matches nothing should say so, not show an empty table"
+        )
+        XCTAssertFalse(
+            requestLogDrawer.emptyHeading.exists,
+            "A filtered-out log is not an empty one — the idle message should not show"
+        )
+
+        // The field's own clear button undoes the filter and the row comes back.
+        let clearFilter = app.buttons.matching(
+            NSPredicate(format: "identifier == %@ OR label == %@", "drawer.clearFilter", "Clear filter")
+        ).firstMatch
+        XCTAssertTrue(clearFilter.waitForExistence(timeout: 5), "A non-empty filter should offer a clear button")
+        clearFilter.click()
+        XCTAssertTrue(
+            requestLogDrawer.firstLogRow.waitForExistence(timeout: 5),
+            "Clearing the filter should bring the request back"
         )
 
         workspace.serverToggleButton.click()
@@ -970,7 +992,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
     /// The drawer's text filter, by identifier and by label together.
     ///
-    /// `drawer.filterField` is a plain `TextField` in a `DSPanelHeader`'s trailing slot, and the
+    /// `drawer.filterField` is a plain `TextField` in the request log header, and the
     /// header stamps `ds.panelheader.requestLog` over its leaves — so whether the identifier lands is
     /// a SwiftUI detail, and the label is what survives either way. `RequestLogUITests.filterField`
     /// resolves the same control the same way, and its filter test got past this point in the run
@@ -1060,9 +1082,11 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// being up, so this cannot hide a log a later assertion needs and cannot toggle it back on.
     @MainActor
     private func hideRequestLogDrawer() {
-        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
-        guard workspace.drawerEmptyHeading.exists else { return }
-        workspace.toggleDrawerButton.click()
+        // ⌥⌘L rather than the toolbar toggle: in a narrow window the toggle is an item of the
+        // "More actions" menu, and reaching it would leave that menu open when there is nothing
+        // to hide.
+        guard workspace.drawerEmptyHeading.waitForExistence(timeout: 5) else { return }
+        app.typeKey("l", modifierFlags: [.command, .option])
         _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
     }
 

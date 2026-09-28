@@ -292,7 +292,7 @@ final class EndpointEditorUITests: MimicUITestCase {
             UITestApp.waitUntil(timeout: 3) { (field.value as? String) == text },
             "\(what) should hold \"\(text)\" after it was typed there — the field reads "
                 + "\(describe(field)). A click that lands outside the field is how this reads when "
-                + "the Settings card is below the fold in a narrow window."
+                + "the field is out of view in a narrow window."
         )
     }
 
@@ -326,13 +326,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.waitUntil(timeout: timeout) { self.sidebarEndpointRows().count == count }
     }
 
-    /// Distinguish the empty-state action from the header's separate creation button.
+    /// The centre pane's first-endpoint card, distinct from the navigator footer's "+".
     @MainActor
     private var emptyStateAddEndpointButton: XCUIElement {
-        app.buttons.matching(NSPredicate(
-            format: "label == %@ AND identifier != %@",
-            "Add endpoint", "sidebar.addEndpointButton"
-        )).firstMatch
+        workspace.centerAddEndpointCard
     }
 
     @MainActor
@@ -589,13 +586,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.waitUntil(timeout: timeout) { self.scenarioValue(named: name) == expected }
     }
 
-    // MARK: - 1. Sidebar: the two "Add endpoint" buttons are two buttons
+    // MARK: - 1. The two "Add endpoint" buttons are two buttons
 
     /// SIDEBAR-03, SIDEBAR-04.
     ///
-    /// Both were "partial" for one reason: the page object matches either. This pins each one and
-    /// then asserts the empty state's copy *goes away* once the project has an endpoint, which is
-    /// what makes the pinning meaningful rather than a restatement of the query.
+    /// An empty project offers "Add endpoint" twice: the first card of the centre pane's
+    /// first-endpoint chooser, and the navigator footer's "+". This pins each one and then asserts
+    /// the chooser *goes away* once the project has an endpoint, which is what makes the pinning
+    /// meaningful rather than a restatement of the query.
     @MainActor
     func testEmptyStateAndNavigatorAddEndpointButtonsAreDistinct() throws {
         launchApp()
@@ -603,14 +601,18 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
                       "A fresh project should show the sidebar's empty state")
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+                      "The centre pane should invite the first endpoint")
         XCTAssertEqual(addEndpointButtonCount, 2,
-                       "An empty project offers 'Add endpoint' twice — in the empty state and in the navigator strip")
+                       "An empty project offers 'Add endpoint' twice — the centre card and the navigator footer")
 
         XCTAssertTrue(emptyStateAddEndpointButton.waitForExistence(timeout: 3),
-                      "The empty state's own call to action should exist")
+                      "The first-endpoint chooser's Add endpoint card should exist")
+        XCTAssertTrue(workspace.centerImportHARCard.exists, "The chooser should offer Import HAR beside it")
+        XCTAssertTrue(workspace.centerImportOpenAPICard.exists, "…and Import OpenAPI")
         emptyStateAddEndpointButton.click()
         XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
-                      "The empty state's 'Add endpoint' should open the new-endpoint sheet")
+                      "The chooser's 'Add endpoint' should open the new-endpoint sheet")
 
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("From Empty State")
@@ -625,10 +627,11 @@ final class EndpointEditorUITests: MimicUITestCase {
             UITestApp.waitUntil(timeout: 5) { self.addEndpointButtonCount == 1 },
             "With an endpoint in the project only the navigator's 'Add endpoint' should remain"
         )
+        XCTAssertFalse(emptyStateAddEndpointButton.exists, "The first-endpoint chooser should be gone")
 
-        // And the survivor is the strip's, which is the button SIDEBAR-04 is about.
+        // And the survivor is the footer's, which is the button SIDEBAR-04 is about.
         XCTAssertTrue(navigatorAddEndpointButton.waitForExistence(timeout: 3),
-                      "The navigator strip should still offer 'Add endpoint'")
+                      "The navigator footer should still offer 'Add endpoint'")
         navigatorAddEndpointButton.click()
         XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
                       "The navigator's '+' should open the new-endpoint sheet")
@@ -808,11 +811,13 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Headers EP", path: "/api/headers")
         hideRequestLogDrawer()
 
+        // Headers are the second pane of the Body/Headers switch, not a section below the body.
+        endpointEditor.showHeaders()
         XCTAssertTrue(headersEmptyNote.waitForExistence(timeout: 5),
-                      "A new endpoint's scenario carries no headers, so the section should say so")
+                      "A new endpoint's scenario carries no headers, so the pane should say so")
 
         XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5),
-                      "The Response headers section should offer 'Add header'")
+                      "The Headers pane should offer 'Add header'")
         revealInEditor(addHeaderButton)
         addHeaderButton.click()
 
@@ -850,6 +855,8 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The endpoint should be in the sidebar after reopening")
         path.click()
 
+        // The pane choice is view state; a reopened editor starts on Body.
+        endpointEditor.showHeaders()
         let reopenedKey = endpointEditor.headerKeyField(at: 0)
         XCTAssertTrue(reopenedKey.waitForExistence(timeout: 5),
                       "The reopened endpoint should still have a header row")
@@ -873,6 +880,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Headers EP", path: "/api/headers")
         hideRequestLogDrawer()
 
+        endpointEditor.showHeaders()
         XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5))
         revealInEditor(addHeaderButton)
 
@@ -1004,8 +1012,13 @@ final class EndpointEditorUITests: MimicUITestCase {
         newScenarioSheet.createButton.click()
         let other = inspector.scenarioRow(named: "Other response")
         XCTAssertTrue(other.waitForExistence(timeout: 5))
+        // A row click opens the scenario in the editor; it does not make it live, and the body
+        // edited below belongs to the scenario that is open, live or not.
         other.click()
-        XCTAssertTrue(waitForScenarioValue("active", named: "Other response"))
+        XCTAssertTrue(endpointEditor.waitForEditedScenario("Other response", live: false),
+                      "The editor should be showing Other response — \(endpointEditor.liveStateText())")
+        XCTAssertTrue(waitForScenarioValue("inactive", named: "Other response"),
+                      "Opening a scenario must not make it live")
         setResponseBody(#"{"saved":"other"}"#, expecting: "other")
         waitForAsyncSave()
 
@@ -1062,13 +1075,12 @@ final class EndpointEditorUITests: MimicUITestCase {
             self.endpointEditor.statusCodeField.value as? String == "418"
                 && self.bodyText() == #"{"remote":true}"#
         }, "A control update must refresh the visible response without changing the selection")
-        XCTAssertTrue(endpointEditor.headersToggle.waitForExistence(timeout: 5))
-        if endpointEditor.headersToggle.value as? String == "Collapsed" {
-            endpointEditor.headersToggle.click()
-        }
+        endpointEditor.showHeaders()
         XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForExistence(timeout: 5))
         XCTAssertEqual(endpointEditor.headerKeyField(at: 0).value as? String, "X-Source")
         XCTAssertEqual(endpointEditor.headerValueField(at: 0).value as? String, "control")
+        // Back to Body: the body editor exists only while its pane is selected.
+        endpointEditor.showBody()
 
         // An invalid value cannot autosave, so it remains a local draft while the control request
         // updates another field. This is deterministic without racing the 300 ms debounce.
@@ -1254,9 +1266,9 @@ final class EndpointEditorUITests: MimicUITestCase {
     ///
     /// The group tag commits on *blur*, not on Return alone — typing a value and moving on is the
     /// ordinary way to fill a form, and without the blur commit the edit was dropped and quietly
-    /// restored the next time the selection changed. Tab is what moves the focus here: the Settings
-    /// card may sit below the fold, and clicking a control to blur another one is a click that has to
-    /// land somewhere visible.
+    /// restored the next time the selection changed. Tab is what moves the focus here: clicking a
+    /// control to blur another one is a click that has to land somewhere visible. The field lives in
+    /// the inspector's Endpoint section, which is open by default.
     @MainActor
     func testGroupTagGathersTheEndpointIntoASidebarSection() throws {
         launchApp()
@@ -1265,14 +1277,13 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Health", path: "/api/health")
         hideRequestLogDrawer()
 
-        endpointEditor.showOptions()
-        let groupTag = endpointEditor.groupTagField
+        let groupTag = inspector.groupTagField
         XCTAssertTrue(groupTag.waitForExistence(timeout: 5),
-                      "The Settings section should show the group tag field")
+                      "The inspector's Endpoint section should show the group tag field")
         // Read back rather than gated on `isHittable` — see `typeIntoEditorField`. The tag has to be
         // in the field before Tab can commit it, and a click that landed elsewhere reads as "the tag
         // did not commit" three assertions later if nothing checks here.
-        typeIntoEditorField(groupTag, "Ops", "The Settings card's group tag field")
+        typeIntoEditorField(groupTag, "Ops", "The inspector's group tag field")
         app.typeKey(.tab, modifierFlags: [])
 
         let grouped = waitForGroupSection(named: "Ops", showing: "Ops")
@@ -1310,9 +1321,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Health", path: "/api/health")
         hideRequestLogDrawer()
 
-        endpointEditor.showOptions()
-        let groupTag = endpointEditor.groupTagField
-        typeIntoEditorField(groupTag, "Ops", "The Settings card's group tag field")
+        let groupTag = inspector.groupTagField
+        typeIntoEditorField(groupTag, "Ops", "The inspector's group tag field")
         app.typeKey(.tab, modifierFlags: [])
 
         XCTAssertTrue(waitForGroupSection(named: "Ops", showing: "Ops"),
@@ -1359,10 +1369,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Slow EP", path: "/api/slow")
         hideRequestLogDrawer()
 
-        endpointEditor.showOptions()
         let delay = endpointEditor.delayField
         XCTAssertTrue(delay.waitForExistence(timeout: 5),
-                      "The Settings section should show the per-endpoint delay field")
+                      "The editor's fields row should show the per-endpoint delay field")
         revealInEditor(delay)
         delay.click()
         delay.typeKey("a", modifierFlags: .command)
@@ -1385,7 +1394,6 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(path.waitForExistence(timeout: 5))
         path.click()
 
-        endpointEditor.showOptions()
         let reopenedDelay = endpointEditor.delayField
         XCTAssertTrue(reopenedDelay.waitForExistence(timeout: 5))
         XCTAssertEqual(reopenedDelay.value as? String, "250",
@@ -1409,7 +1417,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// EPEDIT-12, EPEDIT-13.
     ///
-    /// The row is deliberately *not* a disabled text field — a greyed-out well in a row of live ones
+    /// The row is the inspector's "Base delay", in its Endpoint section. It is deliberately *not* a disabled text field — a greyed-out well in a row of live ones
     /// reads as a control that failed — so "there is no field here" is part of what is being
     /// asserted, and the note beside it is the only thing explaining why.
     ///
@@ -1422,9 +1430,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Any EP", path: "/api/any")
         hideRequestLogDrawer()
 
-        endpointEditor.showOptions()
         XCTAssertTrue(globalDelayValue.waitForExistence(timeout: 5),
-                      "The Settings section should show the project-wide delay")
+                      "The inspector's Endpoint section should show the project-wide delay")
         let globalDelayText = shownText(of: globalDelayValue)
         XCTAssertTrue(globalDelayText.contains("Global delay"),
                       "The row should say which delay it is showing — it reads \(globalDelayText)")
@@ -1453,7 +1460,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
         XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5),
-                      "The inspector header should offer 'Add scenario' while showing the Scenarios tab")
+                      "The inspector header should offer 'Add scenario' while showing an endpoint")
         addScenarioButton.click()
 
         XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5),
@@ -1523,10 +1530,13 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// SCEN-06, SCEN-07.
     ///
-    /// `testSwitchActiveScenarioViaClick` asserts the clicked row reads active and stops there, so
-    /// nothing has ever proved the marker *left* the previous scenario. Read from the row's
+    /// `testSwitchActiveScenarioViaClick` asserts the clicked radio makes its row active and stops
+    /// there, so nothing else proves the marker *left* the previous scenario. Read from the row's
     /// accessibility value, which says "inactive" out loud; the label only gains an "active" clause
     /// and so can never report the negative.
+    ///
+    /// The radio at the head of the row is what makes a scenario live. Clicking the row itself only
+    /// opens it in the editor — `testClickingAScenarioRowOpensItWithoutMakingItLive` covers that.
     @MainActor
     func testActivatingAScenarioMovesTheActiveMarkerOffThePreviousOne() throws {
         launchApp()
@@ -1548,12 +1558,82 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(waitForScenarioValue("inactive", named: "Unauthorized"),
                       "A newly added scenario is not activated by being added")
 
-        added.click()
+        let radio = inspector.liveRadio(named: "Unauthorized")
+        XCTAssertTrue(radio.waitForExistence(timeout: 5), "Each scenario row should lead with a live radio")
+        XCTAssertEqual(radio.label, "Make Unauthorized live",
+                       "A radio that is off should say what clicking it does")
+        radio.click()
 
         XCTAssertTrue(waitForScenarioValue("active", named: "Unauthorized"),
-                      "Clicking a scenario should activate it")
+                      "Clicking a scenario's radio should make it live")
         XCTAssertTrue(waitForScenarioValue("inactive", named: "Default"),
                       "Activating one scenario should take the marker off the other")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { radio.label == "Unauthorized is live" },
+            "The radio should now say the scenario is live — label: \(radio.label)"
+        )
+    }
+
+    /// SCEN-06, EPEDIT-01.
+    ///
+    /// A row click opens the scenario in the editor and nothing else: the editor names it and says
+    /// "Not live", the jump bar's scenario crumb follows, the row takes the selection, and the live
+    /// scenario stays live. "Make live" in the editor is then the explicit way to serve it.
+    @MainActor
+    func testClickingAScenarioRowOpensItWithoutMakingItLive() throws {
+        launchApp()
+        createProjectViaUI(name: "Scenario Open")
+        createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
+
+        XCTAssertTrue(endpointEditor.waitForEditedScenario("Default", live: true),
+                      "A new endpoint opens its live default — \(endpointEditor.liveStateText())")
+        XCTAssertFalse(endpointEditor.makeLiveButton.exists, "The live scenario has nothing to make live")
+
+        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        addScenarioButton.click()
+        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        newScenarioSheet.nameField.click()
+        newScenarioSheet.nameField.typeText("Unauthorized")
+        newScenarioSheet.createButton.click()
+
+        let defaultRow = inspector.scenarioRow(named: "Default")
+        let addedRow = inspector.scenarioRow(named: "Unauthorized")
+        XCTAssertTrue(addedRow.waitForExistence(timeout: 5))
+
+        // Back to Default first, so the click below is a real move rather than a no-op on the
+        // scenario the add already opened.
+        defaultRow.click()
+        XCTAssertTrue(endpointEditor.waitForEditedScenario("Default", live: true),
+                      "Clicking Default should open it — \(endpointEditor.liveStateText())")
+
+        addedRow.click()
+        XCTAssertTrue(endpointEditor.waitForEditedScenario("Unauthorized", live: false),
+                      "The editor should show the clicked scenario and say it is not live — "
+                          + endpointEditor.liveStateText())
+        let crumb = app.descendants(matching: .any).matching(identifier: "breadcrumb.crumb.scenario").firstMatch
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                crumb.exists && (crumb.label == "Unauthorized" || (crumb.value as? String) == "Unauthorized")
+            },
+            "The jump bar's scenario crumb should follow the scenario being edited — \(shownText(of: crumb))"
+        )
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { addedRow.isSelected && !defaultRow.isSelected },
+                      "The clicked row should carry the selection")
+        XCTAssertTrue(waitForScenarioValue("inactive", named: "Unauthorized"),
+                      "Opening a scenario must not make it live")
+        XCTAssertTrue(waitForScenarioValue("active", named: "Default"),
+                      "The live scenario should stay live while another is being edited")
+
+        let makeLive = endpointEditor.makeLiveButton
+        XCTAssertTrue(makeLive.waitForExistence(timeout: 5), "A scenario that is not live should offer Make live")
+        makeLive.click()
+        XCTAssertTrue(waitForScenarioValue("active", named: "Unauthorized"),
+                      "Make live should serve the scenario being edited")
+        XCTAssertTrue(waitForScenarioValue("inactive", named: "Default"),
+                      "…and take the marker off the previous one")
+        XCTAssertTrue(endpointEditor.waitForEditedScenario("Unauthorized", live: true),
+                      "The editor should now say Live — \(endpointEditor.liveStateText())")
+        XCTAssertTrue(makeLive.waitForNonExistence(timeout: 5), "A live scenario has nothing to make live")
     }
 
     // MARK: - 17. A scenario row announces its status code
@@ -1815,11 +1895,13 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "Deleting the last endpoint should return the sidebar to its empty state")
     }
 
-    // MARK: - 23. The editor's more menu — Duplicate
+    // MARK: - 23. The editor's endpoint menu — Duplicate
 
     /// EPDUP-01, EPDUP-02, EPDUP-03.
     ///
-    /// `testDeleteEndpointWithConfirmation` opens this menu and clicks straight past Duplicate.
+    /// The endpoint's actions hang off the method at the head of the request bar ("GET ⌄"), spoken
+    /// as "Endpoint actions, GET". `testDeleteEndpointWithConfirmation` opens this menu and clicks
+    /// straight past Duplicate.
     /// Unlike the sidebar's copy, the editor's duplicate deliberately leaves the selection where it
     /// was — `CenterPaneView` discards the returned endpoint — so what is asserted here is the new
     /// row, not a moved selection.
@@ -1830,18 +1912,22 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Orders", path: "/api/orders")
 
         XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5),
-                      "The editor header should offer its more-actions menu")
-        XCTAssertEqual(endpointEditor.moreMenu.elementType, .menuButton)
-        UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "More actions for this endpoint")
+                      "The request bar should offer the endpoint's actions on its method")
+        XCTAssertTrue([.menuButton, .popUpButton].contains(endpointEditor.moreMenu.elementType),
+                      "The method should be a menu — it is \(endpointEditor.moreMenu.elementType.rawValue)")
+        UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "Endpoint actions, GET")
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
-        XCTAssertLessThanOrEqual(endpointEditor.moreMenu.frame.width, 28)
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
-        // The outer tenth of the square is beyond the centred glyph. It should still respond.
+        // The left edge is the method label's padding, not its letters. It should still respond.
         endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
 
-        let duplicate = app.menuItems["Duplicate"]
+        let duplicate = app.menuItems["Duplicate endpoint"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
-                      "The more-actions menu should offer Duplicate")
+                      "The endpoint menu should offer Duplicate endpoint")
+        XCTAssertTrue(app.menuItems["Edit request\u{2026}"].exists,
+                      "The same menu should offer to edit the request")
+        XCTAssertTrue(app.menuItems["Rename endpoint\u{2026}"].exists,
+                      "The same menu should offer to rename the endpoint")
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists,
                       "The same menu should retain the delete action")
         let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -1858,8 +1944,8 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The copy should be listed under its own name")
     }
 
-    /// The compact editor must keep the same actionable square and AX name as the wide
-    /// editor. A click in its outer left edge also catches a glyph-sized AppKit menu target.
+    /// The compact editor must keep the same endpoint menu and AX name as the wide editor. A click
+    /// in its outer left edge also catches a glyph-sized AppKit menu target.
     @MainActor
     func testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance() throws {
         usesDarkAppearance = true
@@ -1872,13 +1958,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(menu.isHittable)
-        XCTAssertEqual(menu.elementType, .menuButton)
-        UITestApp.assertAccessibleMenuName(menu, equals: "More actions for this endpoint")
+        XCTAssertTrue([.menuButton, .popUpButton].contains(menu.elementType),
+                      "The method should be a menu — it is \(menu.elementType.rawValue)")
+        UITestApp.assertAccessibleMenuName(menu, equals: "Endpoint actions, GET")
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
 
         menu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
-        XCTAssertTrue(app.menuItems["Duplicate"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "compact-endpoint-more-menu-dark"

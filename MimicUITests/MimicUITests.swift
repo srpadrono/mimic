@@ -60,23 +60,27 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
                       "Sidebar should show 'No endpoints' empty state")
 
-        // Center pane with empty state
-        XCTAssertTrue(workspace.centerEmptyHeading.exists,
-                      "Center pane should show 'No endpoint selected' empty state")
+        // Center pane: a project with no endpoints offers the first-endpoint chooser
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+                      "Center pane should invite the first endpoint")
+        XCTAssertTrue(workspace.centerAddEndpointCard.exists,
+                      "The chooser should offer Add endpoint")
 
         // Drawer with empty state
         XCTAssertTrue(workspace.drawerEmptyHeading.exists,
-                      "Drawer should show 'No requests yet' empty state")
+                      "Drawer should say requests appear while the server runs")
 
         // The navigator owns "add", because what it adds depends on which tab is showing.
         XCTAssertTrue(workspace.addEndpointButton.exists,
                       "Add endpoint button should be in the navigator strip")
 
-        // Toolbar buttons
-        XCTAssertTrue(workspace.toggleInspectorButton.exists,
+        // Toolbar buttons — inline when the centre column is wide, in "More actions" when narrow;
+        // `toolbarAction` opens that menu when it has to.
+        XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
                       "Toggle inspector button should be in toolbar")
         XCTAssertTrue(workspace.toggleDrawerButton.exists,
                       "Toggle drawer button should be in toolbar")
+        workspace.closeToolbarMenu()
 
         // Both of these used to sit in the toolbar and were removed: "add endpoint" duplicated the
         // navigator's own button and was wrong on the Journeys tab, and the journeys button opened a
@@ -566,12 +570,12 @@ final class MimicUITests: MimicUITestCase {
         let copyRow = inspector.findScenario(named: "Default (Copy)")
         XCTAssertTrue(copyRow.waitForExistence(timeout: 5))
 
-        // Click the copy to make it active
-        copyRow.click()
+        // The row's radio makes a scenario live; clicking the row itself only opens it.
+        inspector.makeLive(named: "Default (Copy)")
 
         // Verify it became active
         XCTAssertTrue(inspector.isScenarioActive(named: "Default (Copy)"),
-                      "Clicked scenario should become active")
+                      "The scenario whose radio was clicked should become active")
     }
 
     // MARK: - 22. Search Filter in Sidebar
@@ -624,18 +628,42 @@ final class MimicUITests: MimicUITestCase {
 
     // MARK: - 24. Request Log Drawer Shows Header and Empty State
 
+    /// The idle log: one sentence, no scope segments or clear button, and a filter that is at most
+    /// a disabled hint. Once the server runs, a `curl` command for its port appears to try.
     @MainActor
     func testRequestLogDrawerShowsHeaderAndEmptyState() throws {
+        let port = 62098
+
         launchApp()
-        createProjectViaUI(name: "Log Test")
+        createProjectViaUI(name: "Log Test", port: port)
+        workspace.fillWindow()
 
-        // Drawer should show header and empty state
         XCTAssertTrue(requestLogDrawer.emptyHeading.waitForExistence(timeout: 5),
-                      "Request log should show empty state when no requests")
+                      "Request log should show its empty state when there are no requests")
+        XCTAssertFalse(workspace.drawerCurlCommand.exists,
+                       "A stopped server has no address to try, so no curl command")
 
-        // Filter controls only appear when there are log entries (nothing to filter when empty)
-        XCTAssertFalse(requestLogDrawer.filterField.exists,
-                       "Filter field should not show when log is empty")
+        // Nothing to filter or clear. The filter may stay as a quiet hint, but never usable.
+        XCTAssertFalse(requestLogDrawer.unmatchedSegment.exists, "An empty log has no Unmatched segment")
+        XCTAssertFalse(requestLogDrawer.clearButton.exists || app.buttons["Clear request log"].exists,
+                       "An empty log has nothing to clear")
+        if requestLogDrawer.filterField.exists {
+            XCTAssertFalse(requestLogDrawer.filterField.isEnabled,
+                           "The filter field should be disabled while the log is empty")
+        }
+
+        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
+        let command = workspace.drawerCurlCommand
+        XCTAssertTrue(command.waitForExistence(timeout: 5),
+                      "A running server's empty log should offer a command to try")
+        let spoken = "\(command.label)|\(command.value.map { String(describing: $0) } ?? "")"
+        XCTAssertTrue(spoken.contains("curl http://localhost:\(port)/"),
+                      "The command should target the running port — it read \(spoken)")
+        XCTAssertTrue(app.buttons["drawer.empty.copyCommand"].firstMatch.exists
+                          || app.buttons["Copy command"].firstMatch.exists,
+                      "The command should have a copy button")
+        workspace.serverToggleButton.click()
     }
 
     // MARK: - 24c. Capturing Selected Traffic as a Journey
@@ -704,6 +732,12 @@ final class MimicUITests: MimicUITestCase {
         XCUIElement.perform(withKeyModifiers: .command) {
             secondRow.click()
         }
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) {
+                firstRow.label.hasSuffix(", selected") && secondRow.label.hasSuffix(", selected")
+            },
+            "Both rows should announce they are selected — read [\(firstRow.label)] [\(secondRow.label)]"
+        )
         secondRow.rightClick()
         // Polled together — waiting out one item's timeout before looking at the other is the
         // `a || b` trap rule 9 of the UI Definition of Done names.
@@ -793,6 +827,9 @@ final class MimicUITests: MimicUITestCase {
             requestDetail.path.waitForExistence(timeout: 5),
             "Request detail should show the path"
         )
+        XCTAssertTrue(requestDetail.shownPath().contains("/api/users"), "The detail should show the clicked request")
+        XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "Request detail should show the status")
+        XCTAssertEqual(requestDetail.closeButton.label, "Back", "The header's back button should say where it goes")
 
         // Body tab: the payload has to be visible and searchable.
         requestDetail.tab("Body").click()

@@ -321,7 +321,7 @@ jobs:
             only: >-
               -only-testing:MimicUITests/WorkspaceShellUITests/testClickingALoggedRequestOpensTheCollapsedInspector
               -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorOverviewAnswersForTheProject
-              -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorTrafficTabListsTheEndpointsRequests
+              -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorTrafficSectionSummarisesTheEndpointsRequests
               -only-testing:MimicUITests/WorkspaceShellUITests/testJourneyCrumbJumpsToAnotherJourney
               -only-testing:MimicUITests/WorkspaceShellUITests/testMenuBarGuardsTheCommandsThatNeedAProject
               -only-testing:MimicUITests/WorkspaceShellUITests/testNarrowJumpBarCollapsesEarlierLocations
@@ -329,7 +329,7 @@ jobs:
               -only-testing:MimicUITests/WorkspaceShellUITests/testOverviewShowsTheActiveJourneyAndSwitchesTheNavigator
               -only-testing:MimicUITests/WorkspaceShellUITests/testPanelArrangementSurvivesClosingAndReopeningTheProject
               -only-testing:MimicUITests/WorkspaceShellUITests/testPanelChordsToggleBothPanels
-              -only-testing:MimicUITests/WorkspaceShellUITests/testScenarioCrumbSwitchesTheActiveScenario
+              -only-testing:MimicUITests/WorkspaceShellUITests/testScenarioCrumbSwitchesTheEditedScenario
               -only-testing:MimicUITests/WorkspaceShellUITests/testStartingOnAnOccupiedPortOffersTheNextPort
               -only-testing:MimicUITests/WorkspaceShellUITests/testToolbarPreservesIdentityAndCollapsesSecondaryActions
               -only-testing:MimicUITests/WorkspaceShellUITests/testWorkspaceShellNamesItsWindowAndFourPanels
@@ -339,12 +339,13 @@ jobs:
             only: >-
               -only-testing:MimicUITests/WorkspaceShellUITests/testAutosaveIndicatorClearsOnceTheSaveSettles
               -only-testing:MimicUITests/WorkspaceShellUITests/testAutosaveReportsAStoreThatRefusesTheWrite
+              -only-testing:MimicUITests/WorkspaceShellUITests/testCompactOverflowMenuTogglesThePanels
               -only-testing:MimicUITests/WorkspaceShellUITests/testEndpointCrumbJumpsToASibling
               -only-testing:MimicUITests/WorkspaceShellUITests/testGroupCrumbJumpsToAnotherGroup
               -only-testing:MimicUITests/WorkspaceShellUITests/testJourneyRunCommandsAreDisabledWithoutAnActiveJourney
               -only-testing:MimicUITests/WorkspaceShellUITests/testJourneysMenuDrivesTheActiveJourney
               -only-testing:MimicUITests/WorkspaceShellUITests/testJumpBarHistoryWalksBackAndForward
-              -only-testing:MimicUITests/WorkspaceShellUITests/testJumpBarNamesTheProjectAndHasNowhereToGoYet
+              -only-testing:MimicUITests/WorkspaceShellUITests/testJumpBarSaysNoEndpointAndHasNowhereToGoYet
               -only-testing:MimicUITests/WorkspaceShellUITests/testNavigatorTabStripSwitchesTheNavigatorAndCentrePane
               -only-testing:MimicUITests/WorkspaceShellUITests/testReselectingTheSameEndpointStacksNoHistory
               -only-testing:MimicUITests/WorkspaceShellUITests/testSelectingAfterGoingBackDiscardsTheForwardStack
@@ -381,6 +382,7 @@ jobs:
             only: >-
               -only-testing:MimicUITests/EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance
               -only-testing:MimicUITests/EndpointEditorUITests/testClearingTheBodyPersistsWithoutChangingAnotherScenario
+              -only-testing:MimicUITests/EndpointEditorUITests/testClickingAScenarioRowOpensItWithoutMakingItLive
               -only-testing:MimicUITests/EndpointEditorUITests/testChangingProjectsDismissesThePreviousEndpointDraft
               -only-testing:MimicUITests/EndpointEditorUITests/testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts
               -only-testing:MimicUITests/EndpointEditorUITests/testDeleteScenarioIsDisabledForTheOnlyScenarioAndRemovesOneOfSeveral

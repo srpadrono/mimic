@@ -4,7 +4,7 @@ import Network
 import XCTest
 
 /// The request log's own suite: sorting, filtering, selection, the row context menu, the request
-/// detail inspector, and the inspector's Traffic tab.
+/// detail inspector, and the endpoint inspector's Traffic section.
 ///
 /// It sits beside `MimicUITests` rather than inside it because that file is already 1,800 lines and
 /// its page objects are file-scope — so this suite **reuses** `RequestLogDrawerPage`,
@@ -14,15 +14,13 @@ import XCTest
 /// Three rules from `mimic-ui-tests` shape almost every query below, and each one has already cost
 /// this suite time:
 ///
-/// - **A leaf inside `DSPanelHeader`, `DSTabStrip` or `DSEmptyState` loses its own identifier.** The
-///   drawer's clear button, method filter, filter field and unmatched toggle all live in
-///   `DSPanelHeader("Request log", identifier: "requestLog")`, and the inspector's Traffic tab is a
-///   `DSTabStrip` button inside a `DSPanelHeader` — doubly flattened. Those are matched by **label**.
-///   `RequestLogDrawerPage.clearButton` queries `clearRequestLogButton`, which is exactly the
-///   identifier the header stamps over, so this file does not use it.
-/// - **The table header is a plain `HStack`, so its six `drawer.columnHeader.<field>` identifiers do
-///   survive** — and each carries the sort direction in its `accessibilityValue` rather than its
-///   label, which is what ``sortState(of:)`` reads.
+/// - **The drawer's header carries `ds.panelheader.requestLog` over its leaves**, so its clear
+///   button, method menu, filter field and All / Unmatched / Errors segments are matched by label or
+///   by identifier, whichever survives. `RequestLogDrawerPage.clearButton` queries
+///   `clearRequestLogButton`, which the header may stamp over, so this file matches its label.
+/// - **The table header is a plain `HStack`, so its `drawer.columnHeader.<field>` identifiers
+///   survive** — Time, Method, Path, Status and Scenario sort; Duration and Size do not. Each carries
+///   the sort direction in its `accessibilityValue`, which is what ``sortState(of:)`` reads.
 /// - **A log row is one element**: `RequestLogTableRow` composes with
 ///   `.accessibilityElement(children: .ignore)`, so a row's method, path, endpoint, scenario, status
 ///   and time exist only inside its spoken label. Every assertion about a cell is therefore an
@@ -116,20 +114,15 @@ final class RequestLogUITests: MimicUITestCase {
         return candidates.first { $0.exists }
     }
 
-    // MARK: - Drawer chrome, matched by label
+    // MARK: - Drawer chrome
 
-    /// The trash button in the drawer's header. Label, not `clearRequestLogButton`: it is a
-    /// `DSPanelHeaderButton` inside `DSPanelHeader`, whose identifier wins over its children's.
-    /// `DSPanelHeaderButton` speaks its `help` string as the label.
+    /// The trash button in the drawer's header, by its label ("Clear request log") so the query
+    /// survives the header's identifier being stamped over its leaves.
     @MainActor
     private var clearLogButton: XCUIElement { app.buttons["Clear request log"].firstMatch }
 
-    /// Everything in the drawer's header, as one string, for a failure message.
-    ///
-    /// Every leaf in that row reports the container's `ds.panelheader.requestLog` rather than its
-    /// own identifier, so this is also the only way to see the row as the tree sees it. Guarded on
-    /// `firstMatch.exists` because `count` on a query with no matches raises "Failed to get matching
-    /// snapshot" rather than answering zero.
+    /// Everything in the drawer's header, as one string, for a failure message. Guarded on
+    /// `firstMatch.exists` because `count` on an empty query raises rather than answering zero.
     @MainActor
     private func spokenHeaderControls() -> String {
         let query = app.descendants(matching: .any).matching(identifier: "ds.panelheader.requestLog")
@@ -139,24 +132,15 @@ final class RequestLogUITests: MimicUITestCase {
             .joined(separator: " ")
     }
 
-    /// The method popup, likewise flattened.
-    ///
-    /// **Matched on a label *fragment*, and that is the whole correction.** The control is
-    /// `Picker("Method")` with `.labelsHidden()` and an `.accessibilityLabel("Filter by method")`
-    /// over it, and macOS publishes *both* strings comma-joined: CI read the element as
-    /// `[label: Method, Filter by method, value: All]` — the picker's own title, then the label set
-    /// outside it, with the current selection in the value rather than in either. `.labelsHidden()`
-    /// hides the title from the *window*, not from the accessibility tree, which is the trap.
-    /// So an equality match on either half finds nothing, and "The method filter should be
-    /// addressable" failed on a control that had been in the tree the whole time.
-    ///
-    /// Tried as a pop-up button first and then as any element carrying the fragment, for the reason
-    /// `RequestDetailPage.tab(_:)` gives: the realization is a style detail and a query pinned to it
-    /// breaks silently. The two typed tiers come first because a predicate over
-    /// `descendants(matching: .any)` is the expensive kind — see ``elements(identifierPrefix:)``.
+    /// The method filter: a menu at the leading edge of the filter field, labelled "Filter by
+    /// method". Matched on the label fragment across the element types a `Menu` can realize as.
     @MainActor
     private var methodFilterControl: XCUIElement {
+        let byIdentifier = app.menuButtons["drawer.methodFilter"].firstMatch
+        if byIdentifier.exists { return byIdentifier }
         let carriesTheLabel = NSPredicate(format: "label CONTAINS %@", "Filter by method")
+        let byMenuButton = app.menuButtons.matching(carriesTheLabel).firstMatch
+        if byMenuButton.exists { return byMenuButton }
         let byPopUp = app.popUpButtons.matching(carriesTheLabel).firstMatch
         if byPopUp.exists { return byPopUp }
         let byButton = app.buttons.matching(carriesTheLabel).firstMatch
@@ -164,36 +148,13 @@ final class RequestLogUITests: MimicUITestCase {
         return app.descendants(matching: .any).matching(carriesTheLabel).firstMatch
     }
 
-    /// The inspector's panel header, which is how the inspector's presence is witnessed — its
-    /// *contents* change with the selection, its header does not. Same handle
-    /// `WorkspaceShellUITests` uses for PANEL-04.
+    /// The inspector's header, which is how the inspector's presence is witnessed.
     @MainActor
     private var inspectorHeader: XCUIElement { InspectorPage(app: app).header }
 
-    /// Gives the drawer's header the width its own controls need, before one of them is clicked.
-    ///
-    /// `DSPanelHeader` is a single `HStack` — title, count, method popup, unmatched toggle, a 120pt
-    /// filter well, trash button — and nothing in it clips. Asked for less width than that row's
-    /// minimum, SwiftUI lays the row out *at* its minimum and centres it in the pane, so it hangs off
-    /// both ends: the title loses characters on the left and the trailing control is drawn past the
-    /// right edge of the hosting view that owns the pane. `DSPanelHeader`'s own comment describes the
-    /// same mechanism from the other side ("the inspector header read 'narios' instead of
-    /// 'Scenarios', and the trailing controls went with it").
-    ///
-    /// An element drawn outside its hosting view is still in the accessibility tree with the right
-    /// label and the right action — `AXPress` would work, so this is not something a VoiceOver user
-    /// hits — but AppKit hit-tests within the view's bounds, so a *pointer* cannot reach it. That is
-    /// exactly the shape of "the trash button should empty the log": the button answered every query
-    /// put to it and the click went to whatever owned that point instead.
-    ///
-    /// The centre pane is the window minus the navigator and the inspector, and the inspector is
-    /// ~280pt of it (`PanelLayoutStore.Bounds.idealInspectorWidth`). The app opens with no
-    /// `defaultSize`, so on a hosted runner the pane starts near `DSSplitPane`'s own reported ideal —
-    /// far too narrow for that row. ⌥⌘I, the inspector's own chord, is the app's way of giving the
-    /// pane those points back; `WorkspaceShellUITests` covers the chord itself as PANEL-04.
-    ///
-    /// Idempotent: it presses nothing if the inspector is already closed, so a caller cannot
-    /// accidentally *open* it.
+    /// Gives the drawer's header the width its controls need before one of them is clicked, by
+    /// hiding the inspector (⌥⌘I). A control laid out past the hosting view's edge answers queries
+    /// but cannot be clicked. Idempotent: it never opens the inspector.
     @MainActor
     private func widenCentrePaneByHidingTheInspector() {
         guard inspectorHeader.exists else { return }
@@ -201,8 +162,7 @@ final class RequestLogUITests: MimicUITestCase {
         _ = inspectorHeader.waitForNonExistence(timeout: 5)
     }
 
-    /// The text filter. Its identifier may or may not survive the header — a plain `TextField` is not
-    /// a `DSTextField` lending its name to one control — so both handles are polled together.
+    /// The text filter, by identifier or by its label ("Filter request log"), polled together.
     @MainActor
     private func filterField() throws -> XCUIElement {
         let byIdentifier = app.descendants(matching: .textField)
@@ -214,32 +174,43 @@ final class RequestLogUITests: MimicUITestCase {
         )
     }
 
-    /// The unmatched-only toggle. Its label carries the count ("…, 3 so far"), so this matches on the
-    /// stable prefix rather than on a string that moves with the traffic.
+    /// The All / Unmatched / Errors segments. Each segment is a button carrying `.isSelected` when
+    /// chosen; its label is the title, then ", N" when there is something to count.
     @MainActor
-    private var unmatchedToggle: XCUIElement {
-        app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "Show only unmatched requests"))
-            .firstMatch
+    private func scopeSegment(identifier: String, title: String) -> XCUIElement {
+        app.buttons.matching(
+            NSPredicate(
+                format: "identifier == %@ OR label == %@ OR label BEGINSWITH %@",
+                identifier, title, "\(title), "
+            )
+        ).firstMatch
     }
 
-    /// The drawer header's count, which rides in `DSPanelHeader`'s subtitle slot and reports the
-    /// container's identifier rather than its own — the same flattening `RequestDetailPage.panelTitle`
-    /// documents, so it is matched the same way: identifier **plus** the text.
-    ///
-    /// Three identifiers are accepted — the container's, the subtitle's own, and none at all — because
-    /// which of them a flattened leaf ends up carrying is a SwiftUI detail that has already changed
-    /// once. The text is what makes the match specific: "2 requests" is the drawer subtitle's exact
-    /// wording, and nothing else on screen in these tests spells a count that way (the inspector's
-    /// overview writes "Requests" and "2" as a label/value pair).
+    @MainActor
+    private var unmatchedSegment: XCUIElement {
+        scopeSegment(identifier: "drawer.unmatchedFilter", title: "Unmatched")
+    }
+
+    @MainActor
+    private var allSegment: XCUIElement {
+        scopeSegment(identifier: "drawer.scope.all", title: "All")
+    }
+
+    @MainActor
+    private var errorsSegment: XCUIElement {
+        scopeSegment(identifier: "drawer.errorsFilter", title: "Errors")
+    }
+
+    /// The drawer header's "N requests" count, by its text and one of the identifiers a flattened
+    /// leaf may carry.
     @MainActor
     private func headerCount(_ count: String) -> XCUIElement {
         app.staticTexts.matching(
             NSPredicate(
                 format: "(value == %@ OR label == %@)"
-                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@ OR identifier == %@)",
+                    + " AND (identifier == %@ OR identifier == %@ OR identifier == %@)",
                 count, count,
-                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", "drawer.count", ""
+                "ds.panelheader.requestLog", "ds.panelheader.subtitle.requestLog", ""
             )
         ).firstMatch
     }
@@ -362,14 +333,6 @@ final class RequestLogUITests: MimicUITestCase {
         )
     }
 
-    // MARK: - Traffic tab
-
-    /// The native inspector segment, queried through the shared page object.
-    @MainActor
-    private var trafficTab: XCUIElement {
-        InspectorPage(app: app).tab("traffic")
-    }
-
     // MARK: - Shared arrangement
 
     /// Opens a project on `port` and starts the server, so the log has somewhere to come from.
@@ -469,14 +432,16 @@ final class RequestLogUITests: MimicUITestCase {
             waitForRowsToArrive(3, timeout: 15),
             "All three requests should reach the log"
         )
-        // Endpoint and Scenario are intentionally hidden in the compact drawer. Give the table
-        // the wide centre pane before exercising all six sortable columns. The headers only render
-        // once traffic arrives, so this must follow the row-count wait.
-        if !columnHeader("endpoint").exists {
+        // Scenario, Duration and Size are hidden in the compact table. Give the table the wide
+        // centre pane before exercising all five sortable columns. The headers only render once
+        // traffic arrives, so this must follow the row-count wait.
+        if !columnHeader("scenario").exists {
             workspace.toggleInspectorButton.click()
         }
-        XCTAssertTrue(columnHeader("endpoint").waitForExistence(timeout: 5),
-                      "The wide request log should expose Endpoint and Scenario")
+        XCTAssertTrue(columnHeader("scenario").waitForExistence(timeout: 5),
+                      "The wide request log should expose the Scenario column")
+        XCTAssertFalse(columnHeader("endpoint").exists,
+                       "What answered shares the Scenario column; there is no Endpoint column any more")
 
         // The log opens on Time, newest first — the one column that starts active, and the one case
         // `nextSortState` treats specially.
@@ -513,10 +478,8 @@ final class RequestLogUITests: MimicUITestCase {
             "Sorting by method ascending should put a GET first — first row was \(firstRowLabel())"
         )
 
-        // Endpoint and Scenario have no order worth asserting on three rows — two of them are
-        // unmatched and share an empty key — so these two assert the state the header reports, which
-        // is what a reader of the panel gets.
-        sort(by: "endpoint", expecting: "sorted ascending")
+        // Scenario has no order worth asserting on three rows — two of them are unmatched and share
+        // an empty key — so this asserts the state the header reports, which is what a reader gets.
         sort(by: "scenario", expecting: "sorted ascending")
 
         sort(by: "status", expecting: "sorted ascending")
@@ -536,7 +499,7 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - LOGFILT (text and method)
 
-    /// The filter field's three predicates — path, status code, outcome word — the method popup, and
+    /// The filter field's three predicates — path, status code, outcome word — the method menu, and
     /// the empty state a filter that matches nothing falls back to.
     @MainActor
     func testFilteringTheRequestLogByTextAndMethod() async throws {
@@ -596,17 +559,15 @@ final class RequestLogUITests: MimicUITestCase {
         )
         XCTAssertFalse(
             requestLogDrawer.emptyHeading.exists,
-            "'No requests yet' is a different state — the log still holds three entries"
+            "The idle empty state is a different state — the log still holds three entries"
         )
 
         field.typeKey("a", modifierFlags: .command)
         field.typeKey(.delete, modifierFlags: [])
         XCTAssertTrue(waitForVisibleRowCount(3), "Clearing the filter should bring every row back")
 
-        // The method popup. Its identifier is stamped over by the panel header, so it is reached by
-        // label — a *fragment* of it, because the label is the picker's title comma-joined with the
-        // accessibility label; see ``methodFilterControl``. Its items are ordinary menu elements once
-        // it is open.
+        // The method menu at the filter field's leading edge, reached by identifier or label; see
+        // ``methodFilterControl``. Its items are ordinary menu elements once it is open.
         XCTAssertTrue(
             methodFilterControl.waitForExistence(timeout: 5),
             "The method filter should be addressable — the drawer header is saying "
@@ -614,7 +575,7 @@ final class RequestLogUITests: MimicUITestCase {
         )
         methodFilterControl.click()
         let postItem = app.menuItems["POST"]
-        XCTAssertTrue(postItem.waitForExistence(timeout: 5), "The method popup should offer POST")
+        XCTAssertTrue(postItem.waitForExistence(timeout: 5), "The method menu should offer POST")
         postItem.click()
 
         XCTAssertTrue(waitForVisibleRowCount(1), "Filtering by POST should leave the one POST")
@@ -625,7 +586,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         methodFilterControl.click()
         let allItem = app.menuItems["All"]
-        XCTAssertTrue(allItem.waitForExistence(timeout: 5), "The method popup should offer All")
+        XCTAssertTrue(allItem.waitForExistence(timeout: 5), "The method menu should offer All")
         allItem.click()
         XCTAssertTrue(waitForVisibleRowCount(3), "Choosing All should clear the method filter")
 
@@ -644,8 +605,8 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - LOGFILT (unmatched) and clearing the log
 
-    /// The unmatched-only toggle — inert while nothing is unmatched, counted once something is — the
-    /// toolbar badge that switches it on from outside the panel, and the trash button that empties
+    /// The All / Unmatched / Errors segments — counted once there is something to count — the
+    /// toolbar badge that selects Unmatched from outside the panel, and the trash button that empties
     /// the log.
     @MainActor
     func testUnmatchedOnlyFilterAndClearingTheLog() async throws {
@@ -658,24 +619,25 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         XCTAssertTrue(waitForRowsToArrive(1, timeout: 15), "The matched request should reach the log")
 
-        // Nothing to filter to and not already filtering: the control is disabled, and it says so
-        // rather than sitting there looking pressable.
-        XCTAssertTrue(unmatchedToggle.waitForExistence(timeout: 5), "The unmatched filter should be in the header")
-        XCTAssertEqual(
-            unmatchedToggle.label,
-            "Show only unmatched requests",
-            "With nothing unmatched the toggle should carry no count"
-        )
-        XCTAssertFalse(unmatchedToggle.isEnabled, "The unmatched filter should be inert while nothing is unmatched")
+        // Nothing unmatched and nothing failed: the segments carry no counts, and All is chosen.
+        XCTAssertTrue(unmatchedSegment.waitForExistence(timeout: 5),
+                      "The Unmatched segment should be in the header — it is saying " + spokenHeaderControls())
+        XCTAssertEqual(unmatchedSegment.label, "Unmatched", "With nothing unmatched the segment should carry no count")
+        XCTAssertEqual(errorsSegment.label, "Errors", "With nothing failed the Errors segment should carry no count")
+        XCTAssertTrue(allSegment.isSelected, "The log should open on All")
 
         await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "The unmatched request should reach the log")
 
         XCTAssertTrue(
-            poll { self.unmatchedToggle.label == "Show only unmatched requests, 1 so far" },
-            "The toggle should carry the count — it read \(unmatchedToggle.label)"
+            poll { self.unmatchedSegment.label == "Unmatched, 1" },
+            "The Unmatched segment should carry the count — it read \(unmatchedSegment.label)"
         )
-        XCTAssertTrue(unmatchedToggle.isEnabled, "The unmatched filter should come alive once there is one to find")
+        // The unmatched call is answered with a 404, so it is also the one error.
+        XCTAssertTrue(
+            poll { self.errorsSegment.label == "Errors, 1" },
+            "The Errors segment should count the 404 — it read \(errorsSegment.label)"
+        )
 
         // The toolbar's badge is the other way in: it opens the drawer already filtered, the way
         // Xcode's warning count jumps you to the issue navigator.
@@ -699,12 +661,24 @@ final class RequestLogUITests: MimicUITestCase {
             poll { self.firstRowLabel().contains("unmatched") },
             "The surviving row should be the unmatched one — it was \(firstRowLabel())"
         )
+        XCTAssertTrue(poll { self.unmatchedSegment.isSelected }, "The badge should select the Unmatched segment")
 
-        // Off, then on again, from the panel's own control.
-        unmatchedToggle.click()
-        XCTAssertTrue(waitForVisibleRowCount(2), "Turning the unmatched filter off should bring the full log back")
-        unmatchedToggle.click()
-        XCTAssertTrue(waitForVisibleRowCount(1), "Turning it back on should narrow to the unmatched call again")
+        // All brings the full log back; Errors narrows to the failed call; Unmatched again from the
+        // panel's own control.
+        allSegment.click()
+        XCTAssertTrue(waitForVisibleRowCount(2), "All should bring the full log back")
+        XCTAssertTrue(poll { self.allSegment.isSelected && !self.unmatchedSegment.isSelected })
+
+        errorsSegment.click()
+        XCTAssertTrue(waitForVisibleRowCount(1), "Errors should leave only the 404")
+        XCTAssertTrue(
+            poll { self.firstRowLabel().contains("status 404") },
+            "The surviving row should be the 404 — it was \(firstRowLabel())"
+        )
+
+        unmatchedSegment.click()
+        XCTAssertTrue(waitForVisibleRowCount(1), "Unmatched should narrow to the unmatched call again")
+        XCTAssertTrue(poll { self.unmatchedSegment.isSelected })
 
         // Clearing empties the log outright, and the panel falls back to its idle state — not to the
         // "No matching requests" one, which would be a filter still claiming to be filtering.
@@ -731,12 +705,8 @@ final class RequestLogUITests: MimicUITestCase {
         )
 
         // `RequestLogDrawerView` checks `requestLogs.isEmpty` before it checks the filter, so a
-        // cleared log shows "No requests yet" even with the unmatched filter still on. The heading is
-        // a `DSEmptyState` leaf, so it is reached the way this file reaches the "No matching requests"
-        // one: the plain label first, then the identifiers the component builds — the container's and
-        // the heading's — polled together rather than waited out in turn. `emptyHeading` alone is a
-        // label match on a leaf whose string arrives in `value` as readily as in `label`, which is why
-        // it went unfound here while the same query answers on a log that was never written to.
+        // cleared log shows the idle empty state even with Unmatched still selected. The heading and
+        // its container are polled together with the page object's text match.
         XCTAssertTrue(
             UITestApp.waitForAny(
                 [
@@ -746,7 +716,7 @@ final class RequestLogUITests: MimicUITestCase {
                 ],
                 timeout: 5
             ),
-            "Clearing the log should restore the 'No requests yet' empty state"
+            "Clearing the log should restore the idle empty state"
         )
 
         // The negative is checked on the identifier prefix rather than on the heading's label: a
@@ -782,8 +752,8 @@ final class RequestLogUITests: MimicUITestCase {
             "The drawer header should count the requests it is showing"
         )
 
-        // The six columns exist only inside the composed label, so this is the assertion that the
-        // method badge, path, endpoint, scenario and status pill are saying the right things.
+        // The cells exist only inside the composed label, so this is the assertion that the method,
+        // path, status and what answered are saying the right things.
         let matchedLabel = rowLabel(forPath: "/api/users")
         XCTAssertTrue(
             matchedLabel.contains("POST /api/users") && matchedLabel.contains("status 200"),
@@ -797,7 +767,7 @@ final class RequestLogUITests: MimicUITestCase {
         let unmatchedLabel = rowLabel(forPath: "/api/orders")
         XCTAssertTrue(
             unmatchedLabel.contains("status 404") && unmatchedLabel.contains(", unmatched"),
-            "An unmatched row should say so rather than leaving the endpoint column silent — it read \(unmatchedLabel)"
+            "An unmatched row should say so rather than leaving the scenario column silent — it read \(unmatchedLabel)"
         )
 
         let matchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/users"), "The matched row should be addressable")
@@ -807,8 +777,8 @@ final class RequestLogUITests: MimicUITestCase {
             "Clicking a row should switch the inspector to request detail"
         )
 
-        // The identity line: badge, status pill and time. `DSMethodBadge` prefixes the identifier it
-        // is handed, so both spellings are matched.
+        // The identity block: method, status and time. `DSMethodLabel` prefixes the identifier it is
+        // handed, so both spellings are matched.
         let methodBadge = element(identifiedByAnyOf: ["requestDetail.method", "ds.method.requestDetail.method"])
         XCTAssertTrue(methodBadge.waitForExistence(timeout: 5), "The identity line should show the method badge")
         XCTAssertTrue(
@@ -823,6 +793,12 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.timestamp").waitForExistence(timeout: 5),
             "The identity line should show when the request arrived"
+        )
+        let outcomeSentence = element(identifiedBy: "requestDetail.outcome")
+        XCTAssertTrue(outcomeSentence.waitForExistence(timeout: 5), "The identity block should say what answered")
+        XCTAssertTrue(
+            text(of: outcomeSentence).contains("Answered by Users"),
+            "The outcome sentence should name the endpoint — it read \(text(of: outcomeSentence))"
         )
 
         // Summary is the tab a selection opens on.
@@ -895,7 +871,7 @@ final class RequestLogUITests: MimicUITestCase {
         )
     }
 
-    // MARK: - REQDET body tab and copy bar
+    // MARK: - REQDET body tab and copy actions
 
     /// The Body tab across the two shapes a logged exchange actually takes — a matched call whose
     /// default scenario returns nothing, and an unmatched one whose body is Mimic's own fallback —
@@ -934,11 +910,11 @@ final class RequestLogUITests: MimicUITestCase {
 
         // Copy Response is gated on there being one.
         let copyResponse = element(identifiedBy: "requestDetail.copy.responseBody")
-        XCTAssertTrue(copyResponse.waitForExistence(timeout: 5), "The copy bar should offer Response")
+        XCTAssertTrue(copyResponse.waitForExistence(timeout: 5), "The identity block should offer Copy response")
         XCTAssertFalse(copyResponse.isEnabled, "Copy Response should be disabled when the response carried no body")
 
         let copyAll = element(identifiedBy: "requestDetail.copy.all")
-        XCTAssertTrue(copyAll.waitForExistence(timeout: 5), "The copy bar should offer All")
+        XCTAssertTrue(copyAll.waitForExistence(timeout: 5), "The identity block should offer Copy all")
         copyAll.click()
         XCTAssertTrue(
             poll { self.text(of: self.requestDetail.copyConfirmation).localizedCaseInsensitiveContains("all") },
@@ -1348,99 +1324,51 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - TRAFFIC
 
-    /// The inspector's second segment shows the selected endpoint's actual traffic.
+    /// The endpoint inspector's Traffic section counts what the endpoint answered, and its "Show
+    /// latest request" action opens that request in the request detail.
     @MainActor
-    func testEndpointTrafficTabListsWhatTheEndpointAnswered() async throws {
+    func testEndpointTrafficSectionSummarisesWhatTheEndpointAnswered() async throws {
         let port = 62109
+        let inspector = InspectorPage(app: app)
 
         launchApp()
         startServer(projectNamed: "Traffic Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(trafficTab.waitForExistence(timeout: 5), "A selected endpoint should offer a Traffic tab")
-        trafficTab.click()
+        XCTAssertTrue(inspector.traffic.waitForExistence(timeout: 5), "A selected endpoint should show its traffic")
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Traffic"),
-            "The header should follow the tab — it is the more specific answer to what the panel is showing"
-        )
-        XCTAssertTrue(
-            UITestApp.waitForAny(
-                [
-                    app.staticTexts["No traffic yet"],
-                    element(identifiedBy: "ds.empty.endpointTraffic.empty.heading"),
-                    element(identifiedBy: "ds.empty.endpointTraffic.empty"),
-                ],
-                timeout: 5
-            ),
+            inspector.trafficEmpty.waitForExistence(timeout: 5),
             "An endpoint nothing has called should say so"
         )
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
-        XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
+        await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
+        XCTAssertTrue(waitForRowsToArrive(3, timeout: 15), "All three requests should reach the log")
 
-        // The summary line, which is the panel's own header rather than a row.
-        let summary = element(identifiedBy: "endpointTraffic.summary")
-        XCTAssertTrue(summary.waitForExistence(timeout: 10), "The traffic list should summarise what it holds")
+        // Only the endpoint's own two calls are counted; the unmatched /api/orders is not its traffic.
+        XCTAssertTrue(inspector.trafficServed.waitForExistence(timeout: 10), "The section should count what was served")
         XCTAssertTrue(
-            poll { self.text(of: summary).contains("2 requests") },
-            "The summary should count the endpoint's traffic — it read \(text(of: summary))"
-        )
-
-        // The distribution chip: one per status code seen, with how often.
-        //
-        // Read as a subtree, not as one element's label. `DSStatusPill` sets no accessibility of its
-        // own — identifiers and labels are the call site's — and `EndpointTrafficList` gives this one
-        // both an identifier and an `.accessibilityLabel("2 responses with status 200")`; what
-        // arrives is an element carrying the identifier with an **empty** label, so the strict
-        // `chip.label ==` read this replaces asserted against "". The words are in the subtree, in
-        // one of the two spellings the chip legitimately has: the spoken label, or the pill's own
-        // "200 ×2". Either states the same fact — this code, this many — so both are accepted, and
-        // the assertion still fails on a chip that names the code without the count.
-        let statusChip = element(identifiedBy: "endpointTraffic.status.200")
-        XCTAssertTrue(statusChip.waitForExistence(timeout: 5), "The status mix should include the 200s")
-        XCTAssertTrue(
-            poll {
-                let spoken = self.speech(of: statusChip)
-                return spoken.contains("200")
-                    && (spoken.contains("2 responses") || spoken.contains("\u{00D7}2"))
-            },
-            "The chip should say how many responses carried the code — it read \(speech(of: statusChip))"
-        )
-
-        // The segment's accessible label includes its request count.
-        XCTAssertTrue(
-            poll { self.text(of: self.trafficTab).contains("2") },
-            "The tab should announce how many requests it has to show — it read \(text(of: trafficTab))"
-        )
-
-        // A row: status, time and head-truncated path, composed into one spoken label because the row
-        // is `.ignore`d and its cells cannot exist as elements.
-        //
-        // The composed label is the second handle, and it is unambiguous: the request log's row for
-        // the same call says more ("…, endpoint Users, scenario Default"), so an exact-label match
-        // cannot resolve to the drawer by mistake.
-        let trafficRow = try XCTUnwrap(
-            firstExisting([
-                elements(identifierPrefix: "endpointTraffic.row.").firstMatch,
-                app.buttons["GET /api/users, status 200"].firstMatch,
-            ]),
-            "The endpoint's requests should be listed as rows"
+            poll { self.speech(of: inspector.trafficServed).contains("2") },
+            "Served should count the endpoint's two calls — it read \(speech(of: inspector.trafficServed))"
         )
         XCTAssertTrue(
-            trafficRow.label.contains("GET /api/users") && trafficRow.label.contains("status 200"),
-            "A traffic row should announce the request and what came back — it read \(trafficRow.label)"
+            poll { self.speech(of: inspector.trafficErrors).contains("0") },
+            "Nothing failed — errors read \(speech(of: inspector.trafficErrors))"
         )
+        XCTAssertFalse(inspector.trafficEmpty.exists, "The empty note should go once there is traffic")
 
-        // Clicking one opens it in the request detail, which is the whole point of listing them here.
-        trafficRow.click()
+        // The action opens the newest request in the detail, which is the point of summarising here.
+        let showLatest = inspector.showLatestRequestButton
+        XCTAssertTrue(showLatest.waitForExistence(timeout: 5), "The section should offer the latest request")
+        showLatest.click()
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Request"),
-            "Clicking a traffic row should open that request in the detail inspector"
+            "Show latest request should open that request in the detail inspector"
         )
         XCTAssertTrue(
             poll { self.text(of: self.requestDetail.path).contains("/api/users") },
-            "The detail should be showing the request that was clicked"
+            "The detail should be showing the endpoint's request"
         )
     }
 }

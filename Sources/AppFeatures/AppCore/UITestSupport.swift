@@ -90,6 +90,27 @@ enum UITestSupport {
             .appendingPathComponent("mimic-unittests.sqlite")
     }
 
+    /// Forces the app's appearance for a UI test run: `dark` or `light`, case-insensitively.
+    ///
+    /// The screenshot walk captures every screen in both appearances. `-AppleInterfaceStyle` as a
+    /// launch argument no longer reaches the app on macOS 26, so both passes came out light; this
+    /// sets `NSApp.appearance` directly instead. Anything else, and every non-test run, leaves the
+    /// system appearance alone.
+    static let appearanceEnvironmentKey = "MIMIC_APPEARANCE"
+
+    @MainActor
+    static func applyForcedAppearance(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) {
+        guard isRunningUITests(environment: environment, arguments: arguments) else { return }
+        switch environment[appearanceEnvironmentKey]?.lowercased() {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: break
+        }
+    }
+
     /// Whether this process must not check for updates on its own.
     ///
     /// True for both kinds of test run, for two different reasons:

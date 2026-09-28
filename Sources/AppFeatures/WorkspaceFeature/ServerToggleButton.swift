@@ -35,7 +35,12 @@ struct ServerToggleButton: View {
     var body: some View {
         Button(action: stopIsCurrentAction ? onStop : onStart) {
             Label {
-                Text(stopIsCurrentAction ? "Stop" : "Run")
+                // Both words laid out, one shown, so the capsule keeps one width when the server starts.
+                ZStack(alignment: .leading) {
+                    Text("Stop").hidden()
+                    Text("Run").hidden()
+                    Text(stopIsCurrentAction ? "Stop" : "Run")
+                }
             } icon: {
                 Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))

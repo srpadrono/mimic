@@ -173,7 +173,6 @@ extension JourneyStepSheetPage {
     }
 
     var headersDisclosure: XCUIElement { app.buttons["stepSheet.headersDisclosure"] }
-    var timingDisclosure: XCUIElement { app.buttons["stepSheet.timingDisclosure"] }
 
     var bodyField: XCUIElement {
         let byTextField = app.textFields["stepSheet.bodyField"].firstMatch
@@ -447,9 +446,11 @@ final class JourneyEditorUITests: MimicUITestCase {
     /// being up, so a caller cannot toggle it *open* and make its own pane shorter.
     @MainActor
     private func hideRequestLogDrawer() {
-        guard workspace.toggleDrawerButton.waitForExistence(timeout: 5) else { return }
-        guard workspace.drawerEmptyHeading.exists else { return }
-        workspace.toggleDrawerButton.click()
+        // ⌥⌘L rather than the toolbar toggle: in a narrow window the toggle is an item of the
+        // "More actions" menu, and reaching it would leave that menu open when there is nothing
+        // to hide.
+        guard workspace.drawerEmptyHeading.waitForExistence(timeout: 5) else { return }
+        app.typeKey("l", modifierFlags: [.command, .option])
         _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
     }
 
@@ -949,8 +950,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-16 — the delay. This is the coercion regression: "abc" used to become a step that
         // answered instantly, with nothing said.
         replaceText(in: stepSheet.statusField, with: "201")
-        stepSheet.reveal(stepSheet.timingDisclosure, byScrollingUp: true)
-        stepSheet.timingDisclosure.click()
+        // Delay and serve count sit beside the status; there is no timing disclosure to open.
         stepSheet.reveal(stepSheet.delayField, byScrollingUp: true)
         replaceText(in: stepSheet.delayField, with: "abc")
         stepSheet.saveButton.click()
@@ -1014,11 +1014,14 @@ final class JourneyEditorUITests: MimicUITestCase {
         openStepSheet()
 
         XCTAssertTrue(stepSheet.headersDisclosure.exists, "Optional headers should be discoverable")
-        XCTAssertTrue(stepSheet.timingDisclosure.exists, "Timing should be discoverable without scrolling")
         XCTAssertTrue(stepSheet.prettyPrintButton.exists, "The response body should offer JSON formatting")
         XCTAssertFalse(stepSheet.prettyPrintButton.isEnabled, "An empty body cannot be formatted")
         XCTAssertFalse(stepSheet.headersField.exists, "A new step should keep optional headers collapsed")
-        XCTAssertFalse(stepSheet.delayField.exists, "A new step should keep optional timing collapsed")
+        // Timing is no longer behind a disclosure: a respond step shows its delay and serve count
+        // inline beside the status, with their defaults.
+        XCTAssertTrue(stepSheet.delayField.waitForExistence(timeout: 5),
+                      "A respond step should show its delay without a disclosure")
+        XCTAssertTrue(stepSheet.repeatField.exists, "…and its serve count beside it")
         let defaultScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         defaultScreenshot.name = "journey-step-default-sheet"
         defaultScreenshot.lifetime = .keepAlways

@@ -54,7 +54,8 @@ struct BreadcrumbPage {
         ]
     }
 
-    /// One level of the path — `project`, `group`, `endpoint`, `scenario` or `journey`.
+    /// One level of the path — `group`, `endpoint`, `scenario` or `journey`. There is no project
+    /// crumb: the toolbar identity names the project.
     ///
     /// `title` is what the crumb should currently be saying, and it is used only when the identifier
     /// did not land. A caller that does not know the crumb's words passes nothing and gets the
@@ -270,14 +271,17 @@ struct WorkspaceShellPage {
     var endpointsTab: XCUIElement { navigatorTab(labelled: "Show endpoints") }
     var journeysTab: XCUIElement { navigatorTab(labelled: "Show journeys") }
 
-    /// Native segmented pickers expose radio buttons; keep the query scoped to the header.
+    /// `DSSegmentedControl` draws each segment as a plain button carrying the selected trait, not
+    /// as a radio button; keep the fallback scoped to the header so it cannot reach the overview's
+    /// "Show journeys" button.
     private func navigatorTab(labelled label: String) -> XCUIElement {
         let id = label == "Show endpoints" ? "navigator.tab.endpoints" : "navigator.tab.journeys"
-        let named = app.descendants(matching: .any).matching(identifier: id).firstMatch
+        let named = app.buttons.matching(identifier: id).firstMatch
         if named.exists { return named }
-        return panel("navigator.header").descendants(matching: .radioButton)
-            .matching(NSPredicate(format: "label == %@ OR label == %@", label,
-                label == "Show endpoints" ? "Endpoints" : "Journeys")).firstMatch
+        let title = label == "Show endpoints" ? "Endpoints" : "Journeys"
+        return panel("navigator.header").descendants(matching: .button)
+            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", title, "\(title), "))
+            .firstMatch
     }
 
 }
@@ -622,15 +626,16 @@ final class WorkspaceShellUITests: MimicUITestCase {
         templatePicker.addButton.click()
     }
 
-    /// Types a group tag into the editor and commits it with Return.
+    /// Types a group tag into the inspector's Endpoint section and commits it with Return.
     ///
     /// The field commits on submit or on losing focus — never on every keystroke — so a test that
-    /// only typed would assert against a value the endpoint never received.
+    /// only typed would assert against a value the endpoint never received. It lives in the
+    /// inspector now, so the inspector is opened first if a previous step closed it.
     @MainActor
     private func setGroupTag(_ tag: String) {
-        endpointEditor.showOptions()
-        let field = endpointEditor.groupTagField
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "The editor should offer a group tag field")
+        showInspectorIfHidden()
+        let field = inspector.groupTagField
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "The inspector should offer a group tag field")
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText(tag)
@@ -763,8 +768,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         shell.endpointsTab.click()
         XCTAssertTrue(
-            workspace.centerEmptyHeading.waitForExistence(timeout: 5),
-            "The centre pane should go back to the endpoint empty state"
+            workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+            "The centre pane should go back to the first-endpoint chooser"
         )
         XCTAssertTrue(
             workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
@@ -793,8 +798,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
     // MARK: - 2. The breadcrumb jump bar
 
     /// BREAD-01, BREAD-02, BREAD-09, BREAD-12.
+    ///
+    /// The jump bar no longer starts with the project: the toolbar's identity names it, so the path
+    /// begins at the group or endpoint. With nothing selected it is one crumb saying so.
     @MainActor
-    func testJumpBarNamesTheProjectAndHasNowhereToGoYet() throws {
+    func testJumpBarSaysNoEndpointAndHasNowhereToGoYet() throws {
         launchShell()
         createProjectViaUI(name: "Jump Bar")
 
@@ -802,25 +810,33 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // the wrong thing" further down rather than as "there is no jump bar", which is the
         // misdiagnosis the first run produced.
         XCTAssertTrue(
-            UITestApp.waitForAny(breadcrumb.crumbCandidates("project", titled: "Jump Bar"), timeout: 5),
-            "The jump bar should start with a project crumb"
-        )
-        XCTAssertTrue(
-            breadcrumb.waitForCrumb("project", toRead: "Jump Bar"),
-            "The head of the path should name the project — "
-                + breadcrumb.crumbDescription("project", titled: "Jump Bar")
+            UITestApp.waitForAny(breadcrumb.crumbCandidates("endpoint", titled: "No endpoint"), timeout: 5),
+            "The jump bar should have an endpoint crumb even before anything is selected"
         )
         XCTAssertTrue(
             breadcrumb.waitForCrumb("endpoint", toRead: "No endpoint"),
             "With nothing selected the endpoint crumb should say so — "
                 + breadcrumb.crumbDescription("endpoint", titled: "No endpoint")
         )
+        XCTAssertFalse(
+            breadcrumb.crumb("project").exists,
+            "The project is named by the toolbar, not repeated at the head of the path"
+        )
+        let projectTitle = workspace.projectTitle
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                projectTitle.exists
+                    && (projectTitle.label == "Jump Bar" || (projectTitle.value as? String) == "Jump Bar")
+            },
+            "The toolbar identity should name the project the path belongs to"
+        )
 
-        // BREAD-09 — nothing has been visited, so neither arrow has anywhere to go.
+        // BREAD-09 — nothing has been visited, so neither arrow has anywhere to go. The arrows sit
+        // in the toolbar's leading group now, beside the project identity.
         let back = breadcrumb.back
         let forward = breadcrumb.forward
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "The jump bar should offer a back arrow")
-        XCTAssertTrue(forward.exists, "The jump bar should offer a forward arrow")
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "The toolbar should offer a back arrow")
+        XCTAssertTrue(forward.exists, "The toolbar should offer a forward arrow")
         XCTAssertFalse(back.isEnabled, "Back should be disabled with no history to walk")
         XCTAssertFalse(forward.isEnabled, "Forward should be disabled with no history to walk")
 
@@ -847,18 +863,21 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createEndpointViaUI(name: "Get users", path: "/api/users")
         createEndpointViaUI(name: "Get posts", path: "/api/posts")
 
+        // The endpoint crumb names the route, not the endpoint: "METHOD /path", the same words the
+        // sibling options use.
+
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Get posts"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/posts"),
             "The jump bar should name the endpoint just created — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Get posts")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/posts")
         )
 
-        breadcrumb.jump(from: "endpoint", to: "Get users", currentlyReading: "Get posts")
+        breadcrumb.jump(from: "endpoint", to: "GET /api/users", currentlyReading: "GET /api/posts")
 
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Get users"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/users"),
             "Choosing a sibling should move the selection — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Get users")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/users")
         )
 
         let pathLabel = endpointEditor.pathLabel
@@ -873,8 +892,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     /// BREAD-04.
     ///
-    /// The group crumb is conditional — it renders only when the project has more than one non-empty
-    /// group tag — so the test has to build that state before it can assert on it.
+    /// The group crumb appears whenever the selected endpoint has a group tag; its menu lists every
+    /// group in the project, so two groups make the jump a real move.
     @MainActor
     func testGroupCrumbJumpsToAnotherGroup() throws {
         launchShell()
@@ -886,17 +905,32 @@ final class WorkspaceShellUITests: MimicUITestCase {
         setGroupTag("Checkout")
         widenCentrePaneByHidingTheInspector()
 
-        XCTAssertTrue(breadcrumb.crumb("group").waitForExistence(timeout: 5),
-                      "A second group should give the expanded path a group crumb")
-
-        breadcrumb.jump(from: "group", to: "Accounts")
-
-        XCTAssertTrue(breadcrumb.crumb("group").exists, "The group crumb should remain in the path")
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) {
-                self.endpointEditor.groupTagField.value as? String == "Accounts"
-            },
-            "A group option should move the editor to an endpoint in that group"
+            breadcrumb.waitForCrumb("group", toRead: "Checkout"),
+            "A tagged endpoint should put its group at the head of the path — "
+                + breadcrumb.crumbDescription("group", titled: "Checkout")
+        )
+
+        breadcrumb.jump(from: "group", to: "Accounts", currentlyReading: "Checkout")
+
+        XCTAssertTrue(
+            breadcrumb.waitForCrumb("group", toRead: "Accounts"),
+            "The group crumb should follow the jump — "
+                + breadcrumb.crumbDescription("group", titled: "Accounts")
+        )
+        XCTAssertTrue(
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/users"),
+            "A group option should move the selection to the first endpoint in that group — "
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/users")
+        )
+
+        // The inspector's Endpoint section agrees: the selected endpoint's group is the one jumped to.
+        showInspectorIfHidden()
+        let groupField = inspector.groupTagField
+        XCTAssertTrue(groupField.waitForExistence(timeout: 5), "The inspector should show the group tag")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { groupField.value as? String == "Accounts" },
+            "The inspector should be describing an endpoint in the chosen group"
         )
     }
 
@@ -922,8 +956,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
     }
 
     /// BREAD-05, INSPOV-13.
+    ///
+    /// The scenario crumb names the scenario open in the editor, which is not necessarily the live
+    /// one. Choosing another scenario from it opens that scenario for editing and changes nothing
+    /// the mock serves; making it live is the radio's job, or the editor's "Make live".
     @MainActor
-    func testScenarioCrumbSwitchesTheActiveScenario() throws {
+    func testScenarioCrumbSwitchesTheEditedScenario() throws {
         launchShell()
         createProjectViaUI(name: "Scenarios")
         createEndpointViaUI(name: "Get users", path: "/api/users")
@@ -934,15 +972,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         XCTAssertTrue(
             breadcrumb.waitForCrumb("scenario", toRead: "Default"),
-            "A new endpoint answers with its default scenario — "
+            "A new endpoint opens its default scenario — "
                 + breadcrumb.crumbDescription("scenario", titled: "Default")
         )
 
-        // INSPOV-13 — the inspector header's "+", by label. Its identifier
-        // (`inspector.addScenarioButton`) sits in a `DSPanelHeader` accessory slot, which stamps
-        // `ds.panelheader.inspector` over its descendants. Queried before the sheet opens on
+        // INSPOV-13 — the inspector header's "+". Queried by identifier before the sheet opens on
         // purpose: the sheet's confirm button answers to the same words.
-        let addScenario = app.buttons["Add scenario"].firstMatch
+        let addScenario = inspector.addScenarioButton
         XCTAssertTrue(
             addScenario.waitForExistence(timeout: 5),
             "The Scenarios header should offer a way to add one"
@@ -962,33 +998,69 @@ final class WorkspaceShellUITests: MimicUITestCase {
         newScenarioSheet.createButton.click()
 
         let addedRow = inspector.scenarioRow(named: "Unauthorized")
+        let defaultRow = inspector.scenarioRow(named: "Default")
         XCTAssertTrue(
             addedRow.waitForExistence(timeout: 5),
             "The new scenario should be listed in the inspector"
         )
-        // Adding one does not activate it — the endpoint already had an active scenario — so the
-        // crumb is still on the default, and the jump below is a real switch rather than a no-op.
+        // A new scenario opens for editing but does not go live: the endpoint already had one.
+        XCTAssertTrue(
+            breadcrumb.waitForCrumb("scenario", toRead: "Unauthorized"),
+            "The crumb should follow the scenario just added into the editor — "
+                + breadcrumb.crumbDescription("scenario", titled: "Unauthorized")
+        )
+        XCTAssertTrue(
+            endpointEditor.waitForEditedScenario("Unauthorized", live: false),
+            "The editor should say the added scenario is not live — \(endpointEditor.liveStateText())"
+        )
+
+        breadcrumb.jump(from: "scenario", to: "Default", currentlyReading: "Unauthorized")
+
         XCTAssertTrue(
             breadcrumb.waitForCrumb("scenario", toRead: "Default"),
-            "Adding a scenario should not switch to it — "
+            "The scenario crumb should name the scenario now open — "
                 + breadcrumb.crumbDescription("scenario", titled: "Default")
+        )
+        XCTAssertTrue(
+            endpointEditor.waitForEditedScenario("Default", live: true),
+            "The editor should now show the live default — \(endpointEditor.liveStateText())"
+        )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { defaultRow.isSelected && !addedRow.isSelected },
+            "The inspector should mark the row being edited"
         )
 
         breadcrumb.jump(from: "scenario", to: "Unauthorized", currentlyReading: "Default")
-
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("scenario", toRead: "Unauthorized"),
-            "The scenario crumb should name the scenario now answering — "
-                + breadcrumb.crumbDescription("scenario", titled: "Unauthorized")
+            endpointEditor.waitForEditedScenario("Unauthorized", live: false),
+            "Jumping to a scenario opens it without making it live — \(endpointEditor.liveStateText())"
         )
         // `, active` rather than `active`: the row's *value* is "inactive" when it is not, which
         // contains the shorter string. The spoken label is the half that only says it when true.
+        XCTAssertFalse(
+            addedRow.label.localizedCaseInsensitiveContains(", active"),
+            "The crumb must not change which scenario the mock serves"
+        )
+        XCTAssertTrue(
+            defaultRow.label.localizedCaseInsensitiveContains(", active"),
+            "The default should still be the live scenario"
+        )
+
+        // Going live is a separate, explicit act.
+        let makeLive = endpointEditor.makeLiveButton
+        XCTAssertTrue(makeLive.waitForExistence(timeout: 5), "A scenario that is not live offers Make live")
+        makeLive.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
                 addedRow.label.localizedCaseInsensitiveContains(", active")
             },
-            "The inspector should agree that the scenario is the active one"
+            "Make live should make the edited scenario the one the mock serves"
         )
+        XCTAssertTrue(
+            endpointEditor.waitForEditedScenario("Unauthorized", live: true),
+            "The editor should now report the scenario as live — \(endpointEditor.liveStateText())"
+        )
+        XCTAssertTrue(makeLive.waitForNonExistence(timeout: 5), "A live scenario has nothing to make live")
     }
 
     /// BREAD-06.
@@ -1055,7 +1127,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         let back = breadcrumb.back
         let forward = breadcrumb.forward
 
-        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "Second"), "The second endpoint is current")
+        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/second"), "The second endpoint is current")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { back.isEnabled },
             "Two endpoints visited is a history worth walking"
@@ -1065,9 +1137,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         showJourneysNavigator()
         back.click()
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "First"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/first"),
             "Back should return to the endpoint viewed before — "
-                + breadcrumb.crumbDescription("endpoint", titled: "First")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/first")
         )
         XCTAssertTrue(navigator.row(named: "First").waitForExistence(timeout: 5),
                       "Back from Journeys must show Endpoints and expand the destination's group")
@@ -1078,9 +1150,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         forward.click()
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Second"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/second"),
             "Forward should return to the endpoint that was left — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Second")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/second")
         )
     }
 
@@ -1096,22 +1168,22 @@ final class WorkspaceShellUITests: MimicUITestCase {
         let back = breadcrumb.back
         let forward = breadcrumb.forward
 
-        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "Third"), "The third endpoint is current")
+        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/third"), "The third endpoint is current")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { back.isEnabled }, "There is history to walk")
 
         back.click()
-        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "Second"), "Back should land on the second")
+        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/second"), "Back should land on the second")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { forward.isEnabled },
             "Forward should be available before a new visit discards it"
         )
 
-        breadcrumb.jump(from: "endpoint", to: "First", currentlyReading: "Second")
+        breadcrumb.jump(from: "endpoint", to: "GET /api/first", currentlyReading: "GET /api/second")
 
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "First"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/first"),
             "The jump should move the selection — "
-                + breadcrumb.crumbDescription("endpoint", titled: "First")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/first")
         )
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { !forward.isEnabled },
@@ -1131,9 +1203,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // itself: on the first CI run the whole bar was out of the tree and this test failed on the
         // arrow, which read as a history bug rather than as the locator failure it was.
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("endpoint", toRead: "Only"),
+            breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/only"),
             "The jump bar should name the endpoint just created — "
-                + breadcrumb.crumbDescription("endpoint", titled: "Only")
+                + breadcrumb.crumbDescription("endpoint", titled: "GET /api/only")
         )
 
         let back = breadcrumb.back
@@ -1142,9 +1214,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         // Re-picking the endpoint you are already on, twice. Its own option is the only one the
         // crumb offers, and it reads "<name>, selected".
-        breadcrumb.jump(from: "endpoint", to: "Only", currentlyReading: "Only")
-        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "Only"), "The selection should not move")
-        breadcrumb.jump(from: "endpoint", to: "Only", currentlyReading: "Only")
+        breadcrumb.jump(from: "endpoint", to: "GET /api/only", currentlyReading: "GET /api/only")
+        XCTAssertTrue(breadcrumb.waitForCrumb("endpoint", toRead: "GET /api/only"), "The selection should not move")
+        breadcrumb.jump(from: "endpoint", to: "GET /api/only", currentlyReading: "GET /api/only")
 
         XCTAssertFalse(
             back.isEnabled,
@@ -1248,6 +1320,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
             overview.unmatchedNote.waitForExistence(timeout: 5),
             "…and explain what an unmatched call is"
         )
+        // …and the log's Unmatched segment carries the same count.
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { requestLogDrawer.unmatchedSegment.label == "Unmatched, 2" },
+            "The log's Unmatched segment should count both calls — it read "
+                + requestLogDrawer.unmatchedSegment.label
+        )
 
         // INSPOV-16 — one row is a request to inspect; several are not.
         let rows = requestLogDrawer.distinctRows(limit: 2)
@@ -1264,13 +1342,19 @@ final class WorkspaceShellUITests: MimicUITestCase {
             requestDetail.waitForPanelTitle("Requests"),
             "A multiple selection reports its scope instead of showing an unrelated overview"
         )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) {
+                rows[0].label.hasSuffix(", selected") && rows[1].label.hasSuffix(", selected")
+            },
+            "Both rows should announce they are selected — read [\(rows[0].label)] [\(rows[1].label)]"
+        )
 
         // INSPOV-17 — clearing the log takes the detail with it.
         rows[0].click()
         XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "Back to a single selection")
 
-        // By label: the clear button lives in the drawer's `DSPanelHeader`, which stamps its own
-        // identifier over its accessory's.
+        // By label: the clear button lives in the drawer's header, which carries
+        // `ds.panelheader.requestLog` over its controls.
         let clearLog = app.buttons["Clear request log"].firstMatch
         XCTAssertTrue(clearLog.waitForExistence(timeout: 5), "The log should offer a way to clear it")
 
@@ -1369,117 +1453,126 @@ final class WorkspaceShellUITests: MimicUITestCase {
     }
 
     /// INSPOV-10, INSPOV-11, INSPOV-12.
+    ///
+    /// The inspector no longer has a Traffic tab with a per-request list. The selected endpoint's
+    /// traffic is a section under its scenarios: counts for the last 15 minutes and a "Show latest
+    /// request" button that opens the newest one in the request detail.
     @MainActor
-    func testInspectorTrafficTabListsTheEndpointsRequests() async throws {
+    func testInspectorTrafficSectionSummarisesTheEndpointsRequests() async throws {
         let port = 62113
 
         launchShell()
         createProjectViaUI(name: "Endpoint Traffic", port: port)
         workspace.fillWindow()
         createEndpointViaUI(name: "Users", path: "/api/users")
+
+        let traffic = inspector.traffic
+        XCTAssertTrue(traffic.waitForExistence(timeout: 5), "The endpoint inspector should have a Traffic section")
+        XCTAssertTrue(
+            inspector.trafficEmpty.waitForExistence(timeout: 5),
+            "Before any request the section should say there is nothing yet"
+        )
+        XCTAssertFalse(inspector.showLatestRequestButton.exists, "There is no latest request to show yet")
+
         startServer(onPort: port)
-
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
 
+        let served = inspector.trafficServed
+        XCTAssertTrue(served.waitForExistence(timeout: 15), "The section should count what the endpoint served")
         XCTAssertTrue(
-            requestLogDrawer.waitForRowCount(2, timeout: 15),
-            "Both requests should reach the log"
+            UITestApp.waitUntil(timeout: 10) {
+                let spoken = "\(served.label) \((served.value as? String) ?? "")"
+                return spoken.hasPrefix("2") && spoken.contains("served")
+            },
+            "Both requests were answered by this endpoint — \(inspector.spoken(served))"
         )
+        let errors = inspector.trafficErrors
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { errors.label.hasPrefix("0") },
+            "A 200 is not an error — \(inspector.spoken(errors))"
+        )
+        XCTAssertTrue(inspector.trafficMedian.exists, "The section should report a median duration")
+        XCTAssertFalse(inspector.trafficEmpty.exists, "The empty note should give way to the figures")
 
-        // The label is stable across the icon-only and icon-and-title presentations.
-        let trafficTab = InspectorPage(app: app).tab("traffic")
-        XCTAssertTrue(
-            trafficTab.waitForExistence(timeout: 5),
-            "The inspector should offer a Traffic tab for the selected endpoint"
-        )
-        XCTAssertEqual(InspectorPage(app: app).header.frame.midY, shell.panel("navigator.header").frame.midY, accuracy: 1)
         let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        evidence.name = "inspector-adaptive-controls"
+        evidence.name = "inspector-traffic-section"
         evidence.lifetime = .keepAlways
         add(evidence)
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 10) { trafficTab.label.contains("2 requests") },
-            "The tab should badge how many requests this endpoint answered"
-        )
 
-        trafficTab.click()
+        let showLatest = inspector.showLatestRequestButton
+        XCTAssertTrue(showLatest.waitForExistence(timeout: 5), "The section should offer the latest request")
+        if !showLatest.isHittable {
+            // The section sits at the foot of the inspector's scroll view.
+            inspector.endpointIdentity.scroll(byDeltaX: 0, deltaY: -400)
+        }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Traffic"),
-            "The header should follow the tab"
+            UITestApp.waitUntil(timeout: 5) { showLatest.isHittable },
+            "Show latest request should be reachable by the pointer — frame \(showLatest.frame)"
         )
-
-        let trafficRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "endpointTraffic.row."))
-            .firstMatch
-        XCTAssertTrue(
-            trafficRow.waitForExistence(timeout: 5),
-            "The traffic list should show the requests this endpoint answered"
-        )
-        trafficRow.click()
+        showLatest.click()
 
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Request"),
-            "Clicking a traffic row should open it in the request detail"
+            "Show latest request should open it in the request detail"
         )
     }
 
     // MARK: - 4. The toolbar's server well
 
+    /// The toolbar belongs to the centre column and has two shapes.
+    ///
+    /// **Expanded** (centre column 780pt or wider): back/forward and the project identity lead, the
+    /// status capsule sits in the middle, and Run, Import, Server settings and both panel toggles
+    /// trail — all inline, all above the centre column. **Compact**: Import, Server settings and
+    /// both panel toggles fold into one "More actions" menu; Run and the project name stay.
     @MainActor
     func testToolbarPreservesIdentityAndCollapsesSecondaryActions() throws {
         launchShell()
-        workspace.compactWindow()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
-        XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5),
-                      "The compact toolbar must keep the project name visible")
-        // On the smallest CI displays AppKit itself overflows the entire center group.
-        // Check our compact menu whenever that group fits; the expanded layout is always checked.
-        if workspace.overflowMenu.exists {
-            XCTAssertTrue(workspace.overflowMenu.isHittable)
-        }
+
         workspace.fillWindow()
         XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.projectTitle.isHittable, "The expanded toolbar must show the project name")
         XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.projectKind.label == "Local mock" || workspace.projectKind.value as? String == "Local mock")
+        let kind = workspace.projectKind
+        XCTAssertTrue(
+            kind.label == "Local mock at localhost:62118" || kind.label == "localhost:62118"
+                || kind.value as? String == "localhost:62118",
+            "Under the name, the identity should say where the mock serves — label: \(kind.label)"
+        )
         XCTAssertTrue(well.address.isHittable)
         XCTAssertEqual(workspace.serverToggleButton.label, "Start server")
-        assertToolbarGeometry()
+        assertExpandedToolbar()
         let expanded = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         expanded.name = "native-toolbar-expanded"
         expanded.lifetime = .keepAlways
         add(expanded)
-        assertToolbarColumnOwnership()
 
         workspace.compactWindow()
-        if workspace.overflowMenu.exists {
-            XCTAssertTrue(workspace.projectTitle.isHittable)
-            XCTAssertTrue(workspace.projectKind.isHittable)
-            XCTAssertTrue(well.address.isHittable)
-            XCTAssertFalse(workspace.inlineToolbarAction("backend.settingsButton").exists)
-            XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
-            XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
-            assertToolbarGeometry()
-            assertToolbarColumnOwnership()
-            workspace.overflowMenu.click()
-            XCTAssertTrue(workspace.overflowAction("backend.settingsButton").waitForExistence(timeout: 5))
-            XCTAssertFalse(workspace.overflowAction("toggleDrawerButton").exists)
-            XCTAssertFalse(workspace.overflowAction("toggleInspectorButton").exists)
-            workspace.closeToolbarMenu()
-        } else {
-            // The smallest CI display uses AppKit's native overflow for the whole center group.
-            XCTAssertTrue(app.toolbars.popUpButtons["more toolbar items"].exists)
-            workspace.fillWindow()
-        }
+        assertCompactToolbar()
+        let compactStopped = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        compactStopped.name = "native-toolbar-compact"
+        compactStopped.lifetime = .keepAlways
+        add(compactStopped)
 
+        // Starting and stopping the server changes Run's words, not the toolbar's arrangement.
+        workspace.fillWindow()
+        let importButton = workspace.inlineToolbarAction("importMenuButton")
+        XCTAssertTrue(importButton.waitForExistence(timeout: 5))
+        let importFrame = importButton.frame
         let stoppedFrame = workspace.serverToggleButton.frame
         startServer(onPort: 62118)
         XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
-        XCTAssertEqual(workspace.serverToggleButton.frame.width, stoppedFrame.width, accuracy: 1)
-        XCTAssertEqual(workspace.serverToggleButton.frame.midX, stoppedFrame.midX, accuracy: 1)
+        XCTAssertEqual(workspace.serverToggleButton.frame.maxX, stoppedFrame.maxX, accuracy: 4,
+                       "Run/Stop should not wander when its title changes")
+        XCTAssertEqual(importButton.frame.midX, importFrame.midX, accuracy: 1,
+                       "The actions after Run should not move when the server starts")
+        assertExpandedToolbar()
         well.openDetails()
         XCTAssertTrue(well.copyButton(port: 62118).isEnabled)
         well.closeDetails()
+
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
         XCTAssertTrue(workspace.projectTitle.isHittable,
@@ -1491,59 +1584,220 @@ final class WorkspaceShellUITests: MimicUITestCase {
         compact.name = "native-toolbar-compact-running"
         compact.lifetime = .keepAlways
         add(compact)
-        workspace.fillWindow()
 
+        // With the inspector collapsed the toolbar keeps its column and every inline action.
+        workspace.fillWindow()
         app.typeKey("i", modifierFlags: [.command, .option])
         XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(workspace.inlineToolbarAction("toggleInspectorButton").isHittable)
-        XCTAssertTrue(workspace.inlineToolbarAction("toggleDrawerButton").isHittable)
-        assertToolbarGeometry()
+        assertExpandedToolbar()
         let collapsedInspector = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         collapsedInspector.name = "native-toolbar-inspector-collapsed"
         collapsedInspector.lifetime = .keepAlways
         add(collapsedInspector)
         workspace.inlineToolbarAction("toggleInspectorButton").click()
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5))
-        assertToolbarColumnOwnership()
+        assertExpandedToolbar()
         workspace.serverToggleButton.click()
         XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
     }
 
+    /// The four secondary actions the compact toolbar folds into "More actions", with the titles
+    /// each can carry. The toggles' titles flip with the panel's state.
+    private static let secondaryToolbarActions: [(identifier: String, titles: [String])] = [
+        ("importMenuButton", ["Import"]),
+        ("backend.settingsButton", ["Server settings", "Server settings\u{2026}"]),
+        ("toggleDrawerButton", ["Hide request log", "Show request log"]),
+        ("toggleInspectorButton", ["Hide inspector", "Show inspector"]),
+    ]
+
+    /// Expanded: every action inline, above the centre column, in reading order — identity, status,
+    /// Run, Import, Server settings, request log, inspector — and no "More" menu.
     @MainActor
-    private func assertToolbarColumnOwnership(file: StaticString = #filePath, line: UInt = #line) {
+    private func assertExpandedToolbar(file: StaticString = #filePath, line: UInt = #line) {
+        let overflow = workspace.overflowMenu
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { !overflow.exists },
+            "A wide centre column should show every action inline, not a More menu",
+            file: file, line: line
+        )
+
+        let identity = workspace.projectIdentity
+        let status = well.address
+        let run = workspace.serverToggleButton
+        let actions = Self.secondaryToolbarActions.map { workspace.inlineToolbarAction($0.identifier) }
+        let names = ["project identity", "status capsule", "Run"] + Self.secondaryToolbarActions.map { $0.identifier }
+        for (element, name) in zip([identity, status, run] + actions, names) {
+            XCTAssertTrue(element.waitForExistence(timeout: 5), "\(name) should be in the toolbar",
+                          file: file, line: line)
+            XCTAssertTrue(element.isHittable, "\(name) should be clickable in the toolbar", file: file, line: line)
+        }
+        XCTAssertTrue(workspace.projectTitle.isHittable, "The project name must stay visible",
+                      file: file, line: line)
+
+        // Reading order, left to right.
+        XCTAssertLessThanOrEqual(identity.frame.maxX, status.frame.minX,
+                                 "The status capsule sits after the project identity", file: file, line: line)
+        XCTAssertLessThanOrEqual(status.frame.maxX, run.frame.minX,
+                                 "…and before Run", file: file, line: line)
+        var previous = run
+        for action in actions {
+            XCTAssertLessThanOrEqual(previous.frame.maxX, action.frame.minX + 1,
+                                     "\(action.identifier) should follow \(previous.identifier)",
+                                     file: file, line: line)
+            previous = action
+        }
+        XCTAssertEqual(status.frame.midY, run.frame.midY, accuracy: 3,
+                       "The capsule and Run share the toolbar's centre line", file: file, line: line)
+
+        assertToolbarStaysAboveTheCentreColumn([run] + actions, file: file, line: line)
+    }
+
+    /// Compact: Import, Server settings and both toggles live only in the "More actions" menu; Run,
+    /// the status capsule and the project name stay in the toolbar.
+    @MainActor
+    private func assertCompactToolbar(file: StaticString = #filePath, line: UInt = #line) {
+        let overflow = workspace.overflowMenu
+        guard overflow.waitForExistence(timeout: 5) else {
+            // On the smallest hosted displays AppKit can fold the whole trailing group into its own
+            // "more toolbar items" chevron; the More menu is then inside that, not in the toolbar.
+            XCTAssertTrue(
+                app.toolbars.popUpButtons["more toolbar items"].exists,
+                "A compact toolbar should show the More actions menu", file: file, line: line
+            )
+            return
+        }
+        XCTAssertTrue(overflow.isHittable, "More actions should be clickable", file: file, line: line)
+        XCTAssertTrue(workspace.projectTitle.isHittable, "The compact toolbar must keep the project name visible",
+                      file: file, line: line)
+        XCTAssertTrue(workspace.serverToggleButton.isHittable, "Run never folds into the menu",
+                      file: file, line: line)
+        XCTAssertTrue(well.address.isHittable, "The status capsule stays in the toolbar", file: file, line: line)
+        XCTAssertLessThanOrEqual(workspace.serverToggleButton.frame.maxX, overflow.frame.minX + 1,
+                                 "Run sits before the More menu", file: file, line: line)
+
+        for action in Self.secondaryToolbarActions {
+            XCTAssertFalse(
+                workspace.inlineToolbarAction(action.identifier).exists,
+                "\(action.identifier) should not be inline in the compact toolbar", file: file, line: line
+            )
+        }
+        assertToolbarStaysAboveTheCentreColumn([workspace.serverToggleButton, overflow], file: file, line: line)
+
+        overflow.click()
+        for action in Self.secondaryToolbarActions {
+            XCTAssertTrue(
+                workspace.overflowItem(action.identifier, titled: action.titles).waitForExistence(timeout: 5),
+                "More actions should offer \(action.identifier)", file: file, line: line
+            )
+        }
+        workspace.closeToolbarMenu()
+    }
+
+    /// The toolbar is the centre column's: its trailing actions end before the inspector starts.
+    ///
+    /// The centre card is inset from its column by `DSLayout.panelInset` (8pt), and the toolbar spans
+    /// the column rather than the card, so the bounds carry that much slack.
+    @MainActor
+    private func assertToolbarStaysAboveTheCentreColumn(
+        _ elements: [XCUIElement], file: StaticString = #filePath, line: UInt = #line
+    ) {
         let center = shell.panel("centerPane").frame
-        let inspector = shell.panel("inspector").frame
-        let editorActions = workspace.overflowMenu.exists
-            ? [workspace.overflowMenu]
-            : [workspace.inlineToolbarAction("importMenuButton"), workspace.inlineToolbarAction("backend.settingsButton")]
-        for action in editorActions {
-            XCTAssertTrue(action.isHittable, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(action.frame.minX, center.minX, file: file, line: line)
-            XCTAssertLessThanOrEqual(action.frame.maxX, center.maxX, "Editor actions must stay above the center panel", file: file, line: line)
-        }
-        if let trailingAction = editorActions.last {
-            XCTAssertLessThanOrEqual(center.maxX - trailingAction.frame.maxX, 24,
-                                     "Editor actions must be pinned to the center panel's right edge", file: file, line: line)
-        }
-        for identifier in ["toggleDrawerButton", "toggleInspectorButton"] {
-            let action = workspace.inlineToolbarAction(identifier)
-            XCTAssertTrue(action.isHittable, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(action.frame.minX, inspector.minX, "Panel controls must stay above the inspector", file: file, line: line)
+        let inspectorPanel = shell.panel("inspector")
+        let slack: CGFloat = 12
+        for element in elements {
+            XCTAssertGreaterThanOrEqual(element.frame.minX, center.minX - slack,
+                                        "\(element.identifier) should sit above the centre column",
+                                        file: file, line: line)
+            XCTAssertLessThanOrEqual(element.frame.maxX, center.maxX + slack,
+                                     "\(element.identifier) should not reach past the centre column",
+                                     file: file, line: line)
+            if inspectorHeader.exists, inspectorPanel.exists {
+                XCTAssertLessThanOrEqual(element.frame.maxX, inspectorPanel.frame.minX + 1,
+                                         "\(element.identifier) should not sit above the inspector",
+                                         file: file, line: line)
+            }
         }
     }
 
+    /// PANEL-03, PANEL-04 in the compact toolbar.
+    ///
+    /// Folding the panel toggles into "More actions" must not cost them their effect: each item
+    /// hides and shows its panel, its title flips to say which way it will go next, and the chords
+    /// keep working while the toggles are out of sight.
     @MainActor
-    private func assertToolbarGeometry(file: StaticString = #filePath, line: UInt = #line) {
-        let run = workspace.serverToggleButton
-        XCTAssertEqual(well.address.frame.midY, run.frame.midY, accuracy: 2, file: file, line: line)
-        XCTAssertLessThanOrEqual(run.frame.maxX, workspace.projectTitle.frame.minX, file: file, line: line)
-        XCTAssertLessThanOrEqual(workspace.projectTitle.frame.maxX, well.address.frame.minX, file: file, line: line)
-        let identityGap = well.address.frame.minX - workspace.projectIdentity.frame.maxX
-        XCTAssertGreaterThanOrEqual(identityGap, 12, "Leave padding after project identity", file: file, line: line)
-        XCTAssertLessThanOrEqual(identityGap, 25, "Keep the address beside the project with a padded divider, even in a wide window", file: file, line: line)
+    func testCompactOverflowMenuTogglesThePanels() throws {
+        launchShell()
+        createProjectViaUI(name: "Compact Panels")
+        workspace.compactWindow()
+
+        let drawer = shell.panel("drawer")
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The request log starts open")
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The inspector starts open")
+        XCTAssertTrue(
+            workspace.overflowMenu.waitForExistence(timeout: 5),
+            "A compact window should fold the secondary actions into More actions"
+        )
+        XCTAssertFalse(workspace.inlineToolbarAction("toggleDrawerButton").exists,
+                       "The request log toggle is only in More actions when compact")
+        XCTAssertFalse(workspace.inlineToolbarAction("toggleInspectorButton").exists,
+                       "The inspector toggle is only in More actions when compact")
+
+        // Request log: hide, then show, through the menu.
+        XCTAssertTrue(workspace.openOverflowMenu())
+        let hideLog = workspace.overflowItem("toggleDrawerButton", titled: ["Hide request log"])
+        XCTAssertTrue(hideLog.waitForExistence(timeout: 5), "More actions should offer to hide the log")
+        hideLog.click()
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 5), "The menu item should hide the request log")
+
+        XCTAssertTrue(workspace.openOverflowMenu())
+        let showLog = workspace.overflowItem("toggleDrawerButton", titled: ["Show request log"])
+        XCTAssertTrue(showLog.waitForExistence(timeout: 5), "More actions should offer to show the log")
+        XCTAssertTrue(
+            showLog.title == "Show request log" || showLog.label == "Show request log",
+            "With the log hidden the item should offer to show it — title: \(showLog.title)"
+        )
+        showLog.click()
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The menu item should bring the request log back")
+
+        // Inspector: hide, then show, through the menu.
+        XCTAssertTrue(workspace.openOverflowMenu())
+        let hideInspector = workspace.overflowItem("toggleInspectorButton", titled: ["Hide inspector"])
+        XCTAssertTrue(hideInspector.waitForExistence(timeout: 5), "More actions should offer to hide the inspector")
+        hideInspector.click()
+        XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5), "The menu item should hide the inspector")
+
+        // Hiding the inspector widens the centre column, and a window only a little under the
+        // breakpoint can cross 780pt and put the toggles back inline. The toggle is then used where
+        // it is; the menu path has already been proven above for this window's own width.
         if workspace.overflowMenu.exists {
-            XCTAssertGreaterThanOrEqual(workspace.overflowMenu.frame.minX, well.address.frame.maxX, file: file, line: line)
+            XCTAssertTrue(workspace.openOverflowMenu())
+            let showInspector = workspace.overflowItem("toggleInspectorButton", titled: ["Show inspector"])
+            XCTAssertTrue(showInspector.waitForExistence(timeout: 5), "More actions should offer to show the inspector")
+            XCTAssertTrue(
+                showInspector.title == "Show inspector" || showInspector.label == "Show inspector",
+                "With the inspector hidden the item should offer to show it — title: \(showInspector.title)"
+            )
+            showInspector.click()
+        } else {
+            let inlineToggle = workspace.inlineToolbarAction("toggleInspectorButton")
+            XCTAssertTrue(inlineToggle.waitForExistence(timeout: 5),
+                          "A centre column widened past the breakpoint shows the toggle inline")
+            inlineToggle.click()
         }
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The toggle should bring the inspector back")
+
+        // The chords do the same job while the toggles are folded away.
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 5), "⌥⌘L should hide the request log when compact")
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "⌥⌘L again should bring it back")
+
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5), "⌥⌘I should hide the inspector when compact")
+        app.typeKey("i", modifierFlags: [.command, .option])
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "⌥⌘I again should bring it back")
+        XCTAssertTrue(workspace.overflowMenu.waitForExistence(timeout: 5),
+                      "With both panels back the toolbar should be compact again")
     }
 
     /// SRVWELL-01, SRVWELL-04.
@@ -1571,8 +1825,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         _ = NSPasteboard.general.clearContents()
         startServer(onPort: port)
         workspace.fillWindow()
-        assertToolbarGeometry()
-        XCTAssertGreaterThanOrEqual(well.address.frame.height, 36, "Native toolbar margins may enlarge the two-line hit target")
+        assertExpandedToolbar()
+        // The capsule is drawn at `DSControlHeight.prominent` (32pt); toolbar margins may add to it.
+        XCTAssertGreaterThanOrEqual(well.address.frame.height, 30, "The status capsule should keep a full-height hit target")
         let running = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         running.name = "center-toolbar-expanded-running"
         running.lifetime = .keepAlways
@@ -1656,6 +1911,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
             1,
             "…showing only the request that nothing answered"
         )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { requestLogDrawer.unmatchedSegment.isSelected },
+            "…with the log's Unmatched segment selected, so the filter is visible and reversible"
+        )
+
+        // All, in the panel itself, undoes what the badge did.
+        requestLogDrawer.allSegment.click()
+        XCTAssertEqual(waitForDistinctRowCount(2), 2, "Choosing All should bring the matched request back")
     }
 
     /// SRVRUN-04, SRVRUN-05, SRVRUN-06, SRVWELL-07.
@@ -1931,18 +2194,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     /// PANEL-03, PANEL-04.
     ///
-    /// Both chords appear in no menu — they are bound on the toolbar buttons themselves — so a test
-    /// pressing them is the only thing standing between ⌥⌘L/⌥⌘I and being silently unbound.
+    /// The chords are View ▸ Show/Hide Request Log (⌥⌘L) and View ▸ Show/Hide Inspector (⌥⌘I), so
+    /// they work whether the toolbar toggles are inline or folded into "More actions".
+    /// `testCompactOverflowMenuTogglesThePanels` drives the folded toggles themselves.
     ///
-    /// **Asserted through the panels, not through the toggles' labels.** This test used to check
-    /// PANEL-05 as well — that each toggle's accessibility label states the direction it would go —
-    /// and it failed on the very first assertion, reading "Toggle request log" where it wanted "Hide
-    /// request log". The label `WorkspaceView` sets is real and never reaches the tree: a
-    /// `ToolbarItemGroup` button publishes its `Label`'s title, and the title is the fixed
-    /// "Toggle request log" / "Toggle inspector". The identifier lands, the label does not, and that
-    /// is a defect in the window rather than in the query — so it is recorded here and left to the
-    /// window to fix, not asserted in whichever direction happens to be true today. What the chords
-    /// *do* is observable, and that is what is checked.
+    /// **Asserted through the panels, not through the toggles' labels**: what the chords *do* is
+    /// observable, and that is what is checked.
     @MainActor
     func testPanelChordsToggleBothPanels() throws {
         launchShell()
@@ -2073,6 +2330,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
             requestDetail.waitForPanelTitle("Request"),
             "…and show the request that was clicked"
         )
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { requestDetail.shownPath().contains("/api/users") },
+            "The detail should name the clicked request — it read \(requestDetail.shownPath())"
+        )
+        XCTAssertTrue(
+            requestLogDrawer.firstLogRow.label.hasSuffix(", selected"),
+            "The clicked row should announce it is selected — it read \(requestLogDrawer.firstLogRow.label)"
+        )
     }
 
     // MARK: - 7. Autosave
@@ -2091,7 +2356,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
                 [workspace.autosaveSavingIndicator, workspace.autosaveSavedIndicator],
                 timeout: 10
             ),
-            "Adding an endpoint should be saved, and the toolbar should say so"
+            "Adding an endpoint should be saved, and the jump bar should say so"
         )
 
         XCTAssertTrue(
@@ -2102,7 +2367,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
             workspace.autosaveSavedIndicator.waitForNonExistence(timeout: 10),
             "The indicator should clear itself once the save has settled"
         )
-        XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5), "Local mock returns after saving")
+        XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5),
+                      "The toolbar identity keeps its address line through the save")
     }
 
     /// AUTOSAVE-05.

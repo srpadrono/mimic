@@ -269,12 +269,15 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Listening ports")
         workspace.fillWindow()
-        XCTAssertTrue(workspace.centerAddEndpointMessage.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
                       "An empty project must explain how to create its first endpoint")
+        XCTAssertTrue(workspace.centerAddEndpointCard.exists,
+                      "The first-endpoint chooser should offer Add endpoint")
         XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
                        "There is no endpoint available to select yet")
-        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerRunningMessage.exists)
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
+        XCTAssertFalse(workspace.drawerCurlCommand.exists,
+                       "A stopped server has no address to offer a request to")
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -288,9 +291,16 @@ final class BackendSettingsUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
-        XCTAssertTrue(workspace.drawerRunningMessage.waitForExistence(timeout: 5),
+        let curl = workspace.drawerCurlCommand
+        XCTAssertTrue(curl.waitForExistence(timeout: 5),
                       "A running server must invite a request without asking to start again")
-        XCTAssertFalse(workspace.drawerStoppedMessage.exists)
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                curl.label.contains("localhost:\(primary)")
+                    || (curl.value as? String)?.contains("localhost:\(primary)") == true
+            },
+            "The request to try should target the primary port"
+        )
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180,
                           "This assertion must exercise the compact toolbar")
@@ -337,8 +347,9 @@ final class BackendSettingsUITests: MimicUITestCase {
         add(shot)
         workspace.serverToggleButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
-        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerRunningMessage.exists)
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.drawerCurlCommand.waitForNonExistence(timeout: 5),
+                      "Stopping the server withdraws the request to try")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "A stopped server shows the port configured for its next start")
         workspace.serverToggleButton.click()

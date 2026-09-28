@@ -237,7 +237,7 @@ final class NavigatorUITests: MimicUITestCase {
     func testJourneyKeyboardNavigationAndContextRename() async throws {
         try await launchFixture()
         let navigator = NavigatorPage(app: app)
-        app.radioButtons["navigator.tab.journeys"].click()
+        app.buttons["navigator.tab.journeys"].click()
         app.typeKey("f", modifierFlags: .command)
         app.typeText("Empty")
         XCTAssertEqual(navigator.journeyFilter.value as? String, "Empty",
@@ -280,6 +280,9 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(renamed.exists)
     }
 
+    /// The editor has no options disclosure and no scroll view any more: the status, delay and
+    /// content type sit in one fields row that is always visible, the body and the headers share
+    /// the space below through a Body/Headers switch, and the group tag lives in the inspector.
     @MainActor
     func testEndpointEditorUsesTheWorkspaceAndKeepsOptionsAccessibleAtBothWidths() async throws {
         try await launchFixture()
@@ -290,65 +293,78 @@ final class NavigatorUITests: MimicUITestCase {
         let navigator = NavigatorPage(app: app)
         let shell = WorkspaceShellPage(app: app)
         navigator.row(named: "Account summary").click()
-        if requestLogDrawer.emptyHeading.exists { workspace.toggleDrawerButton.click() }
+        if workspace.drawerEmptyHeading.exists {
+            app.typeKey("l", modifierFlags: [.command, .option])
+            XCTAssertTrue(workspace.drawerEmptyHeading.waitForNonExistence(timeout: 5))
+        }
+        let centre = shell.panel("centerPane")
         XCTAssertTrue(endpointEditor.bodyEditor.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.bodyTab.isSelected, "The editor opens on the Body pane")
+        // The editor pads its content by `DSSpacing.xl` (20pt) on both sides.
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            self.endpointEditor.bodyEditor.frame.width >= shell.panel("centerPane").frame.width - 26
+            self.endpointEditor.bodyEditor.frame.width >= centre.frame.width - 42
                 && self.endpointEditor.bodyEditor.frame.height > 200
         }, "The body should fill the available centre pane instead of using a capped form card")
-        XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - shell.panel("centerPane").frame.minX, 12, accuracy: 1)
-        XCTAssertEqual(shell.panel("centerPane").frame.maxX - endpointEditor.bodyEditor.frame.maxX, 12, accuracy: 1)
-        XCTAssertEqual(endpointEditor.optionsToggle.value as? String, "Collapsed")
-        XCTAssertEqual(endpointEditor.headersToggle.value as? String, "Collapsed")
-        XCTAssertFalse(endpointEditor.groupTagField.exists)
+        XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - centre.frame.minX, 20, accuracy: 1)
+        XCTAssertEqual(centre.frame.maxX - endpointEditor.bodyEditor.frame.maxX, 20, accuracy: 1)
         XCTAssertTrue(endpointEditor.statusDescription.label.contains("OK") ||
                       (endpointEditor.statusDescription.value as? String)?.contains("OK") == true)
-        navigator.row(named: "Account summary").click()
+        for (field, name) in [(endpointEditor.statusCodeField, "status"), (endpointEditor.delayField, "delay"),
+                              (endpointEditor.contentTypeMenu, "content type")] {
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "The \(name) control is always in the fields row")
+            XCTAssertTrue(field.isHittable, "The \(name) control needs no disclosure to reach")
+        }
+        let groupTag = inspector.groupTagField
+        XCTAssertTrue(groupTag.waitForExistence(timeout: 5), "The group tag is in the inspector's Endpoint section")
+        XCTAssertEqual(groupTag.value as? String, "Account")
+        XCTAssertFalse(endpointEditor.addHeaderButton.exists, "Headers are behind their own segment")
         add(navigator.screenshot("endpoint-editor-wide"))
 
-        let bodyHeight = endpointEditor.bodyEditor.frame.height
-        endpointEditor.showOptions()
-        XCTAssertTrue(endpointEditor.groupTagField.waitForExistence(timeout: 5))
-        XCTAssertTrue(endpointEditor.delayField.isHittable)
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.endpointEditor.bodyEditor.frame.height < bodyHeight })
+        endpointEditor.showHeaders()
+        XCTAssertTrue(endpointEditor.headersEmptyNote.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.bodyEditor.waitForNonExistence(timeout: 5),
+                      "The headers pane takes the body's place rather than stacking under it")
         endpointEditor.addHeaderButton.click()
         XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForExistence(timeout: 5))
-        XCTAssertEqual(endpointEditor.headersToggle.value as? String, "Expanded")
         endpointEditor.headerKeyField(at: 0).click()
         endpointEditor.headerKeyField(at: 0).typeText("X-Request-Source")
         endpointEditor.headerValueField(at: 0).click()
         endpointEditor.headerValueField(at: 0).typeText("Mimic")
         endpointEditor.headerValueField(at: 0).typeKey(.return, modifierFlags: [])
-        add(navigator.screenshot("endpoint-editor-options-wide"))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.endpointEditor.headersTab.label == "Headers, 1" },
+                      "The Headers segment should count its rows — label: \(endpointEditor.headersTab.label)")
+        add(navigator.screenshot("endpoint-editor-headers-wide"))
 
         workspace.compactWindow()
         workspace.showSidebarIfNeeded()
-        XCTAssertTrue(endpointEditor.reveal(endpointEditor.optionsToggle))
-        XCTAssertTrue(endpointEditor.reveal(endpointEditor.delayField))
-        XCTAssertTrue(endpointEditor.reveal(endpointEditor.groupTagField))
-        XCTAssertGreaterThanOrEqual(endpointEditor.headerKeyField(at: 0).frame.minX, shell.panel("centerPane").frame.minX)
-        XCTAssertLessThanOrEqual(endpointEditor.groupTagField.frame.maxX, shell.panel("centerPane").frame.maxX)
-        XCTAssertLessThanOrEqual(endpointEditor.headerValueField(at: 0).frame.maxX, shell.panel("centerPane").frame.maxX)
-        XCTAssertGreaterThanOrEqual(endpointEditor.bodyEditor.frame.height, 180)
+        XCTAssertGreaterThanOrEqual(endpointEditor.headerKeyField(at: 0).frame.minX, centre.frame.minX)
+        XCTAssertLessThanOrEqual(endpointEditor.headerValueField(at: 0).frame.maxX, centre.frame.maxX)
+        for (field, name) in [(endpointEditor.statusCodeField, "status"), (endpointEditor.delayField, "delay"),
+                              (endpointEditor.contentTypeMenu, "content type")] {
+            XCTAssertTrue(field.isHittable, "The \(name) control stays reachable in a narrow window")
+            XCTAssertLessThanOrEqual(field.frame.maxX, centre.frame.maxX,
+                                     "The \(name) control must not run past the centre pane")
+        }
+        if InspectorPage(app: app).header.exists {
+            XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { groupTag.isHittable },
+                          "The inspector's group tag should stay reachable in a narrow window")
+        }
+        add(navigator.screenshot("endpoint-editor-headers-narrow"))
+        endpointEditor.showBody()
+        // `EditorMetrics.bodyMinHeight`.
+        XCTAssertGreaterThanOrEqual(endpointEditor.bodyEditor.frame.height, 120)
+        XCTAssertTrue(endpointEditor.prettyPrintButton.isHittable)
         add(navigator.screenshot("endpoint-editor-narrow"))
-        // Scroll over the options bar so the nested code editor cannot consume the wheel event.
-        endpointEditor.formScrollView.scroll(byDeltaX: 0, deltaY: -300)
-        XCTAssertTrue(endpointEditor.globalDelayNote.isHittable, "Short windows must allow the last option to scroll into view")
-        add(navigator.screenshot("endpoint-editor-options-narrow-scrolled"))
-        endpointEditor.formScrollView.scroll(byDeltaX: 0, deltaY: 300)
-        endpointEditor.headersToggle.click()
-        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForNonExistence(timeout: 5))
+
         endpointEditor.delayField.click()
         endpointEditor.delayField.typeKey("a", modifierFlags: .command)
         endpointEditor.delayField.typeText("250")
-        endpointEditor.optionsToggle.click()
-        XCTAssertTrue(endpointEditor.groupTagField.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(endpointEditor.prettyPrintButton.isHittable)
-        add(navigator.screenshot("endpoint-editor-narrow-collapsed"))
+        endpointEditor.delayField.typeKey(.return, modifierFlags: [])
         navigator.row(named: "Current orders").click()
         navigator.row(named: "Account summary").click()
-        endpointEditor.showOptions()
-        XCTAssertEqual(endpointEditor.delayField.value as? String, "250", "Collapsing options commits its focused field")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.endpointEditor.delayField.value as? String == "250" },
+                      "The delay should have been committed to the endpoint")
+        endpointEditor.showHeaders()
         XCTAssertEqual(endpointEditor.headerValueField(at: 0).value as? String, "Mimic", "Existing headers reopen as a table")
     }
 
@@ -362,11 +378,17 @@ final class NavigatorUITests: MimicUITestCase {
         let endpointFilterMidY = navigator.endpointFilter.frame.midY
         let endpointHeader = navigator.header.frame
         let endpointRowHeight = navigator.rowHeight(named: "Account summary")
-        XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.endpointFilter.frame.maxX, 20, accuracy: 1,
-                       "Inactive journey controls must not leave an empty slot beside the filter")
-        XCTAssertEqual(endpointRowHeight, 34, accuracy: 1)
-        XCTAssertEqual(navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX, 12, accuracy: 1)
-        XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.element("sidebar.addEndpointButton").frame.maxX, 12, accuracy: 1)
+        let endpointFilterMinX = navigator.endpointFilter.frame.minX
+        let addEndpoint = navigator.element("sidebar.addEndpointButton")
+        // The footer is filter then "+", 8pt apart (`DSSpacing.sm`), inside 10pt of padding.
+        XCTAssertLessThanOrEqual(navigator.endpointFilter.frame.maxX, addEndpoint.frame.minX)
+        XCTAssertLessThanOrEqual(addEndpoint.frame.minX - navigator.endpointFilter.frame.maxX, 24,
+                                 "Inactive journey controls must not leave an empty slot beside the filter")
+        XCTAssertEqual(navigator.footer.frame.maxX - addEndpoint.frame.maxX, 10, accuracy: 1)
+        // `DSNavigatorMetrics.rowHeight`, which is `DSRowHeight.list`.
+        XCTAssertEqual(endpointRowHeight, 28, accuracy: 1)
+        XCTAssertEqual(navigator.group("Account").frame.minX, navigator.row(named: "Account summary").frame.minX,
+                       accuracy: 1, "Group headings and rows share the navigator's row inset")
         XCTAssertTrue(navigator.row(named: "Current orders").exists)
         XCTAssertTrue(navigator.row(named: "Archived orders").exists)
         navigator.group("Orders").click()
@@ -387,8 +409,11 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(navigator.journeyFilter.waitForExistence(timeout: 5))
         XCTAssertEqual(navigator.header.frame.midY, endpointHeader.midY, accuracy: 1)
         XCTAssertEqual(navigator.journeyFilter.frame.midY, endpointFilterMidY, accuracy: 1)
-        XCTAssertEqual(navigator.journeyFilter.frame.minX - shell.panel("sidebar").frame.minX, 20, accuracy: 1)
-        XCTAssertEqual(shell.panel("sidebar").frame.maxX - navigator.journeyFilter.frame.maxX, 20, accuracy: 1)
+        XCTAssertEqual(navigator.journeyFilter.frame.minX, endpointFilterMinX, accuracy: 1,
+                       "Both navigators put the filter in the same place")
+        let addJourney = JourneysNavigatorPage(app: app).addButton
+        XCTAssertLessThanOrEqual(navigator.journeyFilter.frame.maxX, addJourney.frame.minX)
+        XCTAssertEqual(navigator.footer.frame.maxX - addJourney.frame.maxX, 10, accuracy: 1)
         XCTAssertEqual(navigator.rowHeight(named: "Empty journey"), endpointRowHeight, accuracy: 1)
         navigator.filter(navigator.journeyFilter, text: "authorization")
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForExistence(timeout: 5))
@@ -405,8 +430,8 @@ final class NavigatorUITests: MimicUITestCase {
         workspace.showSidebarIfNeeded()
         XCTAssertTrue(navigator.endpointFilter.isHittable)
         add(navigator.screenshot("navigator-narrow-editor-edge"))
-        XCTAssertGreaterThanOrEqual(navigator.element("ds.method.editor.method").frame.minX, shell.panel("centerPane").frame.minX,
-                                    "A narrow editor must keep its leading content visible")
+        XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.minX, shell.panel("centerPane").frame.minX,
+                                    "A narrow editor must keep its leading content — the method menu — visible")
         XCTAssertTrue(shell.endpointsTab.isHittable)
         XCTAssertTrue(shell.journeysTab.isHittable)
         XCTAssertTrue(workspace.addEndpointButton.isHittable)
@@ -675,6 +700,9 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertEqual(endpoints.first?["path"] as? String, "/keyboard-route")
     }
 
+    /// The scenario list and the Traffic section share one inspector column. The radio makes a
+    /// scenario live; the Traffic section counts what the endpoint answered and opens the newest
+    /// request; Back returns to the endpoint with the live scenario unchanged — at both widths.
     @MainActor
     func testInspectorScenarioActivationAndTrafficReturnAtBothWidths() async throws {
         usesLightAppearance = true
@@ -686,55 +714,52 @@ final class NavigatorUITests: MimicUITestCase {
                                              "name": "Unauthorized", "spec": ["statusCode": 401, "body": "{\"error\":\"Unauthorized\"}"]]])
         let scenario = panel.scenarioRow(named: "Unauthorized")
         XCTAssertTrue(scenario.waitForExistence(timeout: 5))
-        XCTAssertEqual(panel.header.frame.midY, navigator.header.frame.midY, accuracy: 1)
-        XCTAssertEqual(scenario.frame.height, 30, accuracy: 1)
-        scenario.click()
+        // `DSRowHeight.list`.
+        XCTAssertEqual(scenario.frame.height, 28, accuracy: 1)
+        panel.makeLive(named: "Unauthorized")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.isScenarioActive(named: "Unauthorized") })
         XCTAssertFalse(panel.isScenarioActive(named: "Default"))
+        XCTAssertTrue(panel.trafficEmpty.waitForExistence(timeout: 5), "No request has reached the endpoint yet")
         try await command(["serverStart": [:]])
         XCTAssertTrue(workspace.waitForServerURL(port: 62171))
         var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:62171/account-summary")))
         request.timeoutInterval = 5
-        let (_, response) = try await URLSession.shared.data(for: request)
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401)
-        for _ in 0..<31 {
+        for _ in 0..<32 {
             let (_, response) = try await URLSession.shared.data(for: request)
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401)
         }
-        panel.tab("traffic").click()
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.trafficRows.count == 32 },
-                      "Traffic row count: \(panel.trafficRows.count)")
-        let traffic = panel.trafficRows.element(boundBy: 25)
-        XCTAssertFalse(traffic.isHittable, "The scroll fixture must extend below the viewport")
-        for _ in 0..<4 where !traffic.isHittable {
-            panel.trafficList.scroll(byDeltaX: 0, deltaY: -500)
+        // A 401 is served, not an error: the section counts 5xx and failures as errors.
+        let served = panel.trafficServed
+        XCTAssertTrue(served.waitForExistence(timeout: 10))
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { served.label.hasPrefix("32") },
+                      "Served count: \(panel.spoken(served))")
+        XCTAssertTrue(panel.spoken(panel.trafficErrors).hasPrefix("0"), panel.spoken(panel.trafficErrors))
+        let showLatest = panel.showLatestRequestButton
+        XCTAssertTrue(showLatest.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !showLatest.isHittable {
+            panel.endpointIdentity.scroll(byDeltaX: 0, deltaY: -300)
         }
-        XCTAssertTrue(traffic.isHittable)
-        let trafficFrame = traffic.frame
-        add(navigator.screenshot("inspector-traffic-scrolled"))
-        traffic.click()
+        XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach")
+        add(navigator.screenshot("inspector-traffic-wide"))
+        showLatest.click()
         XCTAssertTrue(requestDetail.path.waitForExistence(timeout: 5))
         XCTAssertTrue(panel.spoken(requestDetail.status).contains("401"))
-        XCTAssertEqual(requestDetail.closeButton.label, "Back to traffic")
-        requestDetail.tab("Body").click()
-        add(navigator.screenshot("inspector-request-body-wide"))
+        XCTAssertEqual(requestDetail.closeButton.label, "Back")
+        add(navigator.screenshot("inspector-request-wide"))
         requestDetail.closeButton.click()
-        XCTAssertTrue(traffic.waitForExistence(timeout: 5))
-        XCTAssertEqual(traffic.frame, trafficFrame, "Returning preserves the traffic list position")
-        panel.tab("scenarios").click()
+        XCTAssertTrue(scenario.waitForExistence(timeout: 5), "Back returns to the endpoint's scenarios")
         XCTAssertTrue(panel.isScenarioActive(named: "Unauthorized"))
+
         workspace.compactWindow()
-        XCTAssertTrue(panel.tab("scenarios").isHittable)
-        XCTAssertTrue(panel.tab("traffic").isHittable)
         XCTAssertTrue(panel.addScenarioButton.isHittable)
-        XCTAssertEqual(scenario.frame.height, 30, accuracy: 1)
-        for column in ["method", "path", "status", "timestamp"] {
-            let header = app.buttons["drawer.columnHeader.\(column)"].firstMatch
-            XCTAssertTrue(header.isHittable, "\(column) must stay visible in the compact request log")
-        }
+        XCTAssertEqual(scenario.frame.height, 28, accuracy: 1)
+        XCTAssertTrue(panel.liveRadio(named: "Default").isHittable, "The live radio stays reachable when narrow")
         add(navigator.screenshot("inspector-scenarios-narrow"))
-        panel.tab("traffic").click()
-        panel.trafficRows.allElementsBoundByIndex.first(where: \.isHittable)?.click()
+        for _ in 0..<4 where !showLatest.isHittable {
+            panel.endpointIdentity.scroll(byDeltaX: 0, deltaY: -300)
+        }
+        XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach in a narrow window")
+        showLatest.click()
         XCTAssertTrue(requestDetail.closeButton.waitForExistence(timeout: 5))
         add(navigator.screenshot("inspector-request-narrow"))
         try await command(["serverStop": [:]])
