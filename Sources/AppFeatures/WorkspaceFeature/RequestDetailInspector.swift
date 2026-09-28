@@ -55,10 +55,7 @@ struct RequestDetailInspector: View {
     @State private var searchText: String
     @State private var copyConfirmation: String?
     @State private var copyConfirmationTask: Task<Void, Never>?
-    /// This field is hand-rolled rather than a `DSFilterField`, so it owes the keyboard the ring
-    /// that component's documentation defines as the contract: `borderFocused` at `focusRing`
-    /// weight against `border` at `hairline` at rest. `.textFieldStyle(.plain)` discards AppKit's
-    /// own, and a field you cannot see the focus of is one you tab into blind.
+    /// Drives the find field's focus ring, which `.textFieldStyle(.plain)` would otherwise drop.
     @FocusState private var searchFieldIsFocused: Bool
 
     init(
@@ -99,40 +96,21 @@ struct RequestDetailInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            requestLine
+            identity
 
-            // `.standard`, not `.subtle`. This closes a chrome band — the same job the panel header's
-            // own rule does. Three bands in this window were drawn at `border` (9%) while the other
-            // seven used the panel weight, at identical thickness, so some bands ended visibly and
-            // some barely did.
-            DSDivider(style: .standard, identifier: "requestDetail.requestLine")
-
-            Picker("View", selection: activeTabBinding) {
-                ForEach(RequestDetailTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            // Edge to edge between the row's insets, like everything above and below it. A segmented
-            // control sizes to its titles, so in a 290pt inspector this one spanned x=48 to x=240 and
-            // floated in the middle of a panel where every other row starts at 12 — which reads as a
-            // control nobody finished placing rather than as a deliberate centre.
-            //
-            // `.infinity`, never a number. `maxWidth` caps *and* expands, and a numeric cap here would
-            // do to this control what it did to the breadcrumb crumbs: make every one of them exactly
-            // as wide as the cap, whatever the row could actually give them.
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, DSSpacing.md)
-            .padding(.vertical, DSSpacing.sm)
-            // The control-row rung. A small segmented control measures 20, so with `sm` above and
-            // below this row already stood at 32 — stating it means the journey editor's behaviour
-            // row and this one cannot drift apart the next time a control size changes underneath
-            // them.
-            .frame(height: DSBarHeight.controlRow)
-            .accessibilityIdentifier("requestDetail.tabs")
-            .accessibilityLabel("Request detail section")
+            DSSegmentedControl(
+                "Request detail section",
+                segments: RequestDetailTab.allCases.map { tab in
+                    DSSegmentedControl<RequestDetailTab>.Segment(
+                        tab.rawValue, value: tab, identifier: "requestDetail.tab.\(tab.id.lowercased())"
+                    )
+                },
+                selection: activeTabBinding,
+                fillsWidth: true,
+                identifier: "requestDetail.tabs"
+            )
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .padding(.bottom, DSSpacing.md)
 
             if activeTab == .body {
                 bodySearchField
@@ -147,89 +125,138 @@ struct RequestDetailInspector: View {
                     case .body: bodyContent
                     }
                 }
+                .padding(.bottom, DSSpacing.lg)
             }
-
-            copyBar
         }
-        // Every inspector mode inherits the same native column material.
-        // The tab follows the inspector across requests so a user can compare the same section.
-        // A search term belongs to one payload and clears when the selected request changes.
+        // The tab follows the inspector across requests; a search term belongs to one payload.
         .onChange(of: log.id) { _, _ in searchText = "" }
         .onDisappear {
             copyConfirmationTask?.cancel()
         }
-        // Deliberately no identifier on this container. One here overrides every descendant's — the
-        // accessibility dump showed the tabs, the path, the search field, and all three copy buttons
-        // reporting `requestDetail.<uuid>` instead of their own names, which makes each of them
-        // unaddressable from a test. `requestDetail.path` is the handle for "detail is showing".
+        // No identifier on this container: one here would override every descendant's.
         .accessibilityElement(children: .contain)
     }
 
-    // Keep capture guidance inside the scrollable region. Making its wrapped text part of
-    // the inspector's minimum height can trigger an AppKit constraint-update loop in small windows.
+    // Capture guidance stays inside the scrolling region; wrapped text in the fixed part of the
+    // inspector can trigger an AppKit constraint loop in small windows.
     @ViewBuilder
     private var captureControls: some View {
         if log.outcome == .passthrough, let onSaveAsMock {
-            Button("Save response as mock", systemImage: "square.and.arrow.down") { onSaveAsMock(log.id) }
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                DSButton(
+                    "Save response as mock",
+                    systemImage: "square.and.arrow.down",
+                    variant: .primary,
+                    size: .medium,
+                    identifier: "requestDetail.saveMock"
+                ) { onSaveAsMock(log.id) }
                 .disabled(captureIssue != nil)
                 .help("Saves the response body and safe headers in this project. Review private data before sharing.")
                 .accessibilityIdentifier("requestDetail.saveMock")
                 .accessibilityLabel("Save response as mock")
-                .padding(DSSpacing.md)
-            if let captureIssue {
-                Text(captureIssue).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
-                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, DSSpacing.md)
-                    .accessibilityIdentifier("requestDetail.captureIssue")
+
+                if let captureIssue {
+                    Text(captureIssue)
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("requestDetail.captureIssue")
+                }
             }
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .padding(.bottom, DSSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    // MARK: - Request line
+    // MARK: - Identity
 
-    /// Method, path, and status — the identity of the request, pinned above the tabs so it stays
-    /// visible whichever section you are reading.
+    /// Method and path, the status with what answered, timing and size, and the copy actions.
     @ViewBuilder
-    private var requestLine: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            HStack(spacing: DSSpacing.sm) {
-                DSMethodBadge(method: log.method.rawValue, size: .compact,
-                              identifier: "requestDetail.method")
-                statusPill
-                Spacer(minLength: 0)
-                Text(log.timestamp, style: .time)
-                    .font(DSTypography.metaSmall)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .accessibilityIdentifier("requestDetail.timestamp")
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
+                DSMethodLabel(log.method.rawValue, fixedWidth: false, identifier: "requestDetail.method")
+                // Two lines, then truncate in the middle; the tooltip carries the whole path.
+                Text(log.path)
+                    .font(DSTypography.codeLarge)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .help(log.path)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("requestDetail.path")
             }
 
-            // Two lines, then truncate. `.fixedSize(vertical:)` let this wrap without limit, so a
-            // long path made the identity bar taller — the only bar in the window whose height was a
-            // function of its content, and the panel below it moved down to make room. Two lines
-            // covers essentially every real path; the full string is still selectable and the
-            // tooltip carries it whole.
-            Text(log.path)
-                .font(DSTypography.codeLarge)
-                .foregroundStyle(DSColors.labelPrimary)
-                .textSelection(.enabled)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .help(log.path)
-                .accessibilityIdentifier("requestDetail.path")
+            HStack(spacing: DSSpacing.md) {
+                statusLabel
+                Spacer(minLength: DSSpacing.sm)
+                HStack(spacing: 0) {
+                    if let metrics = metricsText {
+                        Text(metrics + " \u{00B7} ")
+                    }
+                    Text(log.timestamp, format: RequestLogQuery.timestampFormat)
+                        .accessibilityIdentifier("requestDetail.timestamp")
+                }
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+            }
+
+            Text(outcomeExplanation)
+                .font(DSTypography.callout)
+                .foregroundStyle(outcomeExplanationColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("requestDetail.outcome")
+
+            copyActions
         }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
+        .padding(.horizontal, DSInspectorMetrics.inset)
+        .padding(.top, DSSpacing.xs)
+        .padding(.bottom, DSSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Error text keeps its semantic color; successful responses do not need a colored badge.
+    /// Dot and code; a failed exchange shows its failure in the error colour.
     @ViewBuilder
-    private var statusPill: some View {
+    private var statusLabel: some View {
         if let failureLabel = log.failureLabel {
             DSInspectorStatus(statusCode: nil, failure: failureLabel)
                 .accessibilityIdentifier("requestDetail.failure")
         } else {
             DSInspectorStatus(statusCode: log.responseStatusCode)
                 .accessibilityIdentifier("requestDetail.status")
+        }
+    }
+
+    /// "2 ms · 214 B", or whichever half is known.
+    private var metricsText: String? {
+        let parts = [
+            log.durationMs.map(RequestLogQuery.formattedDuration),
+            RequestLogQuery.formattedSize(for: log),
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// One sentence saying what answered, coloured like the outcome.
+    private var outcomeExplanation: String {
+        switch log.outcome {
+        case .endpoint:
+            if let endpointName, let scenarioName { return "Answered by \(endpointName), \(scenarioName)" }
+            return endpointName.map { "Answered by \($0)" } ?? "Answered by an endpoint"
+        case .journey: return "Answered by the active journey"
+        case .unmatched: return "No endpoint matched, so Mimic answered with its fallback"
+        case .blockedByJourney: return "Blocked by the active journey"
+        case .proxyFailure: return "The real backend could not be reached"
+        case .passthrough: return "Passed through to \(log.backendName ?? "the real backend")"
+        }
+    }
+
+    private var outcomeExplanationColor: Color {
+        switch log.outcome {
+        case .endpoint, .journey, .passthrough: DSColors.labelSecondary
+        default: outcomeColor
         }
     }
 
@@ -244,9 +271,10 @@ struct RequestDetailInspector: View {
             if let name = log.backendName { summaryRow("Backend", value: name) }
             if let port = log.listenerPort { summaryRow("Local URL", value: "http://localhost:\(port)") }
             if let upstream = log.upstreamURL { summaryRow("Forwarded to", value: upstream) }
-            if let duration = log.durationMs { summaryRow("Duration", value: "\(duration) ms") }
+            if let duration = log.durationMs { summaryRow("Duration", value: RequestLogQuery.formattedDuration(duration)) }
             summaryRow("Endpoint", value: endpointName ?? "\u{2014}")
-            summaryRow("Scenario", value: scenarioName ?? "\u{2014}", valueColor: scenarioName != nil ? DSColors.accentText : nil)
+            summaryRow("Scenario", value: scenarioName ?? "\u{2014}",
+                       valueColor: scenarioName != nil ? DSColors.accent : DSColors.labelSecondary)
 
             DSInspectorSectionHeader("Sizes", identifier: "requestDetail.sizes")
 
@@ -254,23 +282,22 @@ struct RequestDetailInspector: View {
                        + (log.requestBodyTruncated == true ? " (truncated)" : ""))
             summaryRow(
                 "Response body",
-                value: (log.responseBodyIsBinary == true ? "Binary or non-UTF-8 (not previewed)" : Self.byteSummary(log.responseBody)) + (log.responseBodyTruncated ? " (truncated)" : "")
+                value: (log.responseBodyIsBinary == true
+                        ? "Binary or non-UTF-8 (not previewed)"
+                        : Self.byteSummary(log.responseBody))
+                    + (log.responseBodyTruncated ? " (truncated)" : "")
             )
             summaryRow("Request headers", value: "\(log.requestHeaders.count)")
             summaryRow("Response headers", value: "\(log.responseHeaders.count)")
 
             if log.outcome.isMissingConfiguration {
                 Text("Nothing was configured for this call, so Mimic answered with its fallback. Right-click the row in the request log to create an endpoint for it.")
-                    .font(DSTypography.label)
-                    // `labelSecondary`. This sentence is the only place the panel explains what an
-                    // unmatched request is and what to do about it — and `DSContrastTests` asserts
-                    // that `labelTertiary` clears AA on no surface in this app, in either appearance.
-                    // The summary rows just above already carry that correction; this paragraph, and
-                    // the truncation note further down, were the two that did not.
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .lineSpacing(DSSpacing.xxs)
-                    .padding(DSSpacing.md)
+                    .padding(.horizontal, DSInspectorMetrics.inset)
+                    .padding(.top, DSSpacing.md)
                     .accessibilityIdentifier("requestDetail.unmatchedHint")
             }
         }
@@ -286,10 +313,10 @@ struct RequestDetailInspector: View {
     private var outcomeColor: Color {
         switch log.outcome {
         case .endpoint: DSColors.labelPrimary
-        case .journey: DSColors.accentText
-        case .unmatched: DSColors.httpStatusColor(for: 404)
+        case .journey: DSColors.accent
+        case .unmatched: DSColors.warning
         case .blockedByJourney: DSColors.warning
-        case .proxyFailure: DSColors.destructive
+        case .proxyFailure: DSColors.error
         case .passthrough: DSColors.success
         }
     }
@@ -298,16 +325,8 @@ struct RequestDetailInspector: View {
 
     @ViewBuilder
     private var headersContent: some View {
-        // Not lazy. A request has a handful of headers, so laziness buys nothing here — and it costs:
-        // rows that have not been materialised yet are simply absent, which showed up as a response
-        // header silently missing from the panel.
+        // Not lazy: rows not yet materialised would simply be missing.
         VStack(alignment: .leading, spacing: 0) {
-            // "Request headers", not "Request". The panel's own header a hundred points above this
-            // one already says "Request" — it is the mode indicator, and it means "you are looking
-            // at a logged request" rather than "the request half of this exchange". Two senses of
-            // one word, stacked. The long names are also what the Summary tab's rows already call
-            // these ("Request headers 3", "Response body 20 B"), so this is the panel agreeing with
-            // itself rather than a new vocabulary.
             headerSection(
                 title: "Request headers",
                 identifier: "request",
@@ -319,7 +338,7 @@ struct RequestDetailInspector: View {
                 title: responseSectionTitle("headers"),
                 identifier: "response",
                 headers: log.responseHeaders,
-                emptyMessage: log.failureLabel.map { "No response — the connection was \($0)" }
+                emptyMessage: log.failureLabel.map { "No response. The connection was \($0)." }
                     ?? "No response headers"
             )
         }
@@ -338,12 +357,10 @@ struct RequestDetailInspector: View {
             emptyNote(emptyMessage, identifier: "requestDetail.headers.\(identifier).empty")
         } else {
             ForEach(Array(headers.sorted(by: { $0.key < $1.key }).enumerated()), id: \.element.key) { index, header in
-                // Key above value rather than beside it. The inspector is 220–400pt wide, and a
-                // two-column layout at that width truncates both halves of every interesting header.
-                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                // Name above value: the inspector is too narrow for two useful columns.
+                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                     Text(header.key)
-                        .font(DSTypography.labelMedium)
-                        // The key is the half you scan for; it cannot be the fainter half.
+                        .font(DSTypography.code)
                         .foregroundStyle(DSColors.labelSecondary)
                     Text(header.value)
                         .font(DSTypography.code)
@@ -352,13 +369,15 @@ struct RequestDetailInspector: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DSSpacing.md)
-                .padding(.vertical, DSSpacing.sm)
-                .background(index % 2 == 0 ? Color.clear : DSColors.rowStripe)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xs)
+                .background {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.mark)
+                        .fill(index % 2 == 0 ? Color.clear : DSColors.zebra)
+                }
+                .padding(.horizontal, DSSpacing.sm)
                 .accessibilityElement(children: .combine)
-                // Keyed by the header's name, which is what the `ForEach` already keys by, so the
-                // row keeps its identity when the sort puts a new header above it. Sits under the
-                // same `requestDetail.headers.<request|response>` prefix as the empty note.
+                // Keyed by the header's name, so the row keeps its identity when the sort moves it.
                 .accessibilityIdentifier("requestDetail.headers.\(identifier).\(header.key)")
             }
         }
@@ -368,22 +387,19 @@ struct RequestDetailInspector: View {
 
     @ViewBuilder
     private var bodySearchField: some View {
-        HStack(spacing: DSSpacing.xs) {
+        HStack(spacing: DSSpacing.xs + 2) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: DSGlyph.inline, weight: .medium))
+                .font(.system(size: DSGlyph.field, weight: .regular))
                 .foregroundStyle(DSColors.labelTertiary)
+                .accessibilityHidden(true)
             TextField("Find in body", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(DSTypography.label)
+                .font(DSTypography.callout)
                 .focused($searchFieldIsFocused)
                 .accessibilityIdentifier("requestDetail.bodySearchField")
                 .accessibilityLabel("Find in body")
 
             if !searchText.isEmpty {
-                // The same control `DSFilterField` uses, not a second drawing of it. The two were
-                // hand-written twice at 10pt and 11pt in identical 18×18 wells, each with a comment
-                // claiming to match the other; only the frame ever did, and only one of them answered
-                // the pointer.
                 DSClearButton(
                     text: Binding(
                         get: { searchText },
@@ -398,29 +414,15 @@ struct RequestDetailInspector: View {
                 )
             }
         }
-        .padding(.horizontal, DSSpacing.sm)
-        // One search-field height across the navigator, request log, and body inspector.
-        .frame(height: DSControlHeight.search)
-        .background(
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(DSColors.tertiary)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .stroke(
-                    searchFieldIsFocused ? DSColors.borderFocused : DSColors.border,
-                    lineWidth: searchFieldIsFocused ? DSStroke.focusRing : DSStroke.hairline
-                )
-        )
-        .animation(.easeOut(duration: DSAnimation.fast), value: searchFieldIsFocused)
-        .padding(.horizontal, DSSpacing.md)
+        .dsFieldChrome(height: DSControlHeight.regular, cornerRadius: DSControlHeight.regular / 2,
+                       isFocused: searchFieldIsFocused)
+        .padding(.horizontal, DSInspectorMetrics.inset)
         .padding(.bottom, DSSpacing.sm)
     }
 
     @ViewBuilder
     private var bodyContent: some View {
-        // Two sections, so laziness would only add the risk of one of them not appearing. The
-        // expensive part of a body is its formatting, and that is already off the main actor.
+        // Two sections; laziness would only risk one of them not appearing.
         VStack(alignment: .leading, spacing: 0) {
             DSInspectorSectionHeader("Request body", identifier: "requestDetail.body.request")
 
@@ -446,7 +448,7 @@ struct RequestDetailInspector: View {
                 }
             } else {
                 emptyNote(
-                    log.failureLabel.map { "No response — the connection was \($0)" } ?? "No response body",
+                    log.failureLabel.map { "No response. The connection was \($0)." } ?? "No response body",
                     identifier: "requestDetail.body.response.empty"
                 )
             }
@@ -455,113 +457,98 @@ struct RequestDetailInspector: View {
 
     private func truncationNote(identifier: String) -> some View {
         Text("Truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB.")
-            .font(DSTypography.label)
+            .font(DSTypography.callout)
             .foregroundStyle(DSColors.labelSecondary)
-            .padding(.horizontal, DSSpacing.md)
+            .padding(.horizontal, DSInspectorMetrics.inset)
             .padding(.vertical, DSSpacing.xs)
             .accessibilityIdentifier("requestDetail.body.\(identifier).truncated")
     }
 
-    // MARK: - Copy bar
+    // MARK: - Copy actions
 
-    /// The three things you actually do with a logged request, as buttons rather than as a single
-    /// "copy everything" blob you then have to edit down.
-    ///
-    /// **The verb is stated once, in front.** The row rendered as `cURL  Response  All` — three bare
-    /// nouns in accent blue, no glyph, no shared label — which is the shape of a row of links, not a
-    /// row of actions. The tooltips said "copy"; a tooltip is not an affordance, since you have to
-    /// have already pointed at the thing to read it. The alternatives lose: prefixing each button
-    /// ("Copy cURL / Copy response / Copy all") says the verb three times and nearly doubles a row
-    /// that has to fit a 220pt panel, and a `doc.on.doc` on each button puts three identical glyphs in
-    /// a row to make one point.
+    /// The three things you do with a logged request. cURL is the main one, so it gets the filled
+    /// secondary button; the others are quieter.
     @ViewBuilder
-    private var copyBar: some View {
-        VStack(spacing: 0) {
-            DSDivider(style: .standard, identifier: "requestDetail.copyBar")
-
-            HStack(spacing: DSSpacing.sm) {
-                HStack(spacing: DSSpacing.sm) {
-                    // Hidden from VoiceOver, which already hears the whole verb on every button —
-                    // each one is labelled with its own `help` ("Copy as a curl command"). This word
-                    // is for the eye that has not pointed at anything yet.
-                    Text("Copy")
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .accessibilityHidden(true)
-
-                    copyButton(
-                        "cURL",
-                        help: RequestLogExport.curlUnavailability(for: log).map { "Copy as a curl command — \($0)" }
-                            ?? (port == nil
-                            ? "Copy as a curl command — the server is stopped, so the URL has no port"
-                            : "Copy as a curl command"),
-                        identifier: "curl"
-                    ) {
-                        RequestLogExport.curl(for: log, port: port)
-                    }
-                    .disabled(RequestLogExport.curlUnavailability(for: log) != nil)
-
-                    copyButton("Response", help: log.responseBodyTruncated
-                               ? "Copy the available response body preview" : "Copy the response body", identifier: "responseBody") {
-                        log.responseBody.map(RequestLogExport.formattedBody) ?? ""
-                    }
-                    .disabled(log.responseBody?.isEmpty != false)
-
-                    copyButton("All", help: "Copy the full request and response as text", identifier: "all") {
-                        RequestLogQuery.formattedDetails(for: log)
-                    }
-                }
-                // The controls hold their width and the confirmation is what yields. At the
-                // inspector's 220pt minimum this row is full once the label and the three buttons are
-                // in it, and an `HStack` with nothing prioritised splits the shortfall in proportion
-                // — which spends a control's name ("cUR…") on a message about a copy that has already
-                // happened.
-                .layoutPriority(1)
-
-                Spacer(minLength: 0)
-
-                if let copyConfirmation {
-                    ViewThatFits(in: .horizontal) {
-                        Text(copyConfirmation)
-                            .font(DSTypography.caption)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: DSGlyph.inline))
-                            .accessibilityLabel(copyConfirmation)
-                    }
-                    .foregroundStyle(DSColors.success)
-                    .transition(.opacity)
-                    .accessibilityIdentifier("requestDetail.copyConfirmation")
-                }
+    private var copyActions: some View {
+        HStack(spacing: DSSpacing.xs) {
+            copyButton(
+                "Copy as cURL",
+                variant: .secondary,
+                help: RequestLogExport.curlUnavailability(for: log).map { "Copy as a curl command. \($0)" }
+                    ?? (port == nil
+                        ? "Copy as a curl command. The server is stopped, so the URL has no port."
+                        : "Copy as a curl command"),
+                identifier: "curl",
+                confirmation: "Copied cURL"
+            ) {
+                RequestLogExport.curl(for: log, port: port)
             }
-            .padding(.horizontal, DSSpacing.md)
-            .frame(height: DSInspectorMetrics.footerHeight)
+            .disabled(RequestLogExport.curlUnavailability(for: log) != nil)
+
+            copyButton(
+                "Response",
+                variant: .ghost,
+                help: log.responseBodyTruncated
+                    ? "Copy the available response body preview" : "Copy the response body",
+                identifier: "responseBody",
+                confirmation: "Copied response"
+            ) {
+                log.responseBody.map(RequestLogExport.formattedBody) ?? ""
+            }
+            .disabled(log.responseBody?.isEmpty != false)
+
+            copyButton(
+                "All",
+                variant: .ghost,
+                help: "Copy the full request and response as text",
+                identifier: "all",
+                confirmation: "Copied all"
+            ) {
+                RequestLogQuery.formattedDetails(for: log)
+            }
+            // The buttons keep their width; the confirmation yields.
+            .layoutPriority(1)
+
+            Spacer(minLength: 0)
+
+            if let copyConfirmation {
+                ViewThatFits(in: .horizontal) {
+                    Text(copyConfirmation)
+                        .font(DSTypography.caption)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: DSGlyph.field))
+                        .accessibilityLabel(copyConfirmation)
+                }
+                .foregroundStyle(DSColors.success)
+                .transition(.opacity)
+                .accessibilityIdentifier("requestDetail.copyConfirmation")
+            }
         }
+        .padding(.top, DSSpacing.xxs)
     }
 
-    /// `DSButton`'s ghost variant — accent text, no fill, no border — which is what these were
-    /// hand-drawing: a `.plain` button tinted accent, padded, and pinned to 20pt. The shared `.small`
-    /// action now takes a 24pt target. The one thing the hand-written version left out was any
-    /// response to the pointer, and these three are the buttons in this panel a user goes looking
-    /// for most.
     @ViewBuilder
     private func copyButton(
         _ title: String,
+        variant: DSButtonVariant,
         help: String,
         identifier: String,
+        confirmation: String,
         content: @escaping () -> String
     ) -> some View {
         DSButton(
             title,
-            variant: .ghost,
+            systemImage: variant == .secondary ? "doc.on.doc" : nil,
+            variant: variant,
             size: .small,
             identifier: "requestDetail.copy.\(identifier)"
         ) {
-            copy(content(), confirmation: "Copied \(title.lowercased())")
+            copy(content(), confirmation: confirmation)
         }
+        .fixedSize()
         .help(help)
-        // Applied outside, so it wins over the `ds.button.…` name `DSButton` gives itself and the
-        // title it uses as a label. The suite reaches these by `requestDetail.copy.<id>`.
+        // Applied outside, so it wins over the `ds.button.…` name the suite does not use.
         .accessibilityIdentifier("requestDetail.copy.\(identifier)")
         .accessibilityLabel(help)
     }
@@ -587,12 +574,12 @@ struct RequestDetailInspector: View {
     @ViewBuilder
     private func emptyNote(_ message: String, identifier: String) -> some View {
         Text(message)
-            .font(DSTypography.label)
-            // The only thing in an empty section, so it is the thing to read.
-            .foregroundStyle(DSColors.labelSecondary)
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelTertiary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(DSSpacing.md)
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .padding(.vertical, DSSpacing.xs)
             .accessibilityIdentifier(identifier)
     }
 

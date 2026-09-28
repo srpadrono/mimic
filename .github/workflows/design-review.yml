@@ -76,7 +76,7 @@ jobs:
             sips -s format jpeg -s formatOptions 55 --resampleWidth 1440 "$f" \
               --out ".artifacts/jpg/$name.jpg" >/dev/null
             echo "=====SHOT $name"
-            base64 -b 120 -i ".artifacts/jpg/$name.jpg"
+            base64 -b 16000 -i ".artifacts/jpg/$name.jpg"
             echo "=====END $name"
           done
           echo "=====DONE"

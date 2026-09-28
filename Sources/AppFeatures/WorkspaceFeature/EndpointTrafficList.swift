@@ -141,7 +141,7 @@ struct EndpointTrafficList: View {
 
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(EndpointTrafficQuery.summary(for: logs))
-                .font(DSTypography.labelMedium)
+                .font(DSTypography.bodyMedium)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
                 .accessibilityIdentifier("endpointTraffic.summary")
@@ -173,7 +173,7 @@ struct EndpointTrafficList: View {
     private func statusChip(code: Int, count: Int) -> some View {
         HStack(spacing: DSSpacing.xs) {
             DSInspectorStatus(statusCode: code)
-            Text("×\(count)").font(DSTypography.metaSmall).foregroundStyle(DSColors.labelSecondary)
+            Text("×\(count)").font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
         }
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("endpointTraffic.status.\(code)")
@@ -212,9 +212,9 @@ private struct EndpointTrafficRow: View {
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: DSSpacing.smPlus) {
+                HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
                     Text(log.path)
-                        .font(DSTypography.codePath)
+                        .font(DSTypography.code)
                         .foregroundStyle(DSColors.labelPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -226,7 +226,7 @@ private struct EndpointTrafficRow: View {
                     Spacer(minLength: DSSpacing.sm)
                     if let duration = log.durationMs { Text("\(duration) ms").monospacedDigit() }
                 }
-                .font(DSTypography.metaSmall)
+                .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
             }
             .padding(.horizontal, DSInspectorMetrics.inset)
@@ -235,7 +235,7 @@ private struct EndpointTrafficRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.dsPlain)
-        .dsHoverHighlight(cornerRadius: DSCornerRadius.sm)
+        .dsHoverHighlight(cornerRadius: DSCornerRadius.field)
         .help(spokenLabel)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)

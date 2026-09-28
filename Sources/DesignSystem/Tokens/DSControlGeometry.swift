@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// Control heights. Controls in one row share a size.
-public enum DSControlHeight {
+nonisolated public enum DSControlHeight {
     /// 28pt — buttons and fields in sheets.
     public static let large: CGFloat = 28
     /// 24pt — buttons and fields in panels.
@@ -13,7 +13,7 @@ public enum DSControlHeight {
 }
 
 /// Stroke widths. Every rule is a hairline; focus is drawn as a halo, not a heavier line.
-public enum DSStroke {
+nonisolated public enum DSStroke {
     /// 0.5pt — separators and field borders.
     public static let hairline: CGFloat = 0.5
     /// 1pt — a field's border while focused or invalid.

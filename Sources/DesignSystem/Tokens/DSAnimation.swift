@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Animation durations and curves. Repeating animation is gated on Reduce Motion by the caller.
-public enum DSAnimation {
+nonisolated public enum DSAnimation {
     /// 0.1s — hover and press feedback.
     public static let fast: Double = 0.10
     /// 0.2s — selection, expand and collapse.

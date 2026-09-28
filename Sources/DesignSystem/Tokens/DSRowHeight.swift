@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// One row height per kind of list.
-public enum DSRowHeight {
+nonisolated public enum DSRowHeight {
     /// 28pt — sidebar rows, scenario rows, inspector key-value rows.
     public static let list: CGFloat = 28
     /// 24pt — table rows and column headers.

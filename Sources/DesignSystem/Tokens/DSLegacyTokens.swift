@@ -76,14 +76,14 @@ public extension DSTypography.Leading {
     static let body = callout
 }
 
-public extension DSSpacing {
+nonisolated public extension DSSpacing {
     static let smPlus: CGFloat = 8
     static let mdMinus: CGFloat = 12
     static let mdPlus: CGFloat = 16
     static let lgPlus: CGFloat = 20
 }
 
-public extension DSCornerRadius {
+nonisolated public extension DSCornerRadius {
     static let xs: CGFloat = mark
     static let sm: CGFloat = field
     static let smPlus: CGFloat = field
@@ -94,7 +94,7 @@ public extension DSCornerRadius {
     static let xl: CGFloat = panel
 }
 
-public extension DSRowHeight {
+nonisolated public extension DSRowHeight {
     static let listRow: CGFloat = list
     static let logRow: CGFloat = table
     static let importRow: CGFloat = table
@@ -102,7 +102,7 @@ public extension DSRowHeight {
     static let journeyStep: CGFloat = step
 }
 
-public extension DSBarHeight {
+nonisolated public extension DSBarHeight {
     static let navigatorHeader: CGFloat = column
     static let navigatorFooter: CGFloat = footer
     static let panelHeader: CGFloat = paneHeader
@@ -111,7 +111,7 @@ public extension DSBarHeight {
     static let columnHeader: CGFloat = DSRowHeight.table
 }
 
-public extension DSControlHeight {
+nonisolated public extension DSControlHeight {
     static let row: CGFloat = regular
     static let field: CGFloat = regular
     static let search: CGFloat = regular
@@ -119,12 +119,12 @@ public extension DSControlHeight {
     static let verticalPadding: CGFloat = 3
 }
 
-public extension DSStroke {
+nonisolated public extension DSStroke {
     static let seam: CGFloat = hairline
     static let focusRing: CGFloat = emphasis
 }
 
-public extension DSGlyph {
+nonisolated public extension DSGlyph {
     static let indicator: CGFloat = disclosure
     static let inlineSmall: CGFloat = disclosure
     static let inline: CGFloat = field
@@ -132,27 +132,10 @@ public extension DSGlyph {
     static let controlProminent: CGFloat = control
 }
 
-public extension DSSheetWidth {
+nonisolated public extension DSSheetWidth {
     static let backendSettings: CGFloat = wide
 }
 
-public extension DSAnimation {
+nonisolated public extension DSAnimation {
     static let micro: Double = 0.06
-}
-
-nonisolated public enum DSToolbarGeometry {
-    public static let height: CGFloat = DSControlHeight.prominent
-    public static let contentHeight: CGFloat = 16
-    public static let expandedCenterWidth: CGFloat = 600
-    public static let actionOverflowCenterWidth: CGFloat = 440
-    public static let iconStatusCenterWidth: CGFloat = 380
-    public static let projectTitleWidth: CGFloat = 200
-    public static let compactProjectTitleWidth: CGFloat = 140
-    public static let metadataHeight: CGFloat = 13
-    public static let detailsWidth: CGFloat = DSLayout.popoverWidth
-    public static let detailsListHeight: CGFloat = 320
-    public static let copyButtonWidth: CGFloat = 100
-    public static let compactStatusWidth: CGFloat = 120
-    public static let iconStatusWidth: CGFloat = height
-    public static let statusWidth: CGFloat = 280
 }

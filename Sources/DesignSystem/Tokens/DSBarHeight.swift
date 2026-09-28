@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// Heights for the window's chrome. Sidebar, content, and inspector all start 44pt from the top.
-public enum DSBarHeight {
+nonisolated public enum DSBarHeight {
     /// 44pt — the toolbar, and each column's header.
     public static let column: CGFloat = 44
     /// 30pt — the jump bar, the only bar under the toolbar.

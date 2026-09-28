@@ -5,55 +5,46 @@ import DesignSystem
 
 // MARK: - Column & Sort Constants
 
-/// The log's column widths.
-///
-/// One flexible column and five fixed ones, which is the structure rather than an accident: the
-/// header cells and the row cells read these same numbers, so a width that lived in only one of them
-/// would put the two out of step — a defect this file has met before.
-///
-/// The fixed five were sized before the columns held what they hold now. `endpoint` and `scenario`
-/// are names a user chose and are routinely longer than the em dash the empty case draws, while
-/// `path` — the only flexible member — took the entire remainder of a wide pane to hold a short
-/// route. Widening the cramped columns spends some of that surplus without changing the structure.
-/// `path` still takes what is left, and still truncates first, which is right: it is the column a
-/// reader scans rather than reads to the end.
+/// The log's column widths. The header cells and the row cells read these same numbers, so a
+/// column's title always sits over its own values. Path is the one flexible column.
 enum LogColumns {
-    static let method: CGFloat = 62
-    static let compactMethod: CGFloat = 58
+    /// The table's own inset inside the pane; each cell adds `DSSpacing.sm` of padding on both sides.
+    static let tableInset: CGFloat = 6
 
-    /// Up from 110. Holds an endpoint's name, which is prose rather than a token.
+    /// Fits a 12-hour timestamp with milliseconds in the mono figure face.
+    static let time: CGFloat = 110
+    static let method: CGFloat = 64
+    static let status: CGFloat = 84
+    static let scenario: CGFloat = 150
+    static let duration: CGFloat = 84
+    static let size: CGFloat = 76
+
+    /// No longer drawn: what answered now shares the Scenario column. Kept for existing callers.
     static let endpoint: CGFloat = 130
 
-    /// Up from 90, for the same reason.
-    static let scenario: CGFloat = 100
+    /// The narrowest Path worth drawing before the table scrolls sideways.
+    static let minimumPath: CGFloat = 160
 
-    static let status: CGFloat = 52
-    static let compactStatus: CGFloat = 44
+    /// Below this the table drops Scenario, Duration and Size.
+    static let minimumTableWidth = time + method + minimumPath + status + scenario + duration + size
+        + tableInset * 2
 
-    /// Fits a seconds-precision timestamp in a 12-hour locale at the compact caption size.
-    /// Keeping timestamps secondary preserves space for the flexible path column.
-    static let time: CGFloat = 74
+    /// Below this even the compact table scrolls sideways.
+    static let compactMinimumTableWidth = time + method + minimumPath + status + tableInset * 2
 
-    // Reserve a readable path column before offering horizontal scrolling.
-    static let minimumTableWidth = method + endpoint + scenario + status + time + endpoint + DSSpacing.md * 2
-
-    /// Header and rows must receive the same resolved path width. A vertical scrollbar can reduce
-    /// the row viewport without reducing the separate header's width; letting each HStack distribute
-    /// the remainder independently shifts every column after Path when the log starts scrolling.
+    /// Header and rows must receive the same resolved path width, or a vertical scrollbar in the
+    /// rows would shift every column after Path.
     static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
         let fixedWidth = compact
-            ? compactMethod + compactStatus + time
-            : method + endpoint + scenario + status + time
-        return max(0, tableWidth - fixedWidth - DSSpacing.md * 2)
+            ? time + method + status
+            : time + method + status + scenario + duration + size
+        return max(0, tableWidth - fixedWidth - tableInset * 2)
     }
 }
 
-/// One traffic row's geometry.
-///
-/// Traffic has its own 32pt content-row rung. It carries a method badge and six other columns, so
-/// the import review's denser 30pt candidate row is not a useful source of geometry here.
-private enum LogRow {
-    static let height = DSRowHeight.logRow
+/// Which slice of the log the segmented control shows.
+enum LogScope: Hashable {
+    case all, unmatched, errors
 }
 
 enum SortField: String {
@@ -67,6 +58,7 @@ enum RequestLogQuery {
         methodFilter: HTTPMethod?,
         filterText: String,
         unmatchedOnly: Bool = false,
+        errorsOnly: Bool = false,
         sortField: SortField,
         sortAscending: Bool
     ) -> [RequestLog] {
@@ -80,9 +72,27 @@ enum RequestLogQuery {
         // is view state, not a property of the log.
         var filteredLogs = RequestLogFilter(
             unmatchedOnly: unmatchedOnly,
-            method: methodFilter,
-            text: filterText
+            method: methodFilter
         ).apply(to: logs)
+
+        if errorsOnly {
+            filteredLogs = filteredLogs.filter(isError)
+        }
+
+        // The text rules are `RequestLogFilter`'s, widened here to the endpoint and scenario names,
+        // which only the view can resolve.
+        if !filterText.isEmpty {
+            let textFilter = RequestLogFilter(text: filterText)
+            filteredLogs = filteredLogs.filter { log in
+                if textFilter.matches(log) { return true }
+                let names = [
+                    endpointName(for: log.matchedEndpointID, endpoints: endpoints),
+                    scenarioName(endpointID: log.matchedEndpointID, scenarioID: log.matchedScenarioID,
+                                 endpoints: endpoints),
+                ]
+                return names.contains { $0?.localizedCaseInsensitiveContains(filterText) == true }
+            }
+        }
 
         // Descending is the ascending predicate with its **operands** swapped, never its answer
         // negated. This used to end on `sortAscending ? result : !result`, and `!(a < b)` is `a >= b`:
@@ -170,6 +180,50 @@ enum RequestLogQuery {
         logs.count { $0.outcome.isMissingConfiguration }
     }
 
+    /// A 4xx or 5xx answer, or no answer at all.
+    nonisolated static func isError(_ log: RequestLog) -> Bool {
+        guard let code = log.responseStatusCode else { return true }
+        return code >= 400
+    }
+
+    /// How many logged requests the Errors filter would show.
+    nonisolated static func errorCount(logs: [RequestLog]) -> Int {
+        logs.count(where: isError)
+    }
+
+    /// Hours, minutes, seconds and milliseconds, in the reader's 12- or 24-hour convention.
+    nonisolated static let timestampFormat: Date.FormatStyle = .dateTime
+        .hour().minute().second().secondFraction(.fractional(3))
+
+    /// "8 ms", or "1.2 s" from a second up.
+    nonisolated static func formattedDuration(_ milliseconds: Int) -> String {
+        if milliseconds < 1000 { return "\(milliseconds) ms" }
+        return String(format: "%.1f s", Double(milliseconds) / 1000)
+    }
+
+    /// The response's size, from its logged body or its Content-Length. `nil` when neither says.
+    nonisolated static func formattedSize(for log: RequestLog) -> String? {
+        let bytes: Int
+        if let body = log.responseBody, !body.isEmpty, !log.responseBodyTruncated {
+            bytes = body.utf8.count
+        } else if let header = log.responseHeaders.first(where: {
+            $0.key.caseInsensitiveCompare("Content-Length") == .orderedSame
+        }), let length = Int(header.value.trimmingCharacters(in: .whitespaces)) {
+            bytes = length
+        } else if log.responseBodyIsBinary == true || log.responseBodyTruncated {
+            return nil
+        } else {
+            bytes = log.responseBody?.utf8.count ?? 0
+        }
+        return formattedBytes(bytes)
+    }
+
+    nonisolated static func formattedBytes(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+
     nonisolated static func endpointName(for endpointID: UUID?, endpoints: [Endpoint]) -> String? {
         guard let endpointID else { return nil }
         return endpoints.first { $0.id == endpointID }?.name
@@ -222,34 +276,21 @@ enum RequestLogQuery {
         return text
     }
 }
-
 // MARK: - Public View
 
-/// The live traffic list: a column table of everything the server has answered.
-///
-/// Deliberately *only* a list. It used to split itself when you selected a row, showing the request
-/// and response in the bottom 45% of a 220pt drawer — which left about 11pt of readable body and cost
-/// the list more than half its rows at the moment you most wanted context. Detail now goes to the
-/// inspector, which has the height for it, and selection here changes nothing about this panel's
-/// layout.
+/// The live traffic table: everything the server has answered. Selecting a row shows its detail in
+/// the inspector; this pane never splits itself.
 struct RequestLogDrawerView: View {
     let requestLogs: [RequestLog]
     let endpoints: [Endpoint]
     let serverState: ServerState
     let onClear: () -> Void
-    /// The selected rows. Owned by `WorkspaceView` because the inspector needs to see them too — this
-    /// panel no longer renders the detail itself.
-    ///
-    /// A set rather than one id because a selection is also how a journey gets captured: ⌘-click to
-    /// pick calls out of a session, ⇧-click to take a stretch of it, then save the lot as a flow.
-    /// The inspector shows detail only when exactly one row is selected.
+    /// The selected rows. Owned by `WorkspaceView` because the inspector shows them. A set, because
+    /// ⌘- and ⇧-click pick calls out of a session to capture as a journey.
     @Binding var selectedLogIDs: Set<UUID>
-    /// Whether the list is restricted to requests nothing answered. Owned outside this panel so the
-    /// toolbar's unmatched badge can switch it on, the way Xcode's warning count jumps you to the
-    /// issue navigator rather than just telling you a number.
+    /// The Unmatched segment. Owned outside so the toolbar's unmatched badge can switch it on.
     @Binding var unmatchedOnly: Bool
-    /// Creates a mock for a request that matched nothing. Optional so the drawer stays usable in
-    /// previews and tests that do not care about it.
+    /// Creates a mock for a request that matched nothing.
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
     var onSaveAsMock: ((UUID) -> Void)?
     /// Journeys the selected requests can be appended to.
@@ -261,23 +302,17 @@ struct RequestLogDrawerView: View {
 
     @State private var filterText = ""
     @State private var methodFilter: HTTPMethod?
+    /// The Errors segment. Local, unlike Unmatched, because nothing outside the pane switches it.
+    @State private var errorsOnly = false
     @State private var sortField: SortField = .timestamp
     @State private var sortAscending = false
     @State private var sortedAndFilteredLogs: [RequestLog] = []
     @State private var filterDebounceTask: Task<Void, Never>?
-    /// Where a ⇧-click measures its range from: the last row clicked without ⇧. Held here rather than
-    /// derived from the selection, because a set has no notion of which end the user started at.
+    /// Where a ⇧-click measures its range from: the last row clicked without ⇧.
     @State private var selectionAnchorID: UUID?
-    /// Whether the filter field has the keyboard, so the well can draw a ring around it. Separate
-    /// from the table's focus below: the two are different targets and only one of them can be the
-    /// one you are typing into.
     @FocusState private var filterFieldIsFocused: Bool
-    /// Whether the table holds keyboard focus, which is what the arrow keys, Return, Escape and ⌘A
-    /// below are conditional on.
-    ///
-    /// The table is one focus target rather than one per row, the way an AppKit table is: focus
-    /// lands on the list and the keys move within it. A thousand focusable rows would put a
-    /// thousand stops in the window's key-view loop.
+    /// Whether the table holds keyboard focus. The table is one focus target, like an AppKit table,
+    /// and the arrow keys, Return, Escape and ⌘A below depend on it.
     @FocusState private var tableHasKeyboardFocus: Bool
 
     public init(
@@ -352,193 +387,277 @@ struct RequestLogDrawerView: View {
         }
     }
 
-    private var emptyMessage: String {
-        switch serverState {
-        case .running:
-            "Send a request to see it appear here."
-        case .starting:
-            "The server is starting. Send a request once it is ready."
-        case .stopping:
-            "The server is stopping. Start it again to receive requests."
-        case .stopped, .error:
-            "Start the server and send a request to see it appear here."
-        }
-    }
+    /// Below this the filter field moves out of the header onto a row of its own.
+    private static let headerCollapseWidth: CGFloat = 700
 
     private func drawerContent(width: CGFloat) -> some View {
-        let narrow = width < 560
+        let narrow = width < Self.headerCollapseWidth
+        let compact = width < LogColumns.minimumTableWidth
         return VStack(spacing: 0) {
-            // Zone 1: the panel's single row of chrome. `DSPanelHeader` draws its own hairline, so
-            // there is no separate divider here — two would read as a double rule.
-            drawerToolbar(compact: width < LogColumns.minimumTableWidth, narrow: narrow)
+            header(narrow: narrow)
 
-            // At a narrow centre-column width, keep the search usable instead of compressing it
-            // between the popup, unmatched toggle and clear action in the fixed-height header.
             if narrow && !requestLogs.isEmpty {
-                HStack(spacing: DSSpacing.md) {
-                    if let countSubtitle {
-                        Text(countSubtitle)
-                            .font(DSTypography.metaSmall)
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .lineLimit(1)
-                            .accessibilityIdentifier("drawer.count")
-                    }
-                    filterControl
-                        .frame(maxWidth: .infinity)
-                }
-                .padding(.horizontal, DSSpacing.md)
-                .frame(height: DSBarHeight.controlRow)
-                .frame(maxWidth: .infinity)
-                .background(DSColors.band)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
-                }
+                filterControl
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, DSSpacing.md)
+                    .padding(.bottom, DSSpacing.sm)
             }
 
-            // Zone 2 & 3: Content
             if requestLogs.isEmpty {
-                DSEmptyState(
-                    systemImage: "arrow.down.circle",
-                    heading: "No requests yet",
-                    message: emptyMessage,
-                    identifier: "drawer.requests"
-                )
+                DSDivider(identifier: "drawer.empty")
+                emptyLog
             } else if sortedAndFilteredLogs.isEmpty {
+                DSDivider(identifier: "drawer.noMatches")
                 DSEmptyState(
                     heading: "No matching requests",
                     message: "Adjust the filter to see results.",
+                    prominence: .regular,
                     identifier: "drawer.noMatches"
                 )
             } else {
                 GeometryReader { table in
-                    let tableWidth = narrow ? table.size.width : max(table.size.width, LogColumns.minimumTableWidth)
-                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: narrow)
+                    let tableWidth = max(table.size.width, LogColumns.compactMinimumTableWidth)
+                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: compact)
                     ScrollView(.horizontal) {
                         VStack(spacing: 0) {
-                            tableHeader(compact: narrow, pathWidth: pathWidth)
-                            DSDivider(style: .standard, identifier: "drawer.table.header")
-                            tableBody(compact: narrow, pathWidth: pathWidth, tableWidth: tableWidth)
+                            tableHeader(compact: compact, pathWidth: pathWidth)
+                            tableBody(compact: compact, pathWidth: pathWidth, tableWidth: tableWidth)
                         }
                         .frame(width: tableWidth, height: table.size.height)
                     }
                 }
             }
         }
-        // The drawer paints its own surface. It used to paint none, so the panel showed whatever the
-        // window happened to be behind it — and its own zebra made that visible, because every even
-        // row resolves to `.clear` and was letting the background through rather than sitting on a
-        // surface of its own.
-        //
-        // `dominant`, the same canvas as the editor above it: the two share the centre column and
-        // are separated by `DSSplitPane`'s own divider band, not by a change of colour.
+        // No background of its own: the log sits on the centre column's content surface.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DSColors.dominant)
         .onChange(of: filterText) { _, _ in updateLogs(debounce: true) }
         .onChange(of: methodFilter) { _, _ in updateLogs() }
         .onChange(of: unmatchedOnly) { _, _ in updateLogs() }
+        .onChange(of: errorsOnly) { _, _ in updateLogs() }
         .onChange(of: sortField) { _, _ in updateLogs() }
         .onChange(of: sortAscending) { _, _ in updateLogs() }
-        // The newest entry's identity, not the count. `MockServerRuntime` caps the buffer at 1000 and
-        // `removeFirst`s to hold it there, so from request 1001 the count is *permanently* 1000: the
-        // panel stops updating and keeps rendering the snapshot it had when the buffer filled, while
-        // the real log rotates underneath it. Watching the last id keeps the check O(1) — comparing
-        // the whole array would run `Equatable` over 1000 rows on every append.
+        // The newest entry's identity, not the count: the buffer is capped at 1000, so from then on
+        // the count never changes while the log keeps rotating.
         .onChange(of: requestLogs.last?.id) { _, _ in updateLogs() }
         .onChange(of: endpoints) { _, _ in updateLogs() }
         .onAppear { updateLogs() }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    /// The drawer's single row of chrome.
+    /// Title, count, the All / Unmatched / Errors control, the filter field and the clear button.
     ///
-    /// This used to be two stacked rows — a title with the filters, then the column headers — which
-    /// on a 220pt drawer spent roughly a quarter of the panel before showing one request. Now the
-    /// count rides in the header's subtitle slot and the filters sit as trailing controls, so the
-    /// same information costs one row instead of two.
+    /// Carries the identifiers `DSPanelHeader` gives a panel header, which the UI suite addresses.
     @ViewBuilder
-    private func drawerToolbar(compact: Bool, narrow: Bool) -> some View {
-        DSPanelHeader("Request log", subtitle: narrow ? nil : countSubtitle, identifier: "requestLog") {
-            HStack(spacing: DSSpacing.sm) {
-                if !requestLogs.isEmpty {
-                    Picker("Method", selection: $methodFilter) {
-                        Text("All").tag(HTTPMethod?.none)
-                        ForEach(HTTPMethod.allCases, id: \.self) { method in
-                            Text(method.rawValue).tag(HTTPMethod?.some(method))
-                        }
-                    }
-                    // A native popup is the right control for a menu of choices, so this one keeps
-                    // the system's shape rather than being dressed as a well. What it does not keep
-                    // is a hard-coded width: 72pt was sized for "DELETE" and left the row looking
-                    // broken at "All", which is the value it shows almost all the time.
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
-                    .accessibilityIdentifier("drawer.methodFilter")
-                    .accessibilityLabel("Filter by method")
+    private func header(narrow: Bool) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text("Request log")
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
+                .lineLimit(1)
+                .layoutPriority(1)
+                .accessibilityIdentifier("ds.panelheader.title.requestLog")
 
-                    UnmatchedFilterToggle(
-                        count: RequestLogQuery.unmatchedCount(logs: requestLogs),
-                        unmatchedOnly: $unmatchedOnly,
-                        compact: compact
-                    )
+            if let countSubtitle {
+                Text(countSubtitle)
+                    .font(DSTypography.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("ds.panelheader.subtitle.requestLog")
+            }
 
-                    if !narrow { filterControl }
+            if !requestLogs.isEmpty {
+                DSSegmentedControl(
+                    "Show requests",
+                    segments: scopeSegments,
+                    selection: scopeSelection,
+                    identifier: "drawer.scope"
+                )
+                .padding(.leading, DSSpacing.xs)
+            }
 
-                    DSPanelHeaderButton(
-                        systemImage: "trash",
-                        help: "Clear request log",
-                        identifier: "clearRequestLogButton"
-                    ) {
-                        selectedLogIDs = Self.performClear(onClear: onClear)
-                        selectionAnchorID = nil
-                    }
+            Spacer(minLength: DSSpacing.sm)
+
+            if !narrow {
+                filterControl
+                    .frame(width: 240)
+                    // With nothing logged there is nothing to filter; the field stays as a quiet hint.
+                    .disabled(requestLogs.isEmpty)
+                    .opacity(requestLogs.isEmpty ? 0.5 : 1)
+            }
+
+            if !requestLogs.isEmpty {
+                DSIconButton("Clear request log", systemImage: "trash", identifier: "clearRequestLogButton") {
+                    selectedLogIDs = Self.performClear(onClear: onClear)
+                    selectionAnchorID = nil
                 }
             }
         }
+        .padding(.leading, 14)
+        .padding(.trailing, DSSpacing.md)
+        .frame(height: DSBarHeight.paneHeader)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.panelheader.requestLog")
     }
 
+    private var scopeSegments: [DSSegmentedControl<LogScope>.Segment] {
+        let unmatched = RequestLogQuery.unmatchedCount(logs: requestLogs)
+        let errors = RequestLogQuery.errorCount(logs: requestLogs)
+        return [
+            .init("All", value: .all, help: "Show every request", identifier: "drawer.scope.all"),
+            .init(
+                "Unmatched",
+                value: .unmatched,
+                count: unmatched > 0 ? unmatched : nil,
+                countColor: DSColors.warning,
+                help: "Show only requests that matched no endpoint",
+                identifier: "drawer.unmatchedFilter"
+            ),
+            .init(
+                "Errors",
+                value: .errors,
+                count: errors > 0 ? errors : nil,
+                countColor: DSColors.error,
+                help: "Show only 4xx and 5xx responses and failed requests",
+                identifier: "drawer.errorsFilter"
+            ),
+        ]
+    }
+
+    /// Unmatched maps onto the shared `unmatchedOnly` binding; Errors is local.
+    private var scopeSelection: Binding<LogScope> {
+        Binding(
+            get: { unmatchedOnly ? .unmatched : (errorsOnly ? .errors : .all) },
+            set: { scope in
+                unmatchedOnly = scope == .unmatched
+                errorsOnly = scope == .errors
+            }
+        )
+    }
+
+    /// A capsule filter well. The leading glyph is the method filter, as a filter field's scope menu.
     private var filterControl: some View {
-        HStack(spacing: DSSpacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: DSGlyph.inline, weight: .medium))
-                .foregroundStyle(DSColors.labelTertiary)
-            TextField("Filter", text: $filterText)
+        HStack(spacing: DSSpacing.xs + 2) {
+            methodMenu
+
+            TextField("Filter by path, status or scenario", text: $filterText)
                 .textFieldStyle(.plain)
-                .font(DSTypography.label)
+                .font(DSTypography.callout)
                 .focused($filterFieldIsFocused)
                 .accessibilityIdentifier("drawer.filterField")
                 .accessibilityLabel("Filter request log")
+
+            if !filterText.isEmpty {
+                DSClearButton(
+                    text: Binding(
+                        get: { filterText },
+                        set: {
+                            filterText = $0
+                            filterFieldIsFocused = true
+                        }
+                    ),
+                    identifier: "drawer.clearFilter",
+                    label: "Clear filter",
+                    help: "Clear the filter"
+                )
+            }
         }
-                    // Range rather than a fixed 150pt: a filter field is the one control in this row
-                    // whose useful width depends on the window, and 150 was simultaneously too wide
-                    // for a narrow drawer and too narrow to read a path in a wide one.
-                    //
-                    // The focused line is `DSFilterField`'s exactly — `borderFocused` at
-                    // `DSStroke.focusRing` — because `.textFieldStyle(.plain)` throws AppKit's own
-                    // ring away, and a control that looks identical whether or not it has the
-                    // keyboard is the hover defect applied to Full Keyboard Access. This field is
-                    // one of the two hand-rolled ones that component's own note names; it keeps its
-                    // shape here rather than adopting the component, because the component is a
-                    // capsule with a scope pill and this row is four rectangular wells.
-        .dsControlWell(
-            height: DSControlHeight.search,
-            fill: DSColors.tertiary,
-            stroke: filterFieldIsFocused ? DSColors.borderFocused : DSColors.border,
-            strokeWidth: filterFieldIsFocused ? DSStroke.focusRing : DSStroke.hairline,
-            minWidth: LogColumns.time,
-            idealWidth: 160
-        )
-        .animation(.easeOut(duration: DSAnimation.fast), value: filterFieldIsFocused)
+        .dsFieldChrome(height: DSControlHeight.regular, cornerRadius: DSControlHeight.regular / 2,
+                       isFocused: filterFieldIsFocused)
     }
 
-    /// The request count, or `nil` when there is nothing to count — an empty panel does not need a
-    /// "0 requests" label to tell you it is empty.
+    /// The method filter: a magnifying glass at rest, the chosen method once one is picked.
+    private var methodMenu: some View {
+        Menu {
+            Picker("Method", selection: $methodFilter) {
+                Text("All").tag(HTTPMethod?.none)
+                ForEach(HTTPMethod.allCases, id: \.self) { method in
+                    Text(method.rawValue).tag(HTTPMethod?.some(method))
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 2) {
+                if let methodFilter {
+                    Text(methodFilter.rawValue)
+                        .font(DSTypography.method)
+                        .foregroundStyle(DSColors.methodColor(for: methodFilter.rawValue))
+                } else {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: DSGlyph.field, weight: .regular))
+                        .foregroundStyle(DSColors.labelTertiary)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: DSGlyph.minimum, weight: .bold))
+                    .foregroundStyle(DSColors.labelTertiary)
+            }
+            .frame(height: DSControlHeight.regular)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Filter by method")
+        .accessibilityIdentifier("drawer.methodFilter")
+        .accessibilityLabel("Filter by method")
+        .accessibilityValue(methodFilter?.rawValue ?? "All")
+    }
+
+    /// "N requests" for what the table is showing, or `nil` for an empty log.
     private var countSubtitle: String? {
         guard !requestLogs.isEmpty else { return nil }
         let count = sortedAndFilteredLogs.count
         return "\(count) request\(count == 1 ? "" : "s")"
+    }
+
+    // MARK: - Empty log
+
+    private var emptyLog: some View {
+        VStack(spacing: DSSpacing.md) {
+            Text("Requests appear here while the server runs")
+                .font(DSTypography.body)
+                .foregroundStyle(DSColors.labelSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("ds.empty.drawer.requests.heading")
+
+            if let port = serverState.runningPort {
+                curlChip("curl http://localhost:\(port)/")
+            }
+        }
+        .padding(DSSpacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.empty.drawer.requests")
+    }
+
+    /// A command to try, in a code well with a copy button.
+    private func curlChip(_ command: String) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text(command)
+                .font(DSTypography.code)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("drawer.empty.command")
+            DSIconButton("Copy command", systemImage: "doc.on.doc", identifier: "drawer.empty.copyCommand") {
+                RequestDetailInspector.write(command, to: .general)
+            }
+        }
+        .padding(.leading, DSSpacing.md)
+        .padding(.trailing, DSSpacing.xs)
+        .padding(.vertical, DSSpacing.xs)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.segment)
+                .fill(DSColors.code)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: DSCornerRadius.segment)
+                .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+        }
     }
 
     // MARK: - Table Header
@@ -546,36 +665,31 @@ struct RequestLogDrawerView: View {
     @ViewBuilder
     private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            columnHeader("Method", field: .method,
-                         width: compact ? LogColumns.compactMethod : LogColumns.method)
-            columnHeader("Path", field: .path, width: pathWidth)
-            if !compact {
-                columnHeader("Endpoint", field: .endpoint, width: LogColumns.endpoint)
-                columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
-            }
-            columnHeader("Status", field: .status,
-                         width: compact ? LogColumns.compactStatus : LogColumns.status)
             columnHeader("Time", field: .timestamp, width: LogColumns.time)
+            columnHeader("Method", field: .method, width: LogColumns.method)
+            columnHeader("Path", field: .path, width: pathWidth)
+            columnHeader("Status", field: .status, width: LogColumns.status)
+            if !compact {
+                columnHeader("Scenario", field: .scenario, width: LogColumns.scenario)
+                staticColumnHeader("Duration", width: LogColumns.duration)
+                staticColumnHeader("Size", width: LogColumns.size)
+            }
         }
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: DSBarHeight.columnHeader)
-        // `band`, not `secondary.opacity(0.6)`. The drawer's own surface *is* `secondary`, so 60% of
-        // it over itself is exactly itself: this strip was already the same colour as the panel header
-        // above it, and the opacity implied a decision nobody had made. The band puts it one step off
-        // the drawer, which is the difference between "this row names the panel" and "this row names
-        // the columns".
-        .background(DSColors.band)
+        .padding(.horizontal, LogColumns.tableInset)
+        .frame(height: DSRowHeight.table)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+        }
     }
 
     @ViewBuilder
-    private func columnHeader(_ title: String, field: SortField, width: CGFloat?) -> some View {
+    private func columnHeader(_ title: String, field: SortField, width: CGFloat) -> some View {
         SortableColumnHeader(
             title: title,
             isActive: sortField == field,
             isAscending: sortAscending,
             width: width,
-            // Keyed on the sort field rather than the title, so the name a test holds does not move
-            // when a column is relabelled — the same reason the rows below are keyed on `log.id`.
+            // Keyed on the sort field, so a relabelled column keeps the name tests hold.
             identifier: "drawer.columnHeader.\(field.rawValue)"
         ) {
             (sortField, sortAscending) = Self.nextSortState(
@@ -586,13 +700,21 @@ struct RequestLogDrawerView: View {
         }
     }
 
+    /// A numeric column that does not sort, right-aligned over its figures.
+    private func staticColumnHeader(_ title: String, width: CGFloat) -> some View {
+        Text(title)
+            .font(DSTypography.captionSemibold)
+            .foregroundStyle(DSColors.labelSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, DSSpacing.sm)
+            .frame(width: width, alignment: .trailing)
+    }
+
     // MARK: - Table Body
 
     @ViewBuilder
     private func tableBody(compact: Bool, pathWidth: CGFloat, tableWidth: CGFloat) -> some View {
-        // Both resolved once for the whole table. A row's context menu has to know the entire
-        // selection, and working that out inside the row would be O(rows²) on a log that holds a
-        // thousand of them.
+        // Resolved once for the whole table; per row it would be O(rows²).
         let selection = Self.selectedLogs(
             selectedLogIDs: selectedLogIDs,
             sortedAndFilteredLogs: sortedAndFilteredLogs
@@ -607,6 +729,7 @@ struct RequestLogDrawerView: View {
                             log: log,
                             rowIndex: index,
                             isSelected: selectedLogIDs.contains(log.id),
+                            isEmphasized: tableHasKeyboardFocus,
                             compact: compact,
                             pathWidth: pathWidth,
                             onCreateEndpoint: onCreateEndpoint,
@@ -618,10 +741,7 @@ struct RequestLogDrawerView: View {
                             endpointName: resolveEndpointName(log.matchedEndpointID),
                             scenarioName: resolveScenarioName(endpointID: log.matchedEndpointID, scenarioID: log.matchedScenarioID),
                             onSelect: { modifier in
-                                // The pointer hands the table its focus, so the arrows carry on from
-                                // the row that was just clicked rather than from wherever they were
-                                // left. `WelcomeWindow`'s recents list keeps the same contract in the
-                                // other direction.
+                                // A click hands the table focus, so the arrows carry on from here.
                                 tableHasKeyboardFocus = true
                                 withAnimation(.easeOut(duration: DSAnimation.fast)) {
                                     let change = Self.nextSelection(
@@ -638,35 +758,23 @@ struct RequestLogDrawerView: View {
                         )
                     }
                 }
-                // The vertical scrollbar narrows its viewport. Keep the rows anchored to the
-                // header's full table width instead of centering an over-wide stack in that viewport.
+                // Anchor the rows to the header's full width rather than the scrollbar-narrowed viewport.
                 .frame(width: tableWidth, alignment: .leading)
             }
             .frame(width: tableWidth, alignment: .leading)
-            // Selection here was reachable only by pointer — and this is the app's one multi-select
-            // surface, the one a journey is captured from, so capturing a flow was a pointer-only
-            // workflow end to end. `.focusable()` is what lets a `ScrollView` of tap targets take a
-            // key press at all; a `List` would have brought the arrows with it, and this panel is
-            // deliberately not one (six columns at a fixed row height).
+            // One focus target for the whole table; selection shows focus, so no ring.
             .focusable()
+            .focusEffectDisabled()
             .focused($tableHasKeyboardFocus)
-            // `.repeat` as well as `.down`: macOS delivers a held key as one press and then a run of
-            // repeats, so without it holding ↓ moves the selection exactly one row and then stops —
-            // which reads as the key having been dropped. `.up` is deliberately absent; taking it
-            // would run every press twice.
+            // `.repeat` so a held arrow keeps moving; `.up` is absent or every press would run twice.
             .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape, "a"], phases: [.down, .repeat]) { press in
                 handleKeyPress(press, displayOrder: displayOrder, proxy: proxy)
             }
         }
     }
 
-    /// Arrow keys, Return, Escape and ⌘A, while the table holds focus.
-    ///
-    /// The whole decision is in ``nextSelection(key:extending:current:anchor:displayOrder:)``, which
-    /// is pure; this reads the press, writes the two pieces of state and scrolls the row it moved to
-    /// into view. A press the table declines comes back `.ignored`, which leaves the event to
-    /// whatever is behind it — the scroll view's own paging, in the case of an arrow at the end of
-    /// the list.
+    /// Arrow keys, Return, Escape and ⌘A, while the table holds focus. The decision is the pure
+    /// ``nextSelection(key:extending:current:anchor:displayOrder:)``; a declined press is `.ignored`.
     private func handleKeyPress(
         _ press: KeyPress,
         displayOrder: [UUID],
@@ -687,9 +795,7 @@ struct RequestLogDrawerView: View {
             selectionAnchorID = result.change.anchor
         }
 
-        // Unanimated on purpose: the row has to be on screen by the time the next key press is
-        // handled, and a keyboard user holding ↓ generates them faster than a scroll animation
-        // settles.
+        // Unanimated, so the row is on screen before the next repeated key press arrives.
         if let reveal = result.reveal {
             proxy.scrollTo(reveal)
         }
@@ -701,19 +807,21 @@ struct RequestLogDrawerView: View {
 
     private func updateLogs(debounce: Bool = false) {
         filterDebounceTask?.cancel()
-        
+
         let currentLogs = requestLogs
         let currentEndpoints = endpoints
         let currentMethod = methodFilter
         let currentText = filterText
         let currentUnmatchedOnly = unmatchedOnly
+        // Unmatched wins when the toolbar badge switches it on while Errors was chosen.
+        let currentErrorsOnly = errorsOnly && !unmatchedOnly
         let currentField = sortField
         let currentAsc = sortAscending
 
         filterDebounceTask = Task {
             if debounce { try? await Task.sleep(for: .milliseconds(300)) }
             if Task.isCancelled { return }
-            
+
             let result = await Task.detached {
                 RequestLogQuery.process(
                     logs: currentLogs,
@@ -721,11 +829,12 @@ struct RequestLogDrawerView: View {
                     methodFilter: currentMethod,
                     filterText: currentText,
                     unmatchedOnly: currentUnmatchedOnly,
+                    errorsOnly: currentErrorsOnly,
                     sortField: currentField,
                     sortAscending: currentAsc
                 )
             }.value
-            
+
             if !Task.isCancelled {
                 self.sortedAndFilteredLogs = result
             }
@@ -1030,115 +1139,15 @@ struct RequestLogDrawerView: View {
     }
 }
 
-// MARK: - Unmatched filter
-
-/// A one-click answer to "what is my app calling that I have not mocked?".
-///
-/// The count is on the control itself, so a missing mock is visible without opening the filter —
-/// which is the whole point: you notice it while debugging something else.
-///
-/// Its own view so the hover state stays local, which is the same reason `SortableColumnHeader`
-/// below is one: held on the drawer, a `@State` flag toggled by the pointer crossing this control
-/// would re-evaluate the panel's whole body — the table of up to a thousand rows included — twice per
-/// pass of the mouse.
-private struct UnmatchedFilterToggle: View {
-    let count: Int
-    @Binding var unmatchedOnly: Bool
-    var compact = false
-
-    @State private var isHovered = false
-
-    var body: some View {
-        // Not a `.toggleStyle(.button)` Toggle. That draws a bordered capsule, and tinting it amber
-        // to advertise the count made the control look pressed whenever there was anything to count —
-        // so a filter that was off read as on, every time it mattered. On and off have to look
-        // different from each other before either can carry a colour.
-        Button {
-            unmatchedOnly.toggle()
-        } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: DSGlyph.inline))
-                if !compact {
-                    Text(count > 0 ? "Unmatched (\(count))" : "Unmatched")
-                        .font(DSTypography.label)
-                }
-            }
-            .foregroundStyle(foreground)
-            // The same well as the filter field beside it — one height, one radius, one hairline.
-            // These two were written independently and drifted by a couple of points, which is
-            // exactly the kind of difference nobody can name and everybody can see.
-            .dsControlWell(height: DSControlHeight.search, fill: fill, stroke: stroke)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isInert)
-        // This control had no pointer response of any kind, which in a row where the clear button is
-        // a `DSPanelHeaderButton` and the method filter is a native popup made it the one thing in
-        // the drawer's chrome that looked the same whether or not you were about to click it.
-        //
-        // Gated on `isInert` for the reason `ServerToggleButton` states: a well that answers a
-        // pointer which cannot click is the same lie as a live-looking dead control.
-        .onHover { isHovered = $0 && !isInert }
-        .animation(.easeOut(duration: DSAnimation.micro), value: unmatchedOnly)
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-        .help("Show only requests that matched no endpoint — the ones you are missing a mock for.")
-        .accessibilityIdentifier("drawer.unmatchedFilter")
-        .accessibilityLabel(
-            count > 0
-                ? "Show only unmatched requests, \(count) so far"
-                : "Show only unmatched requests"
-        )
-    }
-
-    /// Nothing to filter to and not already filtering: the control is disabled, so it neither reacts
-    /// to the pointer nor carries a colour.
-    private var isInert: Bool { count == 0 && !unmatchedOnly }
-
-    /// Amber once the filter is on, or once there is something to find. Quiet otherwise — a control
-    /// that is always coloured has stopped saying anything.
-    private var foreground: Color {
-        if unmatchedOnly || count > 0 { return DSColors.httpStatusColor(for: 404) }
-        return DSColors.labelSecondary
-    }
-
-    /// On, the well stays amber under the pointer rather than being overpainted by a blue that means
-    /// nothing here — the rule `ServerToggleButton`'s running glow follows. Off, it takes
-    /// `accentSubtle`, which is the app's one hover fill.
-    private var fill: Color {
-        if unmatchedOnly { return DSColors.httpStatusColor(for: 404).opacity(0.12) }
-        return isHovered ? DSColors.accentSubtle : .clear
-    }
-
-    private var stroke: Color {
-        unmatchedOnly ? DSColors.httpStatusColor(for: 404) : DSColors.border
-    }
-}
-
 // MARK: - Column Header
 
-/// One sortable column title.
-///
-/// Sentence case, like every table header in macOS and every one in Xcode. This row used to shout
-/// its titles in caps, which is a web convention borrowed into an AppKit window: it made six labels
-/// compete with the traffic underneath them, and traffic is the reason the panel exists.
-///
-/// Its own view so the hover highlight stays local. Kept on the table as a `hoveredField`, one
-/// pointer crossing the row would re-evaluate all six columns — `DSTabStrip.TabButton` is the same
-/// shape for the same reason.
-///
-/// **It is a `Button`, so it is named like one.** All six of these shipped with no accessibility
-/// identifier and no label, on the type or at the call site — six interactive controls that VoiceOver
-/// could only announce by reading the word inside them, with nothing saying they sorted anything and
-/// nothing a UI test could address. The sort direction rides in the value rather than the label, so
-/// the label stays a stable string while the state underneath it moves, exactly as `DSTabStrip` does
-/// with its badge count.
+/// One sortable column title: 11pt semibold, with a chevron on the sorted column. The direction
+/// rides in the accessibility value so the label stays "Sort by <column>".
 private struct SortableColumnHeader: View {
     let title: String
     let isActive: Bool
     let isAscending: Bool
-    /// `nil` for the flexible column, which takes whatever the fixed ones leave.
-    let width: CGFloat?
+    let width: CGFloat
     let identifier: String
     let sort: () -> Void
 
@@ -1148,55 +1157,33 @@ private struct SortableColumnHeader: View {
         Button(action: sort) {
             HStack(spacing: DSSpacing.xxs) {
                 Text(title)
-                    .font(DSTypography.metaSmall)
+                    .font(DSTypography.captionSemibold)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.9)
-                    // The sorted column should be legible as sorted from across the row, without
-                    // first finding a chevron to read.
-                    .fontWeight(isActive ? .semibold : nil)
-                    .foregroundStyle(titleColor)
+                    .foregroundStyle(isActive || isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
 
                 if isActive {
                     Image(systemName: isAscending ? "chevron.up" : "chevron.down")
-                        // `inlineSmall`, the rung `DSGlyph` names a column header's sort chevron for:
-                        // it qualifies the title beside it rather than being the control itself.
-                        .font(.system(size: DSGlyph.inlineSmall, weight: .semibold))
-                        .foregroundStyle(DSColors.accentText)
+                        .font(.system(size: DSGlyph.minimum, weight: .bold))
+                        .foregroundStyle(DSColors.labelSecondary)
                 }
             }
-            // Inside the label, so the whole cell is the target rather than just the word — a
-            // header that only responds where the glyphs happen to be reads as broken, and the
-            // hover highlight would flicker on and off as the pointer crossed the gaps.
-            .frame(width: width, alignment: .leading)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            // The whole cell is the target, not only the word.
+            .padding(.horizontal, DSSpacing.sm)
+            .frame(width: width, height: DSRowHeight.table, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Nothing else said these were sortable. A plain button gives no pressed state, no pointer
-        // change and no hover, so the columns looked exactly like a static legend.
         .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help("Sort by \(title.lowercased())")
         .accessibilityIdentifier(identifier)
         .accessibilityLabel("Sort by \(title.lowercased())")
         .accessibilityValue(sortStateAnnouncement)
     }
 
-    /// Which way this column is currently sorting, or nothing when it is not the sorted one. A value
-    /// rather than part of the label, so "Sort by status" stays the same string whichever direction
-    /// the arrow is pointing.
     private var sortStateAnnouncement: String {
         guard isActive else { return "" }
         return isAscending ? "sorted ascending" : "sorted descending"
-    }
-
-    private var titleColor: Color {
-        if isHovered { return DSColors.labelPrimary }
-        // An inactive column header is still a button you are meant to find and press. At 36% the
-        // row read as a static legend — which this type's own note says was the bug — and it was the
-        // one control class left at that alpha after `DSTabStrip`, `DSPanelHeaderButton` and
-        // `ServerToggleButton` were each moved off it.
-        return isActive ? DSColors.labelPrimary : DSColors.labelSecondary
     }
 }
 
@@ -1206,8 +1193,11 @@ struct RequestLogTableRow: View {
     let log: RequestLog
     let rowIndex: Int
     let isSelected: Bool
+    /// Whether the table has focus. A selected row in a focused table is filled with the accent and
+    /// its text turns white; otherwise the selection is the quiet inactive fill, as in AppKit.
+    var isEmphasized = true
     var compact = false
-    /// The live table supplies its measured Path width; standalone rows may size it naturally.
+    /// The live table supplies its measured Path width; standalone rows size it naturally.
     var pathWidth: CGFloat? = nil
     var onCreateEndpoint: ((HTTPMethod, String) -> Void)?
     var onSaveAsMock: ((UUID) -> Void)? = nil
@@ -1222,92 +1212,68 @@ struct RequestLogTableRow: View {
     let onSelect: (RequestLogDrawerView.SelectionModifier) -> Void
     @State private var isHovered = false
 
-    /// What a capture acts on: the whole selection when this row belongs to a multi-row one, and
-    /// otherwise just this row.
-    ///
-    /// Right-clicking a row *outside* the selection must not act on the selection — that would be a
-    /// menu doing something to rows the pointer is nowhere near, which is how people lose work they
-    /// spent a minute picking.
+    /// What a capture acts on: the whole selection when this row belongs to a multi-row one,
+    /// otherwise just this row. A right-click outside the selection never acts on the selection.
     private var capturable: [RequestLog] {
         selection.count > 1 && selection.contains(where: { $0.id == log.id }) ? selection : [log]
     }
 
+    private var isProminent: Bool { isSelected && isEmphasized }
+
     var body: some View {
         HStack(spacing: 0) {
-            // Method
-            // Keyed by the log entry, not by the method: every GET row shared one identifier when the
-            // badge defaulted to the method name, so a query for it resolved to an arbitrary row.
-            DSMethodBadge(method: log.method.rawValue, size: .compact, identifier: log.id.uuidString)
-                .frame(width: compact ? LogColumns.compactMethod : LogColumns.method, alignment: .leading)
-
-            // Path
-            Text(log.path)
-                .font(DSTypography.codePath)
-                .foregroundStyle(DSColors.labelPrimary)
+            Text(log.timestamp, format: RequestLogQuery.timestampFormat)
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(ink(DSColors.labelSecondary))
                 .lineLimit(1)
-                .frame(width: pathWidth, alignment: .leading)
-                .frame(maxWidth: pathWidth == nil ? .infinity : nil, alignment: .leading)
+                .cell(width: LogColumns.time)
 
-            // Endpoint — or, when none matched, what did answer. A bare em dash here used to mean
-            // both "unconfigured" and "a journey answered", which is exactly the distinction someone
-            // debugging a missing mock needs.
-            //
-            // No per-cell `.accessibilityIdentifier` on this cell or the scenario one: the row
-            // composes with `.accessibilityElement(children: .ignore)`, which swallows its children
-            // whole, so an identifier down here names an element nothing can ever find. What those
-            // two cells say is in `spokenLabel` instead, where a reader can hear it.
+            // Keyed by the log entry, not the method, so every GET row has its own identifier.
+            DSMethodLabel(log.method.rawValue, fixedWidth: false, identifier: log.id.uuidString)
+                .cell(width: LogColumns.method)
+
+            Text(log.path)
+                .font(DSTypography.code)
+                .foregroundStyle(ink(DSColors.labelPrimary))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .cell(width: pathWidth)
+
+            // `nil` is a transport failure, which the label draws as "Failed" in the error colour.
+            DSStatusLabel(statusCode: log.responseStatusCode)
+                .cell(width: LogColumns.status)
+
             if !compact {
-                endpointCell
-                    .frame(width: LogColumns.endpoint, alignment: .leading)
-
-            // Scenario
-                Text(scenarioName ?? "\u{2014}")
-                    .font(DSTypography.meta)
-                    .foregroundStyle(scenarioName != nil ? DSColors.accentText : DSColors.labelTertiary)
+                // No per-cell identifiers: the row ignores its children for accessibility, and
+                // what these cells say is in `spokenLabel`.
+                scenarioCell
+                    .font(DSTypography.callout)
                     .lineLimit(1)
-                    .frame(width: LogColumns.scenario, alignment: .leading)
+                    .cell(width: LogColumns.scenario)
+
+                Text(log.durationMs.map(RequestLogQuery.formattedDuration) ?? "\u{2014}")
+                    .font(DSTypography.Figure.regular)
+                    .foregroundStyle(ink(DSColors.labelSecondary))
+                    .lineLimit(1)
+                    .cell(width: LogColumns.duration, alignment: .trailing)
+
+                Text(RequestLogQuery.formattedSize(for: log) ?? "\u{2014}")
+                    .font(DSTypography.Figure.regular)
+                    .foregroundStyle(ink(DSColors.labelSecondary))
+                    .lineLimit(1)
+                    .cell(width: LogColumns.size, alignment: .trailing)
             }
-
-            // Status code pill
-            statusPill
-                .frame(width: compact ? LogColumns.compactStatus : LogColumns.status, alignment: .leading)
-
-            // Time
-            // Seconds, and monospaced digits.
-            //
-            // `style: .time` is hours and minutes, so a burst of requests — which is what a mock
-            // server produces — gave every row the identical "12:38". The one job this column has is
-            // letting you match a row against the tap you just made, and without seconds it could
-            // not do it. `.dateTime` rather than a `DateFormatter` so the 12/24-hour choice stays the
-            // reader's locale rather than this file's opinion.
-            //
-            // A timestamp is supporting context, so use the caption size. Monospaced digits keep
-            // a burst of adjacent times aligned without widening this fixed column.
-            Text(log.timestamp, format: .dateTime.hour().minute().second())
-                .font(DSTypography.caption.monospacedDigit())
-                .foregroundStyle(DSColors.labelSecondary)
-                .frame(width: LogColumns.time, alignment: .leading)
         }
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: LogRow.height)
+        .frame(height: DSRowHeight.table)
         .background(rowBackground)
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Rectangle()
-                    .fill(DSColors.accent)
-                    .frame(width: 2)
-            }
-        }
+        // Method and status labels turn white on the accent fill.
+        .environment(\.backgroundProminence, isProminent ? .increased : .standard)
+        .padding(.horizontal, LogColumns.tableInset)
         .contentShape(Rectangle())
         .onTapGesture { onSelect(.current) }
         .onHover { isHovered = $0 }
-        // One element with one spoken label, exactly as `EndpointTrafficRow` forms itself — this
-        // was the only interactive row in the window that composed none: a bare `.isButton` over
-        // six loose cells, which VoiceOver read as six fragments ("GET method", "/api/orders",
-        // "Unmatched"…) with nothing saying they were one request. The traits come after the
-        // element is formed, because a trait added to the children is a trait the element has
-        // already passed over — and the row is a tap target rather than a `Button` in the first
-        // place because a button would swallow the modifier chords the selection depends on.
+        // One element with one spoken label; traits come after the element is formed. A tap target
+        // rather than a `Button`, because a button would swallow the modifier chords selection uses.
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(rowTraits)
         .accessibilityIdentifier("requestLog-\(log.id.uuidString)")
@@ -1319,15 +1285,7 @@ struct RequestLogTableRow: View {
                 isSelected: isSelected
             )
         )
-        // The menu attaches after the element is formed, exactly as the scenario row orders it —
-        // and here that ordering is load-bearing, not stylistic. This menu used to sit before the
-        // `.accessibilityElement(children: .ignore)` above, which collapses the accessibility of
-        // everything beneath it: the menu still opened for a pointer, but its items surfaced
-        // through the swallowed subtree and so never existed as elements. VoiceOver lost the menu,
-        // and the UI test that opens it read "no menu appeared" — deterministically, on every run,
-        // which spent five CI rounds masquerading as a flaky modifier. Attached out here, the open
-        // menu's items are ordinary elements again. It also widens the right-click target from the
-        // padded content to the full row frame, matching where the row already takes a left click.
+        // Attached after the element is formed, so the menu's items stay reachable as elements.
         .alert("Save real response as mock?", isPresented: $showingSaveConfirmation) {
             Button("Save mock") { onSaveAsMock?(log.id) }
                 .accessibilityIdentifier("requestLog.confirmSaveMock")
@@ -1337,8 +1295,6 @@ struct RequestLogTableRow: View {
             Text("The saved response may contain private data. Review its body before sharing the project.")
         }
         .contextMenu {
-            // Going from "this call is unmocked" to "it is mocked now" should not require retyping
-            // the method and path into a sheet.
             if log.outcome.isMissingConfiguration, let onCreateEndpoint {
                 Button {
                     onCreateEndpoint(log.method, RequestLogQuery.mockablePath(from: log.path))
@@ -1357,9 +1313,7 @@ struct RequestLogTableRow: View {
                     .accessibilityLabel("Save real response as mock")
             }
 
-            // A request a journey already answered is by definition in one, so offering to add it
-            // again would only produce a duplicate step. Filtered rather than refused, because a
-            // selection spanning a session is very likely to contain a few of them.
+            // A journey-answered request is already in one; offering it again would duplicate a step.
             let targets = capturable.filter { $0.outcome != .journey }
             if !targets.isEmpty, onAddToJourney != nil || onAddToNewJourney != nil {
                 Menu(targets.count == 1 ? "Add to journey" : "Add \(targets.count) requests to journey") {
@@ -1388,6 +1342,49 @@ struct RequestLogTableRow: View {
         }
     }
 
+    /// White on the accent selection, the given colour otherwise.
+    private func ink(_ color: Color) -> Color {
+        isProminent ? .white : color
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return isEmphasized ? DSColors.accent : DSColors.selectionInactive }
+        if isHovered { return DSColors.hover }
+        return rowIndex % 2 == 0 ? .clear : DSColors.zebra
+    }
+
+    /// The scenario that answered or, when none did, what did: unmatched in the warning colour,
+    /// a journey, the real backend, or a failure.
+    @ViewBuilder
+    private var scenarioCell: some View {
+        if let scenarioName {
+            Text(scenarioName)
+                .foregroundStyle(ink(DSColors.labelPrimary))
+        } else {
+            switch log.outcome {
+            case .unmatched:
+                Text(RequestOutcome.unmatched.label)
+                    .foregroundStyle(ink(DSColors.warning))
+            case .blockedByJourney:
+                Text(RequestOutcome.blockedByJourney.label)
+                    .foregroundStyle(ink(DSColors.warning))
+            case .journey:
+                Text(RequestOutcome.journey.label)
+                    .foregroundStyle(ink(DSColors.accent))
+            case .proxyFailure:
+                Text(RequestOutcome.proxyFailure.label)
+                    .foregroundStyle(ink(DSColors.error))
+            case .passthrough:
+                Text(log.backendName ?? RequestOutcome.passthrough.label)
+                    .foregroundStyle(ink(DSColors.labelSecondary))
+            case .endpoint:
+                // An endpoint answered and has since been renamed or deleted, or no scenario resolved.
+                Text(endpointName ?? "\u{2014}")
+                    .foregroundStyle(ink(endpointName == nil ? DSColors.labelTertiary : DSColors.labelPrimary))
+            }
+        }
+    }
+
     /// `.isButton` always, and `.isSelected` while the row is in the selection.
     ///
     /// Both halves of the selection are needed and they answer different questions. The trait is the
@@ -1404,64 +1401,6 @@ struct RequestLogTableRow: View {
         isSelected ? [.isButton, .isSelected] : .isButton
     }
 
-    private var rowBackground: Color {
-        if isSelected { return DSColors.accentSubtle }
-        if isHovered { return DSColors.accentSubtle.opacity(0.6) }
-        return rowIndex % 2 == 0 ? .clear : DSColors.rowStripe
-    }
-
-    @ViewBuilder
-    private var endpointCell: some View {
-        if let endpointName {
-            Text(endpointName)
-                .font(DSTypography.meta)
-                .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-        } else {
-            switch log.outcome {
-            case .unmatched:
-                Text(RequestOutcome.unmatched.label)
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.httpStatusColor(for: 404))
-                    .lineLimit(1)
-            case .blockedByJourney:
-                Text(RequestOutcome.blockedByJourney.label)
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-            case .journey:
-                Text(RequestOutcome.journey.label)
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.accentText)
-                    .lineLimit(1)
-            case .proxyFailure:
-                Text(RequestOutcome.proxyFailure.label)
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.destructive)
-                    .lineLimit(1)
-            case .passthrough:
-                Text((log.backendName.map { $0 + " · " } ?? "") + RequestOutcome.passthrough.label)
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.success)
-                    .lineLimit(1)
-            case .endpoint:
-                // An endpoint answered but has since been renamed or deleted.
-                Text("\u{2014}")
-                    .font(DSTypography.meta)
-                    .foregroundStyle(DSColors.labelTertiary)
-            }
-        }
-    }
-
-    /// `DSStatusPill` carries the whole convention — the `>= 400` fill gate, the text-variant
-    /// colours, and the failure arm. The last one is why this is a component and not a pattern:
-    /// this row used to spell a failed request `log.responseStatusCode ?? 0` and drew a bare grey
-    /// `0` with no fill — a status no server ever sent, styled as ordinary — while
-    /// `EndpointTrafficRow` rendered the same log as a filled destructive em dash. The em dash is
-    /// the defended treatment, and the row now inherits it instead of re-deciding it.
-    private var statusPill: some View {
-        DSStatusPill(statusCode: log.responseStatusCode)
-    }
 
     /// What VoiceOver reads for the row: the request, what came back, what answered it, and whether
     /// it is in the selection. `static` so `WorkspaceFeatureTests` can hold every arm without
@@ -1515,5 +1454,16 @@ struct RequestLogTableRow: View {
         }
 
         return label
+    }
+}
+// MARK: - Cell geometry
+
+private extension View {
+    /// One table cell: `DSSpacing.sm` inside a fixed column, or the natural width when `nil`.
+    func cell(width: CGFloat?, alignment: Alignment = .leading) -> some View {
+        self
+            .padding(.horizontal, DSSpacing.sm)
+            .frame(width: width, alignment: alignment)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: alignment)
     }
 }

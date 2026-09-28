@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// A 4pt grid. Prefer the nearest step; add a step only for a recurring layout need.
-public enum DSSpacing {
+nonisolated public enum DSSpacing {
     /// 2pt — hairline adjustments inside a control.
     public static let xxs: CGFloat = 2
     /// 4pt — between a glyph and its label, between list rows.

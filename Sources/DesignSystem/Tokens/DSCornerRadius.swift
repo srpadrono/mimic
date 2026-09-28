@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// Corner radii. Controls and rows use ``field``, containers ``panel``, sheets ``sheet``; buttons are
 /// capsules and need no token.
-public enum DSCornerRadius {
+nonisolated public enum DSCornerRadius {
     /// 4pt — marks inside a row: a checkbox, a chart bar.
     public static let mark: CGFloat = 4
     /// 7pt — fields, list rows, pop-up buttons.
