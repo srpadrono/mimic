@@ -1614,15 +1614,17 @@ final class JourneyEditorUITests: MimicUITestCase {
         launchWithProject()
         showJourneysNavigator()
 
-        journeys.addButton.click()
+        // Through the same helper as `addTemplate`: AppKit can drop a click on a menu item that
+        // was only just hovered, and the helper retries that missed selection.
         XCTAssertTrue(
-            journeys.templateMenuItem.waitForExistence(timeout: 5),
-            "The add menu should offer templates"
-        )
-        journeys.templateMenuItem.click()
-        XCTAssertTrue(
-            templatePicker.addButton.waitForExistence(timeout: 5),
-            "The template picker should open"
+            UITestApp.chooseFromSubmenu(
+                in: app,
+                parent: journeys.addButton,
+                item: journeys.templateMenuItem,
+                thenAwait: templatePicker.addButton,
+                reopenMenu: {}
+            ),
+            "The add menu should open the template picker"
         )
 
         // Title and step count, which is the row's whole content — the shelf is meant to be readable
