@@ -182,6 +182,10 @@ final class AppState {
         set { projects.setCurrentProject(newValue, isRestoring: false) }
     }
     var recentProjects: [RecentProjectEntry] { projects.recentProjects }
+    var showsWelcomeOnLaunch: Bool {
+        get { projects.showsWelcomeOnLaunch }
+        set { projects.showsWelcomeOnLaunch = newValue }
+    }
     var autosaveStatus: AutosaveStatus { projects.autosaveStatus }
 
     // MARK: - Journeys
@@ -238,7 +242,10 @@ final class AppState {
             _ = self.savePassedThroughLogAsMock(id: log.id)
         }
         bindProjectWorkspace()
-        _ = projects.loadLastOpenedProject()
+        // A headless daemon has no welcome window to show, so it always restores.
+        if !projects.showsWelcomeOnLaunch || HeadlessMode.isEnabled {
+            _ = projects.loadLastOpenedProject()
+        }
     }
 
     /// Production composition root — wires GRDB persistence and the live recent-projects store.
@@ -921,6 +928,20 @@ final class AppState {
             let stored = await projects.importProject(document)
             guard stored, activate else { return }
             openProjectAdmitted(id: document.id)
+        }
+    }
+
+    /// Stores a fresh copy of the sample project and opens it, the way an opened export is.
+    func openSampleProject() {
+        guard !updates.isPreparingInstallation else { return }
+        do {
+            let sample = try SampleProject.make()
+            lastCommandError = nil
+            importProject(sample, activate: true)
+        } catch let error as ControlError {
+            lastCommandError = error.message
+        } catch {
+            lastCommandError = "The sample project could not be created: \(error.localizedDescription)"
         }
     }
 

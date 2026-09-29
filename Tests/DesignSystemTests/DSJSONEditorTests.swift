@@ -294,6 +294,50 @@ struct DSJSONEditorSizingTests {
     }
 }
 
+@Suite("DSJSONEditor highlighting")
+struct DSJSONEditorHighlightingTests {
+
+    /// Tokenises one line the way the editor's grammar does: one leftmost scan over the string
+    /// alternative, then the key alternative, resuming after each match.
+    private func tokens(in line: String) throws -> (keys: [String], strings: [String]) {
+        let regex = try Regex(
+            "(\(DSJSONEditor.jsonStringPattern))|(\(DSJSONEditor.jsonKeyPattern))"
+        )
+        var keys: [String] = []
+        var strings: [String] = []
+        for match in line.matches(of: regex) {
+            if let string = match.output[1].substring {
+                strings.append(String(string))
+            } else if let key = match.output[2].substring {
+                keys.append(String(key))
+            }
+        }
+        return (keys, strings)
+    }
+
+    @Test("A key is claimed by the key pattern and not by the string pattern")
+    func keysAreNotStrings() throws {
+        let found = try tokens(in: #"  "name": "Ada", "age" : 36, "tag":"x:y""#)
+
+        #expect(found.keys == [#""name""#, #""age""#, #""tag""#])
+        #expect(found.strings == [#""Ada""#, #""x:y""#])
+    }
+
+    @Test("An escaped quote does not end a key early")
+    func escapedQuoteStaysInsideTheKey() throws {
+        let found = try tokens(in: #""say \"hi\"": "ok""#)
+
+        #expect(found.keys == [#""say \"hi\"""#])
+        #expect(found.strings == [#""ok""#])
+    }
+
+    @Test("Keys use the key ink, not the string ink")
+    func keyInkDiffersFromStringInk() {
+        #expect(DSColors.Syntax.keyDarkInk.nsColor() != DSColors.Syntax.stringDarkInk.nsColor())
+        #expect(DSColors.Syntax.keyLightInk.nsColor() != DSColors.Syntax.stringLightInk.nsColor())
+    }
+}
+
 @Suite("DSColors")
 struct DSColorsTests {
 

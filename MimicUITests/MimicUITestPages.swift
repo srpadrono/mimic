@@ -13,6 +13,12 @@ struct WelcomePage {
     private var heroTitleByLabel: XCUIElement { app.staticTexts["Mimic"].firstMatch }
     var newProjectButton: XCUIElement { app.buttons["newProjectButton"] }
     var openExportButton: XCUIElement { app.buttons["welcome.openExport"] }
+    /// A menu button (HAR file… / OpenAPI spec…), so matched across element types.
+    var importMenu: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "welcome.import").firstMatch
+    }
+    var sampleProjectButton: XCUIElement { app.buttons["welcome.sampleProject"] }
+    var showOnLaunchCheckbox: XCUIElement { app.checkBoxes["welcome.showOnLaunch"] }
     private var noRecentProjectsLabelByIdentifier: XCUIElement {
         app.staticTexts["ds.empty.welcome.recents.heading"]
     }
@@ -432,7 +438,10 @@ struct NewEndpointSheetPage {
     let app: XCUIApplication
 
     var nameField: XCUIElement { app.textFields["newEndpoint.nameField"] }
-    var methodPicker: XCUIElement { app.popUpButtons["newEndpoint.methodPicker"] }
+    /// A menu button, not a pop-up: matched across element types by its identifier.
+    var methodPicker: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "newEndpoint.methodPicker").firstMatch
+    }
     var pathField: XCUIElement { app.textFields["newEndpoint.pathField"] }
     var createButton: XCUIElement { app.buttons["newEndpoint.createButton"] }
     var cancelButton: XCUIElement { app.buttons["newEndpoint.cancelButton"] }

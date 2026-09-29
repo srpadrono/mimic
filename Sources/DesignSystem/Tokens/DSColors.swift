@@ -167,6 +167,17 @@ public nonisolated enum DSColors {
         }
     }
 
+    // MARK: - Project tiles
+
+    /// The monogram tiles in the welcome window's project list. White text sits on all four in both
+    /// appearances, so they do not adapt; a project keeps its colour for as long as it keeps its id.
+    public static let projectTiles: [Color] = [
+        Color(light: Ink(0x0A84FF), dark: Ink(0x0A84FF)),
+        Color(light: Ink(0x34A853), dark: Ink(0x34A853)),
+        Color(light: Ink(0xAF52DE), dark: Ink(0xAF52DE)),
+        Color(light: Ink(0xFF9F0A), dark: Ink(0xFF9F0A)),
+    ]
+
     // MARK: - Methods
 
     /// Method text colour. Hue and lightness both differ, so methods stay apart without colour.

@@ -21,6 +21,10 @@ final class ProjectWorkspace {
         }
     }
     var recentProjects: [RecentProjectEntry] = []
+    /// The welcome window's "Show this window when Mimic opens". Stored beside the recents list.
+    var showsWelcomeOnLaunch = false {
+        didSet { recentProjectsStore.showsWelcomeOnLaunch = showsWelcomeOnLaunch }
+    }
     var autosaveStatus: AutosaveStatus = .idle
     var isRestoringProject = false
     var onCurrentProjectChanged: ((MockProject?) -> Void)?
@@ -124,6 +128,7 @@ final class ProjectWorkspace {
     ) {
         self.projectRepository = projectRepository
         self.recentProjectsStore = recentProjectsStore
+        showsWelcomeOnLaunch = recentProjectsStore.showsWelcomeOnLaunch
         // The cache synchronously, so the window has something to draw on its first frame; the store
         // a moment later, which is what actually decides the list.
         recentProjects = recentProjectsStore.load()
@@ -330,7 +335,10 @@ final class ProjectWorkspace {
                 scheduleSavedStatusClear()
                 recentProjects = recentProjects.map { entry in
                     guard entry.id == id else { return entry }
-                    return RecentProjectEntry(id: id, name: project.name, lastOpenedAt: entry.lastOpenedAt)
+                    return RecentProjectEntry(
+                        id: id, name: project.name, lastOpenedAt: entry.lastOpenedAt,
+                        summary: RecentProjectEntry.Summary(project: project)
+                    )
                 }
                 refreshProjectList()
                 return .success(())
@@ -508,6 +516,13 @@ final class ProjectWorkspace {
         // Through ``setCurrentProject(_:isRestoring:)`` for the generation bump: a close must
         // supersede an open still in flight, or its load re-populates the window just cleared.
         setCurrentProject(nil, isRestoring: false)
+        // The welcome list's summary line counts endpoints and journeys, and edits made while the
+        // project was open do not refresh it. Read the store again once the flush has landed.
+        let pendingWrites = storeWrites
+        Task { @MainActor [weak self] in
+            await pendingWrites?.value
+            self?.refreshProjectList()
+        }
     }
 
     /// Waits for every store write already asked for — lifecycle writes and autosaves alike.
@@ -794,7 +809,8 @@ final class ProjectWorkspace {
             return RecentProjectEntry(
                 id: entry.id,
                 name: project.name,
-                lastOpenedAt: entry.lastOpenedAt
+                lastOpenedAt: entry.lastOpenedAt,
+                summary: RecentProjectEntry.Summary(project: project)
             )
         }
 
@@ -804,7 +820,12 @@ final class ProjectWorkspace {
         let forgotten = stored
             .filter { !remembatedIDs.contains($0.id) }
             .sorted { $0.modifiedAt > $1.modifiedAt }
-            .map { RecentProjectEntry(id: $0.id, name: $0.name, lastOpenedAt: $0.modifiedAt) }
+            .map {
+                RecentProjectEntry(
+                    id: $0.id, name: $0.name, lastOpenedAt: $0.modifiedAt,
+                    summary: RecentProjectEntry.Summary(project: $0)
+                )
+            }
 
         return remembered + forgotten
     }

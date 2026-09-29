@@ -46,6 +46,8 @@ struct NewProjectSheet: View {
 
     @State private var form: NewProjectFormState
     @FocusState private var focusedField: Field?
+    /// Whether the typed port can be bound right now; `nil` while the port is not a valid number.
+    @State private var portIsAvailable: Bool?
 
     public init(onConfirm: @escaping (String, Int) -> Void) {
         self.init(initialProjectName: "", initialPortString: "8080", onConfirm: onConfirm)
@@ -84,19 +86,34 @@ struct NewProjectSheet: View {
                 .onSubmit { confirmIfValid() }
 
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                    DSTextField(
-                        "Port",
-                        text: $form.portString,
-                        placeholder: "8080",
-                        validation: portValidationMessage,
-                        validationIdentifier: "newProject.port.error",
-                        controlWidth: DSFormMetrics.portFieldWidth,
-                        inputIdentifier: "serverPortField",
-                        monospaced: true,
-                        identifier: "newProject.port"
-                    )
-                    .focused($focusedField, equals: .port)
-                    .onSubmit { confirmIfValid() }
+                    DSFormRow("Port", alignment: .top) {
+                        HStack(alignment: .top, spacing: DSSpacing.md) {
+                            DSTextField(
+                                "Port",
+                                text: $form.portString,
+                                placeholder: "8080",
+                                validation: portValidationMessage,
+                                validationIdentifier: "newProject.port.error",
+                                controlWidth: DSFormMetrics.portFieldWidth,
+                                inputIdentifier: "serverPortField",
+                                monospaced: true,
+                                labelPlacement: .hidden,
+                                identifier: "newProject.port"
+                            )
+                            .focused($focusedField, equals: .port)
+                            .onSubmit { confirmIfValid() }
+
+                            if let portIsAvailable {
+                                DSAvailabilityLabel(
+                                    isAvailable: portIsAvailable,
+                                    identifier: "newProject.port.availability"
+                                )
+                                // Centred on the 28pt field rather than on the row, which grows
+                                // when a validation message appears under the field.
+                                .frame(height: DSControlHeight.large)
+                            }
+                        }
+                    }
 
                     DSFormHint(portHint)
                         .accessibilityIdentifier("newProject.port.hint")
@@ -134,6 +151,18 @@ struct NewProjectSheet: View {
         .frame(width: DSSheetWidth.compact)
         .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
+        // Re-probed as the port is typed, after a pause so each keystroke is not a bind.
+        .task(id: form.portString) {
+            guard form.isPortValid, let port = form.portValue else {
+                portIsAvailable = nil
+                return
+            }
+            if portIsAvailable != nil {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            portIsAvailable = PortProbe.isAvailable(port)
+        }
     }
 
     /// Where the app under test should point, once the port is usable.
