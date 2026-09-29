@@ -40,7 +40,6 @@ struct EndpointEditorView: View {
     @State private var statusCodeError: String?
     @State private var delayError: String?
     @State private var formatCandidate: (source: String, output: String)?
-    @State private var methodLabelWidth: CGFloat = 0
     @State private var showDeleteConfirmation = false
     @State private var renameScenarioTarget: Scenario?
     @State private var didCopyURL = false
@@ -258,7 +257,6 @@ struct EndpointEditorView: View {
         .overlay(alignment: .leading) {
             DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
                 .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { methodLabelWidth = $0 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -267,9 +265,15 @@ struct EndpointEditorView: View {
         .accessibilityLabel("Endpoint actions, \(endpoint.method.rawValue)")
     }
 
-    /// The method, the gap and the chevron's slot.
+    /// The method, the gap and the chevron's slot. Measured from the method's font rather than read
+    /// back from layout: the pop-up button takes its size from the label's first frame and keeps it,
+    /// so a width that arrived a pass later left the click target at the chevron alone.
     private var endpointMenuWidth: CGFloat {
-        methodLabelWidth + DSSpacing.xs + DSGlyph.disclosure
+        let method = endpoint.method.rawValue.uppercased()
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold) // `DSTypography.method`
+        let text = (method as NSString).size(withAttributes: [.font: font]).width
+        let tracking = 0.2 * CGFloat(method.count)
+        return (text + tracking).rounded(.up) + DSSpacing.xs + DSGlyph.disclosure
     }
 
     // MARK: - Scenario
