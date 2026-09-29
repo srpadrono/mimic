@@ -350,15 +350,20 @@ struct WorkspacePage {
     /// left edge — every click on the navigator then landed off screen and did nothing.
     func fillWindow() {
         if Self.isFilled(app.windows.firstMatch.frame) { return }
-        app.menuBars.menuBarItems["Window"].click()
-        let fill = app.menuItems["Fill"]
-        if fill.waitForExistence(timeout: 3) {
-            fill.click()
-        } else {
-            // The Window menu can open before its window items are populated. Globe-Control-F is
-            // the system's own Fill shortcut.
-            UITestApp.dismissAnyOpenMenu(in: app)
-            app.typeKey("f", modifierFlags: [.function, .control])
+        // The system's Fill shortcut (Globe-Control-F) first. Driving Window ▸ Fill by mouse fails
+        // intermittently on CI: AppKit rebuilds the menu's window items while it opens, and the
+        // item the test found is gone by the time it is clicked.
+        app.typeKey("f", modifierFlags: [.function, .control])
+        let filledByShortcut = UITestApp.waitUntil(timeout: 3) { Self.isFilled(app.windows.firstMatch.frame) }
+        if !filledByShortcut {
+            app.menuBars.menuBarItems["Window"].click()
+            let fill = app.menuItems["Fill"]
+            if fill.waitForExistence(timeout: 3) {
+                UITestApp.waitForStableFrame(fill)
+                fill.click()
+            } else {
+                UITestApp.dismissAnyOpenMenu(in: app)
+            }
         }
         _ = UITestApp.waitUntil(timeout: 5) { Self.isFilled(app.windows.firstMatch.frame) }
         UITestApp.waitForStableFrame(app.windows.firstMatch)
@@ -457,12 +462,14 @@ struct WorkspacePage {
     func compactWindow(file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch
         let before = window.frame
-        if tileWindow(to: ["Top Right", "Right"]) {
-            // On a small display the window is already under 1180pt, so wait for the move itself too.
-            _ = UITestApp.waitUntil(timeout: 5) {
-                let frame = window.frame
-                return frame.width < 1180 && frame != before
-            }
+        // Tile to the right half with the system shortcut (Globe-Control-Right), which keeps the
+        // native overflow popup inside the window screenshot. Not through Window ▸ Move & Resize:
+        // AppKit rebuilds that submenu while it opens and the item a test found is gone by the
+        // time it is hovered or clicked.
+        app.typeKey(.rightArrow, modifierFlags: [.function, .control])
+        _ = UITestApp.waitUntil(timeout: 3) {
+            let frame = window.frame
+            return frame.width < 1180 && frame != before
         }
         if window.frame.width >= 1180 || window.frame == before {
             dragWindowToMinimumWidth()
@@ -473,31 +480,6 @@ struct WorkspacePage {
             file: file, line: line
         )
         UITestApp.waitForStableFrame(window)
-    }
-
-    /// Chooses the first of `titles` under Window ▸ Move & Resize. False when none is offered.
-    private func tileWindow(to titles: [String]) -> Bool {
-        app.menuBars.menuBarItems["Window"].click()
-        let moveAndResize = app.menuItems["Move & Resize"].firstMatch
-        guard moveAndResize.waitForExistence(timeout: 2) else {
-            UITestApp.dismissAnyOpenMenu(in: app)
-            return false
-        }
-        // Hovered, not clicked. A click on a submenu parent hovers it, which opens the submenu, and
-        // then looks the parent up again to press it; by then AppKit has rebuilt the Window menu's
-        // system items and the lookup fails ("No matches found" for Move & Resize). Hovering opens
-        // the submenu without that second lookup.
-        UITestApp.waitForStableFrame(moveAndResize)
-        moveAndResize.hover()
-        for title in titles {
-            let item = app.menuItems[title].firstMatch
-            if item.waitForExistence(timeout: 2) {
-                item.click()
-                return true
-            }
-        }
-        UITestApp.dismissAnyOpenMenu(in: app)
-        return false
     }
 
     /// Drags the bottom-right resize corner a full window width to the left; AppKit stops the
