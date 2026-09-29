@@ -92,16 +92,36 @@ struct WorkspaceFeatureRenderingTests {
     @Test("The server summary keeps one height across lifecycle and width stages")
     func serverSummaryKeepsItsHeight() {
         let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
-        let stages: [(compact: Bool, iconOnly: Bool)] = [(false, false), (true, false), (true, true)]
-        for stage in stages {
+        for compact in [false, true] {
             for state in states {
                 let well = render(ServerStatusWell(
                     serverState: state, projectName: "Toolbar Review", requestCount: 12,
-                    unmatchedCount: 2, compact: stage.compact, iconOnly: stage.iconOnly
+                    unmatchedCount: 2, compact: compact
                 ))
                 #expect(well.height == 32)
             }
         }
+    }
+
+    /// A narrow toolbar drops the counts from the capsule, never the state word: a dot alone is
+    /// 7pt plus the inset, and "Running" needs several times that.
+    @Test("A narrow server summary keeps its state word")
+    func narrowServerSummaryKeepsItsStateWord() {
+        let full = render(ServerStatusWell(
+            serverState: .running(port: 62130), projectName: "Toolbar Review",
+            requestCount: 142, unmatchedCount: 3
+        ))
+        let narrow = render(ServerStatusWell(
+            serverState: .running(port: 62130), projectName: "Toolbar Review",
+            requestCount: 142, unmatchedCount: 3, compact: true
+        ))
+        let stopped = render(ServerStatusWell(
+            serverState: .stopped, projectName: "Toolbar Review",
+            requestCount: 0, unmatchedCount: 0, compact: true
+        ))
+        #expect(narrow.width < full.width)
+        #expect(narrow.width > 60)
+        #expect(stopped.width > 60)
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.

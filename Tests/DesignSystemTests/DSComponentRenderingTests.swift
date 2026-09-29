@@ -296,15 +296,6 @@ struct DSComponentRenderingTests {
         #expect(DSPanelHeader<EmptyView>.height == 40)
     }
 
-    /// The inspector's header is the same 44pt bar as the toolbar and the navigator, so all three
-    /// columns start their content at one y.
-    @Test("The inspector header is the toolbar's height")
-    func inspectorHeaderMatchesTheToolbar() {
-        let measure = CGSize(width: 300, height: 120)
-        let header = render(DSInspectorHeader { Text("Scenarios") }, size: measure)
-        #expect(header.height == 44)
-    }
-
     /// Counts sit inside their segment rather than beside the control, so a segment gaining a count
     /// does not change the control's height, and the control stays on the 24pt panel rung.
     @Test("A segmented control is 24pt tall, with or without counts")
@@ -613,7 +604,6 @@ struct DSComponentRenderingTests {
         // The relationships the comments claim, stated where they can fail: the panels share the
         // column bar, and a panel header stands on the ladder rather than owning its own number.
         #expect(DSPanelHeader<EmptyView>.height == DSBarHeight.paneHeader)
-        #expect(DSInspectorMetrics.headerHeight == DSBarHeight.column)
         #expect(DSInspectorMetrics.footerHeight == DSBarHeight.footer)
         #expect(DSNavigatorMetrics.footerHeight == DSBarHeight.footer)
         #expect(DSNavigatorMetrics.rowHeight == DSRowHeight.list)

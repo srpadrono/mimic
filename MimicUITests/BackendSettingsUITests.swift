@@ -319,7 +319,11 @@ final class BackendSettingsUITests: MimicUITestCase {
         compactShot.lifetime = .keepAlways
         add(compactShot)
         workspace.fillWindow()
-        if !InspectorPage(app: app).header.exists {
+        // An empty project shows no inspector. An endpoint gives it something to show, and the
+        // Journeys navigator (⌘2), with no journey selected, leaves it on the project overview.
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        app.typeKey("2", modifierFlags: .command)
+        if !InspectorPage(app: app).header.waitForExistence(timeout: 5) {
             workspace.toggleInspectorButton.click()
         }
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primary) })

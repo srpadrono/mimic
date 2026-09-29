@@ -10,8 +10,8 @@ struct ServerStatusWell: View {
     let projectName: String?
     let requestCount: Int
     let unmatchedCount: Int
+    /// Narrow toolbars keep the state word and drop the request counts.
     var compact = false
-    var iconOnly = false
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
     var onShowUnmatched: (() -> Void)?
@@ -62,7 +62,7 @@ struct ServerStatusWell: View {
     var body: some View {
         Button { showingDetails.toggle() } label: {
             summary
-                .padding(.horizontal, iconOnly ? DSSpacing.xs : DSSpacing.sm)
+                .padding(.horizontal, compact ? Self.compactInset : Self.inset)
                 .frame(height: DSControlHeight.prominent)
                 .contentShape(.capsule)
         }
@@ -81,20 +81,23 @@ struct ServerStatusWell: View {
         .onDisappear { copyResetTask?.cancel() }
     }
 
-    /// The capsule's content: state, then counts while there is room for them.
+    /// The capsule's inner inset and the gap between its parts, as the design draws them.
+    private static let inset = DSSpacing.md + DSSpacing.xxs
+    private static let compactInset = DSSpacing.sm + DSSpacing.xxs
+    private static let partSpacing = DSSpacing.sm + DSSpacing.xxs
+
+    /// The capsule's content: the state word, then the counts while there is room for them.
     @ViewBuilder
     private var summary: some View {
-        HStack(spacing: DSSpacing.sm) {
+        HStack(spacing: Self.partSpacing) {
             stateLabel
-            if !iconOnly, isRunning, !restartRequired {
-                if !compact {
-                    separatorDot
-                    Text(Self.requestCountShort(requestCount))
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelSecondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
+            if !compact, isRunning, !restartRequired {
+                separatorDot
+                Text(Self.requestCountShort(requestCount))
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
                 if unmatchedCount > 0 {
                     separatorDot
                     DSStatusLabel("\(unmatchedCount) unmatched", color: DSColors.warning)
@@ -108,24 +111,29 @@ struct ServerStatusWell: View {
     private var stateLabel: some View {
         switch serverState {
         case .starting, .stopping:
-            HStack(spacing: DSSpacing.sm) {
+            HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
                 ProgressView()
                     .controlSize(.mini)
                     .frame(width: 10, height: 10)
-                if !iconOnly {
-                    Text(Self.shortState(serverState))
-                        .font(DSTypography.calloutMedium)
-                        .foregroundStyle(DSColors.labelSecondary)
-                }
+                Text(Self.shortState(serverState))
+                    .font(DSTypography.calloutMedium)
+                    .foregroundStyle(DSColors.labelSecondary)
             }
+        case .stopped:
+            // A grey dot and a secondary word: stopped is a state, not a warning.
+            HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
+                Circle()
+                    .fill(DSColors.labelTertiary)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(stateTitle)
+                    .font(DSTypography.calloutMedium)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+            }
+            .fixedSize()
         default:
-            if iconOnly {
-                Circle().fill(statusColor).frame(width: 8, height: 8)
-                    .frame(width: 16, height: 16)
-            } else {
-                DSStatusLabel(stateTitle, color: statusColor)
-                    .foregroundStyle(statusColor)
-            }
+            DSStatusLabel(stateTitle, color: statusColor)
         }
     }
 

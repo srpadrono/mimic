@@ -315,10 +315,12 @@ final class ErrorAlertUITests: MimicUITestCase {
         reopened?.click()
         XCTAssertTrue(workspace.assertVisible(), "The project should reopen")
 
-        let portRow = element(identifier: "inspector.overview.port")
+        // The toolbar's address, under the project name. An empty project shows no inspector, so
+        // its overview is not there to ask.
+        let portRow = workspace.projectKind
         XCTAssertTrue(
             portRow.waitForExistence(timeout: 10),
-            "The inspector's overview should report the project's port"
+            "The toolbar should report the address the project serves on"
         )
         XCTAssertTrue(
             waitForText(portRow, containing: "\(port + 1)"),

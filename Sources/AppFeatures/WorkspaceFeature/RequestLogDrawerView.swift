@@ -488,7 +488,7 @@ struct RequestLogDrawerView: View {
     }
 
     private func headerRow(narrow: Bool, showsCount: Bool, showsScope: Bool) -> some View {
-        HStack(spacing: DSSpacing.sm) {
+        HStack(spacing: DSSpacing.sm + DSSpacing.xxs) {
             Text("Request log")
                 .font(DSTypography.bodySemibold)
                 .foregroundStyle(DSColors.labelPrimary)
@@ -497,18 +497,21 @@ struct RequestLogDrawerView: View {
                 .layoutPriority(1)
                 .accessibilityIdentifier("ds.panelheader.title.requestLog")
 
-            if showsCount, let countSubtitle {
-                Text(countSubtitle)
+            if showsCount, let shownCount {
+                // The bare number, as the design draws it; the spoken label keeps its noun.
+                Text(verbatim: "\(shownCount)")
                     .font(DSTypography.callout)
                     .monospacedDigit()
                     .foregroundStyle(DSColors.labelTertiary)
                     .lineLimit(1)
+                    .help(Self.countLabel(shownCount))
+                    .accessibilityLabel(Self.countLabel(shownCount))
                     .accessibilityIdentifier("ds.panelheader.subtitle.requestLog")
             }
 
             if showsScope, !requestLogs.isEmpty {
                 scopeControl
-                    .padding(.leading, DSSpacing.xs)
+                    .padding(.leading, DSSpacing.xs + DSSpacing.xxs)
             }
 
             Spacer(minLength: DSSpacing.sm)
@@ -647,11 +650,14 @@ struct RequestLogDrawerView: View {
         .accessibilityValue(methodFilter?.rawValue ?? "All")
     }
 
-    /// "N requests" for what the table is showing, or `nil` for an empty log.
-    private var countSubtitle: String? {
-        guard !requestLogs.isEmpty else { return nil }
-        let count = sortedAndFilteredLogs.count
-        return "\(count) request\(count == 1 ? "" : "s")"
+    /// How many requests the table is showing, or `nil` for an empty log.
+    private var shownCount: Int? {
+        requestLogs.isEmpty ? nil : sortedAndFilteredLogs.count
+    }
+
+    /// "N requests", the count's spoken form.
+    nonisolated static func countLabel(_ count: Int) -> String {
+        "\(count) request\(count == 1 ? "" : "s")"
     }
 
     // MARK: - Empty log

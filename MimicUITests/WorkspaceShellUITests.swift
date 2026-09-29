@@ -728,12 +728,25 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "The window title should follow the open project's name"
         )
 
-        for identifier in ["sidebar", "centerPane", "inspector", "drawer"] {
+        // An empty project is the navigator and the centre only: nothing to inspect yet.
+        for identifier in ["sidebar", "centerPane", "drawer"] {
             XCTAssertTrue(
                 shell.panel(identifier).waitForExistence(timeout: 5),
                 "\(identifier) should be an addressable panel container"
             )
         }
+        XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5),
+                      "An empty project should show no inspector")
+        XCTAssertFalse(shell.panel("inspector").exists, "An empty project should show no inspector")
+        XCTAssertFalse(workspace.toggleInspectorButton.isEnabled,
+                       "With nothing to inspect the inspector toggle is unavailable")
+        workspace.closeToolbarMenu()
+
+        // The first endpoint brings the inspector back, because the person never closed it.
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        XCTAssertTrue(shell.panel("inspector").waitForExistence(timeout: 5),
+                      "inspector should be an addressable panel container once there is something to inspect")
+        XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The inspector's header should return with it")
     }
 
     /// SHELL-06, SHELL-08.
@@ -1231,6 +1244,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testInspectorOverviewAnswersForTheProject() throws {
         launchShell()
         createProjectViaUI(name: "Overview", port: 62111)
+        // An empty project shows no inspector. One endpoint brings it back, and the Journeys tab
+        // with no journey selected leaves it on the overview.
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        showJourneysNavigator()
 
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Overview"),
@@ -1250,12 +1267,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "…and the port it would answer on — \(overview.rowDescription("port"))"
         )
         XCTAssertTrue(
-            overview.waitForRow("endpoints", toContain: "0"),
-            "A new project has no endpoints — \(overview.rowDescription("endpoints"))"
+            overview.waitForRow("endpoints", toContain: "1"),
+            "The project has the one endpoint — \(overview.rowDescription("endpoints"))"
         )
         XCTAssertTrue(
-            overview.waitForRow("scenarios", toContain: "0"),
-            "…no scenarios — \(overview.rowDescription("scenarios"))"
+            overview.waitForRow("scenarios", toContain: "1"),
+            "…with its default scenario — \(overview.rowDescription("scenarios"))"
         )
         XCTAssertTrue(
             overview.waitForRow("journeys", toContain: "0"),
@@ -1270,14 +1287,16 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     /// INSPOV-07, INSPOV-16, INSPOV-17, SRVWELL-08, SRVWELL-09.
     ///
-    /// A project with no endpoints makes the unmatched overview and explicit request selection
-    /// states observable without an endpoint selection taking precedence.
+    /// One endpoint the traffic never asks for gives the inspector something to show, and the
+    /// Journeys tab keeps an endpoint selection from taking precedence over the overview.
     @MainActor
     func testOverviewReportsUnmatchedTrafficAndSurvivesAMultiRowSelection() async throws {
         let port = 62112
 
         launchShell()
         createProjectViaUI(name: "Unmatched", port: port)
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        showJourneysNavigator()
         workspace.fillWindow()
         startServer(onPort: port)
 
@@ -1534,6 +1553,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testToolbarPreservesIdentityAndCollapsesSecondaryActions() throws {
         launchShell()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
+        // The inspector, whose column the toolbar must stay clear of, needs something to inspect.
+        createEndpointViaUI(name: "Products", path: "/products")
 
         workspace.widenCentreColumnForExpandedToolbar()
         XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5))
@@ -1721,26 +1742,45 @@ final class WorkspaceShellUITests: MimicUITestCase {
         workspace.closeToolbarMenu()
     }
 
-    /// The toolbar runs the width of the window, as the redesign draws it: the actions start after
-    /// the navigator and trail to the window's edge, over the inspector's floating panel when it is
-    /// open. The layout breakpoint is still the centre column's width.
+    /// The toolbar is the centre column's: its actions end at the centre column's trailing edge,
+    /// and the inspector's own toolbar section, which holds its header, starts after them.
     ///
-    /// The centre card is inset from its column by `DSLayout.panelInset` (8pt), so the bounds carry
-    /// that much slack.
+    /// The centre card is inset from its column by `DSLayout.panelInset` (8pt), and the toolbar spans
+    /// the column rather than the card, so the bounds carry that much slack.
     @MainActor
     private func assertToolbarStaysAboveTheCentreColumn(
         _ elements: [XCUIElement], file: StaticString = #filePath, line: UInt = #line
     ) {
         let slack: CGFloat = 12
+        // AppKit moves toolbar items into their section after the split view settles, a beat after
+        // a panel returns; wait for that before measuring.
+        _ = UITestApp.waitUntil(timeout: 5) {
+            let centreMaxX = self.shell.panel("centerPane").frame.maxX
+            return elements.allSatisfy { $0.frame.maxX <= centreMaxX + slack }
+        }
         let center = shell.panel("centerPane").frame
-        let window = app.windows.firstMatch.frame
+        let inspectorOpen = inspectorHeader.exists
+        let inspectorPanel = shell.panel("inspector")
         for element in elements {
             XCTAssertGreaterThanOrEqual(element.frame.minX, center.minX - slack,
                                         "\(element.identifier) should sit after the navigator",
                                         file: file, line: line)
-            XCTAssertLessThanOrEqual(element.frame.maxX, window.maxX,
-                                     "\(element.identifier) should stay inside the window",
+            XCTAssertLessThanOrEqual(element.frame.maxX, center.maxX + slack,
+                                     "\(element.identifier) should not reach past the centre column",
                                      file: file, line: line)
+            if inspectorOpen, inspectorPanel.exists {
+                XCTAssertLessThanOrEqual(element.frame.maxX, inspectorPanel.frame.minX + 1,
+                                         "\(element.identifier) should not sit above the inspector",
+                                         file: file, line: line)
+            }
+        }
+        if inspectorOpen, inspectorPanel.exists {
+            XCTAssertGreaterThanOrEqual(inspectorHeader.frame.minX, inspectorPanel.frame.minX - 1,
+                                        "The inspector's header should sit above the inspector",
+                                        file: file, line: line)
+            XCTAssertEqual(inspectorHeader.frame.midY, workspace.serverToggleButton.frame.midY, accuracy: 8,
+                           "The inspector's header should sit in the toolbar row, level with Run",
+                           file: file, line: line)
         }
     }
 
@@ -1753,6 +1793,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testCompactOverflowMenuTogglesThePanels() throws {
         launchShell()
         createProjectViaUI(name: "Compact Panels")
+        // An empty project has no inspector to toggle.
+        createEndpointViaUI(name: "Users", path: "/api/users")
         workspace.compactWindow()
 
         let drawer = shell.panel("drawer")
@@ -2229,6 +2271,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
     func testPanelChordsToggleBothPanels() throws {
         launchShell()
         createProjectViaUI(name: "Panel Chords")
+        // An empty project has no inspector to toggle.
+        createEndpointViaUI(name: "Users", path: "/api/users")
         workspace.compactWindow()
 
         let drawerToggle = workspace.toggleDrawerButton
@@ -2313,6 +2357,35 @@ final class WorkspaceShellUITests: MimicUITestCase {
             workspace.drawerEmptyHeading.waitForExistence(timeout: 5),
             "⌥⌘L should reopen the log the restored arrangement had closed"
         )
+    }
+
+    /// The endpoint editor is as tall as its content, and the request log starts right below it and
+    /// takes the rest of the column.
+    @MainActor
+    func testRequestLogSitsRightBelowTheEndpointEditor() throws {
+        launchShell()
+        createProjectViaUI(name: "Editor Height")
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        workspace.fillWindow()
+
+        let body = endpointEditor.bodyEditor
+        let drawer = shell.panel("drawer")
+        XCTAssertTrue(body.waitForExistence(timeout: 5), "The endpoint editor should show its body")
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The request log starts open")
+
+        // Between them: the body card's 8pt padding, the editor's 16pt bottom inset and the 10pt
+        // divider band.
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                let gap = drawer.frame.minY - body.frame.maxY
+                return gap >= 0 && gap < 48
+            },
+            "The request log should start right below the editor — body \(body.frame), log \(drawer.frame)"
+        )
+        XCTAssertLessThan(body.frame.height, 200, "A short body keeps its card short")
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(drawer.frame.maxY, window.maxY - 24,
+                             "The request log takes the rest of the column — log \(drawer.frame), window \(window)")
     }
 
     /// PANEL-11.

@@ -122,7 +122,7 @@ public struct MimicScene: Scene {
                     appState.inspectorToggleRequest += 1
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(appState.currentProject == nil)
+                .disabled(appState.currentProject == nil || !appState.canShowInspector)
             }
 
             CommandMenu("Journeys") {

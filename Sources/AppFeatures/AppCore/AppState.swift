@@ -26,6 +26,9 @@ final class AppState {
     var inspectorToggleRequest = 0
     var isRequestLogVisible = true
     var isInspectorVisible = true
+    /// False while the open project has nothing to inspect: no endpoints, no journeys, no request
+    /// selected. The window hides the inspector then, and View ▸ Show Inspector is disabled.
+    var canShowInspector = true
     /// The scenario open in the editor for each endpoint, when it is not the live one.
     var editedScenarioIDs: [UUID: UUID] = [:]
 

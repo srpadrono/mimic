@@ -7,7 +7,8 @@ nonisolated enum WorkspaceToolbarLayout: Equatable {
     case expanded
     case compactSummary
     case overflow
-    case iconStatus
+    /// The status capsule keeps only its state word and the project identity narrows.
+    case narrow
 }
 
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
@@ -60,10 +61,13 @@ struct WorkspaceView: View {
     /// than every frame of a drag — so this can be persisted on change without writing `UserDefaults`
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
+    /// The endpoint editor's own height. The request log sits right below it and takes the rest;
+    /// `nil` while the centre shows something that fills it.
+    @State private var centreContentHeight: CGFloat?
 
     /// Start with the narrowest fit so AppKit never overflows the identity before the first
     /// geometry measurement. Then update only when the layout tier changes during a resize.
-    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .iconStatus
+    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .narrow
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -152,6 +156,7 @@ struct WorkspaceView: View {
                         minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
                         minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
                         defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
+                        preferredPrimaryThickness: centreContentHeight,
                         identifier: "requestLog"
                     ) {
                         CenterPaneView(
@@ -164,7 +169,11 @@ struct WorkspaceView: View {
                             onEditEndpointRequest: beginEndpointRequestEdit,
                             onAddEndpoint: { appState.showNewEndpointSheet = true },
                             onImportHAR: { showHARImport = true },
-                            onImportOpenAPI: { showOpenAPIImport = true }
+                            onImportOpenAPI: { showOpenAPIImport = true },
+                            onContentHeightChange: { height in
+                                guard centreContentHeight != height else { return }
+                                centreContentHeight = height
+                            }
                         )
                         // Anchored to the top, not centred. A pane is exactly as tall as the split
                         // view gives it, and an editor taller than that — the journey editor has no
@@ -216,8 +225,9 @@ struct WorkspaceView: View {
             }
             .navigationSplitViewStyle(.balanced)
             // Outside the navigation structure, the inspector owns a full-height column and its
-            // own toolbar section. Nesting it in the detail column merges both action groups.
-            .inspector(isPresented: $showInspector) {
+            // own toolbar section, which holds its header (`InspectorPanelView`). That section is
+            // what keeps the centre column's actions over the centre column.
+            .inspector(isPresented: inspectorColumnPresentation) {
                 inspectorPanel
                     .inspectorColumnWidth(
                         min: PanelLayoutStore.Bounds.minimumInspectorWidth,
@@ -405,13 +415,17 @@ struct WorkspaceView: View {
             appState.isRequestLogVisible = visible
             persistLayout()
         }
-        .onChange(of: showInspector, initial: true) { _, visible in
+        .onChange(of: showInspector) { _, _ in persistLayout() }
+        // The View menu reads what is on screen, which an empty project overrides.
+        .onChange(of: isInspectorPresented, initial: true) { _, visible in
             appState.isInspectorVisible = visible
-            persistLayout()
+        }
+        .onChange(of: canPresentInspector, initial: true) { _, available in
+            appState.canShowInspector = available
         }
         // ⌥⌘L and ⌥⌘I live in the View menu, so they work whether the toggles are inline or folded.
         .onChange(of: appState.requestLogToggleRequest) { _, _ in toggleRequestLog() }
-        .onChange(of: appState.inspectorToggleRequest) { _, _ in inspectorPresentation.wrappedValue.toggle() }
+        .onChange(of: appState.inspectorToggleRequest) { _, _ in toggleInspector() }
         // ⌘1 / ⌘2 from the menu bar, which lives above this window and so cannot bind to its state.
         // Journeys ▸ Show Journeys arrives the same way, now that it selects a tab rather than
         // opening a window.
@@ -445,10 +459,11 @@ struct WorkspaceView: View {
     // MARK: - Toolbar
 
     /// Collapse in stages as the centre column narrows: first the secondary actions fold into one
-    /// menu, then the status capsule drops its request count, then it keeps only its dot.
+    /// menu, then the status capsule drops its counts, then the project identity narrows. The
+    /// capsule always keeps its state word.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
-        guard centerWidth.isFinite else { return .iconStatus }
-        if centerWidth < 460 { return .iconStatus }
+        guard centerWidth.isFinite else { return .narrow }
+        if centerWidth < 460 { return .narrow }
         if centerWidth < 620 { return .compactSummary }
         if centerWidth < 780 { return .overflow }
         return .expanded
@@ -456,7 +471,7 @@ struct WorkspaceView: View {
 
     nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
         let layout = toolbarLayout(centerWidth: centerWidth)
-        return layout == .compactSummary || layout == .iconStatus
+        return layout == .compactSummary || layout == .narrow
     }
 
     /// Import, server settings, and both panel toggles move into one menu; Run never does.
@@ -464,20 +479,25 @@ struct WorkspaceView: View {
         toolbarLayout(centerWidth: centerWidth) != .expanded
     }
 
-    nonisolated static func toolbarUsesIconStatus(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) == .iconStatus
+    nonisolated static func toolbarUsesNarrowIdentity(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) == .narrow
     }
 
     private var usesCompactToolbarSummary: Bool {
-        centerToolbarLayout == .compactSummary || centerToolbarLayout == .iconStatus
+        centerToolbarLayout == .compactSummary || centerToolbarLayout == .narrow
     }
 
     private var usesToolbarOverflow: Bool {
         centerToolbarLayout != .expanded
     }
 
-    private var usesIconStatus: Bool {
-        centerToolbarLayout == .iconStatus
+    /// The identity's widest extent at each stage, so the centre column's items fit its section.
+    private var projectIdentityMaximumWidth: CGFloat {
+        switch centerToolbarLayout {
+        case .expanded, .overflow: 220
+        case .compactSummary: 140
+        case .narrow: 100
+        }
     }
 
     @ToolbarContentBuilder
@@ -572,7 +592,7 @@ struct WorkspaceView: View {
                     .accessibilityLabel("Local mock at \(address)")
             }
         }
-        .frame(maxWidth: usesCompactToolbarSummary ? 140 : 220, alignment: .leading)
+        .frame(maxWidth: projectIdentityMaximumWidth, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, DSSpacing.xs)
         .accessibilityElement(children: .contain)
@@ -594,7 +614,6 @@ struct WorkspaceView: View {
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             compact: usesCompactToolbarSummary,
-            iconOnly: usesIconStatus,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             onShowUnmatched: {
@@ -662,13 +681,32 @@ struct WorkspaceView: View {
         .accessibilityLabel("Server settings")
     }
 
-    private var inspectorPresentation: Binding<Bool> {
+    /// Whether there is anything for the inspector to show. A project with no endpoints and no
+    /// journeys has none, unless a logged request is selected.
+    private var canPresentInspector: Bool {
+        !currentEndpoints.isEmpty || !appState.journeys.isEmpty || !selectedLogIDs.isEmpty
+    }
+
+    /// The column on screen: the person's choice, which an empty project overrides without
+    /// forgetting it.
+    private var isInspectorPresented: Bool {
+        showInspector && canPresentInspector
+    }
+
+    /// AppKit writes back here when the column is dragged shut; that is the person's choice too.
+    private var inspectorColumnPresentation: Binding<Bool> {
         Binding(
-            get: { showInspector },
+            get: { isInspectorPresented },
             set: { value in
-                withAnimation(reduceMotion ? nil : DSAnimation.panel) { showInspector = value }
+                guard canPresentInspector, value != showInspector else { return }
+                showInspector = value
             }
         )
+    }
+
+    private func toggleInspector() {
+        guard canPresentInspector else { return }
+        withAnimation(reduceMotion ? nil : DSAnimation.panel) { showInspector.toggle() }
     }
 
     private var drawerToolbarButton: some View {
@@ -681,12 +719,15 @@ struct WorkspaceView: View {
     }
 
     private var inspectorToolbarButton: some View {
-        Button { inspectorPresentation.wrappedValue.toggle() } label: {
-            Label(showInspector ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
+        Button { toggleInspector() } label: {
+            Label(isInspectorPresented ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
         }
-        .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
+        .disabled(!canPresentInspector)
+        .help(canPresentInspector
+            ? (isInspectorPresented ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
+            : "Add an endpoint or a journey to inspect it")
         .accessibilityIdentifier("toggleInspectorButton")
-        .accessibilityLabel(showInspector ? "Hide inspector" : "Show inspector")
+        .accessibilityLabel(isInspectorPresented ? "Hide inspector" : "Show inspector")
     }
 
     private func toggleRequestLog() {
@@ -1043,6 +1084,7 @@ struct WorkspaceView: View {
                                          progress: activeJourneyProgress, serverState: appState.serverState)
             },
             selectedRequestCount: selectedLogIDs.count,
+            showsHeader: isInspectorPresented,
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],

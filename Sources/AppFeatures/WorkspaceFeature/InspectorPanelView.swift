@@ -9,6 +9,9 @@ struct InspectorPanelView: View {
     let endpoint: Endpoint?
     let journey: JourneyInspector.Context?
     let selectedRequestCount: Int
+    /// Whether the column is on screen. Its header lives in the inspector's own toolbar section,
+    /// level with the window's toolbar, and must leave with the column.
+    let showsHeader: Bool
     let overview: InspectorOverview.Summary?
     let onSaveAsMock: ((UUID) -> Void)?
     let onShowJourneys: () -> Void
@@ -35,6 +38,7 @@ struct InspectorPanelView: View {
         overview: InspectorOverview.Summary? = nil,
         journey: JourneyInspector.Context? = nil,
         selectedRequestCount: Int = 0,
+        showsHeader: Bool = true,
         endpointTraffic: [RequestLog] = [],
         endpointSettings: EndpointInspectorSettings.Context? = nil,
         onShowJourneys: @escaping () -> Void = {},
@@ -53,6 +57,7 @@ struct InspectorPanelView: View {
         self.overview = overview
         self.journey = journey
         self.selectedRequestCount = selectedRequestCount
+        self.showsHeader = showsHeader
         self.endpointTraffic = endpointTraffic
         self.endpointSettings = endpointSettings
         self.onShowJourneys = onShowJourneys
@@ -112,31 +117,6 @@ struct InspectorPanelView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DSInspectorHeader {
-                if mode == .request {
-                    DSPanelHeaderButton(
-                        systemImage: "chevron.left",
-                        help: "Back",
-                        identifier: "inspector.closeRequestDetailButton",
-                        action: onCloseRequestDetail
-                    )
-                    .padding(.leading, -6)
-                }
-                Text(mode.title)
-                    .font(DSTypography.bodySemibold)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("ds.panelheader.title.inspector")
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                if mode == .scenarios, let endpoint {
-                    DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
-                                        identifier: "inspector.addScenarioButton") {
-                        addScenarioTarget = ScenarioTarget(id: endpoint.id)
-                    }
-                }
-            }
-
             ZStack(alignment: .topLeading) {
                 if let endpoint {
                     endpointContent(endpoint)
@@ -175,9 +155,57 @@ struct InspectorPanelView: View {
             .frame(minHeight: 0, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .toolbar { headerToolbar }
         .sheet(item: $addScenarioTarget) { target in
             NewScenarioSheet { name in onAddScenario(target.id, name) }
         }
+    }
+
+    /// The header: the mode's title at the leading edge of the inspector's toolbar section and its
+    /// action at the trailing edge, level with the window's toolbar as the design draws it.
+    @ToolbarContentBuilder
+    private var headerToolbar: some ToolbarContent {
+        if showsHeader {
+            ToolbarItem(id: "inspector.header") {
+                headerTitle
+            }
+            .sharedBackgroundVisibility(.hidden)
+
+            ToolbarSpacer(.flexible)
+
+            if mode == .scenarios, endpoint != nil {
+                ToolbarItem(id: "inspector.addScenario") {
+                    DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
+                                        identifier: "inspector.addScenarioButton") {
+                        addScenarioTarget = endpoint.map { ScenarioTarget(id: $0.id) }
+                    }
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
+        }
+    }
+
+    private var headerTitle: some View {
+        HStack(spacing: DSSpacing.xs) {
+            if mode == .request {
+                DSPanelHeaderButton(
+                    systemImage: "chevron.left",
+                    help: "Back",
+                    identifier: "inspector.closeRequestDetailButton",
+                    action: onCloseRequestDetail
+                )
+            }
+            Text(mode.title)
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
+                .lineLimit(1)
+                .fixedSize()
+                .accessibilityIdentifier("ds.panelheader.title.inspector")
+                .accessibilityAddTraits(.isHeader)
+        }
+        .padding(.leading, DSSpacing.xs)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inspector.header")
     }
 
     private func endpointContent(_ endpoint: Endpoint) -> some View {

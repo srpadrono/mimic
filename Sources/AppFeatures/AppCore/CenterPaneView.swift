@@ -15,6 +15,9 @@ struct CenterPaneView: View {
     var onAddEndpoint: () -> Void = {}
     var onImportHAR: () -> Void = {}
     var onImportOpenAPI: () -> Void = {}
+    /// The endpoint editor's own height, so the request log can sit right below it; `nil` while
+    /// the pane shows anything that fills the pane instead.
+    var onContentHeightChange: (CGFloat?) -> Void = { _ in }
 
     var body: some View {
         Group {
@@ -84,16 +87,22 @@ struct CenterPaneView: View {
                     onDeleteScenario: { appState.deleteScenario(endpointID: endpointID, scenarioID: $0) }
                 )
             )
-        } else {
-            if appState.currentProject?.endpoints.isEmpty ?? true {
-                firstEndpointChooser
-            } else {
-                DSEmptyState(
-                    heading: "No endpoint selected",
-                    message: "Select an endpoint from the sidebar to view and edit its configuration.",
-                    identifier: "center.noSelection"
-                )
+            .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { height in
+                onContentHeightChange(height)
             }
+        } else {
+            Group {
+                if appState.currentProject?.endpoints.isEmpty ?? true {
+                    firstEndpointChooser
+                } else {
+                    DSEmptyState(
+                        heading: "No endpoint selected",
+                        message: "Select an endpoint from the sidebar to view and edit its configuration.",
+                        identifier: "center.noSelection"
+                    )
+                }
+            }
+            .onAppear { onContentHeightChange(nil) }
         }
     }
 
@@ -151,6 +160,7 @@ struct CenterPaneView: View {
             )
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("center.journeyEditor")
+            .onAppear { onContentHeightChange(nil) }
         } else {
             DSEmptyState(
                 systemImage: NavigatorTab.journeys.systemImage,
@@ -158,6 +168,7 @@ struct CenterPaneView: View {
                 message: "Select a journey from the sidebar to script its steps, or add one to get started.",
                 identifier: "center.noJourneySelection"
             )
+            .onAppear { onContentHeightChange(nil) }
         }
     }
 }

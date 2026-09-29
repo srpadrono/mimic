@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Inspector chrome shares the navigator's rhythm without painting over the system material.
 public enum DSInspectorMetrics {
-    public static let headerHeight = DSBarHeight.column
     public static let footerHeight = DSBarHeight.footer
     public static let rowHeight = DSRowHeight.list
     /// Text and fields sit 16pt in; selectable rows sit 8pt in so their rounded fill has room.
@@ -11,21 +10,6 @@ public enum DSInspectorMetrics {
     public static let iconSlot = DSSpacing.lg
     public static let labelColumn = DSLayout.inspectorLabelWidth
     public static let statusColumn: CGFloat = 36
-}
-
-public struct DSInspectorHeader<Content: View>: View {
-    private let content: Content
-    public init(@ViewBuilder content: () -> Content) { self.content = content() }
-    public var body: some View {
-        HStack(spacing: DSSpacing.sm) { content }
-            .font(DSTypography.bodySemibold)
-            .padding(.leading, DSInspectorMetrics.inset)
-            .padding(.trailing, DSSpacing.md)
-            .frame(maxWidth: .infinity)
-            .frame(height: DSInspectorMetrics.headerHeight)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("inspector.header")
-    }
 }
 
 /// Quiet section labels, sharing one content inset rather than a stack of filled bands.

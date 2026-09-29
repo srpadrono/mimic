@@ -1264,9 +1264,11 @@ final class RequestLogUITests: MimicUITestCase {
 
         // Clicking the only selected row clears it, which is how the detail gets dismissed without
         // hunting for the close button.
+        // The project has no endpoints or journeys, so with the selection gone there is nothing to
+        // inspect and the inspector leaves with it.
         logRow(identifiers[0]).click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Overview"),
+            inspectorHeader.waitForNonExistence(timeout: 5),
             "Clicking the only selected row again should clear the selection"
         )
 
@@ -1341,8 +1343,8 @@ final class RequestLogUITests: MimicUITestCase {
 
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Overview"),
-            "Escape should clear the selection"
+            inspectorHeader.waitForNonExistence(timeout: 5),
+            "Escape should clear the selection, and with it the empty project's inspector"
         )
     }
 

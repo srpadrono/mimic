@@ -374,18 +374,20 @@ final class MimicUITests: MimicUITestCase {
     func testToggleInspectorPanel() throws {
         launchApp()
         createProjectViaUI(name: "Inspector Test")
+        // An empty project shows no inspector; an endpoint gives it something to show.
+        createEndpointViaUI(name: "Users", path: "/api/users")
 
         XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
                       "Toggle inspector button should exist")
 
         // Inspector should be visible by default
-        let overview = InspectorPage(app: app).element("inspector.overview")
-        XCTAssertTrue(overview.waitForExistence(timeout: 5))
+        let header = InspectorPage(app: app).header
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
         workspace.toggleInspectorButton.click()
-        XCTAssertTrue(overview.waitForNonExistence(timeout: 5), "The inspector must actually close")
+        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "The inspector must actually close")
 
         workspace.toggleInspectorButton.click()
-        XCTAssertTrue(overview.waitForExistence(timeout: 5), "The inspector must actually reopen")
+        XCTAssertTrue(header.waitForExistence(timeout: 5), "The inspector must actually reopen")
     }
 
     // MARK: - 14. Toggle Request Log Drawer
