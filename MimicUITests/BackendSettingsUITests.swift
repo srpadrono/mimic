@@ -64,6 +64,14 @@ struct BackendSettingsPage {
     func additionalState(_ suffix: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
     }
+    var primaryAvailability: XCUIElement {
+        app.descendants(matching: .any)["backend.primary.availability"].firstMatch
+    }
+    var additionalAvailability: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@",
+            "backend.", ".availability", "backend.primary.")).firstMatch
+    }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
@@ -177,6 +185,27 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
         XCTAssertFalse(page.portsDescription.contains("2 ports configured"))
+    }
+
+    @MainActor
+    func testPortRowSaysWhetherThePortIsFree() {
+        launchApp()
+        createProjectViaUI(name: "Port availability")
+        let page = BackendSettingsPage(app: app)
+        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryAvailability.waitForExistence(timeout: 5),
+                      "A stopped server's port row should say whether its port is free")
+        // Whether 8080 is free depends on the machine; a port another listener here claims does not.
+        XCTAssertTrue(["Available", "In use"].contains(page.primaryAvailability.value as? String ?? ""))
+        page.add.click()
+        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        page.replace(page.additional("port"), with: "8080")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            page.additionalAvailability.value as? String == "In use"
+        }, "A port the primary listener uses is not free for another")
+        page.cancel.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

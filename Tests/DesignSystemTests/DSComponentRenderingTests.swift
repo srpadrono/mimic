@@ -635,6 +635,7 @@ struct DSComponentRenderingTests {
         #expect(DSSheetWidth.compact == 440)
         #expect(DSSheetWidth.medium == 560)
         #expect(DSSheetWidth.wide == 680)
+        #expect(DSSheetWidth.split == 760)
         #expect(DSSheetWidth.review == 860)
     }
 

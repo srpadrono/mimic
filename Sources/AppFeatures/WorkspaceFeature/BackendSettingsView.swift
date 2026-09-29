@@ -12,6 +12,8 @@ struct BackendSettingsView: View {
     @State private var portText: [String: String] = [:]
     @State private var issue: FieldIssue?
     @State private var error: String?
+    /// The last probe of each port typed, so the port row can say "Available" or "In use".
+    @State private var portAvailability: [Int: Bool] = [:]
 
     init(configuration: ServerConfiguration) {
         _draft = State(initialValue: configuration)
@@ -51,7 +53,7 @@ struct BackendSettingsView: View {
             DSDivider(identifier: "backend.footer")
             footer
         }
-        .frame(width: DSSheetWidth.wide,
+        .frame(width: DSSheetWidth.split,
                height: BackendSettingsGeometry.height(backend: draft.backend(id: selectedBackendID),
                                                       visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900))
         .background(DSColors.sheet)
@@ -63,7 +65,7 @@ struct BackendSettingsView: View {
     private var footer: some View {
         HStack(spacing: DSSpacing.sm) {
             if needsRestart {
-                Label("Restart the server to use port changes", systemImage: "arrow.clockwise")
+                Label(restartMessage, systemImage: "arrow.clockwise")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.warning)
                     .lineLimit(1)
@@ -118,7 +120,7 @@ struct BackendSettingsView: View {
         }
         .padding(.top, DSSpacing.md)
         .padding([.horizontal, .bottom], DSSpacing.sm)
-        .background(DSColors.window)
+        .background(DSColors.sheetSidebar)
     }
 
     /// The macOS add and remove pair under a source list.
@@ -251,6 +253,7 @@ struct BackendSettingsView: View {
                 }
                 DSDivider()
                 DSFormGroupRow("Port") {
+                    portStatus(port: validPort, pendingRestart: pendingRestart, prefix: prefix, backendID: backendID)
                     DSTextField("Port", text: Binding(get: {
                         portText[prefix] ?? String(port.wrappedValue)
                     }, set: {
@@ -264,14 +267,7 @@ struct BackendSettingsView: View {
                         height: DSControlHeight.regular,
                         identifier: prefix + ".port")
                 }
-                if pendingRestart {
-                    Text("Available after server restart")
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.warning)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.bottom, DSSpacing.sm)
-                        .accessibilityIdentifier(prefix + ".pendingRestart")
-                }
+                .task(id: validPort) { await probe(validPort) }
                 DSDivider()
                 DSFormGroupRow("Your app connects to") {
                     Text(verbatim: validPort.map { "http://localhost:\(String($0))" } ?? "Enter a valid local port")
@@ -329,6 +325,51 @@ struct BackendSettingsView: View {
                 }
             }
         }
+    }
+
+    /// Beside the port field: a port the running server has yet to move to says so; otherwise the
+    /// probe's answer. A port this listener already serves on is its own, so it reads as available.
+    @ViewBuilder
+    private func portStatus(port: Int?, pendingRestart: Bool, prefix: String, backendID: UUID) -> some View {
+        if let port {
+            if pendingRestart {
+                // One Text, so the state reads as the static text it always was to UI tests.
+                Text("\(Image(systemName: "arrow.clockwise")) After a restart")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.warning)
+                    .help("The running server moves to this port when it restarts")
+                    .accessibilityIdentifier(prefix + ".pendingRestart")
+            } else if let available = availability(of: port, for: backendID) {
+                DSAvailabilityLabel(isAvailable: available, identifier: prefix + ".availability")
+            }
+        }
+    }
+
+    /// Probes a typed port after a pause, so each keystroke in the field is not a bind.
+    private func probe(_ port: Int?) async {
+        guard let port else { return }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        portAvailability[port] = PortProbe.isAvailable(port)
+    }
+
+    private func availability(of port: Int, for backendID: UUID) -> Bool? {
+        if appState.serverState.runningPort != nil,
+           appState.server.boundConfiguration?.backend(id: backendID)?.port == port {
+            return true
+        }
+        if draft.listeners.contains(where: { $0.id != backendID && $0.port == port }) { return false }
+        return portAvailability[port]
+    }
+
+    /// Names the listener when only one waits on a restart, as the design does.
+    private var restartMessage: String {
+        guard let bound = appState.server.boundConfiguration else { return "Restart the server to use port changes" }
+        let moved = draft.listeners.filter { bound.backend(id: $0.id)?.port != $0.port }
+        if moved.count == 1, let name = moved.first?.name, !name.isEmpty {
+            return "\(name) starts on its new port after a restart"
+        }
+        return "Restart the server to use port changes"
     }
 
     private var needsRestart: Bool {

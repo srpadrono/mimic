@@ -62,6 +62,9 @@ public nonisolated enum DSColors {
     /// A sheet's own background.
     public static let sheet = Color(light: Ink(0xF7F7F8), dark: Ink(0x2A2A2D))
 
+    /// The source list down the side of a sheet, a step darker than the sheet in either scheme.
+    public static let sheetSidebar = Color(light: Ink(0xEFEFF2), dark: Ink(0x242427))
+
     /// The fill inside a field, a segmented track, or a secondary button.
     public static let field = Color(light: Ink(white: 0, alpha: 0.045), dark: Ink(white: 1, alpha: 0.065))
 
