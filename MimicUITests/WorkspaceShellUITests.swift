@@ -1312,6 +1312,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createEndpointViaUI(name: "Users", path: "/api/users")
         showJourneysNavigator()
         workspace.fillWindow()
+        // The Journeys tab opens without the request log, as its design does; this test reads it.
+        if !shell.panel("drawer").exists {
+            app.typeKey("l", modifierFlags: [.command, .option])
+        }
+        XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5), "The request log should open")
         startServer(onPort: port)
 
         await sendRequest(port: port, path: "/api/missing", method: "GET", body: nil)
