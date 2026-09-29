@@ -2058,7 +2058,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         // menu ends up, not where it was.
         UITestApp.waitForStableFrame(menu)
 
-        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        // The element's own hit point, resolved at click time, the way the wide editor's tests open it.
+        menu.click()
         XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
