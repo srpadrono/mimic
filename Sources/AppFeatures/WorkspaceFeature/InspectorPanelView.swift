@@ -196,11 +196,14 @@ struct InspectorPanelView: View {
                 EndpointTrafficSummary(logs: endpointTraffic)
             }
             .padding(.bottom, DSSpacing.lg)
+            // On the content group: XCUITest found no element for the identifier on the scroll view.
+            // The id makes AppKit drop the old label when the route is edited.
+            .id("\(endpoint.id)-\(endpoint.method.rawValue)-\(endpoint.path)")
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inspector.endpointIdentity")
+            .accessibilityLabel("\(endpoint.method.rawValue) method \(endpoint.path)")
         }
         .scrollBounceBehavior(.basedOnSize)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("inspector.endpointIdentity")
-        .accessibilityLabel("\(endpoint.method.rawValue) method \(endpoint.path)")
     }
 }
 
