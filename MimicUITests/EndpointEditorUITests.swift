@@ -607,8 +607,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         let heading = workspace.centerFirstEndpointHeading.frame
         XCTAssertLessThan(heading.maxY, add.frame.minY, "The headline sits above the cards")
 
-        let chooser = app.descendants(matching: .any)
-            .matching(identifier: "ds.empty.center.noSelection").firstMatch.frame
+        // The chooser fills the centre pane, so the pane's width is the room the cards have.
+        let chooser = WorkspaceShellPage(app: app).panel("centerPane").frame
         guard chooser.width - 48 >= 3 * 168 + 2 * 16 else {
             throw XCTSkip("The centre is \(chooser.width)pt wide, too narrow for one row of three cards")
         }
