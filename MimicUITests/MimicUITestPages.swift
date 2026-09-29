@@ -368,7 +368,8 @@ struct WorkspacePage {
     private static func isFilled(_ frame: CGRect) -> Bool {
         if frame.width >= 1180 { return true }
         guard let visible = NSScreen.screens.first?.visibleFrame else { return false }
-        return frame.width >= visible.width - 1 && frame.height >= visible.height - 1
+        // Tiled windows keep a margin to the screen edge, so allow for it.
+        return frame.width >= visible.width - 40 && frame.height >= visible.height - 40
     }
 
     /// Restores a collapsed navigator. Keyed on the footer's own "+", not on any "Add endpoint":
