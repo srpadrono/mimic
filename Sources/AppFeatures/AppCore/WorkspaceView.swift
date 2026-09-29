@@ -566,11 +566,16 @@ struct WorkspaceView: View {
         }
 
         ToolbarItem(id: "workspace.identity", placement: .navigation) {
-            // One item, so the name and the address never part. Wrapped in a container rather than
-            // rooted at the well's `Button`: a bare button as an item's root is published as the
-            // item itself, and the well's details popover then never reached the accessibility tree.
+            projectIdentity
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarItem(id: "workspace.status", placement: .navigation) {
+            // Its own item, and wrapped rather than rooted at the well's `Button`. A bare button as
+            // an item's root is published as the item itself, and so is a button sharing an item
+            // with other views: the project name beside it then left the accessibility tree, and
+            // the well's details popover never reached it.
             HStack(spacing: DSSpacing.md) {
-                projectIdentity
                 if !usesNarrowIdentity {
                     Rectangle()
                         .fill(DSColors.separator)
@@ -579,7 +584,6 @@ struct WorkspaceView: View {
                 }
                 serverSummary
             }
-            .padding(.trailing, DSSpacing.xs)
             .accessibilityElement(children: .contain)
         }
         .sharedBackgroundVisibility(.hidden)

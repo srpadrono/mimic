@@ -1145,7 +1145,8 @@ final class MimicUITests: MimicUITestCase {
         )
 
         let title = workspace.projectTitle
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "The restored workspace should name its project")
+        XCTAssertTrue(title.waitForExistence(timeout: 5),
+                      "The restored workspace should name its project\n\(app.toolbars.firstMatch.debugDescription)")
         XCTAssertTrue(
             title.label == projectName || (title.value as? String) == projectName,
             "The restored project should be the one saved before quitting"
