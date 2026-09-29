@@ -34,6 +34,7 @@ public struct DSLiveIndicator: View {
 
 /// A large choice on an empty screen: title, one line of explanation, and a hint underneath.
 public struct DSOptionCard: View {
+    private let systemImage: String?
     private let title: String
     private let message: String
     private let footnote: String?
@@ -45,8 +46,10 @@ public struct DSOptionCard: View {
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
 
-    public init(_ title: String, message: String, footnote: String? = nil, shortcut: [String] = [],
-                isDefault: Bool = false, identifier: String, action: @escaping () -> Void) {
+    public init(_ title: String, systemImage: String? = nil, message: String, footnote: String? = nil,
+                shortcut: [String] = [], isDefault: Bool = false, identifier: String,
+                action: @escaping () -> Void) {
+        self.systemImage = systemImage
         self.title = title
         self.message = message
         self.footnote = footnote
@@ -59,6 +62,14 @@ public struct DSOptionCard: View {
     public var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
+                if let systemImage {
+                    // The default choice's symbol is in the accent, the others in secondary ink.
+                    Image(systemName: systemImage)
+                        .font(.system(size: DSGlyph.card, weight: .regular))
+                        .foregroundStyle(isDefault ? DSColors.accent : DSColors.labelSecondary)
+                        .frame(height: DSGlyph.card)
+                        .accessibilityHidden(true)
+                }
                 Text(title)
                     .font(DSTypography.bodySemibold)
                     .foregroundStyle(DSColors.labelPrimary)
@@ -90,8 +101,9 @@ public struct DSOptionCard: View {
                 }
             }
             .padding(18)
-            .frame(width: 220, alignment: .topLeading)
-            .frame(minHeight: 132, alignment: .topLeading)
+            // 220pt as designed, narrowing to 168pt so three still share a row in a narrow pane.
+            .frame(minWidth: 168, idealWidth: 220, maxWidth: 220, alignment: .topLeading)
+            .frame(minHeight: systemImage == nil ? 132 : 164, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous)
                     .fill(isHovered ? DSColors.hover : DSColors.zebra)

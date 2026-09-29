@@ -64,6 +64,14 @@ struct BackendSettingsPage {
     func additionalState(_ suffix: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
     }
+    var primaryAvailability: XCUIElement {
+        app.descendants(matching: .any)["backend.primary.availability"].firstMatch
+    }
+    var additionalAvailability: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@",
+            "backend.", ".availability", "backend.primary.")).firstMatch
+    }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
@@ -180,6 +188,27 @@ final class BackendSettingsUITests: MimicUITestCase {
     }
 
     @MainActor
+    func testPortRowSaysWhetherThePortIsFree() {
+        launchApp()
+        createProjectViaUI(name: "Port availability")
+        let page = BackendSettingsPage(app: app)
+        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryAvailability.waitForExistence(timeout: 5),
+                      "A stopped server's port row should say whether its port is free")
+        // Whether 8080 is free depends on the machine; a port another listener here claims does not.
+        XCTAssertTrue(["Available", "In use"].contains(page.primaryAvailability.value as? String ?? ""))
+        page.add.click()
+        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        page.replace(page.additional("port"), with: "8080")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            page.additionalAvailability.value as? String == "In use"
+        }, "A port the primary listener uses is not free for another")
+        page.cancel.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
     func testInvalidPortCannotBeAppliedOrCopied() {
         launchApp()
         createProjectViaUI(name: "Port validation")
@@ -277,8 +306,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
                        "There is no endpoint available to select yet")
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerCurlCommand.exists,
-                       "A stopped server has no address to offer a request to")
+        XCTAssertTrue(workspace.drawerCurlCommand.waitForExistence(timeout: 5),
+                      "A stopped server's empty log offers the request to try once it runs")
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -353,8 +382,14 @@ final class BackendSettingsUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.drawerCurlCommand.waitForNonExistence(timeout: 5),
-                      "Stopping the server withdraws the request to try")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                let curl = workspace.drawerCurlCommand
+                return curl.label.contains("localhost:\(primaryReplacement)")
+                    || (curl.value as? String)?.contains("localhost:\(primaryReplacement)") == true
+            },
+            "Stopped, the request to try names the port configured for the next start"
+        )
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "A stopped server shows the port configured for its next start")
         workspace.serverToggleButton.click()

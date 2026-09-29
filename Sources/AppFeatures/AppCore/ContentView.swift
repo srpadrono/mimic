@@ -3,6 +3,8 @@ import Domain
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    /// The import the welcome window asked for. It creates the project it imports into.
+    @State private var welcomeImportKind: ImportKind?
 
     var body: some View {
         @Bindable var appState = appState
@@ -29,9 +31,11 @@ struct ContentView: View {
                         appState.projectRenameTarget = .init(id: entry.id, name: entry.name)
                     },
                     onRequestNewProject: { appState.showNewProjectSheet = true },
-                    // The same picker File ▸ Open Project Export… (⌘O) runs. Import and the sample
-                    // project have no window-level backing yet, so their rows stay hidden.
-                    onRequestOpenExport: { ProjectExportPicker.choose(for: appState) }
+                    onRequestImport: { welcomeImportKind = $0 },
+                    // The same picker File ▸ Open Project Export… (⌘O) runs.
+                    onRequestOpenExport: { ProjectExportPicker.choose(for: appState) },
+                    onRequestSampleProject: appState.openSampleProject,
+                    showsOnLaunch: $appState.showsWelcomeOnLaunch
                 )
             }
         }
@@ -50,6 +54,16 @@ struct ContentView: View {
             NewProjectSheet { name, port in
                 appState.createProject(name: name, port: port)
             }
+        }
+        // The welcome window's import: the same review sheet the workspace opens, committed into a
+        // project created for it. Nothing is created when nothing is selected.
+        .sheet(item: $welcomeImportKind) { kind in
+            ImportView(kind: kind, existingEndpoints: []) { candidates in
+                guard candidates.contains(where: \.isSelected) else { return }
+                appState.createProject(name: kind.newProjectName)
+                appState.commitImportedCandidates(candidates)
+            }
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .sheet(item: $appState.projectRenameTarget) { target in
             RenameItemSheet(
@@ -142,6 +156,18 @@ struct ContentView: View {
             // change is silently not made. Named for the same reason the store-failure message is.
             Text(message)
                 .accessibilityIdentifier("commandError.message")
+        }
+    }
+}
+
+extension ImportKind: Identifiable {
+    var id: Self { self }
+
+    /// The name of the project a welcome-window import creates. Renamed like any other.
+    var newProjectName: String {
+        switch self {
+        case .har: "Imported HAR"
+        case .openAPI: "Imported API"
         }
     }
 }

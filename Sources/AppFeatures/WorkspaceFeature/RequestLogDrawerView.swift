@@ -320,6 +320,9 @@ struct RequestLogDrawerView: View {
     var onAddToJourney: (([RequestLog], UUID) -> Void)?
     /// Seeds a new journey with the requests.
     var onAddToNewJourney: (([RequestLog]) -> Void)?
+    /// The port the project serves on when it runs, for the empty log's `curl` hint while stopped.
+    /// Set with ``configuredPort(_:)``.
+    private(set) var configuredPort: Int?
 
     /// The filter, the sort and the rows they produced. Held in an object rather than in `@State`
     /// fields so the log docked under the editor and the log that takes over the centre column while
@@ -810,7 +813,9 @@ struct RequestLogDrawerView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("ds.empty.drawer.requests.heading")
 
-            if let port = serverState.runningPort {
+            // Shown stopped too, as the design has it: the command is what to run once Run is
+            // pressed, and it names the port the server will listen on.
+            if let port = serverState.runningPort ?? configuredPort {
                 curlChip("curl http://localhost:\(port)/")
             }
         }
@@ -818,6 +823,13 @@ struct RequestLogDrawerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ds.empty.drawer.requests")
+    }
+
+    /// The same drawer, naming `port` in the empty log's `curl` hint while the server is stopped.
+    func configuredPort(_ port: Int?) -> Self {
+        var copy = self
+        copy.configuredPort = port
+        return copy
     }
 
     /// A command to try, in a code well with a copy button.

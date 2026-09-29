@@ -117,7 +117,7 @@ public struct DSJSONEditor: View {
         stringColour: DSColors.Syntax.stringDarkInk.nsColor(),
         characterColour: NSColor(srgbRed: 0.84, green: 0.79, blue: 0.53, alpha: 1.0),
         numberColour: DSColors.Syntax.numberDarkInk.nsColor(),
-        identifierColour: NSColor(srgbRed: 0.38, green: 0.74, blue: 0.66, alpha: 1.0),
+        identifierColour: DSColors.Syntax.keyDarkInk.nsColor(),
         operatorColour: NSColor(srgbRed: 0.60, green: 0.92, blue: 0.85, alpha: 1.0),
         keywordColour: DSColors.Syntax.literalDarkInk.nsColor(),
         symbolColour: NSColor(srgbRed: 0.68, green: 0.68, blue: 0.72, alpha: 1.0),
@@ -131,9 +131,15 @@ public struct DSJSONEditor: View {
         invisiblesColour: NSColor(srgbRed: 0.30, green: 0.33, blue: 0.38, alpha: 1.0)
     )
 
-    // The regex grammar colors keys as strings; the read-only formatter distinguishes keys.
+    // An object key is a string followed by a colon. The grammar has no key role, so keys are
+    // tokenised as identifiers (drawn in the key ink) and strings exclude anything a colon follows.
+    // Both patterns match the same span; the lookaheads decide which one claims it.
+    static let jsonStringPattern = #""(?:[^"\\]|\\.)*"(?!\s*:)"#
+    static let jsonKeyPattern = #""(?:[^"\\]|\\.)*"(?=\s*:)"#
+
     private static let jsonLanguage: LanguageConfiguration = {
-        let string = try? Regex<Substring>(#""(?:[^"\\]|\\.)*""#, as: Substring.self)
+        let string = try? Regex<Substring>(jsonStringPattern, as: Substring.self)
+        let key = try? Regex<Substring>(jsonKeyPattern, as: Substring.self)
         let number = try? Regex<Substring>(
             #"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"#,
             as: Substring.self
@@ -148,7 +154,7 @@ public struct DSJSONEditor: View {
             numberRegex: number,
             singleLineComment: nil,
             nestedComment: nil,
-            identifierRegex: nil,
+            identifierRegex: key,
             operatorRegex: nil,
             reservedIdentifiers: ["true", "false", "null"],
             reservedOperators: []
@@ -164,7 +170,7 @@ public struct DSJSONEditor: View {
         stringColour: DSColors.Syntax.stringLightInk.nsColor(),
         characterColour: NSColor(srgbRed: 0.14, green: 0.19, blue: 0.81, alpha: 1.0),
         numberColour: DSColors.Syntax.numberLightInk.nsColor(),
-        identifierColour: NSColor(srgbRed: 0.20, green: 0.48, blue: 0.52, alpha: 1.0),
+        identifierColour: DSColors.Syntax.keyLightInk.nsColor(),
         operatorColour: NSColor(srgbRed: 0.18, green: 0.05, blue: 0.43, alpha: 1.0),
         keywordColour: DSColors.Syntax.literalLightInk.nsColor(),
         symbolColour: NSColor(srgbRed: 0.24, green: 0.13, blue: 0.48, alpha: 1.0),

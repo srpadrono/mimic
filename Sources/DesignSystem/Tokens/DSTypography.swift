@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Type roles, after Apple's macOS text styles. Six sizes: 20, 15, 13, 12, 11, and SF Mono 12.
 public enum DSTypography {
-    /// 26pt bold — the welcome window's app name.
-    public static let largeTitle: Font = .system(size: 26, weight: .bold)
+    /// 28pt bold — the welcome window's app name.
+    public static let largeTitle: Font = .system(size: 28, weight: .bold)
     /// 20pt semibold — sheet and editor titles.
     public static let title: Font = .system(size: 20, weight: .semibold)
     /// 15pt semibold — the scenario or journey being edited, alert titles.

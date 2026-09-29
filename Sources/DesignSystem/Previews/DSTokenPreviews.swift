@@ -18,7 +18,7 @@ import SwiftUI
 
 #Preview("Typography") {
     VStack(alignment: .leading, spacing: DSSpacing.md) {
-        Text("Large title (26pt bold)").font(DSTypography.largeTitle)
+        Text("Large title (28pt bold)").font(DSTypography.largeTitle)
         Text("Title (20pt semibold)").font(DSTypography.title)
         Text("Headline (15pt semibold)").font(DSTypography.headline)
         Text("Body semibold (13pt)").font(DSTypography.bodySemibold)

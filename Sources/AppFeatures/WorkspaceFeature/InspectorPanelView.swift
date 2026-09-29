@@ -19,7 +19,6 @@ struct InspectorPanelView: View {
     let onDeleteScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onRenameScenario: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void
     let endpointTraffic: [RequestLog]
-    let onSelectTrafficLog: (UUID) -> Void
     let endpointSettings: EndpointInspectorSettings.Context?
 
     @State private var addScenarioTarget: ScenarioTarget?
@@ -36,7 +35,6 @@ struct InspectorPanelView: View {
         endpointTraffic: [RequestLog] = [],
         endpointSettings: EndpointInspectorSettings.Context? = nil,
         onShowJourneys: @escaping () -> Void = {},
-        onSelectTrafficLog: @escaping (UUID) -> Void = { _ in },
         onAddScenario: @escaping (_ endpointID: UUID, _ name: String) -> Void,
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
@@ -50,7 +48,6 @@ struct InspectorPanelView: View {
         self.endpointTraffic = endpointTraffic
         self.endpointSettings = endpointSettings
         self.onShowJourneys = onShowJourneys
-        self.onSelectTrafficLog = onSelectTrafficLog
         self.onAddScenario = onAddScenario
         self.onSetActiveScenario = onSetActiveScenario
         self.onDuplicateScenario = onDuplicateScenario
@@ -196,7 +193,7 @@ struct InspectorPanelView: View {
                     EndpointInspectorSettings(endpoint: endpoint, context: endpointSettings)
                 }
 
-                EndpointTrafficSummary(logs: endpointTraffic, onSelect: onSelectTrafficLog)
+                EndpointTrafficSummary(logs: endpointTraffic)
             }
             .padding(.bottom, DSSpacing.lg)
         }

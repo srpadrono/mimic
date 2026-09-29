@@ -306,19 +306,33 @@ struct SheetRequestField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: DSSpacing.sm) {
-                Picker("HTTP method", selection: $method) {
+                // A menu rather than a menu-style `Picker`, whose pop-up button draws its own pair of
+                // chevrons: the design has the method in its colour and one down chevron.
+                Menu {
                     ForEach(HTTPMethod.allCases, id: \.self) { option in
-                        Text(option.rawValue).tag(option)
+                        Button(option.rawValue) { method = option }
                     }
+                } label: {
+                    HStack(spacing: DSSpacing.xs) {
+                        Text(method.rawValue)
+                            .font(DSTypography.method)
+                            .foregroundStyle(DSColors.methodColor(for: method.rawValue))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                            .foregroundStyle(DSColors.labelTertiary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(height: DSControlHeight.regular)
+                    .contentShape(Rectangle())
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .buttonStyle(.borderless)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
-                .font(DSTypography.method)
-                .tint(DSColors.methodColor(for: method.rawValue))
+                .help("HTTP method")
                 .accessibilityIdentifier(pickerIdentifier)
                 .accessibilityLabel("HTTP method")
+                .accessibilityValue(method.rawValue)
 
                 Rectangle()
                     .fill(DSColors.separator)

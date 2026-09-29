@@ -159,4 +159,12 @@ struct ServerStatusWellTests {
         #expect(ServerStatusWell.unmatchedLabel(1, actionable: true) == "1 unmatched request, show it")
         #expect(ServerStatusWell.unmatchedLabel(2, actionable: false) == "2 unmatched requests")
     }
+
+    @Test("The popover says since when the server has been running, as a time of day")
+    func sinceTextNamesTheStartTime() {
+        let text = ServerStatusWell.sinceText(Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(text.hasPrefix("since "))
+        #expect(text.count > "since ".count)
+        #expect(!text.contains("2023"), "only the time of day, not the date")
+    }
 }

@@ -62,6 +62,9 @@ public nonisolated enum DSColors {
     /// A sheet's own background.
     public static let sheet = Color(light: Ink(0xF7F7F8), dark: Ink(0x2A2A2D))
 
+    /// The source list down the side of a sheet, a step darker than the sheet in either scheme.
+    public static let sheetSidebar = Color(light: Ink(0xEFEFF2), dark: Ink(0x242427))
+
     /// The fill inside a field, a segmented track, or a secondary button.
     public static let field = Color(light: Ink(white: 0, alpha: 0.045), dark: Ink(white: 1, alpha: 0.065))
 
@@ -166,6 +169,17 @@ public nonisolated enum DSColors {
         default: labelSecondary
         }
     }
+
+    // MARK: - Project tiles
+
+    /// The monogram tiles in the welcome window's project list. White text sits on all four in both
+    /// appearances, so they do not adapt; a project keeps its colour for as long as it keeps its id.
+    public static let projectTiles: [Color] = [
+        Color(light: Ink(0x0A84FF), dark: Ink(0x0A84FF)),
+        Color(light: Ink(0x34A853), dark: Ink(0x34A853)),
+        Color(light: Ink(0xAF52DE), dark: Ink(0xAF52DE)),
+        Color(light: Ink(0xFF9F0A), dark: Ink(0xFF9F0A)),
+    ]
 
     // MARK: - Methods
 

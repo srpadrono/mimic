@@ -6,8 +6,10 @@ nonisolated public enum DSSheetWidth {
     public static let compact: CGFloat = 440
     /// A sheet with one list or explanation: update notes, templates.
     public static let medium: CGFloat = 560
-    /// A multi-section form: journey step, server settings.
+    /// A multi-section form: journey step.
     public static let wide: CGFloat = 680
+    /// A source list beside a multi-section form: server settings.
+    public static let split: CGFloat = 760
     /// A review table: import.
     public static let review: CGFloat = 860
 }

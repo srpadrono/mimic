@@ -759,15 +759,16 @@ final class ErrorAlertUITests: MimicUITestCase {
             "An endpoint with no response headers should say so"
         )
 
-        // ERRDEAD-08. The endpoint's traffic is a section of the inspector, under its scenarios.
-        let trafficEmpty = InspectorPage(app: app).trafficEmpty
+        // ERRDEAD-08. The endpoint's traffic is a section of the inspector, under its scenarios; with
+        // nothing called it shows its figures at zero rather than a sentence.
+        let served = InspectorPage(app: app).trafficServed
         XCTAssertTrue(
-            trafficEmpty.waitForExistence(timeout: 10),
-            "An endpoint nothing has called should say so in the inspector's Traffic section"
+            served.waitForExistence(timeout: 10),
+            "An endpoint nothing has called should still show its Traffic figures"
         )
         XCTAssertTrue(
-            waitForText(trafficEmpty, containing: "No requests yet"),
-            "The Traffic section should say nothing has arrived — read: " + combinedText(of: trafficEmpty)
+            waitForText(served, containing: "0 served"),
+            "The Traffic section should count nothing served — read: " + combinedText(of: served)
         )
     }
 

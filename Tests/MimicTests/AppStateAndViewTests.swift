@@ -1112,6 +1112,8 @@ struct AppStateAndViewTests {
         // The store owns the name — a rename used to leave the old one in the cache forever.
         #expect(list[1].name == "Cached second")
         #expect(list.contains { $0.name == "Deleted elsewhere" } == false)
+        // Every row, cached or not, carries the store's summary for its detail line.
+        #expect(list.allSatisfy { $0.summary == RecentProjectEntry.Summary(ports: [8080], endpointCount: 0, journeyCount: 0) })
     }
 
     @Test("Nothing in the store is unreachable from the welcome list")

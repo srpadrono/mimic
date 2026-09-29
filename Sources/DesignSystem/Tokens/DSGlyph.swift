@@ -12,6 +12,8 @@ nonisolated public enum DSGlyph {
     public static let control: CGFloat = 15
     /// 16pt — toolbar items, matching the system's own.
     public static let toolbar: CGFloat = 16
+    /// 22pt — the symbol at the top of an option card.
+    public static let card: CGFloat = 22
     /// 28pt — the symbol above an empty state's title.
     public static let illustration: CGFloat = 28
 
