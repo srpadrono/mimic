@@ -214,15 +214,19 @@ struct ServerStatusWell: View {
 
             DSDivider()
 
-            HStack(alignment: .bottom, spacing: 18) {
-                figure("\(requestCount)", caption: requestCount == 1 ? "request" : "requests",
-                       color: DSColors.labelPrimary)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.requestCountLabel(requestCount))
-                    .accessibilityIdentifier("serverStatusWell.requestCount")
-                figure("\(unmatchedCount)", caption: "unmatched",
-                       color: unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary)
-                Spacer(minLength: DSSpacing.sm)
+            // The counts keep their 18pt gap between themselves only; around the spacer the gap is
+            // the ordinary one, so "Show unmatched" has room for its whole label.
+            HStack(alignment: .bottom, spacing: DSSpacing.sm) {
+                HStack(alignment: .bottom, spacing: 18) {
+                    figure("\(requestCount)", caption: requestCount == 1 ? "request" : "requests",
+                           color: DSColors.labelPrimary)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Self.requestCountLabel(requestCount))
+                        .accessibilityIdentifier("serverStatusWell.requestCount")
+                    figure("\(unmatchedCount)", caption: "unmatched",
+                           color: unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary)
+                }
+                Spacer(minLength: 0)
                 // Always offered, as the design has it: with nothing unmatched it opens the log on
                 // an Unmatched scope that says so.
                 if let onShowUnmatched {
@@ -231,6 +235,9 @@ struct ServerStatusWell: View {
                         showingDetails = false
                         onShowUnmatched()
                     }
+                    // Its whole label, always; the counts and the spacer give way instead.
+                    .fixedSize()
+                    .layoutPriority(1)
                     .accessibilityIdentifier("serverStatusWell.unmatched")
                     .accessibilityLabel(unmatchedCount > 0
                         ? Self.unmatchedLabel(unmatchedCount, actionable: true) : "Show unmatched")
