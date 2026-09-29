@@ -241,7 +241,7 @@ struct EndpointEditorView: View {
             // The label is the chevron alone, framed across the method as well, as `DSIconMenu`
             // frames its glyph. A label with text is flattened into the pop-up button's title, and
             // AppKit then sizes the control to that title — a 14pt target — whatever the frame says.
-            // The method is drawn over it, so the whole method-and-chevron box opens the menu.
+            // The method is drawn behind it, so the whole method-and-chevron box opens the menu.
             Label("Endpoint actions", systemImage: "chevron.down")
                 .labelStyle(.iconOnly)
                 .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
@@ -253,8 +253,10 @@ struct EndpointEditorView: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .frame(width: endpointMenuWidth, height: DSControlHeight.regular)
-        // Drawn over the menu but transparent to the pointer, so a click on the method opens it.
-        .overlay(alignment: .leading) {
+        // Drawn behind the menu, whose pop-up button spans the method too, so a click on the
+        // method opens it. An overlay, even one that ignores hits, sits between the pointer and the
+        // AppKit button.
+        .background(alignment: .leading) {
             DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
                 .fixedSize()
                 .allowsHitTesting(false)
