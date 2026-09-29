@@ -18,12 +18,18 @@ public struct DSFilterField: View {
     private let placeholder: String
     private let identifier: String
     private let focusRequest: Int
+    private let reservesScopeSlot: Bool
     private let label: String
     @Environment(\.isEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
 
+    /// `reservesScopeSlot` lays a scopeless field out as if it had an unscoped scope menu, so the
+    /// text starts where it does in a sibling field that has one. Fields that stand in for each other
+    /// in one place, as the navigator's two filters do, set it; a field on its own does not.
     public init(text: Binding<String>, scopeID: Binding<String>, scopes: [Scope],
-                placeholder: String, label: String? = nil, identifier: String, focusRequest: Int = 0) {
+                placeholder: String, label: String? = nil, identifier: String, focusRequest: Int = 0,
+                reservesScopeSlot: Bool = false) {
+        self.reservesScopeSlot = reservesScopeSlot
         self.label = label ?? placeholder
         self._text = text
         self._scopeID = scopeID
@@ -36,10 +42,18 @@ public struct DSFilterField: View {
     public var body: some View {
         HStack(spacing: DSSpacing.xs + 2) {
             if scopes.isEmpty {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: DSGlyph.field, weight: .regular))
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .accessibilityHidden(true)
+                // The unscoped menu's label, with its chevron kept for its width but not drawn.
+                HStack(spacing: ScopeMenu.glyphSpacing) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: DSGlyph.field, weight: .regular))
+                    if reservesScopeSlot {
+                        ScopeMenu.chevron.hidden()
+                    }
+                }
+                .foregroundStyle(DSColors.labelTertiary)
+                .frame(height: DSControlHeight.regular)
+                .fixedSize()
+                .accessibilityHidden(true)
             } else {
                 ScopeMenu(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             }
@@ -73,11 +87,17 @@ public struct DSFilterField: View {
         @Environment(\.isEnabled) private var isEnabled
         @State private var isHovered = false
 
+        static let glyphSpacing: CGFloat = 2
+        static var chevron: some View {
+            Image(systemName: "chevron.down")
+                .font(.system(size: DSGlyph.minimum, weight: .bold))
+        }
+
         var body: some View {
             Menu {
                 ScopeOptions(scopes: scopes, scopeID: $scopeID, identifier: identifier)
             } label: {
-                HStack(spacing: 2) {
+                HStack(spacing: Self.glyphSpacing) {
                     Image(systemName: isScoped ? "line.3.horizontal.decrease.circle.fill" : "magnifyingglass")
                         .font(.system(size: DSGlyph.field, weight: .regular))
                     if isScoped {
@@ -85,8 +105,7 @@ public struct DSFilterField: View {
                             .font(DSTypography.caption.weight(.semibold))
                             .lineLimit(1)
                     }
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.minimum, weight: .bold))
+                    Self.chevron
                 }
                 .foregroundStyle(isScoped ? DSColors.accent
                                  : isEnabled && isHovered ? DSColors.labelSecondary : DSColors.labelTertiary)

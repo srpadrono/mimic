@@ -22,44 +22,25 @@ struct JourneyEditorView: View {
     /// Two steps and the list's margins: the least of the list a short pane keeps on screen.
     static let minimumStepListHeight: CGFloat = DSRowHeight.step * 2 + DSSpacing.sm * 2 + DSSpacing.xs
 
+    /// The scroll anchor on the disclosed details.
+    private static let detailsAnchor = "journeyEditor.details"
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Title, run, behaviour and — when disclosed — the details, in one scroll view that
-            // takes its natural height in a tall pane and gives way in a short one. The steps are
-            // what the editor is for, so they keep `minimumStepListHeight` whatever the pane: a
-            // narrow window stacks the header and the behaviour grid, and without this the list was
-            // laid out at zero height with every step in the tree and none of them clickable.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                        header
-                        JourneyRunProgress(journey: journey, isActive: isActive, status: status)
-                        behaviorRow
-                    }
-                    .padding(.top, DSSpacing.xl)
-                    .padding(.horizontal, DSSpacing.xxl)
-                    .padding(.bottom, settingsExpanded ? DSSpacing.md : DSSpacing.lg)
-
-                    if settingsExpanded {
-                        settingsContent
+        ScrollViewReader { overview in
+            editorStack
+                // Disclosing the details reveals them. In a short pane the overview scroll view is
+                // already at its limit, so the details open below its visible edge, where a click
+                // on the group field lands on the steps instead. Deferred a turn so the details are
+                // laid out before the scroll view is asked to reach them; no animation, so Reduce
+                // Motion has nothing to honour.
+                .onChange(of: settingsExpanded) { _, expanded in
+                    guard expanded else { return }
+                    Task { @MainActor in
+                        // Top, and the scroll view clamps: the whole of the details when they fit,
+                        // the description first when they do not.
+                        overview.scrollTo(Self.detailsAnchor, anchor: .top)
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    overviewContentHeight = height
-                }
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(minHeight: 0, maxHeight: overviewContentHeight)
-            // Offered everything the step list's minimum leaves, before the list takes the rest.
-            .layoutPriority(1)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("journeyEditor.settingsScroll")
-
-            DSDivider(identifier: "journeyEditor.run")
-                .padding(.horizontal, DSSpacing.xxl)
-            stepsHeader
-            stepList
-                .frame(minHeight: Self.minimumStepListHeight, maxHeight: .infinity)
         }
         // `.contain` keeps descendants such as `journeyEditor.name` and `journeyStep-n` addressable
         // when the centre pane names this container.
@@ -83,6 +64,48 @@ struct JourneyEditorView: View {
                     appState.removeJourneyStep(journeyID: journey.id, stepID: step.id)
                 }
             )
+        }
+    }
+
+    private var editorStack: some View {
+        VStack(spacing: 0) {
+            // Title, run, behaviour and — when disclosed — the details, in one scroll view that
+            // takes its natural height in a tall pane and gives way in a short one. The steps are
+            // what the editor is for, so they keep `minimumStepListHeight` whatever the pane: a
+            // narrow window stacks the header and the behaviour grid, and without this the list was
+            // laid out at zero height with every step in the tree and none of them clickable.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: DSSpacing.lg) {
+                        header
+                        JourneyRunProgress(journey: journey, isActive: isActive, status: status)
+                        behaviorRow
+                    }
+                    .padding(.top, DSSpacing.xl)
+                    .padding(.horizontal, DSSpacing.xxl)
+                    .padding(.bottom, settingsExpanded ? DSSpacing.md : DSSpacing.lg)
+
+                    if settingsExpanded {
+                        settingsContent
+                            .id(Self.detailsAnchor)
+                    }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    overviewContentHeight = height
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(minHeight: 0, maxHeight: overviewContentHeight)
+            // Offered everything the step list's minimum leaves, before the list takes the rest.
+            .layoutPriority(1)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("journeyEditor.settingsScroll")
+
+            DSDivider(identifier: "journeyEditor.run")
+                .padding(.horizontal, DSSpacing.xxl)
+            stepsHeader
+            stepList
+                .frame(minHeight: Self.minimumStepListHeight, maxHeight: .infinity)
         }
     }
 

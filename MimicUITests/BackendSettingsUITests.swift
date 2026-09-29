@@ -123,7 +123,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         app.activate()
         page.ports.click()
         XCTAssertTrue(page.portMenuItem(18081).waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(page.portMenuItem(18081).value as? String, "http://localhost:18081")
+        // The popover lists the address as the design draws it, without the scheme.
+        XCTAssertEqual(page.portMenuItem(18081).value as? String, "localhost:18081")
         let portListShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         portListShot.name = "Configured port list"
         portListShot.lifetime = .keepAlways

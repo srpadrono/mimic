@@ -8,6 +8,7 @@ private enum EditorMetrics {
     static let delayFieldWidth: CGFloat = 92
     static let contentTypeFieldWidth: CGFloat = 120
     static let headerKeyWidth: CGFloat = 200
+    /// The least height of the body's text viewport, the part that scrolls.
     static let bodyMinHeight: CGFloat = 120
     /// Codes offered by the status field's menu; any other code can be typed.
     static let commonStatusCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]
@@ -39,6 +40,7 @@ struct EndpointEditorView: View {
     @State private var statusCodeError: String?
     @State private var delayError: String?
     @State private var formatCandidate: (source: String, output: String)?
+    @State private var methodLabelWidth: CGFloat = 0
     @State private var showDeleteConfirmation = false
     @State private var renameScenarioTarget: Scenario?
     @State private var didCopyURL = false
@@ -237,26 +239,35 @@ struct EndpointEditorView: View {
             }
             .accessibilityIdentifier("endpointEditor.moreMenu.delete")
         } label: {
-            HStack(spacing: DSSpacing.xs) {
-                DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
-            }
-            .frame(height: DSControlHeight.regular)
-            .contentShape(Rectangle())
+            // The label is the chevron alone, framed across the method as well, as `DSIconMenu`
+            // frames its glyph. A label with text is flattened into the pop-up button's title, and
+            // AppKit then sizes the control to that title — a 14pt target — whatever the frame says.
+            // The method is drawn behind, so the whole method-and-chevron box opens the menu.
+            Label("Endpoint actions", systemImage: "chevron.down")
+                .labelStyle(.iconOnly)
+                .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                .foregroundStyle(DSColors.labelTertiary)
+                .frame(width: endpointMenuWidth, height: DSControlHeight.regular, alignment: .trailing)
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        // Horizontal only, then an explicit height, as `DSIconMenu` does. A fully fixed-size menu
-        // takes AppKit's intrinsic height for its title — 14pt — whatever the label's own frame
-        // says, which left a glyph-high click target in a 32pt request bar.
-        .fixedSize(horizontal: true, vertical: false)
-        .frame(height: DSControlHeight.regular)
+        .frame(width: endpointMenuWidth, height: DSControlHeight.regular)
+        .background(alignment: .leading) {
+            DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { methodLabelWidth = $0 }
+                .accessibilityHidden(true)
+        }
         .help("Endpoint actions")
         .accessibilityIdentifier("endpointEditor.moreMenu")
         .accessibilityLabel("Endpoint actions, \(endpoint.method.rawValue)")
+    }
+
+    /// The method, the gap and the chevron's slot.
+    private var endpointMenuWidth: CGFloat {
+        methodLabelWidth + DSSpacing.xs + DSGlyph.disclosure
     }
 
     // MARK: - Scenario
@@ -537,8 +548,11 @@ struct EndpointEditorView: View {
     }
 
     private var bodyEditor: some View {
-        DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID)
-            .frame(minHeight: EditorMetrics.bodyMinHeight, maxHeight: .infinity)
+        // The minimum is the text viewport's, not the card's: the card adds its own padding around
+        // it, and a short pane squeezes the body to exactly this minimum.
+        DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID,
+                     minimumViewportHeight: EditorMetrics.bodyMinHeight)
+            .frame(maxHeight: .infinity)
             .onChange(of: responseBody) { debounceBody() }
             .task(id: responseBody) {
                 let source = responseBody

@@ -328,6 +328,7 @@ struct WorkspacePage {
             app.typeKey("i", modifierFlags: [.command, .option])
             _ = inspectorHeader.waitForExistence(timeout: 5)
         }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
 
     func compactWindow() {

@@ -10,19 +10,26 @@ public struct DSJSONEditor: View {
     @Environment(\.colorScheme) private var colorScheme
     private let identifier: String
     private let documentID: String?
+    private let minimumViewportHeight: CGFloat
     private let onValidationChanged: ((Bool) -> Void)?
 
     /// Update `documentID` together with the hydrated text when changing documents.
     /// Replacements within one document are undoable; a new document starts with empty history.
+    ///
+    /// `minimumViewportHeight` is the least height of the text viewport itself. A `.frame(minHeight:)`
+    /// on the editor bounds the whole card, which includes its vertical padding, so the text the
+    /// person can see would be that padding shorter than the number the caller wrote.
     public init(
         text: Binding<String>,
         identifier: String,
         documentID: String? = nil,
+        minimumViewportHeight: CGFloat = 0,
         onValidationChanged: ((Bool) -> Void)? = nil
     ) {
         self._text = text
         self.identifier = identifier
         self.documentID = documentID
+        self.minimumViewportHeight = minimumViewportHeight
         self.onValidationChanged = onValidationChanged
     }
 
@@ -40,6 +47,7 @@ public struct DSJSONEditor: View {
                     .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
                     .environment(\.colorScheme, colorScheme)
             }
+            .frame(minHeight: minimumViewportHeight, maxHeight: .infinity)
             .padding(.vertical, DSSpacing.sm)
             .background(DSColors.code)
             .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))

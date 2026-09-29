@@ -581,11 +581,14 @@ final class JourneyEditorUITests: MimicUITestCase {
         let scroller = app.scrollViews["journeyEditor.settingsScroll"].firstMatch
         XCTAssertTrue(scroller.waitForExistence(timeout: 5), "Expanded journey settings should scroll")
         XCTAssertTrue(control.waitForExistence(timeout: 5), "The journey setting should exist")
+        // Inside the scroll view's visible frame, not only hittable: a control clipped by the
+        // scroll view's edge still reports hittable, and the click then lands on the step list.
+        func revealed() -> Bool { control.isHittable && scroller.frame.contains(control.frame) }
         for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0] {
-            if control.isHittable { return }
+            if revealed() { return }
             scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
         }
-        XCTAssertTrue(control.isHittable, "The journey setting should be visible after scrolling")
+        XCTAssertTrue(revealed(), "The journey setting should be visible after scrolling")
     }
 
     /// Picks one segment of the step sheet's outcome control.

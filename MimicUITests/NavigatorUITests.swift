@@ -48,7 +48,11 @@ struct NavigatorPage {
         )).firstMatch
     }
     func scopeOption(_ name: String) -> XCUIElement { app.menuItems[name].firstMatch }
+    /// Waits for the field to be hittable first: the journey editor's group field is disclosed into a
+    /// scroll view, and a click before it has scrolled into view lands on whatever is there instead.
     func filter(_ field: XCUIElement, text: String) {
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { field.exists && field.isHittable },
+                      "The field should be on screen before it is edited")
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText(text.isEmpty ? XCUIKeyboardKey.delete.rawValue : text)
