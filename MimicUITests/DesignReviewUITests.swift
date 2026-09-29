@@ -80,31 +80,13 @@ final class DesignReviewUITests: MimicUITestCase {
         capture("03-empty-workspace")
 
         try await seedStorefront()
-        logGeometry("after-seed")
         workspace.fillWindow()
-        logGeometry("after-fill")
         workspace.showSidebarIfNeeded()
         dismissInjectedImport()
         let product = row(named: "Get product")
         if product.waitForExistence(timeout: 5) { product.click() }
         _ = endpointEditor.pathLabel.waitForExistence(timeout: 5)
         capture("04-workspace-editor")
-        logGeometry("editor")
-        // Which part holds the window wider than the screen: the toolbar, the inspector or the
-        // navigator. Each is taken away in turn and the window filled again.
-        app.typeKey("t", modifierFlags: [.command, .option])
-        workspace.fillWindow()
-        logGeometry("no-toolbar")
-        app.typeKey("t", modifierFlags: [.command, .option])
-        app.typeKey("i", modifierFlags: [.command, .option])
-        workspace.fillWindow()
-        logGeometry("no-inspector")
-        app.typeKey("i", modifierFlags: [.command, .option])
-        app.typeKey("s", modifierFlags: [.command, .control])
-        workspace.fillWindow()
-        logGeometry("no-navigator")
-        app.typeKey("s", modifierFlags: [.command, .control])
-        workspace.fillWindow()
 
         let outOfStock = element("inspector.scenario.Out of stock")
         if outOfStock.waitForExistence(timeout: 3) {
@@ -344,22 +326,6 @@ final class DesignReviewUITests: MimicUITestCase {
 
     /// Saves the whole screen, so sheets, popovers, and menus outside the window frame are included.
     @MainActor
-    /// Prints the frames that decide the window's width, so a layout that outgrows the screen can
-    /// be read from the log.
-    private func logGeometry(_ label: String) {
-        let window = app.windows.firstMatch
-        var lines = ["DESIGN_GEOMETRY \(label) window=\(window.frame) screen=\(XCUIScreen.main.screenshot().image.size)"]
-        for id in ["navigator", "centerPane", "inspector", "inspector.header", "requestLog", "drawer",
-                   "toolbar.projectIdentity", "workspace.status", "toolbar.overflow", "toggleInspectorButton"] {
-            let element = app.descendants(matching: .any).matching(identifier: id).firstMatch
-            lines.append("DESIGN_GEOMETRY \(label) \(id) exists=\(element.exists) frame=\(element.exists ? element.frame : .zero)")
-        }
-        for (index, item) in window.toolbars.firstMatch.descendants(matching: .any).allElementsBoundByIndex.prefix(40).enumerated() {
-            lines.append("DESIGN_GEOMETRY \(label) toolbar[\(index)] \(item.elementType.rawValue) id=\(item.identifier) label=\(item.label) frame=\(item.frame)")
-        }
-        print(lines.joined(separator: "\n"))
-    }
-
     private func capture(_ name: String) {
         let full = "\(name)-\(appearance)"
         let shot = XCUIScreen.main.screenshot()

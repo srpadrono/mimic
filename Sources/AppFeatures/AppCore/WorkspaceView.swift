@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Domain
 import DesignSystem
 import Persistence
@@ -471,13 +470,6 @@ struct WorkspaceView: View {
     /// Collapse in stages as the centre column narrows: first the secondary actions fold into one
     /// menu, then the status capsule drops its counts, then the project identity narrows. The
     /// capsule always keeps its state word.
-    /// The centre column's floor on a screen this wide: the design's minimum, or whatever is left
-    /// beside the navigator and the inspector at their own minimums if that is less.
-    nonisolated static func centreMinimumWidth(screenWidth: CGFloat) -> CGFloat {
-        let sides = DSLayout.sidebarMinimumWidth + DSLayout.inspectorMinimumWidth
-        return max(0, min(DSLayout.centreMinimumWidth, screenWidth - sides))
-    }
-
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
         guard centerWidth.isFinite else { return .narrow }
         if centerWidth < 460 { return .narrow }
