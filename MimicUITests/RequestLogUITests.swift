@@ -809,6 +809,10 @@ final class RequestLogUITests: MimicUITestCase {
             text(of: outcomeSentence).contains("Answered by Users"),
             "The outcome sentence should name the endpoint — it read \(text(of: outcomeSentence))"
         )
+        // "Answered by Users" is about 110pt wide. However narrow the column, the sentence takes a
+        // line of its own rather than being squeezed to a letter beside the status.
+        XCTAssertGreaterThan(outcomeSentence.frame.width, 80,
+                             "The outcome sentence should not be truncated to a stub")
 
         // Request is the tab a selection opens on: where the call arrived, then its headers.
         XCTAssertTrue(

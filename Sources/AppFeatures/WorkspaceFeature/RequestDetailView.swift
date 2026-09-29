@@ -259,30 +259,61 @@ struct RequestDetailView: View {
     }
 
     /// The status and what produced it, then duration, size and arrival time.
+    ///
+    /// On one line while the whole sentence fits beside the status and the timing. When it does not,
+    /// the sentence takes its own full-width line under them and wraps, rather than being squeezed
+    /// to a letter; in the narrowest column the timing moves under the status too.
     private var statusLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Self.blockSpacing) {
-            statusLabel
-
-            Text(outcomeExplanation)
-                .font(DSTypography.callout)
-                .foregroundStyle(outcomeExplanationColor)
-                .lineLimit(2)
-                .accessibilityIdentifier("requestDetail.outcome")
-
-            Spacer(minLength: DSSpacing.sm)
-
-            HStack(spacing: 0) {
-                if let metrics = metricsText {
-                    Text(metrics + " \u{00B7} ")
-                }
-                Text(log.timestamp, format: RequestLogQuery.timestampFormat)
-                    .accessibilityIdentifier("requestDetail.timestamp")
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: Self.blockSpacing) {
+                statusLabel
+                outcomeText.fixedSize()
+                Spacer(minLength: DSSpacing.sm)
+                timingText
             }
-            .font(DSTypography.Figure.regular)
-            .foregroundStyle(DSColors.labelSecondary)
-            .lineLimit(1)
-            .fixedSize()
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Self.blockSpacing) {
+                    statusLabel
+                    Spacer(minLength: DSSpacing.sm)
+                    timingText
+                }
+                wrappingOutcomeText
+            }
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                statusLabel
+                timingText
+                wrappingOutcomeText
+            }
         }
+    }
+
+    private var outcomeText: some View {
+        Text(outcomeExplanation)
+            .font(DSTypography.callout)
+            .foregroundStyle(outcomeExplanationColor)
+            .accessibilityIdentifier("requestDetail.outcome")
+    }
+
+    /// The sentence on a line of its own, wrapping to the column. No ideal width, so `ViewThatFits`
+    /// judges the arrangement by the status and timing alone.
+    private var wrappingOutcomeText: some View {
+        outcomeText
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var timingText: some View {
+        HStack(spacing: 0) {
+            if let metrics = metricsText {
+                Text(metrics + " \u{00B7} ")
+            }
+            Text(log.timestamp, format: RequestLogQuery.timestampFormat)
+                .accessibilityIdentifier("requestDetail.timestamp")
+        }
+        .font(DSTypography.Figure.regular)
+        .foregroundStyle(DSColors.labelSecondary)
+        .lineLimit(1)
+        .fixedSize()
     }
 
     /// Dot, code and reason phrase; a failed exchange shows its failure in the error colour.
