@@ -232,6 +232,10 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
     private var needsFitToPreferred = false
     /// Bounds the retries of one fit, so a position AppKit keeps refusing cannot loop layout.
     private var fitAttempts = 0
+    /// The fits made in the last `fitFeedbackWindow`, newest last. See `isChasingContent(to:)`.
+    private var recentFits: [(target: CGFloat, uptime: TimeInterval)] = []
+    /// Set while `updateGeometry` is queued for the next turn of the main run loop.
+    private var isGeometryUpdateScheduled = false
 
     init(
         isVertical: Bool,
@@ -310,18 +314,53 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         splitViewItems[1].holdingPriority = hugsContent ? .defaultLow : Self.secondaryHoldingPriority
     }
 
+    /// Only notes that the geometry may need work. Nothing here moves the divider.
+    ///
+    /// Moving it from inside `viewDidLayout` is what hung the window for most of a minute.
+    /// `setPosition(_:ofDividerAt:)` lays the split view out on the spot, nested in the pass that is
+    /// already running — and that pass then finishes with the constraints it started from, so the
+    /// move is thrown away. Only the nested layout survives it: long enough for the hosting view to
+    /// measure the editor at the rejected height and publish a new content extent, which reset the
+    /// retry budget and asked for another fit. The pane alternated between two heights, the editor
+    /// between two extents, and `NSWindow.layoutIfNeeded` never returned. The hang report shows it
+    /// as `viewDidLayout → setPosition → layoutSubtreeIfNeeded` for 56 seconds.
+    ///
+    /// The same pass also fires for layouts AppKit runs only to measure — the panes at sizes the
+    /// window never shows — so geometry read here is not yet the geometry on screen either.
     public override func viewDidLayout() {
         super.viewDidLayout()
+        scheduleGeometryUpdate()
+    }
 
+    /// Runs `updateGeometry` once, on the next turn of the main run loop, after the layout pass that
+    /// asked for it has finished. In the common modes, so a divider or window drag — which runs the
+    /// loop in its event-tracking mode — does not hold it back.
+    private func scheduleGeometryUpdate() {
+        guard !isGeometryUpdateScheduled else { return }
+        isGeometryUpdateScheduled = true
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isGeometryUpdateScheduled = false
+                self.updateGeometry()
+            }
+        }
+    }
+
+    /// Applies what the settled layout calls for: the double-click default, then either the fit to
+    /// the content's extent or the saved thickness. Outside any layout pass, so a move lands.
+    private func updateGeometry() {
+        guard isViewLoaded, view.window != nil, splitViewItems.count == 2 else { return }
         let available = thickness(of: splitView.bounds)
         guard available > 0 else { return }
 
         // `preferredThicknessFraction` is what AppKit consults when a divider is double-clicked. It is
         // a fraction rather than a size, so recomputing it as the window changes is what keeps
-        // "restore the default" meaning the same number of points at any window height.
-        let preferred = min(max(defaultSecondaryThickness / available, 0), 1)
-        if abs(secondaryItem.preferredThicknessFraction - preferred) > 0.001 {
-            secondaryItem.preferredThicknessFraction = preferred
+        // "restore the default" meaning the same number of points at any window height. Compared in
+        // points: every write invalidates the split view's layout, and a fraction tolerance let a
+        // window resize rewrite it on nearly every pass.
+        if abs(secondaryItem.preferredThicknessFraction * available - defaultSecondaryThickness) >= 1 {
+            secondaryItem.preferredThicknessFraction = min(max(defaultSecondaryThickness / available, 0), 1)
         }
 
         // Content that sets its own extent replaces the saved thickness.
@@ -330,7 +369,10 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
             fitToPreferredIfNeeded(available: available)
             return
         }
+        restoreSavedThicknessIfNeeded(available: available)
+    }
 
+    private func restoreSavedThicknessIfNeeded(available: CGFloat) {
         guard !hasRestoredPosition else { return }
 
         // A pane that came up collapsed has nothing to restore, and asking anyway *re-opens* it.
@@ -354,11 +396,11 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         let want = min(max(restoredSecondaryThickness, minimumSecondaryThickness), ceiling)
         guard want >= minimumSecondaryThickness else { return }
 
-        // Latch on the *result*, not on the attempt. `viewDidLayout` fires several times before the
-        // pane is really in a window at its real size, and an attempt made during one of those passes
-        // is discarded by the pass already running — so latching on "we tried" left the panel on its
-        // minimum for good. Checking what landed makes the restore self-correcting: it re-applies each
-        // layout until it takes, then stops, and never fights the user's own drag.
+        // Latch on the *result*, not on the attempt. The layout fires several times before the pane
+        // is really in a window at its real size, and an attempt made against one of those sizes is
+        // undone by the next — so latching on "we tried" left the panel on its minimum for good.
+        // Checking what landed makes the restore self-correcting: it re-applies after each layout
+        // until it takes, then stops, and never fights the user's own drag.
         if abs(thickness(of: secondaryHost.view.frame) - want) < 1 {
             hasRestoredPosition = true
             return
@@ -383,19 +425,37 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         let target = min(max(preferred, minimumPrimaryThickness), ceiling)
         guard target >= minimumPrimaryThickness,
               abs(thickness(of: primaryHost.view.frame) - target) >= 1,
-              fitAttempts < Self.maximumFitAttempts else {
+              fitAttempts < Self.maximumFitAttempts,
+              !isChasingContent(to: target) else {
             needsFitToPreferred = false
             return
         }
         fitAttempts += 1
+        recentFits.append((target, ProcessInfo.processInfo.systemUptime))
         applyExternally {
             splitView.setPosition(target, ofDividerAt: 0)
         }
     }
 
     private static var maximumFitAttempts: Int { 4 }
+    private static var fitFeedbackWindow: TimeInterval { 0.5 }
 
-    /// Records a new content extent and asks for a layout pass to fit it.
+    /// Whether fitting to `target` would return the divider to where it was a moment ago, having
+    /// been somewhere else in between.
+    ///
+    /// The retry budget cannot catch this. Content whose extent depends on the pane it sits in —
+    /// an editor that compresses in a short pane, text that rewraps as the column narrows — answers
+    /// each fit with a different extent, and a new extent starts a new fit with a fresh budget. Two
+    /// extents that produce each other are a loop the budget never sees. Retrying the *same* target
+    /// is not this; that is AppKit refusing a position, which the budget does bound.
+    private func isChasingContent(to target: CGFloat) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        recentFits.removeAll { now - $0.uptime > Self.fitFeedbackWindow }
+        guard let last = recentFits.last, abs(last.target - target) >= 1 else { return false }
+        return recentFits.dropLast().contains { abs($0.target - target) < 1 }
+    }
+
+    /// Records a new content extent and queues a fit to it.
     private func updatePreferredPrimaryThickness(_ preferred: CGFloat?) {
         let previous = preferredPrimaryThickness
         preferredPrimaryThickness = preferred
@@ -408,7 +468,7 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
     private func requestFit() {
         needsFitToPreferred = true
         fitAttempts = 0
-        if isViewLoaded { view.needsLayout = true }
+        if isViewLoaded { scheduleGeometryUpdate() }
     }
 
     /// Guards a crash AppKit walks into on its own.
