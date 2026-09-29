@@ -188,6 +188,9 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
+                // A floor for the centre column, so narrowing the window takes the side panels down
+                // to their minimum widths before the editor is squeezed.
+                .frame(minWidth: DSLayout.centreMinimumWidth)
                 // The one content surface: a rounded card inset from the window, under the toolbar.
                 .background(DSColors.content)
                 .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous))

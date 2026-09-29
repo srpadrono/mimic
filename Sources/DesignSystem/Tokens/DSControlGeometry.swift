@@ -30,6 +30,9 @@ nonisolated public enum DSLayout {
     public static let inspectorWidth: CGFloat = 300
     public static let inspectorMinimumWidth: CGFloat = 260
     public static let inspectorMaximumWidth: CGFloat = 480
+    /// The narrowest the centre column gets. Below it the navigator and the inspector give way to
+    /// their minimums first, so a small window keeps a usable editor rather than two full panels.
+    public static let centreMinimumWidth: CGFloat = 420
     /// The gap between the window edge, the floating panels, and the content surface.
     public static let panelInset: CGFloat = 8
     /// Label column in the inspector's key-value rows.
