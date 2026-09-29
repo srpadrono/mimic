@@ -93,7 +93,6 @@ struct ContentView: View {
         // anything actually happens, so on all but one launch a day this is a sleep and a `false`.
         .task {
             #if DEBUG
-            UITestSupport.applyForcedAppearance()
             // Never in a test run — see `UITestSupport.suppressesAutomaticUpdateChecks`. A unit
             // suite is hosted by this app, so without the guard every `swift`/`xcodebuild test`
             // invocation would call GitHub; and a UI test would race its own sheet against one this
