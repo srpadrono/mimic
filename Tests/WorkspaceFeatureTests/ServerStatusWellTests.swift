@@ -186,4 +186,36 @@ struct ServerStatusWellTests {
         #expect(text.count > "since ".count)
         #expect(!text.contains("2023"), "only the time of day, not the date")
     }
+
+    @Test("The toolbar address names the first listener and counts the others")
+    func toolbarAddress() {
+        let single = ServerConfiguration(port: 18086, globalDelayMs: 0)
+        let pair = ServerConfiguration(port: 18086, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Accounts", port: 18087)
+        ])
+        let one = ServerStatusWell.addressTitle(serverState: .stopped, configuration: single, boundConfiguration: nil)
+        #expect(one.primary == "localhost:18086")
+        #expect(one.others == 0)
+        let two = ServerStatusWell.addressTitle(serverState: .running(port: 18086), configuration: pair,
+                                                boundConfiguration: pair)
+        #expect(two.primary == "localhost:18086")
+        #expect(two.others == 1)
+        #expect(ServerStatusWell.addressTitle(serverState: .stopped, configuration: nil,
+                                              boundConfiguration: nil).primary == "No project")
+    }
+
+    @Test("A pending restart counts each listener it adds, removes or moves")
+    func restartCountsPortChanges() {
+        let bound = ServerConfiguration(port: 8080, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Accounts", port: 8081)
+        ])
+        let moved = ServerConfiguration(port: 9090, globalDelayMs: 0, backends: [
+            .init(id: accountsID, name: "Billing", port: 8081),
+            .init(name: "Search", port: 9092)
+        ])
+        #expect(ServerStatusWell.portChangeCount(configuration: moved, boundConfiguration: bound) == 2)
+        #expect(ServerStatusWell.portChangeCount(configuration: bound, boundConfiguration: bound) == 0)
+        #expect(ServerStatusWell.restartTitle(changes: 2) == "Restart to apply 2 port changes")
+        #expect(ServerStatusWell.restartTitle(changes: 1) == "Restart to apply 1 port change")
+    }
 }

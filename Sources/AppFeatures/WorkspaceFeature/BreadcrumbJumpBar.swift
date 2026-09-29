@@ -28,8 +28,9 @@ import DesignSystem
 ///   from VoiceOver: they are the `▸` in the path, not something you can press.
 /// - **The bar never widens the window.** At narrow centre widths, parent locations move into a
 ///   menu so the current endpoint and scenario remain readable without losing sideways navigation.
-/// The one bar under the toolbar: where you are, as a trail of menus, with the autosave state at the
-/// end. Back and forward live in the toolbar.
+/// The one bar under the toolbar: back and forward, then where you are as a trail of menus, with the
+/// autosave state at the end. History sits in front of the path, as Xcode's jump bar has it, which
+/// leaves the window toolbar to the server.
 struct BreadcrumbJumpBar: View {
     @State private var isEarlierHovered = false
     static var height: CGFloat { DSBarHeight.jumpBar }
@@ -66,17 +67,28 @@ struct BreadcrumbJumpBar: View {
         }
     }
 
+    /// Back and forward across the endpoints you have looked at.
+    struct History {
+        var canGoBack: Bool
+        var canGoForward: Bool
+        var onBack: () -> Void
+        var onForward: () -> Void
+    }
+
     let crumbs: [Crumb]
     let onSelectOption: (String, UUID) -> Void
     let autosaveStatus: AutosaveStatus
+    let history: History?
 
     init(
         crumbs: [Crumb],
         autosaveStatus: AutosaveStatus = .idle,
+        history: History? = nil,
         onSelectOption: @escaping (String, UUID) -> Void
     ) {
         self.crumbs = crumbs
         self.autosaveStatus = autosaveStatus
+        self.history = history
         self.onSelectOption = onSelectOption
     }
 
@@ -92,6 +104,17 @@ struct BreadcrumbJumpBar: View {
 
     private func barContent(compact: Bool) -> some View {
         HStack(spacing: 6) {
+            if let history {
+                HStack(spacing: DSSpacing.xxs) {
+                    BreadcrumbHistoryButton(forward: false, isEnabled: history.canGoBack, action: history.onBack)
+                    BreadcrumbHistoryButton(forward: true, isEnabled: history.canGoForward, action: history.onForward)
+                }
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(width: DSStroke.hairline, height: 14)
+                    .padding(.horizontal, DSSpacing.xs)
+                    .accessibilityHidden(true)
+            }
             if compact {
                 earlierLocationsMenu
                 BreadcrumbSeparator()
@@ -111,7 +134,8 @@ struct BreadcrumbJumpBar: View {
             AutosaveStatusIndicator(status: autosaveStatus)
                 .fixedSize()
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, history == nil ? 14 : DSSpacing.sm)
+        .padding(.trailing, 14)
         .frame(height: Self.height)
     }
 
@@ -259,11 +283,36 @@ private struct BreadcrumbSeparator: View {
 
 // MARK: - History controls
 
-/// A back or forward arrow, sized for the 28pt bar.
+/// A back or forward arrow, sized for the 28pt bar, with Safari's ⌘[ and ⌘].
 ///
 /// The icon is a `Label` with the text styled away rather than a bare `Image`, so VoiceOver and Voice
-/// Control still have something to say, and the 18pt frame plus `contentShape` gives it a hit target
+/// Control still have something to say, and the 22pt frame plus `contentShape` gives it a hit target
 /// rather than the ~10pt the glyph would offer on its own.
+private struct BreadcrumbHistoryButton: View {
+    let forward: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(forward ? "Forward" : "Back", systemImage: forward ? "chevron.forward" : "chevron.backward")
+                .labelStyle(.iconOnly)
+                .font(.system(size: DSGlyph.field, weight: .medium))
+                .foregroundStyle(isEnabled ? DSColors.labelSecondary : DSColors.labelTertiary)
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .dsHoverHighlight()
+        .disabled(!isEnabled)
+        .keyboardShortcut(forward ? "]" : "[", modifiers: .command)
+        .help(forward ? "Go forward (⌘])" : "Go back (⌘[)")
+        .accessibilityIdentifier(forward ? "breadcrumb.forward" : "breadcrumb.back")
+        .accessibilityLabel(forward ? "Go forward" : "Go back")
+    }
+}
+
+/// The endpoints you have looked at, in order, with a cursor for back and forward.
 nonisolated struct NavigationHistory<Item: Equatable>: Equatable {
     /// Enough to retrace a working session, small enough that the array never becomes a leak.
     static var capacity: Int { 50 }

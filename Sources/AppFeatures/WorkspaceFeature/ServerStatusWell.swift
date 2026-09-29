@@ -3,14 +3,17 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// A stable two-line summary; every address is copied from the same server-details popover.
+/// The toolbar's address and server state as one control: "localhost:18086 +1" over "Running ·
+/// 142 requests · 3 unmatched". Clicking it opens the server details, where every address is copied
+/// or opened in the browser.
 struct ServerStatusWell: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let serverState: ServerState
     let projectName: String?
     let requestCount: Int
     let unmatchedCount: Int
-    /// Narrow toolbars keep the state word and drop the request counts.
+    /// Narrow toolbars keep the state word and drop the request counts and the restart detail.
     var compact = false
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
@@ -65,9 +68,13 @@ struct ServerStatusWell: View {
     var body: some View {
         Button { showingDetails.toggle() } label: {
             summary
-                .padding(.horizontal, compact ? Self.compactInset : Self.inset)
-                .frame(height: DSControlHeight.prominent)
-                .contentShape(.capsule)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs + 1)
+                .background {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.segment, style: .continuous)
+                        .fill(isHovered || showingDetails ? DSColors.hover : Color.clear)
+                }
+                .contentShape(.rect(cornerRadius: DSCornerRadius.segment, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!canShowDetails)
@@ -75,6 +82,7 @@ struct ServerStatusWell: View {
         .onChange(of: canShowDetails) { _, enabled in
             if !enabled { isHovered = false }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(detailsDescription)
         .accessibilityIdentifier("serverStatusWell.url")
         .accessibilityLabel("Server details, \(Self.stateDescription(serverState))")
@@ -84,72 +92,98 @@ struct ServerStatusWell: View {
         .onDisappear { copyResetTask?.cancel() }
     }
 
-    /// The capsule's inner inset and the gap between its parts, as the design draws them.
-    private static let inset = DSSpacing.md + DSSpacing.xxs
-    private static let compactInset = DSSpacing.sm + DSSpacing.xxs
-    private static let partSpacing = DSSpacing.sm + DSSpacing.xxs
-
-    /// The capsule's content: the state word, then the counts while there is room for them.
-    @ViewBuilder
+    /// Two lines, as the toolbar design draws them: where the mock serves, with a chevron that says
+    /// the address opens something, and under it the state and, while there is room, the counts.
     private var summary: some View {
-        HStack(spacing: Self.partSpacing) {
-            stateLabel
-            if !compact, isRunning, !restartRequired {
-                separatorDot
-                Text(Self.requestCountShort(requestCount))
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                if unmatchedCount > 0 {
-                    separatorDot
-                    DSStatusLabel("\(unmatchedCount) unmatched", color: DSColors.warning)
-                }
-            }
+        VStack(alignment: .leading, spacing: 1) {
+            addressLine
+            statusLine
         }
         .fixedSize()
     }
 
+    private var addressLine: some View {
+        let address = Self.addressTitle(serverState: serverState, configuration: configuration,
+                                        boundConfiguration: boundConfiguration)
+        return HStack(spacing: DSSpacing.xs) {
+            Text(verbatim: address.primary)
+                .font(DSTypography.body)
+                .foregroundStyle(DSColors.labelPrimary)
+            if address.others > 0 {
+                Text(verbatim: "+\(address.others)")
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.labelSecondary)
+            }
+            Image(systemName: "chevron.down")
+                .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                .foregroundStyle(DSColors.labelSecondary)
+                .accessibilityHidden(true)
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: DSSpacing.xs + 1) {
+            stateLabel
+            if !compact, isRunning, !restartRequired {
+                separatorDot
+                Text(Self.requestCountShort(requestCount))
+                    .foregroundStyle(DSColors.labelSecondary)
+                if unmatchedCount > 0 {
+                    separatorDot
+                    Text("\(unmatchedCount) unmatched")
+                        .foregroundStyle(DSColors.warning)
+                }
+            }
+        }
+        .font(DSTypography.caption)
+        .monospacedDigit()
+        .lineLimit(1)
+    }
+
     @ViewBuilder
     private var stateLabel: some View {
-        switch serverState {
-        case .starting, .stopping:
-            HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
+        HStack(spacing: DSSpacing.xs + 1) {
+            switch serverState {
+            case .starting, .stopping:
                 ProgressView()
                     .controlSize(.mini)
                     .frame(width: 10, height: 10)
-                Text(Self.shortState(serverState))
-                    .font(DSTypography.calloutMedium)
-                    .foregroundStyle(DSColors.labelSecondary)
-            }
-        case .stopped:
-            // A grey dot and a secondary word: stopped is a state, not a warning.
-            HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
+            default:
                 Circle()
-                    .fill(DSColors.labelTertiary)
-                    .frame(width: 7, height: 7)
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
                     .accessibilityHidden(true)
-                Text(stateTitle)
-                    .font(DSTypography.calloutMedium)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
             }
-            .fixedSize()
-        default:
-            DSStatusLabel(stateTitle, color: statusColor)
+            Text(stateTitle)
+                .foregroundStyle(stateTitleColor)
+        }
+    }
+
+    /// Running and trouble take their tone; stopped and the transitions are ordinary words.
+    private var stateTitleColor: Color {
+        if restartRequired { return DSColors.warning }
+        switch serverState {
+        case .running: return DSColors.success
+        case .error: return DSColors.error
+        case .stopped, .starting, .stopping: return DSColors.labelSecondary
         }
     }
 
     private var separatorDot: some View {
         Text(verbatim: "·")
-            .font(DSTypography.callout)
             .foregroundStyle(DSColors.labelTertiary)
             .accessibilityHidden(true)
     }
 
     private var stateTitle: String {
-        Self.capsuleStateTitle(serverState: serverState, restartRequired: restartRequired,
-                               conflictingPort: conflictingPort, compact: compact)
+        if restartRequired, !compact, let configuration, let boundConfiguration {
+            return Self.restartTitle(changes: Self.portChangeCount(configuration: configuration,
+                                                                   boundConfiguration: boundConfiguration))
+        }
+        return Self.capsuleStateTitle(serverState: serverState, restartRequired: restartRequired,
+                                      conflictingPort: conflictingPort, compact: compact)
     }
 
     private var serverDetails: some View {
@@ -279,25 +313,49 @@ struct ServerStatusWell: View {
             Text(verbatim: backend.name)
                 .font(DSTypography.body)
                 .lineLimit(1)
-            Spacer(minLength: DSSpacing.sm)
+                .frame(minWidth: 88, alignment: .leading)
             Text(verbatim: "localhost:\(backend.port)")
                 .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelSecondary)
+                .foregroundStyle(DSColors.labelPrimary)
                 .textSelection(.enabled)
                 .accessibilityIdentifier(isRunning
                     ? "serverStatusWell.listeningPort.\(backend.port)"
                     : "serverStatusWell.configuredPort.\(backend.port)")
-            Button { copyURL(for: backend) } label: {
-                Text(copiedPort == backend.port ? "Copied" : "Copy")
-                    .frame(minWidth: 40)
+            Spacer(minLength: DSSpacing.sm)
+            portButton(systemImage: "safari", help: "Open \(backend.localURL) in your browser") {
+                openInBrowser(backend)
             }
-            .buttonStyle(.ds(.secondary, size: .small))
-            .disabled(!isRunning)
+            .accessibilityIdentifier("serverStatusWell.openPort.\(backend.port)")
+            .accessibilityLabel("Open \(backend.name) in browser, port \(String(backend.port))")
+            portButton(systemImage: copiedPort == backend.port ? "checkmark" : "doc.on.doc",
+                       help: "Copy \(backend.localURL)") {
+                copyURL(for: backend)
+            }
             .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
             .accessibilityLabel("Copy \(backend.name) URL, port \(String(backend.port))")
             .accessibilityValue(copiedPort == backend.port ? "Copied" : "")
-            .help("Copy \(backend.localURL)")
         }
+    }
+
+    /// A port's quiet icon action. Both need a listener, so both wait for the server.
+    private func portButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: DSGlyph.field, weight: .regular))
+                .foregroundStyle(DSColors.labelSecondary)
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .dsHoverHighlight()
+        .disabled(!isRunning)
+        .help(help)
+    }
+
+    private func openInBrowser(_ backend: BackendConfiguration) {
+        guard isRunning, let url = URL(string: backend.localURL) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func copyURL(for backend: BackendConfiguration) {
@@ -332,6 +390,30 @@ struct ServerStatusWell: View {
             result.name = configuration?.backend(id: backend.id)?.name ?? backend.name
             return result
         }
+    }
+
+    /// The toolbar's address: the first listener, and how many others the project serves on.
+    nonisolated static func addressTitle(
+        serverState: ServerState, configuration: ServerConfiguration?, boundConfiguration: ServerConfiguration?
+    ) -> (primary: String, others: Int) {
+        let listeners = displayedBackends(serverState: serverState, configuration: configuration,
+                                          boundConfiguration: boundConfiguration)
+        guard let first = listeners.first else { return ("No project", 0) }
+        return ("localhost:\(first.port)", listeners.count - 1)
+    }
+
+    /// How many listeners a restart would add, remove or move to another port.
+    nonisolated static func portChangeCount(
+        configuration: ServerConfiguration, boundConfiguration: ServerConfiguration
+    ) -> Int {
+        let configured = Dictionary(configuration.listeners.map { ($0.id, $0.port) }, uniquingKeysWith: { a, _ in a })
+        let bound = Dictionary(boundConfiguration.listeners.map { ($0.id, $0.port) }, uniquingKeysWith: { a, _ in a })
+        return Set(configured.keys).union(bound.keys).filter { configured[$0] != bound[$0] }.count
+    }
+
+    /// "Restart to apply 2 port changes", the running server's warning line.
+    nonisolated static func restartTitle(changes: Int) -> String {
+        changes == 1 ? "Restart to apply 1 port change" : "Restart to apply \(changes) port changes"
     }
 
     nonisolated static func requiresRestart(

@@ -166,6 +166,7 @@ struct WorkspacePage {
     // Toolbar
     /// Run/Stop inline in the toolbar. As a toolbar item's root button it publishes its visible
     /// title, "Run" or "Stop", as its label; the view's `.accessibilityLabel` does not reach the tree.
+    /// It leads the toolbar as a round, icon-only button; the title still names it.
     /// Absent while the narrowest centre column folds it into "More actions" — use `toggleServer()`
     /// and `waitForServerToggle(toRead:)` for the action wherever it sits.
     var serverToggleButton: XCUIElement { app.buttons["serverToggleButton"].firstMatch }
@@ -173,7 +174,7 @@ struct WorkspacePage {
     var serverToggleMenuItem: XCUIElement { app.menuItems["serverToggleButton"].firstMatch }
 
     /// Whether the centre column is narrow enough (`WorkspaceView.toolbarLayout`'s minimal tier)
-    /// that Run/Stop and back/forward lead the "More actions" menu instead of sitting inline.
+    /// that Run/Stop leads the "More actions" menu instead of sitting inline.
     var foldsRunIntoOverflow: Bool { !serverToggleButton.exists && overflowMenu.exists }
 
     /// Waits until Run/Stop is reachable: inline, or through "More actions".
@@ -258,9 +259,10 @@ struct WorkspacePage {
         let named = app.menuItems["importOpenAPIMenuItem"].firstMatch
         return named.exists ? named : app.menuItems["Import OpenAPI spec…"].firstMatch
     }
-    /// The request log and inspector toggles. Inline in the centre column's toolbar when it is wide;
-    /// items of the "More" menu (`toolbar.overflow`) when it is narrower than 780pt. Either way the
-    /// identifier is the same, so `toolbarAction` opens the menu first when the toggle is folded.
+    /// The request log and inspector toggles. Beside the inspector's title while the inspector is
+    /// open; otherwise inline at the end of the centre column's toolbar when it is wide, or items of
+    /// the "More" menu (`toolbar.overflow`) when it is narrower than 780pt. The identifier is the
+    /// same everywhere, so `toolbarAction` opens the menu first when the toggle is folded.
     var toggleInspectorButton: XCUIElement { toolbarAction("toggleInspectorButton") }
     var toggleDrawerButton: XCUIElement { toolbarAction("toggleDrawerButton") }
     var projectTitle: XCUIElement {
@@ -269,10 +271,14 @@ struct WorkspacePage {
     var projectIdentity: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "toolbar.projectIdentity").firstMatch
     }
-    /// The subtitle under the project name: the address it serves on, "localhost:<port>", spoken
-    /// as "Local mock at localhost:<port>".
+    /// Where the project serves: the toolbar's address and state control beside the project name,
+    /// "localhost:<port>" over the server's state. Its spoken value carries every address.
     var projectKind: XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "toolbar.projectKind").firstMatch
+        app.descendants(matching: .any).matching(identifier: "serverStatusWell.url").firstMatch
+    }
+    /// The project name's subtitle, "12 endpoints · 3 journeys", on a wide enough toolbar.
+    var projectContents: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "toolbar.projectContents").firstMatch
     }
     func inlineToolbarAction(_ identifier: String) -> XCUIElement {
         app.toolbars.descendants(matching: .any).matching(identifier: identifier).firstMatch
@@ -290,8 +296,8 @@ struct WorkspacePage {
             format: "identifier == %@ OR title IN %@ OR label IN %@", identifier, titles, titles
         )).firstMatch
     }
-    /// The compact toolbar's "More actions" menu. It holds Import, Server settings and both panel
-    /// toggles; at the narrowest centre column Run/Stop and back/forward lead it as well.
+    /// The compact toolbar's "More actions" menu. It holds Import and Server settings, the panel
+    /// toggles while the inspector is hidden, and at the narrowest centre column Run/Stop as well.
     var overflowMenu: XCUIElement {
         app.toolbars.descendants(matching: .any).matching(identifier: "toolbar.overflow").firstMatch
     }
@@ -376,7 +382,7 @@ struct WorkspacePage {
     /// The centre column's width at which the toolbar stops folding its secondary actions into
     /// "More" (`WorkspaceView.toolbarLayout(centerWidth:)`), measured across the card and its inset.
     static let expandedToolbarBreakpoint: CGFloat = 780
-    /// Below this centre-column width Run/Stop and back/forward fold into "More" too.
+    /// Below this centre-column width Run/Stop folds into "More" too.
     static let minimalToolbarBreakpoint: CGFloat = 430
 
     /// The centre column's width as the toolbar layout measures it: the card plus its

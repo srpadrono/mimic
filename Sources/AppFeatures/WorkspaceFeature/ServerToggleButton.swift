@@ -2,7 +2,7 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Run and Stop carry a word, not just a glyph. Native toolbar glass draws the capsule.
+/// Run and Stop lead the toolbar as one round glass button. Native toolbar glass draws the circle.
 struct ServerToggleButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let serverState: ServerState
@@ -39,25 +39,22 @@ struct ServerToggleButton: View {
 
     var body: some View {
         Button(action: stopIsCurrentAction ? onStop : onStart) {
+            // The title stays in the label: the toolbar publishes it, "Run" or "Stop", as the item's
+            // name, while the round glass button shows only the glyph, as Xcode's does.
             Label {
-                // Both words laid out, one shown, so the capsule keeps one width when the server starts.
-                ZStack(alignment: .leading) {
-                    Text("Stop").hidden()
-                    Text("Run").hidden()
-                    Text(stopIsCurrentAction ? "Stop" : "Run")
-                }
+                Text(stopIsCurrentAction ? "Stop" : "Run")
             } icon: {
                 Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
+                    .font(.system(size: DSGlyph.button, weight: .semibold))
                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
-                    // play.fill and stop.fill differ in width; a fixed slot keeps the capsule still.
-                    .frame(width: DSGlyph.control)
+                    // play.fill and stop.fill differ in width; a fixed slot keeps the circle still.
+                    .frame(width: DSGlyph.toolbar, height: DSGlyph.toolbar)
             }
-            .labelStyle(.titleAndIcon)
-            .font(DSTypography.bodyMedium)
+            .labelStyle(.iconOnly)
             .opacity(isTransitioning ? 0.6 : 1)
-            .padding(.horizontal, DSSpacing.xs)
         }
+        .buttonBorderShape(.circle)
         .disabled(isTransitioning)
         .help(stopIsCurrentAction ? "Stop server (⇧⌘R)" : "Start server (⇧⌘R)")
         .accessibilityLabel(stopIsCurrentAction ? "Stop server" : "Start server")

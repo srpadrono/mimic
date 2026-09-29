@@ -2272,8 +2272,8 @@ struct AppStateFacadeTests {
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .nan))
     }
 
-    @Test("The narrowest centre column folds Run and history into the More menu, never past it")
-    func toolbarFoldsRunAndHistoryOnlyWhenTheNarrowTierCannotFit() {
+    @Test("The narrowest centre column folds Run into the More menu, never past it")
+    func toolbarFoldsRunOnlyWhenTheNarrowTierCannotFit() {
         #expect(WorkspaceView.toolbarLayout(centerWidth: 300) == .minimal)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 429) == .minimal)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 430) == .narrow)
@@ -2281,13 +2281,20 @@ struct AppStateFacadeTests {
         #expect(WorkspaceView.toolbarLayout(centerWidth: 460) == .compactSummary)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 620) == .overflow)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 780) == .expanded)
-        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 315))
-        #expect(!WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 450),
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 315))
+        #expect(!WorkspaceView.toolbarFoldsRun(centerWidth: 450),
                 "CI's filled 1024pt window leaves about 450pt and keeps Run inline")
-        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 0))
-        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: .nan))
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 0))
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: .nan))
         #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 300))
         #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 300))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 300))
+    }
+
+    @Test("The project name's subtitle counts what the project holds")
+    func toolbarProjectContents() {
+        #expect(WorkspaceView.projectContents(endpoints: 12, journeys: 3) == "12 endpoints · 3 journeys")
+        #expect(WorkspaceView.projectContents(endpoints: 1, journeys: 1) == "1 endpoint · 1 journey")
+        #expect(WorkspaceView.projectContents(endpoints: 0, journeys: 0) == "0 endpoints · 0 journeys")
     }
 }

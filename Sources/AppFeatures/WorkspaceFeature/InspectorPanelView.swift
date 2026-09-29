@@ -11,6 +11,19 @@ struct InspectorPanelView: View {
     /// Whether the column is on screen. Its header lives in the inspector's own toolbar section,
     /// level with the window's toolbar, and must leave with the column.
     let showsHeader: Bool
+    /// The window's request log and inspector toggles, which sit beside the header's own action.
+    let panelToggles: PanelToggles?
+
+    /// Two views, not one, so the toolbar draws them as two buttons in one glass group.
+    public struct PanelToggles {
+        let requestLog: AnyView
+        let inspector: AnyView
+
+        public init(requestLog: AnyView, inspector: AnyView) {
+            self.requestLog = requestLog
+            self.inspector = inspector
+        }
+    }
     let overview: InspectorOverview.Summary?
     let onShowJourneys: () -> Void
     let onAddScenario: (_ endpointID: UUID, _ name: String) -> Void
@@ -32,6 +45,7 @@ struct InspectorPanelView: View {
         overview: InspectorOverview.Summary? = nil,
         journey: JourneyInspector.Context? = nil,
         showsHeader: Bool = true,
+        panelToggles: PanelToggles? = nil,
         endpointTraffic: [RequestLog] = [],
         endpointSettings: EndpointInspectorSettings.Context? = nil,
         onShowJourneys: @escaping () -> Void = {},
@@ -45,6 +59,7 @@ struct InspectorPanelView: View {
         self.overview = overview
         self.journey = journey
         self.showsHeader = showsHeader
+        self.panelToggles = panelToggles
         self.endpointTraffic = endpointTraffic
         self.endpointSettings = endpointSettings
         self.onShowJourneys = onShowJourneys
@@ -120,8 +135,8 @@ struct InspectorPanelView: View {
         }
     }
 
-    /// The header: the mode's title at the leading edge of the inspector's toolbar section and its
-    /// action at the trailing edge, level with the window's toolbar as the design draws it.
+    /// The header: the mode's title at the leading edge of the inspector's toolbar section, then its
+    /// action and the window's panel toggles at the trailing edge, level with the window's toolbar.
     @ToolbarContentBuilder
     private var headerToolbar: some ToolbarContent {
         if showsHeader {
@@ -147,6 +162,13 @@ struct InspectorPanelView: View {
                     }
                 }
                 .sharedBackgroundVisibility(.hidden)
+            }
+
+            if let panelToggles {
+                ToolbarItemGroup {
+                    panelToggles.requestLog
+                    panelToggles.inspector
+                }
             }
         }
     }

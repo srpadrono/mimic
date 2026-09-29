@@ -5,12 +5,13 @@ import Persistence
 
 nonisolated enum WorkspaceToolbarLayout: Equatable {
     case expanded
+    /// The server line keeps only its state word and the project name drops its subtitle.
     case compactSummary
     case overflow
-    /// The status capsule keeps only its state word and the project identity narrows.
+    /// The project identity narrows too.
     case narrow
-    /// Back, forward and Run/Stop join the "More actions" menu too, so the identity, the capsule and
-    /// that one menu are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
+    /// Run/Stop joins the "More actions" menu too, so the identity, the address and that one menu
+    /// are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
     case minimal
 }
 
@@ -156,6 +157,12 @@ struct WorkspaceView: View {
                         BreadcrumbJumpBar(
                             crumbs: breadcrumbs,
                             autosaveStatus: appState.autosaveStatus,
+                            history: BreadcrumbJumpBar.History(
+                                canGoBack: endpointHistory.canGoBack(where: endpointExists),
+                                canGoForward: endpointHistory.canGoForward(where: endpointExists),
+                                onBack: { goThroughHistory(forward: false) },
+                                onForward: { goThroughHistory(forward: true) }
+                            ),
                             onSelectOption: handleBreadcrumbSelection
                         )
                         Rectangle()
@@ -473,14 +480,14 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// Collapse in stages as the centre column narrows: first the secondary actions fold into one
-    /// menu, then the status capsule drops its counts, then the project identity narrows, and last
-    /// back/forward and Run/Stop fold into the same menu. The capsule always keeps its state word.
+    /// Collapse in stages as the centre column narrows: first import, server settings and the panel
+    /// toggles fold into one menu, then the server line drops its counts and the project name its
+    /// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
+    /// address and the state word always stay.
     ///
-    /// The last breakpoint is what the narrow tier needs: back/forward (≈72pt), the identity
-    /// (≤100pt), the capsule (≈80–95pt), Run (≈76pt) and "More" (≈36pt), plus the toolbar's gaps and
-    /// the column's 8pt insets, come to about 420pt. Below that AppKit would start hiding items
-    /// behind its own chevron. The minimal tier needs about 260pt.
+    /// The last breakpoint is what the narrow tier needs: Run (≈36pt), the name (≤100pt), the
+    /// address and state (≈130pt) and "More" (≈36pt), plus the toolbar's gaps and the column's 8pt
+    /// insets. Below 430pt AppKit could start hiding items behind its own chevron.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
         guard centerWidth.isFinite else { return .minimal }
         if centerWidth < 430 { return .minimal }
@@ -497,8 +504,8 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Import, server settings, and both panel toggles move into one menu; Run and back/forward join
-    /// them only in the minimal tier (`toolbarFoldsRunAndHistory`).
+    /// Import, server settings, and the panel toggles (while the inspector is hidden) move into one
+    /// menu; Run joins them only in the minimal tier (`toolbarFoldsRun`).
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
         toolbarLayout(centerWidth: centerWidth) != .expanded
     }
@@ -508,8 +515,8 @@ struct WorkspaceView: View {
         return layout == .narrow || layout == .minimal
     }
 
-    /// Back/forward and Run/Stop lead the "More actions" menu instead of sitting in the toolbar.
-    nonisolated static func toolbarFoldsRunAndHistory(centerWidth: CGFloat) -> Bool {
+    /// Run/Stop leads the "More actions" menu instead of the toolbar.
+    nonisolated static func toolbarFoldsRun(centerWidth: CGFloat) -> Bool {
         toolbarLayout(centerWidth: centerWidth) == .minimal
     }
 
@@ -520,7 +527,7 @@ struct WorkspaceView: View {
         }
     }
 
-    private var foldsRunAndHistory: Bool {
+    private var foldsRun: Bool {
         centerToolbarLayout == .minimal
     }
 
@@ -537,40 +544,37 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Run, the project, and the server's address and state lead; import and server settings trail
+    /// in one glass group. The panel toggles sit in the inspector's own toolbar section beside its
+    /// title, and come back to the end of this toolbar only while the inspector is hidden.
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        if !foldsRunAndHistory {
-            ToolbarItemGroup(placement: .navigation) {
-                historyButton(forward: false).labelStyle(.iconOnly)
-                historyButton(forward: true).labelStyle(.iconOnly)
-            }
-        }
-
-        ToolbarItem(id: "workspace.identity", placement: .navigation) {
-            projectIdentity
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        ToolbarItem(id: "workspace.status", placement: .principal) {
-            // Wrapped, not the item's root. A bare `Button` as a toolbar item's root is published as
-            // the item itself: the toggle beside it loses its accessibility label that way, and the
-            // well's details popover never reached the accessibility tree. A container keeps the well
-            // a SwiftUI button and its popover addressable, as it was before the toolbar was rebuilt.
-            HStack(spacing: 0) { serverSummary }
-                .accessibilityElement(children: .contain)
-        }
-
-        if !foldsRunAndHistory {
-            ToolbarItem(id: "workspace.run", placement: .primaryAction) {
+        if !foldsRun {
+            ToolbarItem(id: "workspace.run", placement: .navigation) {
                 ServerToggleButton(
                     serverState: appState.serverState,
                     onStart: appState.startServer,
                     onStop: appState.stopServer
                 )
             }
-
-            ToolbarSpacer(.fixed, placement: .primaryAction)
         }
+
+        ToolbarItem(id: "workspace.identity", placement: .navigation) {
+            // One item, so the name and the address never part. Wrapped in a container rather than
+            // rooted at the well's `Button`: a bare button as an item's root is published as the
+            // item itself, and the well's details popover then never reached the accessibility tree.
+            HStack(spacing: DSSpacing.md) {
+                projectIdentity
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(width: DSStroke.hairline, height: 26)
+                    .accessibilityHidden(true)
+                serverSummary
+            }
+            .padding(.trailing, DSSpacing.xs)
+            .accessibilityElement(children: .contain)
+        }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarItemGroup(placement: .primaryAction) {
             if usesToolbarOverflow {
@@ -581,7 +585,7 @@ struct WorkspaceView: View {
             }
         }
 
-        if !usesToolbarOverflow {
+        if !usesToolbarOverflow, !isInspectorPresented {
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItemGroup(placement: .primaryAction) {
                 drawerToolbarButton.labelStyle(.iconOnly)
@@ -591,28 +595,18 @@ struct WorkspaceView: View {
     }
 
     /// Back and forward across endpoints you have looked at, the way Xcode's editor history works.
-    private func historyButton(forward: Bool) -> some View {
-        let enabled = forward
-            ? endpointHistory.canGoForward(where: endpointExists)
-            : endpointHistory.canGoBack(where: endpointExists)
-        return Button {
-            let target = forward
-                ? endpointHistory.goForward(where: endpointExists)
-                : endpointHistory.goBack(where: endpointExists)
-            if let target, let endpoint = currentEndpoints.first(where: { $0.id == target }) {
-                isNavigatingHistory = selectedEndpointID != target
-                revealEndpoint(endpoint)
-            }
-        } label: {
-            Label(forward ? "Forward" : "Back", systemImage: forward ? "chevron.forward" : "chevron.backward")
+    private func goThroughHistory(forward: Bool) {
+        let target = forward
+            ? endpointHistory.goForward(where: endpointExists)
+            : endpointHistory.goBack(where: endpointExists)
+        if let target, let endpoint = currentEndpoints.first(where: { $0.id == target }) {
+            isNavigatingHistory = selectedEndpointID != target
+            revealEndpoint(endpoint)
         }
-        .disabled(!enabled)
-        .help(forward ? "Go forward" : "Go back")
-        .accessibilityIdentifier(forward ? "breadcrumb.forward" : "breadcrumb.back")
-        .accessibilityLabel(forward ? "Go forward" : "Go back")
     }
 
-    /// The project's name over the address it serves on.
+    /// The project's name over what it holds, "12 endpoints · 3 journeys". Narrow toolbars keep
+    /// the name alone.
     private var projectIdentity: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(appState.currentProject?.name ?? "Mimic")
@@ -622,29 +616,35 @@ struct WorkspaceView: View {
                 .truncationMode(.middle)
                 .help(appState.currentProject?.name ?? "Mimic")
                 .accessibilityIdentifier("toolbar.projectName")
-            if let address = projectAddress {
-                Text(address)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .accessibilityIdentifier("toolbar.projectKind")
-                    .accessibilityLabel("Local mock at \(address)")
+            if !usesCompactToolbarSummary, appState.currentProject != nil {
+                HStack(spacing: DSSpacing.xs) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: DSGlyph.disclosure))
+                        .accessibilityHidden(true)
+                    Text(projectContents)
+                        .monospacedDigit()
+                }
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("toolbar.projectContents")
+                .accessibilityLabel(projectContents)
             }
         }
         .frame(maxWidth: projectIdentityMaximumWidth, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, DSSpacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("toolbar.projectIdentity")
     }
 
-    /// `localhost:18086`, plus how many other listeners the project has.
-    private var projectAddress: String? {
-        guard let configuration = appState.currentProject?.serverConfiguration else { return nil }
-        let port = appState.serverState.runningPort ?? configuration.port
-        let others = configuration.listeners.count - 1
-        return others > 0 ? "localhost:\(port) +\(others)" : "localhost:\(port)"
+    /// "12 endpoints · 3 journeys".
+    private var projectContents: String {
+        Self.projectContents(endpoints: currentEndpoints.count, journeys: appState.journeys.count)
+    }
+
+    nonisolated static func projectContents(endpoints: Int, journeys: Int) -> String {
+        "\(endpoints) \(endpoints == 1 ? "endpoint" : "endpoints") · \(journeys) \(journeys == 1 ? "journey" : "journeys")"
     }
 
     private var serverSummary: some View {
@@ -681,26 +681,27 @@ struct WorkspaceView: View {
     }
 
     /// The secondary actions, folded into one menu when the centre column is narrow. At the
-    /// narrowest width Run/Stop and back/forward lead it, so AppKit never has to hide anything.
+    /// narrowest width Run/Stop leads it, so AppKit never has to hide anything. The panel toggles
+    /// join it only while the inspector is hidden; otherwise they sit in the inspector's header.
     private var overflowMenu: some View {
         let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
         let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
         return Menu {
-            if foldsRunAndHistory {
+            if foldsRun {
                 ServerToggleMenuItem(
                     serverState: appState.serverState,
                     onStart: appState.startServer,
                     onStop: appState.stopServer
                 )
-                historyButton(forward: false)
-                historyButton(forward: true)
                 Divider()
             }
             importMenu()
             serverSettingsButton
-            Divider()
-            drawerToolbarButton
-            inspectorToolbarButton
+            if !isInspectorPresented {
+                Divider()
+                drawerToolbarButton
+                inspectorToolbarButton
+            }
             if unmatchedCount > 0 {
                 Divider()
                 Button("Show unmatched requests (\(unmatchedCount))") {
@@ -716,7 +717,7 @@ struct WorkspaceView: View {
                 .labelStyle(.iconOnly)
         }
         .menuIndicator(.hidden)
-        .help(foldsRunAndHistory ? "Run, history, import, server settings, and panels" : "Import, server settings, and panels")
+        .help(foldsRun ? "Run, import, server settings, and more" : "Import, server settings, and more")
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
         .accessibilityValue(unmatchedCount > 0
@@ -1189,6 +1190,10 @@ struct WorkspaceView: View {
                                          selectedStepID: appState.selectedJourneyStepID)
             },
             showsHeader: isInspectorPresented,
+            panelToggles: InspectorPanelView.PanelToggles(
+                requestLog: AnyView(drawerToolbarButton.labelStyle(.iconOnly)),
+                inspector: AnyView(inspectorToolbarButton.labelStyle(.iconOnly))
+            ),
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],
