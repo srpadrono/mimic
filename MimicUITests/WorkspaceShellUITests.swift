@@ -1581,7 +1581,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(well.address.isHittable)
         XCTAssertTrue(workspace.projectContents.waitForExistence(timeout: 5),
                       "A wide toolbar puts what the project holds under its name")
-        XCTAssertTrue(workspace.projectContents.label.contains("1 endpoint"),
+        // Label or value, as with the address: a toolbar item's text can arrive as either.
+        XCTAssertTrue(well.spoken(workspace.projectContents).contains("1 endpoint · 0 journeys"),
                       "The subtitle counts the project's endpoints — \(well.spoken(workspace.projectContents))")
         XCTAssertEqual(workspace.serverToggleButton.label, "Run")
         assertExpandedToolbar()
