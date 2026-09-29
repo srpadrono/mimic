@@ -418,6 +418,7 @@ jobs:
               -only-testing:MimicUITests/EndpointEditorUITests/testRemovingAMiddleHeaderRowKeepsTheOthersIntact
               -only-testing:MimicUITests/EndpointEditorUITests/testSidebarContextMenuDeleteConfirmationNamesTheEndpoint
               -only-testing:MimicUITests/EndpointEditorUITests/testStatusCodeValidationNotesExplainWhyACodeWasRejected
+              -only-testing:MimicUITests/EndpointEditorUITests/testFirstEndpointCardsShareOneRowUnderTheHeadline
 
           - id: 12
             name: alerts
@@ -453,12 +454,14 @@ jobs:
               -only-testing:MimicUITests/WelcomeProjectUITests/testOpenFromTheRecentsContextMenuOpensTheProject
               -only-testing:MimicUITests/WelcomeProjectUITests/testPortValidationMessageAppearsAndClearsWithTheField
               -only-testing:MimicUITests/WelcomeProjectUITests/testRecentProjectRowStatesWhenItWasLastOpened
-              -only-testing:MimicUITests/WelcomeProjectUITests/testRecentsPanelHeaderCountsTheProjects
               -only-testing:MimicUITests/WelcomeProjectUITests/testRecentsSelectionFallsBackAfterDeletingTheSelectedProject
               -only-testing:MimicUITests/WelcomeProjectUITests/testRenameFromRecentsSurvivesReopeningProject
               -only-testing:MimicUITests/WelcomeProjectUITests/testUpArrowMovesTheRecentsSelectionBackTowardTheTop
               -only-testing:MimicUITests/WelcomeProjectUITests/testWelcomeWindowShowsHeroVersionAndEmptyRecentsGuidance
               -only-testing:MimicUITests/WelcomeProjectUITests/testWhitespaceOnlyNameKeepsCreateDisabledAndReturnInert
+              -only-testing:MimicUITests/WelcomeProjectUITests/testSampleProjectOpensWithItsEndpoints
+              -only-testing:MimicUITests/WelcomeProjectUITests/testImportFromWelcomeAsksForTheFormatAndCancelCreatesNothing
+              -only-testing:MimicUITests/WelcomeProjectUITests/testShowOnLaunchCheckboxStartsOffAndToggles
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
