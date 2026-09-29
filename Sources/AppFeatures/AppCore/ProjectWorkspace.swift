@@ -789,15 +789,20 @@ final class ProjectWorkspace {
         Task { @MainActor [weak self, generation] in
             guard let self else { return }
             guard let stored = try? await projectRepository.allProjects() else { return }
+            // The listing's stubs carry no endpoints or journeys, so the summary line's counts come
+            // from the store's own count; without them every row read "0 endpoints".
+            let counts = (try? await projectRepository.projectCounts()) ?? [:]
             guard generation == projectListGeneration else { return }
-            recentProjects = Self.reconcile(cached: recentProjectsStore.load(), stored: stored)
+            recentProjects = Self.reconcile(cached: recentProjectsStore.load(), stored: stored, counts: counts)
         }
     }
 
-    /// Pure so the ordering is testable without a database.
+    /// Pure so the ordering is testable without a database. `stored` is the repository's listing,
+    /// whose stubs hold no endpoints or journeys; `counts` is what the summary line counts.
     static func reconcile(
         cached: [RecentProjectEntry],
-        stored: [MockProject]
+        stored: [MockProject],
+        counts: [UUID: ProjectCounts] = [:]
     ) -> [RecentProjectEntry] {
         let byID = Dictionary(stored.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -810,7 +815,7 @@ final class ProjectWorkspace {
                 id: entry.id,
                 name: project.name,
                 lastOpenedAt: entry.lastOpenedAt,
-                summary: RecentProjectEntry.Summary(project: project)
+                summary: RecentProjectEntry.Summary(project: project, counts: counts[project.id])
             )
         }
 
@@ -823,7 +828,7 @@ final class ProjectWorkspace {
             .map {
                 RecentProjectEntry(
                     id: $0.id, name: $0.name, lastOpenedAt: $0.modifiedAt,
-                    summary: RecentProjectEntry.Summary(project: $0)
+                    summary: RecentProjectEntry.Summary(project: $0, counts: counts[$0.id])
                 )
             }
 

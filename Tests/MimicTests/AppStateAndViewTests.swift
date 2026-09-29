@@ -1116,6 +1116,41 @@ struct AppStateAndViewTests {
         #expect(list.allSatisfy { $0.summary == RecentProjectEntry.Summary(ports: [8080], endpointCount: 0, journeyCount: 0) })
     }
 
+    @Test("The welcome list counts what the store holds, not the listing's empty stubs")
+    func welcomeListSummaryUsesTheStoreCounts() {
+        // `allProjects()` returns stubs with no endpoints or journeys loaded; the summary line read
+        // "Port 62191 · 0 endpoints" for a project with eight endpoints and three journeys.
+        let stub = MockProject(name: "Storefront", serverConfiguration: ServerConfiguration(port: 62191, globalDelayMs: 0))
+        let cached = [RecentProjectEntry(id: stub.id, name: "Storefront", lastOpenedAt: Date())]
+
+        let list = ProjectWorkspace.reconcile(
+            cached: cached,
+            stored: [stub],
+            counts: [stub.id: ProjectCounts(endpoints: 8, journeys: 3)]
+        )
+
+        #expect(list.first?.summary == RecentProjectEntry.Summary(ports: [62191], endpointCount: 8, journeyCount: 3))
+        #expect(list.first?.summary?.text == "Port 62191 \u{00B7} 8 endpoints \u{00B7} 3 journeys")
+    }
+
+    @Test("Closing a project refreshes its welcome row with what was added while it was open")
+    func closingAProjectRefreshesItsWelcomeSummary() async throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Storefront", port: 62191)
+        let id = try #require(appState.currentProject?.id)
+        try await waitUntil { appState.recentProjects.contains { $0.id == id } }
+
+        _ = appState.addEndpoint(name: "Users", path: "/users")
+        _ = appState.addEndpoint(name: "Orders", path: "/orders")
+        _ = appState.addJourney(name: "Checkout")
+        appState.closeProject()
+
+        try await waitUntil {
+            appState.recentProjects.first { $0.id == id }?.summary
+                == RecentProjectEntry.Summary(ports: [62191], endpointCount: 2, journeyCount: 1)
+        }
+    }
+
     @Test("Nothing in the store is unreachable from the welcome list")
     func welcomeListStrandsNothing() {
         // Eleven projects against a ten-entry cache — the exact shape that used to lose one.

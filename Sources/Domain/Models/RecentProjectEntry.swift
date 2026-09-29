@@ -29,6 +29,16 @@ public struct RecentProjectEntry: Codable, Identifiable, Sendable, Equatable {
             )
         }
 
+        /// From a listing stub, whose endpoints and journeys are not loaded, and the store's counts
+        /// for it. Without counts it falls back to the project's own arrays.
+        public init(project: MockProject, counts: ProjectCounts?) {
+            self.init(
+                ports: project.serverConfiguration.listeners.map(\.port),
+                endpointCount: counts?.endpoints ?? project.endpoints.count,
+                journeyCount: counts?.journeys ?? project.journeys.count
+            )
+        }
+
         /// "Port 18086 · 12 endpoints · 3 journeys". Journeys are left out when there are none.
         public var text: String {
             let portList = ports.map(String.init).joined(separator: ", ")
