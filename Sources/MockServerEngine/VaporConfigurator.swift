@@ -82,7 +82,8 @@ enum VaporConfigurator {
             if lease.transferToConsumer() {
                 let result = logContinuation.yield(makeLog(
                     incoming: incoming, resolved: resolved, projectID: projectID,
-                    backendName: backend?.name, listenerPort: listenerPort
+                    backendName: backend?.name, listenerPort: listenerPort,
+                    target: req.url.string
                 ))
                 if case .terminated = result { await logGate.acknowledge() }
             }
@@ -283,7 +284,8 @@ enum VaporConfigurator {
         resolved: ResolvedResponse,
         projectID: UUID? = nil,
         backendName: String? = nil,
-        listenerPort: Int? = nil
+        listenerPort: Int? = nil,
+        target: String? = nil
     ) -> RequestLog {
         // HEAD and bodyless status codes suppress configured content just as transport failures
         // do. The preview follows those content semantics even if the scenario contains a body.
@@ -299,7 +301,10 @@ enum VaporConfigurator {
 
         return RequestLog(
             method: incoming.method,
-            path: incoming.path,
+            // The target as it arrived, query included, as a pass-through's log records it
+            // (`ProxyForwarder`). Matching ignores the query; the request detail lists it, and
+            // "Create endpoint" and journey capture cut it off (`EndpointFromLog.mockablePath`).
+            path: target ?? incoming.path,
             backendID: incoming.backendID,
             projectID: projectID,
             backendName: backendName, listenerPort: listenerPort,

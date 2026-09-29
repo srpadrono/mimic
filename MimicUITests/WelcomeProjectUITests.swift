@@ -286,9 +286,9 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         XCTAssertTrue(welcome.importMenu.waitForExistence(timeout: 5))
         welcome.importMenu.click()
-        let harItem = app.menuItems["HAR file\u{2026}"].firstMatch
+        let harItem = welcome.importHARMenuItem
         XCTAssertTrue(harItem.waitForExistence(timeout: 3), "The import menu should offer a HAR file")
-        XCTAssertTrue(app.menuItems["OpenAPI spec\u{2026}"].firstMatch.exists,
+        XCTAssertTrue(welcome.importOpenAPIMenuItem.exists,
                       "The import menu should offer an OpenAPI spec")
         harItem.click()
 

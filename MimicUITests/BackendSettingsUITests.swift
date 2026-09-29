@@ -72,6 +72,18 @@ struct BackendSettingsPage {
             format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@",
             "backend.", ".availability", "backend.primary.")).firstMatch
     }
+    /// "Available" or "In use", from whichever half of `DSAvailabilityLabel` the tree carries: its
+    /// value is the word shown, its label the spoken "Port available" / "Port in use". A combined
+    /// element does not always publish its value, so the label answers too.
+    func availability(of element: XCUIElement) -> String? {
+        guard element.exists else { return nil }
+        if let value = element.value as? String, ["Available", "In use"].contains(value) { return value }
+        switch element.label {
+        case "Port available": return "Available"
+        case "Port in use": return "In use"
+        default: return nil
+        }
+    }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
@@ -197,12 +209,13 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(page.primaryAvailability.waitForExistence(timeout: 5),
                       "A stopped server's port row should say whether its port is free")
         // Whether 8080 is free depends on the machine; a port another listener here claims does not.
-        XCTAssertTrue(["Available", "In use"].contains(page.primaryAvailability.value as? String ?? ""))
+        XCTAssertNotNil(page.availability(of: page.primaryAvailability),
+                        "The row should say Available or In use — label \(page.primaryAvailability.label)")
         page.add.click()
         XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
         page.replace(page.additional("port"), with: "8080")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
-            page.additionalAvailability.value as? String == "In use"
+            page.availability(of: page.additionalAvailability) == "In use"
         }, "A port the primary listener uses is not free for another")
         page.cancel.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))

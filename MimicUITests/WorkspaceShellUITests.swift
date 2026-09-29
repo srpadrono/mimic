@@ -2419,9 +2419,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "The request log should start right below the editor — body \(body.frame), log \(drawer.frame)"
         )
         XCTAssertLessThan(body.frame.height, 200, "A short body keeps its card short")
+        // The log is the split's second pane, so the split's bottom is the log's. The log's own
+        // element is a `.contain` container, which reports the union of what it draws — an empty
+        // log's header and curl hint — rather than the pane it fills.
+        let split = app.descendants(matching: .any).matching(identifier: "ds.splitpane.requestLog").firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 5), "The editor and the log share one split")
         let window = app.windows.firstMatch.frame
-        XCTAssertGreaterThan(drawer.frame.maxY, window.maxY - 24,
-                             "The request log takes the rest of the column — log \(drawer.frame), window \(window)")
+        XCTAssertGreaterThan(split.frame.maxY, window.maxY - 24,
+                             "The request log takes the rest of the column — split \(split.frame), window \(window)")
+        XCTAssertLessThan(split.frame.minY, body.frame.minY, "The editor is the split's first pane")
     }
 
     /// PANEL-11. A clicked request takes over the centre column — the log on the left, the request

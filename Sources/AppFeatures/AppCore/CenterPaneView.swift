@@ -122,8 +122,6 @@ struct CenterPaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chooserWidth = $0 }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ds.empty.center.noSelection")
     }
 
     private var firstEndpointChooserContent: some View {
@@ -164,6 +162,10 @@ struct CenterPaneView: View {
         }
         .padding(DSSpacing.xxl)
         .frame(maxWidth: .infinity)
+        // On the content, not the `ViewThatFits`: XCUITest finds no element for an identifier set
+        // around a `ScrollView`. Only one of the two copies is ever on screen.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ds.empty.center.noSelection")
     }
 
     /// The design's card width, and the narrowest a card gets before the row wraps.

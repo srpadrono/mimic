@@ -140,6 +140,25 @@ struct ServerStatusWellTests {
         #expect(ServerStatusWell.requestCountShort(24) == "24 requests")
     }
 
+    @Test("The capsule's state word stays short where the toolbar is narrow")
+    func capsuleStateTitleStaysShortWhenCompact() {
+        let conflict = ServerState.error("Port 21313 is already in use.")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: conflict, restartRequired: false,
+                                                   conflictingPort: 21313, compact: false)
+                == "Couldn\u{2019}t start: port 21313 in use")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: conflict, restartRequired: false,
+                                                   conflictingPort: 21313, compact: true) == "Server error")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: .error("Permission denied"), restartRequired: false,
+                                                   conflictingPort: nil, compact: false)
+                == "Couldn\u{2019}t start: Permission denied")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: .running(port: 8080), restartRequired: true,
+                                                   conflictingPort: nil, compact: false) == "Restart required")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: .running(port: 8080), restartRequired: true,
+                                                   conflictingPort: nil, compact: true) == "Restart")
+        #expect(ServerStatusWell.capsuleStateTitle(serverState: .running(port: 8080), restartRequired: false,
+                                                   conflictingPort: nil, compact: true) == "Running")
+    }
+
     @Test("A start error is cut to its first clause, and a long clause to 48 characters")
     func shortErrorKeepsTheFirstClause() {
         #expect(ServerStatusWell.shortError("Port 8080 is in use. Choose another port.") == "Port 8080 is in use")

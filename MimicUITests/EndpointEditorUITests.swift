@@ -756,6 +756,12 @@ final class EndpointEditorUITests: MimicUITestCase {
         let notFound = app.menuItems["404 Not Found"].firstMatch
         XCTAssertTrue(notFound.waitForExistence(timeout: 3), "The status menu should offer 404")
         notFound.click()
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) {
+                (self.newEndpointSheet.statusMenu.value as? String) == "404 Not Found"
+            },
+            "The sheet should show the status chosen from its menu"
+        )
 
         XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitForExistence(timeout: 3),
                       "The sheet should offer a content type")

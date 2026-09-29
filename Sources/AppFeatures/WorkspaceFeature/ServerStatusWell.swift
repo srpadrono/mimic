@@ -16,6 +16,8 @@ struct ServerStatusWell: View {
     var boundConfiguration: ServerConfiguration?
     /// When the server started serving; the popover says "since 21:32" beside Running.
     var runningSince: Date?
+    /// The port a failed start found taken, when that is why it failed.
+    var conflictingPort: Int?
     var onShowUnmatched: (() -> Void)?
     var onShowSettings: (() -> Void)?
     var onToggleServer: (() -> Void)?
@@ -146,11 +148,8 @@ struct ServerStatusWell: View {
     }
 
     private var stateTitle: String {
-        if restartRequired { return "Restart required" }
-        if case .error(let message) = serverState {
-            return compact ? "Server error" : "Couldn\u{2019}t start: \(Self.shortError(message))"
-        }
-        return Self.shortState(serverState)
+        Self.capsuleStateTitle(serverState: serverState, restartRequired: restartRequired,
+                               conflictingPort: conflictingPort, compact: compact)
     }
 
     private var serverDetails: some View {
@@ -396,6 +395,23 @@ struct ServerStatusWell: View {
 
     nonisolated static func requestCountShort(_ count: Int) -> String {
         "\(count) \(count == 1 ? "request" : "requests")"
+    }
+
+    /// The capsule's state word. It stays about as wide as "Running" or "Stopped" where the toolbar
+    /// is narrow: a longer word pushes Run and "More actions" behind AppKit's own overflow chevron,
+    /// since `WorkspaceView.toolbarLayout` budgets the capsule at under 100pt from the narrow tier
+    /// down. A port conflict reads as the design words it, "Couldn't start: port 8080 in use"; the
+    /// popover and the capsule's help carry the whole sentence either way.
+    nonisolated static func capsuleStateTitle(
+        serverState: ServerState, restartRequired: Bool, conflictingPort: Int?, compact: Bool
+    ) -> String {
+        if restartRequired { return compact ? "Restart" : "Restart required" }
+        if case .error(let message) = serverState {
+            if compact { return "Server error" }
+            if let conflictingPort { return "Couldn\u{2019}t start: port \(conflictingPort) in use" }
+            return "Couldn\u{2019}t start: \(shortError(message))"
+        }
+        return shortState(serverState)
     }
 
     /// The first clause of a start error, short enough for the toolbar.

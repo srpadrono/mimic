@@ -99,17 +99,25 @@ struct RealTrafficTests {
         }
     }
 
-    @Test("A query string never affects which route matches")
+    @Test("A query string never affects which route matches, and the log keeps it")
     func queryStringIgnored() async throws {
         try await JourneyServingTests.withEngine(
             endpoints: [Self.endpoint(.get, "/search", body: #"{"results":[]}"#)]
-        ) { _, baseURL in
+        ) { engine, baseURL in
+            var logs = engine.logStream.makeAsyncIterator()
             var request = URLRequest(url: baseURL.appendingPathComponent("search")
                 .appending(queryItems: [URLQueryItem(name: "q", value: "a b&c"), URLQueryItem(name: "page", value: "2")]))
             request.httpMethod = "GET"
             let (data, response) = try await JourneyServingTests.session().data(for: request)
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
             #expect(String(decoding: data, as: UTF8.self) == #"{"results":[]}"#)
+
+            // The request detail lists the query from the logged target, as a pass-through's is.
+            let first = await logs.next()
+            await engine.acknowledgeLog()
+            let log = try #require(first)
+            #expect(log.path.hasPrefix("/search?q="))
+            #expect(log.path.hasSuffix("&page=2"))
         }
     }
 

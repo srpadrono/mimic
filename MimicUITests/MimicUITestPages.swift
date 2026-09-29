@@ -17,6 +17,20 @@ struct WelcomePage {
     var importMenu: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "welcome.import").firstMatch
     }
+    /// The Import menu's items. Their spoken names ("Import HAR file") differ from the titles shown
+    /// ("HAR file…"), and a subscript by title misses an item once its label is overridden, so each
+    /// is matched by identifier, title or label.
+    var importHARMenuItem: XCUIElement {
+        menuItem(identifier: "welcome.import.har", title: "HAR file\u{2026}", label: "Import HAR file")
+    }
+    var importOpenAPIMenuItem: XCUIElement {
+        menuItem(identifier: "welcome.import.openAPI", title: "OpenAPI spec\u{2026}", label: "Import OpenAPI spec")
+    }
+    private func menuItem(identifier: String, title: String, label: String) -> XCUIElement {
+        app.menuItems.matching(NSPredicate(
+            format: "identifier == %@ OR title == %@ OR label == %@", identifier, title, label
+        )).firstMatch
+    }
     var sampleProjectButton: XCUIElement { app.buttons["welcome.sampleProject"] }
     var showOnLaunchCheckbox: XCUIElement { app.checkBoxes["welcome.showOnLaunch"] }
     private var noRecentProjectsLabelByIdentifier: XCUIElement {
@@ -330,8 +344,12 @@ struct WorkspacePage {
         UITestApp.dismissAnyOpenMenu(in: app)
     }
 
+    /// Fills the screen with the window, once. Idempotent: on a display under 1180pt wide (CI's is
+    /// 1024pt) a window that already fills the screen is left alone. Choosing Fill again there
+    /// toggles the window back to its previous frame, which on that display ran past the screen's
+    /// left edge — every click on the navigator then landed off screen and did nothing.
     func fillWindow() {
-        if app.windows.firstMatch.frame.width >= 1180 { return }
+        if Self.isFilled(app.windows.firstMatch.frame) { return }
         app.menuBars.menuBarItems["Window"].click()
         let fill = app.menuItems["Fill"]
         if fill.waitForExistence(timeout: 3) {
@@ -342,8 +360,15 @@ struct WorkspacePage {
             UITestApp.dismissAnyOpenMenu(in: app)
             app.typeKey("f", modifierFlags: [.function, .control])
         }
-        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width >= 1180 }
+        _ = UITestApp.waitUntil(timeout: 5) { Self.isFilled(app.windows.firstMatch.frame) }
         UITestApp.waitForStableFrame(app.windows.firstMatch)
+    }
+
+    /// Wide enough for every tier of the workspace, or as large as the primary display allows.
+    private static func isFilled(_ frame: CGRect) -> Bool {
+        if frame.width >= 1180 { return true }
+        guard let visible = NSScreen.screens.first?.visibleFrame else { return false }
+        return frame.width >= visible.width - 1 && frame.height >= visible.height - 1
     }
 
     /// Restores a collapsed navigator. Keyed on the footer's own "+", not on any "Add endpoint":
@@ -457,7 +482,12 @@ struct WorkspacePage {
             UITestApp.dismissAnyOpenMenu(in: app)
             return false
         }
-        moveAndResize.click()
+        // Hovered, not clicked. A click on a submenu parent hovers it, which opens the submenu, and
+        // then looks the parent up again to press it; by then AppKit has rebuilt the Window menu's
+        // system items and the lookup fails ("No matches found" for Move & Resize). Hovering opens
+        // the submenu without that second lookup.
+        UITestApp.waitForStableFrame(moveAndResize)
+        moveAndResize.hover()
         for title in titles {
             let item = app.menuItems[title].firstMatch
             if item.waitForExistence(timeout: 2) {
@@ -728,11 +758,15 @@ struct RequestLogDrawerPage {
 
     /// At the drawer's minimum height, rows can exist in accessibility outside the clipped table.
     /// Scroll the table itself until the row's click point is inside its viewport.
+    ///
+    /// The table is the shortest scroll view in the row's own column. With a request selected, the
+    /// detail beside the list scrolls too, and is shorter than the list — so the column matters.
     func reveal(_ row: XCUIElement) -> Bool {
         let drawer = app.descendants(matching: .any).matching(identifier: "drawer").firstMatch
         guard drawer.exists, row.exists else { return false }
+        let rowMidX = row.frame.midX
         guard let table = drawer.scrollViews.allElementsBoundByIndex
-            .filter({ $0.frame.height > 0 })
+            .filter({ $0.frame.height > 0 && $0.frame.minX <= rowMidX && rowMidX <= $0.frame.maxX })
             .min(by: { $0.frame.height < $1.frame.height }) else { return false }
         for _ in 0..<4 {
             let viewport = table.frame

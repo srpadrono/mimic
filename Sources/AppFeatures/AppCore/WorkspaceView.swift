@@ -657,6 +657,7 @@ struct WorkspaceView: View {
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             runningSince: appState.server.runningSince,
+            conflictingPort: startConflictPort,
             onShowUnmatched: {
                 logPresentation.wrappedValue = true
                 showUnmatchedOnly = true
@@ -670,6 +671,13 @@ struct WorkspaceView: View {
                 }
             }
         )
+    }
+
+    /// The port the last start found taken, when that is why the server is in error.
+    private var startConflictPort: Int? {
+        guard let failure = appState.serverStartFailure,
+              failure.code == ControlErrorCode.serverPortInUse.rawValue else { return nil }
+        return failure.details?["port"].flatMap { Int($0) }
     }
 
     /// The secondary actions, folded into one menu when the centre column is narrow. At the

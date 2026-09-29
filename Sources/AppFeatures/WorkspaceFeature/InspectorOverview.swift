@@ -101,10 +101,12 @@ struct InspectorOverview: View {
             }
             .padding(.bottom, DSSpacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // On the content group, not the scroll view: XCUITest finds no element for an
+            // identifier set on a `ScrollView`. `.contain` before the identifier, so rows and the
+            // button keep their own names.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inspector.overview")
         }
-        // `.contain` before the identifier, so rows and the button keep their own names.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("inspector.overview")
     }
 
     // MARK: - Pieces
