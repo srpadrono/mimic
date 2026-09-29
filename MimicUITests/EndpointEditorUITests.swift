@@ -758,9 +758,12 @@ final class EndpointEditorUITests: MimicUITestCase {
         notFound.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 3) {
+                // The menu's accessibility value can lag its label; the label's own text is what
+                // the person sees.
                 (self.newEndpointSheet.statusMenu.value as? String) == "404 Not Found"
+                    || self.newEndpointSheet.statusMenu.staticTexts["Not Found"].exists
             },
-            "The sheet should show the status chosen from its menu"
+            "The sheet should show the status chosen from its menu\n\(app.sheets.firstMatch.debugDescription)"
         )
 
         XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitForExistence(timeout: 3),

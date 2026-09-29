@@ -226,6 +226,9 @@ struct WorkspaceView: View {
                 .padding(.top, DSSpacing.xs)
                 .padding([.horizontal, .bottom], DSLayout.panelInset)
                 .background(DSColors.window.ignoresSafeArea())
+                // A floor for the whole window: without it the navigator could take a narrow window
+                // entirely, and AppKit would hide the status capsule behind its overflow chevron.
+                .frame(minWidth: DSLayout.centerMinimumWidth)
                 .onGeometryChange(for: WorkspaceToolbarLayout.self) {
                     Self.toolbarLayout(centerWidth: $0.size.width)
                 } action: { layout in
