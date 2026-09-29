@@ -214,12 +214,6 @@ struct WorkspaceView: View {
                         }
                     }
                 }
-                // A floor for the centre column, so narrowing the window takes the side panels down
-                // to their minimum widths before the editor is squeezed. Capped by the screen: a floor
-                // the screen cannot fit beside both panels would push the window off its left edge.
-                .frame(minWidth: Self.centreMinimumWidth(
-                    screenWidth: NSScreen.main?.visibleFrame.width ?? .greatestFiniteMagnitude
-                ))
                 // The one content surface: a rounded card inset from the window, under the toolbar.
                 .background(DSColors.content)
                 .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous))
