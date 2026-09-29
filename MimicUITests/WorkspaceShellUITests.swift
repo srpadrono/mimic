@@ -1090,23 +1090,25 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 10), "The first journey should open")
         addTemplate("payment-retry", activate: false)
 
+        // The crumb names the journey being edited, as the design's "Checkout › Payment retry" does.
+        let added = "Payment succeeds on retry"
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("journey", toRead: "Journeys"),
-            "The jump bar should keep a short journey switcher above the full editor title — "
-                + breadcrumb.crumbDescription("journey", titled: "Journeys")
+            breadcrumb.waitForCrumb("journey", toRead: added),
+            "The jump bar should name the journey just added — "
+                + breadcrumb.crumbDescription("journey", titled: added)
         )
 
         // The native popup is visible on macOS 27 but XCTest does not expose its options as app
         // menu items on this runner. Exercise its keyboard type selection instead: these two
         // fixtures start with distinct letters, so R unambiguously picks Retry after failure.
-        breadcrumb.crumb("journey", titled: "Journeys").click()
+        breadcrumb.crumb("journey", titled: added).click()
         app.typeKey("r", modifierFlags: [])
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            breadcrumb.waitForCrumb("journey", toRead: "Journeys"),
-            "The journey switcher should remain short after selection — "
-                + breadcrumb.crumbDescription("journey", titled: "Journeys")
+            breadcrumb.waitForCrumb("journey", toRead: "Retry after failure"),
+            "The crumb should follow the jump to the other journey — "
+                + breadcrumb.crumbDescription("journey", titled: "Retry after failure")
         )
         let editorName = journeys.editorName
         XCTAssertTrue(

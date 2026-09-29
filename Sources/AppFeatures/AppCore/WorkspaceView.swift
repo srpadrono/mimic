@@ -856,12 +856,28 @@ struct WorkspaceView: View {
         switch navigatorTab {
         case .journeys:
             let journeys = appState.journeys
+            let selected = journeys.first { $0.id == appState.selectedJourneyID }
+            // "Checkout › Payment retry", as the design draws it: the group earns a crumb only when
+            // the journey has one, and the journey crumb names the journey itself.
+            if let group = selected?.groupTag, !group.isEmpty {
+                let groups = Set(journeys.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+                crumbs.append(
+                    BreadcrumbJumpBar.Crumb(
+                        id: "journeyGroup",
+                        title: group,
+                        options: groups.compactMap { name in
+                            // A group stands for its first journey, the landing a navigator click gives.
+                            journeys.first { $0.groupTag == name }.map {
+                                BreadcrumbJumpBar.Option(id: $0.id, title: name, isSelected: name == group)
+                            }
+                        }
+                    )
+                )
+            }
             crumbs.append(
                 BreadcrumbJumpBar.Crumb(
                     id: "journey",
-                    // The centre editor gives the selected journey its full title. Keep this jump
-                    // control short so it does not repeat and truncate that title above the editor.
-                    title: "Journeys",
+                    title: selected?.name ?? "Journeys",
                     // From `NavigatorTab`, not spelled out here: this crumb sits one bar below the
                     // tab whose glyph it is repeating, and a literal is how the five empty states
                     // `NavigatorTab.systemImage` was extracted for came to disagree with it in the
@@ -944,7 +960,7 @@ struct WorkspaceView: View {
         case "scenario":
             guard let endpointID = selectedEndpointID else { return }
             appState.editScenario(endpointID: endpointID, scenarioID: optionID)
-        case "journey":
+        case "journeyGroup", "journey":
             appState.selectedJourneyID = optionID
         default:
             break
