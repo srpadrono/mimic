@@ -14,9 +14,10 @@ struct ServerStatusWell: View {
     var iconOnly = false
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
+    /// When the server started serving; the popover says "since 21:32" beside Running.
+    var runningSince: Date?
     var onShowUnmatched: (() -> Void)?
     var onShowSettings: (() -> Void)?
-    var onShowTraffic: (() -> Void)?
     var onToggleServer: (() -> Void)?
 
     @State private var showingDetails = false
@@ -149,6 +150,12 @@ struct ServerStatusWell: View {
             HStack(spacing: DSSpacing.sm) {
                 DSStatusLabel(restartRequired ? "Restart required" : Self.shortState(serverState),
                               color: statusColor)
+                if isRunning, let runningSince {
+                    Text(Self.sinceText(runningSince))
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .accessibilityIdentifier("serverStatusWell.since")
+                }
                 Spacer(minLength: DSSpacing.sm)
                 if let onToggleServer {
                     DSButton(isRunning ? "Stop" : "Run", variant: .secondary, size: .medium,
@@ -208,23 +215,18 @@ struct ServerStatusWell: View {
                 figure("\(unmatchedCount)", caption: "unmatched",
                        color: unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary)
                 Spacer(minLength: DSSpacing.sm)
-                if unmatchedCount > 0, let onShowUnmatched {
+                // Always offered, as the design has it: with nothing unmatched it opens the log on
+                // an Unmatched scope that says so.
+                if let onShowUnmatched {
                     DSButton("Show unmatched", variant: .secondary, size: .medium,
                              identifier: "serverStatusWell.unmatchedButton") {
                         showingDetails = false
                         onShowUnmatched()
                     }
                     .accessibilityIdentifier("serverStatusWell.unmatched")
-                    .accessibilityLabel(Self.unmatchedLabel(unmatchedCount, actionable: true))
+                    .accessibilityLabel(unmatchedCount > 0
+                        ? Self.unmatchedLabel(unmatchedCount, actionable: true) : "Show unmatched")
                     .help("Show requests no endpoint or journey answered")
-                } else if let onShowTraffic {
-                    DSButton("View traffic", variant: .secondary, size: .medium,
-                             identifier: "serverStatusWell.trafficButton") {
-                        showingDetails = false
-                        onShowTraffic()
-                    }
-                    .accessibilityIdentifier("serverStatusWell.traffic")
-                    .accessibilityLabel("View traffic")
                 }
             }
 
@@ -298,6 +300,11 @@ struct ServerStatusWell: View {
     }
 
     // MARK: - Presentation rules
+
+    /// "since 21:32": the time of day the server started, in the reader's clock.
+    nonisolated static func sinceText(_ date: Date) -> String {
+        "since \(date.formatted(date: .omitted, time: .shortened))"
+    }
 
     /// Only the runtime snapshot may advertise active listeners. Names may change without a restart.
     nonisolated static func displayedBackends(

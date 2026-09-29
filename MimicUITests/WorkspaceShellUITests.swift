@@ -229,7 +229,7 @@ struct ServerStatusWellPage {
 
     var details: XCUIElement { named("serverStatusWell.portList") }
     var settings: XCUIElement { named("serverStatusWell.settings") }
-    var traffic: XCUIElement { named("serverStatusWell.traffic") }
+    var since: XCUIElement { named("serverStatusWell.since") }
     func copyButton(port: Int) -> XCUIElement { named("serverStatusWell.copyPort.\(port)") }
     func openDetails() {
         if !details.exists { address.click() }
@@ -1868,7 +1868,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
         app.typeKey("l", modifierFlags: [.command, .option])
         XCTAssertTrue(shell.panel("drawer").waitForNonExistence(timeout: 5))
         well.openDetails()
-        well.traffic.click()
+        XCTAssertTrue(well.since.waitForExistence(timeout: 5), "Running should say since when")
+        XCTAssertTrue(well.since.label.hasPrefix("since ") || (well.since.value as? String)?.hasPrefix("since ") == true,
+                      "The start time reads 'since <time>'")
+        // Show unmatched is offered with nothing unmatched too, and opens the log on that scope.
+        XCTAssertTrue(well.unmatchedBadge.waitForExistence(timeout: 5))
+        well.unmatchedBadge.click()
         XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5))
         XCTAssertTrue(well.details.waitForNonExistence(timeout: 5))
     }

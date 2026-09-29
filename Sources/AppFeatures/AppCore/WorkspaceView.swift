@@ -597,15 +597,12 @@ struct WorkspaceView: View {
             iconOnly: usesIconStatus,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
+            runningSince: appState.server.runningSince,
             onShowUnmatched: {
                 showDrawer = true
                 showUnmatchedOnly = true
             },
             onShowSettings: { showBackendSettings = true },
-            onShowTraffic: {
-                showDrawer = true
-                showUnmatchedOnly = false
-            },
             onToggleServer: {
                 if appState.serverState.runningPort != nil {
                     appState.stopServer()

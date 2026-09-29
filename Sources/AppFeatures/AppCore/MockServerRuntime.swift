@@ -83,7 +83,18 @@ extension MockServerEngineProtocol {
 @Observable
 @MainActor
 final class MockServerRuntime {
-    var serverState: ServerState = .stopped
+    var serverState: ServerState = .stopped {
+        didSet {
+            if serverState.runningPort == nil {
+                runningSince = nil
+            } else if oldValue.runningPort == nil {
+                runningSince = Date()
+            }
+        }
+    }
+    /// When the server last started serving, for the status popover's "since 21:32". `nil` while
+    /// nothing is listening.
+    private(set) var runningSince: Date?
     var serverConfiguration: ServerConfiguration = .default
     private var projectID: UUID?
     var boundConfiguration: ServerConfiguration?

@@ -702,6 +702,19 @@ struct MockServerRuntimeTests {
         #expect(manager.portConflictAlert == nil)
     }
 
+    @Test("Running since is set when serving starts, kept while it serves and cleared when it stops")
+    func runningSinceFollowsTheServingState() {
+        let manager = MockServerRuntime(engine: FakeEngine())
+        #expect(manager.runningSince == nil)
+        manager.serverState = .running(port: 8080)
+        let started = manager.runningSince
+        #expect(started != nil)
+        manager.serverState = .running(port: 8080)
+        #expect(manager.runningSince == started)
+        manager.serverState = .stopped
+        #expect(manager.runningSince == nil)
+    }
+
     @Test("Stop server transitions back to stopped even if engine stop throws")
     func stopServerAlwaysStops() async throws {
         let engine = FakeEngine()
