@@ -238,30 +238,25 @@ struct EndpointEditorView: View {
             }
             .accessibilityIdentifier("endpointEditor.moreMenu.delete")
         } label: {
-            // The label is the chevron alone, framed across the method as well, as `DSIconMenu`
-            // frames its glyph. A label with text is flattened into the pop-up button's title, and
-            // AppKit then sizes the control to that title — a 14pt target — whatever the frame says.
-            // The method is drawn behind it, so the whole method-and-chevron box opens the menu.
-            Label("Endpoint actions", systemImage: "chevron.down")
-                .labelStyle(.iconOnly)
+            // One drawn label: the chevron framed across the method's width, with the method drawn
+            // behind it inside the label. A label with text of its own is flattened into the pop-up
+            // button's title, and AppKit sizes the control to that title (a 14pt target); a method
+            // drawn outside the label is not part of the button at all, so clicks on it went nowhere.
+            // Drawn this way the pop-up's image is the whole method-and-chevron box, as the jump bar's
+            // "earlier locations" menu draws its hover well inside its label.
+            Image(systemName: "chevron.down")
                 .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
                 .foregroundStyle(DSColors.labelTertiary)
                 .frame(width: endpointMenuWidth, height: DSControlHeight.regular, alignment: .trailing)
+                .background(alignment: .leading) {
+                    DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
+                }
                 .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .frame(width: endpointMenuWidth, height: DSControlHeight.regular)
-        // Drawn behind the menu, whose pop-up button spans the method too, so a click on the
-        // method opens it. An overlay, even one that ignores hits, sits between the pointer and the
-        // AppKit button.
-        .background(alignment: .leading) {
-            DSMethodLabel(endpoint.method.rawValue, fixedWidth: false, identifier: "editor.method")
-                .fixedSize()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
         .help("Endpoint actions")
         .accessibilityIdentifier("endpointEditor.moreMenu")
         .accessibilityLabel("Endpoint actions, \(endpoint.method.rawValue)")

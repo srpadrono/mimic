@@ -2026,6 +2026,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.assertAccessibleMenuName(menu, equals: "Endpoint actions, GET")
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
+        // The request bar re-lays out as the window settles into the compact size; click where the
+        // menu ends up, not where it was.
+        UITestApp.waitForStableFrame(menu)
 
         menu.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
         XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))

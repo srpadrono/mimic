@@ -332,11 +332,16 @@ struct WorkspacePage {
     }
 
     func compactWindow() {
+        let before = app.windows.firstMatch.frame
         app.menuBars.menuBarItems["Window"].click()
         app.menuItems["Move & Resize"].click()
         // Right edge keeps the native overflow popup inside the window screenshot.
         app.menuItems["Top Right"].click()
-        _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width < 1180 }
+        // On a small display the window is already under 1180pt, so wait for the move itself too.
+        _ = UITestApp.waitUntil(timeout: 5) {
+            let frame = app.windows.firstMatch.frame
+            return frame.width < 1180 && frame != before
+        }
         UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
 
