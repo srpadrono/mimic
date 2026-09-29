@@ -490,7 +490,12 @@ struct WorkspaceView: View {
         .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(id: "workspace.status", placement: .principal) {
-            serverSummary
+            // Wrapped, not the item's root. A bare `Button` as a toolbar item's root is published as
+            // the item itself: the toggle beside it loses its accessibility label that way, and the
+            // well's details popover never reached the accessibility tree. A container keeps the well
+            // a SwiftUI button and its popover addressable, as it was before the toolbar was rebuilt.
+            HStack(spacing: 0) { serverSummary }
+                .accessibilityElement(children: .contain)
         }
 
         ToolbarItem(id: "workspace.run", placement: .primaryAction) {

@@ -36,6 +36,8 @@ struct ContentView: View {
             }
         }
         .disabled(appState.updates.isPreparingInstallation)
+        // Opening a project grows this window; keep what it grows into on screen, above the Dock.
+        .background(WindowScreenFit())
         .navigationTitle(appState.currentProject?.name ?? "Mimic")
         // Presented here rather than inside `WelcomeWindow`, because File ▸ New Project has to work
         // whichever branch is showing — and one sheet with one presenter is what stops the two

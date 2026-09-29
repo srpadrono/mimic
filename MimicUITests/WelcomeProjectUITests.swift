@@ -75,7 +75,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         // The recents pane wears a panel header even when it has nothing to list.
         XCTAssertTrue(
-            staticTextExists(exactly: "Projects"),
+            headingExists(exactly: "Projects"),
             "The recents pane should carry the Projects panel header"
         )
         // `recentCountSubtitle` returns nil rather than "0" when the list is empty — an empty panel
@@ -897,6 +897,14 @@ final class WelcomeProjectUITests: MimicUITestCase {
     private func staticTextExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
         let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
         return app.staticTexts.matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+    }
+
+    /// A header-trait `Text` is published as a heading, not a `StaticText`, so it is matched across
+    /// element types.
+    @MainActor
+    private func headingExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
+        let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
+        return app.descendants(matching: .any).matching(predicate).firstMatch.waitForExistence(timeout: timeout)
     }
 
     @MainActor

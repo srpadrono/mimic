@@ -130,9 +130,10 @@ struct WorkspacePage {
         app.staticTexts["Select an endpoint from the sidebar to view and edit its configuration."]
     }
     /// "Mock your first endpoint". The heading sets its own identifier outside `DSEmptyState`, so
-    /// the identifier lands; the words are polled beside it in case the chooser flattens.
+    /// the identifier lands; the words are polled beside it in case the chooser flattens. Any
+    /// element type: the header trait publishes it as a heading, which `app.staticTexts` misses.
     var centerFirstEndpointHeading: XCUIElement {
-        app.staticTexts.matching(NSPredicate(
+        app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier == %@ OR label == %@ OR value == %@",
             "ds.empty.center.noSelection.heading", "Mock your first endpoint", "Mock your first endpoint"
         )).firstMatch
@@ -143,6 +144,8 @@ struct WorkspacePage {
     var centerImportOpenAPICard: XCUIElement { app.buttons["center.importOpenAPI"].firstMatch }
 
     // Toolbar
+    /// Run/Stop. As a toolbar item's root button it publishes its visible title, "Run" or "Stop",
+    /// as its label; the view's `.accessibilityLabel` does not reach the tree.
     var serverToggleButton: XCUIElement { app.buttons["serverToggleButton"].firstMatch }
     var legacyServerStartButton: XCUIElement { app.buttons["serverStartButton"].firstMatch }
     var legacyServerStopButton: XCUIElement { app.buttons["serverStopButton"].firstMatch }
@@ -670,8 +673,11 @@ struct RequestDetailPage {
 
     /// Every inspector mode names itself in the header text — "Scenarios", "Request", "Journey",
     /// "Requests", "Overview". The endpoint mode's Scenarios/Traffic tabs are gone.
+    ///
+    /// Matched across element types: the title carries the header trait, which AppKit publishes as
+    /// a heading rather than a plain `StaticText`, so an `app.staticTexts` query never saw it.
     func panelTitle(_ title: String) -> XCUIElement {
-        app.staticTexts.matching(
+        app.descendants(matching: .any).matching(
             NSPredicate(
                 format: "identifier == %@ AND (value == %@ OR label == %@)",
                 "ds.panelheader.title.inspector", title, title

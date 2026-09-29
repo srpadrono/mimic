@@ -283,7 +283,10 @@ struct EndpointTrafficSummary: View {
                 .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
         }
-        .accessibilityElement(children: .combine)
+        // One element that reads "2 served". `.combine` on macOS left the label empty and put
+        // "2, served" in the value, so the figure announced no name of its own.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(caption)")
         .accessibilityIdentifier(identifier)
     }
 }

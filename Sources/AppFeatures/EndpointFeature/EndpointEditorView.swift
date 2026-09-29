@@ -143,8 +143,11 @@ struct EndpointEditorView: View {
                 actions.onRenameScenario(scenario.id, name)
             }
         }
-        .accessibilityIdentifier("endpointEditor")
+        // Container first, then its name. The other order names every descendant "endpointEditor":
+        // the path, status field, method menu and Add header all lost their own identifiers, while
+        // only controls that declare their own container (the segmented control) kept theirs.
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("endpointEditor")
     }
 
     // MARK: - Request bar

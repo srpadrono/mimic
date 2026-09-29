@@ -712,4 +712,29 @@ struct WorkspaceFeatureLogicTests {
                                         hasOverview: true, selectedRequestCount: 2) == .selection)
         #expect(InspectorPanelView.Mode.request.title == "Request")
     }
+
+    @Test("A window grown under the Dock is moved back inside the visible frame")
+    func windowScreenFitMovesAWindowUpBeforeShrinkingIt() {
+        // A 1024×768 display: menu bar above y 738, Dock below y 60.
+        let visible = CGRect(x: 0, y: 60, width: 1024, height: 678)
+        let minimum = CGSize(width: 800, height: 560)
+
+        // Grown downward from a fixed top edge, the bottom 50pt sit under the Dock.
+        let grown = CGRect(x: 60, y: 10, width: 900, height: 640)
+        #expect(WindowScreenFit.fittedFrame(grown, visible: visible, minimum: minimum)
+                == CGRect(x: 60, y: 60, width: 900, height: 640))
+
+        // Taller than the screen: as tall as the visible frame, and no taller.
+        let tall = CGRect(x: 60, y: 0, width: 900, height: 900)
+        #expect(WindowScreenFit.fittedFrame(tall, visible: visible, minimum: minimum)
+                == CGRect(x: 60, y: 60, width: 900, height: 678))
+
+        // Never below the content's minimum, even when that cannot fit.
+        let rigid = CGSize(width: 800, height: 700)
+        #expect(WindowScreenFit.fittedFrame(tall, visible: visible, minimum: rigid)?.height == 700)
+
+        // A window already on screen is left alone.
+        let fits = CGRect(x: 60, y: 100, width: 900, height: 600)
+        #expect(WindowScreenFit.fittedFrame(fits, visible: visible, minimum: minimum) == nil)
+    }
 }

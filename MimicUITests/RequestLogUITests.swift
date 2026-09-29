@@ -1348,9 +1348,10 @@ final class RequestLogUITests: MimicUITestCase {
     @MainActor
     func testEndpointTrafficSectionSummarisesWhatTheEndpointAnswered() async throws {
         let port = 62109
-        let inspector = InspectorPage(app: app)
 
         launchApp()
+        // After the launch: `app` is created by it, and building the page first unwrapped nil.
+        let inspector = InspectorPage(app: app)
         startServer(projectNamed: "Traffic Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 

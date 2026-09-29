@@ -1041,9 +1041,10 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// must not make the refused-start tests pass without a positive stopped-state assertion.
     @MainActor
     private func assertStartServerAvailable(after conflict: String) {
-        let startServer = app.buttons["Start server"].firstMatch
+        // The toolbar publishes Run/Stop's visible title as its label, so "Run" is the start action.
+        let startServer = workspace.serverToggleButton
         let canStart = UITestApp.waitUntil(timeout: 10) {
-            startServer.exists && startServer.isEnabled
+            startServer.exists && startServer.isEnabled && startServer.label == "Run"
         }
         if !canStart { captureToolbarLookupFailure(conflict) }
         XCTAssertTrue(canStart, "Declining the port suggestion should leave Start server available")

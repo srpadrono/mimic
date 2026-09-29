@@ -1191,7 +1191,7 @@ final class MimicUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
         XCTAssertTrue(workspace.waitForServerURL(port: 8472, timeout: 8),
                       "The server must actually bind before its screenshot is labelled running")
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop")
         captureEvidenceScreenshot("05-server-running")
 
         workspace.serverToggleButton.click()

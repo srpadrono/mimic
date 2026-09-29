@@ -1536,13 +1536,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(workspace.projectTitle.isHittable, "The expanded toolbar must show the project name")
         XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5))
         let kind = workspace.projectKind
+        // Label or value: inside a toolbar item the text arrived with an empty label, so where the
+        // address is published is not something to pin; that it is published is.
+        let kindSpoken = "\(kind.label) \((kind.value as? String) ?? "")"
         XCTAssertTrue(
-            kind.label == "Local mock at localhost:62118" || kind.label == "localhost:62118"
-                || kind.value as? String == "localhost:62118",
-            "Under the name, the identity should say where the mock serves — label: \(kind.label)"
+            kindSpoken.contains("localhost:62118"),
+            "Under the name, the identity should say where the mock serves — \(well.spoken(kind))"
         )
         XCTAssertTrue(well.address.isHittable)
-        XCTAssertEqual(workspace.serverToggleButton.label, "Start server")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Run")
         assertExpandedToolbar()
         let expanded = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         expanded.name = "native-toolbar-expanded"
@@ -1563,7 +1565,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         let importFrame = importButton.frame
         let stoppedFrame = workspace.serverToggleButton.frame
         startServer(onPort: 62118)
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop")
         XCTAssertEqual(workspace.serverToggleButton.frame.maxX, stoppedFrame.maxX, accuracy: 4,
                        "Run/Stop should not wander when its title changes")
         XCTAssertEqual(importButton.frame.midX, importFrame.midX, accuracy: 1,
@@ -1579,7 +1581,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
                       "Running in a compact window must keep the project name visible")
         XCTAssertTrue(workspace.serverToggleButton.isHittable,
                       "Run/Stop must remain usable in the compact toolbar")
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
+        XCTAssertEqual(workspace.serverToggleButton.label, "Stop")
         let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         compact.name = "native-toolbar-compact-running"
         compact.lifetime = .keepAlways
@@ -1995,7 +1997,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         let toggle = workspace.serverToggleButton
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The toolbar should offer the power button")
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Start server"),
+            waitForLabel(toggle, toRead: "Run"),
             "Stopped, the power button offers to start — label: \(toggle.label)"
         )
 
@@ -2009,7 +2011,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Server ▸ Start Server should start the mock"
         )
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Stop server"),
+            waitForLabel(toggle, toRead: "Stop"),
             "Running, the power button announces the other action — label: \(toggle.label)"
         )
 
