@@ -1987,7 +1987,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         let duplicate = app.menuItems["Duplicate endpoint"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
-                      "The endpoint menu should offer Duplicate endpoint")
+                      "The endpoint menu should offer Duplicate endpoint. Menu: \(endpointEditor.moreMenu.debugDescription)\nEditor: \(app.descendants(matching: .any).matching(identifier: "endpointEditor").firstMatch.debugDescription)")
         XCTAssertTrue(app.menuItems["Edit request\u{2026}"].exists,
                       "The same menu should offer to edit the request")
         XCTAssertTrue(app.menuItems["Rename endpoint\u{2026}"].exists,
