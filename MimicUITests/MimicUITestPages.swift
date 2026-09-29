@@ -500,7 +500,13 @@ struct WorkspacePage {
             let item = app.menuItems[title].firstMatch
             if item.waitForExistence(timeout: 2) {
                 UITestApp.waitForStableFrame(item)
-                screenPoint(item.frame).click()
+                // Into the submenu along the Move & Resize row, then down to the item. A straight
+                // diagonal crosses the Window menu's other rows, which closes the submenu before
+                // the click arrives.
+                let row = moveAndResize.frame
+                let target = item.frame
+                screenPoint(CGRect(x: target.midX, y: row.midY, width: 0, height: 0)).hover()
+                screenPoint(target).click()
                 return true
             }
         }

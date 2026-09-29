@@ -226,11 +226,6 @@ struct WorkspaceView: View {
                 .padding(.top, DSSpacing.xs)
                 .padding([.horizontal, .bottom], DSLayout.panelInset)
                 .background(DSColors.window.ignoresSafeArea())
-                // A floor for the whole window: without it the navigator could take a narrow window
-                // entirely, and AppKit would hide the status capsule behind its overflow chevron.
-                // `maxWidth` keeps the column flexible: a floor alone makes the frame report its
-                // content's ideal width, and a wide editor would then grow the window off screen.
-                .frame(minWidth: DSLayout.centerMinimumWidth, maxWidth: .infinity)
                 .onGeometryChange(for: WorkspaceToolbarLayout.self) {
                     Self.toolbarLayout(centerWidth: $0.size.width)
                 } action: { layout in
