@@ -87,8 +87,8 @@ struct WorkspaceFeatureRenderingTests {
         #expect(errored == stopped)
     }
 
-    /// The toolbar's status capsule stands on the 32pt prominent control rung in every lifecycle
-    /// state and at every width stage, so the toolbar never changes height while the server moves.
+    /// The toolbar's address and state keep one 36pt height in every lifecycle state and at every
+    /// width stage, so the toolbar never changes height while the server moves.
     @Test("The server summary keeps one height across lifecycle and width stages")
     func serverSummaryKeepsItsHeight() {
         let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
@@ -98,7 +98,7 @@ struct WorkspaceFeatureRenderingTests {
                     serverState: state, projectName: "Toolbar Review", requestCount: 12,
                     unmatchedCount: 2, compact: compact
                 ))
-                #expect(well.height == 32)
+                #expect(well.height == 36)
             }
         }
     }

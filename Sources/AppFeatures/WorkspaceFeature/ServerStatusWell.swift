@@ -69,7 +69,8 @@ struct ServerStatusWell: View {
         Button { showingDetails.toggle() } label: {
             summary
                 .padding(.horizontal, DSSpacing.sm)
-                .padding(.vertical, DSSpacing.xxs + 1)
+                // One height in every state, so the toolbar never moves while the server does.
+                .frame(height: Self.height)
                 .background {
                     RoundedRectangle(cornerRadius: DSCornerRadius.segment, style: .continuous)
                         .fill(isHovered || showingDetails ? DSColors.hover : Color.clear)
@@ -91,6 +92,9 @@ struct ServerStatusWell: View {
         .onChange(of: serverState) { _, _ in copiedPort = nil }
         .onDisappear { copyResetTask?.cancel() }
     }
+
+    /// Two lines of text and a little air, on the 32pt prominent rung plus one spacing step.
+    static let height: CGFloat = DSControlHeight.prominent + DSSpacing.xs
 
     /// Two lines, as the toolbar design draws them: where the mock serves, with a chevron that says
     /// the address opens something, and under it the state and, while there is room, the counts.
