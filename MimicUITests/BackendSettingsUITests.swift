@@ -395,6 +395,12 @@ final class BackendSettingsUITests: MimicUITestCase {
         add(shot)
         workspace.toggleServer()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
+        // The Journeys tab, where the overview inspector is, hides the request log by default.
+        let shell = WorkspaceShellPage(app: app)
+        if !shell.panel("drawer").exists {
+            app.typeKey("l", modifierFlags: [.command, .option])
+        }
+        XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5), "The request log should open")
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
