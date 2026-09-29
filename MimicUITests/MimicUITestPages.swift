@@ -360,7 +360,7 @@ struct WorkspacePage {
             let fill = app.menuItems["Fill"]
             if fill.waitForExistence(timeout: 3) {
                 UITestApp.waitForStableFrame(fill)
-                fill.click()
+                screenPoint(fill.frame).click()
             } else {
                 UITestApp.dismissAnyOpenMenu(in: app)
             }
@@ -462,14 +462,14 @@ struct WorkspacePage {
     func compactWindow(file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch
         let before = window.frame
-        // Tile to the right half with the system shortcut (Globe-Control-Right), which keeps the
-        // native overflow popup inside the window screenshot. Not through Window ▸ Move & Resize:
-        // AppKit rebuilds that submenu while it opens and the item a test found is gone by the
-        // time it is hovered or clicked.
-        app.typeKey(.rightArrow, modifierFlags: [.function, .control])
-        _ = UITestApp.waitUntil(timeout: 3) {
-            let frame = window.frame
-            return frame.width < 1180 && frame != before
+        // Top Right keeps the native overflow popup inside the window screenshot. The Window menu
+        // is flaky on CI (AppKit rebuilds its window items while it opens), so a miss falls back
+        // to dragging the window to its minimum width.
+        if tileWindow(to: ["Top Right", "Right"]) {
+            _ = UITestApp.waitUntil(timeout: 5) {
+                let frame = window.frame
+                return frame.width < 1180 && frame != before
+            }
         }
         if window.frame.width >= 1180 || window.frame == before {
             dragWindowToMinimumWidth()
@@ -480,6 +480,40 @@ struct WorkspacePage {
             file: file, line: line
         )
         UITestApp.waitForStableFrame(window)
+    }
+
+    /// Chooses the first of `titles` under Window ▸ Move & Resize. False when none is offered.
+    private func tileWindow(to titles: [String]) -> Bool {
+        app.menuBars.menuBarItems["Window"].click()
+        let moveAndResize = app.menuItems["Move & Resize"].firstMatch
+        guard moveAndResize.waitForExistence(timeout: 2) else {
+            UITestApp.dismissAnyOpenMenu(in: app)
+            return false
+        }
+        // Driven by screen point, not by element. AppKit rebuilds the Window menu's system items
+        // while the menu opens, so an element found a moment ago can be gone when XCUITest looks it
+        // up again to hover or click it ("No matches found"), which fails the test outright. A
+        // point taken from its frame does not need that second lookup.
+        UITestApp.waitForStableFrame(moveAndResize)
+        screenPoint(moveAndResize.frame).hover()
+        for title in titles {
+            let item = app.menuItems[title].firstMatch
+            if item.waitForExistence(timeout: 2) {
+                UITestApp.waitForStableFrame(item)
+                screenPoint(item.frame).click()
+                return true
+            }
+        }
+        UITestApp.dismissAnyOpenMenu(in: app)
+        return false
+    }
+
+    /// The centre of `frame`, as a point on screen that stays valid if its element is rebuilt.
+    private func screenPoint(_ frame: CGRect) -> XCUICoordinate {
+        // Offsets are from the application element's own origin, which need not be the screen's.
+        let origin = app.frame.origin
+        return app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX - origin.x, dy: frame.midY - origin.y))
     }
 
     /// Drags the bottom-right resize corner a full window width to the left; AppKit stops the
