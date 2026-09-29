@@ -8,7 +8,7 @@ nonisolated enum WorkspaceToolbarLayout: Equatable {
     /// The server line keeps only its state word and the project name drops its subtitle.
     case compactSummary
     case overflow
-    /// The project identity narrows too.
+    /// The project identity narrows too, and the address drops its port count and divider.
     case narrow
     /// Run/Stop joins the "More actions" menu too, so the identity, the address and that one menu
     /// are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
@@ -485,12 +485,14 @@ struct WorkspaceView: View {
     /// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
     /// address and the state word always stay.
     ///
-    /// The last breakpoint is what the narrow tier needs: Run (≈36pt), the name (≤100pt), the
-    /// address and state (≈130pt) and "More" (≈36pt), plus the toolbar's gaps and the column's 8pt
-    /// insets. Below 430pt AppKit could start hiding items behind its own chevron.
+    /// The last breakpoint is what the narrow tier needs: Run (≈36pt), the name (≤88pt), the
+    /// address without its port count and the state (≈112pt) and "More" (≈36pt), plus the
+    /// toolbar's gaps and the column's 8pt insets, about 316pt. A 900pt window with both side
+    /// panels open leaves about 330pt, and keeps Run, as the compact proposal draws it. Below 320pt
+    /// AppKit could start hiding items behind its own chevron.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
         guard centerWidth.isFinite else { return .minimal }
-        if centerWidth < 430 { return .minimal }
+        if centerWidth < 320 { return .minimal }
         if centerWidth < 460 { return .narrow }
         if centerWidth < 620 { return .compactSummary }
         if centerWidth < 780 { return .overflow }
@@ -531,6 +533,10 @@ struct WorkspaceView: View {
         centerToolbarLayout == .minimal
     }
 
+    private var usesNarrowIdentity: Bool {
+        centerToolbarLayout == .narrow || centerToolbarLayout == .minimal
+    }
+
     private var usesToolbarOverflow: Bool {
         centerToolbarLayout != .expanded
     }
@@ -540,7 +546,7 @@ struct WorkspaceView: View {
         switch centerToolbarLayout {
         case .expanded, .overflow: 220
         case .compactSummary: 140
-        case .narrow, .minimal: 100
+        case .narrow, .minimal: 88
         }
     }
 
@@ -565,16 +571,21 @@ struct WorkspaceView: View {
             // item itself, and the well's details popover then never reached the accessibility tree.
             HStack(spacing: DSSpacing.md) {
                 projectIdentity
-                Rectangle()
-                    .fill(DSColors.separator)
-                    .frame(width: DSStroke.emphasis, height: 24)
-                    .accessibilityHidden(true)
+                if !usesNarrowIdentity {
+                    Rectangle()
+                        .fill(DSColors.separator)
+                        .frame(width: DSStroke.emphasis, height: 24)
+                        .accessibilityHidden(true)
+                }
                 serverSummary
             }
             .padding(.trailing, DSSpacing.xs)
             .accessibilityElement(children: .contain)
         }
         .sharedBackgroundVisibility(.hidden)
+
+        // The actions keep to the column's trailing edge, clear of the address.
+        ToolbarSpacer(.flexible)
 
         ToolbarItemGroup(placement: .primaryAction) {
             if usesToolbarOverflow {
@@ -654,6 +665,7 @@ struct WorkspaceView: View {
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             compact: usesCompactToolbarSummary,
+            showsListenerCount: !usesNarrowIdentity,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             runningSince: appState.server.runningSince,

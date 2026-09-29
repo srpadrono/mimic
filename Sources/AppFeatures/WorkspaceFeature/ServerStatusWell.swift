@@ -15,6 +15,8 @@ struct ServerStatusWell: View {
     let unmatchedCount: Int
     /// Narrow toolbars keep the state word and drop the request counts and the restart detail.
     var compact = false
+    /// "+1" after the address; the narrowest toolbars leave the count to the details popover.
+    var showsListenerCount = true
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
     /// When the server started serving; the popover says "since 21:32" beside Running.
@@ -113,7 +115,7 @@ struct ServerStatusWell: View {
             Text(verbatim: address.primary)
                 .font(DSTypography.body)
                 .foregroundStyle(DSColors.labelPrimary)
-            if address.others > 0 {
+            if showsListenerCount, address.others > 0 {
                 Text(verbatim: "+\(address.others)")
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
