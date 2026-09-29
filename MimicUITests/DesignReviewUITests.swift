@@ -24,6 +24,7 @@ final class DesignReviewUITests: MimicUITestCase {
                                 "-NSRequiresAquaSystemAppearance", usesLightAppearance ? "YES" : "NO"]
         app.launchEnvironment["MIMIC_APPEARANCE"] = usesLightAppearance ? "light" : "dark"
         app.launchEnvironment["MIMIC_CONTROL_PORT"] = String(controlPort)
+        app.launchEnvironment["MIMIC_UPDATE_FEED_FIXTURE"] = UpdateFixtures.available
         app.launchEnvironment["MIMIC_CONTROL_TOKEN"] = fixtureToken
         let base = "~/Library/Application Support/devxa.Mimic/design-uitest-\(fixtureID)"
         app.launchEnvironment["MIMIC_CONTROL_FILE"] = base + ".json"
@@ -188,13 +189,10 @@ final class DesignReviewUITests: MimicUITestCase {
             capture("16-welcome-recents")
         }
 
-        let checkForUpdates = app.menuItems["menu.checkForUpdates"].firstMatch
-        app.menuBars.menuBarItems["Mimic"].click()
-        if checkForUpdates.waitForExistence(timeout: 3) {
-            checkForUpdates.click()
-            if element("update.downloadButton").waitForExistence(timeout: 10) {
-                capture("17-update")
-            }
+        let updateSheet = UpdateSheetPage(app: app)
+        updateSheet.openFromMenu()
+        if updateSheet.downloadButton.waitForExistence(timeout: 10) {
+            capture("17-update")
             app.typeKey(.escape, modifierFlags: [])
         } else {
             app.typeKey(.escape, modifierFlags: [])

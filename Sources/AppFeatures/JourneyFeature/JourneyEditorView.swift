@@ -298,7 +298,7 @@ struct JourneyEditorView: View {
 
     private var unmatchedPicker: some View {
         Picker("Unscripted", selection: unmatchedBinding) {
-            Text("Fall through").tag(JourneyUnmatchedBehavior.fallThroughToEndpoints)
+            Text("Use endpoints").tag(JourneyUnmatchedBehavior.fallThroughToEndpoints)
             Text("404").tag(JourneyUnmatchedBehavior.notFound)
         }
         .pickerStyle(.menu)

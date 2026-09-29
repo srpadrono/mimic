@@ -1729,9 +1729,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
     private func assertToolbarStaysAboveTheCentreColumn(
         _ elements: [XCUIElement], file: StaticString = #filePath, line: UInt = #line
     ) {
+        let slack: CGFloat = 12
+        // AppKit moves toolbar items to their column after the split view settles, a beat after a
+        // panel returns; wait for that before measuring.
+        _ = UITestApp.waitUntil(timeout: 5) {
+            let centreMaxX = self.shell.panel("centerPane").frame.maxX
+            return elements.allSatisfy { $0.frame.maxX <= centreMaxX + slack }
+        }
         let center = shell.panel("centerPane").frame
         let inspectorPanel = shell.panel("inspector")
-        let slack: CGFloat = 12
         for element in elements {
             XCTAssertGreaterThanOrEqual(element.frame.minX, center.minX - slack,
                                         "\(element.identifier) should sit above the centre column",

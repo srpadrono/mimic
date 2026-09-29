@@ -223,11 +223,6 @@ struct WorkspaceView: View {
                     )
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector")
-                    // An inspector with no toolbar content of its own loses its toolbar section when
-                    // it is hidden and shown again, and AppKit then lays the centre column's trailing
-                    // actions out over the inspector. A flexible spacer keeps the section, and so the
-                    // divider that holds Run and its neighbours above the centre column.
-                    .toolbar { ToolbarSpacer(.flexible) }
             }
         }
     }
