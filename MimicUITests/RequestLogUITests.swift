@@ -4,7 +4,7 @@ import Network
 import XCTest
 
 /// The request log's own suite: sorting, filtering, selection, the row context menu, the request
-/// detail inspector, and the endpoint inspector's Traffic section.
+/// detail beside the log, and the endpoint inspector's Traffic section.
 ///
 /// It sits beside `MimicUITests` rather than inside it because that file is already 1,800 lines and
 /// its page objects are file-scope — so this suite **reuses** `RequestLogDrawerPage`,
@@ -371,12 +371,13 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15))
         XCTAssertTrue(rowLabel(forPath: "/binary").contains("passed through"), rowLabel(forPath: "/binary"))
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/binary"))).click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), app.debugDescription)
+        XCTAssertTrue(requestDetail.waitForDetail(), app.debugDescription)
         let save = app.buttons["requestDetail.saveMock"].firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(save.isEnabled)
-        XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").exists)
+        // Why it cannot be saved sits beside what answered, on the Response tab.
         requestDetail.tab("Response").click()
+        XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").waitForExistence(timeout: 5))
         let binaryBodyNote = element(identifiedBy: "requestDetail.body.response.empty")
         XCTAssertTrue(binaryBodyNote.waitForExistence(timeout: 5))
         XCTAssertTrue([binaryBodyNote.label, binaryBodyNote.value as? String ?? ""].contains(
@@ -776,9 +777,14 @@ final class RequestLogUITests: MimicUITestCase {
         let matchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/users"), "The matched row should be addressable")
         logRow(matchedID).click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Clicking a row should switch the inspector to request detail"
+            requestDetail.waitForDetail(),
+            "Clicking a row should open its detail beside the log"
         )
+        XCTAssertTrue(
+            requestDetail.goToEndpointButton.waitForExistence(timeout: 5),
+            "A request an endpoint answered should offer to open that endpoint"
+        )
+        XCTAssertFalse(requestDetail.createEndpointButton.exists, "An answered request needs no new endpoint")
 
         // The identity block: method, status and time. `DSMethodLabel` prefixes the identifier it is
         // handed, so both spellings are matched.
@@ -890,14 +896,14 @@ final class RequestLogUITests: MimicUITestCase {
         )
     }
 
-    // MARK: - REQDET body tab and copy actions
+    // MARK: - REQDET bodies, the unmatched header and copy actions
 
-    /// The request and response bodies across the two shapes a logged exchange actually takes — a matched call whose
-    /// default scenario returns nothing, and an unmatched one whose body is Mimic's own fallback —
-    /// plus the find field's zero-match state, its clear button, and the two copy buttons no test
-    /// has clicked.
+    /// The request and response bodies across the two shapes a logged exchange actually takes — a
+    /// matched call whose default scenario returns nothing, and an unmatched one whose body is
+    /// Mimic's own fallback — plus the unmatched header's explanation and Create endpoint, and the
+    /// row menu's Copy response body.
     @MainActor
-    func testRequestDetailBodyTabAndCopyButtons() async throws {
+    func testRequestDetailBodiesAndUnmatchedHeader() async throws {
         let port = 62105
         let payload = #"{"name":"Ada Lovelace","role":"engineer"}"#
 
@@ -906,102 +912,69 @@ final class RequestLogUITests: MimicUITestCase {
         createEndpointViaUI(name: "Users", path: "/api/users", method: "POST")
 
         await sendRequest(port: port, path: "/api/users", method: "POST", body: payload)
-        await sendRequest(port: port, path: "/api/orders", method: "GET", body: nil)
+        await sendRequest(port: port, path: "/api/orders?limit=4", method: "GET", body: nil)
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
 
         let matchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/users"), "The matched row should be addressable")
         let unmatchedID = try XCTUnwrap(rowIdentifier(forPath: "/api/orders"), "The unmatched row should be addressable")
 
         logRow(matchedID).click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "The inspector should show the clicked request")
+        XCTAssertTrue(requestDetail.waitForDetail(), "The clicked request should open beside the log")
         requestDetail.tab("Response").click()
 
         // A new endpoint's default scenario has no body, so this is the empty arm — the one a reader
-        // meets most often and which nothing covered.
+        // meets most often.
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.body.response.empty").waitForExistence(timeout: 5),
-            "A scenario with no body should say 'No response body' rather than rendering nothing"
+            "A scenario with no body should say so rather than rendering nothing"
         )
+        // The faint Response / All copy pair is gone; copying a body lives in the row's menu.
+        XCTAssertFalse(element(identifiedBy: "requestDetail.copy.responseBody").exists)
+        XCTAssertFalse(element(identifiedBy: "requestDetail.copy.all").exists)
 
-        // Copy Response is gated on there being one.
-        let copyResponse = element(identifiedBy: "requestDetail.copy.responseBody")
-        XCTAssertTrue(copyResponse.waitForExistence(timeout: 5), "The identity block should offer Copy response")
-        XCTAssertFalse(copyResponse.isEnabled, "Copy Response should be disabled when the response carried no body")
-
-        let copyAll = element(identifiedBy: "requestDetail.copy.all")
-        XCTAssertTrue(copyAll.waitForExistence(timeout: 5), "The identity block should offer Copy all")
-        copyAll.click()
-        XCTAssertTrue(
-            poll { self.text(of: self.requestDetail.copyConfirmation).localizedCaseInsensitiveContains("all") },
-            "Copying everything should confirm it happened"
-        )
-
-        // The payload is on the Request tab.
+        // The payload is on the Request tab, and there is no find field over it.
         requestDetail.tab("Request").click()
         XCTAssertTrue(
             element(identifiedBy: "requestLog.body.request").waitForExistence(timeout: 5),
             "The POST payload should be rendered on the Request tab"
         )
+        XCTAssertFalse(element(identifiedBy: "requestDetail.bodySearchField").exists, "The detail has no find field")
 
-        // A term the payload does not contain is an answer, not a failed search.
-        let search = requestDetail.bodySearchField
-        XCTAssertTrue(search.waitForExistence(timeout: 5), "The Request tab should offer a find field")
-        search.click()
-        search.typeText("zzzznothing")
-        let requestMatches = element(identifiedBy: "requestLog.body.request.matches")
-        XCTAssertTrue(
-            poll { self.text(of: requestMatches).contains("No matches in this body") },
-            "A term the body does not contain should be reported, not left silent"
-        )
-
-        // The find field's own clear button — a `DSClearButton`, which applies the identifier it is
-        // handed verbatim and sits outside any flattening container.
-        let clearSearch = element(identifiedBy: "requestDetail.clearBodySearch")
-        XCTAssertTrue(clearSearch.waitForExistence(timeout: 5), "A non-empty find field should offer a clear button")
-        clearSearch.click()
-        XCTAssertTrue(
-            poll { requestMatches.exists == false },
-            "Clearing the search should take the match count with it"
-        )
-
-        app.typeText("Lovelace")
-        XCTAssertTrue(
-            poll { self.text(of: requestMatches).contains("1 match") },
-            "Clearing the find field should retain keyboard focus so typing immediately searches again"
-        )
-
-        // Selecting another request drops the term — carrying a search for a payload you are no
-        // longer looking at is the case `onChange(of: log.id)` exists for.
+        // The unmatched call is the mirror image: a query, no request body, and a header that says
+        // what Mimic did and offers the fix.
         logRow(unmatchedID).click()
         XCTAssertTrue(
-            poll { requestMatches.exists == false },
-            "Selecting a different request should reset the body search"
+            poll { self.requestDetail.shownPath().contains("/api/orders") },
+            "Selecting another row should show it — the detail read \(requestDetail.shownPath())"
         )
-
-        // The unmatched call is the mirror image: no request body, and a response body Mimic wrote.
+        XCTAssertTrue(
+            element(identifiedBy: "ds.sectionheader.requestDetail.query").waitForExistence(timeout: 5),
+            "A request with a query string should list its items"
+        )
+        XCTAssertTrue(
+            speech(of: element(identifiedBy: "requestDetail.query.0")).contains("limit"),
+            "The query row should name the item"
+        )
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.body.request.empty").waitForExistence(timeout: 5),
-            "A GET with no payload should say 'No request body'"
+            "A GET with no payload should say it has no body"
         )
+        let outcomeSentence = element(identifiedBy: "requestDetail.outcome")
+        XCTAssertTrue(
+            poll { self.text(of: outcomeSentence).contains("No endpoint matched, so Mimic returned 404") },
+            "The header should say what Mimic did — it read \(text(of: outcomeSentence))"
+        )
+        XCTAssertTrue(
+            requestDetail.createEndpointButton.waitForExistence(timeout: 5),
+            "An unmatched request should offer to create its endpoint"
+        )
+        XCTAssertFalse(requestDetail.goToEndpointButton.exists, "Nothing answered, so there is no endpoint to open")
+
         requestDetail.tab("Response").click()
         XCTAssertTrue(
             element(identifiedBy: "requestLog.body.response").waitForExistence(timeout: 5),
             "The fallback response body should be rendered"
         )
-
-        let copyResponseAgain = element(identifiedBy: "requestDetail.copy.responseBody")
-        XCTAssertTrue(
-            poll { copyResponseAgain.isEnabled },
-            "Copy Response should be live once there is a body to copy"
-        )
-        copyResponseAgain.click()
-        XCTAssertTrue(
-            poll { self.text(of: self.requestDetail.copyConfirmation).localizedCaseInsensitiveContains("response") },
-            "Copying the response should confirm it happened"
-        )
-
-        // The hint that explains what an unmatched request is and what to do about it, on the
-        // Response tab beside what answered.
         XCTAssertTrue(
             element(identifiedBy: "requestDetail.unmatchedHint").waitForExistence(timeout: 5),
             "An unmatched request should explain that Mimic answered with its fallback"
@@ -1011,6 +984,28 @@ final class RequestLogUITests: MimicUITestCase {
                 .localizedCaseInsensitiveContains("unmatched"),
             "Response should state the unmatched outcome"
         )
+
+        // The row's menu copies the body the detail is showing.
+        let clipboard = UITestClipboardSnapshot()
+        defer { clipboard.restore() }
+        NSPasteboard.general.clearContents()
+        logRow(unmatchedID).rightClick()
+        let copyBody = app.menuItems["Copy response body"]
+        XCTAssertTrue(copyBody.waitForExistence(timeout: 5), "The row's context menu should offer Copy response body")
+        copyBody.click()
+        XCTAssertTrue(
+            poll { NSPasteboard.general.string(forType: .string)?.isEmpty == false },
+            "Copy response body should put the fallback body on the pasteboard"
+        )
+
+        // Create endpoint turns the call into a mock and gives the column back to the editor.
+        requestDetail.createEndpointButton.click()
+        XCTAssertTrue(
+            poll { self.text(of: self.endpointEditor.pathLabel).contains("/api/orders") },
+            "Creating an endpoint from the detail should open it in the editor — the editor showed "
+                + text(of: endpointEditor.pathLabel)
+        )
+        XCTAssertTrue(requestDetail.path.waitForNonExistence(timeout: 5), "The detail should close")
     }
 
     @MainActor
@@ -1023,7 +1018,7 @@ final class RequestLogUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/large", method: "POST", body: payload)
         XCTAssertTrue(waitForRowsToArrive(1, timeout: 15))
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/api/large"))).click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"))
+        XCTAssertTrue(requestDetail.waitForDetail())
 
         requestDetail.tab("Timing").click()
         let bodySummary = element(identifiedBy: "requestDetail.summary.request body")
@@ -1039,13 +1034,14 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertFalse(curl.isEnabled, "A stored prefix cannot reproduce the original request")
         XCTAssertTrue(curl.label.contains("request body was truncated"), curl.label)
 
-        let clipboard = UITestClipboardSnapshot()
-        defer { clipboard.restore() }
-        element(identifiedBy: "requestDetail.copy.all").click()
-        XCTAssertTrue(poll {
-            NSPasteboard.general.string(forType: .string)?.contains("request body truncated at 64 KB") == true
-        }, "Copy All must disclose that the request payload is only a prefix")
-        XCTAssertFalse(NSPasteboard.general.string(forType: .string)?.contains(payload) == true)
+        // The row's menu refuses the same way.
+        logRow(try XCTUnwrap(rowIdentifier(forPath: "/api/large"))).rightClick()
+        let menuCurl = app.menuItems["Copy as cURL"]
+        XCTAssertTrue(menuCurl.waitForExistence(timeout: 5), "The row's context menu should offer Copy as cURL")
+        XCTAssertFalse(menuCurl.isEnabled, "The row's menu cannot copy a truncated request as cURL either")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(menuCurl.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(payload.isEmpty)
     }
 
     // MARK: - LOGCTX create endpoint
@@ -1127,9 +1123,8 @@ final class RequestLogUITests: MimicUITestCase {
         // the menu must act on the clicked row alone rather than on rows the pointer is nowhere near.
         XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[0])), "The first request must be visible")
         logRow(identifiers[0]).click()
-        // Selecting a row opens the inspector, and `WorkspaceView` opens it inside
-        // `withAnimation(DSAnimation.panel)` — so the drawer beneath it narrows while that
-        // runs and every row moves. Wait for the unselected row's frame to settle before clicking.
+        // Selecting a row moves the log into the centre column beside the request's detail, so every
+        // row moves. Wait for the unselected row's frame to settle before clicking.
         UITestApp.waitForStableFrame(logRow(identifiers[1]))
         XCTAssertTrue(requestLogDrawer.reveal(logRow(identifiers[1])), "The second request must be visible")
         logRow(identifiers[1]).rightClick()
@@ -1230,12 +1225,12 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - LOGSEL
 
-    /// Selection by pointer and by keyboard, read back through the inspector.
+    /// Selection by pointer and by keyboard, read back through the detail beside the log.
     ///
-    /// The project deliberately has **no endpoints**: with none, the inspector's fallback is the
-    /// project overview, so "one row selected" and "no useful selection" are two different header
-    /// titles — "Request" and "Overview" — rather than two states that both read "Scenarios". That is
-    /// what makes every assertion below observable without a single new identifier.
+    /// One row selected shows its detail, several show the selection count, and none gives the
+    /// column back to the editor and the inspector back to its fallback. The project deliberately
+    /// has **no endpoints**, so that fallback is the project overview — a header title no other
+    /// state shares.
     @MainActor
     func testSelectingRequestsWithTheMouseAndKeyboard() async throws {
         let port = 62108
@@ -1256,7 +1251,7 @@ final class RequestLogUITests: MimicUITestCase {
         // A row announces its own selection: the accent stripe down its leading edge is the only
         // other statement, and that is no statement at all to someone being read the panel.
         logRow(identifiers[0]).click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "Clicking a row should show it in the inspector")
+        XCTAssertTrue(requestDetail.waitForDetail(), "Clicking a row should open it beside the log")
         XCTAssertTrue(
             poll { self.logRow(identifiers[0]).label.hasSuffix(", selected") },
             "A selected row should say so — it read \(logRow(identifiers[0]).label)"
@@ -1266,19 +1261,23 @@ final class RequestLogUITests: MimicUITestCase {
         // hunting for the close button.
         logRow(identifiers[0]).click()
         XCTAssertTrue(
+            requestDetail.path.waitForNonExistence(timeout: 5),
+            "Clicking the only selected row again should clear the selection and close the detail"
+        )
+        XCTAssertTrue(
             requestDetail.waitForPanelTitle("Overview"),
-            "Clicking the only selected row again should clear the selection"
+            "Closing the detail should bring the inspector back"
         )
 
-        // Two rows: the inspector names the multi-selection instead of showing one request's detail.
+        // Two rows: the detail names the multi-selection instead of showing one request.
         logRow(identifiers[0]).click()
         UITestApp.waitForStableFrame(logRow(identifiers[1]))
         XCUIElement.perform(withKeyModifiers: .command) {
             logRow(identifiers[1]).click()
         }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Requests"),
-            "With several rows selected the inspector should show the selection; "
+            requestDetail.waitForMultipleSelection(),
+            "With several rows selected the detail should name the selection; "
                 + "rows \(identifiers.map { logRow($0).label })"
         )
 
@@ -1287,7 +1286,7 @@ final class RequestLogUITests: MimicUITestCase {
             logRow(identifiers[1]).click()
         }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
+            requestDetail.waitForDetail(),
             "Removing one of two selected rows should leave a single request showing"
         )
         let firstPath = try XCTUnwrap(
@@ -1316,26 +1315,26 @@ final class RequestLogUITests: MimicUITestCase {
         // The click is what hands the table keyboard focus, so it is a precondition of the presses
         // rather than part of what they are proving.
         logRow(identifiers[1]).click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "Clicking a row should show it in the inspector")
+        XCTAssertTrue(requestDetail.waitForDetail(), "Clicking a row should open it beside the log")
         let beforeUp = requestDetail.shownPath()
         XCTAssertTrue(beforeUp.contains("/api/two"), "The middle row should be selected before pressing Up")
         app.typeKey(.upArrow, modifierFlags: [])
         XCTAssertTrue(
             poll { self.requestDetail.shownPath().contains("/api/three") },
-            "The up arrow should move the selection and update the inspector to the previous request"
+            "The up arrow should move the selection and update the detail to the previous request"
         )
 
-        // ⇧↓ grows the selection a row at a time, so the inspector leaves request mode again.
+        // ⇧↓ grows the selection a row at a time, so the detail gives way to the selection count.
         app.typeKey(.downArrow, modifierFlags: .shift)
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Requests"),
-            "Shift-down should grow the selection past the one row the inspector can show"
+            requestDetail.waitForMultipleSelection(),
+            "Shift-down should grow the selection past the one row the detail can show"
         )
 
         // Return collapses it back onto one row — the keyboard's "open it".
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
+            requestDetail.waitForDetail(),
             "Return should collapse a multi-row selection onto one row"
         )
 
@@ -1388,8 +1387,8 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(showLatest.waitForExistence(timeout: 5), "The section should offer the latest request")
         showLatest.click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Show latest request should open that request in the detail inspector"
+            requestDetail.waitForDetail(),
+            "Show latest request should open that request beside the log"
         )
         XCTAssertTrue(
             poll { self.text(of: self.requestDetail.path).contains("/api/users") },

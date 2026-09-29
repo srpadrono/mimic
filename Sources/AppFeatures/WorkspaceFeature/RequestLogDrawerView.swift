@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import Domain
 import DesignSystem
@@ -39,6 +40,15 @@ enum LogColumns {
         compact ? compactTime : time
     }
 
+    /// The list beside an open request: Time, Method, Path and Status.
+    static let splitList: CGFloat = 520
+
+    /// The list's width beside an open request: 520pt, as drawn, giving way on a narrow window so
+    /// the detail keeps at least half the column, but never narrower than the compact table.
+    static func splitListWidth(totalWidth: CGFloat) -> CGFloat {
+        max(compactMinimumTableWidth, min(splitList, totalWidth / 2))
+    }
+
     /// Header and rows must receive the same resolved path width, or a vertical scrollbar in the
     /// rows would shift every column after Path.
     static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
@@ -56,6 +66,40 @@ enum LogScope: Hashable {
 
 enum SortField: String {
     case method, path, endpoint, scenario, status, timestamp
+}
+
+/// What the request log table is showing: its filter, its sort, and the rows those produce.
+///
+/// One instance is owned by `WorkspaceView` and handed to both places the log appears — docked under
+/// the editor, and in the centre column beside an open request — so moving between the two keeps
+/// the filter, the sort and the rows already computed instead of redrawing an empty table first.
+@Observable
+@MainActor
+final class RequestLogTableState {
+    var filterText: String
+    var methodFilter: HTTPMethod?
+    var errorsOnly: Bool
+    var sortField: SortField
+    var sortAscending: Bool
+    /// The filtered, sorted rows, written by the table once its background pass finishes.
+    var rows: [RequestLog] = []
+    var selectionAnchorID: UUID?
+    /// The detail's tab, kept as the selection moves from one request to the next.
+    var detailTab: RequestDetailTab = .request
+
+    init(
+        filterText: String = "",
+        methodFilter: HTTPMethod? = nil,
+        errorsOnly: Bool = false,
+        sortField: SortField = .timestamp,
+        sortAscending: Bool = false
+    ) {
+        self.filterText = filterText
+        self.methodFilter = methodFilter
+        self.errorsOnly = errorsOnly
+        self.sortField = sortField
+        self.sortAscending = sortAscending
+    }
 }
 
 enum RequestLogQuery {
@@ -250,59 +294,20 @@ enum RequestLogQuery {
         guard let endpoint = endpoints.first(where: { $0.id == endpointID }) else { return nil }
         return endpoint.scenarios.first { $0.id == scenarioID }?.name
     }
-
-    nonisolated static func formattedDetails(for log: RequestLog) -> String {
-        var text = "\(log.method.rawValue) \(log.path)\n"
-        if let code = log.responseStatusCode {
-            text += "Status: \(code)\n"
-        }
-        if !log.requestHeaders.isEmpty {
-            text += "\nHeaders:\n"
-            for (key, value) in log.requestHeaders.sorted(by: { $0.key < $1.key }) {
-                text += "  \(key): \(value)\n"
-            }
-        }
-        if let body = log.requestBody, !body.isEmpty {
-            text += "\nBody:\n\(body)\n"
-        }
-        if log.requestBodyTruncated == true {
-            text += "(request body truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB)\n"
-        }
-
-        // The response belongs in a copied report: pasting a request into an issue without what came
-        // back makes the report half a story.
-        text += "\n--- Response (\(log.outcome.label)) ---\n"
-        if let failureLabel = log.failureLabel {
-            text += "Connection \(failureLabel)\n"
-        }
-        if !log.responseHeaders.isEmpty {
-            text += "\nHeaders:\n"
-            for (key, value) in log.responseHeaders.sorted(by: { $0.key < $1.key }) {
-                text += "  \(key): \(value)\n"
-            }
-        }
-        if let body = log.responseBody, !body.isEmpty {
-            text += "\nBody:\n\(body)\n"
-            if log.responseBodyTruncated {
-                text += "(truncated at \(RequestLog.maxLoggedBodyBytes / 1024) KB)\n"
-            }
-        } else if log.responseBodyIsBinary == true {
-            text += "\nBody: Binary or non-UTF-8 (not previewed)\n"
-        }
-        return text
-    }
 }
+
 // MARK: - Public View
 
-/// The live traffic table: everything the server has answered. Selecting a row shows its detail in
-/// the inspector; this pane never splits itself.
+/// The live traffic table: everything the server has answered. Docked under the editor it is a list;
+/// selecting a row moves it into the centre column with `showsDetail`, the list on the left and the
+/// selected request's detail on the right.
 struct RequestLogDrawerView: View {
     let requestLogs: [RequestLog]
     let endpoints: [Endpoint]
     let serverState: ServerState
     let onClear: () -> Void
-    /// The selected rows. Owned by `WorkspaceView` because the inspector shows them. A set, because
-    /// ⌘- and ⇧-click pick calls out of a session to capture as a journey.
+    /// The selected rows. Owned by `WorkspaceView`, which opens the detail while there are any. A
+    /// set, because ⌘- and ⇧-click pick calls out of a session to capture as a journey.
     @Binding var selectedLogIDs: Set<UUID>
     /// The Unmatched segment. Owned outside so the toolbar's unmatched badge can switch it on.
     @Binding var unmatchedOnly: Bool
@@ -316,20 +321,55 @@ struct RequestLogDrawerView: View {
     /// Seeds a new journey with the requests.
     var onAddToNewJourney: (([RequestLog]) -> Void)?
 
-    @State private var filterText = ""
-    @State private var methodFilter: HTTPMethod?
-    /// The Errors segment. Local, unlike Unmatched, because nothing outside the pane switches it.
-    @State private var errorsOnly = false
-    @State private var sortField: SortField = .timestamp
-    @State private var sortAscending = false
-    @State private var sortedAndFilteredLogs: [RequestLog] = []
+    /// The filter, the sort and the rows they produced. Held in an object rather than in `@State`
+    /// fields so the log docked under the editor and the log that takes over the centre column while
+    /// a request is open read one table: selecting a row swaps one for the other, and the filter
+    /// you used to find that row has to survive the swap.
+    private let sharedTable: RequestLogTableState?
+    /// Used only when no shared table was handed in, as in a preview or a rendering test.
+    @State private var ownTable: RequestLogTableState
+    private var table: RequestLogTableState { sharedTable ?? ownTable }
     @State private var filterDebounceTask: Task<Void, Never>?
-    /// Where a ⇧-click measures its range from: the last row clicked without ⇧.
-    @State private var selectionAnchorID: UUID?
+    /// Beside the table, the selected request's detail. The centre column's arrangement while a
+    /// request is open; the docked log never splits.
+    var showsDetail = false
+    /// Opens the endpoint that answered a request.
+    var onGoToEndpoint: ((UUID) -> Void)?
     @FocusState private var filterFieldIsFocused: Bool
     /// Whether the table holds keyboard focus. The table is one focus target, like an AppKit table,
     /// and the arrow keys, Return, Escape and ⌘A below depend on it.
     @FocusState private var tableHasKeyboardFocus: Bool
+
+    private var filterText: String {
+        get { table.filterText }
+        nonmutating set { table.filterText = newValue }
+    }
+    private var methodFilter: HTTPMethod? {
+        get { table.methodFilter }
+        nonmutating set { table.methodFilter = newValue }
+    }
+    /// The Errors segment. Unlike Unmatched, nothing outside the log switches it.
+    private var errorsOnly: Bool {
+        get { table.errorsOnly }
+        nonmutating set { table.errorsOnly = newValue }
+    }
+    private var sortField: SortField {
+        get { table.sortField }
+        nonmutating set { table.sortField = newValue }
+    }
+    private var sortAscending: Bool {
+        get { table.sortAscending }
+        nonmutating set { table.sortAscending = newValue }
+    }
+    private var sortedAndFilteredLogs: [RequestLog] {
+        get { table.rows }
+        nonmutating set { table.rows = newValue }
+    }
+    /// Where a ⇧-click measures its range from: the last row clicked without ⇧.
+    private var selectionAnchorID: UUID? {
+        get { table.selectionAnchorID }
+        nonmutating set { table.selectionAnchorID = newValue }
+    }
 
     public init(
         requestLogs: [RequestLog],
@@ -342,7 +382,10 @@ struct RequestLogDrawerView: View {
         onSaveAsMock: ((UUID) -> Void)? = nil,
         journeys: [Journey] = [],
         onAddToJourney: (([RequestLog], UUID) -> Void)? = nil,
-        onAddToNewJourney: (([RequestLog]) -> Void)? = nil
+        onAddToNewJourney: (([RequestLog]) -> Void)? = nil,
+        table: RequestLogTableState? = nil,
+        showsDetail: Bool = false,
+        onGoToEndpoint: ((UUID) -> Void)? = nil
     ) {
         self.init(
             requestLogs: requestLogs,
@@ -359,7 +402,10 @@ struct RequestLogDrawerView: View {
             initialFilterText: "",
             initialMethodFilter: nil,
             initialSortField: .timestamp,
-            initialSortAscending: false
+            initialSortAscending: false,
+            table: table,
+            showsDetail: showsDetail,
+            onGoToEndpoint: onGoToEndpoint
         )
     }
 
@@ -378,7 +424,10 @@ struct RequestLogDrawerView: View {
         initialFilterText: String,
         initialMethodFilter: HTTPMethod?,
         initialSortField: SortField,
-        initialSortAscending: Bool
+        initialSortAscending: Bool,
+        table: RequestLogTableState? = nil,
+        showsDetail: Bool = false,
+        onGoToEndpoint: ((UUID) -> Void)? = nil
     ) {
         self.requestLogs = requestLogs
         self.endpoints = endpoints
@@ -391,10 +440,15 @@ struct RequestLogDrawerView: View {
         self.journeys = journeys
         self.onAddToJourney = onAddToJourney
         self.onAddToNewJourney = onAddToNewJourney
-        _filterText = State(initialValue: initialFilterText)
-        _methodFilter = State(initialValue: initialMethodFilter)
-        _sortField = State(initialValue: initialSortField)
-        _sortAscending = State(initialValue: initialSortAscending)
+        self.showsDetail = showsDetail
+        self.onGoToEndpoint = onGoToEndpoint
+        self.sharedTable = table
+        _ownTable = State(initialValue: RequestLogTableState(
+            filterText: initialFilterText,
+            methodFilter: initialMethodFilter,
+            sortField: initialSortField,
+            sortAscending: initialSortAscending
+        ))
     }
 
     public var body: some View {
@@ -408,7 +462,6 @@ struct RequestLogDrawerView: View {
 
     private func drawerContent(width: CGFloat) -> some View {
         let narrow = width < Self.headerCollapseWidth
-        let compact = width < LogColumns.minimumTableWidth
         return VStack(spacing: 0) {
             header(narrow: narrow)
 
@@ -419,29 +472,19 @@ struct RequestLogDrawerView: View {
                     .padding(.bottom, DSSpacing.sm)
             }
 
-            if requestLogs.isEmpty {
-                DSDivider(identifier: "drawer.empty")
-                emptyLog
-            } else if sortedAndFilteredLogs.isEmpty {
-                DSDivider(identifier: "drawer.noMatches")
-                DSEmptyState(
-                    heading: "No matching requests",
-                    message: "Adjust the filter to see results.",
-                    prominence: .regular,
-                    identifier: "drawer.noMatches"
-                )
-            } else {
-                GeometryReader { table in
-                    let tableWidth = max(table.size.width, LogColumns.compactMinimumTableWidth)
-                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: compact)
-                    ScrollView(.horizontal) {
-                        VStack(spacing: 0) {
-                            tableHeader(compact: compact, pathWidth: pathWidth)
-                            tableBody(compact: compact, pathWidth: pathWidth, tableWidth: tableWidth)
-                        }
-                        .frame(width: tableWidth, height: table.size.height)
-                    }
+            if showsDetail {
+                // The list keeps the four columns that identify a call; everything else about the
+                // selected one is in the detail beside it.
+                DSDivider(identifier: "requestLog.split")
+                HStack(spacing: 0) {
+                    logList(compact: true)
+                        .frame(width: LogColumns.splitListWidth(totalWidth: width))
+                    DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                    selectedRequestDetail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+            } else {
+                logList(compact: width < LogColumns.minimumTableWidth)
             }
         }
         // No background of its own: the log sits on the centre column's content surface.
@@ -456,7 +499,103 @@ struct RequestLogDrawerView: View {
         // the count never changes while the log keeps rotating.
         .onChange(of: requestLogs.last?.id) { _, _ in updateLogs() }
         .onChange(of: endpoints) { _, _ in updateLogs() }
-        .onAppear { updateLogs() }
+        .onAppear {
+            updateLogs()
+            // The click that opened this arrangement was a click in the table, so the arrows carry
+            // on from the row it selected.
+            if showsDetail { tableHasKeyboardFocus = true }
+        }
+    }
+
+    /// The table, or the state that stands in for it when there is nothing to list.
+    @ViewBuilder
+    private func logList(compact: Bool) -> some View {
+        VStack(spacing: 0) {
+            if requestLogs.isEmpty {
+                DSDivider(identifier: "drawer.empty")
+                emptyLog
+            } else if sortedAndFilteredLogs.isEmpty {
+                DSDivider(identifier: "drawer.noMatches")
+                DSEmptyState(
+                    heading: "No matching requests",
+                    message: "Adjust the filter to see results.",
+                    prominence: .regular,
+                    identifier: "drawer.noMatches"
+                )
+            } else {
+                GeometryReader { tableGeometry in
+                    let tableWidth = max(tableGeometry.size.width, LogColumns.compactMinimumTableWidth)
+                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: compact)
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            tableHeader(compact: compact, pathWidth: pathWidth)
+                            tableBody(compact: compact, pathWidth: pathWidth, tableWidth: tableWidth)
+                        }
+                        .frame(width: tableWidth, height: tableGeometry.size.height)
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: - Detail
+
+    /// The request the detail beside the list describes: exactly one selected row that is still in
+    /// the log. Names are resolved against the current project so they follow renames.
+    private var selectedDetailContext: RequestDetailView.Context? {
+        guard selectedLogIDs.count == 1,
+              let id = selectedLogIDs.first,
+              let log = requestLogs.first(where: { $0.id == id })
+        else { return nil }
+        return RequestDetailView.Context(
+            log: log,
+            endpointName: resolveEndpointName(log.matchedEndpointID),
+            scenarioName: resolveScenarioName(endpointID: log.matchedEndpointID,
+                                              scenarioID: log.matchedScenarioID),
+            endpointExists: log.matchedEndpointID.map { id in endpoints.contains { $0.id == id } } ?? false,
+            port: log.listenerPort ?? serverState.runningPort
+        )
+    }
+
+    @ViewBuilder
+    private var selectedRequestDetail: some View {
+        if let context = selectedDetailContext {
+            RequestDetailView(
+                context: context,
+                onCreateEndpoint: onCreateEndpoint,
+                onSaveAsMock: onSaveAsMock,
+                onGoToEndpoint: onGoToEndpoint,
+                onClose: closeDetail,
+                tabSelection: Bindable(table).detailTab
+            )
+            // A new request starts at the top of its own scroll position; the tab carries over.
+            .id(context.log.id)
+        } else if selectedLogIDs.count > 1 {
+            DSEmptyState(
+                heading: "\(selectedLogIDs.count) requests selected",
+                message: "Select one request to inspect its headers and body.",
+                actionTitle: "Close",
+                prominence: .compact,
+                identifier: "requestDetail.multipleRequests",
+                action: closeDetail
+            )
+        } else {
+            DSEmptyState(
+                heading: "Request no longer in the log",
+                message: "Older requests leave the log as new ones arrive.",
+                actionTitle: "Close",
+                prominence: .compact,
+                identifier: "requestDetail.missing",
+                action: closeDetail
+            )
+        }
+    }
+
+    /// Deselects everything, which gives the centre column back to the editor.
+    private func closeDetail() {
+        selectedLogIDs = []
+        selectionAnchorID = nil
     }
 
     // MARK: - Header
@@ -582,7 +721,7 @@ struct RequestLogDrawerView: View {
         HStack(spacing: DSSpacing.xs + 2) {
             methodMenu
 
-            TextField("Filter by path, status or scenario", text: $filterText)
+            TextField("Filter by path, status or scenario", text: Bindable(table).filterText)
                 .textFieldStyle(.plain)
                 .font(DSTypography.callout)
                 .focused($filterFieldIsFocused)
@@ -611,7 +750,7 @@ struct RequestLogDrawerView: View {
     /// The method filter: a magnifying glass at rest, the chosen method once one is picked.
     private var methodMenu: some View {
         Menu {
-            Picker("Method", selection: $methodFilter) {
+            Picker("Method", selection: Bindable(table).methodFilter) {
                 Text("All").tag(HTTPMethod?.none)
                 ForEach(HTTPMethod.allCases, id: \.self) { method in
                     Text(method.rawValue).tag(HTTPMethod?.some(method))
@@ -685,7 +824,7 @@ struct RequestLogDrawerView: View {
                 .textSelection(.enabled)
                 .accessibilityIdentifier("drawer.empty.command")
             DSIconButton("Copy command", systemImage: "doc.on.doc", identifier: "drawer.empty.copyCommand") {
-                RequestDetailInspector.write(command, to: .general)
+                RequestDetailView.write(command, to: .general)
             }
         }
         .padding(.leading, DSSpacing.md)
@@ -779,6 +918,9 @@ struct RequestLogDrawerView: View {
                             selection: selection,
                             onAddToJourney: onAddToJourney,
                             onAddToNewJourney: onAddToNewJourney,
+                            port: log.listenerPort ?? serverState.runningPort,
+                            onGoToEndpoint: onGoToEndpoint,
+                            onShowOnlyPath: { filterText = RequestLogQuery.mockablePath(from: $0) },
                             endpointName: resolveEndpointName(log.matchedEndpointID),
                             scenarioName: resolveScenarioName(endpointID: log.matchedEndpointID, scenarioID: log.matchedScenarioID),
                             onSelect: { modifier in
@@ -1248,6 +1390,11 @@ struct RequestLogTableRow: View {
     var selection: [RequestLog] = []
     var onAddToJourney: (([RequestLog], UUID) -> Void)?
     var onAddToNewJourney: (([RequestLog]) -> Void)?
+    /// The port the call arrived on, for the copied URL and cURL command.
+    var port: Int? = nil
+    var onGoToEndpoint: ((UUID) -> Void)? = nil
+    /// Filters the log to this row's path.
+    var onShowOnlyPath: ((String) -> Void)? = nil
     let endpointName: String?
     let scenarioName: String?
     let onSelect: (RequestLogDrawerView.SelectionModifier) -> Void
@@ -1337,6 +1484,25 @@ struct RequestLogTableRow: View {
             Text("The saved response may contain private data. Review its body before sharing the project.")
         }
         .contextMenu {
+            Button("Copy URL") {
+                RequestDetailView.write(RequestDetailView.requestURL(for: log, port: port), to: .general)
+            }
+            .accessibilityIdentifier("requestLog.copyURL.\(log.id.uuidString)")
+
+            Button("Copy as cURL") {
+                RequestDetailView.write(RequestLogExport.curl(for: log, port: port), to: .general)
+            }
+            .disabled(RequestLogExport.curlUnavailability(for: log) != nil)
+            .accessibilityIdentifier("requestLog.copyCurl.\(log.id.uuidString)")
+
+            Button("Copy response body") {
+                RequestDetailView.write(log.responseBody.map(RequestLogExport.formattedBody) ?? "", to: .general)
+            }
+            .disabled(log.responseBody?.isEmpty != false)
+            .accessibilityIdentifier("requestLog.copyResponseBody.\(log.id.uuidString)")
+
+            Divider()
+
             if log.outcome.isMissingConfiguration, let onCreateEndpoint {
                 Button {
                     onCreateEndpoint(log.method, RequestLogQuery.mockablePath(from: log.path))
@@ -1380,6 +1546,18 @@ struct RequestLogTableRow: View {
                     .accessibilityIdentifier("requestLog.addToNewJourney.\(log.id.uuidString)")
                 }
                 .accessibilityIdentifier("requestLog.addToJourneyMenu.\(log.id.uuidString)")
+            }
+
+            if onGoToEndpoint != nil || onShowOnlyPath != nil {
+                Divider()
+            }
+            if let endpointID = log.matchedEndpointID, endpointName != nil, let onGoToEndpoint {
+                Button("Go to endpoint") { onGoToEndpoint(endpointID) }
+                    .accessibilityIdentifier("requestLog.goToEndpoint.\(log.id.uuidString)")
+            }
+            if let onShowOnlyPath {
+                Button("Show only this path") { onShowOnlyPath(log.path) }
+                    .accessibilityIdentifier("requestLog.showOnlyPath.\(log.id.uuidString)")
             }
         }
     }

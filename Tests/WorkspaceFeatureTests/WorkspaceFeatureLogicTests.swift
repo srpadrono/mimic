@@ -147,21 +147,6 @@ struct WorkspaceFeatureLogicTests {
         #expect(RequestLogQuery.scenarioName(endpointID: beta.id, scenarioID: betaScenario.id, endpoints: [alpha, beta]) == "Unauthorized")
     }
 
-    @Test("Request log formatter includes status headers and body")
-    func requestLogFormatterBuildsPasteboardText() {
-        let endpoint = makeEndpoint()
-        let log = makeLog(endpoint: endpoint, statusCode: 202, body: #"{"queued":true}"#, timestamp: 1_710_000_000)
-
-        let text = RequestLogQuery.formattedDetails(for: log)
-
-        #expect(text.contains("GET /api/users"))
-        #expect(text.contains("Status: 202"))
-        #expect(text.contains("Headers:"))
-        #expect(text.contains("X-Trace-ID"))
-        #expect(text.contains("Body:"))
-        #expect(text.contains(#"{"queued":true}"#))
-    }
-
     @Test("Sidebar query groups and filters endpoints")
     func sidebarQueryGroupsEndpoints() {
         let grouped = makeEndpoint(name: "Users", path: "/api/users", groupTag: "Accounts")
@@ -281,22 +266,31 @@ struct WorkspaceFeatureLogicTests {
             },
             size: CGSize(width: 900, height: 160)
         )
-        render(RequestDetailInspector(log: log, initialTab: .request))
-        render(RequestDetailInspector(log: log, initialTab: .response))
-        render(RequestDetailInspector(log: log, initialTab: .timing))
-        render(RequestDetailInspector(log: emptyLog, initialTab: .request))
-        render(RequestDetailInspector(log: emptyLog, initialTab: .response))
-        render(RequestDetailInspector(log: log, initialTab: .response, initialSearchText: "queued"))
-        // A failed exchange draws its failure in the identity and the empty response sections.
-        render(RequestDetailInspector(log: failedLog, initialTab: .request))
-        render(RequestDetailInspector(log: failedLog, initialTab: .response))
-        render(RequestDetailInspector(log: failedLog, initialTab: .timing))
-        // A passed-through request offers the capture control above every tab.
-        render(RequestDetailInspector(log: passthroughLog, port: 8080, onSaveAsMock: { _ in }, initialTab: .response))
-        // A request that arrived with no headers at all, in the tab that lists request headers —
-        // and in a 300pt-wide panel, which is the width the inspector is actually dragged to.
+        render(RequestDetailView(log: log, initialTab: .request))
+        render(RequestDetailView(log: log, initialTab: .response))
+        render(RequestDetailView(log: log, initialTab: .timing))
+        render(RequestDetailView(log: emptyLog, initialTab: .request))
+        render(RequestDetailView(log: emptyLog, initialTab: .response))
+        // A failed exchange draws its failure in the status line and the empty response sections.
+        render(RequestDetailView(log: failedLog, initialTab: .request))
+        render(RequestDetailView(log: failedLog, initialTab: .response))
+        render(RequestDetailView(log: failedLog, initialTab: .timing))
+        // A passed-through request offers the capture control in its header.
+        render(RequestDetailView(log: passthroughLog, port: 8080, onSaveAsMock: { _ in }, initialTab: .response))
+        // An endpoint that answered can be opened, and the detail can be closed.
         render(
-            RequestDetailInspector(log: headerlessLog, initialTab: .request),
+            RequestDetailView(
+                context: RequestDetailView.Context(log: log, endpointName: endpoint.name, scenarioName: "OK",
+                                                   endpointExists: true, port: 8080),
+                onGoToEndpoint: { _ in },
+                onClose: {}
+            ),
+            size: CGSize(width: 640, height: 600)
+        )
+        // A request that arrived with no headers at all, in the tab that lists request headers —
+        // and at the narrowest the detail gets beside the list.
+        render(
+            RequestDetailView(log: headerlessLog, initialTab: .request),
             size: CGSize(width: 300, height: 700)
         )
 
@@ -378,28 +372,13 @@ struct WorkspaceFeatureLogicTests {
         #expect(timestampSorted.first?.timestamp == Date(timeIntervalSince1970: 1_710_000_100))
     }
 
-    @Test("Request log helpers handle missing names and minimal payloads")
+    @Test("Request log helpers handle missing names")
     func requestLogHelpersHandleMissingData() {
         let endpoint = makeEndpoint()
-        let emptyLog = RequestLog(
-            timestamp: Date(timeIntervalSince1970: 1_710_000_050),
-            method: .get,
-            path: "/missing",
-            requestHeaders: [:],
-            requestBody: nil,
-            matchedEndpointID: endpoint.id,
-            matchedScenarioID: nil,
-            responseStatusCode: nil
-        )
 
         #expect(RequestLogQuery.endpointName(for: nil, endpoints: [endpoint]) == nil)
         #expect(RequestLogQuery.scenarioName(endpointID: nil, scenarioID: nil, endpoints: [endpoint]) == nil)
         #expect(RequestLogQuery.scenarioName(endpointID: UUID(), scenarioID: UUID(), endpoints: [endpoint]) == nil)
-
-        let formatted = RequestLogQuery.formattedDetails(for: emptyLog)
-        #expect(formatted.contains("GET /missing"))
-        #expect(formatted.contains("Headers:") == false)
-        #expect(formatted.contains("Body:") == false)
     }
 
     @Test("Request log selection and clear helpers keep state consistent")
@@ -666,51 +645,56 @@ struct WorkspaceFeatureLogicTests {
         #expect(selectedID == secondID)
     }
 
-    @Test("Request log copy helper writes formatted details to the pasteboard")
+    @Test("Request log copy helper replaces the pasteboard's contents with the text")
     func requestLogCopyHelper() {
-        let endpoint = makeEndpoint()
-        let log = makeLog(endpoint: endpoint, statusCode: 202, body: #"{"queued":true}"#, timestamp: 1_710_000_000)
-
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("MimicTests.\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }
-        RequestDetailInspector.write(RequestLogQuery.formattedDetails(for: log), to: pasteboard)
+        pasteboard.clearContents()
+        pasteboard.setString("stale", forType: .string)
 
-        let copied = pasteboard.string(forType: .string)
-        #expect(copied?.contains("Status: 202") == true)
-        #expect(copied?.contains(#"{"queued":true}"#) == true)
+        RequestDetailView.write("http://localhost:8080/api/users", to: pasteboard)
+
+        #expect(pasteboard.string(forType: .string) == "http://localhost:8080/api/users")
     }
 
     @Test("Byte summary reads in the units a person uses")
     func byteSummaryFormatsSizes() {
-        #expect(RequestDetailInspector.byteSummary(nil) == "\u{2014}")
-        #expect(RequestDetailInspector.byteSummary("") == "\u{2014}")
-        #expect(RequestDetailInspector.byteSummary("abc") == "3 B")
-        #expect(RequestDetailInspector.byteSummary(String(repeating: "a", count: 2048)) == "2.0 KB")
+        #expect(RequestDetailView.byteSummary(nil) == "\u{2014}")
+        #expect(RequestDetailView.byteSummary("") == "\u{2014}")
+        #expect(RequestDetailView.byteSummary("abc") == "3 B")
+        #expect(RequestDetailView.byteSummary(String(repeating: "a", count: 2048)) == "2.0 KB")
     }
 
     @Test("Inspector mode follows selection precedence")
     func inspectorModePrecedence() {
-        // A selected request wins over an endpoint, which wins over the overview. The order matters:
-        // clicking a log row must not be swallowed by an endpoint that was already selected.
-        #expect(
-            InspectorPanelView.mode(hasRequestDetail: true, hasEndpoint: true, hasOverview: true) == .request
-        )
-        #expect(
-            InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: true, hasOverview: true) == .scenarios
-        )
-        #expect(
-            InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: false, hasOverview: true) == .overview
-        )
-        #expect(
-            InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: false, hasOverview: false) == .empty
-        )
-        #expect(InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: false,
-                                        hasOverview: true, hasJourney: true) == .journey)
-        #expect(InspectorPanelView.mode(hasRequestDetail: true, hasEndpoint: false,
-                                        hasOverview: true, hasJourney: true) == .request)
-        #expect(InspectorPanelView.mode(hasRequestDetail: false, hasEndpoint: true,
-                                        hasOverview: true, selectedRequestCount: 2) == .selection)
-        #expect(InspectorPanelView.Mode.request.title == "Request")
+        // An endpoint wins over a journey, which wins over the overview. A logged request never
+        // reaches the inspector: it opens in the centre column, which hides the inspector.
+        #expect(InspectorPanelView.mode(hasEndpoint: true, hasOverview: true, hasJourney: true) == .scenarios)
+        #expect(InspectorPanelView.mode(hasEndpoint: false, hasOverview: true, hasJourney: true) == .journey)
+        #expect(InspectorPanelView.mode(hasEndpoint: false, hasOverview: true) == .overview)
+        #expect(InspectorPanelView.mode(hasEndpoint: false, hasOverview: false) == .empty)
+        #expect(InspectorPanelView.Mode.scenarios.title == "Scenarios")
+    }
+
+    @Test("The request detail explains what answered, naming the status Mimic returned for a miss")
+    func requestDetailOutcomeExplanation() {
+        let unmatched = RequestLog(method: .get, path: "/recommendations?limit=4",
+                                   responseStatusCode: 404, outcome: .unmatched)
+        let answered = RequestLog(method: .get, path: "/api/users", responseStatusCode: 200, outcome: .endpoint)
+
+        #expect(RequestDetailView.outcomeExplanation(for: unmatched, endpointName: nil, scenarioName: nil)
+                == "No endpoint matched, so Mimic returned 404")
+        #expect(RequestDetailView.outcomeExplanation(for: answered, endpointName: "Users", scenarioName: "Default")
+                == "Answered by Users, Default")
+        #expect(RequestDetailView.outcomeExplanation(for: answered, endpointName: nil, scenarioName: nil)
+                == "Answered by an endpoint")
+    }
+
+    @Test("Beside an open request the list takes up to 520 points and never less than the compact table")
+    func splitListWidth() {
+        #expect(LogColumns.splitListWidth(totalWidth: 1400) == 520)
+        #expect(LogColumns.splitListWidth(totalWidth: 900) == 450)
+        #expect(LogColumns.splitListWidth(totalWidth: 420) == LogColumns.compactMinimumTableWidth)
     }
 
     @Test("A window grown under the Dock is moved back inside the visible frame")

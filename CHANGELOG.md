@@ -15,6 +15,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Request detail is organized into Request, Response, and Timing tabs. The Request tab shows the
   called URL, listener, and query parameters.
+- Selecting a logged request opens it beside the request log in the centre column, with headers
+  and query items as two columns, Copy as cURL, and Create endpoint for an unmatched call. The log
+  row's context menu adds Copy URL, Copy response body, Go to endpoint, and Show only this path.
 
 ## [0.13.0] — 2026-09-26
 

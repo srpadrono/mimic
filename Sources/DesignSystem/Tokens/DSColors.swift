@@ -202,10 +202,6 @@ public nonisolated enum DSColors {
         public static let literal = Color(light: literalLightInk, dark: literalDarkInk)
 
         public static let punctuation = labelSecondary
-
-        /// Search-result wash; pair with `searchHitText`.
-        public static let searchHit = Color(light: Ink(0xFFB340, alpha: 0.4), dark: Ink(0xFFB340, alpha: 0.35))
-        public static let searchHitText = labelPrimary
     }
 }
 

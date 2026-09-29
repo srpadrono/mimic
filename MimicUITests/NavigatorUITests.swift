@@ -746,12 +746,14 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach")
         add(navigator.screenshot("inspector-traffic-wide"))
         showLatest.click()
-        XCTAssertTrue(requestDetail.path.waitForExistence(timeout: 5))
+        // The request opens beside the log in the centre column, and the inspector steps aside.
+        XCTAssertTrue(requestDetail.waitForDetail())
         XCTAssertTrue(panel.spoken(requestDetail.status).contains("401"))
-        XCTAssertEqual(requestDetail.closeButton.label, "Back")
-        add(navigator.screenshot("inspector-request-wide"))
+        XCTAssertEqual(requestDetail.closeButton.label, "Close request")
+        XCTAssertTrue(requestDetail.goToEndpointButton.exists, "An answered request links to its endpoint")
+        add(navigator.screenshot("request-detail-wide"))
         requestDetail.closeButton.click()
-        XCTAssertTrue(scenario.waitForExistence(timeout: 5), "Back returns to the endpoint's scenarios")
+        XCTAssertTrue(scenario.waitForExistence(timeout: 5), "Closing returns to the endpoint's scenarios")
         XCTAssertTrue(panel.isScenarioActive(named: "Unauthorized"))
 
         workspace.compactWindow()
@@ -765,7 +767,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach in a narrow window")
         showLatest.click()
         XCTAssertTrue(requestDetail.closeButton.waitForExistence(timeout: 5))
-        add(navigator.screenshot("inspector-request-narrow"))
+        add(navigator.screenshot("request-detail-narrow"))
         try await command(["serverStop": [:]])
     }
 

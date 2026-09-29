@@ -203,6 +203,43 @@ struct WorkspaceFeatureRenderingTests {
             ),
             size: CGSize(width: 520, height: 300)
         )
+        // Beside an open request: the four-column list and the detail, then several rows selected,
+        // then a selection that has already left the log.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id]),
+                table: RequestLogTableState(),
+                showsDetail: true,
+                onGoToEndpoint: { _ in }
+            ),
+            size: CGSize(width: 1100, height: 700)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id, UUID()]),
+                showsDetail: true
+            ),
+            size: CGSize(width: 420, height: 400)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .stopped,
+                onClear: {},
+                selectedLogIDs: .constant([UUID()]),
+                showsDetail: true
+            ),
+            size: CGSize(width: 800, height: 400)
+        )
 
         renderSidebarStates(endpoint: endpoint)
     }

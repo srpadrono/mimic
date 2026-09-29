@@ -735,13 +735,36 @@ struct CaptureJourneySheetPage {
     var cancelButton: XCUIElement { app.buttons["captureJourney.cancelButton"] }
 }
 
-/// Page object for the request detail shown in the inspector.
+/// Page object for the request detail, which opens beside the request log in the centre column
+/// while a row is selected — and for the inspector's header, which the detail hides and deselecting
+/// brings back.
 @MainActor
 struct RequestDetailPage {
     let app: XCUIApplication
 
-    /// Every inspector mode names itself in the header text — "Scenarios", "Request", "Journey",
-    /// "Requests", "Overview". The endpoint mode's Scenarios/Traffic tabs are gone.
+    /// The detail pane itself, present only while exactly one request is open.
+    var container: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "requestDetail").firstMatch
+    }
+
+    /// Stands in for the detail while several rows are selected.
+    var multipleRequests: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "ds.empty.requestDetail.multipleRequests").firstMatch
+    }
+
+    /// Waits for one request to be open beside the log — its path is the detail's first line.
+    @discardableResult
+    func waitForDetail(timeout: TimeInterval = 5) -> Bool {
+        path.waitForExistence(timeout: timeout)
+    }
+
+    /// Waits for the several-rows state that replaces the detail.
+    @discardableResult
+    func waitForMultipleSelection(timeout: TimeInterval = 5) -> Bool {
+        multipleRequests.waitForExistence(timeout: timeout)
+    }
+
+    /// Every inspector mode names itself in the header text — "Scenarios", "Journey", "Overview".
     ///
     /// Matched across element types: the title carries the header trait, which AppKit publishes as
     /// a heading rather than a plain `StaticText`, so an `app.staticTexts` query never saw it.
@@ -773,12 +796,17 @@ struct RequestDetailPage {
     var status: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestDetail.status").firstMatch
     }
-    /// The inspector's back action returns to the previous selection context.
+    /// Closes the request, which gives the centre column back to the editor.
     var closeButton: XCUIElement {
-        app.buttons["inspector.closeRequestDetailButton"].firstMatch
+        app.buttons["requestDetail.close"].firstMatch
     }
-    var bodySearchField: XCUIElement {
-        app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch
+    /// "Create endpoint" for a call nothing answered.
+    var createEndpointButton: XCUIElement {
+        app.buttons["requestDetail.createEndpoint"].firstMatch
+    }
+    /// "Go to endpoint" for a call an endpoint answered.
+    var goToEndpointButton: XCUIElement {
+        app.buttons["requestDetail.goToEndpoint"].firstMatch
     }
     var copyCurlButton: XCUIElement {
         app.descendants(matching: .button).matching(identifier: "requestDetail.copy.curl").firstMatch
@@ -791,9 +819,6 @@ struct RequestDetailPage {
     }
     var responseBody: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "requestLog.body.response").firstMatch
-    }
-    var responseBodyMatches: XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "requestLog.body.response.matches").firstMatch
     }
 
     /// A segment of the Request/Response/Timing picker.

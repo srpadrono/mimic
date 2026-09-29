@@ -457,7 +457,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// Matched by **label**. The identifier is set, and it is stamped over by
     /// `ds.sectionheader.editor.headers` — the same flattening that makes `sidebar.addEndpointButton`
-    /// and `inspector.closeRequestDetailButton` unreachable.
+    /// unreachable.
     @MainActor
     private var addHeaderButton: XCUIElement { app.buttons["Add header"].firstMatch }
 

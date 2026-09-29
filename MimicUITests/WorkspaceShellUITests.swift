@@ -1332,14 +1332,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertEqual(rows.count, 2, "Both requests should be listed as separate rows")
         rows[0].click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Selecting one row should show it in the inspector"
+            requestDetail.waitForDetail(),
+            "Selecting one row should open it beside the log"
         )
         XCUIElement.perform(withKeyModifiers: .command) {
             rows[1].click()
         }
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Requests"),
+            requestDetail.waitForMultipleSelection(),
             "A multiple selection reports its scope instead of showing an unrelated overview"
         )
         XCTAssertTrue(
@@ -1351,7 +1351,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         // INSPOV-17 — clearing the log takes the detail with it.
         rows[0].click()
-        XCTAssertTrue(requestDetail.waitForPanelTitle("Request"), "Back to a single selection")
+        XCTAssertTrue(requestDetail.waitForDetail(), "Back to a single selection")
 
         // By label: the clear button lives in the drawer's header, which carries
         // `ds.panelheader.requestLog` over its controls.
@@ -1513,7 +1513,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         showLatest.click()
 
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
+            requestDetail.waitForDetail(),
             "Show latest request should open it in the request detail"
         )
     }
@@ -2315,9 +2315,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
     }
 
-    /// PANEL-11.
+    /// PANEL-11. A clicked request takes over the centre column — the log on the left, the request
+    /// on the right — and the inspector steps aside without forgetting that it was open.
     @MainActor
-    func testClickingALoggedRequestOpensTheCollapsedInspector() async throws {
+    func testClickingALoggedRequestTakesOverTheCentreColumn() async throws {
         let port = 62118
 
         launchShell()
@@ -2330,30 +2331,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
             requestLogDrawer.firstLogRow.waitForExistence(timeout: 15),
             "The request should reach the log"
         )
-
-        // Collapsed and re-expanded through the panel itself rather than through the toggle's label,
-        // which does not flip — see ``inspectorHeader``.
-        let inspectorToggle = workspace.toggleInspectorButton
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5), "The inspector starts open")
-        if inspectorToggle.isHittable {
-            inspectorToggle.click()
-        } else {
-            app.typeKey("i", modifierFlags: [.command, .option])
-        }
-        XCTAssertTrue(
-            inspectorHeader.waitForNonExistence(timeout: 5),
-            "The inspector should be collapsed before the row is clicked"
-        )
 
         requestLogDrawer.firstLogRow.click()
 
         XCTAssertTrue(
-            inspectorHeader.waitForExistence(timeout: 5),
-            "Selecting a request should open the inspector rather than looking like it did nothing"
-        )
-        XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "…and show the request that was clicked"
+            requestDetail.waitForDetail(),
+            "Selecting a request should open it beside the log"
         )
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { requestDetail.shownPath().contains("/api/users") },
@@ -2362,6 +2346,22 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(
             requestLogDrawer.firstLogRow.label.hasSuffix(", selected"),
             "The clicked row should announce it is selected — it read \(requestLogDrawer.firstLogRow.label)"
+        )
+        let centerPane = app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch
+        XCTAssertTrue(
+            centerPane.waitForNonExistence(timeout: 5),
+            "The endpoint editor should give the column to the request"
+        )
+        XCTAssertTrue(
+            inspectorHeader.waitForNonExistence(timeout: 5),
+            "The inspector should step aside while a request is open"
+        )
+
+        requestDetail.closeButton.click()
+        XCTAssertTrue(centerPane.waitForExistence(timeout: 5), "Closing the request should bring the editor back")
+        XCTAssertTrue(
+            inspectorHeader.waitForExistence(timeout: 5),
+            "…and the inspector the user had open"
         )
     }
 
