@@ -344,37 +344,23 @@ struct WorkspacePage {
         UITestApp.dismissAnyOpenMenu(in: app)
     }
 
-    /// Fills the screen with the window, once. Idempotent: on a display under 1180pt wide (CI's is
-    /// 1024pt) a window that already fills the screen is left alone. Choosing Fill again there
-    /// toggles the window back to its previous frame, which on that display ran past the screen's
-    /// left edge — every click on the navigator then landed off screen and did nothing.
+    /// Fills the screen's visible frame with the window.
+    ///
+    /// Through the Debug-only Window ▸ Test: Fill Window command (⌃⌥⌘F), which sets the frame
+    /// directly. The system's Fill command and the Window menu were both unreliable on CI: AppKit
+    /// rebuilds the menu's window items while it opens, and Fill toggles a filled window back.
     func fillWindow() {
-        if Self.isFilled(app.windows.firstMatch.frame) { return }
-        // The system's Fill shortcut (Globe-Control-F) first. Driving Window ▸ Fill by mouse fails
-        // intermittently on CI: AppKit rebuilds the menu's window items while it opens, and the
-        // item the test found is gone by the time it is clicked.
-        app.typeKey("f", modifierFlags: [.function, .control])
-        let filledByShortcut = UITestApp.waitUntil(timeout: 3) { Self.isFilled(app.windows.firstMatch.frame) }
-        if !filledByShortcut {
-            app.menuBars.menuBarItems["Window"].click()
-            let fill = app.menuItems["Fill"]
-            if fill.waitForExistence(timeout: 3) {
-                UITestApp.waitForStableFrame(fill)
-                screenPoint(fill.frame).click()
-            } else {
-                UITestApp.dismissAnyOpenMenu(in: app)
-            }
-        }
-        _ = UITestApp.waitUntil(timeout: 5) { Self.isFilled(app.windows.firstMatch.frame) }
-        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        let window = app.windows.firstMatch
+        app.typeKey("f", modifierFlags: [.command, .option, .control])
+        _ = UITestApp.waitUntil(timeout: 5) { Self.isFilled(window.frame) }
+        UITestApp.waitForStableFrame(window)
     }
 
     /// Wide enough for every tier of the workspace, or as large as the primary display allows.
     private static func isFilled(_ frame: CGRect) -> Bool {
         if frame.width >= 1180 { return true }
         guard let visible = NSScreen.screens.first?.visibleFrame else { return false }
-        // Tiled windows keep a margin to the screen edge, so allow for it.
-        return frame.width >= visible.width - 40 && frame.height >= visible.height - 40
+        return frame.width >= visible.width - 1 && frame.height >= visible.height - 1
     }
 
     /// Restores a collapsed navigator. Keyed on the footer's own "+", not on any "Add endpoint":
@@ -453,85 +439,19 @@ struct WorkspacePage {
         UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
 
-    /// Shrinks the window to its narrowest, three-panel size.
+    /// Shrinks the window to the compact test width (900pt), against the screen's right edge.
     ///
-    /// Window ▸ Move & Resize ▸ Top Right first (then Right), which also keeps any menu the toolbar
-    /// opens inside the window's screenshot. The submenu's titles vary between macOS releases and it
-    /// can open late, so when neither item appears the window's bottom-right corner is dragged left
-    /// instead; the window's own minimum width stops it at the compact size.
+    /// Through the Debug-only Window ▸ Test: Compact Window command (⌃⌥⌘C), which sets the frame
+    /// directly. Tiling through Window ▸ Move & Resize never landed reliably on CI, and the corner
+    /// drag it fell back to stopped at whatever minimum the panels allowed, as narrow as 288pt.
     func compactWindow(file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch
-        let before = window.frame
-        // Top Right keeps the native overflow popup inside the window screenshot. The Window menu
-        // is flaky on CI (AppKit rebuilds its window items while it opens), so a miss falls back
-        // to dragging the window to its minimum width.
-        if tileWindow(to: ["Top Right", "Right"]) {
-            _ = UITestApp.waitUntil(timeout: 5) {
-                let frame = window.frame
-                return frame.width < 1180 && frame != before
-            }
-        }
-        if window.frame.width >= 1180 || window.frame == before {
-            dragWindowToMinimumWidth()
-        }
+        app.typeKey("c", modifierFlags: [.command, .option, .control])
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { window.frame.width < 1180 },
             "The window should be compact (under 1180pt) — it is \(window.frame.width)pt",
             file: file, line: line
         )
-        UITestApp.waitForStableFrame(window)
-    }
-
-    /// Chooses the first of `titles` under Window ▸ Move & Resize. False when none is offered.
-    private func tileWindow(to titles: [String]) -> Bool {
-        app.menuBars.menuBarItems["Window"].click()
-        let moveAndResize = app.menuItems["Move & Resize"].firstMatch
-        guard moveAndResize.waitForExistence(timeout: 2) else {
-            UITestApp.dismissAnyOpenMenu(in: app)
-            return false
-        }
-        // Driven by screen point, not by element. AppKit rebuilds the Window menu's system items
-        // while the menu opens, so an element found a moment ago can be gone when XCUITest looks it
-        // up again to hover or click it ("No matches found"), which fails the test outright. A
-        // point taken from its frame does not need that second lookup.
-        UITestApp.waitForStableFrame(moveAndResize)
-        screenPoint(moveAndResize.frame).hover()
-        for title in titles {
-            let item = app.menuItems[title].firstMatch
-            if item.waitForExistence(timeout: 2) {
-                UITestApp.waitForStableFrame(item)
-                // Into the submenu along the Move & Resize row, then down to the item. A straight
-                // diagonal crosses the Window menu's other rows, which closes the submenu before
-                // the click arrives.
-                let row = moveAndResize.frame
-                let target = item.frame
-                screenPoint(CGRect(x: target.midX, y: row.midY, width: 0, height: 0)).hover()
-                screenPoint(target).click()
-                return true
-            }
-        }
-        UITestApp.dismissAnyOpenMenu(in: app)
-        return false
-    }
-
-    /// The centre of `frame`, as a point on screen that stays valid if its element is rebuilt.
-    private func screenPoint(_ frame: CGRect) -> XCUICoordinate {
-        // Anchored on the menu bar: the application element's frame is unbounded, so a coordinate
-        // taken from it resolves to (-inf, -inf) and the click never lands.
-        let anchor = app.menuBars.firstMatch
-        let origin = anchor.frame.origin
-        return anchor.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: frame.midX - origin.x, dy: frame.midY - origin.y))
-    }
-
-    /// Drags the bottom-right resize corner a full window width to the left; AppKit stops the
-    /// window at its minimum width.
-    private func dragWindowToMinimumWidth() {
-        let window = app.windows.firstMatch
-        let width = window.frame.width
-        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
-            .withOffset(CGVector(dx: -2, dy: -2))
-        corner.press(forDuration: 0.3, thenDragTo: corner.withOffset(CGVector(dx: -width, dy: 0)))
         UITestApp.waitForStableFrame(window)
     }
 

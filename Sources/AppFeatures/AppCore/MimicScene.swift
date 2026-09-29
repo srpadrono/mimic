@@ -165,6 +165,9 @@ public struct MimicScene: Scene {
                     .disabled(appState.activeJourney == nil || appState.updates.isPreparingInstallation)
             }
         }
+        #if DEBUG
+        .commands { UITestWindowCommands() }
+        #endif
 
         // No second window. Journeys live in the navigator, next to the endpoints they override.
         //
