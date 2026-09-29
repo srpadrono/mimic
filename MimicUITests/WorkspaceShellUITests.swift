@@ -1721,35 +1721,26 @@ final class WorkspaceShellUITests: MimicUITestCase {
         workspace.closeToolbarMenu()
     }
 
-    /// The toolbar is the centre column's: its trailing actions end before the inspector starts.
+    /// The toolbar runs the width of the window, as the redesign draws it: the actions start after
+    /// the navigator and trail to the window's edge, over the inspector's floating panel when it is
+    /// open. The layout breakpoint is still the centre column's width.
     ///
-    /// The centre card is inset from its column by `DSLayout.panelInset` (8pt), and the toolbar spans
-    /// the column rather than the card, so the bounds carry that much slack.
+    /// The centre card is inset from its column by `DSLayout.panelInset` (8pt), so the bounds carry
+    /// that much slack.
     @MainActor
     private func assertToolbarStaysAboveTheCentreColumn(
         _ elements: [XCUIElement], file: StaticString = #filePath, line: UInt = #line
     ) {
         let slack: CGFloat = 12
-        // AppKit moves toolbar items to their column after the split view settles, a beat after a
-        // panel returns; wait for that before measuring.
-        _ = UITestApp.waitUntil(timeout: 5) {
-            let centreMaxX = self.shell.panel("centerPane").frame.maxX
-            return elements.allSatisfy { $0.frame.maxX <= centreMaxX + slack }
-        }
         let center = shell.panel("centerPane").frame
-        let inspectorPanel = shell.panel("inspector")
+        let window = app.windows.firstMatch.frame
         for element in elements {
             XCTAssertGreaterThanOrEqual(element.frame.minX, center.minX - slack,
-                                        "\(element.identifier) should sit above the centre column",
+                                        "\(element.identifier) should sit after the navigator",
                                         file: file, line: line)
-            XCTAssertLessThanOrEqual(element.frame.maxX, center.maxX + slack,
-                                     "\(element.identifier) should not reach past the centre column",
+            XCTAssertLessThanOrEqual(element.frame.maxX, window.maxX,
+                                     "\(element.identifier) should stay inside the window",
                                      file: file, line: line)
-            if inspectorHeader.exists, inspectorPanel.exists {
-                XCTAssertLessThanOrEqual(element.frame.maxX, inspectorPanel.frame.minX + 1,
-                                         "\(element.identifier) should not sit above the inspector",
-                                         file: file, line: line)
-            }
         }
     }
 
