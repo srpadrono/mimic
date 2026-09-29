@@ -480,7 +480,7 @@ struct WorkspaceView: View {
     /// The centre column's floor on a screen this wide: the design's minimum, or whatever is left
     /// beside the navigator and the inspector at their own minimums if that is less.
     nonisolated static func centreMinimumWidth(screenWidth: CGFloat) -> CGFloat {
-        let sides = DSNavigatorMetrics.minimumWidth + PanelLayoutStore.Bounds.minimumInspectorWidth
+        let sides = DSLayout.sidebarMinimumWidth + DSLayout.inspectorMinimumWidth
         return max(0, min(DSLayout.centreMinimumWidth, screenWidth - sides))
     }
 
