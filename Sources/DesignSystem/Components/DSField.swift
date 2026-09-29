@@ -28,6 +28,10 @@ public struct DSFieldChrome: ViewModifier {
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .strokeBorder(border, lineWidth: isFocused || isInvalid ? DSStroke.emphasis : DSStroke.hairline)
+                    // Drawn over the field's content, so it must not take the pointer: over an AppKit
+                    // control, such as the request bar's method menu, SwiftUI otherwise keeps the
+                    // click for the border and the control never sees it.
+                    .allowsHitTesting(false)
             }
             .overlay {
                 if isFocused || isInvalid {
