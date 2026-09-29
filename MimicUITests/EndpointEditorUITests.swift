@@ -752,12 +752,13 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.groupField.typeText("Catalog")
 
         XCTAssertTrue(newEndpointSheet.statusMenu.waitForExistence(timeout: 3), "The sheet should offer a status")
-        newEndpointSheet.statusMenu.click()
-        let notFound = app.menuItems["404 Not Found"].firstMatch
-        XCTAssertTrue(notFound.waitForExistence(timeout: 3), "The status menu should offer 404")
-        notFound.click()
         XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 3) {
+            UITestApp.chooseFromPopUp(
+                in: app,
+                menu: newEndpointSheet.statusMenu,
+                item: app.menuItems["newEndpoint.status.404"].firstMatch,
+                typeSelection: "404"
+            ) {
                 // The menu's accessibility value can lag its label; the label's own text is what
                 // the person sees.
                 (self.newEndpointSheet.statusMenu.value as? String) == "404 Not Found"
@@ -768,10 +769,18 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitForExistence(timeout: 3),
                       "The sheet should offer a content type")
-        newEndpointSheet.contentTypeMenu.click()
-        let plainText = app.menuItems["Plain text"].firstMatch
-        XCTAssertTrue(plainText.waitForExistence(timeout: 3), "The content type menu should offer plain text")
-        plainText.click()
+        XCTAssertTrue(
+            UITestApp.chooseFromPopUp(
+                in: app,
+                menu: newEndpointSheet.contentTypeMenu,
+                item: app.menuItems["newEndpoint.contentType.plainText"].firstMatch,
+                typeSelection: "Plain"
+            ) {
+                (self.newEndpointSheet.contentTypeMenu.value as? String) == "Plain text"
+                    || self.newEndpointSheet.contentTypeMenu.staticTexts["Plain text"].exists
+            },
+            "The sheet should show the content type chosen from its menu"
+        )
 
         newEndpointSheet.createButton.click()
         XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5),

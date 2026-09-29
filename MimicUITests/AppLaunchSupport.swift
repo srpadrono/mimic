@@ -260,6 +260,66 @@ enum UITestApp {
         return false
     }
 
+    /// Picks `item` from the pop-up `menu` and returns once `isChosen` holds.
+    ///
+    /// The one-level sibling of ``chooseFromSubmenu(in:parent:item:thenAwait:reopenMenu:menuIsAlreadyOpen:attempts:menuTimeout:outcomeTimeout:)``,
+    /// with two differences that both come from a pop-up living inside a sheet.
+    ///
+    /// **The items may not be in the accessibility tree at all.** On macOS 27 a SwiftUI `Menu`
+    /// opens on screen while none of its items is published, so `item` never exists. When it has
+    /// not appeared, this types `typeSelection` and Return instead, which is what AppKit's menu
+    /// type-select does for a person using the keyboard. Where the item is published, it is
+    /// clicked as before.
+    ///
+    /// **Escape is not free.** Once the menu has closed, the next Escape closes the sheet the menu
+    /// sits in, so a retry presses it only while `item` shows the menu is still open, and never in
+    /// a loop. The outcome is a condition rather than an element because a pop-up shows its choice
+    /// in its value or its title. Every retry is recorded in the result bundle, and a menu that
+    /// never applies the choice still fails.
+    @MainActor
+    @discardableResult
+    static func chooseFromPopUp(
+        in app: XCUIApplication,
+        menu: XCUIElement,
+        item: XCUIElement,
+        typeSelection: String,
+        attempts: Int = 3,
+        menuTimeout: TimeInterval = 5,
+        itemTimeout: TimeInterval = 2,
+        outcomeTimeout: TimeInterval = 5,
+        until isChosen: () -> Bool
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 {
+                XCTContext.runActivity(
+                    named: "Re-opened the pop-up menu (attempt \(attempt) of \(rounds))"
+                ) { _ in }
+                if item.exists {
+                    app.typeKey(.escape, modifierFlags: [])
+                    _ = item.waitForNonExistence(timeout: 1)
+                }
+            }
+
+            guard menu.waitForExistence(timeout: menuTimeout) else { continue }
+            waitForStableFrame(menu)
+            menu.click()
+
+            if item.waitForExistence(timeout: itemTimeout) {
+                waitForStableFrame(item)
+                item.click()
+            } else {
+                XCTContext.runActivity(named: "Chose \"\(typeSelection)\" by typing") { _ in }
+                app.typeText(typeSelection)
+                app.typeKey(.return, modifierFlags: [])
+            }
+
+            let wait = attempt == rounds ? outcomeTimeout : min(outcomeTimeout, 3)
+            if waitUntil(timeout: wait, isChosen) { return true }
+        }
+        return false
+    }
+
     /// Activation is scoped to the process created by this launch. Other builds can share the
     /// bundle identifier, including the developer's normal session.
     static func activateLaunchedApp(processIdentifier: pid_t) {
