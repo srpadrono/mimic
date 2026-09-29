@@ -132,6 +132,17 @@ final class DesignReviewUITests: MimicUITestCase {
             app.typeKey(.escape, modifierFlags: [])
         }
 
+        // Ports changed while running: the toolbar asks for a restart until the server takes them.
+        try await command(["backendUpsert": ["name": "Search", "port": mockPort + 3]])
+        if waitForLabel(statusWell, containing: "Restart") {
+            capture("07b-restart-required")
+        } else {
+            missing("07b-restart-required")
+        }
+        try await command(["serverStop": [:]])
+        try await command(["serverStart": ["port": mockPort]])
+        _ = workspace.waitForServerURL(port: mockPort, timeout: 8)
+
         if firstLog.waitForExistence(timeout: 5) {
             capture("08-request-log")
             firstLog.click()
@@ -216,6 +227,9 @@ final class DesignReviewUITests: MimicUITestCase {
     @MainActor
     private func seedStorefront() async throws {
         try await command(["projectCreate": ["name": "Storefront", "port": mockPort]])
+        // Two listeners, as the toolbar proposal draws them: "localhost:<port> +1".
+        try await command(["serverConfigure": ["name": "Storefront"]])
+        try await command(["backendUpsert": ["name": "Accounts", "port": mockPort + 2]])
         let endpoints: [(String, String, String, String, Int, String)] = [
             ("Get product", "GET", "/products/:id", "Catalog", 200,
              #"{"id":42,"name":"Trail running shoe","price":{"amount":129.0,"currency":"EUR"},"inStock":true,"sizes":[40,41,42,43]}"#),
@@ -304,6 +318,12 @@ final class DesignReviewUITests: MimicUITestCase {
     }
 
     @MainActor
+    private func waitForLabel(_ element: XCUIElement, containing text: String) -> Bool {
+        UITestApp.waitUntil(timeout: 5) {
+            element.exists && "\(element.label) \((element.value as? String) ?? "")".contains(text)
+        }
+    }
+
     private func row(named name: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", name
