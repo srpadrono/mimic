@@ -132,16 +132,17 @@ final class DesignReviewUITests: MimicUITestCase {
             app.typeKey(.escape, modifierFlags: [])
         }
 
-        // Ports changed while running: the toolbar asks for a restart until the server takes them.
-        try await command(["backendUpsert": ["name": "Search", "port": mockPort + 3]])
-        if waitForLabel(statusWell, containing: "Restart") {
-            capture("07b-restart-required")
-        } else {
-            missing("07b-restart-required")
-        }
-        try await command(["serverStop": [:]])
-        try await command(["serverStart": ["port": mockPort]])
-        _ = workspace.waitForServerURL(port: mockPort, timeout: 8)
+        // The proposal's full-width toolbar: the counts and the project's subtitle need a centre
+        // column CI's 1024pt screen only gives with a side panel or two out of the way.
+        workspace.hideSidebarIfShown()
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        capture("06b-toolbar-wide")
+        app.typeKey("i", modifierFlags: [.command, .option])
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        capture("06c-toolbar-expanded")
+        app.typeKey("i", modifierFlags: [.command, .option])
+        workspace.showSidebarIfNeeded()
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
 
         if firstLog.waitForExistence(timeout: 5) {
             capture("08-request-log")
@@ -205,6 +206,19 @@ final class DesignReviewUITests: MimicUITestCase {
             missing("15-compact-overflow")
         }
         workspace.fillWindow()
+
+        // Ports changed while running: the toolbar asks for a restart until the server takes them.
+        // Last, because nothing after this needs the server as it was.
+        try await command(["backendUpsert": ["name": "Search", "port": mockPort + 3]])
+        if waitForLabel(element("serverStatusWell.url"), containing: "Restart") {
+            capture("07b-restart-required")
+            workspace.hideSidebarIfShown()
+            UITestApp.waitForStableFrame(app.windows.firstMatch)
+            capture("07c-restart-required-wide")
+            workspace.showSidebarIfNeeded()
+        } else {
+            missing("07b-restart-required")
+        }
 
         closeProjectViaMenu()
         if welcome.newProjectButton.waitForExistence(timeout: 5) {

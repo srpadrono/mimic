@@ -567,7 +567,7 @@ struct WorkspaceView: View {
                 projectIdentity
                 Rectangle()
                     .fill(DSColors.separator)
-                    .frame(width: DSStroke.hairline, height: 26)
+                    .frame(width: DSStroke.emphasis, height: 24)
                     .accessibilityHidden(true)
                 serverSummary
             }
