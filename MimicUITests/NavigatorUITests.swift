@@ -704,9 +704,40 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertEqual(endpoints.first?["path"] as? String, "/keyboard-route")
     }
 
+    /// "When unmatched" is a menu over the endpoint's listener: forwarding needs an upstream, and
+    /// choosing Return 404 turns forwarding off without forgetting the upstream.
+    @MainActor
+    func testWhenUnmatchedMenuSwitchesForwardingForTheListener() async throws {
+        try await launchFixture()
+        let navigator = NavigatorPage(app: app)
+        let panel = InspectorPage(app: app)
+        navigator.row(named: "Account summary").click()
+
+        let menu = panel.unmatchedBehavior
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        _ = try await command(["serverConfigure": ["upstreamURL": "http://127.0.0.1:65000"]])
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.spoken(menu).contains("Forward to upstream") },
+                      "An upstream turns forwarding on — \(panel.spoken(menu))")
+
+        menu.click()
+        let return404 = app.menuItems["Return 404"].firstMatch
+        XCTAssertTrue(return404.waitForExistence(timeout: 3), "The menu should offer Return 404")
+        return404.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.spoken(menu).contains("Return 404") },
+                      "Choosing Return 404 should stop forwarding — \(panel.spoken(menu))")
+
+        menu.click()
+        let forward = app.menuItems["Forward to upstream"].firstMatch
+        XCTAssertTrue(forward.waitForExistence(timeout: 3))
+        XCTAssertTrue(forward.isEnabled, "The kept upstream can be forwarded to again")
+        forward.click()
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.spoken(menu).contains("Forward to upstream") })
+    }
+
     /// The scenario list and the Traffic section share one inspector column. The radio makes a
-    /// scenario live; the Traffic section counts what the endpoint answered and opens the newest
-    /// request; Back returns to the endpoint with the live scenario unchanged — at both widths.
+    /// scenario live; the Traffic section counts what the endpoint answered; a logged request opens
+    /// in the detail and Back returns to the endpoint with the live scenario unchanged — at both
+    /// widths.
     @MainActor
     func testInspectorScenarioActivationAndTrafficReturnAtBothWidths() async throws {
         usesLightAppearance = true
@@ -723,7 +754,8 @@ final class NavigatorUITests: MimicUITestCase {
         panel.makeLive(named: "Unauthorized")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.isScenarioActive(named: "Unauthorized") })
         XCTAssertFalse(panel.isScenarioActive(named: "Default"))
-        XCTAssertTrue(panel.trafficEmpty.waitForExistence(timeout: 5), "No request has reached the endpoint yet")
+        XCTAssertTrue(panel.trafficServed.waitForExistence(timeout: 5), "The Traffic figures show before any request")
+        XCTAssertTrue(panel.spoken(panel.trafficServed).hasPrefix("0"), "No request has reached the endpoint yet")
         try await command(["serverStart": [:]])
         XCTAssertTrue(workspace.waitForServerURL(port: 62171))
         var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:62171/account-summary")))
@@ -738,14 +770,14 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { served.label.hasPrefix("32") },
                       "Served count: \(panel.spoken(served))")
         XCTAssertTrue(panel.spoken(panel.trafficErrors).hasPrefix("0"), panel.spoken(panel.trafficErrors))
-        let showLatest = panel.showLatestRequestButton
-        XCTAssertTrue(showLatest.waitForExistence(timeout: 5))
-        for _ in 0..<4 where !showLatest.isHittable {
+        for _ in 0..<4 where !served.isHittable {
             panel.endpointIdentity.scroll(byDeltaX: 0, deltaY: -300)
         }
-        XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach")
+        XCTAssertTrue(served.isHittable, "The Traffic section must scroll into reach")
         add(navigator.screenshot("inspector-traffic-wide"))
-        showLatest.click()
+        let loggedRequest = requestLogDrawer.firstLogRow
+        XCTAssertTrue(loggedRequest.waitForExistence(timeout: 5))
+        loggedRequest.click()
         XCTAssertTrue(requestDetail.path.waitForExistence(timeout: 5))
         XCTAssertTrue(panel.spoken(requestDetail.status).contains("401"))
         XCTAssertEqual(requestDetail.closeButton.label, "Back")
@@ -759,11 +791,12 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertEqual(scenario.frame.height, 28, accuracy: 1)
         XCTAssertTrue(panel.liveRadio(named: "Default").isHittable, "The live radio stays reachable when narrow")
         add(navigator.screenshot("inspector-scenarios-narrow"))
-        for _ in 0..<4 where !showLatest.isHittable {
+        for _ in 0..<4 where !served.isHittable {
             panel.endpointIdentity.scroll(byDeltaX: 0, deltaY: -300)
         }
-        XCTAssertTrue(showLatest.isHittable, "The Traffic section must scroll into reach in a narrow window")
-        showLatest.click()
+        XCTAssertTrue(served.isHittable, "The Traffic section must scroll into reach in a narrow window")
+        XCTAssertTrue(requestLogDrawer.firstLogRow.waitForExistence(timeout: 5))
+        requestLogDrawer.firstLogRow.click()
         XCTAssertTrue(requestDetail.closeButton.waitForExistence(timeout: 5))
         add(navigator.screenshot("inspector-request-narrow"))
         try await command(["serverStop": [:]])

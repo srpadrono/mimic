@@ -1348,8 +1348,7 @@ final class RequestLogUITests: MimicUITestCase {
 
     // MARK: - TRAFFIC
 
-    /// The endpoint inspector's Traffic section counts what the endpoint answered, and its "Show
-    /// latest request" action opens that request in the request detail.
+    /// The endpoint inspector's Traffic section counts what the endpoint answered, starting at zero.
     @MainActor
     func testEndpointTrafficSectionSummarisesWhatTheEndpointAnswered() async throws {
         let port = 62109
@@ -1361,9 +1360,11 @@ final class RequestLogUITests: MimicUITestCase {
         createEndpointViaUI(name: "Users", path: "/api/users")
 
         XCTAssertTrue(inspector.traffic.waitForExistence(timeout: 5), "A selected endpoint should show its traffic")
+        XCTAssertTrue(inspector.trafficServed.waitForExistence(timeout: 5),
+                      "An endpoint nothing has called should still show its figures")
         XCTAssertTrue(
-            inspector.trafficEmpty.waitForExistence(timeout: 5),
-            "An endpoint nothing has called should say so"
+            poll { self.speech(of: inspector.trafficServed).contains("0") },
+            "Nothing has been served yet — it read \(speech(of: inspector.trafficServed))"
         )
 
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
@@ -1380,20 +1381,6 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(
             poll { self.speech(of: inspector.trafficErrors).contains("0") },
             "Nothing failed — errors read \(speech(of: inspector.trafficErrors))"
-        )
-        XCTAssertFalse(inspector.trafficEmpty.exists, "The empty note should go once there is traffic")
-
-        // The action opens the newest request in the detail, which is the point of summarising here.
-        let showLatest = inspector.showLatestRequestButton
-        XCTAssertTrue(showLatest.waitForExistence(timeout: 5), "The section should offer the latest request")
-        showLatest.click()
-        XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Show latest request should open that request in the detail inspector"
-        )
-        XCTAssertTrue(
-            poll { self.text(of: self.requestDetail.path).contains("/api/users") },
-            "The detail should be showing the endpoint's request"
         )
     }
 }

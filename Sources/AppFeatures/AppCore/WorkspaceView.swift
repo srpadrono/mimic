@@ -1055,12 +1055,12 @@ struct WorkspaceView: View {
                     backends: appState.serverConfiguration.listeners,
                     groups: Set(currentEndpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted(),
                     onUpdateGroupTag: { appState.updateEndpointGroupTag(id: $0, groupTag: $1) },
-                    onUpdateBackend: { appState.updateEndpointBackend(id: $0, backendID: $1) }
+                    onUpdateBackend: { appState.updateEndpointBackend(id: $0, backendID: $1) },
+                    onUpdatePassthrough: { appState.setPassthrough(backendID: $0, enabled: $1) }
                 )
             },
             onShowJourneys: { navigatorTab = .journeys },
             onCloseRequestDetail: { selectedLogIDs = [] },
-            onSelectTrafficLog: { selectedLogIDs = [$0] },
             onAddScenario: { endpointID, name in
                 if let scenario = appState.addScenario(endpointID: endpointID, name: name) {
                     appState.editScenario(endpointID: endpointID, scenarioID: scenario.id)

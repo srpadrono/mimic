@@ -134,6 +134,15 @@ final class AppState {
         run(.backendUpsert(id: id, name: name, port: port, upstreamURL: upstreamURL)) != nil
     }
 
+    /// Turns forwarding of unmatched requests on or off for one listener, keeping its upstream.
+    @discardableResult
+    func setPassthrough(backendID: UUID, enabled: Bool) -> Bool {
+        let command: ControlCommand = backendID == ServerConfiguration.primaryID
+            ? .serverConfigure(port: nil, globalDelayMs: nil, passthroughEnabled: enabled)
+            : .backendUpsert(id: backendID, name: nil, port: nil, upstreamURL: nil, passthroughEnabled: enabled)
+        return run(command) != nil
+    }
+
     @discardableResult
     func deleteBackend(id: UUID) -> Bool {
         run(.backendDelete(id: id)) != nil

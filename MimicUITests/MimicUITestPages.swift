@@ -855,16 +855,12 @@ struct InspectorPage {
     var backendMenu: XCUIElement { element("endpointEditor.backend") }
     /// The project-wide delay, read-only, with its number as the accessibility value.
     var globalDelayValue: XCUIElement { element("endpointEditor.globalDelay") }
-    var globalDelayNote: XCUIElement { element("endpointEditor.globalDelay.note") }
     var unmatchedBehavior: XCUIElement { element("inspector.unmatchedBehavior") }
 
     var traffic: XCUIElement { element("inspector.traffic") }
-    var trafficEmpty: XCUIElement { element("inspector.traffic.empty") }
     var trafficServed: XCUIElement { element("inspector.traffic.served") }
     var trafficErrors: XCUIElement { element("inspector.traffic.errors") }
     var trafficMedian: XCUIElement { element("inspector.traffic.median") }
-    /// "Show latest request", which opens the endpoint's newest request in the request detail.
-    var showLatestRequestButton: XCUIElement { app.buttons["ds.button.inspector.traffic.latest"].firstMatch }
 
     func journeyRow(_ name: String) -> XCUIElement { element("inspector.journey.\(name)") }
     func spoken(_ element: XCUIElement) -> String {

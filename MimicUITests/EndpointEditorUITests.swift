@@ -1512,7 +1512,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     ///
     /// The row is the inspector's "Base delay", in its Endpoint section. It is deliberately *not* a disabled text field — a greyed-out well in a row of live ones
     /// reads as a control that failed — so "there is no field here" is part of what is being
-    /// asserted, and the note beside it is the only thing explaining why.
+    /// asserted, and the row's tooltip is what explains why.
     ///
     /// An explicit accessibility label replaces the Text's digits, so the row also supplies the
     /// number as its accessibility value. Check both the name and the value a reader receives.
@@ -1533,11 +1533,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertFalse(app.textFields["endpointEditor.globalDelay"].exists,
                        "The global delay is shown, not edited — it must not be a text field")
 
-        XCTAssertTrue(globalDelayNote.waitForExistence(timeout: 5),
-                      "The row should carry the note explaining where the global delay comes from")
-        let noteText = shownText(of: globalDelayNote)
-        XCTAssertTrue(noteText.contains("Project delay"),
-                      "The note should explain how the delays combine — it reads \(noteText)")
+        // The design has no note under the row; its tooltip says where the delay comes from.
+        XCTAssertFalse(globalDelayNote.exists, "The Endpoint section should not carry a note under Base delay")
     }
 
     // MARK: - 14. Adding a scenario from the inspector

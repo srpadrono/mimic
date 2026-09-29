@@ -1455,8 +1455,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// INSPOV-10, INSPOV-11, INSPOV-12.
     ///
     /// The inspector no longer has a Traffic tab with a per-request list. The selected endpoint's
-    /// traffic is a section under its scenarios: counts for the last 15 minutes and a "Show latest
-    /// request" button that opens the newest one in the request detail.
+    /// traffic is a section under its scenarios: a chart and counts for the last 15 minutes, shown at
+    /// zero before any request so the section keeps its shape.
     @MainActor
     func testInspectorTrafficSectionSummarisesTheEndpointsRequests() async throws {
         let port = 62113
@@ -1468,11 +1468,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         let traffic = inspector.traffic
         XCTAssertTrue(traffic.waitForExistence(timeout: 5), "The endpoint inspector should have a Traffic section")
-        XCTAssertTrue(
-            inspector.trafficEmpty.waitForExistence(timeout: 5),
-            "Before any request the section should say there is nothing yet"
-        )
-        XCTAssertFalse(inspector.showLatestRequestButton.exists, "There is no latest request to show yet")
+        XCTAssertTrue(inspector.trafficServed.waitForExistence(timeout: 5),
+                      "Before any request the section should show its figures at zero")
+        XCTAssertTrue(inspector.trafficServed.label.hasPrefix("0"), inspector.spoken(inspector.trafficServed))
+        XCTAssertTrue(inspector.trafficErrors.label.hasPrefix("0"), inspector.spoken(inspector.trafficErrors))
+        XCTAssertTrue(inspector.trafficMedian.exists, "The median is shown as a dash before any request")
 
         startServer(onPort: port)
         await sendRequest(port: port, path: "/api/users", method: "GET", body: nil)
@@ -1493,29 +1493,12 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "A 200 is not an error — \(inspector.spoken(errors))"
         )
         XCTAssertTrue(inspector.trafficMedian.exists, "The section should report a median duration")
-        XCTAssertFalse(inspector.trafficEmpty.exists, "The empty note should give way to the figures")
 
         let evidence = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         evidence.name = "inspector-traffic-section"
         evidence.lifetime = .keepAlways
         add(evidence)
 
-        let showLatest = inspector.showLatestRequestButton
-        XCTAssertTrue(showLatest.waitForExistence(timeout: 5), "The section should offer the latest request")
-        if !showLatest.isHittable {
-            // The section sits at the foot of the inspector's scroll view.
-            inspector.endpointIdentity.scroll(byDeltaX: 0, deltaY: -400)
-        }
-        XCTAssertTrue(
-            UITestApp.waitUntil(timeout: 5) { showLatest.isHittable },
-            "Show latest request should be reachable by the pointer — frame \(showLatest.frame)"
-        )
-        showLatest.click()
-
-        XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Show latest request should open it in the request detail"
-        )
     }
 
     // MARK: - 4. The toolbar's server well

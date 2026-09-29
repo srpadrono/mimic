@@ -12,6 +12,8 @@ struct EndpointInspectorSettings: View {
         var groups: [String]
         var onUpdateGroupTag: (_ endpointID: UUID, _ groupTag: String?) -> Void
         var onUpdateBackend: (_ endpointID: UUID, _ backendID: UUID?) -> Void
+        /// Turns forwarding of unmatched requests on or off for a listener.
+        var onUpdatePassthrough: (_ backendID: UUID, _ enabled: Bool) -> Void = { _, _ in }
     }
 
     let endpoint: Endpoint
@@ -90,15 +92,6 @@ struct EndpointInspectorSettings: View {
                 .dsFieldChrome(isFocused: false)
                 .help("Set in server settings. It is added to every endpoint's delay.")
             }
-            Text("Project delay is added to this endpoint's delay.")
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColors.labelTertiary)
-                .padding(.leading, DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.md)
-                .padding(.trailing, DSInspectorMetrics.inset)
-                .padding(.bottom, DSSpacing.xs)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("endpointEditor.globalDelay.note")
-
             row("Port") {
                 Menu {
                     ForEach(context.backends) { option in
@@ -130,14 +123,7 @@ struct EndpointInspectorSettings: View {
             }
 
             row("When unmatched") {
-                Text(backend?.effectiveUpstream != nil ? "Forward to upstream" : "Return 404")
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(backend?.effectiveUpstream.map { "Unmatched requests go to \($0)" }
-                          ?? "Unmatched requests get a 404. Set an upstream in server settings to forward them.")
-                    .accessibilityIdentifier("inspector.unmatchedBehavior")
+                unmatchedMenu
             }
         }
         .onAppear { groupTag = endpoint.groupTag ?? "" }
@@ -145,6 +131,48 @@ struct EndpointInspectorSettings: View {
         .onChange(of: endpoint.groupTag) { _, value in
             if !isGroupFocused { groupTag = value ?? "" }
         }
+    }
+
+    /// Whether this endpoint's listener forwards requests nothing matches. A listener setting, shown
+    /// here because it decides what a client gets while this endpoint is being written.
+    private var unmatchedMenu: some View {
+        let forwards = backend?.effectiveUpstream != nil
+        let upstream = backend?.upstreamURL?.isEmpty == false ? backend?.upstreamURL : nil
+        let title = forwards ? "Forward to upstream" : "Return 404"
+        return Menu {
+            Button("Return 404") { setForwarding(false) }
+                .accessibilityIdentifier("inspector.unmatchedBehavior.return404")
+            Button("Forward to upstream") { setForwarding(true) }
+                // Forwarding needs somewhere to forward to, which server settings sets.
+                .disabled(upstream == nil)
+                .accessibilityIdentifier("inspector.unmatchedBehavior.forward")
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                Text(title)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                    .foregroundStyle(DSColors.labelTertiary)
+            }
+            .dsFieldChrome(isFocused: false)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .help(upstream.map { forwards ? "Unmatched requests go to \($0)" : "Unmatched requests get a 404" }
+              ?? "Unmatched requests get a 404. Set an upstream in server settings to forward them.")
+        .accessibilityIdentifier("inspector.unmatchedBehavior")
+        .accessibilityLabel("When unmatched")
+        .accessibilityValue(title)
+    }
+
+    private func setForwarding(_ enabled: Bool) {
+        guard let backend, (backend.effectiveUpstream != nil) != enabled else { return }
+        context.onUpdatePassthrough(backend.id, enabled)
     }
 
     private func commitGroup() {
@@ -173,7 +201,6 @@ struct EndpointInspectorSettings: View {
 /// The inspector's "Traffic" section: a small chart of the last fifteen minutes and three figures.
 struct EndpointTrafficSummary: View {
     let logs: [RequestLog]
-    var onSelect: (UUID) -> Void = { _ in }
 
     nonisolated struct Bucket: Equatable {
         var served: Int
@@ -218,29 +245,19 @@ struct EndpointTrafficSummary: View {
                     .foregroundStyle(DSColors.labelTertiary)
             }
 
-            if logs.isEmpty {
-                Text("No requests yet")
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .accessibilityIdentifier("inspector.traffic.empty")
-            } else {
-                TimelineView(.periodic(from: .now, by: 30)) { timeline in
-                    chart(Self.buckets(for: logs, now: timeline.date))
-                }
-                HStack(spacing: DSSpacing.lg) {
-                    figure("\(logs.filter { !Self.isError($0) }.count)", caption: "served",
-                           identifier: "inspector.traffic.served")
-                    figure("\(logs.filter(Self.isError).count)", caption: "errors",
-                           color: logs.contains(where: Self.isError) ? DSColors.error : DSColors.labelPrimary,
-                           identifier: "inspector.traffic.errors")
-                    figure(Self.medianDuration(of: logs).map { "\($0) ms" } ?? "—", caption: "median",
-                           identifier: "inspector.traffic.median")
-                }
-                if let latest = logs.max(by: { $0.timestamp < $1.timestamp }) {
-                    DSButton("Show latest request", variant: .ghost, size: .small,
-                             identifier: "inspector.traffic.latest") { onSelect(latest.id) }
-                        .padding(.leading, -DSSpacing.sm)
-                }
+            // The chart's frame and the three figures stand with no traffic too, at zero, so the
+            // section keeps its shape as the first requests arrive.
+            TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                chart(Self.buckets(for: logs, now: timeline.date))
+            }
+            HStack(spacing: DSSpacing.lg) {
+                figure("\(logs.filter { !Self.isError($0) }.count)", caption: "served",
+                       identifier: "inspector.traffic.served")
+                figure("\(logs.filter(Self.isError).count)", caption: "errors",
+                       color: logs.contains(where: Self.isError) ? DSColors.error : DSColors.labelPrimary,
+                       identifier: "inspector.traffic.errors")
+                figure(Self.medianDuration(of: logs).map { "\($0) ms" } ?? "\u{2014}", caption: "median",
+                       identifier: "inspector.traffic.median")
             }
         }
         .padding(.horizontal, DSInspectorMetrics.inset)
