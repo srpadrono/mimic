@@ -33,7 +33,7 @@ nonisolated public enum DSLayout {
     /// The gap between the window edge, the floating panels, and the content surface.
     public static let panelInset: CGFloat = 8
     /// Label column in the inspector's key-value rows.
-    public static let inspectorLabelWidth: CGFloat = 88
+    public static let inspectorLabelWidth: CGFloat = 104
     /// Label column in sheets.
     public static let sheetLabelWidth: CGFloat = 104
     /// The method column: fits DELETE and OPTIONS in SF Mono 11.

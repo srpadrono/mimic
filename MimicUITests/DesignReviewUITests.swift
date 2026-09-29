@@ -100,6 +100,7 @@ final class DesignReviewUITests: MimicUITestCase {
         if workspace.addEndpointButton.waitForExistence(timeout: 3) {
             workspace.addEndpointButton.click()
             if newEndpointSheet.nameField.waitForExistence(timeout: 3) {
+                newEndpointSheet.nameField.click()
                 newEndpointSheet.nameField.typeText("List reviews")
                 capture("05-new-endpoint")
             }
