@@ -1981,8 +1981,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "Endpoint actions, GET")
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
-        // The left edge is the method label's padding, not its letters. It should still respond.
-        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
+        // On the method's letters, well clear of the chevron: the whole method opens the menu.
+        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
 
         let duplicate = app.menuItems["Duplicate endpoint"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
@@ -2007,8 +2007,8 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The copy should be listed under its own name")
     }
 
-    /// The compact editor must keep the same endpoint menu and AX name as the wide editor. A click
-    /// in its outer left edge also catches a glyph-sized AppKit menu target.
+    /// The compact editor must keep the same endpoint menu and AX name as the wide editor. A click on
+    /// the method, away from the chevron, also catches a glyph-sized AppKit menu target.
     @MainActor
     func testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance() throws {
         usesDarkAppearance = true
@@ -2027,7 +2027,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertGreaterThanOrEqual(menu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(menu.frame.height, 21)
 
-        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).click()
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
         XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
