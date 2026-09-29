@@ -137,6 +137,9 @@ public struct MimicScene: Scene {
                 Button("Show Journeys") { appState.navigatorRequest = .journeys }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
                     .disabled(appState.currentProject == nil)
+                // Clears the journey filter, opens the active journey's group and selects it.
+                Button("Show Active Journey") { appState.activeJourneyRevealRequest += 1 }
+                    .disabled(appState.activeJourney == nil)
 
 
                 Divider()

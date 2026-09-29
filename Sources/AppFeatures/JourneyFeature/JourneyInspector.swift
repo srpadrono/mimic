@@ -292,21 +292,23 @@ private struct JourneyStepInspector: View {
         let endpoint = JourneyStepSheet.matchingEndpoint(
             method: step.method, path: step.path, in: appState.currentProject?.endpoints ?? []
         )
-        HStack(spacing: 6) {
+        // Wraps under the field rather than truncating mid-sentence in a narrow inspector.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let endpoint {
                 Image(systemName: "checkmark")
                     .font(.system(size: DSGlyph.disclosure, weight: .semibold))
                     .foregroundStyle(DSColors.success)
                     .accessibilityHidden(true)
                 Text("Matches \(endpoint.method.rawValue) \(endpoint.path)")
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("No endpoint serves this route")
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .font(DSTypography.caption)
         .foregroundStyle(DSColors.labelTertiary)
-        .lineLimit(1)
-        .truncationMode(.middle)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.md)
         .padding(.trailing, DSInspectorMetrics.inset)
         .frame(minHeight: 18)

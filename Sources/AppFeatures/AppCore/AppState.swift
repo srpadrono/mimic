@@ -24,6 +24,8 @@ final class AppState {
     /// the panels, so it bumps a counter and the window mirrors back what is showing.
     var requestLogToggleRequest = 0
     var inspectorToggleRequest = 0
+    /// Journeys ▸ Show Active Journey: the window selects the active journey in its navigator.
+    var activeJourneyRevealRequest = 0
     var isRequestLogVisible = true
     var isInspectorVisible = true
     /// False while the open project has nothing to inspect: no endpoints, no journeys, no request

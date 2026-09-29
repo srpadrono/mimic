@@ -24,29 +24,17 @@ struct JourneyStepRow: View {
                 .frame(width: 44, alignment: .leading)
 
             // The route alone, as the design draws it; the step's name is in the tooltip, the
-            // spoken label and the inspector.
+            // spoken label and the inspector. It takes what the trailing facts leave, down to a floor.
             Text(routeLabel)
                 .font(DSTypography.code)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(routeHelp)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: Self.routeMinimumWidth, maxWidth: .infinity, alignment: .leading)
+
+            trailingFacts
                 .layoutPriority(1)
-
-            outcomeChip
-            if step.repeatCount > 1 { chip("\u{00D7} \(step.repeatCount)") }
-            statusLabel
-
-            if let progress {
-                Text(Self.progressText(progress))
-                    .font(DSTypography.Figure.regular)
-                    .foregroundStyle(progress.isCurrent ? DSColors.labelSecondary : DSColors.labelTertiary)
-                    .lineLimit(1)
-                    .frame(minWidth: 0, idealWidth: 120, maxWidth: 120, alignment: .trailing)
-                    // First to give way in a narrow pane; the node and route matter more.
-                    .layoutPriority(-1)
-            }
         }
         .padding(.horizontal, DSSpacing.md)
         .frame(height: DSRowHeight.step)
@@ -126,6 +114,60 @@ struct JourneyStepRow: View {
         .accessibilityHidden(true)
     }
 
+    // MARK: - Trailing facts
+
+    /// The narrowest the route gets before the trailing facts start to give way.
+    private static let routeMinimumWidth: CGFloat = 64
+    /// The run column, as wide as the design draws it, so every row's status sits in one column.
+    private static let readoutWidth: CGFloat = 120
+
+    /// Chips, status and the run readout, whole. As the pane narrows the readout's column tightens
+    /// to its text, then the outcome chip goes, then the repeat chip; the status and the readout
+    /// ("Served 1 of 1", "Waiting", "Not reached") always stay.
+    private var trailingFacts: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: DSSpacing.md) {
+                outcomeChip
+                repeatChip
+                statusLabel
+                readout(width: Self.readoutWidth)
+            }
+            HStack(spacing: DSSpacing.md) {
+                outcomeChip
+                repeatChip
+                statusLabel
+                readout(width: nil)
+            }
+            HStack(spacing: DSSpacing.md) {
+                repeatChip
+                statusLabel
+                readout(width: nil)
+            }
+            HStack(spacing: DSSpacing.md) {
+                statusLabel
+                readout(width: nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var repeatChip: some View {
+        if step.repeatCount > 1 { chip("\u{00D7} \(step.repeatCount)") }
+    }
+
+    /// What this step has done so far in the run, right-aligned in its column. Never truncated.
+    @ViewBuilder
+    private func readout(width: CGFloat?) -> some View {
+        if let progress {
+            Text(Self.progressText(progress))
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(progress.isCurrent ? DSColors.labelSecondary : DSColors.labelTertiary)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(minWidth: width, alignment: .trailing)
+        }
+    }
+
     // MARK: - Outcome
 
     /// What happens before, or instead of, a response: a delay, a dropped connection, a time-out.
@@ -151,7 +193,7 @@ struct JourneyStepRow: View {
         }
     }
 
-    /// A quiet neutral fact about the step. Unbounded strings, so it truncates before the route does.
+    /// A quiet neutral fact about the step, shown whole or not at all (see `trailingFacts`).
     private func chip(_ text: String, systemImage: String? = nil) -> some View {
         HStack(spacing: DSSpacing.xs) {
             if let systemImage {

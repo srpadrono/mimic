@@ -18,7 +18,19 @@ struct NavigatorPage {
     var noJourneyMatches: XCUIElement { element("journeys.noMatches") }
     var journeyGroupField: XCUIElement { app.textFields["journeyEditor.groupTag"] }
     func journeyGroup(_ name: String) -> XCUIElement { element("journeys.group.\(name)") }
-    var activeJourney: XCUIElement { app.buttons["navigator.activeJourney"] }
+    /// The active journey's row: it speaks ", active". Only in the tree on the Journeys tab.
+    var activeJourney: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "journeys.row.", ", active"
+        )).firstMatch
+    }
+    /// Journeys ▸ Show Active Journey. The navigator's footer holds only the filter and Add.
+    func showActiveJourneyFromMenu() {
+        app.menuBars.menuBarItems["Journeys"].click()
+        let item = app.menuItems["Show Active Journey"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Journeys ▸ Show Active Journey should be listed")
+        item.click()
+    }
     var methodScope: XCUIElement { app.menuButtons["sidebar.filter.scope"].firstMatch }
 
     func row(named name: String) -> XCUIElement {
@@ -515,7 +527,7 @@ final class NavigatorUITests: MimicUITestCase {
         try await command(["journeyActivate": ["journey": ["name": "Payment succeeds after the second authorization attempt"]]])
         navigator.journeyGroup("Checkout").click()
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForNonExistence(timeout: 5))
-        navigator.activeJourney.click()
+        navigator.showActiveJourneyFromMenu()
         XCTAssertTrue(navigator.row(named: "Payment succeeds").waitForExistence(timeout: 5))
         XCTAssertTrue(navigator.row(named: "Payment succeeds").label.contains(", active"))
         add(navigator.screenshot("navigator-journeys-grouped-wide"))
@@ -650,7 +662,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertEqual(navigator.row(named: name).frame, before)
         navigator.filter(navigator.journeyFilter, text: "Empty")
         XCTAssertTrue(navigator.row(named: name).waitForNonExistence(timeout: 5))
-        navigator.activeJourney.click()
+        navigator.showActiveJourneyFromMenu()
         XCTAssertTrue(navigator.row(named: name).waitForExistence(timeout: 5))
         XCTAssertEqual(navigator.journeyFilter.value as? String, "")
         XCTAssertTrue(journeys.deactivateButton.isHittable)

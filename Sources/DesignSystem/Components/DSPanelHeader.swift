@@ -118,7 +118,6 @@ public struct DSPanelHeaderButton: View {
     private let help: String
     private let identifier: String
     private let role: ButtonRole?
-    private let tint: Color?
     private let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
@@ -129,14 +128,12 @@ public struct DSPanelHeaderButton: View {
         help: String,
         identifier: String,
         role: ButtonRole? = nil,
-        tint: Color? = nil,
         action: @escaping () -> Void
     ) {
         self.systemImage = systemImage
         self.help = help
         self.identifier = identifier
         self.role = role
-        self.tint = tint
         self.action = action
     }
 
@@ -148,7 +145,7 @@ public struct DSPanelHeaderButton: View {
                 .font(.system(size: DSGlyph.control, weight: .regular))
                 // `labelSecondary` at rest, not `labelTertiary`: at tertiary alpha the "add endpoint"
                 // and "clear log" buttons were nearly invisible until the pointer found them.
-                .foregroundStyle(tint ?? (isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary))
+                .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                 // `DSControlHeight.regular`, the panel control size, so the target matches the
                 // buttons and fields beside it.
                 .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)

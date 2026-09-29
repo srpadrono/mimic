@@ -129,9 +129,27 @@ extension JourneysNavigatorPage {
             .firstMatch
     }
 
-    /// The footer indicates the active journey and opens it without changing the run.
+    /// The active journey's navigator row, which speaks ", active" and, while a run is in flight,
+    /// ", step 2 of 5". The design's footer has no indicator of its own; Journeys ▸ Show Active
+    /// Journey reveals the row (`showActiveJourneyFromMenu`).
     var activeJourneyIndicator: XCUIElement {
-        app.buttons["navigator.activeJourney"].firstMatch
+        app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "journeys.row.", ", active"
+            ))
+            .firstMatch
+    }
+
+    /// Journeys ▸ Show Active Journey: selects the active journey in the navigator.
+    func showActiveJourneyFromMenu(file: StaticString = #filePath, line: UInt = #line) {
+        app.menuBars.menuBarItems["Journeys"].click()
+        let item = app.menuItems["Show Active Journey"].firstMatch
+        guard item.waitForExistence(timeout: 5) else {
+            XCTFail("Journeys ▸ Show Active Journey should be listed", file: file, line: line)
+            UITestApp.dismissAnyOpenMenu(in: app)
+            return
+        }
+        item.click()
     }
 
 }
@@ -637,7 +655,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
     @MainActor
     private func sidebarRunText() -> String {
-        spokenText(of: journeys.activeJourneyIndicator)
+        spokenText(of: journeys.activeJourneyIndicator).lowercased()
     }
 
     // MARK: - 1. The editor's behaviour band  (JRNEDIT)
@@ -1443,17 +1461,20 @@ final class JourneyEditorUITests: MimicUITestCase {
         journeys.activateButton.click()
         XCTAssertTrue(journeys.activeJourneyIndicator.waitForExistence(timeout: 10))
         XCTAssertEqual(row.frame.minY, initialFrame.minY, accuracy: 1, "Activation must not move the list")
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") })
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 1 of 5") })
         journeys.advanceButton.click()
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 2 of 5") })
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 2 of 5") })
         let shell = WorkspaceShellPage(app: app)
         shell.endpointsTab.click()
-        XCTAssertTrue(journeys.activeJourneyIndicator.exists, "The endpoint view also identifies an override")
-        journeys.activeJourneyIndicator.click()
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitForNonExistence(timeout: 5),
+                      "The endpoints navigator lists endpoints, not the journey")
+        journeys.showActiveJourneyFromMenu()
         XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 5))
-        XCTAssertTrue(sidebarRunText().contains("Step 2 of 5"), "Revealing the journey must not restart it")
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitForExistence(timeout: 5),
+                      "Show Active Journey should bring the navigator back to the running journey")
+        XCTAssertTrue(sidebarRunText().contains("step 2 of 5"), "Revealing the journey must not restart it")
         journeys.restartButton.click()
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("Step 1 of 5") })
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 1 of 5") })
         journeys.deactivateButton.click()
         XCTAssertTrue(journeys.activeJourneyIndicator.waitForNonExistence(timeout: 10))
         XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5))

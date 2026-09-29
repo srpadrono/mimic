@@ -446,6 +446,9 @@ struct WorkspaceView: View {
             navigatorTab = requested
             appState.navigatorRequest = nil
         }
+        // Journeys ▸ Show Active Journey. The navigator's footer has only the filter and Add, as
+        // the design draws it, so the reveal lives in the menu bar.
+        .onChange(of: appState.activeJourneyRevealRequest) { _, _ in revealActiveJourney() }
         // Last in the chain, like the only other postfix `#if` in this app (`MimicScene`), and for
         // the same reason: everything inside it has to vanish in Release, and a conditional block at
         // the end of a modifier chain is the shape that is unambiguously allowed to.
@@ -1039,22 +1042,6 @@ struct WorkspaceView: View {
                 identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
                 focusRequest: appState.navigatorFilterRequest
             ) {
-                if let active = appState.activeJourney {
-                    DSPanelHeaderButton(
-                        systemImage: "play.circle.fill",
-                        help: "Show active journey: \(active.name)",
-                        identifier: "navigator.activeJourney",
-                        tint: DSColors.success
-                    ) {
-                        journeyFilter = ""
-                        if let group = active.groupTag {
-                            collapsedJourneyGroups.remove(JourneyNavigatorList.groupSectionKey(group))
-                        }
-                        navigatorTab = .journeys
-                        appState.selectedJourneyID = active.id
-                    }
-                    .accessibilityValue("\(active.name), \(activeJourneyProgress ?? "Active")")
-                }
                 switch navigatorTab {
                 case .endpoints:
                     DSPanelHeaderButton(
@@ -1085,6 +1072,17 @@ struct WorkspaceView: View {
         return status.isComplete
             ? "Complete"
             : "Step \((status.currentStepIndex ?? 0) + 1) of \(status.totalSteps)"
+    }
+
+    /// Shows the active journey in the navigator whatever the filter or its group's disclosure.
+    private func revealActiveJourney() {
+        guard let active = appState.activeJourney else { return }
+        journeyFilter = ""
+        if let group = active.groupTag {
+            collapsedJourneyGroups.remove(JourneyNavigatorList.groupSectionKey(group))
+        }
+        navigatorTab = .journeys
+        appState.selectedJourneyID = active.id
     }
 
     // MARK: - Request log wiring

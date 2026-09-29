@@ -1459,10 +1459,15 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "…and count the journeys the project now has — \(overview.rowDescription("journeys"))"
         )
 
-        XCTAssertTrue(
-            NavigatorPage(app: app).activeJourney.waitForExistence(timeout: 5),
-            "The footer should expose the running journey from either navigator mode"
-        )
+        // Reachable from either navigator mode through the menu bar; the footer holds only the
+        // filter and Add, as the design draws it.
+        app.menuBars.menuBarItems["Journeys"].click()
+        let showActive = app.menuItems["Show Active Journey"].firstMatch
+        XCTAssertTrue(showActive.waitForExistence(timeout: 5), "Journeys ▸ Show Active Journey should be listed")
+        XCTAssertTrue(showActive.isEnabled, "…and enabled while a journey is running")
+        UITestApp.dismissAnyOpenMenu(in: app)
+        XCTAssertFalse(app.buttons["navigator.activeJourney"].exists,
+                       "The navigator footer has no active-journey button")
 
         // INSPOV-06 — the overview offers a path back to journeys.
         XCTAssertTrue(
