@@ -1055,6 +1055,9 @@ struct WorkspaceView: View {
                     addJourneyMenu
                 }
             }
+            // One field per navigator: AppKit can keep a focused field's old identifier and label when
+            // only its binding changes, so the journeys filter could still answer as the endpoints one.
+            .id(navigatorTab)
         }
     }
 
