@@ -122,13 +122,17 @@ struct InspectorPanelView: View {
                     )
                     .padding(.leading, -6)
                 }
-                Text(mode.title)
+                // A selected journey step names itself, "Step 3", as the design's inspector does.
+                Text(mode == .journey ? (journey?.title ?? mode.title) : mode.title)
                     .font(DSTypography.bodySemibold)
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                     .accessibilityIdentifier("ds.panelheader.title.inspector")
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
+                if mode == .journey, let journey {
+                    JourneyStepActionsMenu(context: journey)
+                }
                 if mode == .scenarios, let endpoint {
                     DSPanelHeaderButton(systemImage: "plus", help: "Add scenario",
                                         identifier: "inspector.addScenarioButton") {

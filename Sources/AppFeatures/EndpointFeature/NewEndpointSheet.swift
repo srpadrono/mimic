@@ -300,6 +300,8 @@ struct SheetRequestField: View {
     let validationIdentifier: String
     var isFocused: FocusState<Bool>.Binding
     let onSubmit: () -> Void
+    /// A green tick and a short fact at the field's trailing edge, such as "Matches an endpoint".
+    var matchNote: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -331,6 +333,21 @@ struct SheetRequestField: View {
                     .onSubmit(onSubmit)
                     .accessibilityIdentifier(fieldIdentifier)
                     .accessibilityLabel("Path")
+
+                if let matchNote {
+                    HStack(spacing: DSSpacing.xs) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                            .accessibilityHidden(true)
+                        Text(matchNote)
+                            .font(DSTypography.caption)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(DSColors.success)
+                    .fixedSize()
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("\(fieldIdentifier).matchNote")
+                }
             }
             // Same radius as `DSTextField` at sheet height, so stacked rows line up.
             .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,

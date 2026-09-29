@@ -8,8 +8,8 @@ nonisolated public enum DSRowHeight {
     public static let table: CGFloat = 24
     /// 22pt — a sidebar group header.
     public static let groupHeader: CGFloat = 22
-    /// 36pt — a journey step.
-    public static let step: CGFloat = 36
+    /// 48pt — a journey step: a 22pt run node with room around it.
+    public static let step: CGFloat = 48
     /// 44pt — a recent project in the welcome window.
     public static let recent: CGFloat = 44
 }

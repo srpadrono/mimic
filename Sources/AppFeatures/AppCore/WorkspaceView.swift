@@ -18,6 +18,10 @@ struct WorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInspector: Bool
     @State private var showDrawer: Bool
+    /// The request log on the journeys screen, which the design draws without one. Kept apart from
+    /// `showDrawer`, the endpoints screen's persisted preference, so ⌥⌘L can still show the log
+    /// beside a journey without the endpoints screen losing its own arrangement.
+    @State private var showJourneyDrawer = false
     @State private var selectedEndpointID: UUID?
     @State private var renameEndpointTarget: Endpoint?
     @State private var editEndpointRequestTarget: Endpoint?
@@ -147,7 +151,7 @@ struct WorkspaceView: View {
                     // enforces rather than a ceiling this view recomputes from a measured container.
                     DSSplitPane(
                         axis: .vertical,
-                        isSecondaryPresented: $showDrawer,
+                        isSecondaryPresented: logPresentation,
                         secondaryThickness: $drawerHeight,
                         minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
                         minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
@@ -219,6 +223,9 @@ struct WorkspaceView: View {
             // own toolbar section. Nesting it in the detail column merges both action groups.
             .inspector(isPresented: $showInspector) {
                 inspectorPanel
+                    // The journey inspector edits through `AppState`; stated so the column never
+                    // depends on how the inspector happens to be hosted.
+                    .environment(appState)
                     .inspectorColumnWidth(
                         min: PanelLayoutStore.Bounds.minimumInspectorWidth,
                         ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
@@ -367,6 +374,8 @@ struct WorkspaceView: View {
             CaptureJourneySheet(capture: capture) { name, logs in
                 guard let journey = appState.addJourney(name: name, capturing: logs) else { return }
                 appState.selectedJourneyID = journey.id
+                // Captured from the log, so the log stays beside the journey it fed.
+                showJourneyDrawer = true
                 navigatorTab = .journeys
             }
         }
@@ -401,9 +410,9 @@ struct WorkspaceView: View {
         }
         // Panel arrangement is a preference, so it is written as it changes.
         .onChange(of: drawerHeight) { _, _ in persistLayout() }
-        .onChange(of: showDrawer, initial: true) { _, visible in
+        .onChange(of: showDrawer) { _, _ in persistLayout() }
+        .onChange(of: isLogShown, initial: true) { _, visible in
             appState.isRequestLogVisible = visible
-            persistLayout()
         }
         .onChange(of: showInspector, initial: true) { _, visible in
             appState.isInspectorVisible = visible
@@ -598,12 +607,12 @@ struct WorkspaceView: View {
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             onShowUnmatched: {
-                showDrawer = true
+                logPresentation.wrappedValue = true
                 showUnmatchedOnly = true
             },
             onShowSettings: { showBackendSettings = true },
             onShowTraffic: {
-                showDrawer = true
+                logPresentation.wrappedValue = true
                 showUnmatchedOnly = false
             },
             onToggleServer: {
@@ -629,7 +638,7 @@ struct WorkspaceView: View {
             if unmatchedCount > 0 {
                 Divider()
                 Button("Show unmatched requests (\(unmatchedCount))") {
-                    showDrawer = true
+                    logPresentation.wrappedValue = true
                     showUnmatchedOnly = true
                 }
                 .accessibilityIdentifier("toolbar.showUnmatched")
@@ -673,11 +682,11 @@ struct WorkspaceView: View {
 
     private var drawerToolbarButton: some View {
         Button { toggleRequestLog() } label: {
-            Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomthird.inset.filled")
+            Label(isLogShown ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomthird.inset.filled")
         }
-        .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
+        .help(isLogShown ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
         .accessibilityIdentifier("toggleDrawerButton")
-        .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
+        .accessibilityLabel(isLogShown ? "Hide request log" : "Show request log")
     }
 
     private var inspectorToolbarButton: some View {
@@ -690,7 +699,22 @@ struct WorkspaceView: View {
     }
 
     private func toggleRequestLog() {
-        showDrawer.toggle()
+        logPresentation.wrappedValue.toggle()
+    }
+
+    /// Whether the request log is under the centre pane on the screen now showing.
+    private var isLogShown: Bool {
+        navigatorTab == .journeys ? showJourneyDrawer : showDrawer
+    }
+
+    /// The log's visibility for the screen now showing: the journeys screen opens without it.
+    private var logPresentation: Binding<Bool> {
+        Binding(
+            get: { isLogShown },
+            set: { visible in
+                if navigatorTab == .journeys { showJourneyDrawer = visible } else { showDrawer = visible }
+            }
+        )
     }
 
     /// Shared by the full toolbar and its compact overflow menu.
@@ -900,6 +924,7 @@ struct WorkspaceView: View {
                     JourneyNavigatorList(
                         journeys: appState.journeys,
                         activeJourneyID: appState.activeJourney?.id,
+                        activeStatus: appState.activeJourneyStatus,
                         selectedJourneyID: $appState.selectedJourneyID,
                         onActivate: appState.activateJourney,
                         onAdd: {
@@ -1007,6 +1032,7 @@ struct WorkspaceView: View {
                 // Appending to an existing journey shows it too. Without this, capturing eight calls
                 // into a journey you cannot see is indistinguishable from having captured nothing.
                 appState.selectedJourneyID = journey.id
+                showJourneyDrawer = true
                 navigatorTab = .journeys
             },
             // Capturing into a brand-new journey names it first — the sheet then shows the journey,
@@ -1040,7 +1066,8 @@ struct WorkspaceView: View {
             overview: endpoint == nil && detail == nil ? inspectorOverview : nil,
             journey: selectedJourney.map {
                 JourneyInspector.Context(selected: $0, active: appState.activeJourney,
-                                         progress: activeJourneyProgress, serverState: appState.serverState)
+                                         progress: activeJourneyProgress, serverState: appState.serverState,
+                                         selectedStepID: appState.selectedJourneyStepID)
             },
             selectedRequestCount: selectedLogIDs.count,
             endpointTraffic: endpoint.map {

@@ -63,7 +63,7 @@ final class AppState {
     #endif
 
     /// What the window is presenting and what it has selected. Held apart because none of it is a
-    /// fact about the project — see ``WindowPresentation``. The four properties below forward to it
+    /// fact about the project — see ``WindowPresentation``. The properties below forward to it
     /// with their original names and types, so every `appState.showNewProjectSheet = true` and every
     /// `$appState.selectedJourneyID` in the views still reads and writes the same thing.
     let presentation: WindowPresentation
@@ -82,7 +82,19 @@ final class AppState {
     }
     var selectedJourneyID: UUID? {
         get { presentation.selectedJourneyID }
-        set { presentation.selectedJourneyID = newValue }
+        set {
+            // A step selection belongs to one journey; choosing another shows that journey whole.
+            if newValue != presentation.selectedJourneyID { presentation.selectedJourneyStepID = nil }
+            presentation.selectedJourneyID = newValue
+        }
+    }
+    var selectedJourneyStepID: UUID? {
+        get { presentation.selectedJourneyStepID }
+        set { presentation.selectedJourneyStepID = newValue }
+    }
+    var editingJourneyStepID: UUID? {
+        get { presentation.editingJourneyStepID }
+        set { presentation.editingJourneyStepID = newValue }
     }
     var serverState: ServerState { server.serverState }
     /// The open project's configuration — read from the project, not from the runtime's copy.

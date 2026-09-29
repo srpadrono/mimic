@@ -38,10 +38,6 @@ private func resolveJourneyControl(
 
 extension JourneysNavigatorPage {
 
-    var settingsDisclosure: XCUIElement {
-        app.buttons["journeyEditor.settingsDisclosure"].firstMatch
-    }
-
     /// The journey's one-line summary in the editor header, beside its name.
     var editorSummary: XCUIElement {
         let byStaticText = app.staticTexts["journeyEditor.summary"].firstMatch
@@ -172,14 +168,20 @@ extension JourneyStepSheetPage {
         app.descendants(matching: .any).matching(identifier: "stepSheet.headersHint").firstMatch
     }
 
-    var headersDisclosure: XCUIElement { app.buttons["stepSheet.headersDisclosure"] }
+    /// The Body / Headers switch above the response well.
+    var bodyTab: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "stepSheet.tab.body").firstMatch
+    }
+    var headersTab: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "stepSheet.tab.headers").firstMatch
+    }
 
+    /// The body is the endpoint editor's `DSJSONEditor`, whose native text view carries the
+    /// `ds.jsoneditor.` prefix.
     var bodyField: XCUIElement {
-        let byTextField = app.textFields["stepSheet.bodyField"].firstMatch
-        if byTextField.exists { return byTextField }
-        let byTextView = app.textViews["stepSheet.bodyField"].firstMatch
+        let byTextView = app.textViews["ds.jsoneditor.stepSheet.body"].firstMatch
         if byTextView.exists { return byTextView }
-        return app.descendants(matching: .any).matching(identifier: "stepSheet.bodyField").firstMatch
+        return app.descendants(matching: .any).matching(identifier: "ds.jsoneditor.stepSheet.body").firstMatch
     }
 
     var prettyPrintButton: XCUIElement { app.buttons["stepSheet.prettyPrintButton"] }
@@ -526,8 +528,8 @@ final class JourneyEditorUITests: MimicUITestCase {
     /// The first word only. An open `NSMenu` matches what has been typed against item titles as a
     /// prefix, and a **space activates whatever is highlighted** — so typing "Strict sequence" whole
     /// would commit on the space and type "sequence" into whatever is behind the menu. Every option
-    /// this suite picks is uniquely identified by its first word within its own menu ("Ordered" /
-    /// "Strict", "Stop" / "Restart", "Fall" / "404", and the HTTP methods, where "PO" already
+    /// this suite picks is uniquely identified by its first word within its own menu ("Per" /
+    /// "Strict", "Stop" / "Restart", "Use" / "404", and the HTTP methods, where "PO" already
     /// separates POST from PUT and PATCH).
     private func typeSelectPrefix(of option: String) -> String {
         guard let firstWord = option.split(separator: " ").first else { return option }
@@ -572,32 +574,13 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
     }
 
-    /// Expanded settings share the centre pane with the step list and request log. In a short pane
-    /// the controls still exist in the accessibility tree below the settings scroll viewport, and
-    /// XCTest's automatic click scroll can leave them there. Drive that specific scroll view with a
-    /// vertical gesture and check the control's hit point before clicking it.
-    @MainActor
-    private func revealJourneySetting(_ control: XCUIElement) {
-        let scroller = app.scrollViews["journeyEditor.settingsScroll"].firstMatch
-        XCTAssertTrue(scroller.waitForExistence(timeout: 5), "Expanded journey settings should scroll")
-        XCTAssertTrue(control.waitForExistence(timeout: 5), "The journey setting should exist")
-        // Inside the scroll view's visible frame, not only hittable: a control clipped by the
-        // scroll view's edge still reports hittable, and the click then lands on the step list.
-        func revealed() -> Bool { control.isHittable && scroller.frame.contains(control.frame) }
-        for delta in [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0] {
-            if revealed() { return }
-            scroller.scroll(byDeltaX: 0, deltaY: CGFloat(delta))
-        }
-        XCTAssertTrue(revealed(), "The journey setting should be visible after scrolling")
-    }
-
     /// Picks one segment of the step sheet's outcome control.
     @MainActor
     private func selectOutcome(_ title: String) {
-        let scoped = stepSheet.outcomePicker.descendants(matching: .radioButton)
+        let scoped = stepSheet.outcomePicker.descendants(matching: .button)
             .matching(NSPredicate(format: "label == %@", title))
             .firstMatch
-        let loose = app.radioButtons[title].firstMatch
+        let loose = app.sheets.firstMatch.buttons.matching(NSPredicate(format: "label == %@", title)).firstMatch
         XCTAssertTrue(
             UITestApp.waitForAny([scoped, loose], timeout: 5),
             "The outcome control should offer \"\(title)\""
@@ -691,33 +674,26 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The editor should show the journey's one-line summary"
         )
 
-        XCTAssertEqual(journeys.settingsDisclosure.value as? String, "Collapsed")
-        journeys.settingsDisclosure.click()
-
-        // JRNEDIT-05/06/07 — the three pickers.
+        // JRNEDIT-05/06/07 — the three pickers, on one row under the progress strip.
         assertSpeaks(
             journeys.matchModePicker,
-            contains: "Ordered per route",
+            contains: "Per endpoint",
             "Match mode should start on the default"
         )
-        revealJourneySetting(journeys.matchModePicker)
         choose("Strict sequence", in: journeys.matchModePicker, "The match mode picker")
-        revealJourneySetting(journeys.completionPicker)
         choose("Restart", in: journeys.completionPicker, "The on-completion picker")
-        revealJourneySetting(journeys.unmatchedPicker)
         choose("404", in: journeys.unmatchedPicker, "The unscripted-requests picker")
 
-        // JRNEDIT-08 — the checkbox.
+        // JRNEDIT-08 — the checkbox, in the inspector while no step is selected.
         XCTAssertTrue(
             journeys.autoAdvanceToggle.waitForExistence(timeout: 5),
-            "Auto-advance should be offered"
+            "Auto-advance should be offered in the journey's inspector"
         )
         // On by default — `Journey.init` declares `autoAdvance: Bool = true`, so a new journey walks
         // itself forward as its steps are matched. This asserted 0 on the assumption that a checkbox
         // starts clear; CI read 1, and the model is right. Toggling it *off* is the state worth
         // proving anyway: it is the one a user chooses deliberately.
         XCTAssertEqual(journeys.autoAdvanceToggle.value as? Int, 1, "Auto-advance should start on")
-        revealJourneySetting(journeys.autoAdvanceToggle)
         journeys.autoAdvanceToggle.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { self.journeys.autoAdvanceToggle.value as? Int == 0 },
@@ -748,9 +724,6 @@ final class JourneyEditorUITests: MimicUITestCase {
             contains: "Retry after failure",
             "Clicking the row should reopen the template journey"
         )
-
-        XCTAssertEqual(journeys.settingsDisclosure.value as? String, "Collapsed")
-        journeys.settingsDisclosure.click()
 
         assertSpeaks(
             journeys.matchModePicker,
@@ -1016,10 +989,10 @@ final class JourneyEditorUITests: MimicUITestCase {
         createEmptyJourney(named: "Payments")
         openStepSheet()
 
-        XCTAssertTrue(stepSheet.headersDisclosure.exists, "Optional headers should be discoverable")
+        XCTAssertTrue(stepSheet.headersTab.exists, "Optional headers should be discoverable")
         XCTAssertTrue(stepSheet.prettyPrintButton.exists, "The response body should offer JSON formatting")
         XCTAssertFalse(stepSheet.prettyPrintButton.isEnabled, "An empty body cannot be formatted")
-        XCTAssertFalse(stepSheet.headersField.exists, "A new step should keep optional headers collapsed")
+        XCTAssertFalse(stepSheet.headersField.exists, "A new step should open on its body, not its headers")
         // Timing is no longer behind a disclosure: a respond step shows its delay and serve count
         // inline beside the status, with their defaults.
         XCTAssertTrue(stepSheet.delayField.waitForExistence(timeout: 5),
@@ -1041,8 +1014,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         replaceText(in: stepSheet.statusField, with: "402")
 
         // JRNSTEP-10 — the hint that says how to get a second line, which is not guessable.
-        stepSheet.reveal(stepSheet.headersDisclosure, byScrollingUp: true)
-        stepSheet.headersDisclosure.click()
+        stepSheet.reveal(stepSheet.headersTab, byScrollingUp: true)
+        stepSheet.headersTab.click()
         stepSheet.reveal(stepSheet.headersHint, byScrollingUp: true)
         XCTAssertTrue(
             stepSheet.headersHint.waitForExistence(timeout: 5),
@@ -1080,6 +1053,9 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.headersField.typeText(" 30")
         assertSpeaks(stepSheet.headersField, contains: "Retry-After: 30",
                      "The corrected header must contain a colon before saving")
+        stepSheet.reveal(stepSheet.bodyTab, byScrollingUp: true)
+        stepSheet.bodyTab.click()
+        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "Body should swap the headers out")
         stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
         XCTAssertTrue(stepSheet.bodyField.isHittable, "The response body should scroll into view")
         stepSheet.bodyField.click()
@@ -1143,7 +1119,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         assertSpeaks(journeys.step(at: 0), contains: "/payments", "The step should keep its route")
         assertSpeaks(journeys.step(at: 0), contains: "responds 402", "The step should keep its status code")
 
-        journeys.step(at: 0).click()
+        journeys.step(at: 0).doubleClick()
         XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "The saved step should reopen")
         XCTAssertEqual(stepSheet.bodyField.value as? String, formattedBody,
                        "The formatted body should survive saving and reopening exactly")
@@ -1155,7 +1131,7 @@ final class JourneyEditorUITests: MimicUITestCase {
                       "Clearing must empty the editor before saving")
         stepSheet.saveButton.click()
         XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5))
-        journeys.step(at: 0).click()
+        journeys.step(at: 0).doubleClick()
         XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5))
         XCTAssertEqual(stepSheet.bodyField.value as? String, "",
                        "An explicitly cleared body must stay empty when the saved step reopens")
@@ -1176,7 +1152,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         XCTAssertTrue(stepSheet.statusField.waitForExistence(timeout: 5), "Respond is the default outcome")
 
         // JRNSTEP-12.
-        selectOutcome("Drop the connection")
+        selectOutcome("Drop connection")
         XCTAssertTrue(
             stepSheet.dropHint.waitForExistence(timeout: 5),
             "Dropping the connection should explain what the client sees"
@@ -1202,7 +1178,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             "Coming back to Respond should bring the status code back"
         )
 
-        selectOutcome("Drop the connection")
+        selectOutcome("Drop connection")
         stepSheet.pathField.click()
         stepSheet.pathField.typeText("/stream")
         stepSheet.saveButton.click()
@@ -1235,9 +1211,9 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.saveButton.click()
         XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
 
-        // JRNORD-01 — the row is the way back into the sheet.
-        journeys.step(at: 0).click()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "Clicking a step should reopen it")
+        // JRNORD-01 — the row is the way back into the sheet: one click selects, two open it.
+        journeys.step(at: 0).doubleClick()
+        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "Double-clicking a step should reopen it")
 
         // JRNSTEP-21 — the sheet is headed differently and arrives populated.
         assertSpeaks(
@@ -1381,7 +1357,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             contains: "Not active",
             "Before activation the readout should say the endpoints answer for themselves"
         )
-        XCTAssertFalse(journeys.advanceButton.isEnabled, "Advance is meaningless before activation")
+        XCTAssertFalse(journeys.advanceButton.exists, "Advance is only offered once the journey is active")
 
         journeys.activateButton.click()
         XCTAssertTrue(

@@ -184,7 +184,52 @@ struct JourneyFeatureLogicTests {
     @Test("A failing step's chip reads as a sentence")
     func describesFailuresForTheChip() {
         #expect(JourneyStepRow.failureDisplayText(.connectionDrop) == "Drop connection")
-        #expect(JourneyStepRow.failureDisplayText(.timeout(holdMs: 30_000)) == "Time out after 30000 ms")
+        #expect(JourneyStepRow.failureDisplayText(.connectionDrop, delayMs: 5_000) == "Drop connection after 5 s")
+        #expect(JourneyStepRow.failureDisplayText(.connectionDrop, delayMs: 250) == "Drop connection after 250 ms")
+        #expect(JourneyStepRow.failureDisplayText(.timeout(holdMs: 30_000)) == "Time out after 30 s")
+        #expect(JourneyStepRow.failureDisplayText(.timeout(holdMs: 1_500)) == "Time out after 1500 ms")
+    }
+
+    /// Whole seconds read as seconds; anything finer keeps its milliseconds rather than rounding.
+    @Test("A duration reads in seconds only when it is a whole number of them")
+    func formatsDurations() {
+        #expect(JourneyStepRow.durationText(0) == "0 ms")
+        #expect(JourneyStepRow.durationText(999) == "999 ms")
+        #expect(JourneyStepRow.durationText(1_000) == "1 s")
+        #expect(JourneyStepRow.durationText(5_000) == "5 s")
+        #expect(JourneyStepRow.durationText(5_500) == "5500 ms")
+    }
+
+    // MARK: - Navigator progress
+
+    private func status(total: Int, current: Int?, complete: Bool) -> JourneyStatus {
+        JourneyStatus(journeyID: UUID(), journeyName: "Payment retry", isComplete: complete,
+                      totalSteps: total, totalServed: 0, currentStepIndex: current, steps: [])
+    }
+
+    /// The running journey's row says where the run is, as "3/5".
+    @Test("The active journey's row counts steps from one, and a finished run reads as all of them")
+    func describesNavigatorProgress() {
+        #expect(JourneyNavigatorRow.progressText(status(total: 5, current: 2, complete: false)) == "3/5")
+        #expect(JourneyNavigatorRow.progressText(status(total: 5, current: 0, complete: false)) == "1/5")
+        #expect(JourneyNavigatorRow.progressText(status(total: 5, current: nil, complete: true)) == "5/5")
+        #expect(JourneyNavigatorRow.progressText(status(total: 0, current: nil, complete: false)) == nil)
+    }
+
+    // MARK: - Endpoint match
+
+    /// "Matches an endpoint" in the step sheet, and "Matches POST /payments" in the inspector.
+    @Test("A step matches an endpoint with the same method whose route covers its path")
+    func findsTheMatchingEndpoint() {
+        let payments = Endpoint(name: "Create payment", method: .post, path: "/payments", scenarios: [])
+        let payment = Endpoint(name: "Get payment", method: .get, path: "/payments/:id", scenarios: [])
+        let endpoints = [payments, payment]
+
+        #expect(JourneyStepSheet.matchingEndpoint(method: .post, path: "/payments", in: endpoints)?.id == payments.id)
+        #expect(JourneyStepSheet.matchingEndpoint(method: .get, path: "/payments/:id", in: endpoints)?.id == payment.id)
+        #expect(JourneyStepSheet.matchingEndpoint(method: .get, path: "/payments/pay_8Hf2", in: endpoints)?.id == payment.id)
+        #expect(JourneyStepSheet.matchingEndpoint(method: .get, path: "/payments", in: endpoints) == nil)
+        #expect(JourneyStepSheet.matchingEndpoint(method: .post, path: "", in: endpoints) == nil)
     }
 
     // MARK: - Run progress

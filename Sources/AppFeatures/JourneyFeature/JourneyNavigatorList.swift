@@ -8,6 +8,8 @@ struct JourneyNavigatorList: View {
     let journeys: [Journey]
     /// The journey currently overriding endpoint responses, if any.
     let activeJourneyID: UUID?
+    /// Where the active journey's run has got to, shown on its row as "3/5".
+    let activeStatus: JourneyStatus?
     /// What the centre pane is editing. Selecting is *not* activating — see ``JourneyNavigatorRow``.
     @Binding var selectedJourneyID: UUID?
     /// Pass `nil` to deactivate whatever is running.
@@ -27,13 +29,15 @@ struct JourneyNavigatorList: View {
     var searchText: String = ""
     @Binding var collapsedGroups: Set<String>
 
-    init(journeys: [Journey], activeJourneyID: UUID?, selectedJourneyID: Binding<UUID?>,
+    init(journeys: [Journey], activeJourneyID: UUID?, activeStatus: JourneyStatus? = nil,
+         selectedJourneyID: Binding<UUID?>,
          onActivate: @escaping (UUID?) -> Void, onAdd: @escaping () -> Void,
          onDuplicate: @escaping (UUID) -> Void, onDelete: @escaping (UUID) -> Void,
          onRename: @escaping (UUID, String) -> Void = { _, _ in },
          searchText: String = "", collapsedGroups: Binding<Set<String>> = .constant([])) {
         self.journeys = journeys
         self.activeJourneyID = activeJourneyID
+        self.activeStatus = activeStatus
         self._selectedJourneyID = selectedJourneyID
         self.onActivate = onActivate
         self.onAdd = onAdd
@@ -216,6 +220,7 @@ struct JourneyNavigatorList: View {
     private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
         JourneyNavigatorRow(
             journey: journey, isActive: journey.id == activeJourneyID,
+            progress: journey.id == activeJourneyID ? activeStatus.flatMap(JourneyNavigatorRow.progressText) : nil,
             isSelected: journey.id == selectedJourneyID,
             onToggleActivation: { onActivate(journey.id == activeJourneyID ? nil : journey.id) },
             onRename: { renameTarget = journey },
@@ -247,6 +252,8 @@ struct JourneyNavigatorList: View {
 struct JourneyNavigatorRow: View {
     let journey: Journey
     let isActive: Bool
+    /// "3/5" while the journey runs; `nil` shows "Active" instead.
+    var progress: String? = nil
     var isSelected: Bool = false
     let onToggleActivation: () -> Void
     var onRename: () -> Void = {}
@@ -255,8 +262,7 @@ struct JourneyNavigatorRow: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            // The active journey swaps its branch glyph for a play mark: a shape, not only a colour.
-            Image(systemName: isActive ? "play.circle.fill" : NavigatorTab.journeys.systemImage)
+            Image(systemName: NavigatorTab.journeys.systemImage)
                 .font(.system(size: DSGlyph.control))
                 .foregroundStyle(iconStyle)
                 .frame(width: DSNavigatorMetrics.iconSlot)
@@ -268,9 +274,12 @@ struct JourneyNavigatorRow: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            // The run's position is the text, not a colour, so the active row reads as active
+            // whatever the selection paints behind it.
             if isActive {
-                Text("Active")
+                Text(progress ?? "Active")
                     .font(DSTypography.caption)
+                    .monospacedDigit()
                     .foregroundStyle(isSelected ? AnyShapeStyle(.secondary) : AnyShapeStyle(DSColors.labelSecondary))
                     .fixedSize()
             }
@@ -316,6 +325,14 @@ struct JourneyNavigatorRow: View {
         return isActive ? AnyShapeStyle(DSColors.accent) : AnyShapeStyle(DSColors.labelSecondary)
     }
 
+    /// "3/5" at the current step, "5/5" once the run is complete.
+    static func progressText(_ status: JourneyStatus) -> String? {
+        guard status.totalSteps > 0 else { return nil }
+        if status.isComplete { return "\(status.totalSteps)/\(status.totalSteps)" }
+        guard let index = status.currentStepIndex else { return nil }
+        return "\(index + 1)/\(status.totalSteps)"
+    }
+
     private var stepCountText: String {
         "\(journey.steps.count) \(journey.steps.count == 1 ? "step" : "steps")"
     }
@@ -323,7 +340,9 @@ struct JourneyNavigatorRow: View {
     /// Spoken as "Session expiry, 4 steps, active" — the activation state is in the label so a test
     /// can assert that selecting a row did *not* start it.
     private var accessibilityDescription: String {
-        "\(journey.name), \(stepCountText), \(isActive ? "active" : "not active")"
+        var text = "\(journey.name), \(stepCountText), \(isActive ? "active" : "not active")"
+        if isActive, let progress { text += ", step \(progress.replacingOccurrences(of: "/", with: " of "))" }
+        return text
     }
 }
 
