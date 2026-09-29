@@ -383,7 +383,7 @@ struct WorkspacePage {
     /// "More" (`WorkspaceView.toolbarLayout(centerWidth:)`), measured across the card and its inset.
     static let expandedToolbarBreakpoint: CGFloat = 780
     /// Below this centre-column width Run/Stop folds into "More" too.
-    static let minimalToolbarBreakpoint: CGFloat = 320
+    static let minimalToolbarBreakpoint: CGFloat = 360
 
     /// The centre column's width as the toolbar layout measures it: the card plus its
     /// `DSLayout.panelInset` (8pt) on each side.

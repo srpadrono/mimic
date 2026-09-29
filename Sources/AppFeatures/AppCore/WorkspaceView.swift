@@ -485,14 +485,14 @@ struct WorkspaceView: View {
     /// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
     /// address and the state word always stay.
     ///
-    /// The last breakpoint is what the narrow tier needs: Run (≈36pt), the name (≤88pt), the
-    /// address without its port count and the state (≈112pt) and "More" (≈36pt), plus the
-    /// toolbar's gaps and the column's 8pt insets, about 316pt. A 900pt window with both side
-    /// panels open leaves about 330pt, and keeps Run, as the compact proposal draws it. Below 320pt
-    /// AppKit could start hiding items behind its own chevron.
+    /// The last breakpoint is what the narrow tier needs: Run, the name (≤88pt), the address
+    /// without its port count and the state, and "More", plus the toolbar's gaps and the column's
+    /// insets. A 900pt window with both side panels open leaves about 330pt: enough for a short
+    /// project name, but a longer one pushed "More" behind AppKit's own chevron there, so Run
+    /// folds below 360pt, where every name fits.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
         guard centerWidth.isFinite else { return .minimal }
-        if centerWidth < 320 { return .minimal }
+        if centerWidth < 360 { return .minimal }
         if centerWidth < 460 { return .narrow }
         if centerWidth < 620 { return .compactSummary }
         if centerWidth < 780 { return .overflow }

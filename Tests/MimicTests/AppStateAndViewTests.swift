@@ -2275,10 +2275,10 @@ struct AppStateFacadeTests {
     @Test("The narrowest centre column folds Run into the More menu, never past it")
     func toolbarFoldsRunOnlyWhenTheNarrowTierCannotFit() {
         #expect(WorkspaceView.toolbarLayout(centerWidth: 300) == .minimal)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 319) == .minimal)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 320) == .narrow)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 331) == .narrow,
-                "A 900pt window with both side panels open keeps Run, as the compact proposal draws it")
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 359) == .minimal)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 360) == .narrow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 331) == .minimal,
+                "A 900pt window with both side panels open folds Run, so a long project name still fits")
         #expect(WorkspaceView.toolbarLayout(centerWidth: 459) == .narrow)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 460) == .compactSummary)
         #expect(WorkspaceView.toolbarLayout(centerWidth: 620) == .overflow)
