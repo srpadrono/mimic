@@ -268,7 +268,7 @@ final class NavigatorUITests: MimicUITestCase {
         let renamed = navigator.row(named: "Renamed journey")
         XCTAssertTrue(renamed.waitForExistence(timeout: 5))
         renamed.click()
-        app.buttons["journeyEditor.settingsDisclosure"].click()
+        // The description is edited in the journey's inspector while no step is selected.
         let summary = app.textFields["journeyEditor.summaryField"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5))
         summary.click()
@@ -480,7 +480,7 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertFalse(navigator.row(named: "Session expired").exists)
         navigator.filter(navigator.journeyFilter, text: "")
         navigator.row(named: "Empty journey").click()
-        navigator.element("journeyEditor.settingsDisclosure").click()
+        // The group is edited in the journey's inspector while no step is selected.
         XCTAssertTrue(navigator.journeyGroupField.waitForExistence(timeout: 5))
         navigator.filter(navigator.journeyGroupField, text: "Checkout")
         navigator.journeyGroupField.typeKey(.return, modifierFlags: [])
@@ -523,19 +523,15 @@ final class NavigatorUITests: MimicUITestCase {
         workspace.showSidebarIfNeeded()
         XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
         XCTAssertTrue(navigator.journeyGroup("Checkout").isHittable)
-        let settings = navigator.element("journeyEditor.settingsDisclosure")
-        XCTAssertTrue(settings.waitForExistence(timeout: 5), "Narrow editors disclose secondary settings")
-        XCTAssertEqual(settings.value as? String, "Collapsed")
         let firstStep = navigator.element("journeyStep-0")
+        XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
         XCTAssertTrue(firstStep.isHittable, "The first step must be visible in the initial narrow viewport")
         XCTAssertLessThan(firstStep.frame.minY, shell.panel("centerPane").frame.maxY)
-        settings.click()
-        XCTAssertEqual(settings.value as? String, "Expanded")
         XCTAssertGreaterThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.minY,
                                     navigator.element("journeyRun.deactivateButton").frame.maxY,
-                                    "Expanded behavior controls must follow the run buttons")
-        settings.click()
-        XCTAssertTrue(firstStep.isHittable)
+                                    "The behaviour row must follow the run buttons")
+        XCTAssertLessThan(navigator.element("journeyEditor.unmatchedPicker").frame.maxY, firstStep.frame.minY,
+                          "The behaviour row must sit above the steps")
         add(navigator.screenshot("navigator-journeys-grouped-narrow"))
     }
 
@@ -551,15 +547,13 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
         XCTAssertTrue(firstStep.label.contains("First charge declined"), firstStep.label)
         XCTAssertTrue(navigator.element("journeyStep-1").label.contains("Retry accepted"))
-        let settingsWide = navigator.element("journeyEditor.settingsDisclosure")
-        XCTAssertEqual(settingsWide.value as? String, "Collapsed")
+        XCTAssertTrue(navigator.element("journeyEditor.matchModePicker").exists,
+                      "The behaviour row is always shown above the steps")
         add(navigator.screenshot("journey-editor-light-wide"))
 
         workspace.compactWindow()
         workspace.showSidebarIfNeeded()
-        let settings = navigator.element("journeyEditor.settingsDisclosure")
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        XCTAssertEqual(settings.value as? String, "Collapsed")
+        XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
         XCTAssertTrue(firstStep.isHittable, "The first step should remain visible in light mode at narrow width")
         let secondStep = navigator.element("journeyStep-1")
         navigator.element("journeyEditor.stepList").scroll(byDeltaX: 0, deltaY: -120)

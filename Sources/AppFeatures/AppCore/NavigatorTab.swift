@@ -45,12 +45,13 @@ enum NavigatorTab: String, CaseIterable, Identifiable, Sendable {
     /// ```bash
     /// # Both names, everywhere. Prints this file, plus a DesignSystem preview drawing a specimen
     /// # tab strip — that module cannot import this type, and is not choosing this app's tab icons.
-    /// grep -rn 'arrow\.triangle\.branch\|list\.bullet\.indent' Sources
+    /// grep -rn 'point\.topleft\.down\.to\.point\.bottomright\.curvepath\|list\.bullet\.indent' Sources
     /// ```
     var systemImage: String {
         switch self {
         case .endpoints: "list.bullet.indent"
-        case .journeys: "arrow.triangle.branch"
+        // Two points joined by a winding path: a route taken step by step, as the design draws it.
+        case .journeys: "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
 

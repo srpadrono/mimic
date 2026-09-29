@@ -190,7 +190,7 @@ struct JourneyFeatureRenderingTests {
     /// covered by DesignSystem tests; this tests the composed journey row.
     @Test("A step row keeps its height across successful and failing outcomes")
     func stepRowKeepsHeightAcrossOutcomes() {
-        let measure = CGSize(width: 300, height: 60)
+        let measure = CGSize(width: 300, height: 80)
         let succeeding = render(
             JourneyStepRow(
                 step: makeStep(outcome: .respond(JourneyResponse(statusCode: 200))),
@@ -209,8 +209,8 @@ struct JourneyFeatureRenderingTests {
         )
 
         #expect(failing.height == succeeding.height)
-        // A journey step is 36pt.
-        #expect(failing.height == 36)
+        // A journey step is 48pt, the design's row.
+        #expect(failing.height == 48)
     }
 
     /// A run moving through the list does not change the list.
@@ -221,7 +221,7 @@ struct JourneyFeatureRenderingTests {
     /// which is the one moment you are reading it.
     @Test("A step row keeps one height as a run moves through it")
     func stepRowKeepsOneHeightAcrossRunStates() {
-        let measure = CGSize(width: 640, height: 60)
+        let measure = CGSize(width: 640, height: 80)
         let step = makeStep()
 
         let pending = render(JourneyStepRow(step: step, index: 0, progress: nil), size: measure)
@@ -297,7 +297,7 @@ struct JourneyFeatureRenderingTests {
             let views = scrollViews(in: controller.view)
             outerScroll = views.first { !($0.documentView is NSTextView) }
             bodyScroll = views.first {
-                ($0.documentView as? NSTextView)?.accessibilityIdentifier() == "stepSheet.bodyField"
+                ($0.documentView as? NSTextView)?.accessibilityIdentifier() == "ds.jsoneditor.stepSheet.body"
             }
             if let outerScroll, bodyScroll != nil {
                 // This is an owned test view, not a change to the developer's scrollbar defaults.
@@ -318,10 +318,11 @@ struct JourneyFeatureRenderingTests {
         controller.view.layoutSubtreeIfNeeded()
         let frame = editor.convert(editor.bounds, to: outer.contentView)
         let viewport = outer.contentView.bounds
-        // The body sits in the field column: the 20pt sheet margin, the 104pt label column, then the
-        // well's own 8pt padding. On the trailing side it is the sheet margin plus that padding.
-        #expect(abs(frame.minX - viewport.minX - 132) < 0.5)
-        #expect(abs(viewport.maxX - frame.maxX - 28) < 0.5)
+        // The body sits in the field column: the 20pt sheet margin, then the 104pt label column. The
+        // JSON editor's card has no horizontal padding, so its viewport starts there and ends at the
+        // trailing sheet margin.
+        #expect(abs(frame.minX - viewport.minX - 124) < 0.5)
+        #expect(abs(viewport.maxX - frame.maxX - 20) < 0.5)
     }
 
     /// The capture sheet explains a collapse, and only a collapse.

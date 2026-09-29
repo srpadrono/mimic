@@ -594,7 +594,7 @@ struct DSComponentRenderingTests {
         #expect(DSRowHeight.list == 28)
         #expect(DSRowHeight.table == 24)
         #expect(DSRowHeight.groupHeader == 22)
-        #expect(DSRowHeight.step == 36)
+        #expect(DSRowHeight.step == 48)
         #expect(DSRowHeight.recent == 44)
 
         #expect(DSStroke.hairline == 0.5)

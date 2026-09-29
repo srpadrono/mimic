@@ -1159,9 +1159,9 @@ final class ErrorAlertUITests: MimicUITestCase {
         return true
     }
 
-    /// A segment of the step sheet's outcome picker. A `.segmented` picker realizes as a radio group
-    /// on macOS, so the segments are radio buttons rather than buttons — `app.buttons[…]` would never
-    /// match. Both are tried so a style change does not silently break the selection.
+    /// A segment of the step sheet's outcome control. It is a `DSSegmentedControl`, whose segments
+    /// are buttons labelled with their titles; a native `.segmented` picker would realize them as
+    /// radio buttons instead. Both are tried so a style change does not silently break the selection.
     @MainActor
     private func outcomeSegment(_ title: String) -> XCUIElement {
         let byRadio = app.radioButtons[title].firstMatch

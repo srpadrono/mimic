@@ -6,15 +6,20 @@ import SwiftUI
 /// Adds or edits one journey step.
 ///
 /// A step either answers or fails at the transport level, so the form asks that first and then shows
-/// only the fields that apply. Status, delay and repeat share one row; headers stay behind a disclosure.
+/// only the fields that apply. Status, delay and repeat share one row; the body and the headers share
+/// the space below it through a Body/Headers switch, as the endpoint editor's do.
 struct JourneyStepSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `nil` when adding.
     let step: JourneyStep?
+    /// The step's position, for the title: "Edit step 3".
+    var stepNumber: Int? = nil
     var backends: [BackendConfiguration] = []
     var globalDelayMs: Int = 0
+    /// The project's endpoints, to say whether the request also matches one.
+    var endpoints: [Endpoint] = []
     let onCommit: (JourneyStepSpec) -> Void
     /// Offered only when editing an existing step.
     var onRemove: (() -> Void)? = nil
@@ -29,10 +34,16 @@ struct JourneyStepSheet: View {
         var title: String {
             switch self {
             case .respond: "Respond"
-            case .drop: "Drop the connection"
+            case .drop: "Drop connection"
             case .timeout: "Time out"
             }
         }
+    }
+
+    /// What the response well below the status row shows.
+    private enum Pane: Hashable {
+        case body
+        case headers
     }
 
     /// The form's inputs, named so focus and validation can both point at one. A complaint is shown
@@ -64,15 +75,17 @@ struct JourneyStepSheet: View {
     @State private var delayMs = "0"
     @State private var repeatCount = "1"
     @State private var holdMs = String(NetworkFailure.defaultTimeoutHoldMs)
-    @State private var headersExpanded = false
+    @State private var pane: Pane = .body
     @State private var validation: Validation?
     @State private var scrollPresentationID = UUID()
     @FocusState private var focusedField: Field?
+    /// The request field is shared with the endpoint sheets, which focus it with a plain flag.
+    @FocusState private var pathIsFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                Text(step == nil ? "Add step" : "Edit step")
+                Text(title)
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
                     .accessibilityIdentifier("stepSheet.title")
@@ -98,22 +111,17 @@ struct JourneyStepSheet: View {
                 }
                 .task(id: validation) {
                     guard let validation else { return }
-                    // Let a newly expanded disclosure lay out before bringing its field into view.
+                    // Let a newly shown pane lay out before bringing its field into view.
                     do { try await Task.sleep(for: .milliseconds(100)) }
                     catch { return }
                     guard !Task.isCancelled else { return }
                     withAnimation(reduceMotion ? nil : .default) {
                         scroll.scrollTo(validation.field, anchor: .center)
                     }
-                    focusedField = validation.field
-                }
-                .task(id: headersExpanded) {
-                    guard headersExpanded else { return }
-                    do { try await Task.sleep(for: .milliseconds(100)) }
-                    catch { return }
-                    guard !Task.isCancelled else { return }
-                    withAnimation(reduceMotion ? nil : .default) {
-                        scroll.scrollTo(Field.headers, anchor: .bottom)
+                    if validation.field == .path {
+                        pathIsFocused = true
+                    } else {
+                        focusedField = validation.field
                     }
                 }
             }
@@ -127,7 +135,7 @@ struct JourneyStepSheet: View {
                            (NSScreen.main?.visibleFrame.height ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .background(DSColors.sheet)
-        .defaultFocus($focusedField, .path)
+        .defaultFocus($pathIsFocused, true)
         .onAppear {
             loadExistingStep()
             // AppKit may reuse the scroll view between Add and Edit sheets; recreate it so its old
@@ -171,37 +179,23 @@ struct JourneyStepSheet: View {
         VStack(alignment: .leading, spacing: DSSpacing.md) {
             sectionTitle("Match")
             DSFormRow("Request", alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: DSSpacing.sm) {
-                        Picker("HTTP method", selection: $method) {
-                            ForEach(HTTPMethod.allCases, id: \.self) { method in
-                                Text(method.rawValue).tag(method)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .fixedSize()
-                        .accessibilityIdentifier("stepSheet.methodPicker")
-                        .accessibilityLabel("HTTP method")
-
-                        TextField("/account-summary", text: $path)
-                            .textFieldStyle(.plain)
-                            .font(DSTypography.codeLarge)
-                            .focused($focusedField, equals: .path)
-                            .accessibilityIdentifier("stepSheet.pathField")
-                            .accessibilityLabel("Path")
-                            .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
-                                           isFocused: focusedField == .path,
-                                           isInvalid: validation?.field == .path,
-                                           horizontalPadding: 10)
-                            .onChange(of: path) { clearValidation(for: .path) }
-                    }
-                    validationMessage(under: .path)
-                }
+                SheetRequestField(
+                    method: $method,
+                    path: $path,
+                    validation: validation?.field == .path ? validation?.message : nil,
+                    pickerIdentifier: "stepSheet.methodPicker",
+                    fieldIdentifier: "stepSheet.pathField",
+                    validationIdentifier: "stepSheet.validationMessage",
+                    isFocused: $pathIsFocused,
+                    onSubmit: commit,
+                    matchNote: JourneyStepSheet.matchingEndpoint(method: method, path: trimmedPath, in: endpoints) == nil
+                        ? nil : "Matches an endpoint"
+                )
+                .onChange(of: path) { clearValidation(for: .path) }
             }
             .id(Field.path)
 
-            DSTextField("Name", text: $name, placeholder: "Optional, for example \u{201C}Charge declined\u{201D}",
+            DSTextField("Name", text: $name, placeholder: "Optional, for example \u{201C}Charge clears\u{201D}",
                         inputIdentifier: "stepSheet.nameField", identifier: "stepSheet.name")
                 .focused($focusedField, equals: .name)
 
@@ -228,14 +222,17 @@ struct JourneyStepSheet: View {
     private var outcomeFields: some View {
         VStack(alignment: .leading, spacing: DSSpacing.md) {
             sectionTitle("Outcome")
-            Picker("Outcome", selection: $kind) {
-                ForEach(Kind.allCases) { kind in Text(kind.title).tag(kind) }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(maxWidth: .infinity)
-            .accessibilityIdentifier("stepSheet.outcomePicker")
-            .accessibilityLabel("Outcome")
+            // Neutral, like every segmented control in the app: the selection is a choice of form,
+            // not an accent-coloured state.
+            DSSegmentedControl(
+                "Outcome",
+                segments: Kind.allCases.map {
+                    DSSegmentedControl<Kind>.Segment($0.title, value: $0, identifier: "stepSheet.outcome.\($0.rawValue)")
+                },
+                selection: $kind,
+                fillsWidth: true,
+                identifier: "stepSheet.outcomePicker"
+            )
             .onChange(of: kind) { validation = nil }
 
             switch kind {
@@ -358,63 +355,55 @@ struct JourneyStepSheet: View {
         .id(field)
     }
 
-    /// Body and headers, aligned with the field column.
+    /// Body and headers, aligned with the field column: a Body/Headers switch with a quiet Format
+    /// beside it, then the same line-numbered JSON editor the endpoint body uses.
     private var bodyFields: some View {
         VStack(alignment: .leading, spacing: DSSpacing.sm) {
-            DSMultilineField("Body", text: $responseBody,
-                             height: 176,
-                             identifier: "stepSheet.bodyField", isFocused: focusBinding(for: .body)) {
-                Button {
-                    if let formatted = DSJSONEditor.prettyPrint(responseBody) {
-                        responseBody = formatted
-                    }
-                } label: {
-                    Text("Format")
-                        .font(DSTypography.callout)
-                        .foregroundStyle(canFormatBody ? DSColors.accent : DSColors.labelTertiary)
-                        .padding(.horizontal, 6)
-                        .frame(height: DSControlHeight.small)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.dsPlain)
-                .disabled(!canFormatBody)
-                .help("Pretty-print the JSON body")
-                .accessibilityIdentifier("stepSheet.prettyPrintButton")
-                .accessibilityLabel("Pretty-print JSON")
-            }
-            .id(Field.body)
-
-            Button { headersExpanded.toggle() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: DSGlyph.minimum, weight: .semibold))
-                        .rotationEffect(.degrees(headersExpanded ? 0 : -90))
-                        .frame(width: DSGlyph.disclosure)
-                        .accessibilityHidden(true)
-                    Text("Headers")
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelSecondary)
-                    if headerCount > 0 {
-                        Text("\(headerCount)")
+            HStack(spacing: DSSpacing.sm) {
+                DSSegmentedControl(
+                    "Response part",
+                    segments: [
+                        .init("Body", value: Pane.body, identifier: "stepSheet.tab.body"),
+                        .init("Headers", value: Pane.headers, count: headerCount == 0 ? nil : headerCount,
+                              identifier: "stepSheet.tab.headers"),
+                    ],
+                    selection: $pane,
+                    identifier: "stepSheet.pane"
+                )
+                Spacer(minLength: DSSpacing.sm)
+                if pane == .body {
+                    Button {
+                        if let formatted = DSJSONEditor.prettyPrint(responseBody) {
+                            responseBody = formatted
+                        }
+                    } label: {
+                        Text("Format")
                             .font(DSTypography.callout)
-                            .monospacedDigit()
-                            .foregroundStyle(DSColors.labelTertiary)
+                            .foregroundStyle(canFormatBody ? DSColors.labelSecondary : DSColors.labelTertiary)
+                            .padding(.horizontal, 6)
+                            .frame(height: DSControlHeight.regular)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.dsPlain)
+                    .disabled(!canFormatBody)
+                    .help("Pretty-print the JSON body")
+                    .accessibilityIdentifier("stepSheet.prettyPrintButton")
+                    .accessibilityLabel("Pretty-print JSON")
                 }
-                .foregroundStyle(DSColors.labelSecondary)
-                .frame(height: DSControlHeight.regular)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("stepSheet.headersDisclosure")
-            .accessibilityLabel("Response headers")
-            .accessibilityValue(headersExpanded ? "Expanded" : "Collapsed")
 
-            if headersExpanded {
+            switch pane {
+            case .body:
+                DSJSONEditor(text: $responseBody, identifier: "stepSheet.body",
+                             documentID: "stepSheet.body.\(step?.id.uuidString ?? "new")")
+                    .frame(height: JourneyStepSheet.bodyHeight)
+                    .id(Field.body)
+            case .headers:
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
                     DSMultilineField("Headers", text: $headerText,
-                                     height: DSControlHeight.large * 3,
-                                     identifier: "stepSheet.headersField", isFocused: focusBinding(for: .headers))
+                                     height: JourneyStepSheet.bodyHeight - DSSpacing.xl,
+                                     identifier: "stepSheet.headersField", isFocused: focusBinding(for: .headers),
+                                     labelPlacement: .hidden)
                         .accessibilityLabel("Response headers, one per line")
                         .onChange(of: headerText) { clearValidation(for: .headers) }
                     Text("Name: Value, one per line.")
@@ -427,6 +416,26 @@ struct JourneyStepSheet: View {
             }
         }
         .padding(.leading, DSLayout.sheetLabelWidth)
+    }
+
+    /// The design's 200pt code well.
+    private static let bodyHeight: CGFloat = 200
+
+    private var title: String {
+        guard step != nil else { return "Add step" }
+        return stepNumber.map { "Edit step \($0)" } ?? "Edit step"
+    }
+
+    /// The endpoint a step's request would also reach, when there is one. Journeys answer first,
+    /// so this is information, never a requirement.
+    static func matchingEndpoint(method: HTTPMethod, path: String, in endpoints: [Endpoint]) -> Endpoint? {
+        guard !path.isEmpty else { return nil }
+        let key = PathPattern.matchingKey(for: path)
+        return endpoints.first {
+            $0.method == method
+                && (PathPattern.matchingKey(for: $0.path) == key
+                    || PathPattern.matches(requestPath: path, pattern: $0.path))
+        }
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -508,7 +517,6 @@ struct JourneyStepSheet: View {
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key): \($0.value)" }
                 .joined(separator: "\n")
-            headersExpanded = !headerText.isEmpty
         case let .networkFailure(failure):
             switch failure {
             case .connectionDrop:
@@ -566,7 +574,7 @@ struct JourneyStepSheet: View {
             }
             spec.statusCode = code
             if let invalidLine = Self.firstInvalidHeaderLine(headerText) {
-                headersExpanded = true
+                pane = .headers
                 validation = Validation(field: .headers,
                                         message: "Use Name: Value for every header (line \(invalidLine)).")
                 return
@@ -575,7 +583,7 @@ struct JourneyStepSheet: View {
             do {
                 try EndpointValidator.validateHeaders(spec.headers ?? [:])
             } catch {
-                headersExpanded = true
+                pane = .headers
                 validation = Validation(field: .headers, message: error.localizedDescription)
                 return
             }

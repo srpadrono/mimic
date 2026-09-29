@@ -5,12 +5,15 @@ import SwiftUI
 /// One step, as both a definition and a progress indicator.
 ///
 /// The numbered node carries the run state by shape as well as colour: a tick when served, a ring
-/// with a halo when current, a plain ring otherwise. The current row also gets a tinted fill.
+/// with a halo when current, a plain ring otherwise. The current row gets a tinted fill and an accent
+/// border; the row the inspector shows gets a neutral fill.
 struct JourneyStepRow: View {
     let step: JourneyStep
     let index: Int
     /// Run progress for this step, when a run is in flight.
     let progress: JourneyStepProgress?
+    /// The step the inspector is showing.
+    var isSelected = false
 
     @State private var isHovered = false
 
@@ -20,27 +23,20 @@ struct JourneyStepRow: View {
             DSMethodLabel(step.method.rawValue, fixedWidth: false, identifier: step.id.uuidString)
                 .frame(width: 44, alignment: .leading)
 
-            HStack(spacing: DSSpacing.sm) {
-                Text(routeLabel)
-                    .font(DSTypography.code)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(routeHelp)
-                    .layoutPriority(1)
-                if showsName {
-                    Text(step.name)
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelTertiary)
-                        .lineLimit(1)
-                        .help(step.name)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The route alone, as the design draws it; the step's name is in the tooltip, the
+            // spoken label and the inspector.
+            Text(routeLabel)
+                .font(DSTypography.code)
+                .foregroundStyle(DSColors.labelPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(routeHelp)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
-            if step.delayMs > 0 { chip("+\(step.delayMs) ms", systemImage: "clock") }
+            outcomeChip
             if step.repeatCount > 1 { chip("\u{00D7} \(step.repeatCount)") }
-            outcomeLabel
+            statusLabel
 
             if let progress {
                 Text(Self.progressText(progress))
@@ -56,7 +52,7 @@ struct JourneyStepRow: View {
         .frame(height: DSRowHeight.step)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.card)
-                .fill(isCurrent ? DSColors.selectionSoft : (isHovered ? DSColors.hover : Color.clear))
+                .fill(rowFill)
         }
         .overlay {
             if isCurrent {
@@ -71,12 +67,19 @@ struct JourneyStepRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("journeyStep-\(index)")
         .accessibilityLabel(accessibilityDescription)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var isCurrent: Bool { progress?.isCurrent == true }
     private var isExhausted: Bool { progress?.isExhausted == true }
 
-    /// A name that only restates the route adds nothing beside it.
+    private var rowFill: Color {
+        if isCurrent { return DSColors.selectionSoft }
+        if isSelected { return DSColors.selectionInactive }
+        return isHovered ? DSColors.hover : Color.clear
+    }
+
+    /// A name that only restates the route adds nothing to its tooltip.
     private var showsName: Bool {
         let name = step.name.trimmingCharacters(in: .whitespacesAndNewlines)
         return !name.isEmpty && name != step.path && name != routeLabel
@@ -88,8 +91,9 @@ struct JourneyStepRow: View {
     }
 
     private var routeHelp: String {
-        guard let operation = step.graphqlOperation, !operation.isEmpty else { return step.path }
-        return "\(operation) · \(step.path)"
+        var route = step.path
+        if let operation = step.graphqlOperation, !operation.isEmpty { route = "\(operation) · \(step.path)" }
+        return showsName ? "\(step.name) · \(route)" : route
     }
 
     // MARK: - Node
@@ -124,16 +128,26 @@ struct JourneyStepRow: View {
 
     // MARK: - Outcome
 
+    /// What happens before, or instead of, a response: a delay, a dropped connection, a time-out.
     @ViewBuilder
-    private var outcomeLabel: some View {
+    private var outcomeChip: some View {
         switch step.outcome {
-        case let .respond(response):
-            // Three monospaced digits at most (200–599), so it never needs to truncate.
-            DSStatusLabel(statusCode: response.statusCode)
+        case .respond:
+            if step.delayMs > 0 {
+                chip("After \(Self.durationText(step.delayMs))", systemImage: "clock")
+            }
         case let .networkFailure(failure):
-            chip(Self.failureDisplayText(failure),
+            chip(Self.failureDisplayText(failure, delayMs: step.delayMs),
                  systemImage: failure == .connectionDrop ? "bolt.horizontal" : "hourglass")
                 .help(Self.failureText(failure))
+        }
+    }
+
+    /// Three monospaced digits at most (200–599), so it never needs to truncate.
+    @ViewBuilder
+    private var statusLabel: some View {
+        if case let .respond(response) = step.outcome {
+            DSStatusLabel(statusCode: response.statusCode)
         }
     }
 
@@ -177,12 +191,21 @@ struct JourneyStepRow: View {
         }
     }
 
-    /// The visible chip text for a transport failure.
-    static func failureDisplayText(_ failure: NetworkFailure) -> String {
+    /// The visible chip text for a transport failure: "Drop connection after 5 s".
+    static func failureDisplayText(_ failure: NetworkFailure, delayMs: Int = 0) -> String {
         switch failure {
-        case .connectionDrop: "Drop connection"
-        case let .timeout(holdMs): "Time out after \(holdMs) ms"
+        case .connectionDrop:
+            delayMs > 0 ? "Drop connection after \(durationText(delayMs))" : "Drop connection"
+        case let .timeout(holdMs):
+            "Time out after \(durationText(holdMs))"
         }
+    }
+
+    /// Whole seconds read as seconds ("5 s"); anything finer stays in milliseconds ("250 ms").
+    static func durationText(_ milliseconds: Int) -> String {
+        milliseconds >= 1000 && milliseconds % 1000 == 0
+            ? "\(milliseconds / 1000) s"
+            : "\(milliseconds) ms"
     }
 
     private var accessibilityDescription: String {

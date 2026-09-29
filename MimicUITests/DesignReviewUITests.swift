@@ -141,15 +141,24 @@ final class DesignReviewUITests: MimicUITestCase {
             missing("08-request-log")
         }
 
+        // A run in progress, as the design shows it: active, one step served, the next one waiting.
+        try await command(["journeyActivate": ["journey": ["name": "Payment retry"]]])
+        try await command(["journeyAdvance": [:]])
         app.typeKey("2", modifierFlags: .command)
         let journey = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "journeys.row.")).firstMatch
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                                  "journeys.row.", "Payment retry, ")).firstMatch
         if journey.waitForExistence(timeout: 5) {
             journey.click()
             _ = element("journeyEditor.stepList").waitForExistence(timeout: 5)
-            capture("10-journeys")
             let step = element("journeyStep-1")
             if step.waitForExistence(timeout: 3) {
+                // One click shows the step in the inspector, as the design's journey screen does.
+                step.click()
+                _ = element("inspector.journeyStep").waitForExistence(timeout: 3)
+            }
+            capture("10-journeys")
+            if step.exists {
                 step.doubleClick()
                 if element("stepSheet.nameField").waitForExistence(timeout: 3) {
                     capture("11-journey-step")
@@ -160,6 +169,8 @@ final class DesignReviewUITests: MimicUITestCase {
             missing("10-journeys")
         }
         app.typeKey("1", modifierFlags: .command)
+        // The screens after this one show endpoints answering for themselves.
+        try await command(["journeyActivate": [:]])
 
         let settings = workspace.toolbarAction("backend.settingsButton")
         if settings.waitForExistence(timeout: 3) {
@@ -232,8 +243,11 @@ final class DesignReviewUITests: MimicUITestCase {
                                               "spec": ["statusCode": 404, "body": #"{"error":"not_found"}"#]]])
         try await command(["scenarioCreate": ["endpoint": product, "name": "Server error",
                                               "spec": ["statusCode": 500, "body": #"{"error":"internal"}"#]]])
+        // Grouped as the design's navigator is: sections under headers, ungrouped last.
         try await command(["journeyAddTemplate": ["templateID": "payment-retry", "name": "Payment retry"]])
-        try await command(["journeyCreate": ["name": "Checkout happy path"]])
+        try await command(["journeyUpdate": ["journey": ["name": "Payment retry"], "spec": ["groupTag": "Checkout"]]])
+        try await command(["journeyCreate": ["name": "Checkout happy path", "spec": ["groupTag": "Checkout"]]])
+        try await command(["journeyCreate": ["name": "Session expiry", "spec": ["groupTag": "Account"]]])
     }
 
     // MARK: - Control API

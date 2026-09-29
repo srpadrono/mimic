@@ -1080,6 +1080,12 @@ final class RequestLogUITests: MimicUITestCase {
         // the editor back to Endpoints rather than silently selecting an off-screen endpoint.
         let shell = WorkspaceShellPage(app: app)
         shell.journeysTab.click()
+        // The journeys screen opens without the log, as designed; ⌥⌘L brings it back beside a journey.
+        XCTAssertTrue(logRow(unmatchedID).waitForNonExistence(timeout: 5),
+                      "The journeys screen should open without the request log")
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(logRow(unmatchedID).waitForExistence(timeout: 5),
+                      "The request log toggle should show the log on the journeys screen")
 
         logRow(unmatchedID).rightClick()
         let createItem = app.menuItems["Create endpoint for GET /api/orders"]

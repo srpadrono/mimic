@@ -33,4 +33,10 @@ final class WindowPresentation {
 
     /// The journey being edited in the navigator.
     var selectedJourneyID: UUID?
+
+    /// The step of that journey the inspector shows. `nil` shows the journey itself.
+    var selectedJourneyStepID: UUID?
+
+    /// The step whose edit sheet is open, asked for by the step list or the inspector's menu.
+    var editingJourneyStepID: UUID?
 }
