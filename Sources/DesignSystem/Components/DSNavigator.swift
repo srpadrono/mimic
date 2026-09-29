@@ -119,6 +119,12 @@ public extension View {
         self
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            // The sidebar style sizes rows from the system's sidebar row size, not from the rows:
+            // at the default size macOS 26 draws a 32pt row around a 28pt one. The smallest size
+            // leaves the height to `defaultMinListRowHeight` below, so rows are the design's 28pt
+            // whatever the user's "Sidebar icon size". Row fonts are set explicitly, so the size
+            // changes nothing else.
+            .environment(\.sidebarRowSize, .small)
             .environment(\.defaultMinListRowHeight, DSNavigatorMetrics.rowHeight)
             .contentMargins(.vertical, DSSpacing.xxs, for: .scrollContent)
     }

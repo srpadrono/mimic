@@ -267,6 +267,69 @@ struct WorkspacePage {
         _ = navigatorAdd.waitForExistence(timeout: 5)
     }
 
+    /// The centre column's width at which the toolbar stops folding its secondary actions into
+    /// "More" (`WorkspaceView.toolbarLayout(centerWidth:)`), measured across the card and its inset.
+    static let expandedToolbarBreakpoint: CGFloat = 780
+
+    /// The centre column's width as the toolbar layout measures it: the card plus its
+    /// `DSLayout.panelInset` (8pt) on each side.
+    var centreColumnWidth: CGFloat {
+        let pane = app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch
+        return pane.exists ? pane.frame.width + 16 : 0
+    }
+
+    /// Fills the window and, when the display alone cannot give the centre column the toolbar's
+    /// expanded breakpoint, hides the inspector and then the navigator until it does.
+    ///
+    /// On CI's 1024pt display a filled window is 1024pt wide; the navigator (264pt) and inspector
+    /// (300pt) leave the centre column far under 780pt, so the only genuinely wide centre column is
+    /// one with both side panels collapsed. Idempotent. Returns whether any panel was hidden.
+    @discardableResult
+    func widenCentreColumnForExpandedToolbar() -> Bool {
+        fillWindow()
+        guard overflowMenu.exists else { return false }
+        let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
+        if inspectorHeader.exists {
+            app.typeKey("i", modifierFlags: [.command, .option])
+            _ = inspectorHeader.waitForNonExistence(timeout: 5)
+        }
+        if UITestApp.waitUntil(timeout: 2, { !overflowMenu.exists }) { return true }
+        hideSidebarIfShown()
+        _ = UITestApp.waitUntil(timeout: 5) { !overflowMenu.exists }
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        return true
+    }
+
+    /// Collapses the navigator with the split view's own toolbar toggle, or View ▸ Hide Sidebar.
+    func hideSidebarIfShown() {
+        let navigatorAdd = app.buttons["sidebar.addEndpointButton"].firstMatch
+        let hide = app.toolbars.buttons["Hide Sidebar"].firstMatch
+        if hide.exists, hide.isHittable {
+            hide.click()
+        } else if navigatorAdd.exists {
+            app.menuBars.menuBarItems["View"].click()
+            let item = app.menuItems["Hide Sidebar"].firstMatch
+            if item.waitForExistence(timeout: 2) {
+                item.click()
+            } else {
+                UITestApp.dismissAnyOpenMenu(in: app)
+                // The split view's own shortcut, ⌃⌘S.
+                app.typeKey("s", modifierFlags: [.control, .command])
+            }
+        }
+        _ = navigatorAdd.waitForNonExistence(timeout: 5)
+    }
+
+    /// Undoes `widenCentreColumnForExpandedToolbar`: brings back the navigator and the inspector.
+    func restoreSidePanels() {
+        showSidebarIfNeeded()
+        let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
+        if !inspectorHeader.exists {
+            app.typeKey("i", modifierFlags: [.command, .option])
+            _ = inspectorHeader.waitForExistence(timeout: 5)
+        }
+    }
+
     func compactWindow() {
         app.menuBars.menuBarItems["Window"].click()
         app.menuItems["Move & Resize"].click()

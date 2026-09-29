@@ -430,11 +430,16 @@ final class RequestLogUITests: MimicUITestCase {
             waitForRowsToArrive(3, timeout: 15),
             "All three requests should reach the log"
         )
-        // Scenario, Duration and Size are hidden in the compact table. Give the table the wide
-        // centre pane before exercising all five sortable columns. The headers only render once
-        // traffic arrives, so this must follow the row-count wait.
+        // Scenario, Duration and Size are hidden in the compact table, which the log uses below
+        // `LogColumns.minimumTableWidth` (766pt). Give the table the wide centre pane before
+        // exercising all five sortable columns: hide the inspector, and on a display as narrow as
+        // CI's 1024pt the navigator too. The headers only render once traffic arrives, so this must
+        // follow the row-count wait.
         if !columnHeader("scenario").exists {
-            workspace.toggleInspectorButton.click()
+            widenCentrePaneByHidingTheInspector()
+        }
+        if !columnHeader("scenario").waitForExistence(timeout: 2) {
+            workspace.hideSidebarIfShown()
         }
         XCTAssertTrue(columnHeader("scenario").waitForExistence(timeout: 5),
                       "The wide request log should expose the Scenario column")

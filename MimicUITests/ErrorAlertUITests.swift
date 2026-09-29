@@ -188,6 +188,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         // editor interaction in the suite that skipped it.
         hideRequestLogDrawer()
 
+        // Headers are the second pane of the response; Add header belongs to that pane.
+        endpointEditor.showHeaders()
         XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5), "The editor should offer 'Add header'")
         XCTAssertTrue(revealInEditor(addHeaderButton), "'Add header' should be reachable in the editor")
         addHeaderButton.click()

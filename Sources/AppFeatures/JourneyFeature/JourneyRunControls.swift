@@ -12,6 +12,9 @@ struct JourneyRunControls: View {
     let journey: Journey
     let isActive: Bool
     let status: JourneyStatus?
+    /// False draws the symbols alone, for a pane too narrow for the titled row. The titles stay
+    /// the buttons' accessibility labels and tooltips.
+    var showsTitles = true
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
@@ -20,6 +23,7 @@ struct JourneyRunControls: View {
                 systemImage: "arrow.counterclockwise",
                 variant: .secondary,
                 size: .medium,
+                showsTitle: showsTitles,
                 identifier: "journeyRun.restart"
             ) {
                 appState.restartActiveJourney()
@@ -36,6 +40,7 @@ struct JourneyRunControls: View {
                 systemImage: "forward.end",
                 variant: .secondary,
                 size: .medium,
+                showsTitle: showsTitles,
                 identifier: "journeyRun.advance"
             ) {
                 appState.advanceActiveJourney()
@@ -54,6 +59,7 @@ struct JourneyRunControls: View {
                     systemImage: "stop.fill",
                     variant: .secondary,
                     size: .medium,
+                    showsTitle: showsTitles,
                     identifier: "journeyRun.deactivate"
                 ) {
                     appState.activateJourney(id: nil)
@@ -67,6 +73,7 @@ struct JourneyRunControls: View {
                     systemImage: "play.fill",
                     variant: .primary,
                     size: .medium,
+                    showsTitle: showsTitles,
                     identifier: "journeyRun.activate"
                 ) {
                     appState.activateJourney(id: journey.id)

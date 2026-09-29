@@ -1526,12 +1526,16 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// status capsule sits in the middle, and Run, Import, Server settings and both panel toggles
     /// trail — all inline, all above the centre column. **Compact**: Import, Server settings and
     /// both panel toggles fold into one "More actions" menu; Run and the project name stay.
+    ///
+    /// The breakpoint is the centre column's width, not the window's. On CI's 1024pt display a
+    /// filled window leaves the centre column well under 780pt while both side panels are open, so
+    /// the expanded shape is set up by collapsing them (`widenCentreColumnForExpandedToolbar`).
     @MainActor
     func testToolbarPreservesIdentityAndCollapsesSecondaryActions() throws {
         launchShell()
         createProjectViaUI(name: "Acme Storefront", port: 62118)
 
-        workspace.fillWindow()
+        workspace.widenCentreColumnForExpandedToolbar()
         XCTAssertTrue(workspace.projectTitle.waitForExistence(timeout: 5))
         XCTAssertTrue(workspace.projectTitle.isHittable, "The expanded toolbar must show the project name")
         XCTAssertTrue(workspace.projectKind.waitForExistence(timeout: 5))
@@ -1551,6 +1555,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         expanded.lifetime = .keepAlways
         add(expanded)
 
+        // Compact is the everyday window: both side panels open, the window a screen quarter.
+        workspace.restoreSidePanels()
         workspace.compactWindow()
         assertCompactToolbar()
         let compactStopped = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -1559,7 +1565,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         add(compactStopped)
 
         // Starting and stopping the server changes Run's words, not the toolbar's arrangement.
-        workspace.fillWindow()
+        workspace.widenCentreColumnForExpandedToolbar()
         let importButton = workspace.inlineToolbarAction("importMenuButton")
         XCTAssertTrue(importButton.waitForExistence(timeout: 5))
         let importFrame = importButton.frame
@@ -1575,6 +1581,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(well.copyButton(port: 62118).isEnabled)
         well.closeDetails()
 
+        workspace.restoreSidePanels()
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
         XCTAssertTrue(workspace.projectTitle.isHittable,
@@ -1588,17 +1595,23 @@ final class WorkspaceShellUITests: MimicUITestCase {
         add(compact)
 
         // With the inspector collapsed the toolbar keeps its column and every inline action.
-        workspace.fillWindow()
-        app.typeKey("i", modifierFlags: [.command, .option])
+        workspace.widenCentreColumnForExpandedToolbar()
+        if inspectorHeader.exists {
+            app.typeKey("i", modifierFlags: [.command, .option])
+        }
         XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5))
         assertExpandedToolbar()
         let collapsedInspector = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         collapsedInspector.name = "native-toolbar-inspector-collapsed"
         collapsedInspector.lifetime = .keepAlways
         add(collapsedInspector)
+        // The inline toggle brings the inspector back. Its column comes out of the centre column's
+        // width, so the toolbar then takes whichever shape that width calls for.
         workspace.inlineToolbarAction("toggleInspectorButton").click()
         XCTAssertTrue(inspectorHeader.waitForExistence(timeout: 5))
-        assertExpandedToolbar()
+        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        assertToolbarMatchesCentreColumnWidth()
+        workspace.restoreSidePanels()
         workspace.serverToggleButton.click()
         XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
     }
@@ -1652,6 +1665,19 @@ final class WorkspaceShellUITests: MimicUITestCase {
                        "The capsule and Run share the toolbar's centre line", file: file, line: line)
 
         assertToolbarStaysAboveTheCentreColumn([run] + actions, file: file, line: line)
+    }
+
+    /// Expanded when the centre column is clearly past the 780pt breakpoint, compact when it is
+    /// clearly under it. A column within a few points of the line is left unasserted: the card's
+    /// inset is estimated, and the layout's own unit test pins the exact threshold.
+    @MainActor
+    private func assertToolbarMatchesCentreColumnWidth(file: StaticString = #filePath, line: UInt = #line) {
+        let width = workspace.centreColumnWidth
+        if width >= WorkspacePage.expandedToolbarBreakpoint + 10 {
+            assertExpandedToolbar(file: file, line: line)
+        } else if width <= WorkspacePage.expandedToolbarBreakpoint - 10 {
+            assertCompactToolbar(file: file, line: line)
+        }
     }
 
     /// Compact: Import, Server settings and both toggles live only in the "More actions" menu; Run,
@@ -1810,7 +1836,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         launchShell()
         createProjectViaUI(name: "Status Well", port: port)
-        workspace.fillWindow()
+        workspace.widenCentreColumnForExpandedToolbar()
 
         XCTAssertTrue(well.address.waitForExistence(timeout: 5), "The well should be showing something")
         XCTAssertTrue(
@@ -1826,7 +1852,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         defer { clipboard.restore() }
         _ = NSPasteboard.general.clearContents()
         startServer(onPort: port)
-        workspace.fillWindow()
+        workspace.widenCentreColumnForExpandedToolbar()
         assertExpandedToolbar()
         // The capsule is drawn at `DSControlHeight.prominent` (32pt); toolbar margins may add to it.
         XCTAssertGreaterThanOrEqual(well.address.frame.height, 30, "The status capsule should keep a full-height hit target")

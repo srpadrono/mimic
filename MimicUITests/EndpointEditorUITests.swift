@@ -846,13 +846,18 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Method Picker")
         createEndpointViaUI(name: "Create Order", path: "/api/orders", method: "POST")
 
-        let badge = anyElement(identified: "ds.method.editor.method")
-        XCTAssertTrue(badge.waitForExistence(timeout: 5),
-                      "The editor header should show the endpoint's method badge")
-        let isPost = UITestApp.waitUntil(timeout: 5) { self.shownText(of: badge).contains("POST") }
-        let badgeText = shownText(of: badge)
+        // The method heads the request bar as the label of the endpoint's actions menu ("POST ⌄").
+        // A menu's label is flattened into the menu's own AX element, so the method is read from
+        // the menu's name, "Endpoint actions, POST", not from a separate badge.
+        let menu = endpointEditor.moreMenu
+        XCTAssertTrue(menu.waitForExistence(timeout: 5),
+                      "The request bar should show the endpoint's method")
+        let isPost = UITestApp.waitUntil(timeout: 5) {
+            "\(menu.title)|\(self.shownText(of: menu))".contains("POST")
+        }
+        let menuText = "\(menu.title)|\(shownText(of: menu))"
         XCTAssertTrue(isPost,
-                      "The picker's POST should reach the created endpoint — the badge reads \(badgeText)")
+                      "The picker's POST should reach the created endpoint — the method reads \(menuText)")
     }
 
     // MARK: - 5. Response headers: the empty state, adding, and the commit

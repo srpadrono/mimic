@@ -249,7 +249,11 @@ struct EndpointEditorView: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        // Horizontal only, then an explicit height, as `DSIconMenu` does. A fully fixed-size menu
+        // takes AppKit's intrinsic height for its title — 14pt — whatever the label's own frame
+        // says, which left a glyph-high click target in a 32pt request bar.
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(height: DSControlHeight.regular)
         .help("Endpoint actions")
         .accessibilityIdentifier("endpointEditor.moreMenu")
         .accessibilityLabel("Endpoint actions, \(endpoint.method.rawValue)")
@@ -466,6 +470,9 @@ struct EndpointEditorView: View {
         .frame(width: EditorMetrics.contentTypeFieldWidth)
         .accessibilityIdentifier("endpointEditor.contentType")
         .accessibilityLabel("Content type")
+        // A menu's label is flattened into the button, so the chosen type is not a text of its
+        // own: say it as the value, as the new-endpoint sheet's menu does.
+        .accessibilityValue(activeScenario?.bodyContentType == .plainText ? "Plain text" : "JSON")
     }
 
     // MARK: - Body and headers

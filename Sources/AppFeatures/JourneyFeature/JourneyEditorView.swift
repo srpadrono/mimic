@@ -17,40 +17,49 @@ struct JourneyEditorView: View {
     @State private var editingStepID: UUID?
     @State private var showNewStepSheet = false
     @State private var settingsExpanded = false
-    @State private var settingsContentHeight: CGFloat = .infinity
+    @State private var overviewContentHeight: CGFloat = .infinity
+
+    /// Two steps and the list's margins: the least of the list a short pane keeps on screen.
+    static let minimumStepListHeight: CGFloat = DSRowHeight.step * 2 + DSSpacing.sm * 2 + DSSpacing.xs
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                header
-                JourneyRunProgress(journey: journey, isActive: isActive, status: status)
-                behaviorRow
-            }
-            .padding(.top, DSSpacing.xl)
-            .padding(.horizontal, DSSpacing.xxl)
-            .padding(.bottom, settingsExpanded ? DSSpacing.md : DSSpacing.lg)
+            // Title, run, behaviour and — when disclosed — the details, in one scroll view that
+            // takes its natural height in a tall pane and gives way in a short one. The steps are
+            // what the editor is for, so they keep `minimumStepListHeight` whatever the pane: a
+            // narrow window stacks the header and the behaviour grid, and without this the list was
+            // laid out at zero height with every step in the tree and none of them clickable.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: DSSpacing.lg) {
+                        header
+                        JourneyRunProgress(journey: journey, isActive: isActive, status: status)
+                        behaviorRow
+                    }
+                    .padding(.top, DSSpacing.xl)
+                    .padding(.horizontal, DSSpacing.xxl)
+                    .padding(.bottom, settingsExpanded ? DSSpacing.md : DSSpacing.lg)
 
-            if settingsExpanded {
-                ScrollView {
-                    settingsContent
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            settingsContentHeight = height
-                        }
+                    if settingsExpanded {
+                        settingsContent
+                    }
                 }
-                // Natural height in a tall pane; scrolls in a short one so the steps stay reachable.
-                .frame(minHeight: 0, maxHeight: settingsContentHeight)
-                .layoutPriority(1)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("journeyEditor.settingsScroll")
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    overviewContentHeight = height
+                }
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(minHeight: 0, maxHeight: overviewContentHeight)
+            // Offered everything the step list's minimum leaves, before the list takes the rest.
+            .layoutPriority(1)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("journeyEditor.settingsScroll")
 
             DSDivider(identifier: "journeyEditor.run")
                 .padding(.horizontal, DSSpacing.xxl)
             stepsHeader
             stepList
-                // Keep one complete step visible when the settings are open.
-                .frame(minHeight: settingsExpanded ? DSRowHeight.step + DSSpacing.lg : 0,
-                       maxHeight: .infinity)
+                .frame(minHeight: Self.minimumStepListHeight, maxHeight: .infinity)
         }
         // `.contain` keeps descendants such as `journeyEditor.name` and `journeyStep-n` addressable
         // when the centre pane names this container.
@@ -125,14 +134,36 @@ struct JourneyEditorView: View {
         .frame(minWidth: 160, idealWidth: 200, maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The state badge and the run controls, in the first arrangement that fits: one row; the
+    /// badge above the titled controls; the badge above symbol-only controls. A fixed-size row wider
+    /// than a narrow pane is drawn past the pane's edge, where the pointer cannot reach it — that
+    /// was Deactivate, beside Restart, Next step and the badge in a 1024pt window.
     private var runCluster: some View {
-        HStack(spacing: DSSpacing.sm) {
-            if isActive {
-                activeState
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: DSSpacing.sm) {
+                if isActive {
+                    activeState
+                }
+                JourneyRunControls(journey: journey, isActive: isActive, status: status)
             }
-            JourneyRunControls(journey: journey, isActive: isActive, status: status)
+            .fixedSize()
+
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                if isActive {
+                    activeState
+                }
+                JourneyRunControls(journey: journey, isActive: isActive, status: status)
+            }
+            .fixedSize()
+
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                if isActive {
+                    activeState
+                }
+                JourneyRunControls(journey: journey, isActive: isActive, status: status, showsTitles: false)
+            }
+            .fixedSize()
         }
-        .fixedSize()
     }
 
     /// "Active" while the server runs, "Selected" when it will apply to the next run.
