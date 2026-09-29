@@ -331,8 +331,17 @@ struct WorkspacePage {
     }
 
     func fillWindow() {
+        if app.windows.firstMatch.frame.width >= 1180 { return }
         app.menuBars.menuBarItems["Window"].click()
-        app.menuItems["Fill"].click()
+        let fill = app.menuItems["Fill"]
+        if fill.waitForExistence(timeout: 3) {
+            fill.click()
+        } else {
+            // The Window menu can open before its window items are populated. Globe-Control-F is
+            // the system's own Fill shortcut.
+            UITestApp.dismissAnyOpenMenu(in: app)
+            app.typeKey("f", modifierFlags: [.function, .control])
+        }
         _ = UITestApp.waitUntil(timeout: 5) { app.windows.firstMatch.frame.width >= 1180 }
         UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
