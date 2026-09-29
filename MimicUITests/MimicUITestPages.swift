@@ -510,9 +510,11 @@ struct WorkspacePage {
 
     /// The centre of `frame`, as a point on screen that stays valid if its element is rebuilt.
     private func screenPoint(_ frame: CGRect) -> XCUICoordinate {
-        // Offsets are from the application element's own origin, which need not be the screen's.
-        let origin = app.frame.origin
-        return app.coordinate(withNormalizedOffset: .zero)
+        // Anchored on the menu bar: the application element's frame is unbounded, so a coordinate
+        // taken from it resolves to (-inf, -inf) and the click never lands.
+        let anchor = app.menuBars.firstMatch
+        let origin = anchor.frame.origin
+        return anchor.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: frame.midX - origin.x, dy: frame.midY - origin.y))
     }
 

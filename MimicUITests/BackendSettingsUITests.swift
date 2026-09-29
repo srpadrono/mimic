@@ -348,7 +348,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180,
                           "This assertion must exercise the compact toolbar")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.ports.isHittable },
-                      "Server details must remain reachable without enlarging the compact window")
+                      "Server details must remain reachable without enlarging the compact window\n"
+                        + "\(app.windows.firstMatch.frame)\n\(app.debugDescription)")
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
         page.ports.click()
         let copy = page.portMenuItem(secondary, copying: true)
