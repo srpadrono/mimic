@@ -90,6 +90,21 @@ final class DesignReviewUITests: MimicUITestCase {
         _ = endpointEditor.pathLabel.waitForExistence(timeout: 5)
         capture("04-workspace-editor")
         logGeometry("editor")
+        // Which part holds the window wider than the screen: the toolbar, the inspector or the
+        // navigator. Each is taken away in turn and the window filled again.
+        app.typeKey("t", modifierFlags: [.command, .option])
+        workspace.fillWindow()
+        logGeometry("no-toolbar")
+        app.typeKey("t", modifierFlags: [.command, .option])
+        app.typeKey("i", modifierFlags: [.command, .option])
+        workspace.fillWindow()
+        logGeometry("no-inspector")
+        app.typeKey("i", modifierFlags: [.command, .option])
+        app.typeKey("s", modifierFlags: [.command, .control])
+        workspace.fillWindow()
+        logGeometry("no-navigator")
+        app.typeKey("s", modifierFlags: [.command, .control])
+        workspace.fillWindow()
 
         let outOfStock = element("inspector.scenario.Out of stock")
         if outOfStock.waitForExistence(timeout: 3) {
