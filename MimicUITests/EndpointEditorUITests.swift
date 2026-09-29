@@ -1981,8 +1981,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         UITestApp.assertAccessibleMenuName(endpointEditor.moreMenu, equals: "Endpoint actions, GET")
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.width, 21)
         XCTAssertGreaterThanOrEqual(endpointEditor.moreMenu.frame.height, 21)
-        // On the method's letters, well clear of the chevron: the whole method opens the menu.
-        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
+        // The middle of the control is the method's letters, clear of the trailing chevron: a
+        // glyph-sized AppKit target would miss it.
+        endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
         let duplicate = app.menuItems["Duplicate endpoint"]
         XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
@@ -2030,7 +2031,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         // menu ends up, not where it was.
         UITestApp.waitForStableFrame(menu)
 
-        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
+        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
