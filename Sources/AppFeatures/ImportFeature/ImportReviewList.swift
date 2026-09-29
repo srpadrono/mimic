@@ -253,10 +253,12 @@ struct ImportReviewList: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            DSButton("Cancel", variant: .secondary, size: .large, identifier: cancelIdentifier) {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "import.cancel") {
                 onCancel()
             }
             .keyboardShortcut(.cancelAction)
+            // Applied outside, so it wins over the `ds.button.…` name.
+            .accessibilityIdentifier(cancelIdentifier)
             .accessibilityLabel("Cancel")
 
             DSButton(

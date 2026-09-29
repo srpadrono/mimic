@@ -292,54 +292,62 @@ struct UpdateSheet: View {
     private func buttons(for phase: UpdateService.Phase) -> some View {
         switch phase {
         case .idle, .checking:
-            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelCheckButton") {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelCheck") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.cancelCheckButton")
             .accessibilityLabel("Cancel")
             .keyboardShortcut(.cancelAction)
 
         case .upToDate:
-            DSButton("Done", variant: .primary, size: .large, identifier: "update.doneButton") {
+            DSButton("Done", variant: .primary, size: .large, identifier: "update.done") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.doneButton")
             .accessibilityLabel("Done")
             .keyboardShortcut(.defaultAction)
 
         case .available:
-            DSButton("Skip this version", variant: .ghost, size: .large, identifier: "update.skipButton") {
+            DSButton("Skip this version", variant: .ghost, size: .large, identifier: "update.skip") {
                 service.skipCurrentVersion()
             }
+            .accessibilityIdentifier("update.skipButton")
             .accessibilityLabel("Skip this version")
 
-            DSButton("Later", variant: .secondary, size: .large, identifier: "update.laterButton") {
+            DSButton("Later", variant: .secondary, size: .large, identifier: "update.later") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.laterButton")
             .accessibilityLabel("Later")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Download", variant: .primary, size: .large, identifier: "update.downloadButton") {
+            DSButton("Download", variant: .primary, size: .large, identifier: "update.download") {
                 service.downloadAndPrepare()
             }
+            .accessibilityIdentifier("update.downloadButton")
             .accessibilityLabel("Download the update")
             .keyboardShortcut(.defaultAction)
 
         case .downloading:
-            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelDownloadButton") {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelDownload") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.cancelDownloadButton")
             .accessibilityLabel("Cancel the download")
             .keyboardShortcut(.cancelAction)
 
         case .readyToInstall:
-            DSButton("Later", variant: .secondary, size: .large, identifier: "update.installLaterButton") {
+            DSButton("Later", variant: .secondary, size: .large, identifier: "update.installLater") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.installLaterButton")
             .accessibilityLabel("Later")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Quit and install", variant: .primary, size: .large, identifier: "update.installButton") {
+            DSButton("Quit and install", variant: .primary, size: .large, identifier: "update.install") {
                 service.installNow()
             }
+            .accessibilityIdentifier("update.installButton")
             .accessibilityLabel("Quit Mimic and install the update")
             .keyboardShortcut(.defaultAction)
 
@@ -350,15 +358,17 @@ struct UpdateSheet: View {
                 .accessibilityIdentifier("update.installingStatus")
 
         case .failed:
-            DSButton("Close", variant: .secondary, size: .large, identifier: "update.closeFailureButton") {
+            DSButton("Close", variant: .secondary, size: .large, identifier: "update.closeFailure") {
                 service.dismiss()
             }
+            .accessibilityIdentifier("update.closeFailureButton")
             .accessibilityLabel("Close")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Try again", variant: .primary, size: .large, identifier: "update.retryButton") {
+            DSButton("Try again", variant: .primary, size: .large, identifier: "update.retry") {
                 service.checkForUpdates()
             }
+            .accessibilityIdentifier("update.retryButton")
             .accessibilityLabel("Try again")
             .keyboardShortcut(.defaultAction)
         }

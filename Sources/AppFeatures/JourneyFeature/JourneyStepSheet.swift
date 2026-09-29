@@ -146,6 +146,7 @@ struct JourneyStepSheet: View {
                     dismiss()
                 }
                 .help("Remove this step from the journey")
+                .accessibilityIdentifier("stepSheet.removeButton")
             }
             Spacer(minLength: DSSpacing.sm)
             DSButton("Cancel", variant: .secondary, size: .large,
