@@ -2217,6 +2217,15 @@ struct AppStateFacadeTests {
         #expect(appState.lastCommandError == refusal)
     }
 
+    @Test("The centre column's floor gives way on a screen too narrow for it and both panels")
+    func centreFloorFitsTheScreen() {
+        // 220pt navigator and 260pt inspector minimums.
+        #expect(WorkspaceView.centreMinimumWidth(screenWidth: 1440) == 420)
+        #expect(WorkspaceView.centreMinimumWidth(screenWidth: 900) == 420)
+        #expect(WorkspaceView.centreMinimumWidth(screenWidth: 720) == 240)
+        #expect(WorkspaceView.centreMinimumWidth(screenWidth: 400) == 0)
+    }
+
     @Test("Editor toolbar overflow follows the space between the side panels")
     func toolbarOverflowFollowsCenterWidth() {
         #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 619))
