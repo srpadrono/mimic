@@ -330,6 +330,7 @@ jobs:
               -only-testing:MimicUITests/WorkspaceShellUITests/testPanelArrangementSurvivesClosingAndReopeningTheProject
               -only-testing:MimicUITests/WorkspaceShellUITests/testPanelChordsToggleBothPanels
               -only-testing:MimicUITests/WorkspaceShellUITests/testScenarioCrumbSwitchesTheEditedScenario
+              -only-testing:MimicUITests/WorkspaceShellUITests/testRequestLogSitsRightBelowTheEndpointEditor
               -only-testing:MimicUITests/WorkspaceShellUITests/testStartingOnAnOccupiedPortOffersTheNextPort
               -only-testing:MimicUITests/WorkspaceShellUITests/testToolbarPreservesIdentityAndCollapsesSecondaryActions
               -only-testing:MimicUITests/WorkspaceShellUITests/testWorkspaceShellNamesItsWindowAndFourPanels
