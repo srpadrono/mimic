@@ -275,7 +275,7 @@ jobs:
               -only-testing:MimicUITests/MimicUITests/testImportMenuOpensOpenAPISheet
               -only-testing:MimicUITests/MimicUITests/testRequestLogDrawerShowsHeaderAndEmptyState
               -only-testing:MimicUITests/MimicUITests/testReturnSubmitsNewProjectSheet
-              -only-testing:MimicUITests/MimicUITests/testSelectingLoggedRequestShowsDetailInInspector
+              -only-testing:MimicUITests/MimicUITests/testSelectingLoggedRequestShowsDetailBesideTheLog
               -only-testing:MimicUITests/MimicUITests/testSwitchActiveScenarioViaClick
               -only-testing:MimicUITests/MimicUITests/testToggleDrawerPanel
               -only-testing:MimicUITests/MimicUITests/testWelcomeScreenShowsHeroAndButtons
@@ -319,7 +319,7 @@ jobs:
           - id: 5
             name: workspace shell A
             only: >-
-              -only-testing:MimicUITests/WorkspaceShellUITests/testClickingALoggedRequestOpensTheCollapsedInspector
+              -only-testing:MimicUITests/WorkspaceShellUITests/testClickingALoggedRequestTakesOverTheCentreColumn
               -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorOverviewAnswersForTheProject
               -only-testing:MimicUITests/WorkspaceShellUITests/testInspectorTrafficSectionSummarisesTheEndpointsRequests
               -only-testing:MimicUITests/WorkspaceShellUITests/testJourneyCrumbJumpsToAnotherJourney

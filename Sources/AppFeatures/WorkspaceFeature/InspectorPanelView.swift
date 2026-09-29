@@ -2,20 +2,17 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// The right-hand column. It shows one thing at a time: a request, an endpoint's scenarios, a journey,
-/// or the project overview.
+/// The right-hand column. It shows one thing at a time: an endpoint's scenarios, a journey, or the
+/// project overview. A logged request opens beside the request log in the centre column instead, and
+/// the inspector steps aside while it is open.
 struct InspectorPanelView: View {
-    let requestDetail: RequestDetailInspector.Context?
     let endpoint: Endpoint?
     let journey: JourneyInspector.Context?
-    let selectedRequestCount: Int
     /// Whether the column is on screen. Its header lives in the inspector's own toolbar section,
     /// level with the window's toolbar, and must leave with the column.
     let showsHeader: Bool
     let overview: InspectorOverview.Summary?
-    let onSaveAsMock: ((UUID) -> Void)?
     let onShowJourneys: () -> Void
-    let onCloseRequestDetail: () -> Void
     let onAddScenario: (_ endpointID: UUID, _ name: String) -> Void
     let onSetActiveScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDuplicateScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
@@ -26,7 +23,6 @@ struct InspectorPanelView: View {
     let endpointSettings: EndpointInspectorSettings.Context?
 
     @State private var addScenarioTarget: ScenarioTarget?
-    @State private var requestDetailTab: RequestDetailTab = .request
 
     struct ScenarioTarget: Identifiable {
         let id: UUID
@@ -34,34 +30,26 @@ struct InspectorPanelView: View {
 
     public init(
         endpoint: Endpoint?,
-        requestDetail: RequestDetailInspector.Context? = nil,
         overview: InspectorOverview.Summary? = nil,
         journey: JourneyInspector.Context? = nil,
-        selectedRequestCount: Int = 0,
         showsHeader: Bool = true,
         endpointTraffic: [RequestLog] = [],
         endpointSettings: EndpointInspectorSettings.Context? = nil,
         onShowJourneys: @escaping () -> Void = {},
-        onCloseRequestDetail: @escaping () -> Void = {},
         onSelectTrafficLog: @escaping (UUID) -> Void = { _ in },
         onAddScenario: @escaping (_ endpointID: UUID, _ name: String) -> Void,
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
-        onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in },
-        onSaveAsMock: ((UUID) -> Void)? = nil
+        onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void = { _, _, _ in }
     ) {
-        self.onSaveAsMock = onSaveAsMock
         self.endpoint = endpoint
-        self.requestDetail = requestDetail
         self.overview = overview
         self.journey = journey
-        self.selectedRequestCount = selectedRequestCount
         self.showsHeader = showsHeader
         self.endpointTraffic = endpointTraffic
         self.endpointSettings = endpointSettings
         self.onShowJourneys = onShowJourneys
-        self.onCloseRequestDetail = onCloseRequestDetail
         self.onSelectTrafficLog = onSelectTrafficLog
         self.onAddScenario = onAddScenario
         self.onSetActiveScenario = onSetActiveScenario
@@ -71,19 +59,15 @@ struct InspectorPanelView: View {
     }
 
     enum Mode: Equatable {
-        case request
         case scenarios
         case journey
-        case selection
         case overview
         case empty
 
         var title: String {
             switch self {
-            case .request: "Request"
             case .scenarios: "Scenarios"
             case .journey: "Journey"
-            case .selection: "Requests"
             case .overview: "Overview"
             case .empty: "Inspector"
             }
@@ -91,14 +75,10 @@ struct InspectorPanelView: View {
     }
 
     static func mode(
-        hasRequestDetail: Bool,
         hasEndpoint: Bool,
         hasOverview: Bool,
-        hasJourney: Bool = false,
-        selectedRequestCount: Int = 0
+        hasJourney: Bool = false
     ) -> Mode {
-        if hasRequestDetail { return .request }
-        if selectedRequestCount > 1 { return .selection }
         if hasEndpoint { return .scenarios }
         if hasJourney { return .journey }
         if hasOverview { return .overview }
@@ -107,11 +87,9 @@ struct InspectorPanelView: View {
 
     var mode: Mode {
         Self.mode(
-            hasRequestDetail: requestDetail != nil,
             hasEndpoint: endpoint != nil,
             hasOverview: overview != nil,
-            hasJourney: journey != nil,
-            selectedRequestCount: selectedRequestCount
+            hasJourney: journey != nil
         )
     }
 
@@ -125,24 +103,8 @@ struct InspectorPanelView: View {
                         .accessibilityHidden(mode != .scenarios)
                 }
                 switch mode {
-                case .request:
-                    if let requestDetail {
-                        RequestDetailInspector(
-                            context: requestDetail,
-                            onSaveAsMock: onSaveAsMock,
-                            tabSelection: $requestDetailTab
-                        )
-                        .id(requestDetail.log.id)
-                    }
                 case .journey:
                     if let journey { JourneyInspector(context: journey).id(journey.selected.id) }
-                case .selection:
-                    DSEmptyState(
-                        heading: "\(selectedRequestCount) requests selected",
-                        message: "Select one request to inspect its headers and body.",
-                        prominence: .compact,
-                        identifier: "inspector.multipleRequests"
-                    )
                 case .overview:
                     if let overview { InspectorOverview(summary: overview, onShowJourneys: onShowJourneys) }
                 case .empty:
@@ -187,14 +149,6 @@ struct InspectorPanelView: View {
 
     private var headerTitle: some View {
         HStack(spacing: DSSpacing.xs) {
-            if mode == .request {
-                DSPanelHeaderButton(
-                    systemImage: "chevron.left",
-                    help: "Back",
-                    identifier: "inspector.closeRequestDetailButton",
-                    action: onCloseRequestDetail
-                )
-            }
             Text(mode.title)
                 .font(DSTypography.bodySemibold)
                 .foregroundStyle(DSColors.labelPrimary)

@@ -7,28 +7,12 @@ import DesignSystem
 @Suite("Request detail formatting")
 struct RequestDetailTests {
 
-    // MARK: - Search highlighting
-
-    @Test("Every occurrence is counted, case-insensitively")
-    func countsSearchMatches() {
-        var text = AttributedString("Alpha beta ALPHA gamma alpha")
-
-        #expect(RequestBodyView.highlight("alpha", in: &text) == 3)
-    }
-
-    @Test("An empty search term matches nothing rather than everything")
-    func emptySearchTermIsInert() {
-        // Guarding this is not cosmetic: `range(of: "")` succeeds at every index, so without it the
-        // highlight loop never advances and the view hangs.
-        var text = AttributedString("some body")
-
-        #expect(RequestBodyView.highlight("", in: &text) == 0)
-    }
+    // MARK: - Body rendering
 
     @Test("A body over the formatting limit is shown verbatim")
     func skipsFormattingForHugeBodies() {
         let huge = "{\"a\":\"" + String(repeating: "x", count: 20_480) + "\"}"
-        let rendered = RequestBodyView.render(payload: huge, searchText: "")
+        let rendered = RequestBodyView.render(payload: huge)
 
         #expect(rendered.isFormatted == false)
         #expect(String(rendered.text.characters) == huge)
@@ -41,36 +25,27 @@ struct RequestDetailTests {
         let truncated = String(repeating: "[", count: 700) + "0"
         #expect(truncated.utf8.count == 701)
 
-        let rendered = RequestBodyView.render(payload: truncated, searchText: "")
+        let rendered = RequestBodyView.render(payload: truncated)
         #expect(rendered.isFormatted == false)
         #expect(String(rendered.text.characters) == truncated)
     }
 
-    @Test("A normal body is formatted and match-counted together")
-    func rendersFormattedBodyWithMatches() {
-        let rendered = RequestBodyView.render(payload: #"{"id":1,"id2":2}"#, searchText: "id")
+    @Test("A normal body is formatted")
+    func rendersFormattedBody() {
+        let rendered = RequestBodyView.render(payload: #"{"id":1,"id2":2}"#)
 
         #expect(rendered.isFormatted)
         #expect(String(rendered.text.characters).contains("\n"))
-        #expect(rendered.matchCount == 2)
     }
 
     @Test("A body with carriage-return line endings keeps its layout without a refusal")
     func carriageReturnLayoutIsPreservedWithoutARefusal() {
         let body = "{\r  \"ok\": true,\r  \"message\": \"ready\"\r}"
 
-        let rendered = RequestBodyView.render(payload: body, searchText: "ready")
+        let rendered = RequestBodyView.render(payload: body)
 
         #expect(rendered.isFormatted)
         #expect(String(rendered.text.characters) == body)
-        #expect(rendered.matchCount == 1)
-    }
-
-    @Test("Match summary reads as a sentence")
-    func matchSummaryWording() {
-        #expect(RequestBodyView.matchSummary(0) == "No matches in this body")
-        #expect(RequestBodyView.matchSummary(1) == "1 match")
-        #expect(RequestBodyView.matchSummary(4) == "4 matches")
     }
 
     // MARK: - cURL export
@@ -191,23 +166,6 @@ struct RequestDetailTests {
             == "# A HEAD request with a body cannot be reproduced with cURL's header-only mode.")
     }
 
-    @Test("A copied report discloses truncated requests and unavailable binary responses")
-    func copiedDetailsDiscloseUnavailableBodyData() {
-        let log = RequestLog(
-            method: .post,
-            path: "/image",
-            responseBodyIsBinary: true,
-            requestBody: "prefix",
-            requestBodyTruncated: true,
-            responseStatusCode: 200
-        )
-
-        let report = RequestLogQuery.formattedDetails(for: log)
-
-        #expect(report.contains("(request body truncated at 64 KB)"))
-        #expect(report.contains("Body: Binary or non-UTF-8 (not previewed)"))
-    }
-
     @Test("Single quotes in a body cannot break out of the shell quoting")
     func escapesSingleQuotes() {
         let log = RequestLog(
@@ -236,12 +194,9 @@ struct RequestDetailTests {
 
     // MARK: - Request, Response and Timing tabs
 
-    @Test("The tabs are Request, Response and Timing, and the first two offer the find field")
+    @Test("The tabs are Request, Response and Timing")
     func tabsFollowTheDesign() {
         #expect(RequestDetailTab.allCases.map(\.rawValue) == ["Request", "Response", "Timing"])
-        #expect(RequestDetailTab.request.showsBodySearch)
-        #expect(RequestDetailTab.response.showsBodySearch)
-        #expect(RequestDetailTab.timing.showsBodySearch == false)
     }
 
     @Test("The request URL prefers the port the request arrived on")
@@ -249,11 +204,11 @@ struct RequestDetailTests {
         let logged = RequestLog(method: .get, path: "/recommendations?limit=4", listenerPort: 18086)
         let unlogged = RequestLog(method: .get, path: "/recommendations?limit=4")
 
-        #expect(RequestDetailInspector.requestURL(for: logged, port: 8080)
+        #expect(RequestDetailView.requestURL(for: logged, port: 8080)
                 == "http://localhost:18086/recommendations?limit=4")
-        #expect(RequestDetailInspector.requestURL(for: unlogged, port: 8080)
+        #expect(RequestDetailView.requestURL(for: unlogged, port: 8080)
                 == "http://localhost:8080/recommendations?limit=4")
-        #expect(RequestDetailInspector.requestURL(for: unlogged, port: nil) == "/recommendations?limit=4")
+        #expect(RequestDetailView.requestURL(for: unlogged, port: nil) == "/recommendations?limit=4")
     }
 
     @Test("The port row names the listener and its number")
@@ -262,18 +217,18 @@ struct RequestDetailTests {
         let bare = RequestLog(method: .get, path: "/", listenerPort: 18086)
         let unknown = RequestLog(method: .get, path: "/")
 
-        #expect(RequestDetailInspector.portSummary(for: named) == "Storefront \u{00B7} 18086")
-        #expect(RequestDetailInspector.portSummary(for: bare) == "18086")
-        #expect(RequestDetailInspector.portSummary(for: unknown) == nil)
+        #expect(RequestDetailView.portSummary(for: named) == "Storefront \u{00B7} 18086")
+        #expect(RequestDetailView.portSummary(for: bare) == "18086")
+        #expect(RequestDetailView.portSummary(for: unknown) == nil)
     }
 
     @Test("Query items keep their order, duplicates, bracketed names and decoding")
     func queryItemsAreSplitInOrder() {
-        let items = RequestDetailInspector.queryItems(in: "/a?item[0]=one&item[1]=two&q=caf%C3%A9&flag&item[0]=again#top")
+        let items = RequestDetailView.queryItems(in: "/a?item[0]=one&item[1]=two&q=caf%C3%A9&flag&item[0]=again#top")
 
         #expect(items.map(\.name) == ["item[0]", "item[1]", "q", "flag", "item[0]"])
         #expect(items.map(\.value) == ["one", "two", "caf\u{00E9}", nil, "again"])
-        #expect(RequestDetailInspector.queryItems(in: "/products/42").isEmpty)
-        #expect(RequestDetailInspector.queryItems(in: "/products?").isEmpty)
+        #expect(RequestDetailView.queryItems(in: "/products/42").isEmpty)
+        #expect(RequestDetailView.queryItems(in: "/products?").isEmpty)
     }
 }

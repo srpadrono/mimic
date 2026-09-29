@@ -22,12 +22,16 @@ struct WorkspaceView: View {
     @State private var selectedEndpointID: UUID?
     @State private var renameEndpointTarget: Endpoint?
     @State private var editEndpointRequestTarget: Endpoint?
-    /// The logged requests the user has selected. Owned here rather than inside the drawer because
-    /// two panels need them: the log paints the rows selected, the inspector renders the detail.
+    /// The logged requests the user has selected. Owned here rather than inside the log because it
+    /// arranges the window: while any row is selected the centre column shows the log beside the
+    /// request's detail in place of the editor, and the inspector steps aside.
     ///
-    /// A set because a selection is also how a journey is captured from a session. The inspector
-    /// shows detail only when exactly one row is selected — detail is about one thing.
+    /// A set because a selection is also how a journey is captured from a session. The detail
+    /// shows one request only when exactly one row is selected — detail is about one thing.
     @State private var selectedLogIDs: Set<UUID> = []
+    /// The request log's filter, sort and rows, shared by the docked log and the one that opens
+    /// beside a selected request, so moving between the two keeps them.
+    @State private var requestLogTable = RequestLogTableState()
     /// The requests waiting to be named as a journey. Non-nil *is* "the capture sheet is up".
     @State private var pendingCapture: CaptureJourneySheet.Capture?
     /// Restricts the request log to calls nothing answered. Lives here so the toolbar's unmatched
@@ -133,68 +137,76 @@ struct WorkspaceView: View {
                 // that cost the inspector 220pt of height — taken from the one panel whose job is
                 // showing you a payload, and given to a log that was not using the corner.
                 VStack(spacing: 0) {
-                    // Xcode's jump bar. Sits above the editor area rather than inside any one
-                    // editor, because it describes where you are, not what you are editing.
-                    BreadcrumbJumpBar(
-                        crumbs: breadcrumbs,
-                        autosaveStatus: appState.autosaveStatus,
-                        onSelectOption: handleBreadcrumbSelection
-                    )
-                    Rectangle()
-                        .fill(DSColors.separator)
-                        .frame(height: DSStroke.hairline)
-                        .accessibilityHidden(true)
-
-                    // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
-                    // pair — so the divider between them is the same divider the navigator and the
-                    // inspector already wear, and the centre pane's floor is a constraint AppKit
-                    // enforces rather than a ceiling this view recomputes from a measured container.
-                    DSSplitPane(
-                        axis: .vertical,
-                        isSecondaryPresented: $showDrawer,
-                        secondaryThickness: $drawerHeight,
-                        minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
-                        minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
-                        defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
-                        preferredPrimaryThickness: centreContentHeight,
-                        identifier: "requestLog"
-                    ) {
-                        CenterPaneView(
-                            content: CenterPaneContent.forTab(
-                                navigatorTab,
-                                endpointID: selectedEndpointID,
-                                journeyID: appState.selectedJourneyID
-                            ),
-                            onRenameEndpoint: beginEndpointRename,
-                            onEditEndpointRequest: beginEndpointRequestEdit,
-                            onAddEndpoint: { appState.showNewEndpointSheet = true },
-                            onImportHAR: { showHARImport = true },
-                            onImportOpenAPI: { showOpenAPIImport = true },
-                            onContentHeightChange: { height in
-                                guard centreContentHeight != height else { return }
-                                centreContentHeight = height
-                            }
+                    if !selectedLogIDs.isEmpty {
+                        // A selected request takes over the column: the log on the left, the request
+                        // on the right, and neither the editor nor the docked log beside them.
+                        // Deselecting — Escape in the list, the close button, picking an endpoint —
+                        // brings the editor back.
+                        requestLogPanel(showsDetail: true)
+                    } else {
+                        // Xcode's jump bar. Sits above the editor area rather than inside any one
+                        // editor, because it describes where you are, not what you are editing.
+                        BreadcrumbJumpBar(
+                            crumbs: breadcrumbs,
+                            autosaveStatus: appState.autosaveStatus,
+                            onSelectOption: handleBreadcrumbSelection
                         )
-                        // Anchored to the top, not centred. A pane is exactly as tall as the split
-                        // view gives it, and an editor taller than that — the journey editor has no
-                        // scroll view — is centred by default, which pushes its *first* row above the
-                        // pane and out of sight under the toolbar. That row carries "Add step", so on
-                        // a short window the control was drawn nowhere and clicked nothing: two UI
-                        // tests failed on it, and a user with a small window would have seen the same.
-                        // Clipping the bottom of a long editor is recoverable; losing the top is not.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        // Re-injected because the pane is hosted: `NSHostingController` starts a new
-                        // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
-                        // this the editor traps on a missing `AppState` the moment it appears.
-                        .environment(appState)
-                        // Paired, like every other container identifier in this window. Naming a
-                        // container without `.contain` renames every descendant, which would take
-                        // the whole editor out of the accessibility tree.
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("centerPane")
-                    } secondary: {
-                        requestLogPanel
+                        Rectangle()
+                            .fill(DSColors.separator)
+                            .frame(height: DSStroke.hairline)
+                            .accessibilityHidden(true)
+
+                        // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
+                        // pair — so the divider between them is the same divider the navigator and the
+                        // inspector already wear, and the centre pane's floor is a constraint AppKit
+                        // enforces rather than a ceiling this view recomputes from a measured container.
+                        DSSplitPane(
+                            axis: .vertical,
+                            isSecondaryPresented: $showDrawer,
+                            secondaryThickness: $drawerHeight,
+                            minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
+                            minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
+                            defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
+                            preferredPrimaryThickness: centreContentHeight,
+                            identifier: "requestLog"
+                        ) {
+                            CenterPaneView(
+                                content: CenterPaneContent.forTab(
+                                    navigatorTab,
+                                    endpointID: selectedEndpointID,
+                                    journeyID: appState.selectedJourneyID
+                                ),
+                                onRenameEndpoint: beginEndpointRename,
+                                onEditEndpointRequest: beginEndpointRequestEdit,
+                                onAddEndpoint: { appState.showNewEndpointSheet = true },
+                                onImportHAR: { showHARImport = true },
+                                onImportOpenAPI: { showOpenAPIImport = true },
+                                onContentHeightChange: { height in
+                                    guard centreContentHeight != height else { return }
+                                    centreContentHeight = height
+                                }
+                            )
+                            // Anchored to the top, not centred. A pane is exactly as tall as the split
+                            // view gives it, and an editor taller than that — the journey editor has no
+                            // scroll view — is centred by default, which pushes its *first* row above the
+                            // pane and out of sight under the toolbar. That row carries "Add step", so on
+                            // a short window the control was drawn nowhere and clicked nothing: two UI
+                            // tests failed on it, and a user with a small window would have seen the same.
+                            // Clipping the bottom of a long editor is recoverable; losing the top is not.
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            // Re-injected because the pane is hosted: `NSHostingController` starts a new
+                            // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
+                            // this the editor traps on a missing `AppState` the moment it appears.
+                            .environment(appState)
+                            // Paired, like every other container identifier in this window. Naming a
+                            // container without `.contain` renames every descendant, which would take
+                            // the whole editor out of the accessibility tree.
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("centerPane")
+                        } secondary: {
+                            requestLogPanel(showsDetail: false)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
                     }
                 }
                 // A floor for the centre column, so narrowing the window takes the side panels down
@@ -380,17 +392,8 @@ struct WorkspaceView: View {
                 navigatorTab = .journeys
             }
         }
-        // Selecting a request shows it in the inspector, so the inspector has to be open. Without
-        // this, clicking a row in the log looks like it does nothing at all whenever the panel
-        // happens to be collapsed.
-        .onChange(of: selectedLogIDs) { _, newValue in
-            guard !newValue.isEmpty, !showInspector else { return }
-            withAnimation(reduceMotion ? nil : DSAnimation.panel) {
-                showInspector = true
-            }
-        }
-        // The inspector shows one thing at a time, so the newer selection wins. Picking an endpoint
-        // while a request is up should show that endpoint — not silently lose the click.
+        // The centre column shows one thing at a time, so the newer selection wins. Picking an
+        // endpoint while a request is up should show that endpoint — not silently lose the click.
         .onChange(of: selectedEndpointID) { _, newValue in
             guard let newValue else { return }
             selectedLogIDs = []
@@ -403,7 +406,7 @@ struct WorkspaceView: View {
         .onChange(of: navigatorTab) { _, _ in selectedLogIDs = [] }
         .onChange(of: appState.selectedJourneyID) { _, _ in selectedLogIDs = [] }
         .onChange(of: appState.currentProject?.id) { _, _ in resetProjectPresentation() }
-        // A cleared log takes its selection with it; otherwise the inspector goes on showing a
+        // A cleared log takes its selection with it; otherwise the centre column goes on showing a
         // request that is no longer in the list.
         .onChange(of: appState.requestLogs.isEmpty) { _, isEmpty in
             guard isEmpty else { return }
@@ -416,7 +419,7 @@ struct WorkspaceView: View {
             persistLayout()
         }
         .onChange(of: showInspector) { _, _ in persistLayout() }
-        // The View menu reads what is on screen, which an empty project overrides.
+        // The View menu reads what is on screen, which an empty project or an open request overrides.
         .onChange(of: isInspectorPresented, initial: true) { _, visible in
             appState.isInspectorVisible = visible
         }
@@ -682,31 +685,40 @@ struct WorkspaceView: View {
     }
 
     /// Whether there is anything for the inspector to show. A project with no endpoints and no
-    /// journeys has none, unless a logged request is selected.
+    /// journeys has none.
     private var canPresentInspector: Bool {
-        !currentEndpoints.isEmpty || !appState.journeys.isEmpty || !selectedLogIDs.isEmpty
+        !currentEndpoints.isEmpty || !appState.journeys.isEmpty
     }
 
-    /// The column on screen: the person's choice, which an empty project overrides without
-    /// forgetting it.
+    /// The column on screen: the person's choice, which an empty project or a request open in the
+    /// centre column overrides without forgetting it.
     private var isInspectorPresented: Bool {
-        showInspector && canPresentInspector
+        showInspector && canPresentInspector && selectedLogIDs.isEmpty
     }
 
-    /// AppKit writes back here when the column is dragged shut; that is the person's choice too.
+    /// AppKit writes back here when the column is dragged shut; that is the person's choice too. A
+    /// write while an empty project or an open request hides the column is not, and is ignored.
     private var inspectorColumnPresentation: Binding<Bool> {
         Binding(
             get: { isInspectorPresented },
             set: { value in
-                guard canPresentInspector, value != showInspector else { return }
+                guard canPresentInspector, selectedLogIDs.isEmpty, value != showInspector else { return }
                 showInspector = value
             }
         )
     }
 
+    /// Showing the inspector while a request is open closes the request, so the choice is honoured.
     private func toggleInspector() {
         guard canPresentInspector else { return }
-        withAnimation(reduceMotion ? nil : DSAnimation.panel) { showInspector.toggle() }
+        withAnimation(reduceMotion ? nil : DSAnimation.panel) {
+            if isInspectorPresented {
+                showInspector = false
+            } else {
+                selectedLogIDs = []
+                showInspector = true
+            }
+        }
     }
 
     private var drawerToolbarButton: some View {
@@ -1020,7 +1032,7 @@ struct WorkspaceView: View {
     // MARK: - Request log wiring
 
     @ViewBuilder
-    private var requestLogPanel: some View {
+    private func requestLogPanel(showsDetail: Bool) -> some View {
         RequestLogDrawerView(
             requestLogs: appState.requestLogs,
             endpoints: currentEndpoints,
@@ -1049,6 +1061,9 @@ struct WorkspaceView: View {
                 // into a journey you cannot see is indistinguishable from having captured nothing.
                 appState.selectedJourneyID = journey.id
                 navigatorTab = .journeys
+                // Neither line changes anything when that journey is already open, and the editor
+                // is where the new steps show, so the request gives the column back explicitly.
+                selectedLogIDs = []
             },
             // Capturing into a brand-new journey names it first — the sheet then shows the journey,
             // or the command reads as having done nothing.
@@ -1057,10 +1072,16 @@ struct WorkspaceView: View {
                     logs: logs,
                     suggestedName: AppState.journeyName(capturing: logs)
                 )
+            },
+            table: requestLogTable,
+            showsDetail: showsDetail,
+            onGoToEndpoint: { id in
+                guard let endpoint = currentEndpoints.first(where: { $0.id == id }) else { return }
+                revealEndpoint(endpoint)
             }
         )
         .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("drawer")
+        .accessibilityIdentifier("drawer")
     }
 
     // MARK: - Inspector wiring
@@ -1071,14 +1092,12 @@ struct WorkspaceView: View {
             guard navigatorTab == .endpoints, let id = selectedEndpointID else { return nil }
             return appState.currentProject?.endpoints.first { $0.id == id }
         }()
-        let detail = requestDetailContext
         let selectedJourney = navigatorTab == .journeys
             ? appState.journeys.first { $0.id == appState.selectedJourneyID } : nil
 
         InspectorPanelView(
             endpoint: endpoint,
-            requestDetail: detail,
-            overview: endpoint == nil && detail == nil ? inspectorOverview : nil,
+            overview: endpoint == nil ? inspectorOverview : nil,
             journey: selectedJourney.map {
                 JourneyInspector.Context(selected: $0, active: appState.activeJourney,
                                          progress: activeJourneyProgress, serverState: appState.serverState)
@@ -1100,7 +1119,6 @@ struct WorkspaceView: View {
                 )
             },
             onShowJourneys: { navigatorTab = .journeys },
-            onCloseRequestDetail: { selectedLogIDs = [] },
             onSelectTrafficLog: { selectedLogIDs = [$0] },
             onAddScenario: { endpointID, name in
                 if let scenario = appState.addScenario(endpointID: endpointID, name: name) {
@@ -1110,12 +1128,7 @@ struct WorkspaceView: View {
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
             onDeleteScenario: appState.deleteScenario,
-            onRenameScenario: appState.renameScenario,
-            onSaveAsMock: { id in
-                if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
-                    revealEndpoint(endpoint)
-                }
-            }
+            onRenameScenario: appState.renameScenario
         )
     }
 
@@ -1163,30 +1176,6 @@ struct WorkspaceView: View {
 
     private func beginEndpointRequestEdit(_ id: UUID) {
         editEndpointRequestTarget = currentEndpoints.first { $0.id == id }
-    }
-
-    /// The selected request, resolved against the current project so the endpoint and scenario names
-    /// track renames rather than showing whatever they were called when the call arrived.
-    private var requestDetailContext: RequestDetailInspector.Context? {
-        // Exactly one, not "the first of several": a detail panel showing one arbitrary member of a
-        // multi-row selection would claim to be about a selection it is only a fraction of. With
-        // several rows picked the inspector falls back to the overview.
-        guard selectedLogIDs.count == 1,
-              let selectedLogID = selectedLogIDs.first,
-              let log = appState.requestLogs.first(where: { $0.id == selectedLogID })
-        else { return nil }
-
-        let endpoints = currentEndpoints
-        return RequestDetailInspector.Context(
-            log: log,
-            endpointName: RequestLogQuery.endpointName(for: log.matchedEndpointID, endpoints: endpoints),
-            scenarioName: RequestLogQuery.scenarioName(
-                endpointID: log.matchedEndpointID,
-                scenarioID: log.matchedScenarioID,
-                endpoints: endpoints
-            ),
-            port: log.listenerPort ?? appState.serverState.runningPort
-        )
     }
 
     /// Project-level facts for the inspector's no-selection state.

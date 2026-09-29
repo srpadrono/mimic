@@ -790,12 +790,12 @@ final class MimicUITests: MimicUITestCase {
         )
     }
 
-    // MARK: - 24b. Selecting a Request Shows It in the Inspector
+    // MARK: - 24b. Selecting a Request Opens It Beside the Log
 
-    /// The whole point of moving detail out of the drawer: clicking a row has to put the request and
-    /// its body somewhere you can actually read them.
+    /// Clicking a row has to put the request and its body somewhere you can actually read them: the
+    /// centre column, split between the log and the detail.
     @MainActor
-    func testSelectingLoggedRequestShowsDetailInInspector() async throws {
+    func testSelectingLoggedRequestShowsDetailBesideTheLog() async throws {
         let port = 62091
         let payload = #"{"name":"Ada Lovelace","role":"engineer"}"#
 
@@ -820,47 +820,36 @@ final class MimicUITests: MimicUITestCase {
         )
         requestLogDrawer.firstLogRow.click()
 
-        // The inspector takes over — this is the behaviour the redesign exists for.
+        // The centre column takes over: the log on the left, the request on the right, and the
+        // inspector out of the way.
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Selecting a logged request should switch the inspector to request detail"
-        )
-        XCTAssertTrue(
-            requestDetail.path.waitForExistence(timeout: 5),
-            "Request detail should show the path"
+            requestDetail.waitForDetail(),
+            "Selecting a logged request should open its detail beside the log"
         )
         XCTAssertTrue(requestDetail.shownPath().contains("/api/users"), "The detail should show the clicked request")
         XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "Request detail should show the status")
-        XCTAssertEqual(requestDetail.closeButton.label, "Back", "The header's back button should say where it goes")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.exists,
+            "The endpoint editor should give the column to the request"
+        )
+        // The toggle folds into the overflow menu on a narrow window; where it is inline it has to
+        // read as off, because the inspector steps aside while a request is open.
+        let inspectorToggle = app.buttons["toggleInspectorButton"].firstMatch
+        if inspectorToggle.exists {
+            XCTAssertEqual(inspectorToggle.label, "Show inspector",
+                           "The inspector should step aside while a request is open")
+        }
+        XCTAssertEqual(requestDetail.closeButton.label, "Close request", "The close button should say what it does")
 
-        // Request tab: the payload has to be visible and searchable.
+        // Request tab: the payload has to be visible.
         requestDetail.tab("Request").click()
         XCTAssertTrue(
-            UITestApp.waitForAny(
-                [requestDetail.requestBody, requestDetail.bodySearchField],
-                timeout: 5
-            ),
+            requestDetail.requestBody.waitForExistence(timeout: 5),
             "The Request tab should render the payload"
         )
-
-        XCTAssertTrue(
-            requestDetail.bodySearchField.waitForExistence(timeout: 5),
-            "The Request tab should offer a find field"
-        )
-        requestDetail.bodySearchField.click()
-        requestDetail.bodySearchField.typeText("Lovelace")
-
-        XCTAssertTrue(
-            UITestApp.waitForAny(
-                [
-                    requestDetail.responseBodyMatches,
-                    app.descendants(matching: .any)
-                        .matching(identifier: "requestLog.body.request.matches")
-                        .firstMatch
-                ],
-                timeout: 5
-            ),
-            "Searching should report how many times the term appears in a body"
+        XCTAssertFalse(
+            app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch.exists,
+            "The detail has no find field"
         )
 
         // Copying is the other half of "I found the request" — it must not silently do nothing.
@@ -872,8 +861,12 @@ final class MimicUITests: MimicUITestCase {
             "Copying should confirm it happened"
         )
 
-        // Closing returns the panel to whatever it was showing before.
+        // Closing gives the column back to the editor, and the inspector to what it was showing.
         requestDetail.closeButton.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.waitForExistence(timeout: 5),
+            "Closing request detail should bring the endpoint editor back"
+        )
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Scenarios"),
             "Closing request detail should restore the endpoint inspector"
@@ -927,15 +920,11 @@ final class MimicUITests: MimicUITestCase {
                       "The first log row should be reachable in the filled window")
         rows[0].click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Clicking a row should show it in the inspector"
-        )
-        XCTAssertTrue(
-            requestDetail.path.waitForExistence(timeout: 5),
-            "Request detail should name the request it is showing"
+            requestDetail.waitForDetail(),
+            "Clicking a row should open it beside the log"
         )
 
-        // What the inspector says *before* the press, so the assertion is that the selection moved
+        // What the detail says *before* the press, so the assertion is that the selection moved
         // rather than that it landed on a particular path. Which row is second depends on the log's
         // sort order, and a test that hard-codes one of the two paths passes or fails on that rather
         // than on the keyboard.
@@ -956,7 +945,7 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertNotEqual(
             after,
             before,
-            "The down arrow should move the selection to the next row and show it in the inspector"
+            "The down arrow should move the selection to the next row and show it in the detail"
         )
 
         workspace.serverToggleButton.click()

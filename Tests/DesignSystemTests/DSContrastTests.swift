@@ -338,23 +338,6 @@ struct DSContrastTests {
         }
     }
 
-    /// A search hit takes its own ink, so the run under the highlight stays readable.
-    @Test("A search hit's text clears AA on the highlight")
-    func searchHitIsReadable() throws {
-        #expect(DSColors.Syntax.searchHitText == DSColors.labelPrimary)
-        #expect(DSColors.Syntax.punctuation == DSColors.labelSecondary)
-
-        let expected: [Appearance: Double] = [.light: 13.30, .dark: 6.96]
-        for appearance in Appearance.allCases {
-            let well = try resolve(DSColors.code, in: appearance)
-            let hit = try resolve(DSColors.Syntax.searchHit, in: appearance).composited(over: well)
-            let ratio = try contrast(DSColors.Syntax.searchHitText, on: hit, in: appearance)
-            let reading = try #require(expected[appearance])
-            #expect(ratio >= 4.5, "search hit, \(appearance): \(ratio)")
-            #expect(isClose(ratio, reading, within: ratioTolerance), "search hit, \(appearance): \(ratio)")
-        }
-    }
-
     // MARK: - Banners
 
     /// A banner's message is `labelPrimary` on its tinted fill, and its glyph is the tone's ink. The
