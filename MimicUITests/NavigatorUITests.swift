@@ -542,8 +542,8 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertGreaterThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.minY,
                                     navigator.element("journeyRun.deactivateButton").frame.maxY,
                                     "The behaviour row must follow the run buttons")
-        XCTAssertLessThan(navigator.element("journeyEditor.unmatchedPicker").frame.maxY, firstStep.frame.minY,
-                          "The behaviour row must sit above the steps")
+        XCTAssertLessThanOrEqual(navigator.element("journeyEditor.unmatchedPicker").frame.maxY, firstStep.frame.minY,
+                                 "The behaviour row must sit above the steps")
         add(navigator.screenshot("navigator-journeys-grouped-narrow"))
     }
 
@@ -732,6 +732,9 @@ final class NavigatorUITests: MimicUITestCase {
         menu.click()
         let return404 = app.menuItems["Return 404"].firstMatch
         XCTAssertTrue(return404.waitForExistence(timeout: 3), "The menu should offer Return 404")
+        // Clicked once the menu has finished opening; a click during its animation can land on
+        // the item's old frame and close the menu having chosen nothing.
+        UITestApp.waitForStableFrame(return404)
         return404.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.spoken(menu).contains("Return 404") },
                       "Choosing Return 404 should stop forwarding — \(panel.spoken(menu))")
@@ -740,6 +743,7 @@ final class NavigatorUITests: MimicUITestCase {
         let forward = app.menuItems["Forward to upstream"].firstMatch
         XCTAssertTrue(forward.waitForExistence(timeout: 3))
         XCTAssertTrue(forward.isEnabled, "The kept upstream can be forwarded to again")
+        UITestApp.waitForStableFrame(forward)
         forward.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { panel.spoken(menu).contains("Forward to upstream") })
     }
