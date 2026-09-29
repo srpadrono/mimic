@@ -277,8 +277,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
                        "There is no endpoint available to select yet")
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerCurlCommand.exists,
-                       "A stopped server has no address to offer a request to")
+        XCTAssertTrue(workspace.drawerCurlCommand.waitForExistence(timeout: 5),
+                      "A stopped server's empty log offers the request to try once it runs")
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -349,8 +349,14 @@ final class BackendSettingsUITests: MimicUITestCase {
         workspace.serverToggleButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.drawerCurlCommand.waitForNonExistence(timeout: 5),
-                      "Stopping the server withdraws the request to try")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                let curl = workspace.drawerCurlCommand
+                return curl.label.contains("localhost:\(primaryReplacement)")
+                    || (curl.value as? String)?.contains("localhost:\(primaryReplacement)") == true
+            },
+            "Stopped, the request to try names the port configured for the next start"
+        )
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "A stopped server shows the port configured for its next start")
         workspace.serverToggleButton.click()

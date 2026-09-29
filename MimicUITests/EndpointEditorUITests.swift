@@ -588,6 +588,36 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     // MARK: - 1. The two "Add endpoint" buttons are two buttons
 
+    /// The first-endpoint chooser: the headline over three cards that share one row whenever the
+    /// pane is wide enough for three at their narrowest (168pt each, 16pt apart, 24pt padding).
+    @MainActor
+    func testFirstEndpointCardsShareOneRowUnderTheHeadline() throws {
+        launchApp()
+        createProjectViaUI(name: "Chooser Row")
+        workspace.fillWindow()
+
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+                      "The headline should lead the empty project's centre")
+        let add = workspace.centerAddEndpointCard
+        let har = workspace.centerImportHARCard
+        let openAPI = workspace.centerImportOpenAPICard
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        XCTAssertTrue(har.exists && openAPI.exists)
+
+        let heading = workspace.centerFirstEndpointHeading.frame
+        XCTAssertLessThan(heading.maxY, add.frame.minY, "The headline sits above the cards")
+
+        let chooser = app.descendants(matching: .any)
+            .matching(identifier: "ds.empty.center.noSelection").firstMatch.frame
+        guard chooser.width - 48 >= 3 * 168 + 2 * 16 else {
+            throw XCTSkip("The centre is \(chooser.width)pt wide, too narrow for one row of three cards")
+        }
+        XCTAssertEqual(add.frame.minY, har.frame.minY, accuracy: 1, "Import HAR should sit beside Add endpoint")
+        XCTAssertEqual(har.frame.minY, openAPI.frame.minY, accuracy: 1, "Import OpenAPI should share the row")
+        XCTAssertLessThan(add.frame.maxX, har.frame.minX)
+        XCTAssertLessThan(har.frame.maxX, openAPI.frame.minX)
+    }
+
     /// SIDEBAR-03, SIDEBAR-04.
     ///
     /// An empty project offers "Add endpoint" twice: the first card of the centre pane's

@@ -1018,6 +1018,7 @@ struct WorkspaceView: View {
                 )
             }
         )
+        .configuredPort(appState.serverConfiguration.port)
         .accessibilityElement(children: .contain)
             .accessibilityIdentifier("drawer")
     }

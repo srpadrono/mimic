@@ -651,6 +651,7 @@ struct DSComponentRenderingTests {
         #expect(DSGlyph.button == 14)
         #expect(DSGlyph.control == 15)
         #expect(DSGlyph.toolbar == 16)
+        #expect(DSGlyph.card == 22)
         #expect(DSGlyph.illustration == 28)
 
         #expect(DSGlyph.minimum == 8)
@@ -661,6 +662,7 @@ struct DSComponentRenderingTests {
             DSGlyph.button,
             DSGlyph.control,
             DSGlyph.toolbar,
+            DSGlyph.card,
             DSGlyph.illustration
         ]
 

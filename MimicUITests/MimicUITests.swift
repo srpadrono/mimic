@@ -629,7 +629,7 @@ final class MimicUITests: MimicUITestCase {
     // MARK: - 24. Request Log Drawer Shows Header and Empty State
 
     /// The idle log: one sentence, no scope segments or clear button, and a filter that is at most
-    /// a disabled hint. Once the server runs, a `curl` command for its port appears to try.
+    /// a disabled hint. A `curl` command for the project's port is offered stopped and running.
     @MainActor
     func testRequestLogDrawerShowsHeaderAndEmptyState() throws {
         let port = 62098
@@ -640,8 +640,12 @@ final class MimicUITests: MimicUITestCase {
 
         XCTAssertTrue(requestLogDrawer.emptyHeading.waitForExistence(timeout: 5),
                       "Request log should show its empty state when there are no requests")
-        XCTAssertFalse(workspace.drawerCurlCommand.exists,
-                       "A stopped server has no address to try, so no curl command")
+        let stoppedCommand = workspace.drawerCurlCommand
+        XCTAssertTrue(stoppedCommand.waitForExistence(timeout: 5),
+                      "A stopped server's empty log should offer the command to try once it runs")
+        let stoppedSpoken = "\(stoppedCommand.label)|\(stoppedCommand.value.map { String(describing: $0) } ?? "")"
+        XCTAssertTrue(stoppedSpoken.contains("curl http://localhost:\(port)/"),
+                      "The command should target the project's port — it read \(stoppedSpoken)")
 
         // Nothing to filter or clear. The filter may stay as a quiet hint, but never usable.
         XCTAssertFalse(requestLogDrawer.unmatchedSegment.exists, "An empty log has no Unmatched segment")
@@ -656,7 +660,7 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
         let command = workspace.drawerCurlCommand
         XCTAssertTrue(command.waitForExistence(timeout: 5),
-                      "A running server's empty log should offer a command to try")
+                      "A running server's empty log should still offer the command")
         let spoken = "\(command.label)|\(command.value.map { String(describing: $0) } ?? "")"
         XCTAssertTrue(spoken.contains("curl http://localhost:\(port)/"),
                       "The command should target the running port — it read \(spoken)")
