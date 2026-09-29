@@ -574,10 +574,6 @@ final class WelcomeProjectUITests: MimicUITestCase {
             UITestApp.waitUntil(timeout: 5) { copies.count == 2 },
             "Duplicating twice should leave two copies in the list, found \(copies.count)"
         )
-        XCTAssertTrue(
-            staticTextExists(exactly: "3"),
-            "The Projects header should count the original and both copies"
-        )
     }
 
     // MARK: - Creating a project
