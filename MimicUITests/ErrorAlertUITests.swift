@@ -257,7 +257,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         launchApp()
         createProjectViaUI(name: "Last Port", port: port)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
 
         XCTAssertTrue(
             waitForAlert(messageIdentifier: "portConflict.message", saying: "No higher port is available", timeout: 20),
@@ -290,7 +290,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         launchApp()
         createProjectViaUI(name: "Port Conflict", port: port)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
 
         XCTAssertTrue(
             waitForAlert(messageIdentifier: "portConflict.message", saying: "\(port)", timeout: 20),
@@ -305,7 +305,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         )
 
         // ERRPORT-05: the accepted port is a setting, not a runtime detail.
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         waitForAsyncSave()
         closeProjectViaMenu()
         XCTAssertTrue(welcome.assertVisible(), "Closing should return to the welcome window")
@@ -339,7 +339,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         launchApp()
         createProjectViaUI(name: "Keep Stopped", port: port)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
 
         XCTAssertTrue(
             waitForAlert(messageIdentifier: "portConflict.message", saying: "already in use", timeout: 20),
@@ -371,7 +371,7 @@ final class ErrorAlertUITests: MimicUITestCase {
     func testPrivilegedPortRaisesTheGenericServerErrorAlert() throws {
         launchApp()
         createProjectViaUI(name: "Privileged Port", port: 1)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
 
         XCTAssertTrue(
             waitForAlert(messageIdentifier: "serverError.message", saying: "Server error", timeout: 20),
@@ -788,7 +788,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         createProjectViaUI(name: "Log Filter", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port, timeout: 20),
             "The server should report its base URL once running"
@@ -832,7 +832,7 @@ final class ErrorAlertUITests: MimicUITestCase {
             "Clearing the filter should bring the request back"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - Alert elements
@@ -1046,11 +1046,9 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// must not make the refused-start tests pass without a positive stopped-state assertion.
     @MainActor
     private func assertStartServerAvailable(after conflict: String) {
-        // The toolbar publishes Run/Stop's visible title as its label, so "Run" is the start action.
-        let startServer = workspace.serverToggleButton
-        let canStart = UITestApp.waitUntil(timeout: 10) {
-            startServer.exists && startServer.isEnabled && startServer.label == "Run"
-        }
+        // The toolbar publishes Run/Stop's visible title as its label, so "Run" is the start action;
+        // folded into "More actions" it reads "Run server".
+        let canStart = workspace.waitForServerToggle(toRead: "Run", timeout: 10)
         if !canStart { captureToolbarLookupFailure(conflict) }
         XCTAssertTrue(canStart, "Declining the port suggestion should leave Start server available")
     }

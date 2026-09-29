@@ -2236,4 +2236,23 @@ struct AppStateFacadeTests {
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .infinity))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .nan))
     }
+
+    @Test("The narrowest centre column folds Run and history into the More menu, never past it")
+    func toolbarFoldsRunAndHistoryOnlyWhenTheNarrowTierCannotFit() {
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 300) == .minimal)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 429) == .minimal)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 430) == .narrow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 459) == .narrow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 460) == .compactSummary)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 620) == .overflow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 780) == .expanded)
+        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 315))
+        #expect(!WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 450),
+                "CI's filled 1024pt window leaves about 450pt and keeps Run inline")
+        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: 0))
+        #expect(WorkspaceView.toolbarFoldsRunAndHistory(centerWidth: .nan))
+        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 300))
+        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 300))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 300))
+    }
 }

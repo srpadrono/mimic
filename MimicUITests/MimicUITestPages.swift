@@ -150,9 +150,61 @@ struct WorkspacePage {
     var centerImportOpenAPICard: XCUIElement { app.buttons["center.importOpenAPI"].firstMatch }
 
     // Toolbar
-    /// Run/Stop. As a toolbar item's root button it publishes its visible title, "Run" or "Stop",
-    /// as its label; the view's `.accessibilityLabel` does not reach the tree.
+    /// Run/Stop inline in the toolbar. As a toolbar item's root button it publishes its visible
+    /// title, "Run" or "Stop", as its label; the view's `.accessibilityLabel` does not reach the tree.
+    /// Absent while the narrowest centre column folds it into "More actions" — use `toggleServer()`
+    /// and `waitForServerToggle(toRead:)` for the action wherever it sits.
     var serverToggleButton: XCUIElement { app.buttons["serverToggleButton"].firstMatch }
+    /// Run/Stop as the first item of the open "More actions" menu ("Run server" / "Stop server").
+    var serverToggleMenuItem: XCUIElement { app.menuItems["serverToggleButton"].firstMatch }
+
+    /// Whether the centre column is narrow enough (`WorkspaceView.toolbarLayout`'s minimal tier)
+    /// that Run/Stop and back/forward lead the "More actions" menu instead of sitting inline.
+    var foldsRunIntoOverflow: Bool { !serverToggleButton.exists && overflowMenu.exists }
+
+    /// Waits until Run/Stop is reachable: inline, or through "More actions".
+    @discardableResult
+    func waitForServerToggle(timeout: TimeInterval = 5) -> Bool {
+        UITestApp.waitForAny([serverToggleButton, overflowMenu], timeout: timeout)
+    }
+
+    /// Starts or stops the server with the toolbar's Run/Stop, opening "More actions" first when
+    /// the narrowest centre column has folded it there.
+    func toggleServer(file: StaticString = #filePath, line: UInt = #line) {
+        guard waitForServerToggle() else {
+            XCTFail("The toolbar should offer Run/Stop inline or in More actions", file: file, line: line)
+            return
+        }
+        if serverToggleButton.exists {
+            serverToggleButton.click()
+            return
+        }
+        overflowMenu.click()
+        let item = serverToggleMenuItem
+        guard item.waitForExistence(timeout: 5) else {
+            XCTFail("More actions should lead with Run/Stop when it is folded", file: file, line: line)
+            closeToolbarMenu()
+            return
+        }
+        item.click()
+    }
+
+    /// "Run" or "Stop", with the control enabled: the inline button's title, or — when folded — the
+    /// menu item's ("Run server" / "Stop server"), read with the menu open and closed again.
+    func waitForServerToggle(toRead title: String, timeout: TimeInterval = 10) -> Bool {
+        UITestApp.waitUntil(timeout: timeout, pollInterval: 0.5) {
+            let inline = serverToggleButton
+            if inline.exists { return inline.isEnabled && inline.label == title }
+            guard overflowMenu.exists else { return false }
+            overflowMenu.click()
+            let item = serverToggleMenuItem
+            _ = item.waitForExistence(timeout: 2)
+            let shown = item.exists ? "\(item.title) \(item.label)" : ""
+            let enabled = item.exists && item.isEnabled
+            closeToolbarMenu()
+            return enabled && shown.contains("\(title) server")
+        }
+    }
     var legacyServerStartButton: XCUIElement { app.buttons["serverStartButton"].firstMatch }
     var legacyServerStopButton: XCUIElement { app.buttons["serverStopButton"].firstMatch }
     var serverSettingsToolbarButton: XCUIElement { app.toolbars.buttons["backend.settingsButton"].firstMatch }
@@ -225,7 +277,7 @@ struct WorkspacePage {
         )).firstMatch
     }
     /// The compact toolbar's "More actions" menu. It holds Import, Server settings and both panel
-    /// toggles; Run/Stop never folds into it.
+    /// toggles; at the narrowest centre column Run/Stop and back/forward lead it as well.
     var overflowMenu: XCUIElement {
         app.toolbars.descendants(matching: .any).matching(identifier: "toolbar.overflow").firstMatch
     }
@@ -242,6 +294,28 @@ struct WorkspacePage {
         }
         overflowMenu.click()
         return overflowAction("backend.settingsButton").waitForExistence(timeout: 5)
+    }
+
+    /// Toggles the inspector with the toolbar's own control: inline when there is room, otherwise the
+    /// "More actions" item. The caller asserts the panel's effect.
+    func toggleInspector(file: StaticString = #filePath, line: UInt = #line) {
+        let inline = inlineToolbarAction("toggleInspectorButton")
+        guard UITestApp.waitForAny([inline, overflowMenu], timeout: 5) else {
+            XCTFail("The toolbar should offer the inspector toggle inline or in More actions", file: file, line: line)
+            return
+        }
+        if inline.exists {
+            inline.click()
+            return
+        }
+        overflowMenu.click()
+        let item = overflowItem("toggleInspectorButton", titled: ["Hide inspector", "Show inspector"])
+        guard item.waitForExistence(timeout: 5) else {
+            XCTFail("More actions should offer the inspector toggle", file: file, line: line)
+            closeToolbarMenu()
+            return
+        }
+        item.click()
     }
 
     /// Actions stay addressable whether inline or inside the narrow-window menu.
@@ -276,6 +350,8 @@ struct WorkspacePage {
     /// The centre column's width at which the toolbar stops folding its secondary actions into
     /// "More" (`WorkspaceView.toolbarLayout(centerWidth:)`), measured across the card and its inset.
     static let expandedToolbarBreakpoint: CGFloat = 780
+    /// Below this centre-column width Run/Stop and back/forward fold into "More" too.
+    static let minimalToolbarBreakpoint: CGFloat = 430
 
     /// The centre column's width as the toolbar layout measures it: the card plus its
     /// `DSLayout.panelInset` (8pt) on each side.
@@ -337,18 +413,62 @@ struct WorkspacePage {
         UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
 
-    func compactWindow() {
-        let before = app.windows.firstMatch.frame
-        app.menuBars.menuBarItems["Window"].click()
-        app.menuItems["Move & Resize"].click()
-        // Right edge keeps the native overflow popup inside the window screenshot.
-        app.menuItems["Top Right"].click()
-        // On a small display the window is already under 1180pt, so wait for the move itself too.
-        _ = UITestApp.waitUntil(timeout: 5) {
-            let frame = app.windows.firstMatch.frame
-            return frame.width < 1180 && frame != before
+    /// Shrinks the window to its narrowest, three-panel size.
+    ///
+    /// Window ▸ Move & Resize ▸ Top Right first (then Right), which also keeps any menu the toolbar
+    /// opens inside the window's screenshot. The submenu's titles vary between macOS releases and it
+    /// can open late, so when neither item appears the window's bottom-right corner is dragged left
+    /// instead; the window's own minimum width stops it at the compact size.
+    func compactWindow(file: StaticString = #filePath, line: UInt = #line) {
+        let window = app.windows.firstMatch
+        let before = window.frame
+        if tileWindow(to: ["Top Right", "Right"]) {
+            // On a small display the window is already under 1180pt, so wait for the move itself too.
+            _ = UITestApp.waitUntil(timeout: 5) {
+                let frame = window.frame
+                return frame.width < 1180 && frame != before
+            }
         }
-        UITestApp.waitForStableFrame(app.windows.firstMatch)
+        if window.frame.width >= 1180 || window.frame == before {
+            dragWindowToMinimumWidth()
+        }
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { window.frame.width < 1180 },
+            "The window should be compact (under 1180pt) — it is \(window.frame.width)pt",
+            file: file, line: line
+        )
+        UITestApp.waitForStableFrame(window)
+    }
+
+    /// Chooses the first of `titles` under Window ▸ Move & Resize. False when none is offered.
+    private func tileWindow(to titles: [String]) -> Bool {
+        app.menuBars.menuBarItems["Window"].click()
+        let moveAndResize = app.menuItems["Move & Resize"].firstMatch
+        guard moveAndResize.waitForExistence(timeout: 2) else {
+            UITestApp.dismissAnyOpenMenu(in: app)
+            return false
+        }
+        moveAndResize.click()
+        for title in titles {
+            let item = app.menuItems[title].firstMatch
+            if item.waitForExistence(timeout: 2) {
+                item.click()
+                return true
+            }
+        }
+        UITestApp.dismissAnyOpenMenu(in: app)
+        return false
+    }
+
+    /// Drags the bottom-right resize corner a full window width to the left; AppKit stops the
+    /// window at its minimum width.
+    private func dragWindowToMinimumWidth() {
+        let window = app.windows.firstMatch
+        let width = window.frame.width
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -2, dy: -2))
+        corner.press(forDuration: 0.3, thenDragTo: corner.withOffset(CGVector(dx: -width, dy: 0)))
+        UITestApp.waitForStableFrame(window)
     }
 
     // Autosave

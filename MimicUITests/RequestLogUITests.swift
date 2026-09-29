@@ -339,7 +339,7 @@ final class RequestLogUITests: MimicUITestCase {
     private func startServer(projectNamed name: String, port: Int) {
         createProjectViaUI(name: name, port: port)
         workspace.fillWindow()
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "The server should report its base URL once running"
@@ -364,7 +364,7 @@ final class RequestLogUITests: MimicUITestCase {
         settings.replace(settings.primaryUpstream, with: "http://127.0.0.1:62131")
         settings.apply.click()
         XCTAssertTrue(settings.apply.waitForNonExistence(timeout: 5))
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: 62130))
         await sendRequest(port: 62130, path: "/profile")
         await sendRequest(port: 62130, path: "/binary")

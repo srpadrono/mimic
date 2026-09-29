@@ -9,6 +9,9 @@ nonisolated enum WorkspaceToolbarLayout: Equatable {
     case overflow
     /// The status capsule keeps only its state word and the project identity narrows.
     case narrow
+    /// Back, forward and Run/Stop join the "More actions" menu too, so the identity, the capsule and
+    /// that one menu are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
+    case minimal
 }
 
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
@@ -75,7 +78,7 @@ struct WorkspaceView: View {
 
     /// Start with the narrowest fit so AppKit never overflows the identity before the first
     /// geometry measurement. Then update only when the layout tier changes during a resize.
-    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .narrow
+    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .minimal
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -226,7 +229,7 @@ struct WorkspaceView: View {
                 .onGeometryChange(for: WorkspaceToolbarLayout.self) {
                     Self.toolbarLayout(centerWidth: $0.size.width)
                 } action: { layout in
-                    // The toolbar changes its intrinsic width at two breakpoints. During a live
+                    // The toolbar changes its intrinsic width at each breakpoint. During a live
                     // window resize, animating that change lets the Run button and its neighbours
                     // occupy the same space for a frame while AppKit rearranges native items.
                     var transaction = Transaction(animation: nil)
@@ -468,10 +471,16 @@ struct WorkspaceView: View {
     // MARK: - Toolbar
 
     /// Collapse in stages as the centre column narrows: first the secondary actions fold into one
-    /// menu, then the status capsule drops its counts, then the project identity narrows. The
-    /// capsule always keeps its state word.
+    /// menu, then the status capsule drops its counts, then the project identity narrows, and last
+    /// back/forward and Run/Stop fold into the same menu. The capsule always keeps its state word.
+    ///
+    /// The last breakpoint is what the narrow tier needs: back/forward (≈72pt), the identity
+    /// (≤100pt), the capsule (≈80–95pt), Run (≈76pt) and "More" (≈36pt), plus the toolbar's gaps and
+    /// the column's 8pt insets, come to about 420pt. Below that AppKit would start hiding items
+    /// behind its own chevron. The minimal tier needs about 260pt.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
-        guard centerWidth.isFinite else { return .narrow }
+        guard centerWidth.isFinite else { return .minimal }
+        if centerWidth < 430 { return .minimal }
         if centerWidth < 460 { return .narrow }
         if centerWidth < 620 { return .compactSummary }
         if centerWidth < 780 { return .overflow }
@@ -479,21 +488,37 @@ struct WorkspaceView: View {
     }
 
     nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
-        let layout = toolbarLayout(centerWidth: centerWidth)
-        return layout == .compactSummary || layout == .narrow
+        switch toolbarLayout(centerWidth: centerWidth) {
+        case .compactSummary, .narrow, .minimal: true
+        case .expanded, .overflow: false
+        }
     }
 
-    /// Import, server settings, and both panel toggles move into one menu; Run never does.
+    /// Import, server settings, and both panel toggles move into one menu; Run and back/forward join
+    /// them only in the minimal tier (`toolbarFoldsRunAndHistory`).
     nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
         toolbarLayout(centerWidth: centerWidth) != .expanded
     }
 
     nonisolated static func toolbarUsesNarrowIdentity(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) == .narrow
+        let layout = toolbarLayout(centerWidth: centerWidth)
+        return layout == .narrow || layout == .minimal
+    }
+
+    /// Back/forward and Run/Stop lead the "More actions" menu instead of sitting in the toolbar.
+    nonisolated static func toolbarFoldsRunAndHistory(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) == .minimal
     }
 
     private var usesCompactToolbarSummary: Bool {
-        centerToolbarLayout == .compactSummary || centerToolbarLayout == .narrow
+        switch centerToolbarLayout {
+        case .compactSummary, .narrow, .minimal: true
+        case .expanded, .overflow: false
+        }
+    }
+
+    private var foldsRunAndHistory: Bool {
+        centerToolbarLayout == .minimal
     }
 
     private var usesToolbarOverflow: Bool {
@@ -505,15 +530,17 @@ struct WorkspaceView: View {
         switch centerToolbarLayout {
         case .expanded, .overflow: 220
         case .compactSummary: 140
-        case .narrow: 100
+        case .narrow, .minimal: 100
         }
     }
 
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            historyButton(forward: false)
-            historyButton(forward: true)
+        if !foldsRunAndHistory {
+            ToolbarItemGroup(placement: .navigation) {
+                historyButton(forward: false).labelStyle(.iconOnly)
+                historyButton(forward: true).labelStyle(.iconOnly)
+            }
         }
 
         ToolbarItem(id: "workspace.identity", placement: .navigation) {
@@ -530,15 +557,17 @@ struct WorkspaceView: View {
                 .accessibilityElement(children: .contain)
         }
 
-        ToolbarItem(id: "workspace.run", placement: .primaryAction) {
-            ServerToggleButton(
-                serverState: appState.serverState,
-                onStart: appState.startServer,
-                onStop: appState.stopServer
-            )
-        }
+        if !foldsRunAndHistory {
+            ToolbarItem(id: "workspace.run", placement: .primaryAction) {
+                ServerToggleButton(
+                    serverState: appState.serverState,
+                    onStart: appState.startServer,
+                    onStop: appState.stopServer
+                )
+            }
 
-        ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
 
         ToolbarItemGroup(placement: .primaryAction) {
             if usesToolbarOverflow {
@@ -573,7 +602,6 @@ struct WorkspaceView: View {
             }
         } label: {
             Label(forward ? "Forward" : "Back", systemImage: forward ? "chevron.forward" : "chevron.backward")
-                .labelStyle(.iconOnly)
         }
         .disabled(!enabled)
         .help(forward ? "Go forward" : "Go back")
@@ -641,11 +669,22 @@ struct WorkspaceView: View {
         )
     }
 
-    /// Everything but Run, folded into one menu when the centre column is narrow.
+    /// The secondary actions, folded into one menu when the centre column is narrow. At the
+    /// narrowest width Run/Stop and back/forward lead it, so AppKit never has to hide anything.
     private var overflowMenu: some View {
         let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
         let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
         return Menu {
+            if foldsRunAndHistory {
+                ServerToggleMenuItem(
+                    serverState: appState.serverState,
+                    onStart: appState.startServer,
+                    onStop: appState.stopServer
+                )
+                historyButton(forward: false)
+                historyButton(forward: true)
+                Divider()
+            }
             importMenu()
             serverSettingsButton
             Divider()
@@ -666,7 +705,7 @@ struct WorkspaceView: View {
                 .labelStyle(.iconOnly)
         }
         .menuIndicator(.hidden)
-        .help("Import, server settings, and panels")
+        .help(foldsRunAndHistory ? "Run, history, import, server settings, and panels" : "Import, server settings, and panels")
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
         .accessibilityValue(unmatchedCount > 0

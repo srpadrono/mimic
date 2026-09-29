@@ -646,7 +646,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// Starts the mock server from the toolbar and waits for the well to report its address.
     @MainActor
     private func startServer(onPort port: Int) {
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "The server should report its base URL once running"
@@ -846,6 +846,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         // BREAD-09 — nothing has been visited, so neither arrow has anywhere to go. The arrows sit
         // in the toolbar's leading group now, beside the project identity.
+        // The arrows are inline once the centre column fits them; the narrowest one folds them
+        // into More actions with Run. A filled window gives them room.
+        workspace.fillWindow()
         let back = breadcrumb.back
         let forward = breadcrumb.forward
         XCTAssertTrue(back.waitForExistence(timeout: 5), "The toolbar should offer a back arrow")
@@ -1137,6 +1140,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertEqual(navigator.endpointFilter.value as? String, "")
         XCTAssertEqual(navigator.methodScope.value as? String, "Any")
 
+        // The arrows are inline once the centre column fits them; the narrowest one folds them
+        // into More actions with Run. A filled window gives them room.
+        workspace.fillWindow()
         let back = breadcrumb.back
         let forward = breadcrumb.forward
 
@@ -1178,6 +1184,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         createEndpointViaUI(name: "Second", path: "/api/second")
         createEndpointViaUI(name: "Third", path: "/api/third")
 
+        // The arrows are inline once the centre column fits them; the narrowest one folds them
+        // into More actions with Run. A filled window gives them room.
+        workspace.fillWindow()
         let back = breadcrumb.back
         let forward = breadcrumb.forward
 
@@ -1221,6 +1230,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
                 + breadcrumb.crumbDescription("endpoint", titled: "GET /api/only")
         )
 
+        // The arrows are inline once the centre column fits them; the narrowest one folds them
+        // into More actions with Run. A filled window gives them room.
+        workspace.fillWindow()
         let back = breadcrumb.back
         XCTAssertTrue(back.waitForExistence(timeout: 5), "The jump bar should offer a back arrow")
         XCTAssertFalse(back.isEnabled, "One endpoint visited is not a history")
@@ -1527,7 +1539,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// **Expanded** (centre column 780pt or wider): back/forward and the project identity lead, the
     /// status capsule sits in the middle, and Run, Import, Server settings and both panel toggles
     /// trail — all inline, all above the centre column. **Compact**: Import, Server settings and
-    /// both panel toggles fold into one "More actions" menu; Run and the project name stay.
+    /// both panel toggles fold into one "More actions" menu; Run and the project name stay. Under
+    /// about 430pt Run/Stop and back/forward lead that menu too, so AppKit never hides anything.
     ///
     /// The breakpoint is the centre column's width, not the window's. On CI's 1024pt display a
     /// filled window leaves the centre column well under 780pt while both side panels are open, so
@@ -1590,9 +1603,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
         XCTAssertTrue(workspace.projectTitle.isHittable,
                       "Running in a compact window must keep the project name visible")
-        XCTAssertTrue(workspace.serverToggleButton.isHittable,
-                      "Run/Stop must remain usable in the compact toolbar")
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop")
+        if workspace.foldsRunIntoOverflow {
+            XCTAssertTrue(workspace.overflowMenu.isHittable,
+                          "Folded, Run/Stop must remain usable through More actions")
+        } else {
+            XCTAssertTrue(workspace.serverToggleButton.isHittable,
+                          "Run/Stop must remain usable in the compact toolbar")
+        }
+        XCTAssertTrue(workspace.waitForServerToggle(toRead: "Stop"))
         let compact = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         compact.name = "native-toolbar-compact-running"
         compact.lifetime = .keepAlways
@@ -1616,7 +1634,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         UITestApp.waitForStableFrame(app.windows.firstMatch)
         assertToolbarMatchesCentreColumnWidth()
         workspace.restoreSidePanels()
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(waitForLabel(well.address, toContain: "server stopped"))
     }
 
@@ -1684,28 +1702,45 @@ final class WorkspaceShellUITests: MimicUITestCase {
         }
     }
 
-    /// Compact: Import, Server settings and both toggles live only in the "More actions" menu; Run,
-    /// the status capsule and the project name stay in the toolbar.
+    /// Compact: Import, Server settings and both toggles live only in the "More actions" menu; the
+    /// status capsule and the project name stay in the toolbar. Run stays inline too, until the
+    /// centre column is under `WorkspacePage.minimalToolbarBreakpoint`: then Run/Stop and
+    /// back/forward lead the same menu. Nothing is ever left to AppKit's own overflow chevron.
     @MainActor
     private func assertCompactToolbar(file: StaticString = #filePath, line: UInt = #line) {
         let overflow = workspace.overflowMenu
-        guard overflow.waitForExistence(timeout: 5) else {
-            // On the smallest hosted displays AppKit can fold the whole trailing group into its own
-            // "more toolbar items" chevron; the More menu is then inside that, not in the toolbar.
-            XCTAssertTrue(
-                app.toolbars.popUpButtons["more toolbar items"].exists,
-                "A compact toolbar should show the More actions menu", file: file, line: line
-            )
-            return
-        }
+        XCTAssertTrue(overflow.waitForExistence(timeout: 5),
+                      "A compact toolbar should show the More actions menu", file: file, line: line)
+        XCTAssertFalse(app.toolbars.popUpButtons["more toolbar items"].exists,
+                       "Nothing should fall into AppKit's own toolbar overflow", file: file, line: line)
+        guard overflow.exists else { return }
         XCTAssertTrue(overflow.isHittable, "More actions should be clickable", file: file, line: line)
         XCTAssertTrue(workspace.projectTitle.isHittable, "The compact toolbar must keep the project name visible",
                       file: file, line: line)
-        XCTAssertTrue(workspace.serverToggleButton.isHittable, "Run never folds into the menu",
-                      file: file, line: line)
         XCTAssertTrue(well.address.isHittable, "The status capsule stays in the toolbar", file: file, line: line)
-        XCTAssertLessThanOrEqual(workspace.serverToggleButton.frame.maxX, overflow.frame.minX + 1,
-                                 "Run sits before the More menu", file: file, line: line)
+
+        // Within a few points of the breakpoint either shape is right; the unit test pins the line.
+        let width = workspace.centreColumnWidth
+        let folded = workspace.foldsRunIntoOverflow
+        if width <= WorkspacePage.minimalToolbarBreakpoint - 10 {
+            XCTAssertTrue(folded, "A \(Int(width))pt centre column should fold Run into More actions",
+                          file: file, line: line)
+        } else if width >= WorkspacePage.minimalToolbarBreakpoint + 10 {
+            XCTAssertFalse(folded, "A \(Int(width))pt centre column keeps Run inline", file: file, line: line)
+        }
+        if folded {
+            for identifier in ["breadcrumb.back", "breadcrumb.forward"] {
+                XCTAssertFalse(workspace.inlineToolbarAction(identifier).exists,
+                               "\(identifier) folds into More actions with Run", file: file, line: line)
+            }
+            assertToolbarStaysAboveTheCentreColumn([overflow], file: file, line: line)
+        } else {
+            XCTAssertTrue(workspace.serverToggleButton.isHittable, "Run stays inline while it fits",
+                          file: file, line: line)
+            XCTAssertLessThanOrEqual(workspace.serverToggleButton.frame.maxX, overflow.frame.minX + 1,
+                                     "Run sits before the More menu", file: file, line: line)
+            assertToolbarStaysAboveTheCentreColumn([workspace.serverToggleButton, overflow], file: file, line: line)
+        }
 
         for action in Self.secondaryToolbarActions {
             XCTAssertFalse(
@@ -1713,9 +1748,17 @@ final class WorkspaceShellUITests: MimicUITestCase {
                 "\(action.identifier) should not be inline in the compact toolbar", file: file, line: line
             )
         }
-        assertToolbarStaysAboveTheCentreColumn([workspace.serverToggleButton, overflow], file: file, line: line)
 
         overflow.click()
+        if folded {
+            let run = workspace.serverToggleMenuItem
+            XCTAssertTrue(run.waitForExistence(timeout: 5), "More actions should lead with Run/Stop",
+                          file: file, line: line)
+            XCTAssertTrue(workspace.overflowAction("breadcrumb.back").exists, "More actions should offer Back",
+                          file: file, line: line)
+            XCTAssertTrue(workspace.overflowAction("breadcrumb.forward").exists, "More actions should offer Forward",
+                          file: file, line: line)
+        }
         for action in Self.secondaryToolbarActions {
             XCTAssertTrue(
                 workspace.overflowItem(action.identifier, titled: action.titles).waitForExistence(timeout: 5),
@@ -1761,7 +1804,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
             XCTAssertGreaterThanOrEqual(inspectorHeader.frame.minX, inspectorPanel.frame.minX - 1,
                                         "The inspector's header should sit above the inspector",
                                         file: file, line: line)
-            XCTAssertEqual(inspectorHeader.frame.midY, workspace.serverToggleButton.frame.midY, accuracy: 8,
+            let toolbarItem = workspace.serverToggleButton.exists ? workspace.serverToggleButton : workspace.overflowMenu
+            XCTAssertEqual(inspectorHeader.frame.midY, toolbarItem.frame.midY, accuracy: 8,
                            "The inspector's header should sit in the toolbar row, level with Run",
                            file: file, line: line)
         }
@@ -2008,7 +2052,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
             )
         ).firstMatch
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
 
         XCTAssertTrue(
             UITestApp.waitForAny([keepStopped, tryNextPort], timeout: 20),
@@ -2024,7 +2068,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
 
         // SRVRUN-05 — accepting the suggestion starts it one port along.
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             tryNextPort.waitForExistence(timeout: 20),
             "The conflict should be reported again on the second attempt"
@@ -2047,11 +2091,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         launchShell()
         createProjectViaUI(name: "Server Menu", port: port)
 
-        let toggle = workspace.serverToggleButton
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The toolbar should offer the power button")
+        XCTAssertTrue(workspace.waitForServerToggle(), "The toolbar should offer the power button")
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Run"),
-            "Stopped, the power button offers to start — label: \(toggle.label)"
+            workspace.waitForServerToggle(toRead: "Run"),
+            "Stopped, the power button offers to start"
         )
 
         menuBar.open("Server")
@@ -2064,8 +2107,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
             "Server ▸ Start Server should start the mock"
         )
         XCTAssertTrue(
-            waitForLabel(toggle, toRead: "Stop"),
-            "Running, the power button announces the other action — label: \(toggle.label)"
+            workspace.waitForServerToggle(toRead: "Stop"),
+            "Running, the power button announces the other action"
         )
 
         menuBar.open("Server")

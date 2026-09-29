@@ -377,16 +377,21 @@ final class MimicUITests: MimicUITestCase {
         // An empty project shows no inspector; an endpoint gives it something to show.
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
-                      "Toggle inspector button should exist")
+        // Inline when the centre column is wide, in "More actions" when it is not.
+        XCTAssertTrue(
+            UITestApp.waitForAny(
+                [workspace.inlineToolbarAction("toggleInspectorButton"), workspace.overflowMenu], timeout: 5
+            ),
+            "The toolbar should offer the inspector toggle"
+        )
 
         // Inspector should be visible by default
         let header = InspectorPage(app: app).header
         XCTAssertTrue(header.waitForExistence(timeout: 5))
-        workspace.toggleInspectorButton.click()
+        workspace.toggleInspector()
         XCTAssertTrue(header.waitForNonExistence(timeout: 5), "The inspector must actually close")
 
-        workspace.toggleInspectorButton.click()
+        workspace.toggleInspector()
         XCTAssertTrue(header.waitForExistence(timeout: 5), "The inspector must actually reopen")
     }
 
@@ -658,7 +663,7 @@ final class MimicUITests: MimicUITestCase {
                            "The filter field should be disabled while the log is empty")
         }
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
         let command = workspace.drawerCurlCommand
         XCTAssertTrue(command.waitForExistence(timeout: 5),
@@ -669,7 +674,7 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(app.buttons["drawer.empty.copyCommand"].firstMatch.exists
                           || app.buttons["Copy command"].firstMatch.exists,
                       "The command should have a copy button")
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 24c. Capturing Selected Traffic as a Journey
@@ -688,7 +693,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Capture Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "Server should report its base URL once running"
@@ -810,7 +815,7 @@ final class MimicUITests: MimicUITestCase {
         // Make the status visible before asserting on its address and starting traffic.
         workspace.fillWindow()
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         guard workspace.waitForServerURL(port: port) else {
             XCTFail("Server should report its base URL once running")
             return
@@ -876,7 +881,7 @@ final class MimicUITests: MimicUITestCase {
             "Closing request detail should restore the endpoint inspector"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 24d. Moving Through the Request Log With the Keyboard
@@ -901,7 +906,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Keyboard Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "Server should report its base URL once running"
@@ -952,7 +957,7 @@ final class MimicUITests: MimicUITestCase {
             "The down arrow should move the selection to the next row and show it in the detail"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 25. Import Menu Opens HAR Import Sheet
@@ -1040,16 +1045,16 @@ final class MimicUITests: MimicUITestCase {
         recentElement!.click()
 
         XCTAssertTrue(workspace.assertVisible())
-        XCTAssertTrue(workspace.serverToggleButton.waitForExistence(timeout: 5),
-                      "Server toggle button should be visible after reopening the project")
+        XCTAssertTrue(workspace.waitForServerToggle(timeout: 5),
+                      "Run should be reachable from the toolbar after reopening the project")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: customPort),
             "Starting the reopened project should use the persisted custom port"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 28. Endpoint Status Code Persists After Reopen
@@ -1182,14 +1187,14 @@ final class MimicUITests: MimicUITestCase {
                       "The response edit must be visible before capturing its screenshot")
         captureEvidenceScreenshot("04-response-configured")
 
-        XCTAssertTrue(workspace.serverToggleButton.waitForExistence(timeout: 5))
-        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerToggle(timeout: 5))
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: 8472, timeout: 8),
                       "The server must actually bind before its screenshot is labelled running")
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop")
+        XCTAssertTrue(workspace.waitForServerToggle(toRead: "Stop"))
         captureEvidenceScreenshot("05-server-running")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     /// Captures a screenshot to the xcresult (always works) and to a guaranteed-writable temp

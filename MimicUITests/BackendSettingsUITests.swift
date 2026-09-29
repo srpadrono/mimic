@@ -318,7 +318,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.additional("port"), with: String(secondary))
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
         let curl = workspace.drawerCurlCommand
@@ -379,7 +379,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         shot.name = "Toolbar — running ports with restart required"
         shot.lifetime = .keepAlways
         add(shot)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
         XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
         XCTAssertTrue(
@@ -392,13 +392,13 @@ final class BackendSettingsUITests: MimicUITestCase {
         )
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "A stopped server shows the port configured for its next start")
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: primaryReplacement))
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "After restart, the inspector must show the newly bound port")
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
         XCTAssertFalse(page.portsDescription.contains("Restart required"))
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     @MainActor
