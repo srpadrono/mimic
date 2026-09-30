@@ -58,7 +58,7 @@ public final class UpdateSheetPreviewModel: UpdateSheetModel {
     public var checksAutomatically = true
 
     public init(phase: UpdatePhase = .available(UpdateSheetPreviewModel.release),
-                installedVersionDescription: String = "1.9.2") {
+                installedVersionDescription: String = "1.9") {
         self.phase = phase
         self.installedVersionDescription = installedVersionDescription
     }
@@ -70,18 +70,19 @@ public final class UpdateSheetPreviewModel: UpdateSheetModel {
         title: "Mimic 1.10",
         notes: """
         ## New
-        - Journeys can capture a flow straight from the request log.
-        - The request log filters by status class.
+        - Journeys can drop a connection after a delay, to test timeouts.
+        - Copy any logged request as a cURL command.
 
         ## Fixed
-        - Port changes apply without restarting the app.
+        - The request log keeps its column widths between launches.
+        - Importing a HAR with duplicate routes no longer skips the first response.
         """,
         pageURL: URL(fileURLWithPath: "/"),
         publishedAt: Date(timeIntervalSinceReferenceDate: 812_000_000),
         asset: UpdateRelease.Asset(
             name: "Mimic-1.10.0.zip",
             downloadURL: URL(fileURLWithPath: "/Mimic-1.10.0.zip"),
-            sizeInBytes: 18_400_000,
+            sizeInBytes: 18_000_000,
             sha256: String(repeating: "0", count: 64)
         )
     )

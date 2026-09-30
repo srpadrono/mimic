@@ -216,7 +216,11 @@ enum GalleryCatalog {
 
     static let updates: [GalleryEntry] = [
         GalleryEntry("updates.sheet", "Update sheet", group: .updates, size: CGSize(width: 560, height: 480)) {
+            // The sheet is shorter than its artboard; it hangs from the top on the sheet surface, as
+            // the design draws it, rather than floating centred over nothing.
             UpdateSheet(service: GalleryModels.updates)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(DSColors.sheet)
         },
     ]
 }

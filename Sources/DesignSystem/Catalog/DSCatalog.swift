@@ -85,11 +85,13 @@ public enum DSCatalog {
         },
         Entry(id: "ds.banners", title: "Banners", referenceID: "ds.banners",
               size: CGSize(width: 432, height: 229)) {
-            DSCatalogCard("Banners") {
-                DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", identifier: "catalog.error")
-                DSBanner(.info, message: "Restart to use the new port.", identifier: "catalog.info")
-                DSBanner(.warning, message: "This scenario isn\u{2019}t live.", actionTitle: "Make live",
+            DSCatalogCard("Banners", detail: "Inline, above the content they concern, with one action.") {
+                DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", actionTitle: "Try again",
+                         identifier: "catalog.error") {}
+                DSBanner(.warning, message: "Restart to use the new port.", actionTitle: "Restart",
                          identifier: "catalog.warning") {}
+                DSBanner(.info, message: "This scenario isn\u{2019}t live.", actionTitle: "Make live",
+                         identifier: "catalog.info") {}
             }
         },
         Entry(id: "ds.codeEditor", title: "Code editor", referenceID: "ds.codeEditor",
