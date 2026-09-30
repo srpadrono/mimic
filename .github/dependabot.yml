@@ -1,19 +1,38 @@
-# Keeps the workflow's pinned action SHAs from rotting.
+# Keeps pinned action SHAs and Swift package pins from rotting. Checked weekly.
 #
 # Pinning to a commit is what stops a tag being repointed under us, but it also means a fix upstream
 # never arrives on its own. Dependabot opens a PR when one does, and rewrites both the SHA and the
-# `# v4` comment beside it, so the pin stays readable.
+# `# v4` comment beside it, so the pin stays readable. The composite action under `.github/actions`
+# pins its own SHAs, so its directory is listed next to the workflows'.
 #
-# Only GitHub Actions. Swift packages are resolved by Tuist from `Tuist/Package.swift`, which
-# Dependabot does not understand — those are updated by hand with `tuist install`.
+# Swift packages live in two manifests that must resolve identically: `Package.swift` for the
+# portable build and `Tuist/Package.swift` for the app. `Scripts/check_lockfiles.py` fails CI when
+# their lockfiles disagree, so updates are grouped by dependency name across both directories —
+# one PR moves a package in both `Package.resolved` files at once. A PR that still leaves them
+# apart (a transitive pin resolving differently) is finished by hand with `swift package resolve`
+# and `tuist install`.
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
-      interval: monthly
+      interval: weekly
     commit-message:
       prefix: "ci"
     groups:
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: swift
+    directories:
+      - /
+      - /Tuist
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    groups:
+      swift-packages:
+        group-by: dependency-name
