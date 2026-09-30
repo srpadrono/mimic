@@ -124,7 +124,7 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         // 0.16 fixes native typing after Unicode characters using UTF-16 text ranges.
         .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.16.0"),
-        .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "3.3.0"),
+        .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "6.4.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: []
