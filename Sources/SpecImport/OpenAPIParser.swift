@@ -568,15 +568,17 @@ public enum OpenAPIParser {
     }
 
     private static func domainMethod(from method: OpenAPI.HttpMethod) -> HTTPMethod? {
+        // OpenAPIKit 5 split methods into builtins and free-form `.other` names. A 3.0 path item can
+        // only carry the builtins, and Mimic serves none of TRACE, QUERY or a custom verb.
         switch method {
-        case .get: return .get
-        case .post: return .post
-        case .put: return .put
-        case .patch: return .patch
-        case .delete: return .delete
-        case .head: return .head
-        case .options: return .options
-        case .trace: return nil
+        case .builtin(.get): return .get
+        case .builtin(.post): return .post
+        case .builtin(.put): return .put
+        case .builtin(.patch): return .patch
+        case .builtin(.delete): return .delete
+        case .builtin(.head): return .head
+        case .builtin(.options): return .options
+        case .builtin(.trace), .builtin(.query), .other: return nil
         }
     }
 
