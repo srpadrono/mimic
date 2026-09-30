@@ -28,30 +28,33 @@ struct RenameItemSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text(title)
-                .font(DSTypography.title)
+                .font(DSTypography.headline)
                 .foregroundStyle(DSColors.labelPrimary)
+                .accessibilityAddTraits(.isHeader)
 
             DSTextField(fieldLabel, text: $name, identifier: "\(identifier).name")
                 .focused($nameIsFocused)
                 .onSubmit(renameIfValid)
 
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.sm) {
                 Spacer()
-                DSButton("Cancel", variant: .ghost, size: .medium,
+                DSButton("Cancel", variant: .secondary, size: .large,
                          identifier: "\(identifier).cancel", action: dismiss.callAsFunction)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("\(identifier).cancel")
                     .accessibilityLabel("Cancel")
-                DSButton("Rename", variant: .primary, size: .medium,
+                DSButton("Rename", variant: .primary, size: .large,
                          identifier: "\(identifier).confirm", action: renameIfValid)
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedName.isEmpty || trimmedName == initialName)
                     .accessibilityIdentifier("\(identifier).confirm")
                     .accessibilityLabel("Rename")
             }
+            .padding(.top, DSSpacing.sm)
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .background(DSColors.sheet)
         .onAppear { nameIsFocused = true }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)

@@ -40,6 +40,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     private let minimumPrimaryThickness: CGFloat
     private let minimumSecondaryThickness: CGFloat
     private let defaultSecondaryThickness: CGFloat
+    private let preferredPrimaryThickness: CGFloat?
     private let identifier: String
     private let primary: Primary
     private let secondary: Secondary
@@ -50,6 +51,10 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     ///   - secondaryThickness: Two-way, and *coalesced* — AppKit reports a settled size rather than
     ///     every frame of a drag, so a binding wired to a store is not written once per event.
     ///   - defaultSecondaryThickness: What double-clicking the divider restores.
+    ///   - preferredPrimaryThickness: The primary content's own extent, when the primary pane should
+    ///     hug it. The divider moves to it whenever it changes and the secondary pane takes the rest,
+    ///     including what a window resize adds. The divider still drags; `nil` leaves it where the
+    ///     person put it.
     public init(
         axis: Axis,
         isSecondaryPresented: Binding<Bool>,
@@ -57,6 +62,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         minimumPrimaryThickness: CGFloat,
         minimumSecondaryThickness: CGFloat,
         defaultSecondaryThickness: CGFloat,
+        preferredPrimaryThickness: CGFloat? = nil,
         identifier: String,
         @ViewBuilder primary: () -> Primary,
         @ViewBuilder secondary: () -> Secondary
@@ -67,6 +73,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         self.minimumPrimaryThickness = minimumPrimaryThickness
         self.minimumSecondaryThickness = minimumSecondaryThickness
         self.defaultSecondaryThickness = defaultSecondaryThickness
+        self.preferredPrimaryThickness = preferredPrimaryThickness
         self.identifier = identifier
         self.primary = primary()
         self.secondary = secondary()
@@ -82,6 +89,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
             defaultSecondaryThickness: defaultSecondaryThickness,
             restoredSecondaryThickness: secondaryThickness,
             isSecondaryCollapsed: !isSecondaryPresented,
+            preferredPrimaryThickness: preferredPrimaryThickness,
             paneIdentifier: identifier
         )
         attachCallbacks(to: controller)
@@ -152,6 +160,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
             primary: primary,
             secondary: secondary,
             isSecondaryCollapsed: !isSecondaryPresented,
+            preferredPrimaryThickness: preferredPrimaryThickness,
             // A whole panel sliding open is the largest motion in the window. `DSEmptyState` gates a
             // 4% scale on this setting; a panel cannot be exempt from what a 4% scale respects.
             animated: !context.environment.accessibilityReduceMotion
@@ -217,6 +226,12 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
     /// wrote four `UserDefaults` keys per event, which at 120Hz is roughly 480 synchronous writes a
     /// second on the main thread, inside the gesture that was also driving layout.
     private var thicknessReportTask: Task<Void, Never>?
+    /// The primary content's own extent, when the primary pane hugs it. See `DSSplitPane.init`.
+    private var preferredPrimaryThickness: CGFloat?
+    /// Set when the preferred extent changes and the divider has not moved to it yet.
+    private var needsFitToPreferred = false
+    /// Bounds the retries of one fit, so a position AppKit keeps refusing cannot loop layout.
+    private var fitAttempts = 0
 
     init(
         isVertical: Bool,
@@ -227,6 +242,7 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         defaultSecondaryThickness: CGFloat,
         restoredSecondaryThickness: CGFloat,
         isSecondaryCollapsed: Bool,
+        preferredPrimaryThickness: CGFloat?,
         paneIdentifier: String
     ) {
         self.primaryHost = DSPaneViewController(rootView: primary)
@@ -236,6 +252,8 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         self.defaultSecondaryThickness = defaultSecondaryThickness
         self.restoredSecondaryThickness = restoredSecondaryThickness
         self.initialSecondaryCollapsed = isSecondaryCollapsed
+        self.preferredPrimaryThickness = preferredPrimaryThickness
+        self.needsFitToPreferred = preferredPrimaryThickness != nil
         self.paneIdentifier = paneIdentifier
         self.isVerticalSplit = isVertical
         super.init(nibName: nil, bundle: nil)
@@ -280,6 +298,16 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 
         addSplitViewItem(primaryItem)
         addSplitViewItem(secondaryItem)
+        applyHoldingPriorities()
+    }
+
+    /// Which pane absorbs a window resize. Normally the primary; while the primary hugs its
+    /// content, the secondary, so the content keeps its extent and the other pane takes the rest.
+    private func applyHoldingPriorities() {
+        guard splitViewItems.count == 2 else { return }
+        let hugsContent = preferredPrimaryThickness != nil
+        splitViewItems[0].holdingPriority = hugsContent ? Self.secondaryHoldingPriority : .defaultLow
+        splitViewItems[1].holdingPriority = hugsContent ? .defaultLow : Self.secondaryHoldingPriority
     }
 
     public override func viewDidLayout() {
@@ -294,6 +322,13 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         let preferred = min(max(defaultSecondaryThickness / available, 0), 1)
         if abs(secondaryItem.preferredThicknessFraction - preferred) > 0.001 {
             secondaryItem.preferredThicknessFraction = preferred
+        }
+
+        // Content that sets its own extent replaces the saved thickness.
+        if preferredPrimaryThickness != nil {
+            hasRestoredPosition = true
+            fitToPreferredIfNeeded(available: available)
+            return
         }
 
         guard !hasRestoredPosition else { return }
@@ -334,6 +369,48 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         }
     }
 
+    /// Moves the divider to the primary content's extent, within both panes' minimums.
+    ///
+    /// Latches on the result, like the restore above, and gives up after a few layouts. A drag in
+    /// progress — the divider's or the window's — is never overridden; the next change of the
+    /// content's extent fits again.
+    private func fitToPreferredIfNeeded(available: CGFloat) {
+        guard needsFitToPreferred, let preferred = preferredPrimaryThickness,
+              !secondaryItem.isCollapsed else { return }
+        guard NSApp.currentEvent?.type != .leftMouseDragged else { return }
+
+        let ceiling = available - minimumSecondaryThickness - splitView.dividerThickness
+        let target = min(max(preferred, minimumPrimaryThickness), ceiling)
+        guard target >= minimumPrimaryThickness,
+              abs(thickness(of: primaryHost.view.frame) - target) >= 1,
+              fitAttempts < Self.maximumFitAttempts else {
+            needsFitToPreferred = false
+            return
+        }
+        fitAttempts += 1
+        applyExternally {
+            splitView.setPosition(target, ofDividerAt: 0)
+        }
+    }
+
+    private static var maximumFitAttempts: Int { 4 }
+
+    /// Records a new content extent and asks for a layout pass to fit it.
+    private func updatePreferredPrimaryThickness(_ preferred: CGFloat?) {
+        let previous = preferredPrimaryThickness
+        preferredPrimaryThickness = preferred
+        if (previous == nil) != (preferred == nil) { applyHoldingPriorities() }
+        guard let preferred else { return }
+        if let previous, abs(previous - preferred) < 1 { return }
+        requestFit()
+    }
+
+    private func requestFit() {
+        needsFitToPreferred = true
+        fitAttempts = 0
+        if isViewLoaded { view.needsLayout = true }
+    }
+
     /// Guards a crash AppKit walks into on its own.
     ///
     /// Installing a custom `splitView` from `loadView` costs one extra constraint pass before any
@@ -353,12 +430,21 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 
     // MARK: SwiftUI → AppKit
 
-    func apply(primary: Primary, secondary: Secondary, isSecondaryCollapsed: Bool, animated: Bool) {
+    func apply(
+        primary: Primary,
+        secondary: Secondary,
+        isSecondaryCollapsed: Bool,
+        preferredPrimaryThickness: CGFloat?,
+        animated: Bool
+    ) {
         applyExternally {
             primaryHost.rootView = primary
             secondaryHost.rootView = secondary
+            updatePreferredPrimaryThickness(preferredPrimaryThickness)
 
             guard secondaryItem.isCollapsed != isSecondaryCollapsed else { return }
+            // A panel brought back fits the content again rather than reopening where it closed.
+            if !isSecondaryCollapsed, self.preferredPrimaryThickness != nil { requestFit() }
             if animated {
                 secondaryItem.animator().isCollapsed = isSecondaryCollapsed
             } else {
@@ -452,16 +538,15 @@ final class DSHairlineSplitView: NSSplitView {
         // The band belongs to the pane after it, so it takes that pane's surface and the seam is the
         // hairline closing the pane before it. Drawn rather than left to `dividerColor`, because
         // AppKit would paint the whole band as divider and the window would grow a gutter.
-        NSColor(DSColors.secondary).setFill()
+        NSColor(DSColors.content).setFill()
         rect.fill()
 
-        // `DSStroke.seam`, which is the weight `DSDivider` pairs with `panelSeparator` — the colour
-        // filled below. Written as a bare `1` this was the one place in the module where the two
-        // halves of that pairing could drift apart without anything noticing.
+        // `DSStroke.hairline` in `DSColors.separator`, the same pairing `DSDivider` draws, so the
+        // seam and every other rule in the window stay the same weight and colour.
         let seam = isVertical
-            ? NSRect(x: rect.minX, y: rect.minY, width: DSStroke.seam, height: rect.height)
-            : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: DSStroke.seam)
-        NSColor(DSColors.panelSeparator).setFill()
+            ? NSRect(x: rect.minX, y: rect.minY, width: DSStroke.hairline, height: rect.height)
+            : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: DSStroke.hairline)
+        NSColor(DSColors.separator).setFill()
         seam.fill()
     }
 }

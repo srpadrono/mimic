@@ -60,23 +60,27 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
                       "Sidebar should show 'No endpoints' empty state")
 
-        // Center pane with empty state
-        XCTAssertTrue(workspace.centerEmptyHeading.exists,
-                      "Center pane should show 'No endpoint selected' empty state")
+        // Center pane: a project with no endpoints offers the first-endpoint chooser
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+                      "Center pane should invite the first endpoint")
+        XCTAssertTrue(workspace.centerAddEndpointCard.exists,
+                      "The chooser should offer Add endpoint")
 
         // Drawer with empty state
         XCTAssertTrue(workspace.drawerEmptyHeading.exists,
-                      "Drawer should show 'No requests yet' empty state")
+                      "Drawer should say requests appear while the server runs")
 
         // The navigator owns "add", because what it adds depends on which tab is showing.
         XCTAssertTrue(workspace.addEndpointButton.exists,
                       "Add endpoint button should be in the navigator strip")
 
-        // Toolbar buttons
-        XCTAssertTrue(workspace.toggleInspectorButton.exists,
+        // Toolbar buttons — inline when the centre column is wide, in "More actions" when narrow;
+        // `toolbarAction` opens that menu when it has to.
+        XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
                       "Toggle inspector button should be in toolbar")
         XCTAssertTrue(workspace.toggleDrawerButton.exists,
                       "Toggle drawer button should be in toolbar")
+        workspace.closeToolbarMenu()
 
         // Both of these used to sit in the toolbar and were removed: "add endpoint" duplicated the
         // navigator's own button and was wrong on the Journeys tab, and the journeys button opened a
@@ -370,18 +374,25 @@ final class MimicUITests: MimicUITestCase {
     func testToggleInspectorPanel() throws {
         launchApp()
         createProjectViaUI(name: "Inspector Test")
+        // An empty project shows no inspector; an endpoint gives it something to show.
+        createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
-                      "Toggle inspector button should exist")
+        // Inline when the centre column is wide, in "More actions" when it is not.
+        XCTAssertTrue(
+            UITestApp.waitForAny(
+                [workspace.inlineToolbarAction("toggleInspectorButton"), workspace.overflowMenu], timeout: 5
+            ),
+            "The toolbar should offer the inspector toggle"
+        )
 
         // Inspector should be visible by default
-        let overview = InspectorPage(app: app).element("inspector.overview")
-        XCTAssertTrue(overview.waitForExistence(timeout: 5))
-        workspace.toggleInspectorButton.click()
-        XCTAssertTrue(overview.waitForNonExistence(timeout: 5), "The inspector must actually close")
+        let header = InspectorPage(app: app).header
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        workspace.toggleInspector()
+        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "The inspector must actually close")
 
-        workspace.toggleInspectorButton.click()
-        XCTAssertTrue(overview.waitForExistence(timeout: 5), "The inspector must actually reopen")
+        workspace.toggleInspector()
+        XCTAssertTrue(header.waitForExistence(timeout: 5), "The inspector must actually reopen")
     }
 
     // MARK: - 14. Toggle Request Log Drawer
@@ -566,12 +577,12 @@ final class MimicUITests: MimicUITestCase {
         let copyRow = inspector.findScenario(named: "Default (Copy)")
         XCTAssertTrue(copyRow.waitForExistence(timeout: 5))
 
-        // Click the copy to make it active
-        copyRow.click()
+        // The row's radio makes a scenario live; clicking the row itself only opens it.
+        inspector.makeLive(named: "Default (Copy)")
 
         // Verify it became active
         XCTAssertTrue(inspector.isScenarioActive(named: "Default (Copy)"),
-                      "Clicked scenario should become active")
+                      "The scenario whose radio was clicked should become active")
     }
 
     // MARK: - 22. Search Filter in Sidebar
@@ -624,18 +635,46 @@ final class MimicUITests: MimicUITestCase {
 
     // MARK: - 24. Request Log Drawer Shows Header and Empty State
 
+    /// The idle log: one sentence, no scope segments or clear button, and a filter that is at most
+    /// a disabled hint. A `curl` command for the project's port is offered stopped and running.
     @MainActor
     func testRequestLogDrawerShowsHeaderAndEmptyState() throws {
+        let port = 62098
+
         launchApp()
-        createProjectViaUI(name: "Log Test")
+        createProjectViaUI(name: "Log Test", port: port)
+        workspace.fillWindow()
 
-        // Drawer should show header and empty state
         XCTAssertTrue(requestLogDrawer.emptyHeading.waitForExistence(timeout: 5),
-                      "Request log should show empty state when no requests")
+                      "Request log should show its empty state when there are no requests")
+        let stoppedCommand = workspace.drawerCurlCommand
+        XCTAssertTrue(stoppedCommand.waitForExistence(timeout: 5),
+                      "A stopped server's empty log should offer the command to try once it runs")
+        let stoppedSpoken = "\(stoppedCommand.label)|\(stoppedCommand.value.map { String(describing: $0) } ?? "")"
+        XCTAssertTrue(stoppedSpoken.contains("curl http://localhost:\(port)/"),
+                      "The command should target the project's port — it read \(stoppedSpoken)")
 
-        // Filter controls only appear when there are log entries (nothing to filter when empty)
-        XCTAssertFalse(requestLogDrawer.filterField.exists,
-                       "Filter field should not show when log is empty")
+        // Nothing to filter or clear. The filter may stay as a quiet hint, but never usable.
+        XCTAssertFalse(requestLogDrawer.unmatchedSegment.exists, "An empty log has no Unmatched segment")
+        XCTAssertFalse(requestLogDrawer.clearButton.exists || app.buttons["Clear request log"].exists,
+                       "An empty log has nothing to clear")
+        if requestLogDrawer.filterField.exists {
+            XCTAssertFalse(requestLogDrawer.filterField.isEnabled,
+                           "The filter field should be disabled while the log is empty")
+        }
+
+        workspace.toggleServer()
+        XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
+        let command = workspace.drawerCurlCommand
+        XCTAssertTrue(command.waitForExistence(timeout: 5),
+                      "A running server's empty log should still offer the command")
+        let spoken = "\(command.label)|\(command.value.map { String(describing: $0) } ?? "")"
+        XCTAssertTrue(spoken.contains("curl http://localhost:\(port)/"),
+                      "The command should target the running port — it read \(spoken)")
+        XCTAssertTrue(app.buttons["drawer.empty.copyCommand"].firstMatch.exists
+                          || app.buttons["Copy command"].firstMatch.exists,
+                      "The command should have a copy button")
+        workspace.toggleServer()
     }
 
     // MARK: - 24c. Capturing Selected Traffic as a Journey
@@ -654,7 +693,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Capture Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "Server should report its base URL once running"
@@ -704,6 +743,12 @@ final class MimicUITests: MimicUITestCase {
         XCUIElement.perform(withKeyModifiers: .command) {
             secondRow.click()
         }
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) {
+                firstRow.label.hasSuffix(", selected") && secondRow.label.hasSuffix(", selected")
+            },
+            "Both rows should announce they are selected — read [\(firstRow.label)] [\(secondRow.label)]"
+        )
         secondRow.rightClick()
         // Polled together — waiting out one item's timeout before looking at the other is the
         // `a || b` trap rule 9 of the UI Definition of Done names.
@@ -754,12 +799,12 @@ final class MimicUITests: MimicUITestCase {
         )
     }
 
-    // MARK: - 24b. Selecting a Request Shows It in the Inspector
+    // MARK: - 24b. Selecting a Request Opens It Beside the Log
 
-    /// The whole point of moving detail out of the drawer: clicking a row has to put the request and
-    /// its body somewhere you can actually read them.
+    /// Clicking a row has to put the request and its body somewhere you can actually read them: the
+    /// centre column, split between the log and the detail.
     @MainActor
-    func testSelectingLoggedRequestShowsDetailInInspector() async throws {
+    func testSelectingLoggedRequestShowsDetailBesideTheLog() async throws {
         let port = 62091
         let payload = #"{"name":"Ada Lovelace","role":"engineer"}"#
 
@@ -770,7 +815,7 @@ final class MimicUITests: MimicUITestCase {
         // Make the status visible before asserting on its address and starting traffic.
         workspace.fillWindow()
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         guard workspace.waitForServerURL(port: port) else {
             XCTFail("Server should report its base URL once running")
             return
@@ -784,44 +829,36 @@ final class MimicUITests: MimicUITestCase {
         )
         requestLogDrawer.firstLogRow.click()
 
-        // The inspector takes over — this is the behaviour the redesign exists for.
+        // The centre column takes over: the log on the left, the request on the right, and the
+        // inspector out of the way.
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Selecting a logged request should switch the inspector to request detail"
+            requestDetail.waitForDetail(),
+            "Selecting a logged request should open its detail beside the log"
         )
-        XCTAssertTrue(
-            requestDetail.path.waitForExistence(timeout: 5),
-            "Request detail should show the path"
+        XCTAssertTrue(requestDetail.shownPath().contains("/api/users"), "The detail should show the clicked request")
+        XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "Request detail should show the status")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.exists,
+            "The endpoint editor should give the column to the request"
         )
+        // The toggle folds into the overflow menu on a narrow window; where it is inline it has to
+        // read as off, because the inspector steps aside while a request is open.
+        let inspectorToggle = app.buttons["toggleInspectorButton"].firstMatch
+        if inspectorToggle.exists {
+            XCTAssertEqual(inspectorToggle.label, "Show inspector",
+                           "The inspector should step aside while a request is open")
+        }
+        XCTAssertEqual(requestDetail.closeButton.label, "Close request", "The close button should say what it does")
 
-        // Body tab: the payload has to be visible and searchable.
-        requestDetail.tab("Body").click()
+        // Request tab: the payload has to be visible.
+        requestDetail.tab("Request").click()
         XCTAssertTrue(
-            UITestApp.waitForAny(
-                [requestDetail.responseBody, requestDetail.bodySearchField],
-                timeout: 5
-            ),
-            "The Body tab should render the exchange"
+            requestDetail.requestBody.waitForExistence(timeout: 5),
+            "The Request tab should render the payload"
         )
-
-        XCTAssertTrue(
-            requestDetail.bodySearchField.waitForExistence(timeout: 5),
-            "The Body tab should offer a find field"
-        )
-        requestDetail.bodySearchField.click()
-        requestDetail.bodySearchField.typeText("Lovelace")
-
-        XCTAssertTrue(
-            UITestApp.waitForAny(
-                [
-                    requestDetail.responseBodyMatches,
-                    app.descendants(matching: .any)
-                        .matching(identifier: "requestLog.body.request.matches")
-                        .firstMatch
-                ],
-                timeout: 5
-            ),
-            "Searching should report how many times the term appears in a body"
+        XCTAssertFalse(
+            app.descendants(matching: .textField).matching(identifier: "requestDetail.bodySearchField").firstMatch.exists,
+            "The detail has no find field"
         )
 
         // Copying is the other half of "I found the request" — it must not silently do nothing.
@@ -833,14 +870,18 @@ final class MimicUITests: MimicUITestCase {
             "Copying should confirm it happened"
         )
 
-        // Closing returns the panel to whatever it was showing before.
+        // Closing gives the column back to the editor, and the inspector to what it was showing.
         requestDetail.closeButton.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.waitForExistence(timeout: 5),
+            "Closing request detail should bring the endpoint editor back"
+        )
         XCTAssertTrue(
             requestDetail.waitForPanelTitle("Scenarios"),
             "Closing request detail should restore the endpoint inspector"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 24d. Moving Through the Request Log With the Keyboard
@@ -865,7 +906,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Keyboard Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
             "Server should report its base URL once running"
@@ -888,15 +929,11 @@ final class MimicUITests: MimicUITestCase {
                       "The first log row should be reachable in the filled window")
         rows[0].click()
         XCTAssertTrue(
-            requestDetail.waitForPanelTitle("Request"),
-            "Clicking a row should show it in the inspector"
-        )
-        XCTAssertTrue(
-            requestDetail.path.waitForExistence(timeout: 5),
-            "Request detail should name the request it is showing"
+            requestDetail.waitForDetail(),
+            "Clicking a row should open it beside the log"
         )
 
-        // What the inspector says *before* the press, so the assertion is that the selection moved
+        // What the detail says *before* the press, so the assertion is that the selection moved
         // rather than that it landed on a particular path. Which row is second depends on the log's
         // sort order, and a test that hard-codes one of the two paths passes or fails on that rather
         // than on the keyboard.
@@ -917,10 +954,10 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertNotEqual(
             after,
             before,
-            "The down arrow should move the selection to the next row and show it in the inspector"
+            "The down arrow should move the selection to the next row and show it in the detail"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 25. Import Menu Opens HAR Import Sheet
@@ -1008,16 +1045,16 @@ final class MimicUITests: MimicUITestCase {
         recentElement!.click()
 
         XCTAssertTrue(workspace.assertVisible())
-        XCTAssertTrue(workspace.serverToggleButton.waitForExistence(timeout: 5),
-                      "Server toggle button should be visible after reopening the project")
+        XCTAssertTrue(workspace.waitForServerToggle(timeout: 5),
+                      "Run should be reachable from the toolbar after reopening the project")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: customPort),
             "Starting the reopened project should use the persisted custom port"
         )
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     // MARK: - 28. Endpoint Status Code Persists After Reopen
@@ -1108,7 +1145,8 @@ final class MimicUITests: MimicUITestCase {
         )
 
         let title = workspace.projectTitle
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "The restored workspace should name its project")
+        XCTAssertTrue(title.waitForExistence(timeout: 5),
+                      "The restored workspace should name its project\n\(app.toolbars.firstMatch.debugDescription)")
         XCTAssertTrue(
             title.label == projectName || (title.value as? String) == projectName,
             "The restored project should be the one saved before quitting"
@@ -1150,14 +1188,14 @@ final class MimicUITests: MimicUITestCase {
                       "The response edit must be visible before capturing its screenshot")
         captureEvidenceScreenshot("04-response-configured")
 
-        XCTAssertTrue(workspace.serverToggleButton.waitForExistence(timeout: 5))
-        workspace.serverToggleButton.click()
+        XCTAssertTrue(workspace.waitForServerToggle(timeout: 5))
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: 8472, timeout: 8),
                       "The server must actually bind before its screenshot is labelled running")
-        XCTAssertEqual(workspace.serverToggleButton.label, "Stop server")
+        XCTAssertTrue(workspace.waitForServerToggle(toRead: "Stop"))
         captureEvidenceScreenshot("05-server-running")
 
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     /// Captures a screenshot to the xcresult (always works) and to a guaranteed-writable temp

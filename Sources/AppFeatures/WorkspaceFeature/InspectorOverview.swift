@@ -3,28 +3,16 @@ import Domain
 import DesignSystem
 
 /// Geometry shared by every label/value row the inspector draws, whichever mode the panel is in.
-///
-/// Xcode's inspectors right-align the label in a fixed column and start every value at the same x,
-/// which gives one vertical seam down the panel instead of two columns pinned to opposite edges with
-/// a canyon between them. The seam has to be a constant rather than a per-view number: the overview
-/// and the request detail are the *same* 280pt column, and a seam that shifted when you clicked a
-/// logged request would read as the panel re-laying itself out.
+/// Labels sit in one fixed column so values start at the same x in the overview and the request detail.
 enum InspectorRowMetrics {
     static let detailLabelColumn = DSInspectorMetrics.labelColumn
     static let overviewLabelColumn = DSInspectorMetrics.labelColumn
-    static let overviewValueInset = DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.smPlus
+    /// Where a value starts: the inset, the label column, and the row's own gap.
+    static let overviewValueInset = DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.md
 }
 
-/// What the inspector shows when no endpoint is selected.
-///
-/// The panel used to reserve 280pt of window to say "No selection" — a permanent void, since nothing
-/// is selected for most of a session. Rather than collapse the panel (which makes the layout jump
-/// every time you click), it now answers the questions you would otherwise go looking for: is the
-/// server up, on which port, is a journey overriding my mocks, and is anything arriving that I have
-/// not mocked.
-///
-/// The unmatched count is the one that earns its place. It is the signal that something is wrong with
-/// your configuration, and it was previously only visible if the request log happened to be open.
+/// What the inspector shows when nothing is selected: the server, the project's size, whether a
+/// journey is overriding mocks, and whether anything arrived that nothing answered.
 struct InspectorOverview: View {
     struct Summary: Equatable {
         var projectName: String
@@ -44,73 +32,65 @@ struct InspectorOverview: View {
 
     var body: some View {
         ScrollView {
-            // No spacing and no outer padding: the section bands are the separation, and rows carry
-            // their own horizontal padding so their seam lands at the same x as the request detail's.
             VStack(alignment: .leading, spacing: 0) {
                 section("Server") {
                     row("Status", value: serverStatusText, valueColor: serverStatusColor)
-                    row("Port", value: "\(summary.port)")
+                    row("Port", value: "\(summary.port)", valueColor: DSColors.labelPrimary)
                 }
 
                 section("Configuration") {
-                    row("Endpoints", value: "\(summary.endpointCount)")
-                    row("Scenarios", value: "\(summary.scenarioCount)")
-                    row("Journeys", value: "\(summary.journeyCount)")
+                    row("Endpoints", value: "\(summary.endpointCount)", valueColor: DSColors.labelPrimary)
+                    row("Scenarios", value: "\(summary.scenarioCount)", valueColor: DSColors.labelPrimary)
+                    row("Journeys", value: "\(summary.journeyCount)", valueColor: DSColors.labelPrimary)
                 }
 
                 section(summary.serverState.runningPort == nil ? "Selected journey" : "Active journey") {
                     if let name = summary.activeJourneyName {
-                        row("Name", value: name, valueColor: DSColors.accentText)
+                        row("Name", value: name, valueColor: DSColors.accent)
                         if let progress = summary.activeJourneyProgress {
-                            row("Progress", value: progress)
+                            row("Progress", value: progress, valueColor: DSColors.labelPrimary)
                         }
-                        // `DSButton`'s ghost variant, not `.buttonStyle(.link)` and no longer a
-                        // hand-rolled `.plain` button either. Link style was the only AppKit link in
-                        // the window: it draws its own blue and its own underline-on-hover, neither of
-                        // which matches the accent text buttons around it, and it gave a ~13pt-tall
-                        // hit target. The subsequent hand-rolled replacement — accent text, a 20pt
-                        // target, `accentSubtle` under the pointer — duplicated the shared ghost
-                        // button. `DSButton(.ghost, .small)` now gives it a 24pt target, as it does
-                        // the copy bar's three actions.
-                        // "Show", not "Open". It used to open the standalone journeys window; it now
-                        // switches the navigator to its Journeys tab, which is where journeys live.
-                        // "Open" promises a window, and a label that names the wrong outcome is worse
-                        // than a vague one — you press it expecting somewhere new and the sidebar
-                        // changes underneath you instead.
+                        // "Show", not "Open": it switches the navigator to Journeys, it opens no window.
                         DSButton(
                             "Show journeys",
-                            variant: .ghost,
-                            size: .small,
+                            variant: .secondary,
+                            size: .medium,
                             identifier: "inspector.overview.openJourneys",
                             action: onShowJourneys
                         )
                         .accessibilityIdentifier("inspector.overview.openJourneys")
-                        // A control that acts on the journey above it, so it starts where that
-                        // journey's name does rather than at the panel edge. Subtracting the button's
-                        // own horizontal padding — `sm` at this size — keeps the text on the seam.
-                        .padding(.leading, InspectorRowMetrics.overviewValueInset - DSSpacing.sm)
-                        .padding(.trailing, DSSpacing.md)
-                        .padding(.vertical, DSSpacing.xs + 1)
+                        .padding(.leading, InspectorRowMetrics.overviewValueInset)
+                        .padding(.trailing, DSInspectorMetrics.inset)
+                        .padding(.top, DSSpacing.xs)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         note(
-                            "None — endpoints answer directly.",
+                            "None. Endpoints answer directly.",
                             identifier: "inspector.overview.activeJourney.none"
                         )
                     }
                 }
 
                 section("Traffic") {
-                    row("Requests", value: "\(summary.requestCount)")
-                    row(
-                        "Unmatched",
-                        value: "\(summary.unmatchedCount)",
-                        // Amber only when there is something to look at; a zero here is good news
-                        // and should not read as a warning.
-                        valueColor: summary.unmatchedCount > 0
-                            ? DSColors.httpStatusColor(for: 404)
-                            : DSColors.labelSecondary
-                    )
+                    HStack(alignment: .top, spacing: DSSpacing.lg) {
+                        figure(
+                            "Requests",
+                            caption: summary.requestCount == 1 ? "request" : "requests",
+                            value: summary.requestCount,
+                            color: DSColors.labelPrimary
+                        )
+                        figure(
+                            "Unmatched",
+                            caption: "unmatched",
+                            value: summary.unmatchedCount,
+                            // Warning only when there is something to look at; zero is good news.
+                            color: summary.unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary
+                        )
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, DSInspectorMetrics.inset)
+                    .padding(.top, DSSpacing.xxs)
+
                     if summary.unmatchedCount > 0 {
                         note(
                             "Requests arrived that no endpoint or journey answered.",
@@ -118,18 +98,15 @@ struct InspectorOverview: View {
                         )
                     }
                 }
-
-                Spacer(minLength: 0)
             }
-            .padding(.bottom, DSSpacing.md)
+            .padding(.bottom, DSSpacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // On the content group, not the scroll view: XCUITest finds no element for an
+            // identifier set on a `ScrollView`. `.contain` before the identifier, so rows and the
+            // button keep their own names.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inspector.overview")
         }
-        // `.contain` before the identifier, the way the journey editor's step list orders it. A
-        // named container without it renames every descendant to match — the rows, the notes and
-        // `inspector.overview.openJourneys` all reported `inspector.overview`, which left the one
-        // button in this panel unaddressable.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("inspector.overview")
     }
 
     // MARK: - Pieces
@@ -140,48 +117,51 @@ struct InspectorOverview: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The component, not a copy of it. This used to be a private `sectionHeader` that
-            // reproduced `DSSectionHeader` value for value — same 12/5 padding, same
-            // `tertiary.opacity(0.5)` band, same 0.5pt rule, same 11pt medium label. Two copies of
-            // one band, in the *same panel*: the overview drew one and the request detail drew the
-            // real component, so any edit to `DSSectionHeader` would have desynchronised the two
-            // halves of the inspector. It also had no `ds.sectionheader.*` identifier.
             DSInspectorSectionHeader(title, identifier: "overview.\(title.lowercased())")
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Label right-aligned in a fixed column, value flush left in what is left — the macOS inspector
-    /// convention. The old layout pushed the two apart with a `Spacer`, which in a 280pt panel gave
-    /// two edge-pinned columns and a ragged right edge of values.
     @ViewBuilder
     private func row(
         _ label: String,
         value: String,
         valueColor: Color = DSColors.labelSecondary
     ) -> some View {
-        DSInspectorValueRow(label, value: value, color: valueColor, identifier: "inspector.overview.\(label.lowercased())")
+        DSInspectorValueRow(label, value: value, color: valueColor,
+                            identifier: "inspector.overview.\(label.lowercased())")
     }
 
-    /// Explanatory prose under a section's rows. Full width rather than in the value column: these
-    /// wrap, and 158pt would turn one sentence into four lines.
-    ///
-    /// The identifier is passed in rather than derived from the message, the way
-    /// `EndpointEditorView.validationNote` takes its own: these sentences are the panel's answer to
-    /// "is a journey overriding my mocks" and "is anything arriving unmatched", so a test asserts on
-    /// the note being present, not on the prose staying word for word.
+    /// A large figure over a small caption, as the inspector's traffic summary draws them.
+    /// Spoken as "Label: value" under the same identifier a value row would carry.
+    private func figure(_ label: String, caption: String, value: Int, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("\(value)")
+                .font(DSTypography.Figure.large)
+                .foregroundStyle(color)
+                .lineLimit(1)
+            Text(caption)
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelSecondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value)")
+        .accessibilityIdentifier("inspector.overview.\(label.lowercased())")
+    }
+
+    /// Explanatory prose under a section, full width because it wraps.
     @ViewBuilder
     private func note(_ message: String, identifier: String) -> some View {
         Text(message)
-            .font(DSTypography.label)
-            // "Requests arrived that no endpoint answered" is the point of the panel, not a hint.
+            .font(DSTypography.callout)
             .foregroundStyle(DSColors.labelSecondary)
-            .lineSpacing(DSSpacing.xxs)
+            .lineSpacing(DSTypography.Leading.callout - 2)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, DSSpacing.md)
-            .padding(.vertical, DSSpacing.xs + 1)
+            .padding(.horizontal, DSInspectorMetrics.inset)
+            .padding(.vertical, DSSpacing.xs + 2)
             .accessibilityIdentifier(identifier)
     }
 
@@ -197,8 +177,8 @@ struct InspectorOverview: View {
 
     private var serverStatusColor: Color {
         switch summary.serverState {
-        case .running: DSColors.successText
-        case .error: DSColors.destructiveText
+        case .running: DSColors.success
+        case .error: DSColors.error
         default: DSColors.labelSecondary
         }
     }

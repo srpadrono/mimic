@@ -5,6 +5,27 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Open a `mimic project export` document from the welcome window or File ▸ Open Project Export…
+  (⌘O). It is checked and validated as `mimic project import` checks it.
+- Choose a new endpoint's group, status, and content type in the new-endpoint sheet.
+- The welcome window opens a sample project, imports a HAR file or OpenAPI spec into a new project,
+  and can be set to show at launch instead of reopening the last project.
+- The new-project sheet and server settings say whether a port is available.
+
+### Improved
+
+- JSON keys have their own colour in the body editor.
+- The request log's empty state offers a curl command while the server is stopped.
+- "When unmatched" in the endpoint inspector is a menu that switches forwarding for the listener.
+- The server status popover says since when the server has been running.
+- Request detail is organized into Request, Response, and Timing tabs. The Request tab shows the
+  called URL, listener, and query parameters.
+- Selecting a logged request opens it beside the request log in the centre column, with headers
+  and query items as two columns, Copy as cURL, and Create endpoint for an unmatched call. The log
+  row's context menu adds Copy URL, Copy response body, Go to endpoint, and Show only this path.
+
 ## [0.13.0] — 2026-09-26
 
 ### Added

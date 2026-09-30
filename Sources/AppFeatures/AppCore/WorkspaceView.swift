@@ -5,9 +5,14 @@ import Persistence
 
 nonisolated enum WorkspaceToolbarLayout: Equatable {
     case expanded
+    /// The server line keeps only its state word and the project name drops its subtitle.
     case compactSummary
     case overflow
-    case iconStatus
+    /// The project identity narrows too, and the address drops its port count and divider.
+    case narrow
+    /// Run/Stop joins the "More actions" menu too, so the identity, the address and that one menu
+    /// are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
+    case minimal
 }
 
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
@@ -18,15 +23,23 @@ struct WorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInspector: Bool
     @State private var showDrawer: Bool
+    /// The request log on the journeys screen, which the design draws without one. Kept apart from
+    /// `showDrawer`, the endpoints screen's persisted preference, so ⌥⌘L can still show the log
+    /// beside a journey without the endpoints screen losing its own arrangement.
+    @State private var showJourneyDrawer = false
     @State private var selectedEndpointID: UUID?
     @State private var renameEndpointTarget: Endpoint?
     @State private var editEndpointRequestTarget: Endpoint?
-    /// The logged requests the user has selected. Owned here rather than inside the drawer because
-    /// two panels need them: the log paints the rows selected, the inspector renders the detail.
+    /// The logged requests the user has selected. Owned here rather than inside the log because it
+    /// arranges the window: while any row is selected the centre column shows the log beside the
+    /// request's detail in place of the editor, and the inspector steps aside.
     ///
-    /// A set because a selection is also how a journey is captured from a session. The inspector
-    /// shows detail only when exactly one row is selected — detail is about one thing.
+    /// A set because a selection is also how a journey is captured from a session. The detail
+    /// shows one request only when exactly one row is selected — detail is about one thing.
     @State private var selectedLogIDs: Set<UUID> = []
+    /// The request log's filter, sort and rows, shared by the docked log and the one that opens
+    /// beside a selected request, so moving between the two keeps them.
+    @State private var requestLogTable = RequestLogTableState()
     /// The requests waiting to be named as a journey. Non-nil *is* "the capture sheet is up".
     @State private var pendingCapture: CaptureJourneySheet.Capture?
     /// Restricts the request log to calls nothing answered. Lives here so the toolbar's unmatched
@@ -60,10 +73,13 @@ struct WorkspaceView: View {
     /// than every frame of a drag — so this can be persisted on change without writing `UserDefaults`
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
+    /// The endpoint editor's own height. The request log sits right below it and takes the rest;
+    /// `nil` while the centre shows something that fills it.
+    @State private var centreContentHeight: CGFloat?
 
     /// Start with the narrowest fit so AppKit never overflows the identity before the first
     /// geometry measurement. Then update only when the layout tier changes during a resize.
-    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .iconStatus
+    @State private var centerToolbarLayout: WorkspaceToolbarLayout = .minimal
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -129,77 +145,98 @@ struct WorkspaceView: View {
                 // that cost the inspector 220pt of height — taken from the one panel whose job is
                 // showing you a payload, and given to a log that was not using the corner.
                 VStack(spacing: 0) {
-                    // Xcode's jump bar. Sits above the editor area rather than inside any one
-                    // editor, because it describes where you are, not what you are editing.
-                    BreadcrumbJumpBar(
-                        crumbs: breadcrumbs,
-                        canGoBack: endpointHistory.canGoBack(where: endpointExists),
-                        canGoForward: endpointHistory.canGoForward(where: endpointExists),
-                        onSelectOption: handleBreadcrumbSelection,
-                        onBack: {
-                            if let previous = endpointHistory.goBack(where: endpointExists),
-                               let endpoint = currentEndpoints.first(where: { $0.id == previous }) {
-                                isNavigatingHistory = selectedEndpointID != previous
-                                revealEndpoint(endpoint)
-                            }
-                        },
-                        onForward: {
-                            if let next = endpointHistory.goForward(where: endpointExists),
-                               let endpoint = currentEndpoints.first(where: { $0.id == next }) {
-                                isNavigatingHistory = selectedEndpointID != next
-                                revealEndpoint(endpoint)
-                            }
-                        }
-                    )
-
-                    // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
-                    // pair — so the divider between them is the same divider the navigator and the
-                    // inspector already wear, and the centre pane's floor is a constraint AppKit
-                    // enforces rather than a ceiling this view recomputes from a measured container.
-                    DSSplitPane(
-                        axis: .vertical,
-                        isSecondaryPresented: $showDrawer,
-                        secondaryThickness: $drawerHeight,
-                        minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
-                        minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
-                        defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
-                        identifier: "requestLog"
-                    ) {
-                        CenterPaneView(
-                            content: CenterPaneContent.forTab(
-                                navigatorTab,
-                                endpointID: selectedEndpointID,
-                                journeyID: appState.selectedJourneyID
+                    if !selectedLogIDs.isEmpty {
+                        // A selected request takes over the column: the log on the left, the request
+                        // on the right, and neither the editor nor the docked log beside them.
+                        // Deselecting — Escape in the list, the close button, picking an endpoint —
+                        // brings the editor back.
+                        requestLogPanel(showsDetail: true)
+                    } else {
+                        // Xcode's jump bar. Sits above the editor area rather than inside any one
+                        // editor, because it describes where you are, not what you are editing.
+                        BreadcrumbJumpBar(
+                            crumbs: breadcrumbs,
+                            autosaveStatus: appState.autosaveStatus,
+                            history: BreadcrumbJumpBar.History(
+                                canGoBack: endpointHistory.canGoBack(where: endpointExists),
+                                canGoForward: endpointHistory.canGoForward(where: endpointExists),
+                                onBack: { goThroughHistory(forward: false) },
+                                onForward: { goThroughHistory(forward: true) }
                             ),
-                            onRenameEndpoint: beginEndpointRename,
-                            onEditEndpointRequest: beginEndpointRequestEdit
+                            onSelectOption: handleBreadcrumbSelection
                         )
-                        // Anchored to the top, not centred. A pane is exactly as tall as the split
-                        // view gives it, and an editor taller than that — the journey editor has no
-                        // scroll view — is centred by default, which pushes its *first* row above the
-                        // pane and out of sight under the toolbar. That row carries "Add step", so on
-                        // a short window the control was drawn nowhere and clicked nothing: two UI
-                        // tests failed on it, and a user with a small window would have seen the same.
-                        // Clipping the bottom of a long editor is recoverable; losing the top is not.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        // Re-injected because the pane is hosted: `NSHostingController` starts a new
-                        // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
-                        // this the editor traps on a missing `AppState` the moment it appears.
-                        .environment(appState)
-                        // Paired, like every other container identifier in this window. Naming a
-                        // container without `.contain` renames every descendant, which would take
-                        // the whole editor out of the accessibility tree.
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("centerPane")
-                    } secondary: {
-                        requestLogPanel
+                        Rectangle()
+                            .fill(DSColors.separator)
+                            .frame(height: DSStroke.hairline)
+                            .accessibilityHidden(true)
+
+                        // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
+                        // pair — so the divider between them is the same divider the navigator and the
+                        // inspector already wear, and the centre pane's floor is a constraint AppKit
+                        // enforces rather than a ceiling this view recomputes from a measured container.
+                        DSSplitPane(
+                            axis: .vertical,
+                            isSecondaryPresented: logPresentation,
+                            secondaryThickness: $drawerHeight,
+                            minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
+                            minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
+                            defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
+                            preferredPrimaryThickness: centreContentHeight,
+                            identifier: "requestLog"
+                        ) {
+                            CenterPaneView(
+                                content: CenterPaneContent.forTab(
+                                    navigatorTab,
+                                    endpointID: selectedEndpointID,
+                                    journeyID: appState.selectedJourneyID
+                                ),
+                                onRenameEndpoint: beginEndpointRename,
+                                onEditEndpointRequest: beginEndpointRequestEdit,
+                                onAddEndpoint: { appState.showNewEndpointSheet = true },
+                                onImportHAR: { showHARImport = true },
+                                onImportOpenAPI: { showOpenAPIImport = true },
+                                onContentHeightChange: { height in
+                                    guard centreContentHeight != height else { return }
+                                    centreContentHeight = height
+                                }
+                            )
+                            // Anchored to the top, not centred. A pane is exactly as tall as the split
+                            // view gives it, and an editor taller than that — the journey editor has no
+                            // scroll view — is centred by default, which pushes its *first* row above the
+                            // pane and out of sight under the toolbar. That row carries "Add step", so on
+                            // a short window the control was drawn nowhere and clicked nothing: two UI
+                            // tests failed on it, and a user with a small window would have seen the same.
+                            // Clipping the bottom of a long editor is recoverable; losing the top is not.
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            // Re-injected because the pane is hosted: `NSHostingController` starts a new
+                            // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
+                            // this the editor traps on a missing `AppState` the moment it appears.
+                            .environment(appState)
+                            // Paired, like every other container identifier in this window. Naming a
+                            // container without `.contain` renames every descendant, which would take
+                            // the whole editor out of the accessibility tree.
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("centerPane")
+                        } secondary: {
+                            requestLogPanel(showsDetail: false)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
                     }
                 }
+                // The one content surface: a rounded card inset from the window, under the toolbar.
+                .background(DSColors.content)
+                .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous)
+                        .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+                }
+                .padding(.top, DSSpacing.xs)
+                .padding([.horizontal, .bottom], DSLayout.panelInset)
+                .background(DSColors.window.ignoresSafeArea())
                 .onGeometryChange(for: WorkspaceToolbarLayout.self) {
                     Self.toolbarLayout(centerWidth: $0.size.width)
                 } action: { layout in
-                    // The toolbar changes its intrinsic width at two breakpoints. During a live
+                    // The toolbar changes its intrinsic width at each breakpoint. During a live
                     // window resize, animating that change lets the Run button and its neighbours
                     // occupy the same space for a frame while AppKit rearranges native items.
                     var transaction = Transaction(animation: nil)
@@ -211,17 +248,20 @@ struct WorkspaceView: View {
             }
             .navigationSplitViewStyle(.balanced)
             // Outside the navigation structure, the inspector owns a full-height column and its
-            // own toolbar section. Nesting it in the detail column merges both action groups.
-            .inspector(isPresented: $showInspector) {
+            // own toolbar section, which holds its header (`InspectorPanelView`). That section is
+            // what keeps the centre column's actions over the centre column.
+            .inspector(isPresented: inspectorColumnPresentation) {
                 inspectorPanel
+                    // The journey inspector edits through `AppState`; stated so the column never
+                    // depends on how the inspector happens to be hosted.
+                    .environment(appState)
                     .inspectorColumnWidth(
                         min: PanelLayoutStore.Bounds.minimumInspectorWidth,
                         ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
-                        max: 640
+                        max: DSLayout.inspectorMaximumWidth
                     )
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector")
-                    .toolbar { panelToolbar }
             }
         }
     }
@@ -272,8 +312,17 @@ struct WorkspaceView: View {
         }
         // New endpoint sheet
         .sheet(isPresented: $appState.showNewEndpointSheet) {
-            NewEndpointSheet { name, method, path in
-                if let endpoint = appState.addEndpoint(name: name, method: method, path: path) {
+            NewEndpointSheet(
+                existingGroups: Set(currentEndpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+            ) { draft in
+                if let endpoint = appState.addEndpoint(
+                    name: draft.name,
+                    method: draft.method,
+                    path: draft.path,
+                    groupTag: draft.groupTag,
+                    statusCode: draft.statusCode,
+                    contentType: draft.contentType
+                ) {
                     revealEndpoint(endpoint)
                 }
             }
@@ -354,20 +403,13 @@ struct WorkspaceView: View {
             CaptureJourneySheet(capture: capture) { name, logs in
                 guard let journey = appState.addJourney(name: name, capturing: logs) else { return }
                 appState.selectedJourneyID = journey.id
+                // Captured from the log, so the log stays beside the journey it fed.
+                showJourneyDrawer = true
                 navigatorTab = .journeys
             }
         }
-        // Selecting a request shows it in the inspector, so the inspector has to be open. Without
-        // this, clicking a row in the log looks like it does nothing at all whenever the panel
-        // happens to be collapsed.
-        .onChange(of: selectedLogIDs) { _, newValue in
-            guard !newValue.isEmpty, !showInspector else { return }
-            withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) {
-                showInspector = true
-            }
-        }
-        // The inspector shows one thing at a time, so the newer selection wins. Picking an endpoint
-        // while a request is up should show that endpoint — not silently lose the click.
+        // The centre column shows one thing at a time, so the newer selection wins. Picking an
+        // endpoint while a request is up should show that endpoint — not silently lose the click.
         .onChange(of: selectedEndpointID) { _, newValue in
             guard let newValue else { return }
             selectedLogIDs = []
@@ -380,7 +422,7 @@ struct WorkspaceView: View {
         .onChange(of: navigatorTab) { _, _ in selectedLogIDs = [] }
         .onChange(of: appState.selectedJourneyID) { _, _ in selectedLogIDs = [] }
         .onChange(of: appState.currentProject?.id) { _, _ in resetProjectPresentation() }
-        // A cleared log takes its selection with it; otherwise the inspector goes on showing a
+        // A cleared log takes its selection with it; otherwise the centre column goes on showing a
         // request that is no longer in the list.
         .onChange(of: appState.requestLogs.isEmpty) { _, isEmpty in
             guard isEmpty else { return }
@@ -389,7 +431,20 @@ struct WorkspaceView: View {
         // Panel arrangement is a preference, so it is written as it changes.
         .onChange(of: drawerHeight) { _, _ in persistLayout() }
         .onChange(of: showDrawer) { _, _ in persistLayout() }
+        .onChange(of: isLogShown, initial: true) { _, visible in
+            appState.isRequestLogVisible = visible
+        }
         .onChange(of: showInspector) { _, _ in persistLayout() }
+        // The View menu reads what is on screen, which an empty project or an open request overrides.
+        .onChange(of: isInspectorPresented, initial: true) { _, visible in
+            appState.isInspectorVisible = visible
+        }
+        .onChange(of: canPresentInspector, initial: true) { _, available in
+            appState.canShowInspector = available
+        }
+        // ⌥⌘L and ⌥⌘I live in the View menu, so they work whether the toggles are inline or folded.
+        .onChange(of: appState.requestLogToggleRequest) { _, _ in toggleRequestLog() }
+        .onChange(of: appState.inspectorToggleRequest) { _, _ in toggleInspector() }
         // ⌘1 / ⌘2 from the menu bar, which lives above this window and so cannot bind to its state.
         // Journeys ▸ Show Journeys arrives the same way, now that it selects a tab rather than
         // opening a window.
@@ -398,6 +453,9 @@ struct WorkspaceView: View {
             navigatorTab = requested
             appState.navigatorRequest = nil
         }
+        // Journeys ▸ Show Active Journey. The navigator's footer has only the filter and Add, as
+        // the design draws it, so the reveal lives in the menu bar.
+        .onChange(of: appState.activeJourneyRevealRequest) { _, _ in revealActiveJourney() }
         // Last in the chain, like the only other postfix `#if` in this app (`MimicScene`), and for
         // the same reason: everything inside it has to vanish in Release, and a conditional block at
         // the end of a modifier chain is the shape that is unambiguously allowed to.
@@ -422,68 +480,117 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// Shorten the summaries first; the actions remain visible while there is room for them.
+    /// Collapse in stages as the centre column narrows: first import, server settings and the panel
+    /// toggles fold into one menu, then the server line drops its counts and the project name its
+    /// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
+    /// address and the state word always stay.
+    ///
+    /// The last breakpoint is what the narrow tier needs: Run, the name (≤88pt), the address
+    /// without its port count and the state, and "More", plus the toolbar's gaps and the column's
+    /// insets. A 900pt window with both side panels open leaves about 330pt: enough for a short
+    /// project name, but a longer one pushed "More" behind AppKit's own chevron there, so Run
+    /// folds below 360pt, where every name fits.
     nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
-        guard centerWidth.isFinite else { return .iconStatus }
-        if centerWidth < DSToolbarGeometry.iconStatusCenterWidth { return .iconStatus }
-        if centerWidth < DSToolbarGeometry.actionOverflowCenterWidth { return .overflow }
-        if centerWidth < DSToolbarGeometry.expandedCenterWidth { return .compactSummary }
+        guard centerWidth.isFinite else { return .minimal }
+        if centerWidth < 360 { return .minimal }
+        if centerWidth < 460 { return .narrow }
+        if centerWidth < 620 { return .compactSummary }
+        if centerWidth < 780 { return .overflow }
         return .expanded
     }
 
     nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
+        switch toolbarLayout(centerWidth: centerWidth) {
+        case .compactSummary, .narrow, .minimal: true
+        case .expanded, .overflow: false
+        }
+    }
+
+    /// Import, server settings, and the panel toggles (while the inspector is hidden) move into one
+    /// menu; Run joins them only in the minimal tier (`toolbarFoldsRun`).
+    nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
         toolbarLayout(centerWidth: centerWidth) != .expanded
     }
 
-    /// Preserve project identity and server context; only editor actions move into overflow.
-    nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
+    nonisolated static func toolbarUsesNarrowIdentity(centerWidth: CGFloat) -> Bool {
         let layout = toolbarLayout(centerWidth: centerWidth)
-        return layout == .overflow || layout == .iconStatus
+        return layout == .narrow || layout == .minimal
     }
 
-    nonisolated static func toolbarUsesIconStatus(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) == .iconStatus
+    /// Run/Stop leads the "More actions" menu instead of the toolbar.
+    nonisolated static func toolbarFoldsRun(centerWidth: CGFloat) -> Bool {
+        toolbarLayout(centerWidth: centerWidth) == .minimal
     }
 
     private var usesCompactToolbarSummary: Bool {
-        centerToolbarLayout != .expanded
+        switch centerToolbarLayout {
+        case .compactSummary, .narrow, .minimal: true
+        case .expanded, .overflow: false
+        }
+    }
+
+    private var foldsRun: Bool {
+        centerToolbarLayout == .minimal
+    }
+
+    private var usesNarrowIdentity: Bool {
+        centerToolbarLayout == .narrow || centerToolbarLayout == .minimal
     }
 
     private var usesToolbarOverflow: Bool {
-        centerToolbarLayout == .overflow || centerToolbarLayout == .iconStatus
+        centerToolbarLayout != .expanded
     }
 
-    private var usesIconStatus: Bool {
-        centerToolbarLayout == .iconStatus
+    /// The identity's widest extent at each stage, so the centre column's items fit its section.
+    private var projectIdentityMaximumWidth: CGFloat {
+        switch centerToolbarLayout {
+        case .expanded, .overflow: 220
+        case .compactSummary: 140
+        case .narrow, .minimal: 88
+        }
     }
 
+    /// Run, the project, and the server's address and state lead; import and server settings trail
+    /// in one glass group. The panel toggles sit in the inspector's own toolbar section beside its
+    /// title, and come back to the end of this toolbar only while the inspector is hidden.
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItem(id: "workspace.run", placement: .navigation) {
-            ServerToggleButton(
-                serverState: appState.serverState,
-                onStart: appState.startServer,
-                onStop: appState.stopServer
-            )
+        if !foldsRun {
+            ToolbarItem(id: "workspace.run", placement: .navigation) {
+                ServerToggleButton(
+                    serverState: appState.serverState,
+                    onStart: appState.startServer,
+                    onStop: appState.stopServer
+                )
+            }
+        }
+
+        ToolbarItem(id: "workspace.identity", placement: .navigation) {
+            projectIdentity
         }
         .sharedBackgroundVisibility(.hidden)
 
-        ToolbarItem(id: "workspace.identityAndServer", placement: .navigation) {
-            HStack(spacing: usesCompactToolbarSummary ? DSSpacing.sm : DSSpacing.md) {
-                projectIdentity
-                Rectangle()
-                    .fill(DSColors.border)
-                    .frame(width: DSStroke.seam, height: DSSpacing.xl)
-                    .accessibilityHidden(true)
+        ToolbarItem(id: "workspace.status", placement: .navigation) {
+            // Its own item, and wrapped rather than rooted at the well's `Button`. A bare button as
+            // an item's root is published as the item itself, and so is a button sharing an item
+            // with other views: the project name beside it then left the accessibility tree, and
+            // the well's details popover never reached it.
+            HStack(spacing: DSSpacing.md) {
+                if !usesNarrowIdentity {
+                    Rectangle()
+                        .fill(DSColors.separator)
+                        .frame(width: DSStroke.emphasis, height: 24)
+                        .accessibilityHidden(true)
+                }
                 serverSummary
             }
-            .fixedSize(horizontal: true, vertical: false)
             .accessibilityElement(children: .contain)
         }
         .sharedBackgroundVisibility(.hidden)
 
-        ToolbarSpacer(.flexible, placement: .primaryAction)
-        // Keep one native group installed when the workspace first opens in compact mode.
+        // The actions keep to the column's trailing edge, clear of the address.
+        ToolbarSpacer(.flexible)
+
         ToolbarItemGroup(placement: .primaryAction) {
             if usesToolbarOverflow {
                 overflowMenu
@@ -492,41 +599,67 @@ struct WorkspaceView: View {
                 serverSettingsButton.labelStyle(.iconOnly)
             }
         }
+
+        if !usesToolbarOverflow, !isInspectorPresented {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItemGroup(placement: .primaryAction) {
+                drawerToolbarButton.labelStyle(.iconOnly)
+                inspectorToolbarButton.labelStyle(.iconOnly)
+            }
+        }
     }
 
+    /// Back and forward across endpoints you have looked at, the way Xcode's editor history works.
+    private func goThroughHistory(forward: Bool) {
+        let target = forward
+            ? endpointHistory.goForward(where: endpointExists)
+            : endpointHistory.goBack(where: endpointExists)
+        if let target, let endpoint = currentEndpoints.first(where: { $0.id == target }) {
+            isNavigatingHistory = selectedEndpointID != target
+            revealEndpoint(endpoint)
+        }
+    }
+
+    /// The project's name over what it holds, "12 endpoints · 3 journeys". Narrow toolbars keep
+    /// the name alone.
     private var projectIdentity: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(appState.currentProject?.name ?? "Mimic")
-                .font(DSTypography.bodyBold)
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(appState.currentProject?.name ?? "Mimic")
                 .accessibilityIdentifier("toolbar.projectName")
-            ZStack(alignment: .leading) {
-                Label {
-                    Text("Local mock").font(DSTypography.label)
-                } icon: {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: DSGlyph.inline, weight: .regular))
+            if !usesCompactToolbarSummary, appState.currentProject != nil {
+                HStack(spacing: DSSpacing.xs) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: DSGlyph.disclosure))
+                        .accessibilityHidden(true)
+                    Text(projectContents)
+                        .monospacedDigit()
                 }
-                .labelStyle(.titleAndIcon)
+                .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
-                .opacity(appState.autosaveStatus == .idle ? 1 : 0)
+                .lineLimit(1)
                 .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("toolbar.projectKind")
-                .accessibilityLabel("Local mock")
-                .accessibilityHidden(appState.autosaveStatus != .idle)
-                AutosaveStatusIndicator(status: appState.autosaveStatus)
-                    .fixedSize(horizontal: true, vertical: false)
+                .accessibilityIdentifier("toolbar.projectContents")
+                .accessibilityLabel(projectContents)
             }
-            .frame(height: DSToolbarGeometry.metadataHeight, alignment: .leading)
         }
-        .frame(maxWidth: usesCompactToolbarSummary
-            ? DSToolbarGeometry.compactProjectTitleWidth : DSToolbarGeometry.projectTitleWidth,
-               alignment: .leading)
-        .frame(height: DSToolbarGeometry.height, alignment: .leading)
+        .frame(maxWidth: projectIdentityMaximumWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("toolbar.projectIdentity")
+    }
+
+    /// "12 endpoints · 3 journeys".
+    private var projectContents: String {
+        Self.projectContents(endpoints: currentEndpoints.count, journeys: appState.journeys.count)
+    }
+
+    nonisolated static func projectContents(endpoints: Int, journeys: Int) -> String {
+        "\(endpoints) \(endpoints == 1 ? "endpoint" : "endpoints") · \(journeys) \(journeys == 1 ? "journey" : "journeys")"
     }
 
     private var serverSummary: some View {
@@ -536,62 +669,71 @@ struct WorkspaceView: View {
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             compact: usesCompactToolbarSummary,
-            iconOnly: usesIconStatus,
+            showsListenerCount: !usesNarrowIdentity,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
+            runningSince: appState.server.runningSince,
+            conflictingPort: startConflictPort,
             onShowUnmatched: {
-                showDrawer = true
+                logPresentation.wrappedValue = true
                 showUnmatchedOnly = true
             },
             onShowSettings: { showBackendSettings = true },
-            onShowTraffic: {
-                showDrawer = true
-                showUnmatchedOnly = false
+            onToggleServer: {
+                if appState.serverState.runningPort != nil {
+                    appState.stopServer()
+                } else {
+                    appState.startServer()
+                }
             }
         )
-        .frame(width: usesIconStatus
-            ? DSToolbarGeometry.iconStatusWidth
-            : (usesCompactToolbarSummary ? DSToolbarGeometry.compactStatusWidth : DSToolbarGeometry.statusWidth))
     }
 
-    @ToolbarContentBuilder
-    private var panelToolbar: some ToolbarContent {
-        ToolbarSpacer(.flexible, placement: .primaryAction)
-        ToolbarItemGroup(placement: .primaryAction) {
-            drawerToolbarButton.labelStyle(.iconOnly)
-            inspectorToolbarButton.labelStyle(.iconOnly)
-        }
+    /// The port the last start found taken, when that is why the server is in error.
+    private var startConflictPort: Int? {
+        guard let failure = appState.serverStartFailure,
+              failure.code == ControlErrorCode.serverPortInUse.rawValue else { return nil }
+        return failure.details?["port"].flatMap { Int($0) }
     }
 
+    /// The secondary actions, folded into one menu when the centre column is narrow. At the
+    /// narrowest width Run/Stop leads it, so AppKit never has to hide anything. The panel toggles
+    /// join it only while the inspector is hidden; otherwise they sit in the inspector's header.
     private var overflowMenu: some View {
         let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
         let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
         return Menu {
+            if foldsRun {
+                ServerToggleMenuItem(
+                    serverState: appState.serverState,
+                    onStart: appState.startServer,
+                    onStop: appState.stopServer
+                )
+                Divider()
+            }
             importMenu()
             serverSettingsButton
-            if !appState.requestLogs.isEmpty {
+            if !isInspectorPresented {
+                Divider()
+                drawerToolbarButton
+                inspectorToolbarButton
+            }
+            if unmatchedCount > 0 {
                 Divider()
                 Button("Show unmatched requests (\(unmatchedCount))") {
-                    showDrawer = true
+                    logPresentation.wrappedValue = true
                     showUnmatchedOnly = true
                 }
                 .accessibilityIdentifier("toolbar.showUnmatched")
                 .accessibilityLabel("Show unmatched requests")
             }
         } label: {
-            Label("More actions", systemImage: appState.server.restartRequired
-                  ? "exclamationmark.arrow.circlepath" : "chevron.forward.2")
+            Label("More", systemImage: appState.server.restartRequired
+                  ? "exclamationmark.arrow.circlepath" : "ellipsis")
                 .labelStyle(.iconOnly)
-                .font(.system(size: DSGlyph.toolbar, weight: .regular))
         }
-        .menuStyle(.button)
         .menuIndicator(.hidden)
-        // A native toolbar otherwise measures this menu as zero on the first compact layout.
-        .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
-        .help(unmatchedCount > 0
-            ? "More actions; \(unmatchedDescription)"
-            : "More actions: import and server settings")
-        .accessibilityElement(children: .combine)
+        .help(foldsRun ? "Run, import, server settings, and more" : "Import, server settings, and more")
         .accessibilityIdentifier("toolbar.overflow")
         .accessibilityLabel("More actions")
         .accessibilityValue(unmatchedCount > 0
@@ -602,46 +744,91 @@ struct WorkspaceView: View {
     private var serverSettingsButton: some View {
         Button { showBackendSettings = true } label: {
             Label(
-                appState.server.restartRequired ? "Server settings — restart required" : "Server settings",
-                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "server.rack"
+                appState.server.restartRequired ? "Server settings, restart required" : "Server settings\u{2026}",
+                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "slider.horizontal.3"
             )
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
         .disabled(appState.currentProject == nil)
         .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
         .accessibilityIdentifier("backend.settingsButton")
         .accessibilityLabel("Server settings")
     }
 
-    private var inspectorPresentation: Binding<Bool> {
+    /// Whether there is anything for the inspector to show. A project with no endpoints and no
+    /// journeys has none.
+    private var canPresentInspector: Bool {
+        !currentEndpoints.isEmpty || !appState.journeys.isEmpty
+    }
+
+    /// The column on screen: the person's choice, which an empty project or a request open in the
+    /// centre column overrides without forgetting it.
+    private var isInspectorPresented: Bool {
+        showInspector && canPresentInspector && selectedLogIDs.isEmpty
+    }
+
+    /// AppKit writes back here when the column is dragged shut; that is the person's choice too. A
+    /// write while an empty project or an open request hides the column is not, and is ignored.
+    private var inspectorColumnPresentation: Binding<Bool> {
         Binding(
-            get: { showInspector },
+            get: { isInspectorPresented },
             set: { value in
-                withAnimation(reduceMotion ? nil : DSAnimation.drawerToggle) { showInspector = value }
+                guard canPresentInspector, selectedLogIDs.isEmpty, value != showInspector else { return }
+                showInspector = value
             }
         )
     }
 
-    private var drawerToolbarButton: some View {
-        Button { showDrawer.toggle() } label: {
-            Label(showDrawer ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomhalf.inset.filled")
+    /// Showing the inspector while a request is open closes the request, so the choice is honoured.
+    private func toggleInspector() {
+        guard canPresentInspector else { return }
+        withAnimation(reduceMotion ? nil : DSAnimation.panel) {
+            if isInspectorPresented {
+                showInspector = false
+            } else {
+                selectedLogIDs = []
+                showInspector = true
+            }
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
-        .keyboardShortcut("l", modifiers: [.command, .option])
-        .help(showDrawer ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
+    }
+
+    private var drawerToolbarButton: some View {
+        Button { toggleRequestLog() } label: {
+            Label(isLogShown ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomthird.inset.filled")
+        }
+        .help(isLogShown ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
         .accessibilityIdentifier("toggleDrawerButton")
-        .accessibilityLabel(showDrawer ? "Hide request log" : "Show request log")
+        .accessibilityLabel(isLogShown ? "Hide request log" : "Show request log")
     }
 
     private var inspectorToolbarButton: some View {
-        Button { inspectorPresentation.wrappedValue.toggle() } label: {
-            Label(showInspector ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
+        Button { toggleInspector() } label: {
+            Label(isInspectorPresented ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
         }
-        .font(.system(size: DSGlyph.toolbar, weight: .regular))
-        .keyboardShortcut("i", modifiers: [.command, .option])
-        .help(showInspector ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
+        .disabled(!canPresentInspector)
+        .help(canPresentInspector
+            ? (isInspectorPresented ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
+            : "Add an endpoint or a journey to inspect it")
         .accessibilityIdentifier("toggleInspectorButton")
-        .accessibilityLabel(showInspector ? "Hide inspector" : "Show inspector")
+        .accessibilityLabel(isInspectorPresented ? "Hide inspector" : "Show inspector")
+    }
+
+    private func toggleRequestLog() {
+        logPresentation.wrappedValue.toggle()
+    }
+
+    /// Whether the request log is under the centre pane on the screen now showing.
+    private var isLogShown: Bool {
+        navigatorTab == .journeys ? showJourneyDrawer : showDrawer
+    }
+
+    /// The log's visibility for the screen now showing: the journeys screen opens without it.
+    private var logPresentation: Binding<Bool> {
+        Binding(
+            get: { isLogShown },
+            set: { visible in
+                if navigatorTab == .journeys { showJourneyDrawer = visible } else { showDrawer = visible }
+            }
+        )
     }
 
     /// Shared by the full toolbar and its compact overflow menu.
@@ -662,7 +849,6 @@ struct WorkspaceView: View {
             if inToolbar {
                 Label("Import", systemImage: "square.and.arrow.down")
                     .labelStyle(.iconOnly)
-                    .font(.system(size: DSGlyph.toolbar, weight: .regular))
             } else {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
@@ -682,23 +868,33 @@ struct WorkspaceView: View {
     /// Every level past the first is a menu over its siblings, so moving to another endpoint in the
     /// same group — or another scenario on this endpoint — never means a round trip to the sidebar.
     private var breadcrumbs: [BreadcrumbJumpBar.Crumb] {
-        var crumbs: [BreadcrumbJumpBar.Crumb] = [
-            BreadcrumbJumpBar.Crumb(
-                id: "project",
-                title: appState.currentProject?.name ?? "Mimic",
-                systemImage: "shippingbox"
-            )
-        ]
+        var crumbs: [BreadcrumbJumpBar.Crumb] = []
 
         switch navigatorTab {
         case .journeys:
             let journeys = appState.journeys
+            let selected = journeys.first { $0.id == appState.selectedJourneyID }
+            // "Checkout › Payment retry", as the design draws it: the group earns a crumb only when
+            // the journey has one, and the journey crumb names the journey itself.
+            if let group = selected?.groupTag, !group.isEmpty {
+                let groups = Set(journeys.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+                crumbs.append(
+                    BreadcrumbJumpBar.Crumb(
+                        id: "journeyGroup",
+                        title: group,
+                        options: groups.compactMap { name in
+                            // A group stands for its first journey, the landing a navigator click gives.
+                            journeys.first { $0.groupTag == name }.map {
+                                BreadcrumbJumpBar.Option(id: $0.id, title: name, isSelected: name == group)
+                            }
+                        }
+                    )
+                )
+            }
             crumbs.append(
                 BreadcrumbJumpBar.Crumb(
                     id: "journey",
-                    // The centre editor gives the selected journey its full title. Keep this jump
-                    // control short so it does not repeat and truncate that title above the editor.
-                    title: "Journeys",
+                    title: selected?.name ?? "Journeys",
                     // From `NavigatorTab`, not spelled out here: this crumb sits one bar below the
                     // tab whose glyph it is repeating, and a literal is how the five empty states
                     // `NavigatorTab.systemImage` was extracted for came to disagree with it in the
@@ -723,7 +919,7 @@ struct WorkspaceView: View {
 
             // The group crumb only earns its place when there are groups to move between.
             let groups = Set(endpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
-            if let group = endpoint.groupTag, !group.isEmpty, groups.count > 1 {
+            if let group = endpoint.groupTag, !group.isEmpty {
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(
                         id: "group",
@@ -743,24 +939,25 @@ struct WorkspaceView: View {
             crumbs.append(
                 BreadcrumbJumpBar.Crumb(
                     id: "endpoint",
-                    title: endpoint.name,
+                    title: "\(endpoint.method.rawValue) \(endpoint.path)",
                     options: siblings.map {
-                        BreadcrumbJumpBar.Option(id: $0.id, title: $0.name, isSelected: $0.id == endpoint.id)
+                        BreadcrumbJumpBar.Option(id: $0.id, title: "\($0.method.rawValue) \($0.path)",
+                                                 isSelected: $0.id == endpoint.id)
                     }
                 )
             )
 
             if !endpoint.scenarios.isEmpty {
+                let edited = appState.editedScenario(of: endpoint)
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(
                         id: "scenario",
-                        title: endpoint.scenarios.first { $0.id == endpoint.activeScenarioID }?.name
-                            ?? "No scenario",
+                        title: edited?.name ?? "No scenario",
                         options: endpoint.scenarios.map {
                             BreadcrumbJumpBar.Option(
                                 id: $0.id,
                                 title: $0.name,
-                                isSelected: $0.id == endpoint.activeScenarioID
+                                isSelected: $0.id == edited?.id
                             )
                         }
                     )
@@ -779,8 +976,8 @@ struct WorkspaceView: View {
             }
         case "scenario":
             guard let endpointID = selectedEndpointID else { return }
-            appState.setActiveScenario(endpointID: endpointID, scenarioID: optionID)
-        case "journey":
+            appState.editScenario(endpointID: endpointID, scenarioID: optionID)
+        case "journeyGroup", "journey":
             appState.selectedJourneyID = optionID
         default:
             break
@@ -834,24 +1031,7 @@ struct WorkspaceView: View {
                     DSNavigatorMode(id: $0.id, title: $0.title, help: $0.help)
                 },
                 selection: navigatorTabBinding
-            ) {
-                switch navigatorTab {
-                case .endpoints:
-                    DSPanelHeaderButton(
-                        systemImage: "plus",
-                        help: "Add endpoint",
-                        identifier: "sidebar.addEndpointButton"
-                    ) {
-                        appState.showNewEndpointSheet = true
-                    }
-                case .journeys:
-                    // A menu, not a button, because there are two ways to start a journey and the
-                    // templates were the ones about to be stranded: they had no entry point outside
-                    // the journeys window, so removing that window would have removed the feature.
-                    // The window offered exactly this menu from its own "+".
-                    addJourneyMenu
-                }
-            }
+            )
 
             Group {
                 switch navigatorTab {
@@ -874,6 +1054,7 @@ struct WorkspaceView: View {
                     JourneyNavigatorList(
                         journeys: appState.journeys,
                         activeJourneyID: appState.activeJourney?.id,
+                        activeStatus: appState.activeJourneyStatus,
                         selectedJourneyID: $appState.selectedJourneyID,
                         onActivate: appState.activateJourney,
                         onAdd: {
@@ -897,28 +1078,27 @@ struct WorkspaceView: View {
                 text: navigatorTab == .endpoints ? $endpointFilter : $journeyFilter,
                 scopeID: $endpointMethodScope,
                 scopes: navigatorTab == .endpoints ? SidebarView.methodScopes : [],
-                placeholder: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
+                placeholder: "Filter",
+                label: navigatorTab == .endpoints ? "Filter endpoints" : "Filter journeys",
                 identifier: navigatorTab == .endpoints ? "sidebar.filter" : "journeys.filter",
-                focusRequest: appState.navigatorFilterRequest,
-                showsStatus: appState.activeJourney != nil
+                focusRequest: appState.navigatorFilterRequest
             ) {
-                if let active = appState.activeJourney {
+                switch navigatorTab {
+                case .endpoints:
                     DSPanelHeaderButton(
-                        systemImage: "play.circle.fill",
-                        help: "Show active journey: \(active.name)",
-                        identifier: "navigator.activeJourney",
-                        tint: DSColors.accent
+                        systemImage: "plus",
+                        help: "Add endpoint",
+                        identifier: "sidebar.addEndpointButton"
                     ) {
-                        journeyFilter = ""
-                        if let group = active.groupTag {
-                            collapsedJourneyGroups.remove(JourneyNavigatorList.groupSectionKey(group))
-                        }
-                        navigatorTab = .journeys
-                        appState.selectedJourneyID = active.id
+                        appState.showNewEndpointSheet = true
                     }
-                    .accessibilityValue("\(active.name), \(activeJourneyProgress ?? "Active")")
+                case .journeys:
+                    addJourneyMenu
                 }
             }
+            // One field per navigator: AppKit can keep a focused field's old identifier and label when
+            // only its binding changes, so the journeys filter could still answer as the endpoints one.
+            .id(navigatorTab)
         }
     }
 
@@ -938,10 +1118,21 @@ struct WorkspaceView: View {
             : "Step \((status.currentStepIndex ?? 0) + 1) of \(status.totalSteps)"
     }
 
+    /// Shows the active journey in the navigator whatever the filter or its group's disclosure.
+    private func revealActiveJourney() {
+        guard let active = appState.activeJourney else { return }
+        journeyFilter = ""
+        if let group = active.groupTag {
+            collapsedJourneyGroups.remove(JourneyNavigatorList.groupSectionKey(group))
+        }
+        navigatorTab = .journeys
+        appState.selectedJourneyID = active.id
+    }
+
     // MARK: - Request log wiring
 
     @ViewBuilder
-    private var requestLogPanel: some View {
+    private func requestLogPanel(showsDetail: Bool) -> some View {
         RequestLogDrawerView(
             requestLogs: appState.requestLogs,
             endpoints: currentEndpoints,
@@ -969,7 +1160,11 @@ struct WorkspaceView: View {
                 // Appending to an existing journey shows it too. Without this, capturing eight calls
                 // into a journey you cannot see is indistinguishable from having captured nothing.
                 appState.selectedJourneyID = journey.id
+                showJourneyDrawer = true
                 navigatorTab = .journeys
+                // Neither line changes anything when that journey is already open, and the editor
+                // is where the new steps show, so the request gives the column back explicitly.
+                selectedLogIDs = []
             },
             // Capturing into a brand-new journey names it first — the sheet then shows the journey,
             // or the command reads as having done nothing.
@@ -978,10 +1173,17 @@ struct WorkspaceView: View {
                     logs: logs,
                     suggestedName: AppState.journeyName(capturing: logs)
                 )
+            },
+            table: requestLogTable,
+            showsDetail: showsDetail,
+            onGoToEndpoint: { id in
+                guard let endpoint = currentEndpoints.first(where: { $0.id == id }) else { return }
+                revealEndpoint(endpoint)
             }
         )
+        .configuredPort(appState.serverConfiguration.port)
         .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("drawer")
+        .accessibilityIdentifier("drawer")
     }
 
     // MARK: - Inspector wiring
@@ -992,35 +1194,47 @@ struct WorkspaceView: View {
             guard navigatorTab == .endpoints, let id = selectedEndpointID else { return nil }
             return appState.currentProject?.endpoints.first { $0.id == id }
         }()
-        let detail = requestDetailContext
         let selectedJourney = navigatorTab == .journeys
             ? appState.journeys.first { $0.id == appState.selectedJourneyID } : nil
 
         InspectorPanelView(
             endpoint: endpoint,
-            requestDetail: detail,
-            overview: endpoint == nil && detail == nil ? inspectorOverview : nil,
+            overview: endpoint == nil ? inspectorOverview : nil,
             journey: selectedJourney.map {
                 JourneyInspector.Context(selected: $0, active: appState.activeJourney,
-                                         progress: activeJourneyProgress, serverState: appState.serverState)
+                                         progress: activeJourneyProgress, serverState: appState.serverState,
+                                         selectedStepID: appState.selectedJourneyStepID)
             },
-            selectedRequestCount: selectedLogIDs.count,
+            showsHeader: isInspectorPresented,
+            panelToggles: InspectorPanelView.PanelToggles(
+                requestLog: AnyView(drawerToolbarButton.labelStyle(.iconOnly)),
+                inspector: AnyView(inspectorToolbarButton.labelStyle(.iconOnly))
+            ),
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
             } ?? [],
+            endpointSettings: endpoint.map { endpoint in
+                EndpointInspectorSettings.Context(
+                    editedScenarioID: appState.editedScenario(of: endpoint)?.id,
+                    onEditScenario: { appState.editScenario(endpointID: $0, scenarioID: $1) },
+                    globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                    backends: appState.serverConfiguration.listeners,
+                    groups: Set(currentEndpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted(),
+                    onUpdateGroupTag: { appState.updateEndpointGroupTag(id: $0, groupTag: $1) },
+                    onUpdateBackend: { appState.updateEndpointBackend(id: $0, backendID: $1) },
+                    onUpdatePassthrough: { appState.setPassthrough(backendID: $0, enabled: $1) }
+                )
+            },
             onShowJourneys: { navigatorTab = .journeys },
-            onCloseRequestDetail: { selectedLogIDs = [] },
-            onSelectTrafficLog: { selectedLogIDs = [$0] },
-            onAddScenario: { _ = appState.addScenario(endpointID: $0, name: $1) },
+            onAddScenario: { endpointID, name in
+                if let scenario = appState.addScenario(endpointID: endpointID, name: name) {
+                    appState.editScenario(endpointID: endpointID, scenarioID: scenario.id)
+                }
+            },
             onSetActiveScenario: appState.setActiveScenario,
             onDuplicateScenario: { _ = appState.duplicateScenario(endpointID: $0, scenarioID: $1) },
             onDeleteScenario: appState.deleteScenario,
-            onRenameScenario: appState.renameScenario,
-            onSaveAsMock: { id in
-                if let endpoint = appState.savePassedThroughLogAsMock(id: id) {
-                    revealEndpoint(endpoint)
-                }
-            }
+            onRenameScenario: appState.renameScenario
         )
     }
 
@@ -1068,30 +1282,6 @@ struct WorkspaceView: View {
 
     private func beginEndpointRequestEdit(_ id: UUID) {
         editEndpointRequestTarget = currentEndpoints.first { $0.id == id }
-    }
-
-    /// The selected request, resolved against the current project so the endpoint and scenario names
-    /// track renames rather than showing whatever they were called when the call arrived.
-    private var requestDetailContext: RequestDetailInspector.Context? {
-        // Exactly one, not "the first of several": a detail panel showing one arbitrary member of a
-        // multi-row selection would claim to be about a selection it is only a fraction of. With
-        // several rows picked the inspector falls back to the overview.
-        guard selectedLogIDs.count == 1,
-              let selectedLogID = selectedLogIDs.first,
-              let log = appState.requestLogs.first(where: { $0.id == selectedLogID })
-        else { return nil }
-
-        let endpoints = currentEndpoints
-        return RequestDetailInspector.Context(
-            log: log,
-            endpointName: RequestLogQuery.endpointName(for: log.matchedEndpointID, endpoints: endpoints),
-            scenarioName: RequestLogQuery.scenarioName(
-                endpointID: log.matchedEndpointID,
-                scenarioID: log.matchedScenarioID,
-                endpoints: endpoints
-            ),
-            port: log.listenerPort ?? appState.serverState.runningPort
-        )
     }
 
     /// Project-level facts for the inspector's no-selection state.

@@ -1,23 +1,15 @@
 import CoreGraphics
 
-/// Shared row heights for content lists. Rows have enough room for the text that people scan;
-/// shorter group labels and table chrome use separate bar metrics.
-public enum DSRowHeight {
-    /// 34pt — a navigator row with a method badge, path, and metadata.
-    public static let listRow: CGFloat = 34
-
-    /// 32pt — a request log row with seven aligned columns.
-    public static let logRow: CGFloat = 32
-
-    /// 30pt — an import candidate with a method, path, status, and flag.
-    public static let importRow: CGFloat = 30
-
-    /// 22pt — a navigator group label.
+/// One row height per kind of list.
+nonisolated public enum DSRowHeight {
+    /// 28pt — sidebar rows, scenario rows, inspector key-value rows.
+    public static let list: CGFloat = 28
+    /// 24pt — table rows and column headers.
+    public static let table: CGFloat = 24
+    /// 22pt — a sidebar group header.
     public static let groupHeader: CGFloat = 22
-
-    /// 30pt — a scenario row or another compact name-and-status row.
-    public static let compactRow: CGFloat = 30
-
-    /// 60pt — a two-line journey step with name, route, and outcome.
-    public static let journeyStep: CGFloat = 60
+    /// 48pt — a journey step: a 22pt run node with room around it.
+    public static let step: CGFloat = 48
+    /// 44pt — a recent project in the welcome window.
+    public static let recent: CGFloat = 44
 }

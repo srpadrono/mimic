@@ -2,7 +2,7 @@ import SwiftUI
 import Domain
 import DesignSystem
 
-/// Xcode-style Run/Stop control: one target whose symbol changes in place.
+/// Run and Stop lead the toolbar as one round glass button. Native toolbar glass draws the circle.
 struct ServerToggleButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let serverState: ServerState
@@ -18,41 +18,66 @@ struct ServerToggleButton: View {
 
     static func canStop(in state: ServerState) -> Bool { state.runningPort != nil }
 
-    private var stopIsCurrentAction: Bool {
-        switch serverState {
+    /// Whether the button reads Stop: while the server runs, and while it is on its way down.
+    static func stopIsCurrentAction(in state: ServerState) -> Bool {
+        switch state {
         case .running, .stopping: true
         default: false
         }
     }
 
-    private var isTransitioning: Bool {
-        switch serverState {
+    static func isTransitioning(in state: ServerState) -> Bool {
+        switch state {
         case .starting, .stopping: true
         default: false
         }
     }
 
-    private var isRunning: Bool { serverState.runningPort != nil }
+    private var stopIsCurrentAction: Bool { Self.stopIsCurrentAction(in: serverState) }
+
+    private var isTransitioning: Bool { Self.isTransitioning(in: serverState) }
 
     var body: some View {
         Button(action: stopIsCurrentAction ? onStop : onStart) {
-            Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
-                .font(.system(size: DSGlyph.toolbar, weight: .semibold))
-                .foregroundStyle(DSColors.labelPrimary)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.downUp.byLayer))
-                .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
-                .frame(width: DSToolbarGeometry.contentHeight, height: DSToolbarGeometry.contentHeight)
-                .opacity(isTransitioning ? 0.6 : 1)
-                .frame(width: DSToolbarGeometry.height, height: DSToolbarGeometry.height)
-                .contentShape(.circle)
+            // The title stays in the label: the toolbar publishes it, "Run" or "Stop", as the item's
+            // name, while the round glass button shows only the glyph, as Xcode's does.
+            Label {
+                Text(stopIsCurrentAction ? "Stop" : "Run")
+            } icon: {
+                Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
+                    .font(.system(size: DSGlyph.field, weight: .semibold))
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                    .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
+                    // play.fill and stop.fill differ in width; a fixed slot keeps the circle still.
+                    .frame(width: DSGlyph.toolbar, height: DSGlyph.toolbar)
+            }
+            .labelStyle(.iconOnly)
+            .opacity(isTransitioning ? 0.6 : 1)
         }
-        // Keep the label hosted in SwiftUI so the symbol replacement can animate in the toolbar.
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(isRunning ? DSColors.success : .clear).interactive(), in: .circle)
+        .buttonBorderShape(.circle)
         .disabled(isTransitioning)
-        .help(stopIsCurrentAction ? "Stop server" : "Start server")
+        .help(stopIsCurrentAction ? "Stop server (⇧⌘R)" : "Start server (⇧⌘R)")
         .accessibilityLabel(stopIsCurrentAction ? "Stop server" : "Start server")
         .accessibilityIdentifier("serverToggleButton")
-        .animation(reduceMotion ? nil : .easeInOut(duration: DSAnimation.normal), value: serverState)
+    }
+}
+
+/// Run and Stop as the first item of the toolbar's "More actions" menu, where the narrowest centre
+/// column folds them. Same identifier and spoken name as the toolbar button, so it is the same
+/// action wherever it sits.
+struct ServerToggleMenuItem: View {
+    let serverState: ServerState
+    let onStart: () -> Void
+    let onStop: () -> Void
+
+    var body: some View {
+        let stops = ServerToggleButton.stopIsCurrentAction(in: serverState)
+        Button(action: stops ? onStop : onStart) {
+            Label(stops ? "Stop server" : "Run server", systemImage: stops ? "stop.fill" : "play.fill")
+        }
+        .disabled(ServerToggleButton.isTransitioning(in: serverState))
+        .help(stops ? "Stop server (⇧⌘R)" : "Start server (⇧⌘R)")
+        .accessibilityLabel(stops ? "Stop server" : "Start server")
+        .accessibilityIdentifier("serverToggleButton")
     }
 }

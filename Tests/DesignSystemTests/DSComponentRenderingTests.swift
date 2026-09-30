@@ -79,62 +79,6 @@ struct DSComponentRenderingTests {
         }
     }
 
-    private struct DrawerHarness: View {
-        @State private var showTrailing = true
-        @State private var showBottom = true
-
-        var body: some View {
-            VStack(spacing: 16) {
-                DSDrawer(edge: .trailing, isPresented: $showTrailing, identifier: "trailing") {
-                    Text("Trailing drawer")
-                        .padding()
-                }
-                .frame(height: 120)
-
-                DSDrawer(edge: .bottom, isPresented: $showBottom, identifier: "bottom") {
-                    Text("Bottom drawer")
-                        .padding()
-                }
-                .frame(height: 240)
-            }
-            .frame(width: 500, height: 420)
-        }
-    }
-
-    private struct EdgeDrawerHarness: View {
-        @State private var showLeading = true
-        @State private var showTop = true
-
-        var body: some View {
-            VStack(spacing: 16) {
-                HStack(spacing: 0) {
-                    DSDrawer(edge: .leading, isPresented: $showLeading, identifier: "leading") {
-                        Text("Leading drawer")
-                            .padding()
-                            .frame(width: 160)
-                    }
-
-                    Text("Canvas")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(height: 180)
-
-                VStack(spacing: 0) {
-                    DSDrawer(edge: .top, isPresented: $showTop, identifier: "top") {
-                        Text("Top drawer")
-                            .padding()
-                            .frame(height: 100)
-                    }
-
-                    Text("Inspector")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(height: 220)
-            }
-            .frame(width: 500, height: 420)
-        }
-    }
-
     /// Hosts a `DSSplitPane` so the representable is actually made, laid out and updated — which is
     /// where `NSHostingController` sizing, the initial collapse state and the position restore all
     /// have to agree. A pure unit test cannot reach any of that.
@@ -188,12 +132,14 @@ struct DSComponentRenderingTests {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     DSButton("Primary", variant: .primary, size: .small, identifier: "primary") {}
-                    DSButton("Secondary", variant: .secondary, size: .medium, identifier: "secondary") {}
+                    DSButton("Secondary", systemImage: "plus", variant: .secondary, size: .medium,
+                             identifier: "secondary") {}
                     DSButton("Destructive", variant: .destructive, size: .large, identifier: "destructive") {}
                     DSButton("Ghost", variant: .ghost, size: .medium, identifier: "ghost") {}
+                    DSIconButton("Add", systemImage: "plus", identifier: "icon") {}
                     DSCodeBlock("let value = 42", identifier: "code")
-                    DSDivider(style: .subtle, axis: .horizontal, identifier: "subtle")
-                    DSDivider(style: .strong, axis: .vertical, identifier: "strong")
+                    DSDivider(axis: .horizontal, identifier: "horizontal")
+                    DSDivider(axis: .vertical, identifier: "vertical")
                     DSEmptyState(
                         systemImage: "tray",
                         heading: "Nothing here",
@@ -201,8 +147,14 @@ struct DSComponentRenderingTests {
                         actionTitle: "Create endpoint",
                         identifier: "empty"
                     ) {}
+                    DSEmptyState(
+                        heading: "No endpoints",
+                        message: "Nothing matches the filter.",
+                        prominence: .compact,
+                        identifier: "compact"
+                    )
                     // Both arms of the filter field, because they lay out differently: the first has
-                    // a scope pill carrying a title and a clear button in the row, the second has
+                    // a scope menu carrying a title and a clear button in the row, the second has
                     // neither and is the well with nothing but a field inside it.
                     DSFilterField(
                         text: .constant("/v1/accounts"),
@@ -223,17 +175,41 @@ struct DSComponentRenderingTests {
                     )
                     DSLoadingPlaceholder(identifier: "loading")
                         .frame(height: 160)
-                    DSMethodBadge(method: "get", size: .standard, identifier: "get")
-                    DSMethodBadge(method: "delete", size: .compact, identifier: "delete")
+                    DSMethodLabel("get", identifier: "get")
+                    DSMethodLabel("delete", fixedWidth: false, identifier: "delete")
                     DSSectionHeader("Headers", identifier: "headers")
                     DSSectionHeader("Actions", identifier: "actions") {
                         Button("Refresh") {}
                     }
-                    DSStatusPill(statusCode: 200)
-                    DSStatusPill(statusCode: 500)
-                    DSStatusPill(statusCode: nil)
-                    DSStatusPill(statusCode: 404, detail: "\u{00D7}3")
-                    DSStatusPill(failureLabel: "timeout 30000ms")
+                    DSStatusLabel(statusCode: 200)
+                    DSStatusLabel(statusCode: 500, reason: "Internal Server Error")
+                    DSStatusLabel(statusCode: nil)
+                    DSStatusLabel(statusCode: nil, reason: "timeout 30000ms")
+                    DSStatusLabel("3 unmatched", color: DSColors.warning)
+                    DSSegmentedControl(
+                        "Scope",
+                        segments: [
+                            .init("All", value: "all", identifier: "all"),
+                            .init("Unmatched", value: "unmatched", count: 3, countColor: DSColors.warning,
+                                  identifier: "unmatched")
+                        ],
+                        selection: .constant("all"),
+                        identifier: "scope"
+                    )
+                    DSBanner(.info, message: "Imported 12 endpoints.", identifier: "info")
+                    DSBanner(.warning, message: "Restart to apply the new port.", actionTitle: "Restart",
+                             identifier: "warning") {}
+                    DSBanner(.error, message: "Port 8080 is in use.", identifier: "error")
+                    DSLiveIndicator(isLive: true)
+                    DSLiveIndicator(isLive: false, size: 10)
+                    DSOptionCard("New project", message: "Start from an empty project.",
+                                 shortcut: ["\u{2318}", "N"], isDefault: true, identifier: "new") {}
+                    DSOptionCard("Open sample", message: "Explore a finished project.",
+                                 footnote: "Read only", identifier: "sample") {}
+                    Text("Field chrome")
+                        .dsFieldChrome(isFocused: true)
+                    Text("Invalid field chrome")
+                        .dsFieldChrome(height: DSControlHeight.large, isFocused: false, isInvalid: true)
                     DSTextField("Project name", text: .constant("Mimic"), identifier: "project")
                     DSTextField(
                         "Port",
@@ -249,8 +225,6 @@ struct DSComponentRenderingTests {
             }
         )
 
-        render(DrawerHarness())
-        render(EdgeDrawerHarness())
         render(SplitPaneHarness(axis: .vertical))
         render(SplitPaneHarness(axis: .horizontal))
         // A pane that starts collapsed must not load its content into a zero-height frame and trap;
@@ -276,47 +250,39 @@ struct DSComponentRenderingTests {
 
     /// The claim the component exists to make, stated where it can fail.
     ///
-    /// A badge sized to its content came out around 32pt for `GET` and 52pt for `DELETE`, so a column
-    /// of them left the paths beside them starting at a different x on every row — and compact
-    /// `OPTIONS` wanted 58.2pt inside the 58pt frame `SidebarView` and `ImportReviewList` both give
-    /// it, which a `Text` resolves by wrapping onto a second line and taking the row's height with it.
-    /// Every measurement here is a comparison between two renders rather than a literal, so it stays
-    /// true across a font substitution and still fails the moment the fixed width comes off.
-    @Test("A method badge is one width whatever method it holds")
-    func methodBadgeWidthIsStableAcrossMethods() {
+    /// In a list every method sits in one column, so the path beside it starts at the same x on
+    /// every row. A label sized to its text would move the path by a character's width between
+    /// `GET` and `OPTIONS`; the fixed column is 52pt, wide enough for the widest method in SF Mono 11.
+    @Test("A method label is one width in a list, whatever method it holds")
+    func methodLabelWidthIsStableAcrossMethods() {
         let measure = CGSize(width: 200, height: 60)
-        let compactGet = render(DSMethodBadge(method: "GET", size: .compact, identifier: "get"), size: measure)
-        let compactOptions = render(DSMethodBadge(method: "OPTIONS", size: .compact, identifier: "options"), size: measure)
-        let standardGet = render(DSMethodBadge(method: "GET", size: .standard, identifier: "get"), size: measure)
-        let standardOptions = render(DSMethodBadge(method: "OPTIONS", size: .standard, identifier: "options"), size: measure)
+        let get = render(DSMethodLabel("GET", identifier: "get"), size: measure)
+        let options = render(DSMethodLabel("OPTIONS", identifier: "options"), size: measure)
+        let delete = render(DSMethodLabel("delete", identifier: "delete"), size: measure)
 
-        #expect(compactGet.width == compactOptions.width)
-        #expect(standardGet.width == standardOptions.width)
+        #expect(get.width == 52)
+        #expect(options.width == 52)
+        #expect(delete.width == 52)
+        #expect(get.height == options.height)
 
-        // And the widest method still fits the 58pt column its two callers reserve —
-        // `SidebarView.EndpointSidebarRow` and `ImportColumns.method`. The badge and the column
-        // both measure 58pt, so the widest method stays on a single line.
-        #expect(compactOptions.width <= 58)
-
-        // The two sizes are genuinely two sizes: a dense list gets the smaller badge.
-        #expect(standardGet.width > compactGet.width)
-        #expect(standardGet.height > compactGet.height)
+        // Outside a list the label is its text, so the two methods measure differently there.
+        let bareGet = render(DSMethodLabel("GET", fixedWidth: false, identifier: "get"), size: measure)
+        let bareOptions = render(DSMethodLabel("OPTIONS", fixedWidth: false, identifier: "options"), size: measure)
+        #expect(bareGet.width < bareOptions.width)
+        // And the widest method still fits the column rather than overflowing it.
+        #expect(bareOptions.width <= 52)
     }
 
-    /// "Every panel wears one bar of chrome, `DSBarHeight.panelHeader` tall."
+    /// A pane header is one 40pt bar whether it carries a subtitle and controls or only a title, so
+    /// the request log's header and its neighbours line up.
     ///
-    /// The navigator wears a `DSTabStrip` where the other two panels wear a `DSPanelHeader`, and the
-    /// only reason that is allowed is that the two stand the same height — otherwise the three panels'
-    /// headers stop aligning horizontally, which is the state the window was in before either
-    /// component existed. `DSTabStrip` states the parity in its own documentation; nothing checked it.
-    ///
-    /// Measured against a bare `Color` fixed to the token rather than against a literal, so the
-    /// comparison cannot drift from the ladder and cannot be broken by anything the hosting layer adds
-    /// to both sides equally.
-    @Test("Panel chrome stands one height, whether a panel opens with a header or a tab strip")
-    func panelChromeSharesOneHeight() {
+    /// Measured against a bare `Color` fixed to 40pt rather than against the token, so the
+    /// comparison cannot drift with the ladder and cannot be broken by anything the hosting layer
+    /// adds to both sides equally.
+    @Test("A pane header stands one height, bare or loaded")
+    func panelHeaderSharesOneHeight() {
         let measure = CGSize(width: 320, height: 120)
-        let ruler = render(Color.clear.frame(height: DSBarHeight.panelHeader), size: measure)
+        let ruler = render(Color.clear.frame(height: 40), size: measure)
         let header = render(DSPanelHeader("Endpoints", identifier: "sidebar"), size: measure)
         let loadedHeader = render(
             DSPanelHeader("Scenarios", subtitle: "12 requests", identifier: "inspector") {
@@ -324,68 +290,115 @@ struct DSComponentRenderingTests {
             },
             size: measure
         )
-        let strip = render(
-            DSTabStrip(
-                tabs: [
-                    DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints"),
-                    DSTabStrip.Tab(id: "journeys", systemImage: "arrow.triangle.branch", help: "Show journeys"),
-                ],
-                selection: .constant("endpoints"),
-                identifier: "navigator"
-            ),
-            size: measure
-        )
 
         #expect(header.height == ruler.height)
         #expect(loadedHeader.height == header.height)
-        #expect(strip.height == header.height)
-        for width: CGFloat in [160, 220, 360] {
-            let adaptive = render(
-                DSTabStrip(
-                    tabs: [
-                        .init(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints", title: "Endpoints"),
-                        .init(id: "journeys", systemImage: "arrow.triangle.branch", help: "Show journeys", title: "Journeys")
-                    ],
-                    selection: .constant("endpoints"),
-                    identifier: "adaptive"
-                ) {
-                    DSPanelHeaderButton(systemImage: "plus", help: "Add", identifier: "add") {}
-                },
-                size: CGSize(width: width, height: 120)
-            )
-            #expect(adaptive.height == DSBarHeight.panelHeader)
-            // fittingSize asks for the ideal width, not the laid-out width. The UI resize test
-            // checks the icon/title transition using the actual button frames instead.
+        #expect(DSPanelHeader<EmptyView>.height == 40)
+    }
+
+    /// Counts sit inside their segment rather than beside the control, so a segment gaining a count
+    /// does not change the control's height, and the control stays on the 24pt panel rung.
+    @Test("A segmented control is 24pt tall, with or without counts")
+    func segmentedControlKeepsItsHeight() {
+        let measure = CGSize(width: 320, height: 80)
+        let bare = render(
+            DSSegmentedControl(
+                "Scope",
+                segments: [
+                    .init("All", value: "all", identifier: "all"),
+                    .init("Unmatched", value: "unmatched", identifier: "unmatched")
+                ],
+                selection: .constant("all"),
+                identifier: "bare"
+            ),
+            size: measure
+        )
+        let counted = render(
+            DSSegmentedControl(
+                "Scope",
+                segments: [
+                    .init("All", value: "all", count: 128, identifier: "all"),
+                    .init("Unmatched", value: "unmatched", count: 3, countColor: DSColors.warning,
+                          identifier: "unmatched")
+                ],
+                selection: .constant("unmatched"),
+                identifier: "counted"
+            ),
+            size: measure
+        )
+
+        #expect(bare.height == 24)
+        #expect(counted.height == 24)
+        #expect(counted.width > bare.width)
+    }
+
+    /// Focus and validation are drawn as a halo and a heavier border over the field, never as extra
+    /// layout: a field that grew when it took focus would shove the form under the pointer.
+    @Test("Field chrome keeps its height focused, invalid and at rest")
+    func fieldChromeKeepsItsHeight() {
+        let measure = CGSize(width: 240, height: 80)
+        let rest = render(Text("8080").dsFieldChrome(isFocused: false), size: measure)
+        let focused = render(Text("8080").dsFieldChrome(isFocused: true), size: measure)
+        let invalid = render(Text("70000").dsFieldChrome(isFocused: false, isInvalid: true), size: measure)
+        let sheet = render(Text("8080").dsFieldChrome(height: DSControlHeight.large, isFocused: false),
+                           size: measure)
+
+        #expect(rest.height == 24)
+        #expect(focused.height == 24)
+        #expect(invalid.height == 24)
+        #expect(sheet.height == 28)
+    }
+
+    /// Every button stands on its size's rung, whatever its variant: 20pt inside a row, 24pt in a
+    /// panel, 28pt in a sheet. A ghost button draws no fill but must not be shorter than the primary
+    /// beside it.
+    @Test("Every button variant stands on its size's rung")
+    func buttonVariantsShareTheirSizeRung() {
+        let measure = CGSize(width: 240, height: 80)
+        let expected: [(DSButtonSize, CGFloat)] = [(.small, 20), (.medium, 24), (.large, 28)]
+        for (size, height) in expected {
+            #expect(size.height == height)
+            for variant in DSButtonVariant.allCases {
+                let button = render(
+                    DSButton("Import", systemImage: "square.and.arrow.down", variant: variant, size: size,
+                             identifier: "button") {},
+                    size: measure
+                )
+                #expect(button.height == height, "\(variant) at \(size)")
+            }
         }
     }
 
-    /// A badge rides the corner of the selection shape as an overlay, so it takes no part in layout.
-    ///
-    /// Inline, it widened the cell by its own width: the icon drifted off centre the moment a count
-    /// appeared and drifted back when it cleared, so the strip visibly shuffled while you watched it.
-    @Test("A badged tab is the same shape as a bare one")
-    func tabBadgeDoesNotChangeTheStripsGeometry() {
-        let measure = CGSize(width: 320, height: 120)
-        let bare = render(
-            DSTabStrip(
-                tabs: [DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints")],
-                selection: .constant("endpoints"),
-                identifier: "navigator"
-            ),
+    /// The live radio holds its footprint when it fills, so a row's name does not shift sideways
+    /// when a scenario goes live.
+    @Test("The live indicator is one size, live or not")
+    func liveIndicatorKeepsItsSize() {
+        let measure = CGSize(width: 60, height: 60)
+        #expect(render(DSLiveIndicator(isLive: true), size: measure) == CGSize(width: 14, height: 14))
+        #expect(render(DSLiveIndicator(isLive: false), size: measure) == CGSize(width: 14, height: 14))
+        #expect(render(DSLiveIndicator(isLive: true, size: 10), size: measure) == CGSize(width: 10, height: 10))
+    }
+
+    /// Option cards line up in a row on the welcome screen, so each is 220pt wide and at least
+    /// 132pt tall whether it shows a shortcut or a footnote.
+    @Test("An option card is 220pt wide and keeps its minimum height")
+    func optionCardGeometry() {
+        let measure = CGSize(width: 400, height: 300)
+        let shortcut = render(
+            DSOptionCard("New project", message: "Start from an empty project.",
+                         shortcut: ["\u{2318}", "N"], isDefault: true, identifier: "new") {},
             size: measure
         )
-        let badged = render(
-            DSTabStrip(
-                tabs: [
-                    DSTabStrip.Tab(id: "endpoints", systemImage: "list.bullet", help: "Show endpoints", badge: 128),
-                ],
-                selection: .constant("endpoints"),
-                identifier: "navigator"
-            ),
+        let footnote = render(
+            DSOptionCard("Open sample", message: "Explore a finished project.",
+                         footnote: "Read only", identifier: "sample") {},
             size: measure
         )
 
-        #expect(badged == bare)
+        #expect(shortcut.width == 220)
+        #expect(footnote.width == 220)
+        #expect(shortcut.height >= 132)
+        #expect(footnote.height >= 132)
     }
 
     /// "Controls sharing a row share their geometry", measured on the one control that spent longest
@@ -394,15 +407,15 @@ struct DSComponentRenderingTests {
     /// `DSFilterField` once documented a 20pt row and stated no height, so its
     /// height was whatever the scope `Menu` inside it happened to want — which is the failure the
     /// house rule is about, since a panel's chrome is built out of controls that are supposed to line
-    /// up. The scopeless arm is measured beside it because the pill is exactly what used to set the
-    /// number: a well with no pill in it must still stand on the same rung, or a panel's header
+    /// up. The scopeless arm is measured beside it because the scope menu is exactly what used to set
+    /// the number: a well with no menu in it must still stand on the same rung, or a panel's footer
     /// changes height depending on whether its filter has anything to be pointed at.
     ///
-    /// Pin the intended 30-point height independently of the production token.
-    @Test("A filter field stands on the control rung, with a scope pill and without one")
+    /// Pin the intended 24-point panel rung independently of the production token.
+    @Test("A filter field stands on the control rung, with a scope menu and without one")
     func filterFieldStandsOnTheControlRung() {
         let measure = CGSize(width: 240, height: 80)
-        let ruler = render(Color.clear.frame(height: 30), size: measure)
+        let ruler = render(Color.clear.frame(height: 24), size: measure)
         let scoped = render(
             DSFilterField(
                 text: .constant("/v1/accounts"),
@@ -467,7 +480,7 @@ struct DSComponentRenderingTests {
             try withHostedView(
                 Button {} label: {
                     Text("Refresh")
-                        .font(DSTypography.heading)
+                        .font(DSTypography.title)
                         .foregroundStyle(.black)
                         .padding(8)
                         .opacity(hidesLabel ? 0 : 1)
@@ -541,22 +554,6 @@ struct DSComponentRenderingTests {
         #expect(complaining.height > quiet.height)
     }
 
-    @Test("Drawer edges stay consistent")
-    func drawerHelpersAndAdditionalEdges() {
-        #expect(DSDrawerEdge.leading.swiftUIEdge == .leading)
-        #expect(DSDrawerEdge.trailing.swiftUIEdge == .trailing)
-        #expect(DSDrawerEdge.top.swiftUIEdge == .top)
-        #expect(DSDrawerEdge.bottom.swiftUIEdge == .bottom)
-        #expect(DSDrawerEdge.leading.isHorizontal)
-        #expect(DSDrawerEdge.trailing.isHorizontal)
-        #expect(DSDrawerEdge.top.isHorizontal == false)
-        #expect(DSDrawerEdge.bottom.isHorizontal == false)
-        #expect(DSDrawerEdge.leading.dividerLeads == false)
-        #expect(DSDrawerEdge.trailing.dividerLeads)
-        #expect(DSDrawerEdge.top.dividerLeads == false)
-        #expect(DSDrawerEdge.bottom.dividerLeads)
-    }
-
     @Test("JSON editor helpers validate and pretty print")
     func jsonEditorHelpers() async {
         #expect(DSJSONEditor.validationErrorMessage(text: "", isValid: false) == nil)
@@ -578,163 +575,149 @@ struct DSComponentRenderingTests {
     /// Values, not orderings.
     ///
     /// An ordering assertion cannot catch the change that actually matters: `DSSpacing.md` going from
-    /// 12 to 10 keeps every `<` true and moves every panel in the window. These numbers are measured
-    /// against Xcode rather than chosen freely, so changing one should mean editing a test and
-    /// re-reading why the number is what it is.
-    ///
-    /// The two ladders below had no coverage at all, having been six and twenty-three hand-written
-    /// literals until they were named — which is precisely when a test is worth adding, because the
-    /// literals are no longer there to compare against each other.
-    @Test("The bar, control and stroke ladders are the measured values")
+    /// 12 to 10 keeps every `<` true and moves every panel in the window. These numbers are the
+    /// redesign's measured values, so changing one should mean editing a test and re-reading why the
+    /// number is what it is.
+    @Test("The bar, control, row and stroke ladders are the measured values")
     func laddersArePinned() {
-        #expect(DSBarHeight.panelHeader == 36)
-        #expect(DSBarHeight.secondaryBar == 28)
-        #expect(DSBarHeight.controlRow == 36)
-        #expect(DSBarHeight.columnHeader == 26)
+        // Sidebar, content and inspector all start 44pt from the top.
+        #expect(DSBarHeight.column == 44)
+        #expect(DSBarHeight.jumpBar == 30)
+        #expect(DSBarHeight.paneHeader == 40)
+        #expect(DSBarHeight.footer == 44)
 
-        #expect(DSControlHeight.row == 24)
-        #expect(DSControlHeight.field == 26)
-        #expect(DSRowHeight.importRow == 30)
+        #expect(DSControlHeight.small == 20)
+        #expect(DSControlHeight.regular == 24)
+        #expect(DSControlHeight.large == 28)
         #expect(DSControlHeight.prominent == 32)
-        #expect(DSControlHeight.verticalPadding == 3)
+
+        #expect(DSRowHeight.list == 28)
+        #expect(DSRowHeight.table == 24)
+        #expect(DSRowHeight.groupHeader == 22)
+        #expect(DSRowHeight.step == 48)
+        #expect(DSRowHeight.recent == 44)
 
         #expect(DSStroke.hairline == 0.5)
-        #expect(DSStroke.seam == 1)
-        #expect(DSStroke.focusRing == 1)
+        #expect(DSStroke.emphasis == 1)
+        #expect(DSStroke.focusHalo == 3.5)
 
-        // The relationships the comments claim, stated where they can fail: a control row is a row
-        // control with `sm` above and below, and a panel header stands on the ladder rather than
-        // owning its own number.
-        #expect(DSBarHeight.controlRow == DSControlHeight.row + DSSpacing.sm * 2)
-        #expect(DSPanelHeader<EmptyView>.height == DSBarHeight.panelHeader)
+        // The relationships the comments claim, stated where they can fail: the panels share the
+        // column bar, and a panel header stands on the ladder rather than owning its own number.
+        #expect(DSPanelHeader<EmptyView>.height == DSBarHeight.paneHeader)
+        #expect(DSInspectorMetrics.footerHeight == DSBarHeight.footer)
+        #expect(DSNavigatorMetrics.footerHeight == DSBarHeight.footer)
+        #expect(DSNavigatorMetrics.rowHeight == DSRowHeight.list)
+        #expect(DSInspectorMetrics.rowHeight == DSRowHeight.list)
     }
 
-    /// The third ladder, and the only one that arrived with a floor.
+    /// Panel widths and sheet widths: the numbers the window's layout turns on.
+    @Test("Layout and sheet widths are the measured values")
+    func layoutWidthsArePinned() {
+        #expect(DSLayout.sidebarWidth == 264)
+        #expect(DSLayout.sidebarMinimumWidth == 220)
+        #expect(DSLayout.sidebarMaximumWidth == 360)
+        #expect(DSLayout.inspectorWidth == 300)
+        #expect(DSLayout.inspectorMinimumWidth == 260)
+        #expect(DSLayout.inspectorMaximumWidth == 480)
+        #expect(DSLayout.panelInset == 8)
+        #expect(DSLayout.methodColumn == 52)
+
+        #expect(DSSheetWidth.compact == 440)
+        #expect(DSSheetWidth.medium == 560)
+        #expect(DSSheetWidth.wide == 680)
+        #expect(DSSheetWidth.split == 760)
+        #expect(DSSheetWidth.review == 860)
+    }
+
+    /// The glyph ladder, and the floor under it.
     ///
-    /// `DSBarHeight` and `DSControlHeight` name points. `DSGlyph` names tiers, because the house rule
-    /// it encodes states ranges — "Separators and menu indicators are 8pt, inline glyphs 9–10pt,
-    /// control glyphs 11–13pt" — and it spent far longer than either as prose with nothing behind it:
-    /// thirty-odd bare `.font(.system(size:))` literals across two modules, which is exactly the state
-    /// the other two ladders were pinned on leaving.
-    ///
-    /// **The floor is asserted separately, and it is not redundant with the values above it.** A tier
-    /// stated as a range invites a seventh rung, and a seventh rung would pass every value line here
-    /// while sitting at 7pt — which is the failure the rule is actually about, since a menu indicator
-    /// that small stops reading as a mark and the control it annotates stops being discovered.
-    ///
-    /// Not asserted, for want of a way to: three rungs are deliberately the sizes of
-    /// `DSTypography.caption`, `.label` and `.body`, so a glyph beside a line of type matches the
-    /// line. `Font` does not expose its point size, so that relationship stays a claim in the token's
-    /// documentation rather than a check — unlike the `controlRow == row + sm * 2` line above, which
-    /// is why that one is stated there and this one is not stated here.
+    /// **The floor is asserted separately, and it is not redundant with the values above it.** A
+    /// new rung would pass every value line here while sitting at 7pt — which is the failure the
+    /// house rule is about, since a mark that small stops reading as a mark. `minimum` is a bound,
+    /// not a size to draw at, so it is checked against rather than listed as a rung.
     @Test("The glyph ladder is the measured values, and nothing sits below the floor")
     func glyphLadderIsPinned() {
-        #expect(DSGlyph.indicator == 8)
-        #expect(DSGlyph.inlineSmall == 9)
-        #expect(DSGlyph.inline == 10)
-        #expect(DSGlyph.control == 11)
-        #expect(DSGlyph.controlLarge == 12)
-        #expect(DSGlyph.controlProminent == 13)
+        #expect(DSGlyph.disclosure == 10)
+        #expect(DSGlyph.field == 12)
+        #expect(DSGlyph.button == 14)
+        #expect(DSGlyph.control == 15)
+        #expect(DSGlyph.toolbar == 16)
+        #expect(DSGlyph.card == 22)
+        #expect(DSGlyph.illustration == 28)
 
         #expect(DSGlyph.minimum == 8)
 
         let ladder = [
-            DSGlyph.indicator,
-            DSGlyph.inlineSmall,
-            DSGlyph.inline,
+            DSGlyph.disclosure,
+            DSGlyph.field,
+            DSGlyph.button,
             DSGlyph.control,
-            DSGlyph.controlLarge,
-            DSGlyph.controlProminent
+            DSGlyph.toolbar,
+            DSGlyph.card,
+            DSGlyph.illustration
         ]
 
-        // "No glyph below 8pt" — the rule, stated where it can fail rather than remembered.
+        // "No glyph below 8pt" — the rule, stated where it can fail rather than remembered. The
+        // smallest derived size in the module is `disclosure - 1`, which is why that rung carries
+        // headroom above the floor.
         for rung in ladder {
             #expect(rung >= DSGlyph.minimum)
         }
-
-        // And the floor is reached, not merely respected: a `minimum` that drifted above every rung
-        // would satisfy the loop above while no longer describing the ladder it bounds.
-        #expect(ladder.min() == DSGlyph.minimum)
+        #expect(DSGlyph.disclosure - 1 >= DSGlyph.minimum)
     }
 
-    /// The last two ladders in the module that were held by nothing but a chain of `<`.
-    ///
-    /// `laddersArePinned` above makes the argument for pinning by value and reaches for `DSSpacing` to
-    /// make it — "an ordering assertion cannot catch `DSSpacing.md` going from 12 to 10" — while
-    /// leaving `DSSpacing` itself, and `DSCornerRadius` beside it, on exactly the ordering it is
-    /// arguing against. That chain is what the loops below replace, and no coverage goes with it:
-    /// every rung it compared is now pinned outright, so it could not have failed without one of these
-    /// lines failing first.
-    ///
-    /// `DSAnimation` stays an ordering, deliberately. Its four values are durations rather than
-    /// geometry — nothing lines up against them, no rung is measured off another app, and 0.06 against
-    /// 0.07 is not a difference a reader could defend either way. What has to hold is that the tiers
-    /// stay in order and stay distinct, which is exactly what `<` says. The spacing and radius rungs
-    /// are the opposite case: they are measured against Xcode, and a panel's inset moving by two
-    /// points moves every panel in the window at once.
-    @Test("Spacing and radius are pinned by value; animation and method colours stay consistent")
+    /// Spacing and radius are measured, so they are pinned by value; animation durations only have
+    /// to stay in order and distinct, which is exactly what `<` says.
+    @Test("Spacing and radius are pinned by value; animation tiers stay ordered")
     func tokenValuesStayConsistent() {
         // rung, what the token reads, what it is measured to be
         let spacing: [(String, CGFloat, CGFloat)] = [
             ("xxs", DSSpacing.xxs, 2),
             ("xs", DSSpacing.xs, 4),
-            ("sm", DSSpacing.sm, 6),
+            ("sm", DSSpacing.sm, 8),
             ("md", DSSpacing.md, 12),
             ("lg", DSSpacing.lg, 16),
-            ("xl", DSSpacing.xl, 24),
-            ("xxl", DSSpacing.xxl, 32),
-            ("xxxl", DSSpacing.xxxl, 48)
+            ("xl", DSSpacing.xl, 20),
+            ("xxl", DSSpacing.xxl, 24),
+            ("xxxl", DSSpacing.xxxl, 32)
         ]
         for (rung, measured, expected) in spacing {
             #expect(
                 measured == expected,
                 """
                 DSSpacing.\(rung) is \(measured) where this pins \(expected), and every gap in the \
-                window that names that rung has moved with it. If the change is deliberate: check the \
-                new value against Xcode, rewrite the rung's own doc comment in DSSpacing.swift so it \
-                still describes what the number is for, and only then update this line. If it is not \
-                deliberate, put the value back.
+                window that names that rung has moved with it. If the change is deliberate, rewrite the \
+                rung's doc comment in DSSpacing.swift and then this line; otherwise put the value back.
                 """
             )
         }
 
         let radius: [(String, CGFloat, CGFloat)] = [
-            ("xs", DSCornerRadius.xs, 3),
-            ("sm", DSCornerRadius.sm, 4),
-            ("md", DSCornerRadius.md, 6),
-            ("lg", DSCornerRadius.lg, 8),
-            ("xl", DSCornerRadius.xl, 12)
+            ("mark", DSCornerRadius.mark, 4),
+            ("field", DSCornerRadius.field, 7),
+            ("segment", DSCornerRadius.segment, 8),
+            ("card", DSCornerRadius.card, 10),
+            ("panel", DSCornerRadius.panel, 12),
+            ("sheet", DSCornerRadius.sheet, 20)
         ]
         for (rung, measured, expected) in radius {
             #expect(
                 measured == expected,
                 """
-                DSCornerRadius.\(rung) is \(measured) where this pins \(expected). Radius is what \
-                makes two controls in one row read as the same kind of thing — `DSTextField`, \
-                `DSMethodBadge`, `DSPanelHeaderButton` and `DSIconMenu` all draw `sm` — so moving a \
-                rung reshapes call sites that never mention it. If the change is deliberate: update \
-                the rung's doc comment in DSCornerRadius.swift, then this line. Otherwise put it back.
+                DSCornerRadius.\(rung) is \(measured) where this pins \(expected). Moving a rung \
+                reshapes every call site that draws it. If the change is deliberate, update the rung's \
+                doc comment in DSCornerRadius.swift and then this line; otherwise put it back.
                 """
             )
         }
 
-        // The one claim `DSSpacing` is load-bearing for outside its own ladder, and it is made in
-        // prose: "3 — the inset above and below a control's own text. Half of `DSSpacing.sm`, which is
-        // why it is not on the spacing scale." Stated where it can fail, exactly as `laddersArePinned`
-        // states `controlRow == row + sm * 2` for the two ladders it pins.
-        #expect(
-            DSControlHeight.verticalPadding == DSSpacing.sm / 2,
-            "DSControlGeometry says verticalPadding is half of DSSpacing.sm; one of the two moved."
-        )
-
         _ = DSAnimation.spring()
+        _ = DSAnimation.panel
 
-        #expect(DSAnimation.micro < DSAnimation.fast)
+        #expect(DSAnimation.fast == 0.10)
+        #expect(DSAnimation.normal == 0.20)
+        #expect(DSAnimation.slow == 0.30)
         #expect(DSAnimation.fast < DSAnimation.normal)
         #expect(DSAnimation.normal < DSAnimation.slow)
-
-        #expect(DSColors.methodColor(for: "HEAD") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "OPTIONS") != DSColors.labelSecondary)
-        #expect(DSColors.methodColor(for: "TRACE") == DSColors.labelSecondary)
     }
 }

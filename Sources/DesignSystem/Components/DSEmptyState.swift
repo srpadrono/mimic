@@ -1,198 +1,143 @@
 import SwiftUI
 
-/// What a panel shows when it has nothing to show: an icon, a heading, a sentence, and — sometimes
-/// — the one action that would fix it.
-///
-/// The hard part is that it has to work at both ends of the window. The sidebar is 220pt and the
-/// inspector 280pt; the centre pane is whatever is left of a full-screen window. It used to be
-/// written for the wide end only: `DSSpacing.xxl` on all four sides took 64pt of a 220pt panel
-/// before a word was drawn, and an 80pt glow around a 36pt glyph then took another third of what
-/// was left. Horizontal padding is now `lg` and the icon is sized for the narrow case, which the
-/// wide case does not mind.
-///
-/// **The strings render exactly as given.** The heading arrives at XCUITest as an element's `value`
-/// rather than its `label`, and the UI suite matches on the literal text, so a heading that
-/// truncated instead of wrapping would not just look wrong — it would change what the suite reads.
-/// **Do not add `.fixedSize(horizontal: false, vertical: true)` to these `Text`s.** It looks like the
-/// way to say "wrap, never truncate", and it is not needed — a `Text` in a bounded width already
-/// wraps, and nothing here sets `.lineLimit`. What it *does* do, combined with this view's
-/// `.frame(maxHeight: .infinity)`, is make the whole view claim about a thousand points of height:
-/// a `VStack` containing it then overflows its window, and the siblings above it are pushed off the
-/// top. That is not theoretical — it put the journey editor's header, its behaviour section and its
-/// run controls roughly 750pt above the top of the journeys window, where nothing could click them.
-public struct DSEmptyState: View {
-    /// Sized for a 220pt panel: with `lg` padding either side that leaves 188pt of content, and a
-    /// 64pt circle reads as an illustration rather than as the panel's main event.
-    private static let glowDiameter: CGFloat = 64
-    private static let glyphSize: CGFloat = 26
+/// An action an empty state offers. The first primary action answers Return when the state asks it to.
+public struct DSEmptyStateAction: Identifiable {
+    public let id: String
+    public let title: String
+    public let systemImage: String?
+    public let isPrimary: Bool
+    public let action: () -> Void
 
-    /// Below this the illustration is dropped, because it is the only part of this view that can be
-    /// spared and the only part that was not being spared.
-    ///
-    /// The request log's default height is 220pt; its 36pt header leaves about 184pt for this view.
-    /// The 64pt icon, heading, two-line message, and outer padding fill that space quickly. The
-    /// `VStack` resolved the overflow by squeezing the one child that can shrink, which is the
-    /// sentence, and a `Text` given room for one line truncates rather than wraps: the
-    /// drawer read "Start the server and send a request to see it appea…" while the identical
-    /// component in the taller centre pane wrapped the same string cleanly.
-    ///
-    /// So the check is on the container, not on the text. An icon is an illustration; the sentence is
-    /// the only thing here that tells you what to do. At still shorter heights, the outer spacing
-    /// yields too; removing the illustration alone does not save the two-line sentence.
-    private static let minimumHeightForIcon: CGFloat = 200
-    /// A collapsed drawer can leave less than 100pt below its header. Preserve the explanation by
-    /// spending less space on decoration and outer rhythm before allowing the text to be squeezed.
-    private static let compactHeight: CGFloat = 130
+    public init(_ title: String, systemImage: String? = nil, isPrimary: Bool = false,
+                identifier: String, action: @escaping () -> Void) {
+        self.id = identifier
+        self.title = title
+        self.systemImage = systemImage
+        self.isPrimary = isPrimary
+        self.action = action
+    }
+}
+
+/// Says what goes here and offers the next step.
+public struct DSEmptyState: View {
+    public enum Prominence {
+        /// The centre of the window: a 20pt title.
+        case large
+        /// A pane or panel: a 13pt title.
+        case regular
+        /// A sidebar or narrow strip: quiet text, no symbol.
+        case compact
+    }
 
     private let systemImage: String?
     private let heading: String
     private let message: String
-    private let actionTitle: String?
+    private let actions: [DSEmptyStateAction]
     private let identifier: String
     private let isDefaultAction: Bool
-    private let action: (() -> Void)?
+    private let prominence: Prominence
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var appeared = false
-    /// Zero means "not measured yet", which counts as roomy — the icon is what this view is usually
-    /// for, so the first frame should not flash without it.
-    @State private var availableHeight: CGFloat = 0
+    public init(
+        systemImage: String? = nil,
+        heading: String,
+        message: String,
+        actions: [DSEmptyStateAction],
+        prominence: Prominence = .regular,
+        identifier: String,
+        isDefaultAction: Bool = false
+    ) {
+        self.systemImage = systemImage
+        self.heading = heading
+        self.message = message
+        self.actions = actions
+        self.prominence = prominence
+        self.identifier = identifier
+        self.isDefaultAction = isDefaultAction
+    }
 
-    /// - Parameter isDefaultAction: Makes the call-to-action answer Return.
-    ///
-    ///   Opt-in rather than automatic, because two empty states are routinely on screen at once — the
-    ///   sidebar's and the centre pane's — and Return cannot belong to both. Set it where this view
-    ///   *is* the primary action of a modal: the import sheets open on an empty state whose only
-    ///   control is "Choose HAR file", and without this the sheet answered neither Return nor Tab, so
-    ///   there was no way to import anything without a mouse.
+    /// One primary action, the shape most panes need.
     public init(
         systemImage: String? = nil,
         heading: String,
         message: String,
         actionTitle: String? = nil,
+        prominence: Prominence = .regular,
         identifier: String,
         isDefaultAction: Bool = false,
         action: (() -> Void)? = nil
     ) {
-        self.systemImage = systemImage
-        self.heading = heading
-        self.message = message
-        self.actionTitle = actionTitle
-        self.identifier = identifier
-        self.isDefaultAction = isDefaultAction
-        self.action = action
-    }
-
-    private var showsIcon: Bool {
-        availableHeight == 0 || availableHeight >= Self.minimumHeightForIcon
-    }
-
-    private var isCompact: Bool {
-        availableHeight > 0 && availableHeight < Self.compactHeight
+        var actions: [DSEmptyStateAction] = []
+        if let actionTitle, let action {
+            actions.append(DSEmptyStateAction(actionTitle, isPrimary: true, identifier: "empty.\(identifier).cta",
+                                              action: action))
+        }
+        self.init(systemImage: systemImage, heading: heading, message: message, actions: actions,
+                  prominence: prominence, identifier: identifier, isDefaultAction: isDefaultAction)
     }
 
     public var body: some View {
-        VStack(spacing: isCompact ? DSSpacing.sm : DSSpacing.md) {
-            if let systemImage, showsIcon {
-                icon(systemImage)
+        VStack(spacing: prominence == .compact ? 6 : DSSpacing.sm) {
+            if let systemImage, prominence != .compact {
+                Image(systemName: systemImage)
+                    .font(.system(size: prominence == .large ? DSGlyph.illustration + 4 : DSGlyph.illustration,
+                                  weight: .light))
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .padding(.bottom, DSSpacing.xs)
+                    .accessibilityHidden(true)
             }
 
-            // One modifier, and the cap is all of it. A `Text` given a bounded width already wraps,
-            // so `.frame(maxWidth: 320)` is the whole rule: a readable measure whether this lands in
-            // a 220pt sidebar or a maximised centre pane.
-            //
-            // This note used to explain the *order* of `.fixedSize(horizontal: false, vertical: true)`
-            // against that cap, and neither `Text` here applies a `.fixedSize` any more. The type's
-            // own note above says not to add one back and why — combined with this view's
-            // `.frame(maxHeight: .infinity)` it made the whole view claim about a thousand points of
-            // height, which pushed the journey editor's header, behaviour section and run controls
-            // roughly 750pt above the top of their own window.
             Text(heading)
-                .font(DSTypography.heading)
-                .foregroundStyle(DSColors.labelPrimary)
+                .font(headingFont)
+                .foregroundStyle(prominence == .compact ? DSColors.labelSecondary : DSColors.labelPrimary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
                 .accessibilityIdentifier("ds.empty.\(identifier).heading")
 
             Text(message)
-                .font(DSTypography.body)
-                .foregroundStyle(DSColors.labelSecondary)
+                .font(messageFont)
+                .lineSpacing(prominence == .compact ? 2 : 4)
+                .foregroundStyle(prominence == .compact ? DSColors.labelTertiary : DSColors.labelSecondary)
                 .multilineTextAlignment(.center)
-                // The same cap the heading takes. Uncapped, a sentence would run the full width of a
-                // maximised centre pane as one very long line; capped, it wraps — and it wraps rather
-                // than truncates because nothing here sets `.lineLimit`.
-                .frame(maxWidth: 320)
+                .frame(maxWidth: prominence == .large ? 460 : DSLayout.emptyStateTextWidth)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("ds.empty.\(identifier).message")
 
-            if let actionTitle, let action {
-                DSButton(
-                    actionTitle,
-                    variant: .primary,
-                    size: .medium,
-                    identifier: "empty.\(identifier).cta",
-                    action: action
-                )
-                .modifier(DefaultActionShortcut(isEnabled: isDefaultAction))
-                // A beat more than the stack's own rhythm: the action is a different kind of thing
-                // from the sentence explaining why it is offered.
+            if !actions.isEmpty {
+                HStack(spacing: DSSpacing.sm) {
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, item in
+                        DSButton(item.title, systemImage: item.systemImage,
+                                 variant: item.isPrimary ? .primary : .secondary,
+                                 size: prominence == .large ? .large : .medium,
+                                 identifier: item.id, action: item.action)
+                            .modifier(DefaultActionShortcut(isEnabled: isDefaultAction && index == 0))
+                    }
+                }
                 .padding(.top, DSSpacing.xs)
             }
         }
-        .padding(.horizontal, DSSpacing.lg)
-        // `lg` rather than `xl` once the illustration is gone: without it the block is short enough
-        // that 24pt above and below reads as the panel having been left half-empty on purpose.
-        .padding(.vertical, isCompact ? DSSpacing.xs : (showsIcon ? DSSpacing.xl : DSSpacing.lg))
+        .padding(.horizontal, prominence == .compact ? DSSpacing.xxl : DSSpacing.lg)
+        .padding(.vertical, DSSpacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The container's height, not the content's. `.frame(maxHeight: .infinity)` above means this
-        // view always takes whatever it is offered, so this reports exactly what there is to work in.
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
-        // Reduce Motion keeps the cross-fade — which is the recommended substitute — and drops the
-        // scale, which is the part that actually moves.
-        .scaleEffect(reduceMotion ? 1.0 : (appeared ? 1.0 : 0.96))
-        .opacity(appeared ? 1.0 : 0.0)
-        .animation(.easeOut(duration: DSAnimation.normal), value: appeared)
-        .onAppear { appeared = true }
-        // Paired deliberately. A bare identifier on a container makes every descendant report the
-        // container's name instead of its own, which left `…heading`, `…message` and the call to
-        // action — a real button — with no addressable identity of their own.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ds.empty.\(identifier)")
     }
 
-    /// Decoration, and hidden from the accessibility tree accordingly — the heading beneath it says
-    /// the same thing in words.
-    ///
-    /// The glyph used to be 36pt at `.light` weight in `labelTertiary`, which is 36% alpha: a large,
-    /// thin, very faint shape that read as a smudge rather than as a symbol. Smaller, at a normal
-    /// weight, in `labelSecondary`, it is legible — and it is the fastest way to tell which empty
-    /// state you are looking at.
-    private func icon(_ systemImage: String) -> some View {
-        ZStack {
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [DSColors.accent.opacity(0.10), .clear],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: Self.glowDiameter / 2
-                    )
-                )
-                .frame(width: Self.glowDiameter, height: Self.glowDiameter)
-
-            Image(systemName: systemImage)
-                .font(.system(size: Self.glyphSize, weight: .regular))
-                .foregroundStyle(DSColors.labelSecondary)
+    private var headingFont: Font {
+        switch prominence {
+        case .large: DSTypography.title
+        case .regular: DSTypography.bodySemibold
+        case .compact: DSTypography.callout
         }
-        .accessibilityHidden(true)
+    }
+
+    private var messageFont: Font {
+        switch prominence {
+        case .large: DSTypography.body
+        case .regular: DSTypography.callout
+        case .compact: DSTypography.caption
+        }
     }
 }
 
-/// Applies `.keyboardShortcut(.defaultAction)` only when asked.
-///
-/// A conditional modifier rather than `if isDefaultAction { … } else { … }` around the button: the
-/// two branches would be different view types, so SwiftUI would tear down and rebuild the button
-/// whenever the flag changed, losing its hover state and any in-flight animation. This keeps one
-/// identity and toggles the shortcut on it.
 private struct DefaultActionShortcut: ViewModifier {
     let isEnabled: Bool
 

@@ -93,16 +93,10 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             if endpoints.isEmpty {
                 DSEmptyState(
-                    systemImage: NavigatorTab.endpoints.systemImage,
                     heading: "No endpoints",
-                    // Names what the Import menu actually offers. "A Charles export" named a
-                    // third-party tool the app mentions nowhere else, and left the reader to work out
-                    // that Charles writes HAR — while the menu two panels away says "HAR file".
-                    message: "Add an endpoint to define a mock route, or import a HAR file or an "
-                        + "OpenAPI spec.",
-                    actionTitle: "Add endpoint",
-                    identifier: "sidebar.endpoints",
-                    action: onAddEndpoint
+                    message: "Endpoints you add or import appear here.",
+                    prominence: .compact,
+                    identifier: "sidebar.endpoints"
                 )
             } else {
                 endpointList
@@ -156,7 +150,7 @@ struct SidebarView: View {
                 Text(noMatchesMessage)
                     .lineLimit(1)
                     .help(noMatchesMessage)
-                    .font(DSTypography.label)
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .dsNavigatorRow()
                     .selectionDisabled()
@@ -164,10 +158,10 @@ struct SidebarView: View {
             } else {
                 ForEach(groupedSections, id: \.name) { section in
                     groupRow(section)
-                        .padding(.top, section.name == groupedSections.first?.name ? 0 : DSSpacing.smPlus)
+                        .padding(.top, section.name == groupedSections.first?.name ? 0 : DSSpacing.sm)
                     if !collapsedSections.contains(Self.groupSectionKey(section.name)) {
                         ForEach(section.endpoints) { endpoint in
-                            endpointRow(endpoint, indented: true)
+                            endpointRow(endpoint, indented: false)
                         }
                     }
                 }
@@ -177,11 +171,11 @@ struct SidebarView: View {
                         isCollapsed: collapsedSections.contains(Self.ungroupedSectionKey),
                         identifier: "sidebar.group.ungrouped"
                     ) { toggleSection(Self.ungroupedSectionKey) }
-                    .padding(.top, DSSpacing.smPlus)
+                    .padding(.top, DSSpacing.sm)
                 }
                 if groupedSections.isEmpty || !collapsedSections.contains(Self.ungroupedSectionKey) {
                     ForEach(ungroupedEndpoints) { endpoint in
-                        endpointRow(endpoint, indented: !groupedSections.isEmpty)
+                        endpointRow(endpoint, indented: false)
                     }
                 }
             }
@@ -453,27 +447,38 @@ struct EndpointSidebarRow: View {
         return name
     }
 
+    /// The live scenario's status, shown only when it is not a success: a row that serves an
+    /// error or a redirect says so without opening it.
+    nonisolated static func liveStatusCode(for endpoint: Endpoint) -> Int? {
+        guard let live = endpoint.scenarios.first(where: { $0.id == endpoint.activeScenarioID }),
+              !(200..<300).contains(live.statusCode) else { return nil }
+        return live.statusCode
+    }
+
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            DSMethodBadge(
-                method: endpoint.method.rawValue, size: .compact,
-                identifier: "navigator.\(endpoint.id.uuidString)"
-            )
+            DSMethodLabel(endpoint.method.rawValue, fixedWidth: false,
+                          identifier: "navigator.\(endpoint.id.uuidString)")
+                .frame(width: 46, alignment: .leading)
 
             Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : $0 } ?? endpoint.path)
                 .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let metadata = backendName ?? (showsName ? Self.subtitle(for: endpoint) : nil) {
                 Text(metadata)
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.secondary) : AnyShapeStyle(DSColors.labelSecondary))
                     .lineLimit(1)
-                    .frame(maxWidth: DSNavigatorMetrics.metadataWidth, alignment: .trailing)
+                    .frame(maxWidth: 88, alignment: .trailing)
                     .layoutPriority(1)
+            }
+
+            if let status = Self.liveStatusCode(for: endpoint) {
+                DSStatusLabel(statusCode: status)
+                    .scaleEffect(0.92, anchor: .trailing)
             }
         }
         .help("\(endpoint.method.rawValue) \(endpoint.path)\n\(endpoint.name)"

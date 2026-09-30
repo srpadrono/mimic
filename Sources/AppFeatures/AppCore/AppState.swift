@@ -20,6 +20,31 @@ final class AppState {
 
     var projectRenameTarget: ProjectRenameTarget?
     var navigatorFilterRequest = 0
+    /// View menu requests for the workspace's panels. The menu lives above the window that owns
+    /// the panels, so it bumps a counter and the window mirrors back what is showing.
+    var requestLogToggleRequest = 0
+    var inspectorToggleRequest = 0
+    /// Journeys ▸ Show Active Journey: the window selects the active journey in its navigator.
+    var activeJourneyRevealRequest = 0
+    var isRequestLogVisible = true
+    var isInspectorVisible = true
+    /// False while the open project has nothing to inspect: no endpoints, no journeys, no request
+    /// selected. The window hides the inspector then, and View ▸ Show Inspector is disabled.
+    var canShowInspector = true
+    /// The scenario open in the editor for each endpoint, when it is not the live one.
+    var editedScenarioIDs: [UUID: UUID] = [:]
+
+    /// The scenario the editor shows: the one picked in the inspector, else the live one.
+    func editedScenario(of endpoint: Endpoint) -> Scenario? {
+        if let id = editedScenarioIDs[endpoint.id], let scenario = endpoint.scenarios.first(where: { $0.id == id }) {
+            return scenario
+        }
+        return endpoint.scenarios.first { $0.id == endpoint.activeScenarioID }
+    }
+
+    func editScenario(endpointID: UUID, scenarioID: UUID) {
+        editedScenarioIDs[endpointID] = scenarioID
+    }
 
     let server: MockServerRuntime
     let projects: ProjectWorkspace
@@ -43,7 +68,7 @@ final class AppState {
     #endif
 
     /// What the window is presenting and what it has selected. Held apart because none of it is a
-    /// fact about the project — see ``WindowPresentation``. The four properties below forward to it
+    /// fact about the project — see ``WindowPresentation``. The properties below forward to it
     /// with their original names and types, so every `appState.showNewProjectSheet = true` and every
     /// `$appState.selectedJourneyID` in the views still reads and writes the same thing.
     let presentation: WindowPresentation
@@ -62,7 +87,19 @@ final class AppState {
     }
     var selectedJourneyID: UUID? {
         get { presentation.selectedJourneyID }
-        set { presentation.selectedJourneyID = newValue }
+        set {
+            // A step selection belongs to one journey; choosing another shows that journey whole.
+            if newValue != presentation.selectedJourneyID { presentation.selectedJourneyStepID = nil }
+            presentation.selectedJourneyID = newValue
+        }
+    }
+    var selectedJourneyStepID: UUID? {
+        get { presentation.selectedJourneyStepID }
+        set { presentation.selectedJourneyStepID = newValue }
+    }
+    var editingJourneyStepID: UUID? {
+        get { presentation.editingJourneyStepID }
+        set { presentation.editingJourneyStepID = newValue }
     }
     var serverState: ServerState { server.serverState }
     /// The open project's configuration — read from the project, not from the runtime's copy.
@@ -114,6 +151,15 @@ final class AppState {
         run(.backendUpsert(id: id, name: name, port: port, upstreamURL: upstreamURL)) != nil
     }
 
+    /// Turns forwarding of unmatched requests on or off for one listener, keeping its upstream.
+    @discardableResult
+    func setPassthrough(backendID: UUID, enabled: Bool) -> Bool {
+        let command: ControlCommand = backendID == ServerConfiguration.primaryID
+            ? .serverConfigure(port: nil, globalDelayMs: nil, passthroughEnabled: enabled)
+            : .backendUpsert(id: backendID, name: nil, port: nil, upstreamURL: nil, passthroughEnabled: enabled)
+        return run(command) != nil
+    }
+
     @discardableResult
     func deleteBackend(id: UUID) -> Bool {
         run(.backendDelete(id: id)) != nil
@@ -162,6 +208,10 @@ final class AppState {
         set { projects.setCurrentProject(newValue, isRestoring: false) }
     }
     var recentProjects: [RecentProjectEntry] { projects.recentProjects }
+    var showsWelcomeOnLaunch: Bool {
+        get { projects.showsWelcomeOnLaunch }
+        set { projects.showsWelcomeOnLaunch = newValue }
+    }
     var autosaveStatus: AutosaveStatus { projects.autosaveStatus }
 
     // MARK: - Journeys
@@ -218,7 +268,10 @@ final class AppState {
             _ = self.savePassedThroughLogAsMock(id: log.id)
         }
         bindProjectWorkspace()
-        _ = projects.loadLastOpenedProject()
+        // A headless daemon has no welcome window to show, so it always restores.
+        if !projects.showsWelcomeOnLaunch || HeadlessMode.isEnabled {
+            _ = projects.loadLastOpenedProject()
+        }
     }
 
     /// Production composition root — wires GRDB persistence and the live recent-projects store.
@@ -430,6 +483,47 @@ final class AppState {
         run(.endpointCreate(name: name, method: method, path: path, spec: nil))?.endpoint
     }
 
+    /// Creates an endpoint with its group, and sets what its default scenario answers with, as one
+    /// edit: both commands go through `ProjectCommandExecutor` against one copy of the project, so a
+    /// refused status leaves no half-made endpoint behind and the autosave runs once.
+    func addEndpoint(
+        name: String,
+        method: HTTPMethod,
+        path: String,
+        groupTag: String?,
+        statusCode: Int,
+        contentType: Scenario.ContentType
+    ) -> Endpoint? {
+        guard !updates.isPreparingInstallation, var project = currentProject else { return nil }
+        do {
+            let created = try ProjectCommandExecutor.apply(.endpointCreate(
+                name: name,
+                method: method,
+                path: path,
+                spec: EndpointSpec(groupTag: groupTag ?? "")
+            ), to: &project)
+            guard let endpoint = created?.result.endpoint, let scenarioID = endpoint.activeScenarioID else {
+                return nil
+            }
+            _ = try ProjectCommandExecutor.apply(.scenarioUpdate(
+                endpoint: .id(endpoint.id),
+                scenario: .id(scenarioID),
+                spec: ScenarioSpec(statusCode: statusCode, contentType: contentType)
+            ), to: &project)
+            project.modifiedAt = Date()
+            currentProject = project
+            projects.scheduleAutosave()
+            lastCommandError = nil
+            return project.endpoints.first { $0.id == endpoint.id }
+        } catch let error as ControlError {
+            lastCommandError = error.message
+            return nil
+        } catch {
+            lastCommandError = error.localizedDescription
+            return nil
+        }
+    }
+
     @discardableResult
     func updateEndpoint(id: UUID, spec: EndpointSpec) -> Bool {
         run(.endpointUpdate(endpoint: .id(id), spec: spec)) != nil
@@ -457,12 +551,13 @@ final class AppState {
         scenarioID: UUID,
         statusCode: Int? = nil,
         headers: [String: String]? = nil,
-        body: String? = nil
+        body: String? = nil,
+        contentType: Scenario.ContentType? = nil
     ) {
         _ = run(.scenarioUpdate(
             endpoint: .id(endpointID),
             scenario: .id(scenarioID),
-            spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body)
+            spec: ScenarioSpec(statusCode: statusCode, headers: headers, body: body, contentType: contentType)
         ))
     }
 
@@ -584,6 +679,7 @@ final class AppState {
 
     func setActiveScenario(endpointID: UUID, scenarioID: UUID) {
         _ = run(.scenarioActivate(endpoint: .id(endpointID), scenario: .id(scenarioID)))
+        editedScenarioIDs[endpointID] = scenarioID
     }
 
     func duplicateScenario(endpointID: UUID, scenarioID: UUID) -> Scenario? {
@@ -859,6 +955,47 @@ final class AppState {
             guard stored, activate else { return }
             openProjectAdmitted(id: document.id)
         }
+    }
+
+    /// Stores a fresh copy of the sample project and opens it, the way an opened export is.
+    func openSampleProject() {
+        guard !updates.isPreparingInstallation else { return }
+        do {
+            let sample = try SampleProject.make()
+            lastCommandError = nil
+            importProject(sample, activate: true)
+        } catch let error as ControlError {
+            lastCommandError = error.message
+        } catch {
+            lastCommandError = "The sample project could not be created: \(error.localizedDescription)"
+        }
+    }
+
+    /// Opens a project export chosen in the window, held to what `mimic project import` is held to:
+    /// the same document check before decoding, the same whole-document validation the control host
+    /// runs on `projectImport`, then the same store-then-open path. A refusal goes to
+    /// `lastCommandError`, which the window presents.
+    @discardableResult
+    func openProjectExport(_ data: Data, fileName: String) -> Bool {
+        guard !updates.isPreparingInstallation else { return false }
+        guard MockProject.namesProjectDocument(data) else {
+            lastCommandError = "\(fileName) is not a Mimic project export. Write one with `mimic project export`."
+            return false
+        }
+        let document: MockProject
+        do {
+            document = try ControlCoding.decode(MockProject.self, from: data)
+            try ProjectValidator.validate(document)
+        } catch let error as ControlError {
+            lastCommandError = error.message
+            return false
+        } catch {
+            lastCommandError = "\(fileName) could not be opened: \(error.localizedDescription)"
+            return false
+        }
+        lastCommandError = nil
+        importProject(document, activate: true)
+        return true
     }
 
     /// The server serves *the open project*, so it cannot outlive one.

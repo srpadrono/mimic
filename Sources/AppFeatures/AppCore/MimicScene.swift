@@ -57,6 +57,15 @@ public struct MimicScene: Scene {
                 }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(appState.updates.isPreparingInstallation)
+                // Opens a `mimic project export` document — the window's half of `mimic project
+                // import`, and the action the welcome window's ⌘O row names.
+                Button("Open Project Export\u{2026}") { ProjectExportPicker.choose(for: appState) }
+                    .keyboardShortcut("o", modifiers: .command)
+                    .disabled(appState.updates.isPreparingInstallation)
+                    .accessibilityIdentifier("menu.openProjectExport")
+                Button("New Endpoint\u{2026}") { appState.showNewEndpointSheet = true }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(appState.currentProject == nil)
 
                 // Closing is its own command now, and says so. ⇧⌘W rather than ⌘W, because ⌘W is
                 // AppKit's close-the-window and taking it would leave no way to close the window.
@@ -103,6 +112,17 @@ public struct MimicScene: Scene {
                 Button("Filter Navigator") { appState.navigatorFilterRequest += 1 }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(appState.currentProject == nil)
+                Divider()
+                Button(appState.isRequestLogVisible ? "Hide Request Log" : "Show Request Log") {
+                    appState.requestLogToggleRequest += 1
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(appState.currentProject == nil)
+                Button(appState.isInspectorVisible ? "Hide Inspector" : "Show Inspector") {
+                    appState.inspectorToggleRequest += 1
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(appState.currentProject == nil || !appState.canShowInspector)
             }
 
             CommandMenu("Journeys") {
@@ -117,6 +137,9 @@ public struct MimicScene: Scene {
                 Button("Show Journeys") { appState.navigatorRequest = .journeys }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
                     .disabled(appState.currentProject == nil)
+                // Clears the journey filter, opens the active journey's group and selects it.
+                Button("Show Active Journey") { appState.activeJourneyRevealRequest += 1 }
+                    .disabled(appState.activeJourney == nil)
 
 
                 Divider()
@@ -142,6 +165,9 @@ public struct MimicScene: Scene {
                     .disabled(appState.activeJourney == nil || appState.updates.isPreparingInstallation)
             }
         }
+        #if DEBUG
+        .commands { UITestWindowCommands() }
+        #endif
 
         // No second window. Journeys live in the navigator, next to the endpoints they override.
         //

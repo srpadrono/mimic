@@ -1,23 +1,13 @@
 import CoreGraphics
 
-/// Shared heights for workspace chrome. Each rung seats the typography and controls it contains;
-/// panel headers, rows of controls, and column labels keep distinct levels of emphasis.
-public enum DSBarHeight {
-    /// 44pt — navigator mode switch and creation control.
-    public static let navigatorHeader: CGFloat = 44
-
-    /// 48pt — navigator filter and status controls.
-    public static let navigatorFooter: CGFloat = 48
-
-    /// 36pt — panel and editor headers.
-    public static let panelHeader: CGFloat = 36
-
-    /// 28pt — secondary chrome inside a pane, including the breadcrumb bar.
-    public static let secondaryBar: CGFloat = 28
-
-    /// 36pt — 24pt row controls with 6pt above and below.
-    public static let controlRow: CGFloat = 36
-
-    /// 26pt — compact column labels above a table.
-    public static let columnHeader: CGFloat = 26
+/// Heights for the window's chrome. Sidebar, content, and inspector all start 44pt from the top.
+nonisolated public enum DSBarHeight {
+    /// 44pt — the toolbar, and each column's header.
+    public static let column: CGFloat = 44
+    /// 30pt — the jump bar, the only bar under the toolbar.
+    public static let jumpBar: CGFloat = 30
+    /// 40pt — a pane header with a title and filters, like the request log's.
+    public static let paneHeader: CGFloat = 40
+    /// 44pt — the sidebar's filter footer.
+    public static let footer: CGFloat = 44
 }

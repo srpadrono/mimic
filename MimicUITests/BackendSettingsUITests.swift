@@ -64,6 +64,26 @@ struct BackendSettingsPage {
     func additionalState(_ suffix: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@", "backend.", "." + suffix, "backend.primary.")).firstMatch
     }
+    var primaryAvailability: XCUIElement {
+        app.descendants(matching: .any)["backend.primary.availability"].firstMatch
+    }
+    var additionalAvailability: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT identifier BEGINSWITH %@",
+            "backend.", ".availability", "backend.primary.")).firstMatch
+    }
+    /// "Available" or "In use", from whichever half of `DSAvailabilityLabel` the tree carries: its
+    /// value is the word shown, its label the spoken "Port available" / "Port in use". A combined
+    /// element does not always publish its value, so the label answers too.
+    func availability(of element: XCUIElement) -> String? {
+        guard element.exists else { return nil }
+        if let value = element.value as? String, ["Available", "In use"].contains(value) { return value }
+        switch element.label {
+        case "Port available": return "Available"
+        case "Port in use": return "In use"
+        default: return nil
+        }
+    }
     func replace(_ field: XCUIElement, with value: String) {
         field.click()
         field.typeKey("a", modifierFlags: .command)
@@ -123,7 +143,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         app.activate()
         page.ports.click()
         XCTAssertTrue(page.portMenuItem(18081).waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(page.portMenuItem(18081).value as? String, "http://localhost:18081")
+        // The popover lists the address as the design draws it, without the scheme.
+        XCTAssertEqual(page.portMenuItem(18081).value as? String, "localhost:18081")
         let portListShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         portListShot.name = "Configured port list"
         portListShot.lifetime = .keepAlways
@@ -176,6 +197,28 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
         XCTAssertFalse(page.portsDescription.contains("2 ports configured"))
+    }
+
+    @MainActor
+    func testPortRowSaysWhetherThePortIsFree() {
+        launchApp()
+        createProjectViaUI(name: "Port availability")
+        let page = BackendSettingsPage(app: app)
+        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
+        page.open.click()
+        XCTAssertTrue(page.primaryAvailability.waitForExistence(timeout: 5),
+                      "A stopped server's port row should say whether its port is free")
+        // Whether 8080 is free depends on the machine; a port another listener here claims does not.
+        XCTAssertNotNil(page.availability(of: page.primaryAvailability),
+                        "The row should say Available or In use — label \(page.primaryAvailability.label)")
+        page.add.click()
+        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        page.replace(page.additional("port"), with: "8080")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            page.availability(of: page.additionalAvailability) == "In use"
+        }, "A port the primary listener uses is not free for another")
+        page.cancel.click()
+        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
     }
 
     @MainActor
@@ -269,12 +312,15 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Listening ports")
         workspace.fillWindow()
-        XCTAssertTrue(workspace.centerAddEndpointMessage.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
                       "An empty project must explain how to create its first endpoint")
+        XCTAssertTrue(workspace.centerAddEndpointCard.exists,
+                      "The first-endpoint chooser should offer Add endpoint")
         XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
                        "There is no endpoint available to select yet")
-        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerRunningMessage.exists)
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.drawerCurlCommand.waitForExistence(timeout: 5),
+                      "A stopped server's empty log offers the request to try once it runs")
         let page = BackendSettingsPage(app: app)
         page.open.click()
         XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
@@ -285,17 +331,25 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.additional("port"), with: String(secondary))
         page.apply.click()
         XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
-        XCTAssertTrue(workspace.drawerRunningMessage.waitForExistence(timeout: 5),
+        let curl = workspace.drawerCurlCommand
+        XCTAssertTrue(curl.waitForExistence(timeout: 5),
                       "A running server must invite a request without asking to start again")
-        XCTAssertFalse(workspace.drawerStoppedMessage.exists)
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                curl.label.contains("localhost:\(primary)")
+                    || (curl.value as? String)?.contains("localhost:\(primary)") == true
+            },
+            "The request to try should target the primary port"
+        )
         workspace.compactWindow()
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180,
                           "This assertion must exercise the compact toolbar")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.ports.isHittable },
-                      "Server details must remain reachable without enlarging the compact window")
+                      "Server details must remain reachable without enlarging the compact window\n"
+                        + "\(app.windows.firstMatch.frame)\n\(app.debugDescription)")
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
         page.ports.click()
         let copy = page.portMenuItem(secondary, copying: true)
@@ -308,7 +362,11 @@ final class BackendSettingsUITests: MimicUITestCase {
         compactShot.lifetime = .keepAlways
         add(compactShot)
         workspace.fillWindow()
-        if !InspectorPage(app: app).header.exists {
+        // An empty project shows no inspector. An endpoint gives it something to show, and the
+        // Journeys navigator (⌘2), with no journey selected, leaves it on the project overview.
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        app.typeKey("2", modifierFlags: .command)
+        if !InspectorPage(app: app).header.waitForExistence(timeout: 5) {
             workspace.toggleInspectorButton.click()
         }
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primary) })
@@ -335,19 +393,32 @@ final class BackendSettingsUITests: MimicUITestCase {
         shot.name = "Toolbar — running ports with restart required"
         shot.lifetime = .keepAlways
         add(shot)
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { page.portsDescription.contains("Server is not running") })
-        XCTAssertTrue(workspace.drawerStoppedMessage.waitForExistence(timeout: 5))
-        XCTAssertFalse(workspace.drawerRunningMessage.exists)
+        // The Journeys tab, where the overview inspector is, hides the request log by default.
+        let shell = WorkspaceShellPage(app: app)
+        if !shell.panel("drawer").exists {
+            app.typeKey("l", modifierFlags: [.command, .option])
+        }
+        XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5), "The request log should open")
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) {
+                let curl = workspace.drawerCurlCommand
+                return curl.label.contains("localhost:\(primaryReplacement)")
+                    || (curl.value as? String)?.contains("localhost:\(primaryReplacement)") == true
+            },
+            "Stopped, the request to try names the port configured for the next start"
+        )
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "A stopped server shows the port configured for its next start")
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: primaryReplacement))
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primaryReplacement) },
                       "After restart, the inspector must show the newly bound port")
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
         XCTAssertFalse(page.portsDescription.contains("Restart required"))
-        workspace.serverToggleButton.click()
+        workspace.toggleServer()
     }
 
     @MainActor

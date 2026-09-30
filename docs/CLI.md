@@ -4,7 +4,7 @@
 
 Project edits (such as rename, endpoint, scenario, journey definition, and `log save-as-mock` changes) report success after the edited project has been saved. If the store refuses a save, the command returns `persistence.failure`; the edited project remains in the open session and the window shows the save failure. Inspect the open project before retrying a create command: repeating it can add a second item to that session. Project create, open, and duplicate retain their asynchronous window workflow; confirm their settled state with a follow-up command.
 
-HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
+HAR and OpenAPI/Swagger spec import require the window. `mimic project import` accepts only a JSON document written by `mimic project export`; the window opens the same document, under the same checks, from File ▸ Open Project Export… or the welcome window. `mimic app update-check` is available to scripts; installing an update requires the window and macOS Installer.
 
 While the app saves and backs up projects for installation, new control edits that can change the project store return `update.installing` (HTTP 409, CLI exit code 4). Read-only queries remain available. If installation cannot proceed, the app resumes accepting edits and the caller may retry.
 

@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Animation duration and curve tokens.
-public enum DSAnimation {
-    /// 0.06s — instantaneous feedback (button press, toggle snap)
-    public static let micro: Double = 0.06
-    /// 0.1s — micro-interactions (hover, press feedback, copied toast)
+/// Animation durations and curves. Repeating animation is gated on Reduce Motion by the caller.
+nonisolated public enum DSAnimation {
+    /// 0.1s — hover and press feedback.
     public static let fast: Double = 0.10
-    /// 0.2s — standard transitions (expand/collapse, selection, panel toggle)
+    /// 0.2s — selection, expand and collapse.
     public static let normal: Double = 0.20
-    /// 0.35s — larger transitions (drawer slide, inspector reveal)
-    public static let slow: Double = 0.35
+    /// 0.3s — a panel appearing or hiding.
+    public static let slow: Double = 0.30
 
-    /// Spring animation with configurable duration and bounce.
+    /// The spring used when a panel shows or hides.
+    public static var panel: Animation { .spring(duration: slow, bounce: 0) }
+
     public static func spring(_ duration: Double = normal, bounce: Double = 0.15) -> Animation {
         .spring(duration: duration, bounce: bounce)
     }

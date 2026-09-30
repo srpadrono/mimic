@@ -21,12 +21,12 @@ public struct DSCodeBlock: View {
         .padding(DSSpacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .fill(DSColors.tertiary)
+            RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                .fill(DSColors.code)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                .strokeBorder(DSColors.border, lineWidth: DSStroke.hairline)
+            RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
         }
         .accessibilityIdentifier("ds.code.\(identifier)")
         .accessibilityLabel(content)

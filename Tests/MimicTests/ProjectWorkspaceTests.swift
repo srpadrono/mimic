@@ -850,6 +850,12 @@ struct ProjectWorkspaceTests {
 
         func allProjects() async throws -> [MockProject] { Array(projects.values) }
 
+        /// Counted from what is held, as a store that can count would. The protocol's fallback loads
+        /// every project, and those loads would park here and be counted as opens.
+        func projectCounts() async throws -> [UUID: ProjectCounts] {
+            projects.mapValues { ProjectCounts(endpoints: $0.endpoints.count, journeys: $0.journeys.count) }
+        }
+
         func delete(id: UUID) async throws { projects[id] = nil }
     }
 

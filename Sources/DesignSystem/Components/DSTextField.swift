@@ -1,24 +1,16 @@
 import SwiftUI
 
-/// Text input with label, focus ring, and validation state.
-///
-/// The field wears the workspace's control shape: `DSCornerRadius.sm`, a 0.5pt `DSColors.border`
-/// hairline and 3pt above and below the text. Its 26pt height gives a 14pt line room to breathe.
-///
-/// This used to claim 22 was also "what AppKit gives a regular-size `Picker`, which is the control
-/// this field is most often placed beside". It is not. Rendered and measured in sRGB, a `Picker`
-/// stands **24pt** at `.regular`, 20 at `.small` and 16 at `.mini` — so on the one row where the two
-/// genuinely sit side by side, the method picker and the path field in `NewEndpointSheet`, they end
-/// two points apart and no picker size closes the gap. The mismatch is written down at that call
-/// site rather than papered over with a frame the popup ignores.
-///
-/// The border used to be 1pt at rest and 1.5pt focused, which put a form-weight rule around every
-/// input while the wells beside them wore hairlines; the field now differs from its neighbours by
-/// *state* — accent when focused, destructive when invalid — and by nothing else.
+/// A labelled text field. The label sits in a right-aligned column beside the field, as in every
+/// sheet; units such as "ms" sit inside the field.
 public struct DSTextField: View {
-    /// One 13pt line plus `verticalPadding` above and below.
-    private static let controlHeight = DSControlHeight.field
-    private static let verticalPadding = DSControlHeight.verticalPadding
+    public enum LabelPlacement {
+        /// A right-aligned column to the left: sheets.
+        case leading
+        /// Above the field: narrow panes.
+        case top
+        /// No visible label; the label is only announced.
+        case hidden
+    }
 
     private let label: String
     @Binding private var text: String
@@ -28,6 +20,10 @@ public struct DSTextField: View {
     private let controlWidth: CGFloat?
     private let inputIdentifier: String?
     private let identifier: String
+    private let unit: String?
+    private let monospaced: Bool
+    private let labelPlacement: LabelPlacement
+    private let height: CGFloat
     @FocusState private var isFocused: Bool
 
     public init(
@@ -38,6 +34,10 @@ public struct DSTextField: View {
         validationIdentifier: String? = nil,
         controlWidth: CGFloat? = nil,
         inputIdentifier: String? = nil,
+        unit: String? = nil,
+        monospaced: Bool = false,
+        labelPlacement: LabelPlacement = .leading,
+        height: CGFloat = DSControlHeight.large,
         identifier: String
     ) {
         self.label = label
@@ -47,77 +47,57 @@ public struct DSTextField: View {
         self.validationIdentifier = validationIdentifier
         self.controlWidth = controlWidth
         self.inputIdentifier = inputIdentifier
+        self.unit = unit
+        self.monospaced = monospaced
+        self.labelPlacement = labelPlacement
+        self.height = height
         self.identifier = identifier
     }
 
     public var body: some View {
-        // Deliberately *not* an accessibility container. This view carries no identifier of its own,
-        // and callers can put `inputIdentifier` directly on the input, leaving a separately
-        // identified validation row reachable too. Making the stack a container would move its
-        // identifier onto a group element and hide both descendants.
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            Text(label)
-                .font(DSTypography.label)
-                .foregroundStyle(DSColors.labelSecondary)
-                .accessibilityIdentifier("ds.textfield.\(identifier).label")
+        switch labelPlacement {
+        case .leading:
+            DSFormRow(label, alignment: .top) { fieldStack }
+        case .top:
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                Text(label)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .accessibilityIdentifier("ds.textfield.\(identifier).label")
+                fieldStack
+            }
+        case .hidden:
+            fieldStack
+        }
+    }
 
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(DSTypography.body)
-                .padding(.horizontal, DSSpacing.sm)
-                .padding(.vertical, Self.verticalPadding)
-                .frame(height: Self.controlHeight)
-                .frame(width: controlWidth)
-                .focused($isFocused)
-                .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(DSColors.tertiary)
+    private var fieldStack: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: DSSpacing.xs) {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.plain)
+                    .font(monospaced ? DSTypography.codeLarge : DSTypography.body)
+                    .focused($isFocused)
+                    .accessibilityIdentifier(inputIdentifier ?? "ds.textfield.\(identifier)")
+                    .accessibilityLabel(label)
+                if let unit {
+                    Text(unit)
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelTertiary)
+                        .accessibilityHidden(true)
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .stroke(borderColor, lineWidth: isFocused ? DSStroke.focusRing : DSStroke.hairline)
-                }
-                .animation(.easeOut(duration: DSAnimation.fast), value: isFocused)
-                .accessibilityIdentifier(inputIdentifier ?? "ds.textfield.\(identifier)")
-                .accessibilityLabel(label)
+            }
+            .dsFieldChrome(height: height, cornerRadius: height >= DSControlHeight.large ? 8 : DSCornerRadius.field,
+                           isFocused: isFocused, isInvalid: validation != nil,
+                           horizontalPadding: height >= DSControlHeight.large ? 10 : DSSpacing.sm)
+            .frame(width: controlWidth)
+            .contentShape(Rectangle())
+            .onTapGesture { isFocused = true }
 
             if let validation {
-                validationRow(validation)
+                DSValidationMessage(validation,
+                                    identifier: validationIdentifier ?? "ds.textfield.\(identifier).error")
             }
         }
-    }
-
-    /// The message sits under the field it is about, and says so with a glyph as well as a colour.
-    ///
-    /// Red 13pt text on its own is a single channel of meaning: with Differentiate Without Color on,
-    /// in a greyscale screenshot, or to a reader with a red deficiency, an invalid field and a hint
-    /// look the same. The glyph is the part that survives all three.
-    private func validationRow(_ message: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: DSSpacing.xs) {
-            Image(systemName: "exclamationmark.circle.fill")
-                // `inline`, smaller than the 13pt `label` this row sets.
-                // A mark carrying the whole message for a greyscale reader has to be readable, which
-                // is what keeps it a tier above an indicator.
-                .font(.system(size: DSGlyph.inline, weight: .semibold))
-
-            // Wraps rather than truncates. The path field shares its row with a method picker, so
-            // the message can be given well under its ideal width — and a validation message that
-            // ends in an ellipsis is a validation message that has stopped explaining itself.
-            Text(message)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(DSTypography.label)
-        .foregroundStyle(DSColors.destructive)
-        // One reading, not a glyph and a sentence read separately.
-        .accessibilityElement()
-        .accessibilityLabel(message)
-        .accessibilityIdentifier(validationIdentifier ?? "ds.textfield.\(identifier).error")
-        .accessibilityValue(message)
-    }
-
-    private var borderColor: Color {
-        if validation != nil { return DSColors.destructive }
-        if isFocused { return DSColors.borderFocused }
-        return DSColors.border
     }
 }

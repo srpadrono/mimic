@@ -3,6 +3,7 @@ import AppKit
 import Domain
 import Foundation
 import Persistence
+import SwiftUI
 
 /// Test-only support for deterministic XCUITest launches.
 ///
@@ -36,6 +37,33 @@ enum UITestSupport {
     private static let activationAttempts = 5
     private static let activationRetryDelay = Duration.milliseconds(200)
     private static var hasResetCurrentProcess = false
+
+    /// The two window sizes UI tests work at: the screen's whole visible frame, and a compact
+    /// width that folds the toolbar while keeping all three panels.
+    enum TestWindowSize {
+        case fill
+        case compact
+    }
+
+    /// Under 1180pt, where the toolbar folds its secondary actions, and wide enough for the
+    /// navigator, the editor and the inspector together.
+    static let compactTestWindowWidth: CGFloat = 900
+
+    /// Sets the workspace window's frame directly. UI tests used to reach these sizes through
+    /// Window ▸ Move & Resize or a corner drag, and both proved unreliable on CI: the menu's system
+    /// items are rebuilt while it opens, and a drag stops at whatever minimum the panels allow.
+    static func resizeMainWindow(to size: TestWindowSize) {
+        guard let window = NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible),
+              let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+        else { return }
+        var frame = visible
+        if size == .compact {
+            // Against the right edge, so menus the toolbar opens stay inside the window's screenshot.
+            frame.size.width = min(compactTestWindowWidth, visible.width)
+            frame.origin.x = visible.maxX - frame.width
+        }
+        window.setFrame(frame, display: true, animate: false)
+    }
 
     static var isRunningUITests: Bool {
         isRunningUITests(environment: ProcessInfo.processInfo.environment)
@@ -88,6 +116,27 @@ enum UITestSupport {
         return try? DatabaseFactory.resolveDatabaseURL(environment: [:])
             .deletingLastPathComponent()
             .appendingPathComponent("mimic-unittests.sqlite")
+    }
+
+    /// Forces the app's appearance for a UI test run: `dark` or `light`, case-insensitively.
+    ///
+    /// The screenshot walk captures every screen in both appearances. `-AppleInterfaceStyle` as a
+    /// launch argument no longer reaches the app on macOS 26, so both passes came out light; this
+    /// sets `NSApp.appearance` directly instead. Anything else, and every non-test run, leaves the
+    /// system appearance alone.
+    static let appearanceEnvironmentKey = "MIMIC_APPEARANCE"
+
+    @MainActor
+    static func applyForcedAppearance(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) {
+        guard isRunningUITests(environment: environment, arguments: arguments) else { return }
+        switch environment[appearanceEnvironmentKey]?.lowercased() {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: break
+        }
     }
 
     /// Whether this process must not check for updates on its own.
@@ -532,6 +581,20 @@ enum UITestSupport {
         case "har": return .har
         case "openapi": return .openAPI
         default: return nil
+        }
+    }
+}
+/// Window sizes for UI tests, bound to shortcuts no one presses by accident. Present only in Debug
+/// builds and only while the UI test harness is driving the app.
+struct UITestWindowCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .windowArrangement) {
+            if UITestSupport.isRunningUITests {
+                Button("Test: Fill Window") { UITestSupport.resizeMainWindow(to: .fill) }
+                    .keyboardShortcut("f", modifiers: [.command, .option, .control])
+                Button("Test: Compact Window") { UITestSupport.resizeMainWindow(to: .compact) }
+                    .keyboardShortcut("c", modifiers: [.command, .option, .control])
+            }
         }
     }
 }

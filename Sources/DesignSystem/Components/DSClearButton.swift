@@ -12,11 +12,10 @@ import SwiftUI
 /// affordance — and its own view so the hover highlight redraws the button rather than the text field
 /// it sits beside.
 ///
-/// **Hover is a colour change, not a well.** Every other icon button in the window lights up with an
-/// `accentSubtle` rounded rect, and this is the one place that cannot: the button is 18pt inside a
-/// 20pt track that already has a fill and a hairline, so a second well would leave a 1pt margin and
-/// read as a control that had come loose from its field. The glyph going from `labelSecondary` to
-/// `labelPrimary` is the whole response, which is what `DSPanelHeaderButton` does with its own glyph.
+/// **Hover is a colour change, not a well.** Other icon buttons light up with a `DSColors.hover`
+/// rounded rect, and this is the one place that cannot: the button sits inside a field that already
+/// has a fill and a hairline, so a second well would read as a control that had come loose from its
+/// field. The glyph going from `labelTertiary` to `labelSecondary` is the whole response.
 ///
 /// The strings are parameters rather than constants because the two fields filter different things —
 /// "Clear filter" and "Clear the search" are the names a UI test already knows them by.
@@ -50,12 +49,11 @@ public struct DSClearButton: View {
         Button { text = "" } label: {
             // The target is on the label, not the glyph: a bare `Image` in a `.plain` button gives a
             // ~10pt hit area, the shape the panel-chrome rules name as too small to aim at.
-            // `DSGlyph.control` is the bottom of the control tier — at `inline` this sat level with
-            // the annotations around it rather than above them, and this glyph is a control.
+            // `DSGlyph.field`, the size of every other glyph inside a field.
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: DSGlyph.control))
-                .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: 18, height: 18)
+                .font(.system(size: DSGlyph.field))
+                .foregroundStyle(isEnabled && isHovered ? DSColors.labelSecondary : DSColors.labelTertiary)
+                .frame(width: 16, height: 16)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -63,7 +61,7 @@ public struct DSClearButton: View {
         .onChange(of: isEnabled) { _, enabled in
             if !enabled { isHovered = false }
         }
-        .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
+        .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
         .help(help)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(label)

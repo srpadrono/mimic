@@ -465,6 +465,49 @@ struct AppStateAndViewTests {
         )
     }
 
+    @Test("A new endpoint takes its group, status and content type in one edit")
+    func addEndpointAppliesGroupStatusAndContentType() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Catalog API", port: 9000)
+
+        let endpoint = try #require(appState.addEndpoint(
+            name: "Get product",
+            method: .get,
+            path: "/products/:id",
+            groupTag: "Catalog",
+            statusCode: 404,
+            contentType: .plainText
+        ))
+
+        #expect(endpoint.name == "Get product")
+        #expect(endpoint.path == "/products/:id")
+        #expect(endpoint.groupTag == "Catalog")
+        let scenario = try #require(endpoint.scenarios.first { $0.id == endpoint.activeScenarioID })
+        #expect(scenario.statusCode == 404)
+        #expect(scenario.bodyContentType == .plainText)
+        #expect(appState.currentProject?.endpoints.map(\.id) == [endpoint.id])
+        #expect(appState.lastCommandError == nil)
+    }
+
+    @Test("A refused status leaves no half-made endpoint behind")
+    func addEndpointWithRefusedStatusAddsNothing() throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Catalog API", port: 9000)
+
+        let endpoint = appState.addEndpoint(
+            name: "Broken",
+            method: .get,
+            path: "/broken",
+            groupTag: nil,
+            statusCode: 99,
+            contentType: .json
+        )
+
+        #expect(endpoint == nil)
+        #expect(appState.currentProject?.endpoints.isEmpty == true)
+        #expect(appState.lastCommandError != nil)
+    }
+
     @Test("AppState coordinates endpoint and scenario mutations")
     func appStateCoordinatesEndpointFlow() async throws {
         let appState = try makeAppState()
@@ -1069,6 +1112,43 @@ struct AppStateAndViewTests {
         // The store owns the name — a rename used to leave the old one in the cache forever.
         #expect(list[1].name == "Cached second")
         #expect(list.contains { $0.name == "Deleted elsewhere" } == false)
+        // Every row, cached or not, carries the store's summary for its detail line.
+        #expect(list.allSatisfy { $0.summary == RecentProjectEntry.Summary(ports: [8080], endpointCount: 0, journeyCount: 0) })
+    }
+
+    @Test("The welcome list counts what the store holds, not the listing's empty stubs")
+    func welcomeListSummaryUsesTheStoreCounts() {
+        // `allProjects()` returns stubs with no endpoints or journeys loaded; the summary line read
+        // "Port 62191 · 0 endpoints" for a project with eight endpoints and three journeys.
+        let stub = MockProject(name: "Storefront", serverConfiguration: ServerConfiguration(port: 62191, globalDelayMs: 0))
+        let cached = [RecentProjectEntry(id: stub.id, name: "Storefront", lastOpenedAt: Date())]
+
+        let list = ProjectWorkspace.reconcile(
+            cached: cached,
+            stored: [stub],
+            counts: [stub.id: ProjectCounts(endpoints: 8, journeys: 3)]
+        )
+
+        #expect(list.first?.summary == RecentProjectEntry.Summary(ports: [62191], endpointCount: 8, journeyCount: 3))
+        #expect(list.first?.summary?.text == "Port 62191 \u{00B7} 8 endpoints \u{00B7} 3 journeys")
+    }
+
+    @Test("Closing a project refreshes its welcome row with what was added while it was open")
+    func closingAProjectRefreshesItsWelcomeSummary() async throws {
+        let appState = try makeAppState()
+        appState.createProject(name: "Storefront", port: 62191)
+        let id = try #require(appState.currentProject?.id)
+        try await waitUntil { appState.recentProjects.contains { $0.id == id } }
+
+        _ = appState.addEndpoint(name: "Users", path: "/users")
+        _ = appState.addEndpoint(name: "Orders", path: "/orders")
+        _ = appState.addJourney(name: "Checkout")
+        appState.closeProject()
+
+        try await waitUntil {
+            appState.recentProjects.first { $0.id == id }?.summary
+                == RecentProjectEntry.Summary(ports: [62191], endpointCount: 2, journeyCount: 1)
+        }
     }
 
     @Test("Nothing in the store is unreachable from the welcome list")
@@ -1773,6 +1853,36 @@ struct AppStateAndViewTests {
         #expect(appState.currentProject?.name == "Imported over the open project")
     }
 
+    // MARK: - Open project export
+
+    @Test("Opening a project export stores the document and opens it")
+    func openProjectExportImportsAndActivates() async throws {
+        let appState = try makeAppState()
+        let json = #"{"id":"6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B","name":"Exported storefront","endpoints":[],"journeys":[]}"#
+
+        #expect(appState.openProjectExport(Data(json.utf8), fileName: "storefront.json"))
+        #expect(appState.lastCommandError == nil)
+
+        let id = try #require(UUID(uuidString: "6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B"))
+        try await waitUntil { appState.currentProject?.id == id }
+        #expect(appState.currentProject?.name == "Exported storefront")
+        #expect(try await appState.repository.load(id: id).name == "Exported storefront")
+    }
+
+    @Test("A file that only decodes as a project is refused, as the CLI refuses it")
+    func openProjectExportRefusesANonProjectDocument() throws {
+        let appState = try makeAppState()
+        // A serialized journey: it carries `id` and `name`, and none of a project's own keys.
+        let journey = #"{"id":"6B1C4A0E-2F3D-4E5F-8A9B-0C1D2E3F4A5B","name":"Checkout","steps":[]}"#
+
+        #expect(appState.openProjectExport(Data(journey.utf8), fileName: "checkout.json") == false)
+        #expect(appState.lastCommandError == "checkout.json is not a Mimic project export. Write one with `mimic project export`.")
+        #expect(appState.currentProject == nil)
+
+        #expect(appState.openProjectExport(Data("not json".utf8), fileName: "notes.txt") == false)
+        #expect(appState.lastCommandError?.hasPrefix("notes.txt is not a Mimic project export") == true)
+    }
+
     // MARK: - An open the store refuses
 
     /// A store that has the project and cannot open it: the shape of a locked store, or of the one
@@ -2144,18 +2254,49 @@ struct AppStateFacadeTests {
 
     @Test("Editor toolbar overflow follows the space between the side panels")
     func toolbarOverflowFollowsCenterWidth() {
-        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 599))
-        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 600))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 439))
-        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 440))
-        #expect(WorkspaceView.toolbarUsesIconStatus(centerWidth: 379))
-        #expect(!WorkspaceView.toolbarUsesIconStatus(centerWidth: 380))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 380))
+        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 619))
+        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 620))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 779))
+        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 780))
+        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 459))
+        #expect(!WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 460))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 460))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 620))
+        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 700))
         #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 500))
-        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 500))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 500))
         #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 1400))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 0))
+        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: .infinity))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .infinity))
         #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .nan))
+    }
+
+    @Test("The narrowest centre column folds Run into the More menu, never past it")
+    func toolbarFoldsRunOnlyWhenTheNarrowTierCannotFit() {
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 300) == .minimal)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 359) == .minimal)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 360) == .narrow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 331) == .minimal,
+                "A 900pt window with both side panels open folds Run, so a long project name still fits")
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 459) == .narrow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 460) == .compactSummary)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 620) == .overflow)
+        #expect(WorkspaceView.toolbarLayout(centerWidth: 780) == .expanded)
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 315))
+        #expect(!WorkspaceView.toolbarFoldsRun(centerWidth: 450),
+                "CI's filled 1024pt window leaves about 450pt and keeps Run inline")
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 0))
+        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: .nan))
+        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 300))
+        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 300))
+        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 300))
+    }
+
+    @Test("The project name's subtitle counts what the project holds")
+    func toolbarProjectContents() {
+        #expect(WorkspaceView.projectContents(endpoints: 12, journeys: 3) == "12 endpoints · 3 journeys")
+        #expect(WorkspaceView.projectContents(endpoints: 1, journeys: 1) == "1 endpoint · 1 journey")
+        #expect(WorkspaceView.projectContents(endpoints: 0, journeys: 0) == "0 endpoints · 0 journeys")
     }
 }

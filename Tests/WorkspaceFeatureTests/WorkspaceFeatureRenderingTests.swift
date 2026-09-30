@@ -87,7 +87,9 @@ struct WorkspaceFeatureRenderingTests {
         #expect(errored == stopped)
     }
 
-    @Test("Two-line server summaries retain their height across lifecycle and compact states")
+    /// The toolbar's address and state keep one 36pt height in every lifecycle state and at every
+    /// width stage, so the toolbar never changes height while the server moves.
+    @Test("The server summary keeps one height across lifecycle and width stages")
     func serverSummaryKeepsItsHeight() {
         let states: [ServerState] = [.stopped, .starting, .running(port: 62130), .stopping, .error("Port in use")]
         for compact in [false, true] {
@@ -99,6 +101,27 @@ struct WorkspaceFeatureRenderingTests {
                 #expect(well.height == 36)
             }
         }
+    }
+
+    /// A narrow toolbar drops the counts from the capsule, never the state word: a dot alone is
+    /// 7pt plus the inset, and "Running" needs several times that.
+    @Test("A narrow server summary keeps its state word")
+    func narrowServerSummaryKeepsItsStateWord() {
+        let full = render(ServerStatusWell(
+            serverState: .running(port: 62130), projectName: "Toolbar Review",
+            requestCount: 142, unmatchedCount: 3
+        ))
+        let narrow = render(ServerStatusWell(
+            serverState: .running(port: 62130), projectName: "Toolbar Review",
+            requestCount: 142, unmatchedCount: 3, compact: true
+        ))
+        let stopped = render(ServerStatusWell(
+            serverState: .stopped, projectName: "Toolbar Review",
+            requestCount: 0, unmatchedCount: 0, compact: true
+        ))
+        #expect(narrow.width < full.width)
+        #expect(narrow.width > 60)
+        #expect(stopped.width > 60)
     }
 
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
@@ -163,6 +186,79 @@ struct WorkspaceFeatureRenderingTests {
                 initialSortField: .timestamp,
                 initialSortAscending: false
             )
+        )
+        // An empty log while the server runs offers a curl command to try.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [],
+                endpoints: [],
+                serverState: .running(port: 8080),
+                onClear: {}
+            )
+        )
+        // Below the header's collapse width and the full table's minimum: the filter moves onto its
+        // own row and the table drops Scenario, Duration and Size. The filter matches nothing, so the
+        // no-matches state draws too.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                unmatchedOnly: .constant(true),
+                initialFilterText: "zzz",
+                initialMethodFilter: .post,
+                initialSortField: .scenario,
+                initialSortAscending: true
+            ),
+            size: CGSize(width: 520, height: 300)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id])
+            ),
+            size: CGSize(width: 520, height: 300)
+        )
+        // Beside an open request: the four-column list and the detail, then several rows selected,
+        // then a selection that has already left the log.
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id]),
+                table: RequestLogTableState(),
+                showsDetail: true,
+                onGoToEndpoint: { _ in }
+            ),
+            size: CGSize(width: 1100, height: 700)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .running(port: 8080),
+                onClear: {},
+                selectedLogIDs: .constant([log.id, UUID()]),
+                showsDetail: true
+            ),
+            size: CGSize(width: 420, height: 400)
+        )
+        render(
+            RequestLogDrawerView(
+                requestLogs: [log],
+                endpoints: [endpoint],
+                serverState: .stopped,
+                onClear: {},
+                selectedLogIDs: .constant([UUID()]),
+                showsDetail: true
+            ),
+            size: CGSize(width: 800, height: 400)
         )
 
         renderSidebarStates(endpoint: endpoint)

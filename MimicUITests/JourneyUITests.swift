@@ -110,7 +110,10 @@ struct JourneyStepSheetPage {
     var pathField: XCUIElement { app.textFields["stepSheet.pathField"] }
     var statusField: XCUIElement { app.textFields["stepSheet.statusField"] }
     var holdField: XCUIElement { app.textFields["stepSheet.holdField"] }
-    var outcomePicker: XCUIElement { app.radioGroups["stepSheet.outcomePicker"].firstMatch }
+    /// A `DSSegmentedControl`: a container of buttons, one per outcome.
+    var outcomePicker: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "stepSheet.outcomePicker").firstMatch
+    }
     var saveButton: XCUIElement { app.buttons["stepSheet.saveButton"] }
     var cancelButton: XCUIElement { app.buttons["stepSheet.cancelButton"] }
     var validationMessage: XCUIElement {
@@ -367,7 +370,8 @@ final class JourneyUITests: XCTestCase {
         addTemplate("retry-after-failure", activate: false)
 
         XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 10), "Activate should be offered")
-        XCTAssertFalse(journeys.restartButton.isEnabled, "Restart is meaningless before activation")
+        // An inactive journey offers Activate in the run controls' slot, and nothing else.
+        XCTAssertFalse(journeys.restartButton.exists, "Restart is meaningless before activation")
 
         journeys.activateButton.click()
 
@@ -397,7 +401,8 @@ final class JourneyUITests: XCTestCase {
             journeys.activateButton.waitForExistence(timeout: 5),
             "Deactivating should offer to activate again"
         )
-        XCTAssertFalse(journeys.restartButton.isEnabled, "Run controls should be disabled again")
+        XCTAssertTrue(journeys.restartButton.waitForNonExistence(timeout: 5),
+                      "Run controls should give way to Activate again")
     }
 
     @MainActor

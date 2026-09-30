@@ -4,13 +4,10 @@ import SwiftUI
 
 /// Scripts one journey and shows its run in the same list.
 ///
-/// The step list is the editor *and* the progress view. A journey is defined by its order, so the
-/// order is what you see; the run marks the current step in place rather than in a second panel you
-/// would have to correlate by eye.
-///
-/// It renders at two very different widths — the journeys window's detail column, and the main
-/// window's centre pane, which is a few hundred points narrower with both drawers open. The title
-/// can wrap, while the settings stay collapsed until requested so the steps remain primary.
+/// The step list is both the editor and the progress view: the run marks the current step in place.
+/// Title, run controls, progress and behaviour sit above the list. Clicking a step shows it in the
+/// inspector; double-clicking it opens the step sheet. Description, group and auto-advance live in
+/// the inspector while no step is selected.
 struct JourneyEditorView: View {
     @Environment(AppState.self) private var appState
 
@@ -18,133 +15,117 @@ struct JourneyEditorView: View {
     let isActive: Bool
     let status: JourneyStatus?
 
-    @State private var editingStepID: UUID?
     @State private var showNewStepSheet = false
-    @State private var settingsExpanded = false
-    @State private var settingsContentHeight: CGFloat = .infinity
+    @State private var showCaptureSheet = false
+    @State private var overviewContentHeight: CGFloat = .infinity
+
+    /// Two steps and the list's margins: the least of the list a short pane keeps on screen.
+    static let minimumStepListHeight: CGFloat = DSRowHeight.step * 2 + DSSpacing.sm * 2 + DSSpacing.xs
 
     var body: some View {
+        editorStack
+            // `.contain` keeps descendants such as `journeyEditor.name` and `journeyStep-n`
+            // addressable when the centre pane names this container.
+            .accessibilityElement(children: .contain)
+            .sheet(isPresented: $showNewStepSheet) {
+                JourneyStepSheet(step: nil, backends: appState.currentProject?.serverConfiguration.listeners ?? [],
+                    globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                    endpoints: appState.currentProject?.endpoints ?? []) { spec in
+                    appState.addJourneyStep(journeyID: journey.id, spec: spec)
+                }
+            }
+            .sheet(item: editingStep) { step in
+                JourneyStepSheet(
+                    step: step,
+                    stepNumber: (journey.steps.firstIndex { $0.id == step.id } ?? 0) + 1,
+                    backends: appState.currentProject?.serverConfiguration.listeners ?? [],
+                    globalDelayMs: appState.serverConfiguration.globalDelayMs,
+                    endpoints: appState.currentProject?.endpoints ?? [],
+                    onCommit: { spec in
+                        appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
+                    },
+                    onRemove: {
+                        appState.removeJourneyStep(journeyID: journey.id, stepID: step.id)
+                    }
+                )
+            }
+            .sheet(isPresented: $showCaptureSheet) {
+                CaptureFromLogSheet(journeyName: journey.name, logs: appState.requestLogs) { logs in
+                    appState.addJourneySteps(journeyID: journey.id, capturing: logs)
+                }
+            }
+    }
+
+    private var editorStack: some View {
         VStack(spacing: 0) {
-            header
-            JourneyRunControls(journey: journey, isActive: isActive, status: status)
-                .fixedSize(horizontal: false, vertical: true)
+            // Title, run and behaviour, in one scroll view that takes its natural height in a tall
+            // pane and gives way in a short one. The steps are what the editor is for, so they keep
+            // `minimumStepListHeight` whatever the pane: without it a narrow window laid the list out
+            // at zero height with every step in the tree and none of them clickable.
+            ScrollView {
+                VStack(alignment: .leading, spacing: DSSpacing.lg) {
+                    header
+                    JourneyRunProgress(journey: journey, isActive: isActive, status: status)
+                    behaviorRow
+                }
+                .padding(.top, DSSpacing.xl)
+                .padding(.horizontal, DSSpacing.xxl)
+                .padding(.bottom, DSSpacing.lg)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    overviewContentHeight = height
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(minHeight: 0, maxHeight: overviewContentHeight)
+            // Offered everything the step list's minimum leaves, before the list takes the rest.
+            .layoutPriority(1)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("journeyEditor.settingsScroll")
+
             DSDivider(identifier: "journeyEditor.run")
-            settingsDisclosure
-            if settingsExpanded {
-                ScrollView {
-                    VStack(spacing: 0) { settingsContent }
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            settingsContentHeight = height
-                        }
-                }
-                // Give the settings their natural height in a tall pane. In a short pane they
-                // scroll, leaving the Steps heading and a reachable list below them.
-                .frame(minHeight: 0, maxHeight: settingsContentHeight)
-                .layoutPriority(1)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("journeyEditor.settingsScroll")
-            }
-            DSSectionHeader("Steps", identifier: "journeyEditor.stepsHeader") {
-                DSButton("Add step\u{2026}", variant: .secondary, size: .small,
-                         identifier: "journeyEditor.addStep") {
-                    showNewStepSheet = true
-                }
-                .accessibilityIdentifier("journeyEditor.addStepButton")
-                .accessibilityLabel("Add step")
-            }
+                .padding(.horizontal, DSSpacing.xxl)
+            stepsHeader
             stepList
-                // Keep one complete two-line step visible, including the List's top inset.
-                .frame(minHeight: settingsExpanded ? DSRowHeight.journeyStep + DSSpacing.lgPlus : 0,
-                       maxHeight: .infinity)
-        }
-        // The centre pane tags this view with an identifier of its own, and a bare
-        // `.accessibilityIdentifier` on a container renames every descendant to match it — which
-        // would take `journeyEditor.name`, `journeyEditor.addStepButton` and every `journeyStep-n`
-        // out of the tree. Declaring the container here keeps them addressable whoever wraps it.
-        .accessibilityElement(children: .contain)
-        .onChange(of: journey.id) { _, _ in settingsExpanded = false }
-        .sheet(isPresented: $showNewStepSheet) {
-            JourneyStepSheet(step: nil, backends: appState.currentProject?.serverConfiguration.listeners ?? [],
-                globalDelayMs: appState.serverConfiguration.globalDelayMs) { spec in
-                appState.addJourneyStep(journeyID: journey.id, spec: spec)
-            }
-        }
-        .sheet(item: editingStep) { step in
-            JourneyStepSheet(step: step, backends: appState.currentProject?.serverConfiguration.listeners ?? [],
-                globalDelayMs: appState.serverConfiguration.globalDelayMs) { spec in
-                appState.updateJourneyStep(journeyID: journey.id, stepID: step.id, spec: spec)
-            }
+                .frame(minHeight: Self.minimumStepListHeight, maxHeight: .infinity)
         }
     }
 
-    @ViewBuilder
-    private var settingsContent: some View {
-        JourneySummaryField(journey: journey).id(journey.id)
-        JourneyGroupField(journey: journey).id(journey.id)
-        DSSectionHeader("Behavior", identifier: "journeyEditor.behavior")
-        behaviorControls
-            .fixedSize(horizontal: false, vertical: true)
-        DSDivider(style: .standard, identifier: "journeyEditor.behavior")
-    }
-
-    private var settingsDisclosure: some View {
-        Button {
-            settingsExpanded.toggle()
-        } label: {
-            HStack(spacing: DSSpacing.sm) {
-                Text("Journey settings")
-                    .font(DSTypography.controlLabel)
-                Spacer(minLength: DSSpacing.xs)
-                Text("\(journey.groupTag ?? "Ungrouped") · \(journey.matchMode == .orderedPerEndpoint ? "Ordered per route" : "Strict sequence")")
-                    .font(DSTypography.meta)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(DSColors.labelSecondary)
-                Image(systemName: settingsExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: DSGlyph.indicator, weight: .semibold))
-                    .frame(width: DSGlyph.control)
-                    .accessibilityHidden(true)
-            }
-            .foregroundStyle(DSColors.labelPrimary)
-            .padding(.horizontal, DSSpacing.md)
-            .frame(minHeight: DSBarHeight.controlRow)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.dsPlain)
-        .background(DSColors.band)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
-        }
-        .accessibilityIdentifier("journeyEditor.settingsDisclosure")
-        .accessibilityLabel("Journey settings")
-        .accessibilityValue(settingsExpanded ? "Expanded" : "Collapsed")
-    }
-
-    /// Binding shim so a step can be presented as a sheet item by id.
+    /// Binding shim so a step can be presented as a sheet item by id. The id lives in the window's
+    /// presentation state, so the inspector's "Edit step…" opens the same sheet.
     private var editingStep: Binding<JourneyStep?> {
         Binding(
-            get: { journey.steps.first { $0.id == editingStepID } },
-            set: { editingStepID = $0?.id }
+            get: { journey.steps.first { $0.id == appState.editingJourneyStepID } },
+            set: { appState.editingJourneyStepID = $0?.id }
         )
     }
 
     // MARK: - Header
 
-    /// Give the script a readable identity; the step action belongs with the Steps heading below.
+    /// Title and description on the left, the run's state and controls on the right. A narrow pane
+    /// keeps the controls beside the title as glyphs before it gives up and stacks them.
     private var header: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-            HStack {
-                Text("Journey")
-                    .font(DSTypography.labelMedium)
-                    .foregroundStyle(DSColors.labelSecondary)
-                Spacer(minLength: 0)
-                if isActive {
-                    DSStateBadge(appState.serverState.runningPort == nil ? "Selected" : "Active",
-                                 tone: .accent, identifier: "journeyEditor.activeBadge")
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: DSSpacing.md) {
+                titleBlock
+                runCluster(showsTitles: true)
             }
+            HStack(alignment: .top, spacing: DSSpacing.md) {
+                titleBlock
+                runCluster(showsTitles: false)
+            }
+            VStack(alignment: .leading, spacing: DSSpacing.md) {
+                titleBlock
+                runCluster(showsTitles: false)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("journeyEditor.header")
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
             Text(journey.name)
-                .font(DSTypography.heading)
+                .font(DSTypography.title)
                 .foregroundStyle(DSColors.labelPrimary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,135 +136,152 @@ struct JourneyEditorView: View {
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(2)
-                    .lineSpacing(DSSpacing.xxs)
                     .help(summary)
                     .accessibilityIdentifier("journeyEditor.summary")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, DSSpacing.lg)
-        .padding(.vertical, DSSpacing.md)
-        .background(DSColors.secondary)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
+        // A modest ideal width lets a long name wrap beside the run controls instead of pushing
+        // them below it.
+        .frame(minWidth: 160, idealWidth: 200, maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The "Active" badge, then Restart and Next step; Activate alone while the journey is inactive.
+    private func runCluster(showsTitles: Bool) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            if isActive {
+                activeState
+            }
+            JourneyRunControls(journey: journey, isActive: isActive, status: status, showsTitles: showsTitles)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("journeyEditor.header")
+        .fixedSize()
+    }
+
+    /// "Active" while the server runs, "Selected" when it will apply to the next run.
+    private var activeState: some View {
+        let title = appState.serverState.runningPort == nil ? "Selected" : "Active"
+        let tint = appState.serverState.runningPort == nil ? DSColors.labelSecondary : DSColors.success
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(tint)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(DSTypography.caption.weight(.medium))
+                .accessibilityIdentifier("journeyEditor.activeBadge")
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .frame(height: 18)
+        .overlay {
+            Capsule()
+                .strokeBorder(tint, lineWidth: DSStroke.hairline)
+        }
+        // Centred on the 24pt buttons beside it.
+        .frame(height: DSControlHeight.regular)
     }
 
     // MARK: - Behaviour
 
-    /// The four options that change how a journey behaves at run time. Inline rather than behind a
-    /// settings sheet, because they change what a test observes and should be visible while reading it.
-    ///
-    /// One row when there is room for one, two when there is not. The row used to be four pickers
-    /// capped at 200, 170 and 180 points, which needs about 700 points of window — at centre-pane
-    /// width the labels themselves truncated, and "On comp…" is not a label.
-    @ViewBuilder
-    private var behaviorControls: some View {
+    /// Order, unscripted requests and the end of the run: three labelled pop-up menus on one row,
+    /// wrapping onto a second row only when the pane is too narrow for three.
+    private var behaviorRow: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: DSSpacing.md) {
-                matchModePicker
-                completionPicker
-                unmatchedPicker
-                autoAdvanceToggle
+            HStack(spacing: DSSpacing.xl) {
+                behaviorControl("Order") { matchModePicker.frame(width: Self.wideMenuWidth) }
+                behaviorControl("Unscripted requests") { unmatchedPicker.frame(width: Self.wideMenuWidth) }
+                behaviorControl("At the end") { completionPicker.frame(width: Self.narrowMenuWidth) }
             }
 
-            Grid(alignment: .leading, horizontalSpacing: DSSpacing.md, verticalSpacing: DSSpacing.sm) {
+            Grid(alignment: .leading, horizontalSpacing: DSSpacing.sm, verticalSpacing: DSSpacing.sm) {
                 GridRow {
-                    matchModePicker
-                    completionPicker
+                    behaviorLabel("Order")
+                    matchModePicker.frame(width: Self.wideMenuWidth)
                 }
                 GridRow {
-                    unmatchedPicker
-                    autoAdvanceToggle
-                }
-            }
-
-            // Labels move above their controls when two inline label/value pairs no longer fit.
-            // This preserves the same four controls without making the entire editor overflow or
-            // consuming four rows of the height needed by the steps below.
-            Grid(alignment: .leading, horizontalSpacing: DSSpacing.md, verticalSpacing: DSSpacing.sm) {
-                GridRow {
-                    compactBehaviorControl("Match") { matchModePicker.labelsHidden() }
-                    compactBehaviorControl("On completion") { completionPicker.labelsHidden() }
+                    behaviorLabel("Unscripted requests")
+                    unmatchedPicker.frame(width: Self.wideMenuWidth)
                 }
                 GridRow {
-                    compactBehaviorControl("Unscripted") { unmatchedPicker.labelsHidden() }
-                    autoAdvanceToggle
+                    behaviorLabel("At the end")
+                    completionPicker.frame(width: Self.narrowMenuWidth)
                 }
             }
         }
-        .font(DSTypography.label)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
-        // The control-row rung, as a floor. On one line this already measures exactly 32, and stating
-        // it stops the row drifting under the rung if AppKit ever changes what a small popup measures.
-        // It has to be a floor and not a height because of the `ViewThatFits` above: the folded
-        // candidate is two rows of pickers and needs about 56, and a fixed 32 would hold the container
-        // at one row's worth of space while the grid drew straight over the step list below it.
-        .frame(minHeight: DSBarHeight.controlRow)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("journeyEditor.behavior")
     }
 
-    private func compactBehaviorControl<Control: View>(
+    /// The design's pop-up widths: 176pt for the two with longer choices, 140pt for the end.
+    private static let wideMenuWidth: CGFloat = 176
+    private static let narrowMenuWidth: CGFloat = 140
+
+    private func behaviorControl<Control: View>(
         _ title: String,
         @ViewBuilder control: () -> Control
     ) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            Text(title)
-                .font(DSTypography.meta)
-                .foregroundStyle(DSColors.labelSecondary)
-                .accessibilityHidden(true)
+        HStack(spacing: DSSpacing.sm) {
+            behaviorLabel(title)
             control()
         }
     }
 
-    /// `.small` and `.fixedSize()` on all four: one height down the row, and a control that reports
-    /// the width it actually needs, which is what lets `ViewThatFits` know when to fold.
+    private func behaviorLabel(_ title: String) -> some View {
+        Text(title)
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelSecondary)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+
     private var matchModePicker: some View {
-        Picker("Match", selection: matchModeBinding) {
-            Text("Ordered per route").tag(JourneyMatchMode.orderedPerEndpoint)
-            Text("Strict sequence").tag(JourneyMatchMode.strictSequence)
+        Picker("Order", selection: matchModeBinding) {
+            Text(JourneyEditorView.title(for: .orderedPerEndpoint)).tag(JourneyMatchMode.orderedPerEndpoint)
+            Text(JourneyEditorView.title(for: .strictSequence)).tag(JourneyMatchMode.strictSequence)
         }
         .pickerStyle(.menu)
-        .controlSize(.small)
-        .fixedSize()
+        .labelsHidden()
+        .help("Per endpoint: the next step for each route can answer. Strict sequence: only the current step can.")
         .accessibilityIdentifier("journeyEditor.matchModePicker")
         .accessibilityLabel("Match mode")
     }
 
     private var completionPicker: some View {
-        Picker("On completion", selection: completionBinding) {
+        Picker("At the end", selection: completionBinding) {
             Text("Stop").tag(JourneyCompletion.stop)
             Text("Restart").tag(JourneyCompletion.restart)
         }
         .pickerStyle(.menu)
-        .controlSize(.small)
-        .fixedSize()
+        .labelsHidden()
         .accessibilityIdentifier("journeyEditor.completionPicker")
         .accessibilityLabel("On completion")
     }
 
     private var unmatchedPicker: some View {
-        Picker("Unscripted", selection: unmatchedBinding) {
-            Text("Fall through").tag(JourneyUnmatchedBehavior.fallThroughToEndpoints)
-            Text("404").tag(JourneyUnmatchedBehavior.notFound)
+        Picker("Unscripted requests", selection: unmatchedBinding) {
+            Text(JourneyEditorView.title(for: .fallThroughToEndpoints)).tag(JourneyUnmatchedBehavior.fallThroughToEndpoints)
+            Text(JourneyEditorView.title(for: .notFound)).tag(JourneyUnmatchedBehavior.notFound)
         }
         .pickerStyle(.menu)
-        .controlSize(.small)
-        .fixedSize()
+        .labelsHidden()
         .accessibilityIdentifier("journeyEditor.unmatchedPicker")
         .accessibilityLabel("Unscripted requests")
     }
 
-    private var autoAdvanceToggle: some View {
-        Toggle("Auto-advance", isOn: autoAdvanceBinding)
-            .toggleStyle(.checkbox)
-            .controlSize(.small)
-            .fixedSize()
-            .accessibilityIdentifier("journeyEditor.autoAdvanceToggle")
-            .accessibilityLabel("Advance automatically")
+    /// The design's names for the behaviours, shared with the inspector.
+    static func title(for mode: JourneyMatchMode) -> String {
+        switch mode {
+        case .orderedPerEndpoint: "Per endpoint"
+        case .strictSequence: "Strict sequence"
+        }
+    }
+
+    static func title(for behavior: JourneyUnmatchedBehavior) -> String {
+        switch behavior {
+        case .fallThroughToEndpoints: "Use endpoints"
+        case .notFound: "404"
+        }
     }
 
     private var matchModeBinding: Binding<JourneyMatchMode> {
@@ -307,14 +305,57 @@ struct JourneyEditorView: View {
         )
     }
 
-    private var autoAdvanceBinding: Binding<Bool> {
-        Binding(
-            get: { journey.autoAdvance },
-            set: { appState.updateJourney(id: journey.id, spec: JourneySpec(autoAdvance: $0)) }
-        )
+    // MARK: - Steps
+
+    private var stepsHeader: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text("Steps")
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text("\(journey.steps.count)")
+                .font(DSTypography.callout)
+                .monospacedDigit()
+                .foregroundStyle(DSColors.labelTertiary)
+                .accessibilityHidden(true)
+            Spacer(minLength: DSSpacing.sm)
+            quietButton("Capture from log", systemImage: "text.alignleft") {
+                showCaptureSheet = true
+            }
+            .help("Add steps from requests the server has answered")
+            .accessibilityIdentifier("journeyEditor.captureFromLogButton")
+            .accessibilityLabel("Capture from log")
+            quietButton("Add step", systemImage: "plus") {
+                showNewStepSheet = true
+            }
+            .help("Add a step to the end of this journey")
+            .accessibilityIdentifier("journeyEditor.addStepButton")
+            .accessibilityLabel("Add step")
+        }
+        .padding(.horizontal, DSSpacing.xxl)
+        .padding(.top, DSSpacing.lg)
+        .padding(.bottom, DSSpacing.xs)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("journeyEditor.stepsHeader")
     }
 
-    // MARK: - Steps
+    /// A borderless secondary-label action, as the design draws the Steps header's two.
+    private func quietButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: DSGlyph.field, weight: .medium))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(DSTypography.callout)
+            }
+            .foregroundStyle(DSColors.labelSecondary)
+            .padding(.horizontal, 6)
+            .frame(height: DSControlHeight.regular)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPlain)
+    }
 
     @ViewBuilder
     private var stepList: some View {
@@ -322,7 +363,7 @@ struct JourneyEditorView: View {
             DSEmptyState(
                 heading: "No steps yet",
                 message: "Add the requests this flow makes, in order. The same route can appear more "
-                    + "than once — that is how a call fails and then succeeds.",
+                    + "than once \u{2014} that is how a call fails and then succeeds.",
                 identifier: "journeyEditor.steps"
             )
         } else {
@@ -331,65 +372,95 @@ struct JourneyEditorView: View {
                     JourneyStepRow(
                         step: step,
                         index: index,
-                        progress: status?.steps.first { $0.id == step.id }
+                        progress: status?.steps.first { $0.id == step.id },
+                        isSelected: appState.selectedJourneyStepID == step.id
                     )
                     .contentShape(Rectangle())
-                    .onTapGesture { editingStepID = step.id }
-                    // A tap gesture carries no trait, so the row that opens the step editor was
-                    // announced as static text with no hint that it could be pressed.
-                    // `RequestLogTableRow` and `EndpointTrafficRow` restore it the same way; this row
-                    // and the inspector's scenario row were the two that did not.
-                    .accessibilityAddTraits(.isButton)
-                    .contextMenu {
-                        Button {
-                            editingStepID = step.id
-                        } label: {
-                            Label("Edit step\u{2026}", systemImage: "pencil")
-                        }
-                        .accessibilityIdentifier("journeyEditor.step.contextMenu.edit")
-
-                        if index > 0 {
-                            Button {
-                                appState.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: index - 1)
-                            } label: {
-                                Label("Move up", systemImage: "arrow.up")
-                            }
-                            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveUp")
-                        }
-                        if index < journey.steps.count - 1 {
-                            Button {
-                                appState.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: index + 1)
-                            } label: {
-                                Label("Move down", systemImage: "arrow.down")
-                            }
-                            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveDown")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            appState.removeJourneyStep(journeyID: journey.id, stepID: step.id)
-                        } label: {
-                            Label("Remove step", systemImage: "trash")
-                        }
-                        .accessibilityIdentifier("journeyEditor.step.contextMenu.remove")
+                    // One click shows the step in the inspector; a second opens the sheet, as a
+                    // double-click opens a file from Finder's selection.
+                    .onTapGesture(count: 2) {
+                        appState.selectedJourneyStepID = step.id
+                        appState.editingJourneyStepID = step.id
                     }
+                    .onTapGesture {
+                        appState.selectedJourneyStepID = appState.selectedJourneyStepID == step.id ? nil : step.id
+                    }
+                    // A tap gesture carries no trait, so restore the button trait for VoiceOver.
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(named: "Edit step") { appState.editingJourneyStepID = step.id }
+                    .listRowInsets(EdgeInsets(top: 1, leading: DSSpacing.lg, bottom: 1, trailing: DSSpacing.lg))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu { stepContextMenu(step: step, index: index) }
                 }
                 .onMove { source, destination in
-                    // A single drag is the natural way to reorder a sequence; SwiftUI reports the
-                    // destination as an insertion index, which is what the command expects.
+                    // SwiftUI reports the destination as an insertion index.
                     guard let from = source.first else { return }
                     let step = journey.steps[from]
                     let target = destination > from ? destination - 1 : destination
                     appState.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: target)
                 }
             }
-            .listStyle(.inset)
-            // `.contain` before the identifier: naming a container without it renames every row to
-            // match, and the rows are what `journeyStep-n` addresses.
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, DSRowHeight.step)
+            .contentMargins(.vertical, DSSpacing.sm, for: .scrollContent)
+            // `.contain` before the identifier so rows keep their own `journeyStep-n` names.
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("journeyEditor.stepList")
         }
+    }
+
+    @ViewBuilder
+    private func stepContextMenu(step: JourneyStep, index: Int) -> some View {
+        JourneyStepMenuItems(journey: journey, step: step, index: index) {
+            appState.editingJourneyStepID = step.id
+        }
+    }
+}
+
+/// Edit, move and remove: the step's actions, shared by the row's context menu and the inspector's
+/// "…" menu so the two can never offer different things.
+struct JourneyStepMenuItems: View {
+    @Environment(AppState.self) private var appState
+
+    let journey: Journey
+    let step: JourneyStep
+    let index: Int
+    let onEdit: () -> Void
+
+    var body: some View {
+        Button(action: onEdit) {
+            Label("Edit step\u{2026}", systemImage: "pencil")
+        }
+        .accessibilityIdentifier("journeyEditor.step.contextMenu.edit")
+
+        if index > 0 {
+            Button {
+                appState.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: index - 1)
+            } label: {
+                Label("Move up", systemImage: "arrow.up")
+            }
+            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveUp")
+        }
+        if index < journey.steps.count - 1 {
+            Button {
+                appState.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: index + 1)
+            } label: {
+                Label("Move down", systemImage: "arrow.down")
+            }
+            .accessibilityIdentifier("journeyEditor.step.contextMenu.moveDown")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            if appState.selectedJourneyStepID == step.id { appState.selectedJourneyStepID = nil }
+            appState.removeJourneyStep(journeyID: journey.id, stepID: step.id)
+        } label: {
+            Label("Remove step", systemImage: "trash")
+        }
+        .accessibilityIdentifier("journeyEditor.step.contextMenu.remove")
     }
 }
 
@@ -408,87 +479,5 @@ private extension View {
                 content(value)
             }
         }
-    }
-}
-
-private struct JourneySummaryField: View {
-    @Environment(AppState.self) private var appState
-    let journey: Journey
-    @State private var draft: String
-    @FocusState private var isFocused: Bool
-
-    init(journey: Journey) {
-        self.journey = journey
-        _draft = State(initialValue: journey.summary ?? "")
-    }
-
-    var body: some View {
-        HStack(spacing: DSSpacing.sm) {
-            Text("Description")
-                .foregroundStyle(DSColors.labelSecondary)
-            TextField("What this journey tests", text: $draft)
-                .textFieldStyle(.plain)
-                .font(DSTypography.label)
-                .dsFieldWell()
-                .focused($isFocused)
-                .onSubmit { commit() }
-                .onChange(of: isFocused) { _, focused in if !focused { commit() } }
-                .accessibilityIdentifier("journeyEditor.summaryField")
-                .accessibilityLabel("Journey description")
-        }
-        .font(DSTypography.label)
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: DSBarHeight.controlRow)
-        .onChange(of: journey.summary) { _, value in
-            if !isFocused { draft = value ?? "" }
-        }
-        .onDisappear { commit() }
-    }
-
-    private func commit() {
-        let summary = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard summary != (journey.summary ?? ""), appState.journeys.contains(where: { $0.id == journey.id }) else { return }
-        appState.updateJourney(id: journey.id, spec: JourneySpec(summary: summary))
-    }
-}
-
-private struct JourneyGroupField: View {
-    @Environment(AppState.self) private var appState
-    let journey: Journey
-    @State private var draft: String
-    @FocusState private var isFocused: Bool
-
-    init(journey: Journey) {
-        self.journey = journey
-        _draft = State(initialValue: journey.groupTag ?? "")
-    }
-
-    var body: some View {
-        HStack(spacing: DSSpacing.sm) {
-            Text("Group").foregroundStyle(DSColors.labelSecondary)
-            TextField("None", text: $draft)
-                .textFieldStyle(.plain)
-                .font(DSTypography.label)
-                .dsFieldWell()
-                .focused($isFocused)
-                .onSubmit { commit() }
-                .onChange(of: isFocused) { _, focused in if !focused { commit() } }
-                .accessibilityIdentifier("journeyEditor.groupTag")
-                .accessibilityLabel("Journey group")
-                .help("Journeys with the same group appear together. Clear to leave ungrouped.")
-        }
-        .font(DSTypography.label)
-        .padding(.horizontal, DSSpacing.md)
-        .frame(height: DSBarHeight.controlRow)
-        .onChange(of: journey.groupTag) { _, value in
-            if !isFocused { draft = value ?? "" }
-        }
-        .onDisappear { commit() }
-    }
-
-    private func commit() {
-        let group = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard group != (journey.groupTag ?? ""), appState.journeys.contains(where: { $0.id == journey.id }) else { return }
-        appState.updateJourney(id: journey.id, spec: JourneySpec(groupTag: group))
     }
 }

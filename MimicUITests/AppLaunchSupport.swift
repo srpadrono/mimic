@@ -260,6 +260,66 @@ enum UITestApp {
         return false
     }
 
+    /// Picks an item from the pop-up `menu` by typing `typeSelection` and Return, and returns once
+    /// `isChosen` holds.
+    ///
+    /// The one-level sibling of ``chooseFromSubmenu(in:parent:item:thenAwait:reopenMenu:menuIsAlreadyOpen:attempts:menuTimeout:outcomeTimeout:)``,
+    /// but it never clicks the item, for two reasons seen on real runs.
+    ///
+    /// **Clicking can land on the wrong row.** On CI (macOS 26) three hover-and-click rounds on
+    /// "404 Not Found" left the sheet on "409 Conflict", the row below. The likely cause is a pop-up
+    /// that opens positioned over its current choice, so an item's frame can be stale by the time
+    /// the click is synthesized.
+    /// **On macOS 27 the items are not published at all**, so there is nothing to click. Typing the
+    /// start of the title is AppKit's menu type-select, what a keyboard user does, and needs neither.
+    /// `item` is only used to tell whether the menu is still open.
+    ///
+    /// **Escape is not free.** Once the menu has closed, the next Escape closes the sheet the menu
+    /// sits in, so a retry presses it only while `item` shows the menu is open, and never in a
+    /// loop. The outcome is a condition because a pop-up shows its choice in its value or title.
+    /// Every retry is recorded in the result bundle, and a menu that never applies the choice
+    /// still fails.
+    @MainActor
+    @discardableResult
+    static func chooseFromPopUp(
+        in app: XCUIApplication,
+        menu: XCUIElement,
+        item: XCUIElement,
+        typeSelection: String,
+        attempts: Int = 3,
+        menuTimeout: TimeInterval = 5,
+        itemTimeout: TimeInterval = 2,
+        outcomeTimeout: TimeInterval = 5,
+        until isChosen: () -> Bool
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 {
+                XCTContext.runActivity(
+                    named: "Re-opened the pop-up menu (attempt \(attempt) of \(rounds))"
+                ) { _ in }
+                if item.exists {
+                    app.typeKey(.escape, modifierFlags: [])
+                    _ = item.waitForNonExistence(timeout: 1)
+                }
+            }
+
+            guard menu.waitForExistence(timeout: menuTimeout) else { continue }
+            waitForStableFrame(menu)
+            menu.click()
+
+            // Where items are published, their appearance says the menu is open. Where they are
+            // not, the wait simply runs out and the typing goes to the open menu all the same.
+            _ = item.waitForExistence(timeout: itemTimeout)
+            app.typeText(typeSelection)
+            app.typeKey(.return, modifierFlags: [])
+
+            let wait = attempt == rounds ? outcomeTimeout : min(outcomeTimeout, 3)
+            if waitUntil(timeout: wait, isChosen) { return true }
+        }
+        return false
+    }
+
     /// Activation is scoped to the process created by this launch. Other builds can share the
     /// bundle identifier, including the developer's normal session.
     static func activateLaunchedApp(processIdentifier: pid_t) {

@@ -1,8 +1,11 @@
 import SwiftUI
 import Domain
+import SpecImport
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    /// The import the welcome window asked for. It creates the project it imports into.
+    @State private var welcomeImportKind: ImportKind?
 
     var body: some View {
         @Bindable var appState = appState
@@ -28,11 +31,18 @@ struct ContentView: View {
                     onRequestRenameProject: { entry in
                         appState.projectRenameTarget = .init(id: entry.id, name: entry.name)
                     },
-                    onRequestNewProject: { appState.showNewProjectSheet = true }
+                    onRequestNewProject: { appState.showNewProjectSheet = true },
+                    onRequestImport: { welcomeImportKind = $0 },
+                    // The same picker File ▸ Open Project Export… (⌘O) runs.
+                    onRequestOpenExport: { ProjectExportPicker.choose(for: appState) },
+                    onRequestSampleProject: appState.openSampleProject,
+                    showsOnLaunch: $appState.showsWelcomeOnLaunch
                 )
             }
         }
         .disabled(appState.updates.isPreparingInstallation)
+        // Opening a project grows this window; keep what it grows into on screen, above the Dock.
+        .background(WindowScreenFit())
         .navigationTitle(appState.currentProject?.name ?? "Mimic")
         // Presented here rather than inside `WelcomeWindow`, because File ▸ New Project has to work
         // whichever branch is showing — and one sheet with one presenter is what stops the two
@@ -45,6 +55,16 @@ struct ContentView: View {
             NewProjectSheet { name, port in
                 appState.createProject(name: name, port: port)
             }
+        }
+        // The welcome window's import: the same review sheet the workspace opens, committed into a
+        // project created for it. Nothing is created when nothing is selected.
+        .sheet(item: $welcomeImportKind) { kind in
+            ImportView(kind: kind, existingEndpoints: []) { candidates in
+                guard candidates.contains(where: \.isSelected) else { return }
+                appState.createProject(name: kind.newProjectName)
+                appState.commitImportedCandidates(candidates)
+            }
+            .disabled(appState.updates.isPreparingInstallation)
         }
         .sheet(item: $appState.projectRenameTarget) { target in
             RenameItemSheet(
@@ -69,6 +89,7 @@ struct ContentView: View {
         // anything actually happens, so on all but one launch a day this is a sleep and a `false`.
         .task {
             #if DEBUG
+            UITestSupport.applyForcedAppearance()
             // Never in a test run — see `UITestSupport.suppressesAutomaticUpdateChecks`. A unit
             // suite is hosted by this app, so without the guard every `swift`/`xcodebuild test`
             // invocation would call GitHub; and a UI test would race its own sheet against one this
@@ -136,6 +157,18 @@ struct ContentView: View {
             // change is silently not made. Named for the same reason the store-failure message is.
             Text(message)
                 .accessibilityIdentifier("commandError.message")
+        }
+    }
+}
+
+extension ImportKind: Identifiable {
+    var id: Self { self }
+
+    /// The name of the project a welcome-window import creates. Renamed like any other.
+    var newProjectName: String {
+        switch self {
+        case .har: "Imported HAR"
+        case .openAPI: "Imported API"
         }
     }
 }

@@ -167,8 +167,8 @@ class MimicUITestCase: XCTestCase {
 
     /// Picks a method in the new-endpoint sheet.
     ///
-    /// A SwiftUI `Picker` in a sheet realizes as a pop-up button, so the menu has to be opened before
-    /// its items exist — `app.menuItems` matches nothing while it is closed.
+    /// The method is a menu button inside the request field, so the menu has to be opened before its
+    /// items exist — `app.menuItems` matches nothing while it is closed.
     @MainActor
     func selectMethod(_ method: String) {
         let picker = newEndpointSheet.methodPicker

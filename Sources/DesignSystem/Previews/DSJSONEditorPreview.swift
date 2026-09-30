@@ -13,7 +13,7 @@ import SwiftUI
 
     VStack(alignment: .leading, spacing: DSSpacing.md) {
         Text("JSON editor")
-            .font(DSTypography.heading)
+            .font(DSTypography.headline)
 
         DSJSONEditor(text: $json, identifier: "preview") { valid in
             isValid = valid
@@ -22,8 +22,8 @@ import SwiftUI
 
         HStack {
             Text(isValid ? "Valid JSON" : "Invalid JSON")
-                .font(DSTypography.label)
-                .foregroundStyle(isValid ? DSColors.successText : DSColors.destructiveText)
+                .font(DSTypography.body)
+                .foregroundStyle(isValid ? DSColors.success : DSColors.error)
         }
     }
     .padding()

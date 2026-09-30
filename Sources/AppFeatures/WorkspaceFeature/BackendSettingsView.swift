@@ -12,6 +12,8 @@ struct BackendSettingsView: View {
     @State private var portText: [String: String] = [:]
     @State private var issue: FieldIssue?
     @State private var error: String?
+    /// The last probe of each port typed, so the port row can say "Available" or "In use".
+    @State private var portAvailability: [Int: Bool] = [:]
 
     init(configuration: ServerConfiguration) {
         _draft = State(initialValue: configuration)
@@ -19,24 +21,26 @@ struct BackendSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Server settings")
-                    .font(DSTypography.title)
+                    .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
-                Text("Configure local listeners and optional pass-through.")
-                    .font(DSTypography.body)
+                    .accessibilityAddTraits(.isHeader)
+                Text(appState.currentProject?.name ?? "Local ports and pass-through")
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
             }
-            .padding(DSSpacing.lg)
+            .padding(.horizontal, DSSpacing.xl)
+            .padding(.top, DSSpacing.xl)
+            .padding(.bottom, DSSpacing.lg)
 
             DSDivider(identifier: "backend.headerDivider")
 
             HStack(spacing: 0) {
                 backendList
                     .frame(width: BackendSettingsGeometry.listWidth)
-                Rectangle()
-                    .fill(DSColors.separator)
-                    .frame(width: DSStroke.seam)
+                DSDivider(axis: .vertical, identifier: "backend.listDivider")
                 ScrollView {
                     selectedBackendDetails
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -47,113 +51,171 @@ struct BackendSettingsView: View {
             .frame(maxHeight: .infinity)
 
             DSDivider(identifier: "backend.footer")
-            HStack(spacing: DSSpacing.md) {
-                if needsRestart {
-                    Label("Restart server to use listener changes", systemImage: "arrow.clockwise")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warningText)
-                        .accessibilityIdentifier("backend.restartHelp")
-                }
-                if let error {
-                    Text(error)
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.destructiveText)
-                        .lineLimit(2)
-                        .accessibilityIdentifier("backend.error")
-                }
-                Spacer(minLength: 0)
-                DSButton("Cancel", variant: .ghost, size: .medium, identifier: "backend.cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier("backend.cancel")
-                .accessibilityLabel("Cancel settings changes")
-                DSButton("Apply", variant: .primary, size: .medium, identifier: "backend.apply") {
-                    apply()
-                }
-                .disabled(hasInvalidPorts)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("backend.apply")
-                .accessibilityLabel("Apply server settings")
-            }
-            .padding(DSSpacing.lg)
+            footer
         }
-        .frame(width: DSSheetWidth.backendSettings,
+        .frame(width: DSSheetWidth.split,
                height: BackendSettingsGeometry.height(backend: draft.backend(id: selectedBackendID),
                                                       visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900))
+        .background(DSColors.sheet)
         .onChange(of: draft) { _, _ in clearIssue() }
         .onChange(of: portText) { _, _ in clearIssue() }
         .accessibilityElement(children: .contain)
     }
 
+    private var footer: some View {
+        HStack(spacing: DSSpacing.sm) {
+            if needsRestart {
+                Label(restartMessage, systemImage: "arrow.clockwise")
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.warning)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .frame(height: DSControlHeight.regular)
+                    .background(Capsule().fill(DSColors.warningBackground))
+                    .accessibilityIdentifier("backend.restartHelp")
+            }
+            if let error {
+                Text(error)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.error)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("backend.error")
+            }
+            Spacer(minLength: 0)
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "backend.cancel") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityIdentifier("backend.cancel")
+            .accessibilityLabel("Cancel settings changes")
+            DSButton("Apply", variant: .primary, size: .large, identifier: "backend.apply") {
+                apply()
+            }
+            .disabled(hasInvalidPorts)
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("backend.apply")
+            .accessibilityLabel("Apply server settings")
+        }
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.vertical, 14)
+    }
+
     private var backendList: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
-            Text("Listeners")
-                .font(DSTypography.controlLabel)
-                .foregroundStyle(DSColors.labelSecondary)
-                .padding(.horizontal, DSSpacing.smPlus)
-                .padding(.top, DSSpacing.smPlus)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Ports")
+                .font(DSTypography.captionSemibold)
+                .foregroundStyle(DSColors.labelTertiary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
             ScrollView {
-                VStack(spacing: DSSpacing.xs) {
+                VStack(spacing: DSSpacing.xxs) {
                     ForEach(draft.listeners) { backend in
                         backendRow(backend)
                     }
                 }
-                .padding(.horizontal, DSSpacing.smPlus)
             }
-            HStack(spacing: DSSpacing.sm) {
-                DSButton("Add", variant: .secondary, size: .small, identifier: "backend.add") {
-                    addBackend()
-                }
-                .accessibilityIdentifier("backend.add")
-                .accessibilityLabel("Add listener")
-                DSButton("Remove", variant: .secondary, size: .small,
-                         identifier: "backend.delete.\(selectedBackendID)") {
-                    removeSelectedBackend()
-                }
-                .disabled(selectedBackendID == ServerConfiguration.primaryID)
-                .accessibilityIdentifier("backend.delete.\(selectedBackendID)")
-                .accessibilityLabel("Remove selected listener")
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, DSSpacing.smPlus)
-            .padding(.bottom, DSSpacing.smPlus)
+            addRemoveControl
+                .padding(.top, DSSpacing.sm)
         }
-        .background(DSColors.surfaceElevated)
+        .padding(.top, DSSpacing.md)
+        .padding([.horizontal, .bottom], DSSpacing.sm)
+        .background(DSColors.sheetSidebar)
     }
+
+    /// The macOS add and remove pair under a source list.
+    private var addRemoveControl: some View {
+        HStack(spacing: 0) {
+            Button {
+                addBackend()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: DSGlyph.field, weight: .medium))
+                    .frame(width: DSControlHeight.large, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DSColors.labelPrimary)
+            .help("Add port")
+            .accessibilityIdentifier("backend.add")
+            .accessibilityLabel("Add port")
+
+            Rectangle()
+                .fill(DSColors.fieldBorder)
+                .frame(width: DSStroke.hairline, height: 22)
+                .accessibilityHidden(true)
+
+            Button {
+                removeSelectedBackend()
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: DSGlyph.field, weight: .medium))
+                    .frame(width: DSControlHeight.large, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(canRemoveSelected ? DSColors.labelPrimary : DSColors.labelTertiary)
+            .disabled(!canRemoveSelected)
+            .help("Remove port")
+            .accessibilityIdentifier("backend.delete.\(selectedBackendID)")
+            .accessibilityLabel("Remove selected port")
+        }
+        .background(DSColors.field)
+        .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.field))
+        .overlay {
+            RoundedRectangle(cornerRadius: DSCornerRadius.field)
+                .strokeBorder(DSColors.fieldBorder, lineWidth: DSStroke.hairline)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var canRemoveSelected: Bool { selectedBackendID != ServerConfiguration.primaryID }
 
     private func backendRow(_ backend: BackendConfiguration) -> some View {
         let isSelected = selectedBackendID == backend.id
-        let prefix = backend.id == ServerConfiguration.primaryID ? "backend.primary" : "backend.\(backend.id)"
-        let hasIssue = issue?.backendID == backend.id || validatedPort(for: prefix, fallback: backend.port) == nil
+        let isPrimary = backend.id == ServerConfiguration.primaryID
+        let prefix = isPrimary ? "backend.primary" : "backend.\(backend.id)"
+        let port = validatedPort(for: prefix, fallback: backend.port)
+        let hasIssue = issue?.backendID == backend.id || port == nil
+        let restartPending = appState.serverState.runningPort != nil
+            && appState.server.boundConfiguration?.backend(id: backend.id)?.port != port
+        var label = "\(backend.name), port \(String(backend.port))"
+        if isPrimary { label += ", primary" }
+        if restartPending && !hasIssue { label += ", needs a restart" }
         return Button {
             selectedBackendID = backend.id
         } label: {
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                HStack(spacing: DSSpacing.xs) {
-                    Text(backend.name.isEmpty ? "Unnamed backend" : backend.name)
+            HStack(spacing: DSSpacing.sm) {
+                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                    Text(backend.name.isEmpty ? "Unnamed port" : backend.name)
                         .font(isSelected ? DSTypography.bodyMedium : DSTypography.body)
-                        .foregroundStyle(DSColors.labelPrimary)
+                        .foregroundStyle(isSelected ? Color.white : DSColors.labelPrimary)
                         .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if hasIssue {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: DSGlyph.inline))
-                            .foregroundStyle(DSColors.destructiveText)
-                            .accessibilityHidden(true)
-                    }
+                    Text(verbatim: isPrimary ? ":\(String(backend.port)) · main" : ":\(String(backend.port))")
+                        .font(DSTypography.caption.monospaced())
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.8) : DSColors.labelSecondary)
+                        .lineLimit(1)
                 }
-                Text(verbatim: backend.id == ServerConfiguration.primaryID
-                     ? "Primary · port \(String(backend.port))" : "Port \(String(backend.port))")
-                    .font(DSTypography.codeSmall)
-                    .foregroundStyle(DSColors.labelSecondary)
+                Spacer(minLength: 0)
+                if hasIssue {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: DSGlyph.field))
+                        .foregroundStyle(isSelected ? Color.white : DSColors.error)
+                        .accessibilityHidden(true)
+                } else if restartPending {
+                    Circle()
+                        .fill(DSColors.warning)
+                        .frame(width: 7, height: 7)
+                        .help("Needs a restart")
+                        .accessibilityHidden(true)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(DSSpacing.smPlus)
+            .frame(maxWidth: .infinity, minHeight: DSFormMetrics.groupRowHeight, alignment: .leading)
+            .padding(.horizontal, 10)
         }
         .buttonStyle(BackendRowButtonStyle(isSelected: isSelected))
         .accessibilityIdentifier("backend.select.\(backend.id)")
-        .accessibilityLabel("\(backend.name), port \(String(backend.port))\(backend.id == ServerConfiguration.primaryID ? ", primary" : "")")
+        .accessibilityLabel(label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -178,31 +240,43 @@ struct BackendSettingsView: View {
         let validPort = validatedPort(for: prefix, fallback: port.wrappedValue)
         let pendingRestart = appState.serverState.runningPort != nil
             && appState.server.boundConfiguration?.backend(id: backendID)?.port != validPort
-        VStack(alignment: .leading, spacing: DSSpacing.xl) {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                sectionHeading("Local listener", detail: "Your app connects to this address.")
-                HStack(alignment: .top, spacing: DSSpacing.md) {
+        VStack(alignment: .leading, spacing: 18) {
+            DSFormSection("Port", identifier: prefix + ".portSection") {
+                DSFormGroupRow("Name") {
                     DSTextField("Name", text: name,
                                 validation: fieldIssue(backendID, .name),
-                                inputIdentifier: prefix + ".name", identifier: prefix + ".name")
+                                controlWidth: 220,
+                                inputIdentifier: prefix + ".name",
+                                labelPlacement: .hidden,
+                                height: DSControlHeight.regular,
+                                identifier: prefix + ".name")
+                }
+                DSDivider()
+                DSFormGroupRow("Port") {
+                    portStatus(port: validPort, pendingRestart: pendingRestart, prefix: prefix, backendID: backendID)
                     DSTextField("Port", text: Binding(get: {
                         portText[prefix] ?? String(port.wrappedValue)
                     }, set: {
                         portText[prefix] = $0
                         if let value = Int($0), (1...65535).contains(value) { port.wrappedValue = value }
                     }), validation: validPort == nil ? "Use 1–65535" : fieldIssue(backendID, .port),
+                        controlWidth: DSFormMetrics.portFieldWidth,
                         inputIdentifier: prefix + ".port",
+                        monospaced: true,
+                        labelPlacement: .hidden,
+                        height: DSControlHeight.regular,
                         identifier: prefix + ".port")
-                        .frame(width: DSFormMetrics.portFieldWidth)
                 }
-                HStack(spacing: DSSpacing.sm) {
+                .task(id: validPort) { await probe(validPort) }
+                DSDivider()
+                DSFormGroupRow("Your app connects to") {
                     Text(verbatim: validPort.map { "http://localhost:\(String($0))" } ?? "Enter a valid local port")
                         .font(DSTypography.code)
-                        .foregroundStyle(DSColors.labelPrimary)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .lineLimit(1)
                         .textSelection(.enabled)
                         .accessibilityIdentifier(prefix + ".localURL")
-                    Spacer(minLength: 0)
-                    DSButton("Copy URL", variant: .secondary, size: .small, identifier: prefix + ".copy") {
+                    DSButton("Copy", variant: .secondary, size: .small, identifier: prefix + ".copy") {
                         guard let validPort else { return }
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString("http://localhost:\(validPort)", forType: .string)
@@ -211,60 +285,91 @@ struct BackendSettingsView: View {
                     .accessibilityIdentifier(prefix + ".copy")
                     .accessibilityLabel("Copy local URL")
                 }
-                if pendingRestart {
-                    Text("Available after server restart")
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.warningText)
-                        .accessibilityIdentifier(prefix + ".pendingRestart")
-                }
             }
-            DSDivider(identifier: prefix + ".sectionDivider")
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                sectionHeading("Pass-through", detail: "Forward calls that do not match a mock.")
-                settingsToggle("Enable pass-through", isOn: enabled,
-                               identifier: prefix + ".enabled")
-                if enabled.wrappedValue {
-                    DSTextField("Real backend URL", text: Binding(get: {
-                        upstream.wrappedValue ?? ""
-                    }, set: {
-                        upstream.wrappedValue = $0.isEmpty ? nil : $0
-                    }), placeholder: "https://api.example.com",
-                        validation: fieldIssue(backendID, .upstream),
-                        validationIdentifier: prefix + ".upstreamError",
-                        inputIdentifier: prefix + ".upstream", identifier: prefix + ".upstream")
-                    settingsToggle("Save responses as mocks", isOn: capture,
-                                   identifier: prefix + ".capture")
-                    if capture.wrappedValue {
-                        Text("Saves text responses up to 5 MiB. Traffic previews show 64 KiB. Credential headers are removed; review bodies for private data.")
-                            .font(DSTypography.label)
-                            .foregroundStyle(DSColors.labelSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier(prefix + ".captureHelp")
+
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                DSFormSection("Upstream", identifier: prefix + ".upstreamSection") {
+                    DSFormToggle("Forward unmatched requests",
+                                 description: "Requests with no endpoint go to your real server.",
+                                 isOn: enabled, identifier: prefix + ".enabled")
+                    if enabled.wrappedValue {
+                        DSDivider()
+                        DSFormGroupRow("Upstream URL") {
+                            DSTextField("Upstream URL", text: Binding(get: {
+                                upstream.wrappedValue ?? ""
+                            }, set: {
+                                upstream.wrappedValue = $0.isEmpty ? nil : $0
+                            }), placeholder: "https://api.example.com",
+                                validation: fieldIssue(backendID, .upstream),
+                                validationIdentifier: prefix + ".upstreamError",
+                                controlWidth: 260,
+                                inputIdentifier: prefix + ".upstream",
+                                monospaced: true,
+                                labelPlacement: .hidden,
+                                height: DSControlHeight.regular,
+                                identifier: prefix + ".upstream")
+                        }
+                        DSDivider()
+                        DSFormToggle("Save forwarded responses as scenarios",
+                                     description: "Credential headers are removed. Check bodies for private data.",
+                                     isOn: capture, identifier: prefix + ".capture")
                     }
                 }
+                if enabled.wrappedValue && capture.wrappedValue {
+                    Text("Saves text responses up to 5 MiB. Traffic previews show 64 KiB.")
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, DSSpacing.xs)
+                        .accessibilityIdentifier(prefix + ".captureHelp")
+                }
             }
         }
     }
 
-    private func sectionHeading(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            Text(title).font(DSTypography.subheading).foregroundStyle(DSColors.labelPrimary)
-            Text(detail).font(DSTypography.label).foregroundStyle(DSColors.labelSecondary)
+    /// Beside the port field: a port the running server has yet to move to says so; otherwise the
+    /// probe's answer. A port this listener already serves on is its own, so it reads as available.
+    @ViewBuilder
+    private func portStatus(port: Int?, pendingRestart: Bool, prefix: String, backendID: UUID) -> some View {
+        if let port {
+            if pendingRestart {
+                // One Text, so the state reads as the static text it always was to UI tests.
+                Text("\(Image(systemName: "arrow.clockwise")) After a restart")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.warning)
+                    .help("The running server moves to this port when it restarts")
+                    .accessibilityIdentifier(prefix + ".pendingRestart")
+            } else if let available = availability(of: port, for: backendID) {
+                DSAvailabilityLabel(isAvailable: available, identifier: prefix + ".availability")
+            }
         }
     }
 
-    private func settingsToggle(_ title: String, isOn: Binding<Bool>, identifier: String) -> some View {
-        Toggle(isOn: isOn) {
-            Text(title)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// Probes a typed port after a pause, so each keystroke in the field is not a bind.
+    private func probe(_ port: Int?) async {
+        guard let port else { return }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        portAvailability[port] = PortProbe.isAvailable(port)
+    }
+
+    private func availability(of port: Int, for backendID: UUID) -> Bool? {
+        if appState.serverState.runningPort != nil,
+           appState.server.boundConfiguration?.backend(id: backendID)?.port == port {
+            return true
         }
-        .toggleStyle(.switch)
-        .font(DSTypography.body)
-        .foregroundStyle(DSColors.labelPrimary)
-        .tint(DSColors.accent)
-        .frame(maxWidth: .infinity, minHeight: DSControlHeight.prominent)
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(title)
+        if draft.listeners.contains(where: { $0.id != backendID && $0.port == port }) { return false }
+        return portAvailability[port]
+    }
+
+    /// Names the listener when only one waits on a restart, as the design does.
+    private var restartMessage: String {
+        guard let bound = appState.server.boundConfiguration else { return "Restart the server to use port changes" }
+        let moved = draft.listeners.filter { bound.backend(id: $0.id)?.port != $0.port }
+        if moved.count == 1, let name = moved.first?.name, !name.isEmpty {
+            return "\(name) starts on its new port after a restart"
+        }
+        return "Restart the server to use port changes"
     }
 
     private var needsRestart: Bool {
@@ -357,12 +462,12 @@ private struct FieldIssue {
 }
 
 private enum BackendSettingsGeometry {
-    static let listWidth: CGFloat = 200
+    static let listWidth: CGFloat = 208
 
     static func height(backend: BackendConfiguration?, visibleScreenHeight: CGFloat) -> CGFloat {
         let contentHeight: CGFloat
         if backend?.passthroughEnabled == true {
-            contentHeight = backend?.captureResponses == true ? 560 : 520
+            contentHeight = backend?.captureResponses == true ? 580 : 520
         } else {
             contentHeight = 460
         }
@@ -370,8 +475,8 @@ private enum BackendSettingsGeometry {
     }
 }
 
-/// A listener selection stays blue; hover is a quiet neutral surface, so the two states cannot
-/// look like two selected listeners when the pointer remains over the previous row.
+/// The selected port is an accent fill with white text; hover is a quiet neutral wash, so the two
+/// never read as two selections.
 private struct BackendRowButtonStyle: ButtonStyle {
     let isSelected: Bool
 
@@ -387,14 +492,15 @@ private struct BackendRowButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                        .fill(isSelected || configuration.isPressed ? DSColors.accentMuted
-                              : isHovered ? DSColors.tertiary : .clear)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.segment)
+                        .fill(isSelected ? DSColors.accent
+                              : configuration.isPressed ? DSColors.selectionInactive
+                              : isHovered ? DSColors.hover : .clear)
                 }
-                .contentShape(RoundedRectangle(cornerRadius: DSCornerRadius.sm))
+                .contentShape(RoundedRectangle(cornerRadius: DSCornerRadius.segment))
                 .onHover { isHovered = $0 }
-                .animation(.easeOut(duration: DSAnimation.micro), value: isHovered)
-                .animation(.easeOut(duration: DSAnimation.micro), value: configuration.isPressed)
+                .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
+                .animation(.easeOut(duration: DSAnimation.fast), value: configuration.isPressed)
         }
     }
 }

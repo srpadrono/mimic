@@ -181,6 +181,17 @@ struct ProjectFeatureRenderingTests {
                 onRequestNewProject: {}
             )
         )
+        // With the Open project export row the window wires, beside New project.
+        render(
+            WelcomeWindow(
+                recentProjects: entries,
+                onOpenProject: { _ in },
+                onDuplicateProject: { _ in },
+                onDeleteProject: { _ in },
+                onRequestNewProject: {},
+                onRequestOpenExport: {}
+            )
+        )
 
         let target = try! #require(entries.first)
         render(

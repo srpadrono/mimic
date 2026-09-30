@@ -98,6 +98,9 @@ struct PanelLayoutStoreTests {
         // the floor and the preferred width are ours to state.
         #expect(PanelLayoutStore.Bounds.minimumInspectorWidth > 0)
         #expect(PanelLayoutStore.Bounds.idealInspectorWidth >= PanelLayoutStore.Bounds.minimumInspectorWidth)
+        // The redesign's inspector opens at 300pt and never narrows below 260pt.
+        #expect(PanelLayoutStore.Bounds.minimumInspectorWidth == 260)
+        #expect(PanelLayoutStore.Bounds.idealInspectorWidth == 300)
     }
 
     @Test("A nonsensical stored size falls back to the default")

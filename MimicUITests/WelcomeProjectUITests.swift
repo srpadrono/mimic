@@ -73,13 +73,11 @@ final class WelcomeProjectUITests: MimicUITestCase {
             "The version line should name a version rather than the bare word, got '\(versionText)'"
         )
 
-        // The recents pane wears a panel header even when it has nothing to list.
+        // The recents pane keeps its caption even when it has nothing to list, and carries no count.
         XCTAssertTrue(
-            staticTextExists(exactly: "Projects"),
-            "The recents pane should carry the Projects panel header"
+            headingExists(exactly: "Recent projects"),
+            "The recents pane should carry the Recent projects caption"
         )
-        // `recentCountSubtitle` returns nil rather than "0" when the list is empty — an empty panel
-        // does not need a number to say it is empty.
         XCTAssertFalse(
             staticTextExists(exactly: "0", timeout: 1),
             "An empty recents pane should show no count at all, not a zero"
@@ -91,39 +89,24 @@ final class WelcomeProjectUITests: MimicUITestCase {
             shownText(of: hint).contains("Create one"),
             "The empty-state hint should tell the user to create a project, got '\(shownText(of: hint))'"
         )
+        // The four start actions of the design.
+        XCTAssertTrue(welcome.openExportButton.waitForExistence(timeout: 3),
+                      "The welcome window should offer to open a project export")
+        XCTAssertEqual(welcome.openExportButton.label, "Open project export\u{2026}")
+        XCTAssertTrue(welcome.importMenu.waitForExistence(timeout: 3),
+                      "The welcome window should offer to import a HAR file or an OpenAPI spec")
+        XCTAssertTrue(welcome.sampleProjectButton.waitForExistence(timeout: 3),
+                      "The welcome window should offer the sample project")
+        XCTAssertTrue(welcome.showOnLaunchCheckbox.waitForExistence(timeout: 3),
+                      "The recents pane should end with the show-on-launch checkbox")
+
         let screenshot = XCTAttachment(screenshot: app.windows["Mimic"].firstMatch.screenshot())
         screenshot.name = "welcome-empty"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
 
-    /// WELC-06 — the count in the panel header's subtitle slot tracks the list.
-    @MainActor
-    func testRecentsPanelHeaderCountsTheProjects() throws {
-        launchApp()
-
-        createProjectViaUI(name: "Count One")
-        waitForAsyncSave()
-        closeProjectViaMenu()
-        XCTAssertTrue(welcome.assertVisible())
-
-        XCTAssertTrue(
-            staticTextExists(exactly: "1"),
-            "The Projects header should report a count of 1 with one project stored"
-        )
-
-        createProjectViaUI(name: "Count Two")
-        waitForAsyncSave()
-        closeProjectViaMenu()
-        XCTAssertTrue(welcome.assertVisible())
-
-        XCTAssertTrue(
-            staticTextExists(exactly: "2"),
-            "The Projects header count should follow the list to 2"
-        )
-    }
-
-    /// WELC-10 — a row says when its project was last opened.
+    /// WELC-10 — a row says when its project was last opened and what it holds.
     @MainActor
     func testRecentProjectRowStatesWhenItWasLastOpened() throws {
         launchApp()
@@ -143,8 +126,13 @@ final class WelcomeProjectUITests: MimicUITestCase {
         // asserted through the row rather than app-wide. It is only the row's *identifier* that the
         // list's identifier overrides — see `recentsRow(named:)`.
         XCTAssertTrue(
-            rowText(in: row, beginningWith: "Last opened").exists,
-            "The row should state when the project was last opened"
+            rowText(in: row, exactly: "Today").exists,
+            "The row should state the day the project was last opened"
+        )
+        // The detail line summarises the stored project: its port and what it holds.
+        XCTAssertTrue(
+            rowText(in: row, exactly: "Port 8080 \u{00B7} 0 endpoints").waitForExistence(timeout: 5),
+            "The row should summarise the project's port and endpoints"
         )
         XCTAssertTrue(
             rowText(in: row, exactly: "Recency Row").exists,
@@ -262,6 +250,73 @@ final class WelcomeProjectUITests: MimicUITestCase {
             openedEndpoint(in: "Fallback Newer", path: "/newer").waitForExistence(timeout: 10),
             "After the selected project was deleted the selection should fall back to the first "
                 + "surviving row, so Return opens Fallback Newer rather than doing nothing"
+        )
+    }
+
+    // MARK: - Start actions
+
+    /// The sample project opens straight into a workspace with its endpoints, and is listed after.
+    @MainActor
+    func testSampleProjectOpensWithItsEndpoints() throws {
+        launchApp()
+
+        XCTAssertTrue(welcome.sampleProjectButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(welcome.sampleProjectButton.label, "Try the sample project")
+        welcome.sampleProjectButton.click()
+
+        let navigator = NavigatorPage(app: app)
+        XCTAssertTrue(
+            navigator.endpointRow(named: "Log in", path: "/login").waitForExistence(timeout: 10),
+            "The sample project should open with its endpoints listed"
+        )
+        XCTAssertTrue(navigator.endpointRow(named: "Product", path: "/products/:id").exists)
+
+        closeProjectViaMenu()
+        XCTAssertTrue(welcome.assertVisible())
+        XCTAssertNotNil(
+            welcome.findRecentProject(named: "Sample project"),
+            "The sample should be stored like any other project"
+        )
+    }
+
+    /// One Import row for both formats: its menu asks which, and cancelling creates nothing.
+    @MainActor
+    func testImportFromWelcomeAsksForTheFormatAndCancelCreatesNothing() throws {
+        launchApp()
+
+        XCTAssertTrue(welcome.importMenu.waitForExistence(timeout: 5))
+        welcome.importMenu.click()
+        let harItem = welcome.importHARMenuItem
+        XCTAssertTrue(harItem.waitForExistence(timeout: 3), "The import menu should offer a HAR file")
+        XCTAssertTrue(welcome.importOpenAPIMenuItem.exists,
+                      "The import menu should offer an OpenAPI spec")
+        harItem.click()
+
+        let harImport = HARImportPage(app: app)
+        XCTAssertTrue(harImport.emptyHeading.waitForExistence(timeout: 5),
+                      "Choosing HAR file should open the HAR import sheet")
+        harImport.cancelButton.click()
+
+        XCTAssertTrue(welcome.assertVisible(), "Cancelling the import should leave the welcome window up")
+        XCTAssertTrue(
+            welcome.waitForNoRecentProjectsLabel(timeout: 3),
+            "Cancelling the import should not have created a project"
+        )
+    }
+
+    /// The show-on-launch checkbox starts off, so launch keeps restoring the last project, and it
+    /// can be turned on.
+    @MainActor
+    func testShowOnLaunchCheckboxStartsOffAndToggles() throws {
+        launchApp()
+
+        let checkbox = welcome.showOnLaunchCheckbox
+        XCTAssertTrue(checkbox.waitForExistence(timeout: 5))
+        XCTAssertEqual(checkbox.value as? Int, 0, "Launch restores the last project unless asked not to")
+        checkbox.click()
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3) { (checkbox.value as? Int) == 1 },
+            "Clicking the checkbox should turn it on"
         )
     }
 
@@ -518,10 +573,6 @@ final class WelcomeProjectUITests: MimicUITestCase {
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { copies.count == 2 },
             "Duplicating twice should leave two copies in the list, found \(copies.count)"
-        )
-        XCTAssertTrue(
-            staticTextExists(exactly: "3"),
-            "The Projects header should count the original and both copies"
         )
     }
 
@@ -889,6 +940,14 @@ final class WelcomeProjectUITests: MimicUITestCase {
     private func staticTextExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
         let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
         return app.staticTexts.matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+    }
+
+    /// A header-trait `Text` is published as a heading, not a `StaticText`, so it is matched across
+    /// element types.
+    @MainActor
+    private func headingExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
+        let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
+        return app.descendants(matching: .any).matching(predicate).firstMatch.waitForExistence(timeout: timeout)
     }
 
     @MainActor

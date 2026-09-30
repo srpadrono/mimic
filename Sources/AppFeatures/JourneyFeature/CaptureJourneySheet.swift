@@ -8,10 +8,6 @@ import SwiftUI
 /// build before it builds it. Eight selected calls can be five steps once repeated polls collapse and
 /// requests an active journey already answered drop out; discovering that only afterwards, in the
 /// editor, makes a correct capture look like a bug.
-///
-/// Follows the shared sheet convention: a sentence-case heading inside the sheet, `DSSpacing.lg`
-/// between the heading, the fields and the button row, `DSSpacing.lg` of outer padding, and a
-/// trailing button row with cancel to the left of the confirm action.
 struct CaptureJourneySheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -73,14 +69,16 @@ struct CaptureJourneySheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 Text("New journey from traffic")
-                    .font(DSTypography.title)
+                    .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityAddTraits(.isHeader)
 
                 Text(capture.summary)
-                    .font(DSTypography.label)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(capture.refusal == nil ? DSColors.labelSecondary : DSColors.error)
+                    .lineSpacing(DSTypography.Leading.callout)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("captureJourney.summary")
             }
@@ -88,19 +86,19 @@ struct CaptureJourneySheet: View {
             DSTextField(
                 "Name",
                 text: $name,
-                placeholder: "e.g. Checkout retries",
+                placeholder: "Checkout retries",
                 identifier: "captureJourney.name"
             )
             .accessibilityIdentifier("captureJourney.nameField")
             .focused($focusedField, equals: .name)
             .onSubmit(create)
 
-            HStack(spacing: DSSpacing.md) {
+            HStack(spacing: DSSpacing.sm) {
                 Spacer()
                 DSButton(
                     "Cancel",
-                    variant: .ghost,
-                    size: .medium,
+                    variant: .secondary,
+                    size: .large,
                     identifier: "captureJourney.cancel",
                     action: dismiss.callAsFunction
                 )
@@ -111,7 +109,7 @@ struct CaptureJourneySheet: View {
                 DSButton(
                     "Create journey",
                     variant: .primary,
-                    size: .medium,
+                    size: .large,
                     identifier: "captureJourney.create",
                     action: create
                 )
@@ -120,9 +118,11 @@ struct CaptureJourneySheet: View {
                 .disabled(trimmedName.isEmpty || capture.refusal != nil)
                 .keyboardShortcut(.defaultAction)
             }
+            .padding(.top, DSSpacing.sm)
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
     }
 

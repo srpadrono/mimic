@@ -8,6 +8,8 @@ struct JourneyNavigatorList: View {
     let journeys: [Journey]
     /// The journey currently overriding endpoint responses, if any.
     let activeJourneyID: UUID?
+    /// Where the active journey's run has got to, shown on its row as "3/5".
+    let activeStatus: JourneyStatus?
     /// What the centre pane is editing. Selecting is *not* activating — see ``JourneyNavigatorRow``.
     @Binding var selectedJourneyID: UUID?
     /// Pass `nil` to deactivate whatever is running.
@@ -27,13 +29,15 @@ struct JourneyNavigatorList: View {
     var searchText: String = ""
     @Binding var collapsedGroups: Set<String>
 
-    init(journeys: [Journey], activeJourneyID: UUID?, selectedJourneyID: Binding<UUID?>,
+    init(journeys: [Journey], activeJourneyID: UUID?, activeStatus: JourneyStatus? = nil,
+         selectedJourneyID: Binding<UUID?>,
          onActivate: @escaping (UUID?) -> Void, onAdd: @escaping () -> Void,
          onDuplicate: @escaping (UUID) -> Void, onDelete: @escaping (UUID) -> Void,
          onRename: @escaping (UUID, String) -> Void = { _, _ in },
          searchText: String = "", collapsedGroups: Binding<Set<String>> = .constant([])) {
         self.journeys = journeys
         self.activeJourneyID = activeJourneyID
+        self.activeStatus = activeStatus
         self._selectedJourneyID = selectedJourneyID
         self.onActivate = onActivate
         self.onAdd = onAdd
@@ -47,24 +51,13 @@ struct JourneyNavigatorList: View {
     var body: some View {
         VStack(spacing: 0) {
             if journeys.isEmpty {
-                // The navigator header stays put above this, so the panel keeps its chrome and
-                // its height whichever branch renders. Chrome that disappears with its content reads
-                // as a rendering glitch, and it would leave this navigator a row shorter than the
-                // endpoint one.
                 DSEmptyState(
                     systemImage: NavigatorTab.journeys.systemImage,
                     heading: "No journeys",
                     message: "A journey scripts an ordered sequence of responses, so one endpoint can "
                         + "fail and then succeed on the retry. Add one to script a flow endpoints "
                         + "alone can't express.",
-                    // This must stay different from the navigator "+" menu's label above the list
-                    // ("Choose how to add a journey", set in `WorkspaceView.addJourneyMenu`). The
-                    // two controls do different things: this one creates a journey outright — no
-                    // ellipsis, no sheet, straight to `onAdd` — while that one opens a chooser. They
-                    // carried the same words until the UI suite was found telling them apart by
-                    // AppKit element type, which is a property of a menu style rather than of either
-                    // control's identity. `DSEmptyState` speaks this string to VoiceOver as the
-                    // button's label, so the copy and the name are the same decision.
+                    // Creates a journey outright; worded apart from the "+" menu, which opens a chooser.
                     actionTitle: "Add journey",
                     identifier: "journeys.empty",
                     action: onAdd
@@ -73,7 +66,7 @@ struct JourneyNavigatorList: View {
                 List(selection: $selectedJourneyID) {
                     if filteredJourneys.isEmpty {
                         Text("No journeys match your filter")
-                            .font(DSTypography.label)
+                            .font(DSTypography.callout)
                             .foregroundStyle(DSColors.labelSecondary)
                             .dsNavigatorRow()
                             .selectionDisabled()
@@ -91,7 +84,7 @@ struct JourneyNavigatorList: View {
                                 collapsedGroups.insert(Self.groupSectionKey(name))
                             }
                         }
-                        .padding(.top, name == groupNames.first ? 0 : DSSpacing.smPlus)
+                        .padding(.top, name == groupNames.first ? 0 : DSSpacing.sm)
                         if !collapsedGroups.contains(Self.groupSectionKey(name)) {
                             ForEach(groupedJourneys[name] ?? []) { journey in
                                 journeyRow(journey, indented: true)
@@ -110,7 +103,7 @@ struct JourneyNavigatorList: View {
                                 collapsedGroups.insert(Self.ungroupedSectionKey)
                             }
                         }
-                        .padding(.top, DSSpacing.smPlus)
+                        .padding(.top, DSSpacing.sm)
                     }
                     if groupNames.isEmpty || !collapsedGroups.contains(Self.ungroupedSectionKey) {
                         ForEach(ungroupedJourneys) { journey in
@@ -227,6 +220,7 @@ struct JourneyNavigatorList: View {
     private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
         JourneyNavigatorRow(
             journey: journey, isActive: journey.id == activeJourneyID,
+            progress: journey.id == activeJourneyID ? activeStatus.flatMap(JourneyNavigatorRow.progressText) : nil,
             isSelected: journey.id == selectedJourneyID,
             onToggleActivation: { onActivate(journey.id == activeJourneyID ? nil : journey.id) },
             onRename: { renameTarget = journey },
@@ -258,6 +252,8 @@ struct JourneyNavigatorList: View {
 struct JourneyNavigatorRow: View {
     let journey: Journey
     let isActive: Bool
+    /// "3/5" while the journey runs; `nil` shows "Active" instead.
+    var progress: String? = nil
     var isSelected: Bool = false
     let onToggleActivation: () -> Void
     var onRename: () -> Void = {}
@@ -265,26 +261,28 @@ struct JourneyNavigatorRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
-            Image(systemName: isActive ? "play.circle.fill" : NavigatorTab.journeys.systemImage)
-                .font(.system(size: DSGlyph.controlProminent))
-                .foregroundStyle(isActive && !isSelected ? DSColors.accentText : DSColors.labelSecondary)
+        HStack(spacing: DSSpacing.sm) {
+            Image(systemName: NavigatorTab.journeys.systemImage)
+                .font(.system(size: DSGlyph.control))
+                .foregroundStyle(iconStyle)
                 .frame(width: DSNavigatorMetrics.iconSlot)
                 .accessibilityHidden(true)
 
-            // Names stay at full contrast whether or not a journey is running: dimming the rest of
-            // the list to mark one row would make the other journeys harder to read for no reason.
             Text(journey.name)
-                .font(DSTypography.labelMedium)
-                .foregroundStyle(DSColors.labelPrimary)
+                .font(DSTypography.body)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("· \(stepCountText)")
-                .font(DSTypography.meta)
-                .foregroundStyle(DSColors.labelSecondary)
-                .monospacedDigit()
-                .fixedSize()
-            Spacer(minLength: 0)
+            // The run's position is the text, not a colour, so the active row reads as active
+            // whatever the selection paints behind it.
+            if isActive {
+                Text(progress ?? "Active")
+                    .font(DSTypography.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.secondary) : AnyShapeStyle(DSColors.labelSecondary))
+                    .fixedSize()
+            }
         }
         .contentShape(Rectangle())
         .help(accessibilityDescription)
@@ -311,10 +309,7 @@ struct JourneyNavigatorRow: View {
 
             Divider()
 
-            // The ellipsis is honest now: `JourneyNavigatorList` presents a confirmation before it
-            // calls through. It used to hand `appState.deleteJourney` straight to this button, so a
-            // journey and every step in it went in one click, with no undo — while the identical
-            // command in the journeys window asked first.
+            // The list confirms before deleting.
             Button(role: .destructive, action: onDelete) {
                 Label("Delete journey\u{2026}", systemImage: "trash")
             }
@@ -325,6 +320,19 @@ struct JourneyNavigatorRow: View {
         .accessibilityLabel(accessibilityDescription)
     }
 
+    private var iconStyle: AnyShapeStyle {
+        if isSelected { return AnyShapeStyle(.primary) }
+        return isActive ? AnyShapeStyle(DSColors.accent) : AnyShapeStyle(DSColors.labelSecondary)
+    }
+
+    /// "3/5" at the current step, "5/5" once the run is complete.
+    static func progressText(_ status: JourneyStatus) -> String? {
+        guard status.totalSteps > 0 else { return nil }
+        if status.isComplete { return "\(status.totalSteps)/\(status.totalSteps)" }
+        guard let index = status.currentStepIndex else { return nil }
+        return "\(index + 1)/\(status.totalSteps)"
+    }
+
     private var stepCountText: String {
         "\(journey.steps.count) \(journey.steps.count == 1 ? "step" : "steps")"
     }
@@ -332,7 +340,9 @@ struct JourneyNavigatorRow: View {
     /// Spoken as "Session expiry, 4 steps, active" — the activation state is in the label so a test
     /// can assert that selecting a row did *not* start it.
     private var accessibilityDescription: String {
-        "\(journey.name), \(stepCountText), \(isActive ? "active" : "not active")"
+        var text = "\(journey.name), \(stepCountText), \(isActive ? "active" : "not active")"
+        if isActive, let progress { text += ", step \(progress.replacingOccurrences(of: "/", with: " of "))" }
+        return text
     }
 }
 

@@ -11,6 +11,7 @@ public final class RecentProjectsStore: @unchecked Sendable {
     private static let lock = NSLock()
     private static let key = "recentProjects"
     private static let lastOpenedKey = "lastOpenedProjectID"
+    private static let showsWelcomeKey = "showsWelcomeOnLaunch"
     private static let maxEntries = 10
 
     private let defaults: UserDefaults
@@ -78,6 +79,15 @@ public final class RecentProjectsStore: @unchecked Sendable {
                 defaults.removeObject(forKey: Self.lastOpenedKey)
             }
         }
+    }
+
+    // MARK: - Launch
+
+    /// Whether launch shows the welcome window instead of reopening the last project. Off unless the
+    /// person turns it on, so a launch keeps restoring where they left off.
+    public var showsWelcomeOnLaunch: Bool {
+        get { defaults.bool(forKey: Self.showsWelcomeKey) }
+        set { defaults.set(newValue, forKey: Self.showsWelcomeKey) }
     }
 
     // MARK: - Last Opened

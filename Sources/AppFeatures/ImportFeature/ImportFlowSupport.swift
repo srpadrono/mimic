@@ -173,6 +173,9 @@ final class ImportWorkflow {
     /// either outcome so an abandoned result cannot replace the current file's review.
     private var parseGeneration = 0
 
+    /// The name of the file being reviewed, shown under the sheet title.
+    private(set) var sourceFileName: String?
+
     init(
         kind: ImportKind = .har,
         candidates: [ImportCandidate] = [],
@@ -253,6 +256,7 @@ final class ImportWorkflow {
         parse: @escaping @Sendable (Data, [Endpoint]) async throws -> [ImportCandidate]
     ) {
         beginParsing()
+        sourceFileName = url.lastPathComponent
 
         parseGeneration &+= 1
         let generation = parseGeneration
@@ -358,44 +362,24 @@ struct ImportWorkflowScreen: View {
         @Bindable var workflow = workflow
 
         VStack(spacing: 0) {
-            // A sheet heading at `DSTypography.title`, *not* a `DSPanelHeader`, and deliberately so.
-            // This is the shared sheet convention — `NewProjectSheet`, `NewJourneySheet`,
-            // `JourneyTemplatePicker` and `JourneyStepSheet` all open with a sentence-case 21pt
-            // heading — and a modal you have just opened from a menu needs a title that says what it
-            // is, which a small `labelSecondary` caption does not. The decisive part is what sits
-            // directly beneath: `ImportReviewList` opens with a real `DSPanelHeader` ("Endpoints
-            // found"), so making this one too would stack two identical 36pt panel bars and leave
-            // the sheet with no title at all.
-            HStack(spacing: DSSpacing.sm) {
-                Text(kind.title)
-                    .font(DSTypography.title)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).title")
-                Spacer(minLength: DSSpacing.sm)
-            }
-            .padding(DSSpacing.md)
-
-            DSDivider(identifier: "\(kind.rootAccessibilityIdentifier).header")
+            header
 
             if workflow.isParsing {
                 ProgressView(kind.parsingMessage)
+                    .controlSize(.small)
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelSecondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityIdentifier(kind.parsingAccessibilityIdentifier)
             } else if let error = workflow.parseError {
-                // No `Spacer()` above and below. `DSEmptyState` already claims
-                // `.frame(maxHeight: .infinity)` and centres itself inside it, so a `Spacer` either
-                // side gave three equally flexible children one third of the sheet each — and one
-                // third of a 560pt sheet is less than the icon, heading, message and button need, so
-                // the state that exists to explain a failure was the one squeezed out of room.
+                // `DSEmptyState` fills and centres itself; no spacers around it.
                 DSEmptyState(
                     systemImage: "exclamationmark.triangle",
                     heading: "Parse error",
                     message: error,
                     actionTitle: "Choose another file",
                     identifier: kind.errorAccessibilityIdentifier,
-                    // The sheet's only action, so Return has to reach it. Without this the import
-                    // sheets answered neither Return nor Tab: a modal whose one control could only
-                    // be hit with a mouse.
+                    // The only action, so Return reaches it.
                     isDefaultAction: true
                 ) {
                     workflow.chooseFile(existingEndpoints: existingEndpoints)
@@ -420,39 +404,91 @@ struct ImportWorkflowScreen: View {
                 )
             }
 
-            if workflow.isParsing || workflow.parseError != nil || workflow.candidates.isEmpty {
+            if !isReviewing {
                 DSDivider(identifier: "\(kind.rootAccessibilityIdentifier).footer")
                 HStack {
                     Spacer()
                     cancelButton
                 }
-                .padding(DSSpacing.md)
+                .padding(.horizontal, DSSpacing.xl)
+                .padding(.vertical, DSSpacing.md)
             }
         }
-        .frame(minWidth: 600, minHeight: 360)
-        // Paired, or this one identifier renames every control in the import sheet — the cancel
-        // button, the select-all pair, and all two hundred candidate toggles would each report
-        // "harImportView" and none of them would be addressable. Still correct: this container holds
-        // several addressable things, which is exactly the case that needs `.contain`. Nothing
-        // between here and them masks a child either — `DSEmptyState` and `ImportReviewList`'s
-        // candidate list pair their own container identifiers, and the cancel button and the
-        // progress view are leaves whose identifiers are the ones a test looks for.
+        .frame(minWidth: DSSheetWidth.wide, minHeight: 360)
+        .background(DSColors.sheet)
+        // Paired so the controls inside keep their own identifiers.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(kind.rootAccessibilityIdentifier)
         .onDisappear { workflow.cancelParsing() }
     }
 
+    private var isReviewing: Bool {
+        !workflow.isParsing && workflow.parseError == nil && !workflow.candidates.isEmpty
+    }
+
+    /// Title, a subtitle naming the file under review, and a way to pick a different one.
+    private var header: some View {
+        HStack(alignment: .center, spacing: DSSpacing.md) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(kind.title)
+                    .font(DSTypography.headline)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).title")
+
+                if isReviewing {
+                    HStack(spacing: 0) {
+                        // Its own `Text` so the words can be found exactly.
+                        Text("Endpoints found")
+                        Text(subtitleDetail)
+                    }
+                    .font(DSTypography.callout)
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isReviewing {
+                DSButton(
+                    "Choose another file\u{2026}",
+                    variant: .secondary,
+                    size: .medium,
+                    identifier: "\(kind.rootAccessibilityIdentifier).chooseFile"
+                ) {
+                    workflow.chooseFile(existingEndpoints: existingEndpoints)
+                }
+            }
+        }
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.top, DSSpacing.xl)
+        .padding(.bottom, isReviewing ? DSSpacing.md : DSSpacing.lg)
+    }
+
+    private var subtitleDetail: String {
+        let count = workflow.candidates.count
+        let noun: String
+        switch kind {
+        case .har: noun = count == 1 ? "request" : "requests"
+        case .openAPI: noun = count == 1 ? "operation" : "operations"
+        }
+        var parts = [String]()
+        if let name = workflow.sourceFileName, !name.isEmpty { parts.append(name) }
+        parts.append("\(count) \(noun)")
+        return " \u{00B7} " + parts.joined(separator: " \u{00B7} ")
+    }
+
     private var cancelButton: some View {
         DSButton(
             "Cancel",
-            variant: .ghost,
-            size: .medium,
+            variant: .secondary,
+            size: .large,
             identifier: "\(kind.rootAccessibilityIdentifier).cancel",
             action: dismiss.callAsFunction
         )
+        .keyboardShortcut(.cancelAction)
         .accessibilityIdentifier(kind.cancelAccessibilityIdentifier)
         .accessibilityLabel("Cancel")
-        .keyboardShortcut(.cancelAction)
     }
 }
 

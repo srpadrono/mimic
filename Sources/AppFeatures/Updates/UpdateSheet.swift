@@ -4,10 +4,8 @@ import SwiftUI
 
 /// The window's whole update conversation, in one sheet.
 ///
-/// Follows the shared sheet convention: a sentence-case heading, `DSSpacing.lg` between the heading,
-/// the body and the button row, and a trailing button row with the confirming action last. Every
-/// state renders from ``UpdateService/Phase`` and nothing else, so there is no arrangement of flags
-/// that can put a progress bar under a heading saying the app is up to date.
+/// App icon beside a headline title and summary, the phase body, then a footer with the automatic
+/// check toggle and the phase buttons. Every state renders from ``UpdateService/Phase`` alone.
 struct UpdateSheet: View {
 
     let service: UpdateService
@@ -18,19 +16,12 @@ struct UpdateSheet: View {
 
             body(for: service.phase)
 
-            Divider()
-
-            HStack(spacing: DSSpacing.md) {
-                // `.lineLimit(1)` and `.layoutPriority(1)` on the buttons together, because the row
-                // has four controls in it and SwiftUI resolves an over-full `HStack` by compressing
-                // whatever will compress. At 460pt it chose the buttons: "Skip this version"
-                // rendered as "Skip this versi…" — a truncated *control label*, which is the one
-                // string in a row that must never be guessed at — while the checkbox wrapped onto
-                // two lines. Widening alone would fix today's strings and leave the next longer one
-                // to find it again.
+            HStack(spacing: DSSpacing.sm) {
+                // The buttons keep one line and take priority, so a narrow row never truncates a
+                // control label.
                 Toggle("Check automatically", isOn: automaticChecks)
                     .toggleStyle(.checkbox)
-                    .font(DSTypography.label)
+                    .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
                     .accessibilityIdentifier("update.automaticToggle")
@@ -43,8 +34,9 @@ struct UpdateSheet: View {
                     .layoutPriority(1)
             }
         }
-        .padding(DSSpacing.lg)
-        .frame(minWidth: DSSheetWidth.medium, idealWidth: DSSheetWidth.medium)
+        .padding(DSSpacing.xl)
+        .frame(width: DSSheetWidth.medium)
+        .background(DSColors.sheet)
         .interactiveDismissDisabled(service.phase.isBusy)
     }
 
@@ -54,12 +46,28 @@ struct UpdateSheet: View {
 
     // MARK: - Heading
 
-    @ViewBuilder
     private var heading: some View {
-        Text(title(for: service.phase))
-            .font(DSTypography.title)
-            .foregroundStyle(DSColors.labelPrimary)
-            .accessibilityIdentifier("update.title")
+        HStack(alignment: .top, spacing: DSSpacing.md) {
+            Image("MimicLogo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 56, height: 56)
+                // App-icon squircle, not a control corner.
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                Text(title(for: service.phase))
+                    .font(DSTypography.headline)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("update.title")
+
+                subtitle(for: service.phase)
+            }
+            .padding(.top, DSSpacing.sm)
+        }
     }
 
     private func title(for phase: UpdateService.Phase) -> String {
@@ -81,13 +89,35 @@ struct UpdateSheet: View {
         }
     }
 
+    @ViewBuilder
+    private func subtitle(for phase: UpdateService.Phase) -> some View {
+        switch phase {
+        case .upToDate(let installed):
+            subtitleText("Mimic \(installed.description) is the newest version.")
+                .accessibilityIdentifier("update.upToDate")
+        case .available(let release):
+            subtitleText("You have \(service.installedVersionDescription). "
+                + "The download is \(release.asset.sizeInBytes.formatted(.byteCount(style: .file))).")
+                .accessibilityIdentifier("update.summary")
+        case .idle, .checking, .downloading, .readyToInstall, .installing, .failed:
+            EmptyView()
+        }
+    }
+
+    private func subtitleText(_ text: String) -> some View {
+        Text(text)
+            .font(DSTypography.callout)
+            .foregroundStyle(DSColors.labelSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     // MARK: - Body
 
     @ViewBuilder
     private func body(for phase: UpdateService.Phase) -> some View {
         switch phase {
         case .idle, .checking:
-            HStack(spacing: DSSpacing.smPlus) {
+            HStack(spacing: DSSpacing.sm) {
                 ProgressView().controlSize(.small)
                 Text("Asking GitHub for the newest release\u{2026}")
                     .font(DSTypography.body)
@@ -95,70 +125,62 @@ struct UpdateSheet: View {
             }
             .accessibilityIdentifier("update.checking")
 
-        case .upToDate(let installed):
-            Text("Mimic \(installed.description) is the newest version.")
-                .font(DSTypography.body)
-                .foregroundStyle(DSColors.labelSecondary)
-                .accessibilityIdentifier("update.upToDate")
+        case .upToDate:
+            EmptyView()
 
         case .available(let release):
-            VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
-                Text("You have \(service.installedVersionDescription). "
-                    + "The installer is \(release.asset.sizeInBytes.formatted(.byteCount(style: .file))).")
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .accessibilityIdentifier("update.summary")
-
+            VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 releaseNotes(release)
 
-                Text("Installing quits Mimic and updates the mimic command-line tool. "
-                    + "Your projects are preserved.")
-                    .font(DSTypography.body)
+                Text("Installing quits Mimic and also updates the mimic command-line tool. "
+                    + "Your projects are kept.")
+                    .font(DSTypography.caption)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("update.installNote")
             }
 
         case .downloading(let release, let fraction):
             VStack(alignment: .leading, spacing: DSSpacing.sm) {
                 ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
                     .accessibilityIdentifier("update.progress")
                     .accessibilityLabel("Download progress")
                 Text("\(Int(fraction * 100))% of "
                     + "\(release.asset.sizeInBytes.formatted(.byteCount(style: .file)))")
-                    .font(DSTypography.code)
+                    .font(DSTypography.Figure.regular)
                     .foregroundStyle(DSColors.labelSecondary)
-                    .monospacedDigit()
                     .accessibilityIdentifier("update.progressLabel")
             }
 
         case .readyToInstall:
-            VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
-                // Naming the checks is not decoration: it is the difference between "this app
-                // downloaded something and wants to run it" and a claim the user can evaluate.
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                // Naming the checks lets the user judge the claim.
                 Label("Checksum and developer signature verified",
                       systemImage: "checkmark.seal")
                     .font(DSTypography.body)
-                    .foregroundStyle(DSColors.successText)
+                    .foregroundStyle(DSColors.success)
                     .accessibilityIdentifier("update.verified")
 
                 Text("Mimic will save your work, take a copy of your projects, then quit and open "
                     + "the installer. macOS will ask for your password.")
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("update.readyNote")
             }
 
         case .installing:
-            HStack(spacing: DSSpacing.smPlus) {
+            HStack(spacing: DSSpacing.sm) {
                 ProgressView().controlSize(.small)
-                Text("Saving your work and opening the installer…")
+                Text("Saving your work and opening the installer\u{2026}")
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
             }
             .accessibilityIdentifier("update.installing")
 
         case .failed(let message):
-            VStack(alignment: .leading, spacing: DSSpacing.smPlus) {
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
                 Text(message)
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelPrimary)
@@ -166,36 +188,102 @@ struct UpdateSheet: View {
                     .accessibilityIdentifier("update.failure")
 
                 Link("Open the releases page", destination: UpdateFeed.releasesPageURL)
-                    .font(DSTypography.label)
+                    .font(DSTypography.callout)
                     .accessibilityIdentifier("update.releasesLink")
                     .accessibilityLabel("Open the releases page")
             }
         }
     }
 
-    /// The notes, scrollable and selectable, capped so a long release cannot push the buttons off
-    /// screen.
-    ///
-    /// Plain text rather than rendered Markdown: `AttributedString(markdown:)` drops list bullets and
-    /// silently returns nothing at all for input it cannot parse, which would turn a formatting
-    /// quirk in a release note into a blank panel where the reasons to update should be.
-    @ViewBuilder
+    /// The notes in a scrollable, selectable well, capped so a long release cannot push the buttons
+    /// off screen. Headings and list items are drawn from the Markdown by line; anything else is
+    /// shown as written, so a formatting quirk never blanks the panel.
     private func releaseNotes(_ release: UpdateRelease) -> some View {
-        ScrollView {
-            Text(release.notes.isEmpty ? "This release has no notes." : release.notes)
-                .font(DSTypography.body)
-                .foregroundStyle(DSColors.labelPrimary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(DSSpacing.smPlus)
+        let lines = Self.noteLines(release.notes)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                if lines.isEmpty {
+                    Text("This release has no notes.")
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
+                } else {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        noteLine(line, isFirst: index == 0)
+                    }
+                }
+            }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, DSSpacing.md)
+            .padding(.horizontal, DSSpacing.lg)
         }
-        .frame(height: 180)
-        .background(DSColors.codeWell)
-        .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.md))
+        .frame(height: 240)
+        .background {
+            RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                .fill(DSColors.code)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: DSCornerRadius.card)
+                .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card))
         .accessibilityIdentifier("update.notes")
-        // `.description`, not the value: `accessibilityLabel` takes a `LocalizedStringKey`, and
-        // interpolating a type it does not know falls back to a debug description.
+        // `.description`: interpolating an unknown type into a `LocalizedStringKey` falls back to a
+        // debug description.
         .accessibilityLabel("Release notes for Mimic \(release.version.description)")
+    }
+
+    @ViewBuilder
+    private func noteLine(_ line: NoteLine, isFirst: Bool) -> some View {
+        switch line {
+        case .heading(let text):
+            Text(text)
+                .font(DSTypography.calloutMedium.weight(.semibold))
+                .foregroundStyle(DSColors.labelPrimary)
+                .padding(.top, isFirst ? 0 : DSSpacing.sm)
+                .padding(.bottom, DSSpacing.xxs)
+        case .bullet(let text):
+            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
+                Text("\u{2022}")
+                    .foregroundStyle(DSColors.labelSecondary)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .foregroundStyle(DSColors.labelPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(DSTypography.callout)
+            .lineSpacing(DSTypography.Leading.callout)
+            .padding(.leading, DSSpacing.xs)
+        case .text(let text):
+            Text(text)
+                .font(DSTypography.callout)
+                .lineSpacing(DSTypography.Leading.callout)
+                .foregroundStyle(DSColors.labelPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    enum NoteLine: Equatable {
+        case heading(String)
+        case bullet(String)
+        case text(String)
+    }
+
+    /// Splits release notes into headings, list items and plain lines. Blank lines are dropped.
+    static func noteLines(_ notes: String) -> [NoteLine] {
+        notes.split(whereSeparator: \.isNewline).compactMap { raw -> NoteLine? in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "**", with: "")
+            guard !line.isEmpty else { return nil }
+            if line.hasPrefix("#") {
+                let text = line.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
+                return text.isEmpty ? nil : .heading(text)
+            }
+            for marker in ["- ", "* ", "+ ", "\u{2022} "] where line.hasPrefix(marker) {
+                return .bullet(String(line.dropFirst(marker.count)))
+            }
+            return .text(line)
+        }
     }
 
     // MARK: - Buttons
@@ -204,7 +292,7 @@ struct UpdateSheet: View {
     private func buttons(for phase: UpdateService.Phase) -> some View {
         switch phase {
         case .idle, .checking:
-            DSButton("Cancel", variant: .ghost, size: .medium, identifier: "update.cancelCheck") {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelCheck") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.cancelCheckButton")
@@ -212,7 +300,7 @@ struct UpdateSheet: View {
             .keyboardShortcut(.cancelAction)
 
         case .upToDate:
-            DSButton("Done", variant: .primary, size: .medium, identifier: "update.done") {
+            DSButton("Done", variant: .primary, size: .large, identifier: "update.done") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.doneButton")
@@ -220,20 +308,20 @@ struct UpdateSheet: View {
             .keyboardShortcut(.defaultAction)
 
         case .available:
-            DSButton("Skip this version", variant: .ghost, size: .medium, identifier: "update.skip") {
+            DSButton("Skip this version", variant: .ghost, size: .large, identifier: "update.skip") {
                 service.skipCurrentVersion()
             }
             .accessibilityIdentifier("update.skipButton")
             .accessibilityLabel("Skip this version")
 
-            DSButton("Later", variant: .secondary, size: .medium, identifier: "update.later") {
+            DSButton("Later", variant: .secondary, size: .large, identifier: "update.later") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.laterButton")
             .accessibilityLabel("Later")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Download", variant: .primary, size: .medium, identifier: "update.download") {
+            DSButton("Download", variant: .primary, size: .large, identifier: "update.download") {
                 service.downloadAndPrepare()
             }
             .accessibilityIdentifier("update.downloadButton")
@@ -241,7 +329,7 @@ struct UpdateSheet: View {
             .keyboardShortcut(.defaultAction)
 
         case .downloading:
-            DSButton("Cancel", variant: .ghost, size: .medium, identifier: "update.cancelDownload") {
+            DSButton("Cancel", variant: .secondary, size: .large, identifier: "update.cancelDownload") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.cancelDownloadButton")
@@ -249,14 +337,14 @@ struct UpdateSheet: View {
             .keyboardShortcut(.cancelAction)
 
         case .readyToInstall:
-            DSButton("Later", variant: .secondary, size: .medium, identifier: "update.installLater") {
+            DSButton("Later", variant: .secondary, size: .large, identifier: "update.installLater") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.installLaterButton")
             .accessibilityLabel("Later")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Quit and install", variant: .primary, size: .medium, identifier: "update.install") {
+            DSButton("Quit and install", variant: .primary, size: .large, identifier: "update.install") {
                 service.installNow()
             }
             .accessibilityIdentifier("update.installButton")
@@ -264,20 +352,20 @@ struct UpdateSheet: View {
             .keyboardShortcut(.defaultAction)
 
         case .installing:
-            Text("Please wait…")
-                .font(DSTypography.label)
+            Text("Please wait\u{2026}")
+                .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityIdentifier("update.installingStatus")
 
         case .failed:
-            DSButton("Close", variant: .secondary, size: .medium, identifier: "update.closeFailure") {
+            DSButton("Close", variant: .secondary, size: .large, identifier: "update.closeFailure") {
                 service.dismiss()
             }
             .accessibilityIdentifier("update.closeFailureButton")
             .accessibilityLabel("Close")
             .keyboardShortcut(.cancelAction)
 
-            DSButton("Try again", variant: .primary, size: .medium, identifier: "update.retry") {
+            DSButton("Try again", variant: .primary, size: .large, identifier: "update.retry") {
                 service.checkForUpdates()
             }
             .accessibilityIdentifier("update.retryButton")

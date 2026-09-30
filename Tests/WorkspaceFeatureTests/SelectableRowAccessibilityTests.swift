@@ -55,9 +55,8 @@ struct SelectableRowAccessibilityTests {
 
     // MARK: - The request and its answer
 
-    /// The opening clause follows `EndpointTrafficRow.spokenLabel` exactly, so the same request is
-    /// announced the same way in the drawer and in the inspector's traffic list. Three arms, and the
-    /// ordering between them matters: a failed request carries a `failureLabel` and no status code,
+    /// The opening clause is method, path, then what came back. Three arms, and the ordering between
+    /// them matters: a failed request carries a `failureLabel` and no status code,
     /// so the failure arm must only be reachable when there is genuinely no code to speak.
     @Test("A row opens with the request and what came back")
     func speaksTheRequestAndItsAnswer() {
@@ -169,34 +168,82 @@ struct SelectableRowAccessibilityTests {
         #expect(unselected.rowTraits == Self.unselectedRowTraits)
     }
 
+    /// An unfocused table draws its selection as the quiet inactive fill rather than the accent, but
+    /// the row is no less selected: the trait follows the selection, not the table's focus.
+    @Test("A selected row in an unfocused table still carries the selected trait")
+    func selectionTraitIgnoresTableFocus() {
+        let unfocused = RequestLogTableRow(
+            log: Self.log(),
+            rowIndex: 1,
+            isSelected: true,
+            isEmphasized: false,
+            endpointName: "Users",
+            scenarioName: "OK",
+            onSelect: { _ in }
+        )
+        let unfocusedUnselected = RequestLogTableRow(
+            log: Self.log(),
+            rowIndex: 1,
+            isSelected: false,
+            isEmphasized: false,
+            endpointName: "Users",
+            scenarioName: "OK",
+            onSelect: { _ in }
+        )
+
+        #expect(unfocused.rowTraits == Self.selectedRowTraits)
+        #expect(unfocusedUnselected.rowTraits == Self.unselectedRowTraits)
+    }
+
+    /// The two backend outcomes, which the Scenario cell draws as the backend's name and as
+    /// "Backend unavailable".
+    @Test("A row speaks the backend outcomes when no endpoint is named")
+    func speaksTheBackendOutcomes() {
+        #expect(
+            RequestLogTableRow.spokenLabel(
+                for: Self.log(path: "/live", outcome: .passthrough),
+                endpointName: nil,
+                scenarioName: nil,
+                isSelected: false
+            ) == "GET /live, status 200, passed through to real backend"
+        )
+
+        #expect(
+            RequestLogTableRow.spokenLabel(
+                for: Self.log(path: "/live", status: 502, outcome: .proxyFailure),
+                endpointName: nil,
+                scenarioName: nil,
+                isSelected: false
+            ) == "GET /live, status 502, backend unavailable"
+        )
+    }
+
     // MARK: - The scenario row, one panel over
 
-    /// The inspector's scenario row is the same shape of control — a tap target that is one of a set,
-    /// with exactly one of them live — so it answers the same two ways. It drew its active state
-    /// three times over (an accent bar, a filled mark, the word "Active") and carried it
-    /// programmatically not at all.
-    @Test("The active scenario carries the selected trait and says so")
-    func activeScenarioRowIsSelected() {
+    /// The inspector's scenario row is the same shape of control — a tap target that is one of a set
+    /// — so it answers the same two ways. Since the redesign two states live on the row: the scenario
+    /// being edited (the selection, drawn as a soft wash) and the scenario being served (the live
+    /// radio beside it). The selected trait follows the first; the spoken label names the second.
+    @Test("The edited scenario carries the selected trait, and the live one says so")
+    func editedScenarioRowIsSelected() {
         let scenario = Scenario(name: "Unauthorized", statusCode: 401)
-        let active = ScenarioRow(
-            scenario: scenario,
-            isActive: true,
-            isOnlyScenario: false,
-            onTap: {},
-            onDuplicate: {},
-            onDelete: {}
-        )
-        let inactive = ScenarioRow(
-            scenario: scenario,
-            isActive: false,
-            isOnlyScenario: false,
-            onTap: {},
-            onDuplicate: {},
-            onDelete: {}
-        )
+        func scenarioRow(isActive: Bool, isEdited: Bool) -> ScenarioRow {
+            ScenarioRow(
+                scenario: scenario,
+                isActive: isActive,
+                isEdited: isEdited,
+                isOnlyScenario: false,
+                onTap: {},
+                onDuplicate: {},
+                onDelete: {}
+            )
+        }
 
-        #expect(active.rowTraits == Self.selectedRowTraits)
-        #expect(inactive.rowTraits == Self.unselectedRowTraits)
+        #expect(scenarioRow(isActive: false, isEdited: true).rowTraits == Self.selectedRowTraits)
+        #expect(scenarioRow(isActive: true, isEdited: true).rowTraits == Self.selectedRowTraits)
+        // Live but not being edited is not the selection: the live radio carries that state.
+        #expect(scenarioRow(isActive: true, isEdited: false).rowTraits == Self.unselectedRowTraits)
+        #expect(scenarioRow(isActive: false, isEdited: false).rowTraits == Self.unselectedRowTraits)
 
         #expect(ScenarioRow.spokenLabel(scenario: scenario, isActive: true) == "Unauthorized, status 401, active")
         #expect(ScenarioRow.spokenLabel(scenario: scenario, isActive: false) == "Unauthorized, status 401")

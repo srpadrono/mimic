@@ -10,19 +10,26 @@ public struct DSJSONEditor: View {
     @Environment(\.colorScheme) private var colorScheme
     private let identifier: String
     private let documentID: String?
+    private let minimumViewportHeight: CGFloat
     private let onValidationChanged: ((Bool) -> Void)?
 
     /// Update `documentID` together with the hydrated text when changing documents.
     /// Replacements within one document are undoable; a new document starts with empty history.
+    ///
+    /// `minimumViewportHeight` is the least height of the text viewport itself. A `.frame(minHeight:)`
+    /// on the editor bounds the whole card, which includes its vertical padding, so the text the
+    /// person can see would be that padding shorter than the number the caller wrote.
     public init(
         text: Binding<String>,
         identifier: String,
         documentID: String? = nil,
+        minimumViewportHeight: CGFloat = 0,
         onValidationChanged: ((Bool) -> Void)? = nil
     ) {
         self._text = text
         self.identifier = identifier
         self.documentID = documentID
+        self.minimumViewportHeight = minimumViewportHeight
         self.onValidationChanged = onValidationChanged
     }
 
@@ -40,10 +47,13 @@ public struct DSJSONEditor: View {
                     .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
                     .environment(\.colorScheme, colorScheme)
             }
-            .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.sm))
+            .frame(minHeight: minimumViewportHeight, maxHeight: .infinity)
+            .padding(.vertical, DSSpacing.sm)
+            .background(DSColors.code)
+            .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: DSCornerRadius.sm)
-                    .stroke(DSColors.border, lineWidth: DSStroke.hairline)
+                RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                    .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
                     .allowsHitTesting(false)
             )
             .accessibilityIdentifier("ds.jsoneditor.\(identifier)")
@@ -52,11 +62,11 @@ public struct DSJSONEditor: View {
             if let error = Self.validationErrorMessage(text: text, isValid: isValid) {
                 HStack(spacing: DSSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(DSColors.destructive)
-                        .font(.system(size: DSGlyph.inline))
+                        .foregroundStyle(DSColors.error)
+                        .font(.system(size: DSGlyph.field - 1))
                     Text(error)
-                        .font(DSTypography.label)
-                        .foregroundStyle(DSColors.destructive)
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.error)
                 }
                 .padding(.top, DSSpacing.xs)
                 .accessibilityIdentifier("ds.jsoneditor.\(identifier).error")
@@ -76,7 +86,7 @@ public struct DSJSONEditor: View {
 
     // Font metrics and both native editor themes share this face.
     static let editorFontName = "SFMono-Regular"
-    static let editorFontSize: CGFloat = 13
+    static let editorFontSize: CGFloat = 12
 
     /// Height for logical lines. Wrapped lines may need more room; callers provide a minimum height.
     public static func height(forLines lines: Int) -> CGFloat {
@@ -94,8 +104,8 @@ public struct DSJSONEditor: View {
     // MARK: - Themes — warm, cohesive with Ink & Electric palette
 
     // Exposed internally so contrast tests use the surfaces the native editor actually draws.
-    static let lightCanvas = DSColors.dominantLightInk.nsColor()
-    static let darkCanvas = DSColors.dominantDarkInk.nsColor()
+    static let lightCanvas = DSColors.codeLightInk.nsColor()
+    static let darkCanvas = DSColors.codeDarkInk.nsColor()
 
     // Syntax colors and surfaces share DSColors; other native editor roles are explicit here.
     private static let darkTheme = Theme(
@@ -107,7 +117,7 @@ public struct DSJSONEditor: View {
         stringColour: DSColors.Syntax.stringDarkInk.nsColor(),
         characterColour: NSColor(srgbRed: 0.84, green: 0.79, blue: 0.53, alpha: 1.0),
         numberColour: DSColors.Syntax.numberDarkInk.nsColor(),
-        identifierColour: NSColor(srgbRed: 0.38, green: 0.74, blue: 0.66, alpha: 1.0),
+        identifierColour: DSColors.Syntax.keyDarkInk.nsColor(),
         operatorColour: NSColor(srgbRed: 0.60, green: 0.92, blue: 0.85, alpha: 1.0),
         keywordColour: DSColors.Syntax.literalDarkInk.nsColor(),
         symbolColour: NSColor(srgbRed: 0.68, green: 0.68, blue: 0.72, alpha: 1.0),
@@ -115,15 +125,21 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.60, green: 0.42, blue: 0.92, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.78, green: 0.64, blue: 1.0, alpha: 1.0),
         backgroundColour: darkCanvas,
-        currentLineColour: DSColors.secondaryDarkInk.nsColor(),
-        selectionColour: DSColors.accentInk.nsColor(opacity: 0.25),
-        cursorColour: DSColors.accentInk.nsColor(),
+        currentLineColour: NSColor(white: 1, alpha: 0.035),
+        selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.3),
+        cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.30, green: 0.33, blue: 0.38, alpha: 1.0)
     )
 
-    // The regex grammar colors keys as strings; the read-only formatter distinguishes keys.
+    // An object key is a string followed by a colon. The grammar has no key role, so keys are
+    // tokenised as identifiers (drawn in the key ink) and strings exclude anything a colon follows.
+    // Both patterns match the same span; the lookaheads decide which one claims it.
+    static let jsonStringPattern = #""(?:[^"\\]|\\.)*"(?!\s*:)"#
+    static let jsonKeyPattern = #""(?:[^"\\]|\\.)*"(?=\s*:)"#
+
     private static let jsonLanguage: LanguageConfiguration = {
-        let string = try? Regex<Substring>(#""(?:[^"\\]|\\.)*""#, as: Substring.self)
+        let string = try? Regex<Substring>(jsonStringPattern, as: Substring.self)
+        let key = try? Regex<Substring>(jsonKeyPattern, as: Substring.self)
         let number = try? Regex<Substring>(
             #"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"#,
             as: Substring.self
@@ -138,7 +154,7 @@ public struct DSJSONEditor: View {
             numberRegex: number,
             singleLineComment: nil,
             nestedComment: nil,
-            identifierRegex: nil,
+            identifierRegex: key,
             operatorRegex: nil,
             reservedIdentifiers: ["true", "false", "null"],
             reservedOperators: []
@@ -154,7 +170,7 @@ public struct DSJSONEditor: View {
         stringColour: DSColors.Syntax.stringLightInk.nsColor(),
         characterColour: NSColor(srgbRed: 0.14, green: 0.19, blue: 0.81, alpha: 1.0),
         numberColour: DSColors.Syntax.numberLightInk.nsColor(),
-        identifierColour: NSColor(srgbRed: 0.20, green: 0.48, blue: 0.52, alpha: 1.0),
+        identifierColour: DSColors.Syntax.keyLightInk.nsColor(),
         operatorColour: NSColor(srgbRed: 0.18, green: 0.05, blue: 0.43, alpha: 1.0),
         keywordColour: DSColors.Syntax.literalLightInk.nsColor(),
         symbolColour: NSColor(srgbRed: 0.24, green: 0.13, blue: 0.48, alpha: 1.0),
@@ -162,9 +178,9 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.36, green: 0.15, blue: 0.60, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.18, green: 0.05, blue: 0.43, alpha: 1.0),
         backgroundColour: lightCanvas,
-        currentLineColour: DSColors.secondaryLightInk.nsColor(),
-        selectionColour: DSColors.accentInk.nsColor(opacity: 0.18),
-        cursorColour: DSColors.accentInk.nsColor(),
+        currentLineColour: NSColor(white: 0, alpha: 0.03),
+        selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.2),
+        cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.84, green: 0.84, blue: 0.86, alpha: 1.0)
     )
 
