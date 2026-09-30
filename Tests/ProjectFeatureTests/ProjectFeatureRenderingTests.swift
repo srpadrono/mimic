@@ -3,6 +3,7 @@ import SwiftUI
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import ProjectsFeature
 
 @Suite("ProjectFeature Rendering")
 @MainActor

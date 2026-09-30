@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import RequestLogFeature
 
 /// The request log's Errors scope, its name-aware filter, and the figures the Duration and Size
 /// columns and the inspector's metrics line draw.

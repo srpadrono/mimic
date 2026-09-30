@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import Testing
 @testable import AppFeatures
+@testable import FeatureSupport
 
 @Suite("Port probe")
 struct PortProbeTests {

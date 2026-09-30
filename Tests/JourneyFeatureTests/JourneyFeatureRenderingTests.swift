@@ -4,6 +4,7 @@ import Testing
 import Domain
 import DesignSystem
 @testable import AppFeatures
+@testable import JourneysFeature
 
 @Suite("JourneyFeature Rendering")
 @MainActor

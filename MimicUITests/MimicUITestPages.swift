@@ -380,7 +380,7 @@ struct WorkspacePage {
     }
 
     /// The centre column's width at which the toolbar stops folding its secondary actions into
-    /// "More" (`WorkspaceView.toolbarLayout(centerWidth:)`), measured across the card and its inset.
+    /// "More" (`WorkspaceToolbarLayout(centerWidth:)`), measured across the card and its inset.
     static let expandedToolbarBreakpoint: CGFloat = 780
     /// Below this centre-column width Run/Stop folds into "More" too.
     static let minimalToolbarBreakpoint: CGFloat = 360

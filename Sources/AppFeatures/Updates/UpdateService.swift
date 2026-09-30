@@ -3,6 +3,7 @@ import Domain
 import Foundation
 import Observation
 import Persistence
+import UpdatesFeature
 
 /// Drives the update flow the window shows: check, offer, download, verify, install.
 ///
@@ -12,38 +13,9 @@ import Persistence
 /// how a progress bar ends up running under a sheet that says "up to date".
 @Observable
 @MainActor
-final class UpdateService {
+final class UpdateService: UpdateSheetModel {
 
-    /// Where the flow is. Exhaustive: the sheet renders from this and nothing else.
-    enum Phase: Equatable {
-        case idle
-        case checking
-        case upToDate(installed: ReleaseVersion)
-        case available(UpdateRelease)
-        case downloading(UpdateRelease, fraction: Double)
-        case readyToInstall(UpdateRelease, installer: URL)
-        case installing(UpdateRelease)
-        case failed(String)
-
-        var release: UpdateRelease? {
-            switch self {
-            case .idle, .checking, .upToDate, .failed: nil
-            case .available(let release),
-                 .downloading(let release, _),
-                 .readyToInstall(let release, _), .installing(let release): release
-            }
-        }
-
-        /// Whether closing the sheet now would abandon work in progress.
-        var isBusy: Bool {
-            switch self {
-            case .checking, .downloading, .installing: true
-            case .idle, .upToDate, .available, .readyToInstall, .failed: false
-            }
-        }
-    }
-
-    private(set) var phase: Phase = .idle
+    private(set) var phase: UpdatePhase = .idle
 
     /// The install sheet is modal, but control clients and automatic capture can still edit a
     /// project. They stop accepting new work from the moment installation preparation begins.

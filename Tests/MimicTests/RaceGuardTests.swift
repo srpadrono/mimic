@@ -4,6 +4,7 @@ import Domain
 import Persistence
 import SpecImport
 @testable import AppFeatures
+@testable import ImportFeature
 
 /// The two stale-result guards, gated.
 ///

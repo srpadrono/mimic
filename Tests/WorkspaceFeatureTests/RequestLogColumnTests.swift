@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AppFeatures
+@testable import RequestLogFeature
 
 /// The request log's column widths.
 ///

@@ -1,6 +1,9 @@
-import SwiftUI
-import Domain
 import DesignSystem
+import Domain
+import EndpointsFeature
+import FeatureSupport
+import JourneysFeature
+import SwiftUI
 
 /// Center pane — edits whatever the active navigator has selected.
 ///
@@ -18,9 +21,6 @@ struct CenterPaneView: View {
     /// The endpoint editor's own height, so the request log can sit right below it; `nil` while
     /// the pane shows anything that fills the pane instead.
     var onContentHeightChange: (CGFloat?) -> Void = { _ in }
-
-    /// The pane's width, which decides how many option cards share a row.
-    @State private var chooserWidth: CGFloat = 1_000
 
     var body: some View {
         Group {
@@ -96,7 +96,12 @@ struct CenterPaneView: View {
         } else {
             Group {
                 if appState.currentProject?.endpoints.isEmpty ?? true {
-                    firstEndpointChooser
+                    FirstEndpointChooser(
+                        port: appState.serverState.runningPort ?? appState.serverConfiguration.port,
+                        onAddEndpoint: onAddEndpoint,
+                        onImportHAR: onImportHAR,
+                        onImportOpenAPI: onImportOpenAPI
+                    )
                 } else {
                     DSEmptyState(
                         heading: "No endpoint selected",
@@ -111,94 +116,12 @@ struct CenterPaneView: View {
 
     // MARK: - Journeys
 
-    /// A new project's centre: three ways to get a first endpoint.
-    ///
-    /// The headline sits over the three cards, which share one row and shrink before they wrap; a
-    /// pane too short for all of it scrolls rather than clipping the headline.
-    private var firstEndpointChooser: some View {
-        ViewThatFits(in: .vertical) {
-            firstEndpointChooserContent
-            ScrollView { firstEndpointChooserContent }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chooserWidth = $0 }
-    }
-
-    private var firstEndpointChooserContent: some View {
-        let port = appState.serverState.runningPort ?? appState.serverConfiguration.port
-        let columns = Self.chooserColumns(forWidth: chooserWidth - 2 * DSSpacing.xxl)
-        return VStack(spacing: DSSpacing.xxl + DSSpacing.xs) {
-            VStack(spacing: DSSpacing.sm) {
-                Text("Mock your first endpoint")
-                    .font(DSTypography.title)
-                    .foregroundStyle(DSColors.labelPrimary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("ds.empty.center.noSelection.heading")
-                    .accessibilityAddTraits(.isHeader)
-                Text("Add one by hand, or bring in traffic you already have. Mimic serves it on localhost:\(String(port)) when you press Run.")
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(DSTypography.Leading.callout)
-                    .frame(maxWidth: 460)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("ds.empty.center.noSelection.message")
-            }
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(
-                        .flexible(minimum: Self.cardMinimumWidth, maximum: Self.cardWidth),
-                        spacing: DSSpacing.lg,
-                        alignment: .top
-                    ),
-                    count: columns
-                ),
-                alignment: .center,
-                spacing: DSSpacing.lg
-            ) {
-                chooserCards
-            }
-            .frame(maxWidth: CGFloat(columns) * Self.cardWidth + CGFloat(columns - 1) * DSSpacing.lg)
-        }
-        .padding(DSSpacing.xxl)
-        .frame(maxWidth: .infinity)
-        // On the content, not the `ViewThatFits`: XCUITest finds no element for an identifier set
-        // around a `ScrollView`. Only one of the two copies is ever on screen.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ds.empty.center.noSelection")
-    }
-
-    /// The design's card width, and the narrowest a card gets before the row wraps.
-    private static let cardWidth: CGFloat = 220
-    private static let cardMinimumWidth: CGFloat = 168
-
-    /// Three cards to a row while they fit at their narrowest, then two, then one.
-    static func chooserColumns(forWidth width: CGFloat) -> Int {
-        let perCard = cardMinimumWidth + DSSpacing.lg
-        let fitting = Int((width + DSSpacing.lg) / perCard)
-        return min(3, max(1, fitting))
-    }
-
-    @ViewBuilder
-    private var chooserCards: some View {
-        // ⌥⌘N, the shortcut File ▸ New Endpoint… really has; ⌘N is New Project.
-        DSOptionCard("Add endpoint", systemImage: "plus",
-                     message: "Choose a method and path, then write the response.",
-                     shortcut: ["⌥", "⌘", "N"], isDefault: true, identifier: "empty.center.noSelection.cta",
-                     action: onAddEndpoint)
-        DSOptionCard("Import HAR", systemImage: "doc.text",
-                     message: "From Proxyman, Charles or browser DevTools.",
-                     footnote: "A .har file", identifier: "center.importHAR", action: onImportHAR)
-        DSOptionCard("Import OpenAPI", systemImage: "curlybraces",
-                     message: "Each operation becomes an endpoint with its example response.",
-                     footnote: "JSON or YAML", identifier: "center.importOpenAPI", action: onImportOpenAPI)
-    }
-
     @ViewBuilder
     private func journeyEditor(for journeyID: UUID?) -> some View {
         if let journeyID,
            let journey = appState.journeys.first(where: { $0.id == journeyID }) {
             JourneyEditorView(
+                model: appState,
                 journey: journey,
                 isActive: appState.activeJourney?.id == journey.id,
                 status: appState.activeJourney?.id == journey.id ? appState.activeJourneyStatus : nil
@@ -214,6 +137,23 @@ struct CenterPaneView: View {
                 identifier: "center.noJourneySelection"
             )
             .onAppear { onContentHeightChange(nil) }
+        }
+    }
+}
+
+/// What the centre pane is editing.
+///
+/// Selecting in a navigator changes the editor, exactly as clicking a file in Xcode's project
+/// navigator does. Modelled as one value rather than two optional IDs so the two cannot both be
+/// "selected" and leave the pane guessing which to show.
+enum CenterPaneContent: Equatable, Sendable {
+    case endpoint(UUID?)
+    case journey(UUID?)
+
+    static func forTab(_ tab: NavigatorTab, endpointID: UUID?, journeyID: UUID?) -> CenterPaneContent {
+        switch tab {
+        case .endpoints: .endpoint(endpointID)
+        case .journeys: .journey(journeyID)
         }
     }
 }

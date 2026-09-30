@@ -4,6 +4,7 @@ import Testing
 import Domain
 import SpecImport
 @testable import AppFeatures
+@testable import ImportFeature
 
 @Suite("ImportFeature Support")
 @MainActor

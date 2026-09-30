@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import RequestLogFeature
 
 /// The request log's sort comparator, checked on the case that had no coverage: ties.
 ///

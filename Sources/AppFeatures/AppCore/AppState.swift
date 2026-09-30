@@ -3,6 +3,9 @@ import Foundation
 import Observation
 import Persistence
 import SpecImport
+import FeatureSupport
+import ImportFeature
+import JourneysFeature
 
 /// The root observable for a live editing session: it owns the mock server runtime and the
 /// project workspace, and is the single place endpoint/scenario/journey mutations are coordinated.

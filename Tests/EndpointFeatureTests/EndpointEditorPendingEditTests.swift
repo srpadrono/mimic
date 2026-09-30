@@ -1,6 +1,7 @@
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
 
 /// What becomes of an edit that is still settling when the endpoint underneath it changes.
 ///

@@ -3,6 +3,7 @@ import Testing
 import Domain
 import DesignSystem
 @testable import AppFeatures
+@testable import ServerFeature
 
 @Suite("Server toolbar presentation")
 struct ServerStatusWellTests {

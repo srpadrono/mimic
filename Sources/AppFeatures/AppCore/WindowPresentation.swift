@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import FeatureSupport
 
 /// What the window is presenting, and what it has selected — the state that exists only because a
 /// window exists.

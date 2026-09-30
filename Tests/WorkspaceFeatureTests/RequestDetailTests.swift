@@ -3,6 +3,7 @@ import Testing
 import Domain
 import DesignSystem
 @testable import AppFeatures
+@testable import RequestLogFeature
 
 @Suite("Request detail formatting")
 struct RequestDetailTests {

@@ -1,5 +1,6 @@
 import Testing
 @testable import AppFeatures
+@testable import WorkspaceShell
 
 @Suite("Navigation history")
 struct NavigationHistoryTests {

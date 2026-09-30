@@ -1,6 +1,7 @@
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
 
 /// The rules the endpoint editor commits by: which status codes it will serve and what it says
 /// about the ones it will not, and — separately — whether a field is carrying an edit at all.

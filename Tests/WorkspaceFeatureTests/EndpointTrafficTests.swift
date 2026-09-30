@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
 
 /// Answering "has anything actually called this endpoint?" from the request log the app already
 /// keeps — every `RequestLog` records the endpoint that answered it.

@@ -3,6 +3,8 @@ import SwiftUI
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
+@testable import ProjectsFeature
 
 @Suite("EndpointFeature Rendering")
 @MainActor

@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import RequestLogFeature
 
 /// The drawer's job in this scenario is to answer "what is my app calling that I have not mocked?".
 @Suite("Request log — unmatched requests")

@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import JourneysFeature
 
 /// The journey feature's pure logic — which is, deliberately, a short list.
 ///
