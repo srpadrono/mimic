@@ -25,6 +25,12 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test \
   -destination 'platform=macOS' -only-testing:DomainTests
 ```
 
+For a change inside one UI section, run that section's own test target, which builds nothing else, and compare it with its design in the `MimicGallery` app ([Working on one section](docs/ARCHITECTURE.md#working-on-one-section)):
+
+```bash
+xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test -destination 'platform=macOS' -only-testing:EndpointsFeatureTests
+```
+
 For UI changes, select the affected methods and wait for each run to finish before starting another. Add more `-only-testing` arguments when the changed flow needs several cases:
 
 ```bash

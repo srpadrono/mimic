@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New project and new endpoint sheets</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#141518;--sheet:#2a2a2d;--field:rgba(255,255,255,.07);--field-b:rgba(255,255,255,.1);--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--ring:rgba(10,132,255,.5);--get:#5aa9ff;--ok:#34d06c;--err:#ff5f57;--shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.12);color-scheme:dark}
+.light{--desk:#d9dbe0;--sheet:#f7f7f8;--field:#ffffff;--field-b:rgba(0,0,0,.14);--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--ring:rgba(0,122,255,.4);--get:#0a62cc;--ok:#1d8a3e;--err:#cc302b;--shadow:0 24px 60px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.14);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.sheet{background:var(--sheet);border-radius:20px;box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:16px}
+.ttl{font-size:15px;line-height:20px;font-weight:600}
+.lab{font-size:12px;color:var(--l2);width:92px;flex:none;text-align:right}
+.frow{display:flex;align-items:center;gap:12px}
+.field{height:28px;border-radius:8px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 10px}
+.field.focus{box-shadow:0 0 0 3.5px var(--ring);border-color:var(--accent)}
+.mono{font:400 13px var(--mono)}
+.hint{font-size:11px;line-height:15px;color:var(--l3);padding-left:104px;margin-top:-10px}
+.btn{all:unset;height:28px;padding:0 16px;border-radius:14px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.chev{width:10px;height:10px;color:var(--l3)}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 880px; height: 640px; background: var(--desk); display: flex; align-items: flex-start; justify-content: center; gap: 32px; padding: 48px 32px; border-radius: 18px;">
+
+  <div class="sheet" style="width: 388px;">
+    <span class="ttl">New project</span>
+    <div class="frow"><span class="lab">Name</span><div class="field focus grow"><span>Acme Storefront</span></div></div>
+    <div class="frow"><span class="lab">Port</span><div class="field" style="width: 96px;"><span class="mono">8080</span></div><span class="row" style="gap: 5px; font-size: 11px; color: var(--ok);"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px;"><path d="M3.5 8.5l3 3 6-7"/></svg>Available</span></div>
+    <span class="hint" style="margin-top: -6px;">Your app connects to http://localhost:8080.</span>
+    <div class="row" style="gap: 8px; justify-content: flex-end; margin-top: 8px;"><button class="btn">Cancel</button><button class="btn pri">Create project</button></div>
+  </div>
+
+  <div class="sheet" style="width: 420px;">
+    <span class="ttl">New endpoint</span>
+    <div class="frow"><span class="lab">Request</span>
+      <div class="field focus grow" style="gap: 10px; padding-left: 8px;">
+        <span class="row" style="gap: 4px;"><span style="font: 600 12px var(--mono); color: var(--get);">GET</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+        <span style="width: .5px; align-self: stretch; margin: 6px 0; background: var(--sep);"></span>
+        <span class="mono">/products/:id</span>
+      </div>
+    </div>
+    <span class="hint">Use :name for a path parameter, like :id.</span>
+    <div class="frow"><span class="lab">Name</span><div class="field grow"><span class="l3">Get product</span></div></div>
+    <div class="frow"><span class="lab">Group</span><div class="field grow"><span class="grow">Catalog</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+    <div style="height: .5px; background: var(--sep); margin: 2px 0;"></div>
+    <div class="frow"><span class="lab">Status</span><div class="field" style="width: 180px;"><span class="row" style="gap: 6px; font: 500 12px var(--mono); color: var(--ok);"><span style="width: 7px; height: 7px; border-radius: 50%; background: currentColor;"></span>200</span><span class="grow l2" style="font-size: 12px;">OK</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+    <div class="frow"><span class="lab">Content type</span><div class="field" style="width: 180px;"><span class="grow">JSON</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+    <div class="row" style="gap: 8px; justify-content: flex-end; margin-top: 8px;"><button class="btn">Cancel</button><button class="btn pri">Add endpoint</button></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":880,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

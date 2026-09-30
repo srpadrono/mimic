@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Journey step sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#141518;--sheet:#2a2a2d;--field:rgba(255,255,255,.07);--field-b:rgba(255,255,255,.1);--code:#1d1d20;--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--segon:rgba(255,255,255,.16);--post:#4fd07b;--ok:#34d06c;--err:#ff5f57;--jk:#c490ff;--js:#4fd1c5;--jn:#ffb14e;--jl:#5aa9ff;--shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.12);color-scheme:dark}
+.light{--desk:#d9dbe0;--sheet:#f7f7f8;--field:#ffffff;--field-b:rgba(0,0,0,.14);--code:#ffffff;--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--segon:#ffffff;--post:#18823a;--ok:#1d8a3e;--err:#cc302b;--jk:#8a2fc4;--js:#00766f;--jn:#945a00;--jl:#0060d9;--shadow:0 24px 60px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.14);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.lab{font-size:12px;color:var(--l2);width:80px;flex:none;text-align:right}
+.frow{display:flex;align-items:center;gap:12px}
+.field{height:28px;border-radius:8px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 10px}
+.mono{font:400 13px var(--mono)}
+.num{font:400 12px var(--mono)}
+.sh{font-size:11px;font-weight:600;color:var(--l3)}
+.seg{display:flex;padding:2px;border-radius:8px;background:var(--field)}
+.seg span{flex:1;text-align:center;padding:3px 10px;border-radius:6px;font-size:12px;line-height:16px;color:var(--l2);font-weight:500}
+.seg .on{background:var(--segon);color:var(--l1);box-shadow:0 .5px 1.5px rgba(0,0,0,.25)}
+.btn{all:unset;height:28px;padding:0 16px;border-radius:14px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.chev{width:10px;height:10px;color:var(--l3)}
+.code{font:400 12px/19px var(--mono);white-space:pre}
+.gut{font:400 12px/19px var(--mono);color:var(--l3);text-align:right;white-space:pre;padding-right:12px;width:36px;flex:none}
+.jk{color:var(--jk)}.js{color:var(--js)}.jn{color:var(--jn)}.jl{color:var(--jl)}.jp{color:var(--l2)}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 880px; height: 760px; background: var(--desk); display: flex; justify-content: center; padding-top: 32px; border-radius: 18px;">
+  <div class="col" style="width: 580px; height: 696px; background: var(--sheet); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden;">
+    <div class="col" style="padding: 20px 20px 0; gap: 4px;">
+      <span style="font-size: 15px; line-height: 20px; font-weight: 600;">Edit step 3</span>
+      <span class="l2" style="font-size: 12px;">Match a request, then choose what the client gets.</span>
+    </div>
+    <div class="col grow" style="padding: 18px 20px; gap: 14px;">
+      <span class="sh">Match</span>
+      <div class="frow"><span class="lab">Request</span>
+        <div class="field grow" style="gap: 10px; padding-left: 8px;">
+          <span class="row" style="gap: 4px;"><span style="font: 600 12px var(--mono); color: var(--post);">POST</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+          <span style="width: .5px; align-self: stretch; margin: 6px 0; background: var(--sep);"></span>
+          <span class="mono grow">/payments</span>
+          <span class="row" style="gap: 4px; font-size: 11px; color: var(--ok);"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px;"><path d="M3.5 8.5l3 3 6-7"/></svg>Matches an endpoint</span>
+        </div>
+      </div>
+      <div class="frow"><span class="lab">Name</span><div class="field grow"><span class="l3">Optional, for example “Charge clears”</span></div></div>
+      <div style="height: .5px; background: var(--sep);"></div>
+      <span class="sh">Outcome</span>
+      <div class="seg"><span class="on">Respond</span><span>Drop connection</span><span>Time out</span></div>
+      <div class="row" style="gap: 20px;">
+        <div class="frow"><span class="lab">Status</span><div class="field" style="width: 160px;"><span class="row" style="gap: 6px; font: 500 12px var(--mono); color: var(--ok);"><span style="width: 7px; height: 7px; border-radius: 50%; background: currentColor;"></span>201</span><span class="grow l2" style="font-size: 12px;">Created</span><svg class="ic chev" viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+        <div class="frow" style="gap: 8px;"><span class="l2" style="font-size: 12px;">Delay</span><div class="field" style="width: 80px;"><span class="num grow">0</span><span class="l3" style="font-size: 12px;">ms</span></div></div>
+        <div class="frow" style="gap: 8px;"><span class="l2" style="font-size: 12px;">Repeat</span><div class="field" style="width: 64px;"><span class="num grow">1</span><span class="l3" style="font-size: 12px;">×</span></div></div>
+      </div>
+      <div class="row" style="gap: 8px; padding-left: 92px;">
+        <div class="seg" style="display: inline-flex;"><span class="on">Body</span><span>Headers <span class="l3">1</span></span></div>
+        <span class="grow"></span>
+        <span class="l2" style="font-size: 12px;">Format</span>
+      </div>
+      <div class="row" style="align-items: stretch; margin-left: 92px; background: var(--code); border: .5px solid var(--field-b); border-radius: 10px; padding: 10px 0; height: 200px;">
+        <div class="gut">1
+2
+3
+4
+5
+6
+7
+8</div>
+        <div class="code grow"><span class="jp">{</span>
+  <span class="jk">"id"</span><span class="jp">:</span> <span class="js">"pay_8Hf2kQ"</span><span class="jp">,</span>
+  <span class="jk">"status"</span><span class="jp">:</span> <span class="js">"succeeded"</span><span class="jp">,</span>
+  <span class="jk">"amount"</span><span class="jp">:</span> <span class="jn">2400</span><span class="jp">,</span>
+  <span class="jk">"currency"</span><span class="jp">:</span> <span class="js">"eur"</span><span class="jp">,</span>
+  <span class="jk">"retried"</span><span class="jp">:</span> <span class="jl">true</span><span class="jp">,</span>
+  <span class="jk">"receiptUrl"</span><span class="jp">:</span> <span class="jl">null</span>
+<span class="jp">}</span></div>
+      </div>
+    </div>
+    <div style="height: .5px; background: var(--sep);"></div>
+    <div class="row" style="padding: 14px 20px; gap: 8px;">
+      <span style="color: var(--err); font-size: 13px;">Remove step</span>
+      <span class="grow"></span>
+      <button class="btn">Cancel</button><button class="btn pri">Save step</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":880,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

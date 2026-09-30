@@ -1,0 +1,32 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-09-28T22:05:00Z"},
+  "title": "Mimic UI Redesign",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "Workspace · endpoint editor · dark"},
+    "WorkspaceLight.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "Workspace · endpoint editor · light"},
+    "RequestDetail.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "Workspace · request log with detail"},
+    "Journeys.dc.html": {"x": 0, "y": 1300, "w": 1440, "h": 900, "title": "Workspace · journey editor"},
+    "EmptyStates.dc.html": {"x": 1520, "y": 1300, "w": 1440, "h": 900, "title": "Empty and first-run states"},
+    "Alerts.dc.html": {"x": 3040, "y": 1300, "w": 1440, "h": 900, "title": "Alerts, banners and popovers"},
+    "Welcome.dc.html": {"x": 0, "y": 2600, "w": 880, "h": 560, "title": "Welcome window"},
+    "NewEndpoint.dc.html": {"x": 960, "y": 2600, "w": 880, "h": 640, "title": "New project and new endpoint sheets"},
+    "JourneyStep.dc.html": {"x": 1920, "y": 2600, "w": 880, "h": 760, "title": "Journey step sheet"},
+    "Import.dc.html": {"x": 2880, "y": 2600, "w": 1120, "h": 760, "title": "Import review sheet"},
+    "Settings.dc.html": {"x": 0, "y": 3760, "w": 880, "h": 640, "title": "Server settings sheet"},
+    "Update.dc.html": {"x": 960, "y": 3760, "w": 720, "h": 560, "title": "Update sheet"},
+    "Components.dc.html": {"x": 0, "y": 4800, "w": 1440, "h": 1500, "title": "Components"},
+    "Tokens.dc.html": {"x": 1520, "y": 4800, "w": 1440, "h": 820, "title": "Tokens"}
+  },
+  "order": ["Main.dc.html", "WorkspaceLight.dc.html", "RequestDetail.dc.html", "Journeys.dc.html", "EmptyStates.dc.html", "Alerts.dc.html", "Welcome.dc.html", "NewEndpoint.dc.html", "JourneyStep.dc.html", "Import.dc.html", "Settings.dc.html", "Update.dc.html", "Components.dc.html", "Tokens.dc.html"],
+  "notes": {
+    "rowA": {"x": 0, "y": -260, "text": "Main window", "kind": "title1", "maxW": 4480},
+    "rowB": {"x": 0, "y": 1040, "text": "Journeys, empty states and feedback", "kind": "title1", "maxW": 4480},
+    "rowC": {"x": 0, "y": 2340, "text": "Welcome and sheets", "kind": "title1", "maxW": 4000},
+    "rowD": {"x": 0, "y": 3500, "text": "Server settings and updates", "kind": "title1", "maxW": 1680},
+    "rowE": {"x": 0, "y": 4540, "text": "Design system", "kind": "title1", "maxW": 2960}
+  },
+  "designSystems": []
+}

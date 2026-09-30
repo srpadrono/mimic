@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 import Testing
 import Domain
 @testable import SpecImport
-@testable import AppFeatures
 @testable import ImportFeature
 
 @Suite("ImportFeature Rendering")

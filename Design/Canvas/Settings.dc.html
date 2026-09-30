@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Server settings sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#141518;--sheet:#2a2a2d;--side:#242427;--group:rgba(255,255,255,.045);--field:rgba(255,255,255,.07);--field-b:rgba(255,255,255,.1);--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--sel:#0a6ce0;--ok:#34d06c;--warn:#ffb340;--warn-bg:rgba(255,179,64,.12);--knob:#f2f2f2;--track:rgba(255,255,255,.18);--shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.12);color-scheme:dark}
+.light{--desk:#d9dbe0;--sheet:#f7f7f8;--side:#efeff2;--group:#ffffff;--field:#ffffff;--field-b:rgba(0,0,0,.14);--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--sel:#0a74f0;--ok:#1d8a3e;--warn:#a86400;--warn-bg:rgba(255,159,10,.12);--knob:#ffffff;--track:rgba(0,0,0,.14);--shadow:0 24px 60px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.14);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.field{height:24px;border-radius:7px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 8px}
+.mono{font:400 12px var(--mono)}
+.btn{all:unset;height:28px;padding:0 16px;border-radius:14px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);white-space:nowrap}
+.btn.sm{height:22px;padding:0 10px;border-radius:11px;font-size:12px}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.group{background:var(--group);border-radius:12px;border:.5px solid var(--sep)}
+.gr{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 14px}
+.gr + .gr{border-top:.5px solid var(--sep)}
+.gh{font-size:11px;font-weight:600;color:var(--l3);padding:0 4px 6px}
+.sw{width:32px;height:18px;border-radius:9px;background:var(--track);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--knob);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:16px}
+.port{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;border-radius:8px}
+.port.sel{background:var(--sel);color:#fff}
+.port.sel .l2{color:rgba(255,255,255,.8)}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 880px; height: 640px; background: var(--desk); display: flex; justify-content: center; padding-top: 32px; border-radius: 18px;">
+  <div class="col" style="width: 760px; height: 576px; background: var(--sheet); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden;">
+    <div class="col" style="padding: 20px 20px 16px; gap: 3px;">
+      <span style="font-size: 15px; line-height: 20px; font-weight: 600;">Server settings</span>
+      <span class="l2" style="font-size: 12px;">Acme Storefront</span>
+    </div>
+    <div class="row grow" style="align-items: stretch; border-top: .5px solid var(--sep);">
+      <div class="col" style="width: 208px; flex: none; background: var(--side); border-right: .5px solid var(--sep); padding: 12px 8px 8px;">
+        <span class="gh" style="padding-left: 10px;">Ports</span>
+        <div class="port sel"><div class="col grow" style="gap: 2px;"><span style="font-weight: 500;">Storefront</span><span class="l2 mono" style="font-size: 11px;">:18086 · main</span></div></div>
+        <div class="port"><div class="col grow" style="gap: 2px;"><span>Payments</span><span class="l2 mono" style="font-size: 11px;">:18087</span></div><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--warn);" title="Needs a restart"></span></div>
+        <span class="grow"></span>
+        <div class="row" style="gap: 0; border: .5px solid var(--field-b); border-radius: 7px; align-self: flex-start; overflow: hidden;">
+          <button class="row" style="all: unset; width: 28px; height: 22px; display: flex; align-items: center; justify-content: center; background: var(--field);" aria-label="Add port"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px;"><path d="M8 3v10M3 8h10"/></svg></button>
+          <span style="width: .5px; height: 22px; background: var(--field-b);"></span>
+          <button class="row" style="all: unset; width: 28px; height: 22px; display: flex; align-items: center; justify-content: center; background: var(--field); color: var(--l3);" aria-label="Remove port"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px;"><path d="M3 8h10"/></svg></button>
+        </div>
+      </div>
+      <div class="col grow" style="padding: 16px 20px; gap: 18px;">
+        <div class="col">
+          <span class="gh">Port</span>
+          <div class="group">
+            <div class="gr"><span class="grow">Name</span><div class="field" style="width: 220px;"><span>Storefront</span></div></div>
+            <div class="gr"><span class="grow">Port</span><span class="row" style="gap: 4px; font-size: 11px; color: var(--ok);"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px;"><path d="M3.5 8.5l3 3 6-7"/></svg>Available</span><div class="field" style="width: 80px;"><span class="mono">18086</span></div></div>
+            <div class="gr"><span class="grow">Your app connects to</span><span class="mono l2">http://localhost:18086</span><button class="btn sm">Copy</button></div>
+          </div>
+        </div>
+        <div class="col">
+          <span class="gh">Upstream</span>
+          <div class="group">
+            <div class="gr"><div class="col grow" style="gap: 2px; padding: 8px 0;"><span>Forward unmatched requests</span><span class="l2" style="font-size: 11px;">Requests with no endpoint go to your real server.</span></div><span class="sw on"></span></div>
+            <div class="gr"><span class="grow">Upstream URL</span><div class="field" style="width: 260px;"><span class="mono">https://api.acme.shop</span></div></div>
+            <div class="gr"><div class="col grow" style="gap: 2px; padding: 8px 0;"><span>Save forwarded responses as scenarios</span><span class="l2" style="font-size: 11px;">Credential headers are removed. Check bodies for private data.</span></div><span class="sw"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="padding: 14px 20px; gap: 8px; border-top: .5px solid var(--sep);">
+      <span class="row" style="gap: 6px; font-size: 12px; color: var(--warn); background: var(--warn-bg); height: 24px; padding: 0 10px; border-radius: 12px;"><svg class="ic" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 3v2.5h2.5"/></svg>Payments starts on its new port after a restart</span>
+      <span class="grow"></span>
+      <button class="btn">Cancel</button><button class="btn pri">Apply</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":880,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

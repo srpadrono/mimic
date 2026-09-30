@@ -264,7 +264,309 @@ let project = Project(
             settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
         ),
 
-        // AppFeatures — deep application module for app workflows and SwiftUI flows
+        // UI sections — one framework per part of the window, each built, tested and previewed on its
+        // own. A section depends on Domain, DesignSystem and FeatureSupport only (ImportFeature also on
+        // SpecImport, whose parsers it drives): never on AppFeatures, the server, the store, or another
+        // section. `check_module_edges.py` enforces it. Each section reads and edits through a model
+        // protocol it declares, which `AppState` conforms to in AppFeatures, the composition root.
+        // FeatureSupport — the small pieces more than one section uses: navigator tabs, the rename
+        // sheet, the request field, status phrases, port probing.
+        .target(
+            name: "FeatureSupport",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.FeatureSupport",
+            buildableFolders: ["Sources/FeatureSupport"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        .target(
+            name: "FeatureSupportTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.FeatureSupportTests",
+            buildableFolders: ["Tests/FeatureSupportTests"],
+            dependencies: [
+                .target(name: "FeatureSupport"),
+                .target(name: "Domain"),
+            ]
+        ),
+        // WorkspaceShell — the window skeleton: panel layout and chrome, jump bar, toolbar tiers,
+        // inspector overview. It takes the sections as slots and knows none of them.
+        .target(
+            name: "WorkspaceShell",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.WorkspaceShell",
+            buildableFolders: ["Sources/WorkspaceShell"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "WorkspaceShellTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.WorkspaceShellTests",
+            buildableFolders: ["Tests/WorkspaceShellTests"],
+            dependencies: [
+                .target(name: "WorkspaceShell"),
+                .target(name: "Domain"),
+            ]
+        ),
+        // EndpointsFeature — endpoint navigator, editor, scenarios inspector, sheets, first-run chooser.
+        .target(
+            name: "EndpointsFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.EndpointsFeature",
+            buildableFolders: ["Sources/EndpointsFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "EndpointsFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.EndpointsFeatureTests",
+            buildableFolders: ["Tests/EndpointsFeatureTests"],
+            dependencies: [
+                .target(name: "EndpointsFeature"),
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // JourneysFeature — journey navigator, editor, step inspector, step and capture sheets.
+        .target(
+            name: "JourneysFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.JourneysFeature",
+            buildableFolders: ["Sources/JourneysFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "JourneysFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.JourneysFeatureTests",
+            buildableFolders: ["Tests/JourneysFeatureTests"],
+            dependencies: [
+                .target(name: "JourneysFeature"),
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // RequestLogFeature — request log table, filters, request detail, export.
+        .target(
+            name: "RequestLogFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.RequestLogFeature",
+            buildableFolders: ["Sources/RequestLogFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "RequestLogFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.RequestLogFeatureTests",
+            buildableFolders: ["Tests/RequestLogFeatureTests"],
+            dependencies: [
+                .target(name: "RequestLogFeature"),
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // ServerFeature — run control, server status, server settings.
+        .target(
+            name: "ServerFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.ServerFeature",
+            buildableFolders: ["Sources/ServerFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "ServerFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.ServerFeatureTests",
+            buildableFolders: ["Tests/ServerFeatureTests"],
+            dependencies: [
+                .target(name: "ServerFeature"),
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // ImportFeature — HAR and OpenAPI import review and commit.
+        .target(
+            name: "ImportFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.ImportFeature",
+            buildableFolders: ["Sources/ImportFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+                .target(name: "SpecImport"),
+            ]
+        ),
+        .target(
+            name: "ImportFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.ImportFeatureTests",
+            buildableFolders: ["Tests/ImportFeatureTests"],
+            dependencies: [
+                .target(name: "ImportFeature"),
+                .target(name: "SpecImport"),
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // ProjectsFeature — welcome window and new project sheet.
+        .target(
+            name: "ProjectsFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.ProjectsFeature",
+            buildableFolders: ["Sources/ProjectsFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "FeatureSupport"),
+            ]
+        ),
+        .target(
+            name: "ProjectsFeatureTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.ProjectsFeatureTests",
+            buildableFolders: ["Tests/ProjectsFeatureTests"],
+            dependencies: [
+                .target(name: "ProjectsFeature"),
+                .target(name: "Domain"),
+            ]
+        ),
+        // UpdatesFeature — the update sheet. The feed, download and installer stay in AppFeatures.
+        .target(
+            name: "UpdatesFeature",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.UpdatesFeature",
+            buildableFolders: ["Sources/UpdatesFeature"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+            ]
+        ),
+        // MimicFixtures — the design canvas's data as Mimic values, for the gallery, previews and
+        // snapshot tests. Debug only: every file is `#if DEBUG`.
+        .target(
+            name: "MimicFixtures",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.MimicFixtures",
+            buildableFolders: ["Sources/MimicFixtures"],
+            dependencies: [
+                .target(name: "Domain"),
+            ],
+            settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
+        ),
+        // SnapshotSupport — renders a view to a 2x PNG, scores it against an exported artboard, and
+        // writes a fidelity report. No Mimic dependencies.
+        .target(
+            name: "SnapshotSupport",
+            destinations: [.mac],
+            product: .staticFramework,
+            bundleId: "devxa.Mimic.SnapshotSupport",
+            buildableFolders: ["Sources/SnapshotSupport"],
+            dependencies: [],
+            settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
+        ),
+        .target(
+            name: "SnapshotSupportTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.SnapshotSupportTests",
+            buildableFolders: ["Tests/SnapshotSupportTests"],
+            dependencies: [.target(name: "SnapshotSupport")],
+            settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
+        ),
+
+        // MimicGallery — a development tool, never shipped or archived: every component and section
+        // on its own, drawn from MimicFixtures, with the design artboard over it. It carries no
+        // server, store or AppState; a section that needs them to draw is a section that leaked.
+        .target(
+            name: "MimicGallery",
+            destinations: [.mac],
+            product: .app,
+            bundleId: "devxa.Mimic.Gallery",
+            infoPlist: .extendingDefault(with: [
+                "NSMainStoryboardFile": "",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+            ]),
+            buildableFolders: ["Tools/MimicGallery"],
+            dependencies: [
+                .target(name: "Domain"),
+                .target(name: "DesignSystem"),
+                .target(name: "SpecImport"),
+                .target(name: "FeatureSupport"),
+                .target(name: "WorkspaceShell"),
+                .target(name: "EndpointsFeature"),
+                .target(name: "JourneysFeature"),
+                .target(name: "RequestLogFeature"),
+                .target(name: "ServerFeature"),
+                .target(name: "ImportFeature"),
+                .target(name: "ProjectsFeature"),
+                .target(name: "UpdatesFeature"),
+                .target(name: "MimicFixtures"),
+                .target(name: "SnapshotSupport"),
+            ],
+            settings: .settings(base: [
+                "ENABLE_APP_SANDBOX": "NO",
+                "CODE_SIGN_IDENTITY": "-",
+            ])
+        ),
+        // DesignFidelityTests — renders every gallery entry and scores it against its artboard. The
+        // scores are a report, never a failure; see the suite's own comment.
+        .target(
+            name: "DesignFidelityTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "devxa.Mimic.DesignFidelityTests",
+            buildableFolders: ["Tests/DesignFidelityTests"],
+            dependencies: [
+                .target(name: "MimicGallery"),
+                .target(name: "SnapshotSupport"),
+            ],
+            settings: .settings(base: ["ENABLE_APP_SANDBOX": "NO"])
+        ),
+
+        // AppFeatures — the composition root: AppState, the control host, the server runtime,
+        // persistence wiring, and the views that put the sections together.
         .target(
             name: "AppFeatures",
             destinations: [.mac],
@@ -278,6 +580,15 @@ let project = Project(
                 .target(name: "ControlPlane"),
                 .target(name: "DesignSystem"),
                 .target(name: "SpecImport"),
+                .target(name: "FeatureSupport"),
+                .target(name: "WorkspaceShell"),
+                .target(name: "EndpointsFeature"),
+                .target(name: "JourneysFeature"),
+                .target(name: "RequestLogFeature"),
+                .target(name: "ServerFeature"),
+                .target(name: "ImportFeature"),
+                .target(name: "ProjectsFeature"),
+                .target(name: "UpdatesFeature"),
             ]
         ),
 
@@ -348,15 +659,8 @@ let project = Project(
             bundleId: "devxa.Mimic.AppTests",
             buildableFolders: [
                 "Tests/MimicTests",
+                // Tests that need more than one section, or a section inside the window.
                 "Tests/WorkspaceFeatureTests",
-                "Tests/EndpointFeatureTests",
-                "Tests/ProjectFeatureTests",
-                "Tests/ImportFeatureTests",
-                // This line was here from the first commit with no directory behind it — Tuist
-                // tolerated the absence, so the manifest read as if the journey UI had a suite of
-                // its own when `Sources/AppFeatures/JourneyFeature` was the one feature folder with
-                // no tests at all. The directory exists now, so the line finally means what it said.
-                "Tests/JourneyFeatureTests",
             ],
             dependencies: [
                 .target(name: "Mimic"),
@@ -367,6 +671,15 @@ let project = Project(
                 // is what stops that from being an implicit transitive import, which
                 // SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY exists to refuse.
                 .target(name: "ControlPlane"),
+                .target(name: "FeatureSupport"),
+                .target(name: "WorkspaceShell"),
+                .target(name: "EndpointsFeature"),
+                .target(name: "JourneysFeature"),
+                .target(name: "RequestLogFeature"),
+                .target(name: "ServerFeature"),
+                .target(name: "ImportFeature"),
+                .target(name: "ProjectsFeature"),
+                .target(name: "UpdatesFeature"),
             ]
         ),
     ]
@@ -394,11 +707,20 @@ let project = Project(
                         .target("ControlPlane"),
                         .target("DesignSystem"),
                         .target("Domain"),
+                        .target("EndpointsFeature"),
+                        .target("FeatureSupport"),
+                        .target("ImportFeature"),
+                        .target("JourneysFeature"),
                         .target("Mimic"),
                         .target("MimicCLICore"),
                         .target("MockServerEngine"),
                         .target("Persistence"),
+                        .target("ProjectsFeature"),
+                        .target("RequestLogFeature"),
+                        .target("ServerFeature"),
                         .target("SpecImport"),
+                        .target("UpdatesFeature"),
+                        .target("WorkspaceShell"),
                     ]
                 )
             ),

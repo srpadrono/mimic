@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mimic workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#101216;--win:#1e1e20;--content:#1b1b1d;--glass:rgba(46,46,50,.9);--glass-b:rgba(255,255,255,.09);--raised:#2c2c2f;--field:rgba(255,255,255,.065);--field-b:rgba(255,255,255,.08);--code:#161618;--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--accent-t:#4aa3ff;--sel:#0a6ce0;--sel-soft:rgba(10,132,255,.22);--unsel:rgba(255,255,255,.10);--zebra:rgba(255,255,255,.028);--segon:rgba(255,255,255,.16);--get:#5aa9ff;--post:#4fd07b;--put:#ffa94d;--patch:#c79bff;--del:#ff6b66;--head:#a1a1aa;--ok:#34d06c;--redir:#5aa9ff;--warn:#ffb340;--err:#ff5f57;--jk:#c490ff;--js:#4fd1c5;--jn:#ffb14e;--jl:#5aa9ff;--shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 .5px rgba(255,255,255,.14);--dim:rgba(0,0,0,.45);color-scheme:dark}
+.light{--desk:#e8eaee;--win:#f6f6f7;--content:#ffffff;--glass:rgba(240,240,243,.94);--glass-b:rgba(0,0,0,.08);--raised:#ffffff;--field:rgba(0,0,0,.045);--field-b:rgba(0,0,0,.12);--code:#fbfbfc;--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--accent-t:#0064d2;--sel:#0a74f0;--sel-soft:rgba(0,122,255,.12);--unsel:rgba(0,0,0,.08);--zebra:rgba(0,0,0,.025);--segon:#ffffff;--get:#0a62cc;--post:#18823a;--put:#a85a00;--patch:#8433c4;--del:#c42b27;--head:#62626a;--ok:#1d8a3e;--redir:#0a62cc;--warn:#a86400;--err:#cc302b;--jk:#8a2fc4;--js:#00766f;--jn:#945a00;--jl:#0060d9;--shadow:0 24px 64px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.14);--dim:rgba(0,0,0,.18);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.m{font:600 11px/16px var(--mono);letter-spacing:.02em;width:44px;flex:none}
+.m-get{color:var(--get)}.m-post{color:var(--post)}.m-put{color:var(--put)}.m-patch{color:var(--patch)}.m-del{color:var(--del)}.m-head{color:var(--head)}
+.st{display:inline-flex;align-items:center;gap:6px;font:500 12px/16px var(--mono)}
+.st i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+.s2{color:var(--ok)}.s3{color:var(--redir)}.s4{color:var(--warn)}.s5{color:var(--err)}
+.path{font:400 12px/16px var(--mono);color:var(--l1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.glass{background:var(--glass);border:.5px solid var(--glass-b);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.cap{height:32px;border-radius:16px;display:flex;align-items:center;padding:0 2px}
+.cap button{all:unset;height:30px;min-width:30px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px;border-radius:15px;color:var(--l1);font-size:13px;font-weight:500}
+.field{height:24px;border-radius:7px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--l1)}
+.field.lg{height:32px;border-radius:10px;padding:0 10px}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--field)}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12px;line-height:16px;color:var(--l2);font-weight:500;white-space:nowrap}
+.seg .on{background:var(--segon);color:var(--l1);box-shadow:0 .5px 1.5px rgba(0,0,0,.25)}
+.btn{all:unset;height:24px;padding:0 12px;border-radius:12px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);color:var(--l1);white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.bl{all:unset;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--l2);height:24px;padding:0 6px;border-radius:6px}
+.sh{font-size:11px;line-height:14px;font-weight:600;color:var(--l3)}
+.lab{font-size:12px;color:var(--l2)}
+.sep{height:.5px;background:var(--sep);flex:none}
+.vsep{width:.5px;background:var(--sep);flex:none;align-self:stretch}
+.tl{width:12px;height:12px;border-radius:50%;display:block}
+.nav{height:28px;border-radius:7px;padding:0 8px;gap:8px;display:flex;align-items:center}
+.nav.sel{background:var(--sel);color:#fff}
+.nav.sel .m,.nav.sel .path,.nav.sel .st{color:#fff}
+.jk{color:var(--jk)}.js{color:var(--js)}.jn{color:var(--jn)}.jl{color:var(--jl)}.jp{color:var(--l2)}
+.code{font:400 12px/19px var(--mono);white-space:pre;color:var(--l1)}
+.gut{font:400 12px/19px var(--mono);color:var(--l3);text-align:right;white-space:pre;padding-right:12px;width:40px;flex:none}
+.th{font-size:11px;font-weight:600;color:var(--l2);height:24px;display:flex;align-items:center;padding:0 8px}
+.tr{height:24px;display:flex;align-items:center}
+.tr:nth-child(even){background:var(--zebra)}
+.td{padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.num{font:400 12px/16px var(--mono);font-variant-numeric:tabular-nums}
+.scen{height:28px;border-radius:7px;padding:0 8px;gap:10px;display:flex;align-items:center}
+.radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--l3);flex:none;display:flex;align-items:center;justify-content:center}
+.radio.on{border-color:var(--ok)}
+.radio.on::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.kv{display:flex;align-items:center;height:28px;gap:12px}
+.kv .k{width:88px;font-size:12px;color:var(--l2);flex:none}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 1440px; height: 900px; background: var(--win); display: flex; gap: 0; padding: 8px; position: relative; overflow: hidden; border-radius: 18px;">
+
+  <!-- Sidebar (floating glass) -->
+  <aside class="glass col" style="width: 264px; flex: none; border-radius: 14px; overflow: hidden;">
+    <div class="row" style="height: 44px; padding: 0 12px; gap: 8px;">
+      <span class="tl" style="background: #ff5f57;"></span><span class="tl" style="background: #febc2e;"></span><span class="tl" style="background: #28c840;"></span>
+      <span class="grow"></span>
+      <button class="bl" aria-label="Hide sidebar" style="color: var(--l2);"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6 3v10"/></svg></button>
+    </div>
+    <div class="row" style="padding: 0 12px 10px; gap: 8px;">
+      <div class="seg grow" style="display: flex;"><span class="on" style="flex: 1; text-align: center;">Endpoints</span><span style="flex: 1; text-align: center;">Journeys</span></div>
+    </div>
+    <div class="col grow" style="padding: 0 8px; gap: 2px; overflow: hidden;">
+      <div class="row sh" style="height: 24px; padding: 0 8px; gap: 6px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg>Catalog<span class="grow"></span><span class="l3" style="font-weight: 500;">4</span></div>
+      <div class="nav sel"><span class="m">GET</span><span class="path grow">/products</span><span class="st" style="font-size: 11px;">503</span></div>
+      <div class="nav"><span class="m m-get">GET</span><span class="path grow">/products/:id</span></div>
+      <div class="nav"><span class="m m-get">GET</span><span class="path grow">/products/search</span></div>
+      <div class="nav"><span class="m m-post">POST</span><span class="path grow">/cart</span></div>
+      <div class="row sh" style="height: 24px; padding: 0 8px; gap: 6px; margin-top: 8px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg>Account<span class="grow"></span><span class="l3" style="font-weight: 500;">3</span></div>
+      <div class="nav"><span class="m m-get">GET</span><span class="path grow">/account-summary</span></div>
+      <div class="nav"><span class="m m-patch">PATCH</span><span class="path grow">/account/profile</span><span class="st s4" style="font-size: 11px;"><i></i>401</span></div>
+      <div class="nav"><span class="m m-del">DELETE</span><span class="path grow">/session</span></div>
+      <div class="row sh" style="height: 24px; padding: 0 8px; gap: 6px; margin-top: 8px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg>Payments<span class="grow"></span><span class="l3" style="font-weight: 500;">2</span></div>
+      <div class="nav"><span class="m m-post">POST</span><span class="path grow">/payments</span><span class="st s5" style="font-size: 11px;"><i></i>503</span></div>
+      <div class="nav"><span class="m m-get">GET</span><span class="path grow">/payments/:id</span></div>
+      <div class="nav"><span class="m m-put">PUT</span><span class="path grow">/payments/:id/refund</span></div>
+    </div>
+    <div class="sep"></div>
+    <div class="row" style="height: 44px; padding: 0 10px; gap: 8px;">
+      <div class="field grow" style="border-radius: 12px;"><svg class="ic l3" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2L13.5 13.5"/></svg><span class="l3" style="font-size: 12px;">Filter</span></div>
+      <button class="bl" aria-label="Add endpoint" style="color: var(--l2);"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+    </div>
+  </aside>
+
+  <!-- Centre -->
+  <main class="col grow" style="padding: 0 0 0 8px;">
+    <!-- Toolbar -->
+    <div class="row" style="height: 44px; gap: 10px; flex: none;">
+      <div class="cap glass"><button aria-label="Back"><svg class="ic" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg></button><button aria-label="Forward" style="color: var(--l3);"><svg class="ic" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></svg></button></div>
+      <div class="col" style="gap: 1px;">
+        <span style="font-size: 13px; font-weight: 600;">Acme Storefront</span>
+        <span class="l2" style="font-size: 11px; line-height: 13px;">localhost:18086</span>
+      </div>
+      <span class="grow"></span>
+      <div class="cap glass" style="padding: 0 14px; gap: 10px; font-size: 12px;">
+        <span class="st s2" style="font-family: var(--font); font-weight: 500;"><i></i>Running</span>
+        <span class="l3">·</span><span class="l2">142 requests</span>
+        <span class="l3">·</span><span class="st s4" style="font-family: var(--font); font-weight: 500;"><i></i>3 unmatched</span>
+      </div>
+      <span class="grow"></span>
+      <div class="cap glass"><button><svg class="ic" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" style="fill: currentColor; stroke: none;"/></svg>Stop</button></div>
+      <div class="cap glass"><button aria-label="Import"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
+      <div class="cap glass"><button aria-label="Hide request log"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M2 9.5h12"/></svg></button><button aria-label="Hide inspector"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M10 3v10"/></svg></button></div>
+    </div>
+
+    <!-- Content surface -->
+    <div class="col grow" style="margin-top: 4px; background: var(--content); border-radius: 12px; border: .5px solid var(--sep); overflow: hidden;">
+      <!-- Jump bar -->
+      <div class="row" style="height: 30px; padding: 0 14px; gap: 6px; font-size: 12px; flex: none;">
+        <span class="l2">Catalog</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M6 3l5 5-5 5"/></svg>
+        <span class="l2">GET /products</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M6 3l5 5-5 5"/></svg>
+        <span style="font-weight: 500;">Out of stock</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>
+        <span class="grow"></span>
+        <span class="l3" style="font-size: 11px;">Saved</span>
+      </div>
+      <div class="sep"></div>
+
+      <!-- Editor -->
+      <div class="col" style="padding: 16px 20px 16px; gap: 14px; flex: none;">
+        <div class="field lg" style="gap: 10px;">
+          <span class="row" style="gap: 4px;"><span class="m m-get" style="width: auto;">GET</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span>
+          <span class="vsep" style="margin: 7px 0;"></span>
+          <span class="l3" style="font: 400 13px var(--mono);">localhost:18086</span><span style="font: 400 13px var(--mono); margin-left: -10px;">/products</span>
+          <span class="grow"></span>
+          <button class="bl" aria-label="Copy URL"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg></button>
+        </div>
+
+        <div class="row" style="gap: 10px;">
+          <span style="font-size: 15px; line-height: 20px; font-weight: 600;">Out of stock</span>
+          <span class="row l2" style="gap: 5px; font-size: 12px;"><span class="radio" style="width: 12px; height: 12px;"></span>Not live</span>
+          <span class="grow"></span>
+          <button class="btn">Make live</button>
+          <button class="bl" aria-label="More scenario actions"><svg class="ic" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" style="fill: currentColor;"/><circle cx="8" cy="8" r=".9" style="fill: currentColor;"/><circle cx="12.5" cy="8" r=".9" style="fill: currentColor;"/></svg></button>
+        </div>
+
+        <div class="row" style="gap: 20px;">
+          <div class="row" style="gap: 8px;"><span class="lab">Status</span><div class="field" style="width: 196px;"><span class="st s5"><i></i>503</span><span class="grow l2" style="font-size: 12px;">Service Unavailable</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+          <div class="row" style="gap: 8px;"><span class="lab">Delay</span><div class="field" style="width: 92px;"><span class="num grow">800</span><span class="l3" style="font-size: 12px;">ms</span></div></div>
+          <div class="row" style="gap: 8px;"><span class="lab">Content type</span><div class="field" style="width: 120px;"><span class="grow" style="font-size: 12px;">JSON</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+        </div>
+
+        <div class="row" style="gap: 8px;">
+          <div class="seg"><span class="on">Body</span><span>Headers <span class="l3">2</span></span></div>
+          <span class="grow"></span>
+          <button class="bl"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><path d="M3 4h10M3 8h7M3 12h10"/></svg>Format</button>
+          <button class="bl"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>Copy</button>
+        </div>
+
+        <div class="row" style="align-items: stretch; background: var(--code); border: .5px solid var(--sep); border-radius: 10px; padding: 10px 0; height: 214px; overflow: hidden;">
+          <div class="gut">1
+2
+3
+4
+5
+6
+7
+8
+9
+10</div>
+          <div class="code grow"><span class="jp">{</span>
+  <span class="jk">"error"</span><span class="jp">: {</span>
+    <span class="jk">"code"</span><span class="jp">:</span> <span class="js">"OUT_OF_STOCK"</span><span class="jp">,</span>
+    <span class="jk">"message"</span><span class="jp">:</span> <span class="js">"Canvas Tote is out of stock"</span><span class="jp">,</span>
+    <span class="jk">"retryAfter"</span><span class="jp">:</span> <span class="jn">3600</span><span class="jp">,</span>
+    <span class="jk">"restockExpected"</span><span class="jp">:</span> <span class="jl">null</span>
+  <span class="jp">},</span>
+  <span class="jk">"products"</span><span class="jp">: [],</span>
+  <span class="jk">"partial"</span><span class="jp">:</span> <span class="jl">true</span>
+<span class="jp">}</span></div>
+        </div>
+      </div>
+
+      <span class="grow"></span>
+      <!-- Request log -->
+      <div class="sep"></div>
+      <div class="col" style="height: 318px; flex: none;">
+        <div class="row" style="height: 40px; padding: 0 12px 0 14px; gap: 10px; flex: none;">
+          <span style="font-size: 13px; font-weight: 600;">Request log</span>
+          <span class="l3" style="font-size: 12px;">142</span>
+          <div class="seg" style="margin-left: 6px;"><span class="on">All</span><span>Unmatched <span style="color: var(--warn);">3</span></span><span>Errors <span style="color: var(--err);">5</span></span></div>
+          <span class="grow"></span>
+          <div class="field" style="width: 240px; border-radius: 12px;"><svg class="ic l3" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2L13.5 13.5"/></svg><span class="l3" style="font-size: 12px;">Filter by path, status or scenario</span></div>
+          <button class="bl" aria-label="Clear log"><svg class="ic" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg></button>
+        </div>
+        <div class="row" style="padding: 0 6px; border-bottom: .5px solid var(--sep); flex: none;">
+          <span class="th" style="width: 110px;">Time</span><span class="th" style="width: 64px;">Method</span><span class="th grow">Path</span><span class="th" style="width: 84px;">Status</span><span class="th" style="width: 150px;">Scenario</span><span class="th" style="width: 84px; justify-content: flex-end;">Duration</span><span class="th" style="width: 76px; justify-content: flex-end;">Size</span>
+        </div>
+        <div class="col" style="padding: 0 6px;">
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:12.418</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/products</span><span class="td" style="width: 84px;"><span class="st s5"><i></i>503</span></span><span class="td" style="width: 150px;">Out of stock</span><span class="td num l2" style="width: 84px; text-align: right;">803 ms</span><span class="td num l2" style="width: 76px; text-align: right;">214 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:12.380</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/products/42</span><span class="td" style="width: 84px;"><span class="st s2"><i></i>200</span></span><span class="td" style="width: 150px;">Default</span><span class="td num l2" style="width: 84px; text-align: right;">8 ms</span><span class="td num l2" style="width: 76px; text-align: right;">640 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:11.902</span><span class="td" style="width: 64px;"><span class="m m-post">POST</span></span><span class="td grow path">/cart</span><span class="td" style="width: 84px;"><span class="st s2"><i></i>201</span></span><span class="td" style="width: 150px;">Item added</span><span class="td num l2" style="width: 84px; text-align: right;">24 ms</span><span class="td num l2" style="width: 76px; text-align: right;">312 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:10.155</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/recommendations?limit=4</span><span class="td" style="width: 84px;"><span class="st s4"><i></i>404</span></span><span class="td" style="width: 150px; color: var(--warn);">Unmatched</span><span class="td num l2" style="width: 84px; text-align: right;">2 ms</span><span class="td num l2" style="width: 76px; text-align: right;">0 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:09.771</span><span class="td" style="width: 64px;"><span class="m m-post">POST</span></span><span class="td grow path">/payments</span><span class="td" style="width: 84px;"><span class="st s5"><i></i>503</span></span><span class="td" style="width: 150px;">Declined</span><span class="td num l2" style="width: 84px; text-align: right;">1.2 s</span><span class="td num l2" style="width: 76px; text-align: right;">180 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:09.004</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/account-summary</span><span class="td" style="width: 84px;"><span class="st s2"><i></i>200</span></span><span class="td" style="width: 150px;">Premium member</span><span class="td num l2" style="width: 84px; text-align: right;">15 ms</span><span class="td num l2" style="width: 76px; text-align: right;">2.1 KB</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:08.650</span><span class="td" style="width: 64px;"><span class="m m-patch">PATCH</span></span><span class="td grow path">/account/profile</span><span class="td" style="width: 84px;"><span class="st s4"><i></i>401</span></span><span class="td" style="width: 150px;">Session expired</span><span class="td num l2" style="width: 84px; text-align: right;">6 ms</span><span class="td num l2" style="width: 76px; text-align: right;">96 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:08.212</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/products/search?q=tote</span><span class="td" style="width: 84px;"><span class="st s2"><i></i>200</span></span><span class="td" style="width: 150px;">Default</span><span class="td num l2" style="width: 84px; text-align: right;">11 ms</span><span class="td num l2" style="width: 76px; text-align: right;">1.4 KB</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:07.531</span><span class="td" style="width: 64px;"><span class="m m-get">GET</span></span><span class="td grow path">/cdn/fonts/inter.woff2</span><span class="td" style="width: 84px;"><span class="st s3"><i></i>302</span></span><span class="td l2" style="width: 150px;">Upstream</span><span class="td num l2" style="width: 84px; text-align: right;">41 ms</span><span class="td num l2" style="width: 76px; text-align: right;">0 B</span></div>
+          <div class="tr"><span class="td num l2" style="width: 110px;">21:46:06.980</span><span class="td" style="width: 64px;"><span class="m m-del">DELETE</span></span><span class="td grow path">/session</span><span class="td" style="width: 84px;"><span class="st s2"><i></i>204</span></span><span class="td" style="width: 150px;">Default</span><span class="td num l2" style="width: 84px; text-align: right;">3 ms</span><span class="td num l2" style="width: 76px; text-align: right;">0 B</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Inspector (floating glass) -->
+  <aside class="glass col" style="width: 300px; flex: none; margin-left: 8px; border-radius: 14px; overflow: hidden;">
+    <div class="row" style="height: 44px; padding: 0 16px;">
+      <span style="font-size: 13px; font-weight: 600;">Scenarios</span>
+      <span class="grow"></span>
+      <button class="bl" aria-label="Add scenario" style="color: var(--l2);"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+    </div>
+    <div class="col" style="padding: 0 8px; gap: 2px;">
+      <div class="scen"><span class="radio on" title="Live"></span><span class="grow">Default</span><span class="st s2"><i></i>200</span></div>
+      <div class="scen" style="background: var(--sel-soft);"><span class="radio"></span><span class="grow" style="font-weight: 500;">Out of stock</span><span class="st s5"><i></i>503</span></div>
+      <div class="scen"><span class="radio"></span><span class="grow">Slow catalogue</span><span class="l3 num" style="font-size: 11px;">2 s</span><span class="st s2"><i></i>200</span></div>
+      <div class="scen"><span class="radio"></span><span class="grow">Empty catalogue</span><span class="st s2"><i></i>200</span></div>
+      <div class="scen"><span class="radio"></span><span class="grow">Rate limited</span><span class="st s4"><i></i>429</span></div>
+    </div>
+    <div class="row l3" style="padding: 8px 16px 0; gap: 6px; font-size: 11px;"><span class="radio on" style="width: 10px; height: 10px; border-width: 1px;"></span>Live scenario, served on every request</div>
+
+    <div class="sep" style="margin: 16px 16px 0;"></div>
+    <div class="col" style="padding: 12px 16px 0; gap: 0;">
+      <span style="font-size: 13px; font-weight: 600; margin-bottom: 6px;">Endpoint</span>
+      <div class="kv"><span class="k">Group</span><div class="field grow"><span class="grow" style="font-size: 12px;">Catalog</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+      <div class="kv"><span class="k">Base delay</span><div class="field grow"><span class="num grow">0</span><span class="l3" style="font-size: 12px;">ms</span></div></div>
+      <div class="kv"><span class="k">Port</span><div class="field grow"><span class="grow" style="font-size: 12px;">Storefront · 18086</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+      <div class="kv"><span class="k">When unmatched</span><div class="field grow"><span class="grow" style="font-size: 12px;">Forward to upstream</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+    </div>
+
+    <div class="sep" style="margin: 16px 16px 0;"></div>
+    <div class="col" style="padding: 12px 16px 0; gap: 10px;">
+      <div class="row"><span style="font-size: 13px; font-weight: 600;">Traffic</span><span class="grow"></span><span class="l3" style="font-size: 11px;">Last 15 minutes</span></div>
+      <div class="row" style="align-items: flex-end; gap: 3px; height: 44px;">
+        <span style="flex: 1; height: 30%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 45%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 38%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 60%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 52%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 72%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 64%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 80%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 58%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 66%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 90%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 70%; background: var(--ok); opacity: .7; border-radius: 2px;"></span><span style="flex: 1; height: 40%; background: var(--err); opacity: .85; border-radius: 2px;"></span><span style="flex: 1; height: 55%; background: var(--err); opacity: .85; border-radius: 2px;"></span><span style="flex: 1; height: 48%; background: var(--err); opacity: .85; border-radius: 2px;"></span>
+      </div>
+      <div class="row" style="gap: 16px; font-size: 12px;">
+        <span class="col"><span class="num" style="font-size: 15px; line-height: 20px; font-weight: 600;">128</span><span class="l2" style="font-size: 11px;">served</span></span>
+        <span class="col"><span class="num" style="font-size: 15px; line-height: 20px; font-weight: 600; color: var(--err);">3</span><span class="l2" style="font-size: 11px;">errors</span></span>
+        <span class="col"><span class="num" style="font-size: 15px; line-height: 20px; font-weight: 600;">12 ms</span><span class="l2" style="font-size: 11px;">median</span></span>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'dark' };
+  }
+}
+</script>
+</body>
+</html>

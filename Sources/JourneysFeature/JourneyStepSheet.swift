@@ -9,7 +9,7 @@ import FeatureSupport
 /// A step either answers or fails at the transport level, so the form asks that first and then shows
 /// only the fields that apply. Status, delay and repeat share one row; the body and the headers share
 /// the space below it through a Body/Headers switch, as the endpoint editor's do.
-struct JourneyStepSheet: View {
+public struct JourneyStepSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -83,7 +83,25 @@ struct JourneyStepSheet: View {
     /// The request field is shared with the endpoint sheets, which focus it with a plain flag.
     @FocusState private var pathIsFocused: Bool
 
-    var body: some View {
+    public init(
+        step: JourneyStep? = nil,
+        stepNumber: Int? = nil,
+        backends: [BackendConfiguration] = [],
+        globalDelayMs: Int = 0,
+        endpoints: [Endpoint] = [],
+        onCommit: @escaping (JourneyStepSpec) -> Void,
+        onRemove: (() -> Void)? = nil
+    ) {
+        self.step = step
+        self.stepNumber = stepNumber
+        self.backends = backends
+        self.globalDelayMs = globalDelayMs
+        self.endpoints = endpoints
+        self.onCommit = onCommit
+        self.onRemove = onRemove
+    }
+
+    public var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 Text(title)

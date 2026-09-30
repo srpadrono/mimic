@@ -46,3 +46,50 @@ public protocol UpdateSheetModel: AnyObject, Observable {
     func downloadAndPrepare()
     func installNow()
 }
+
+#if DEBUG
+/// An update flow with no feed behind it, for the gallery, previews and tests. Its buttons move
+/// between phases the way the real flow would, without downloading anything.
+@MainActor
+@Observable
+public final class UpdateSheetPreviewModel: UpdateSheetModel {
+    public var phase: UpdatePhase
+    public var installedVersionDescription: String
+    public var checksAutomatically = true
+
+    public init(phase: UpdatePhase = .available(UpdateSheetPreviewModel.release),
+                installedVersionDescription: String = "1.9.2") {
+        self.phase = phase
+        self.installedVersionDescription = installedVersionDescription
+    }
+
+    /// The release the design's update sheet announces.
+    public static let release = UpdateRelease(
+        version: ReleaseVersion(major: 1, minor: 10, patch: 0),
+        tag: "v1.10.0",
+        title: "Mimic 1.10",
+        notes: """
+        ## New
+        - Journeys can capture a flow straight from the request log.
+        - The request log filters by status class.
+
+        ## Fixed
+        - Port changes apply without restarting the app.
+        """,
+        pageURL: URL(fileURLWithPath: "/"),
+        publishedAt: Date(timeIntervalSinceReferenceDate: 812_000_000),
+        asset: UpdateRelease.Asset(
+            name: "Mimic-1.10.0.zip",
+            downloadURL: URL(fileURLWithPath: "/Mimic-1.10.0.zip"),
+            sizeInBytes: 18_400_000,
+            sha256: String(repeating: "0", count: 64)
+        )
+    )
+
+    public func checkForUpdates() { phase = .available(Self.release) }
+    public func skipCurrentVersion() { phase = .idle }
+    public func dismiss() { phase = .idle }
+    public func downloadAndPrepare() { phase = .downloading(Self.release, fraction: 0.4) }
+    public func installNow() { phase = .installing(Self.release) }
+}
+#endif

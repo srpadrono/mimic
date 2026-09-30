@@ -25,8 +25,11 @@ Mimic app → AppFeatures → Domain
                         → ControlPlane     → Domain + Vapor
                         → SpecImport       → Domain
                         → DesignSystem
+                        → UI sections      → Domain + DesignSystem + FeatureSupport
 
 mimic CLI → MimicCLICore → Domain + ArgumentParser
+
+MimicGallery (Debug tool) → UI sections + MimicFixtures + SnapshotSupport
 ```
 
 The app target links each module for bundling, while its source imports `AppFeatures` as the composition root. `Package.swift` builds portable modules from the same source folders that `Project.swift` uses for the app.
@@ -38,10 +41,38 @@ The app target links each module for bundling, while its source imports `AppFeat
 - **ControlPlane** contains the loopback `ControlServer`, the `0600` discovery file, and `ControlHost` protocol. It depends on Domain and Vapor, not Persistence or MockServerEngine.
 - **SpecImport** parses HAR and OpenAPI/Swagger into candidates reviewed in the window. Imports create primary-backend endpoints, so duplicate detection compares existing primary routes and earlier usable candidates using Domain's matching identity. Unavailable, partial, binary, oversized, or invalid responses remain visible with an explanation and do not displace a later usable capture. Neither ControlPlane nor the CLI links it.
 - **DesignSystem** holds `DS*` SwiftUI tokens and components. Each token enum in `Tokens/` is one ladder with no legacy aliases: `DSColors` (surfaces, labels, status and syntax inks), `DSTypography` (roles after the macOS text styles), `DSSpacing` (a 4 pt grid), `DSCornerRadius`, `DSControlHeight`, `DSStroke`, `DSLayout`, `DSBarHeight`, `DSRowHeight`, `DSGlyph`, `DSSheetWidth`, and `DSAnimation`. Components build only on those tokens; for example, `DSPanelHeader` draws every panel's title bar, `DSMethodLabel` and `DSStatusLabel` render methods and statuses as colored text, and `dsFieldChrome` gives a bare text field the shared field look. Its shared JSON scanner bounds display formatting so a captured body cannot expand without limit; the editor enables Format only when valid JSON can be reflowed within that same output budget. Native text editors preserve undo and UTF-16 selection within a document and reset undo when document identity changes. Callers must update the identity together with the draft body it identifies.
-- **AppFeatures** coordinates workflows. `AppState` owns the session, `ProjectWorkspace` owns project lifecycle, `MockServerRuntime` coordinates the live engine, and `AppControlHost` implements the only production `ControlHost`.
+- **AppFeatures** is the composition root. `AppState` owns the session, `ProjectWorkspace` owns project lifecycle, `MockServerRuntime` coordinates the live engine, and `AppControlHost` implements the only production `ControlHost`. `WorkspaceView`, `CenterPaneView`, and `InspectorPanelView` place the sections into the shell and wire their callbacks to `AppState`; `AppState` conforms to each section's model protocol in `AppState+FeatureModels.swift`.
+- **UI sections** are one framework each, described under [UI sections](#ui-sections).
 - **MimicCLICore** formats and sends commands. It does not host a server or open the project database.
 
 `Scripts/check_module_edges.py` verifies the important dependency boundaries in both manifests.
+
+## UI sections
+
+Each part of the window is its own framework, so it can be built, tested, previewed, and matched to its design without the app, the server, or the store.
+
+| Module | Holds |
+| --- | --- |
+| `WorkspaceShell` | `WorkspaceShellLayout` (navigator, jump bar, centre, docked request log, inspector and toolbar as slots), `WorkspaceToolbarLayout` tiers, the jump bar, autosave status, and the inspector overview. |
+| `EndpointsFeature` | Endpoint navigator, editor, scenario inspector, request and new-endpoint sheets, and the first-endpoint chooser. |
+| `JourneysFeature` | Journey navigator, editor, run controls, step inspector, and the step, capture and template sheets. |
+| `RequestLogFeature` | Request log table, filters and sorting, request detail, and export. |
+| `ServerFeature` | Run control, server status, and server settings. |
+| `ImportFeature` | HAR and OpenAPI review, and committing the reviewed candidates. |
+| `ProjectsFeature` | Welcome window and new-project sheet. |
+| `UpdatesFeature` | The update sheet. The feed, download and installer stay in AppFeatures. |
+| `FeatureSupport` | Pieces more than one section uses: `NavigatorTab`, `RenameItemSheet`, `SheetRequestField`, `HTTPStatusText`, `ImportKind`, and `PortProbe`. |
+
+A section depends only on Domain, DesignSystem and FeatureSupport; ImportFeature also depends on SpecImport. A section never imports AppFeatures, Persistence, MockServerEngine, ControlPlane, or another section, and `check_module_edges.py` fails the build if one does. A section takes values and callbacks, or reads and edits through a model protocol it declares (`JourneyEditingModel`, `ServerSettingsModel`, `UpdateSheetModel`). Each protocol has a Debug-only stand-in (`JourneyPreviewModel`, `ServerSettingsPreviewModel`, `UpdateSheetPreviewModel`) that the gallery, previews and tests use. Hosted panes receive their model as an argument rather than from the environment, because `NSHostingController` does not carry the environment across.
+
+Something two sections both need belongs in FeatureSupport, or in Domain if it is a rule. Wiring between sections belongs in AppFeatures.
+
+### Working on one section
+
+- **Tests.** Sections have their own test targets (`EndpointsFeatureTests`, `JourneysFeatureTests`, and so on), each building only its module and what it depends on: `xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test -destination 'platform=macOS' -only-testing:EndpointsFeatureTests`. Tests that need several sections, or a section inside the window, stay in `MimicTests`.
+- **Gallery.** The `MimicGallery` scheme is a Debug-only app that lists every design-system component and every section, drawn from `MimicFixtures` at the size of its artboard. It switches between dark and light and lays the design over the live view as an overlay, a difference blend, or side by side. It never ships: the `Mimic` app cannot reach it, the fixtures, or the snapshot harness.
+- **Design references.** `Design/Canvas` holds the design canvas's artboards. `swift Scripts/export_design_references.swift` renders each one to a 2x PNG in `Design/Reference` with WebKit, the engine that has SF Pro. `Design/Reference/sections.json` names where each section sits on its artboard, in points. Re-run the exporter and commit its images whenever an artboard changes.
+- **Fidelity reports.** `DesignFidelityTests` renders every gallery entry in both appearances with `SnapshotSupport` and scores it against its crop of the artboard. The scores are a report, never a failure, because WebKit and AppKit never rasterise text identically. The report is written to `$MIMIC_FIDELITY_REPORT`, or to the temporary directory, with an `index.html` that shows each section, its design, and their difference. The gallery's Export report button writes the same report. The suite does fail if a gallery entry names a section the manifest lacks, or is drawn at a size other than its artboard's.
 
 When the open project changes, `AppState` requests a server stop before publishing the new project. `MockServerRuntime` waits for that stop, including a bind still in progress, before pushing the new project's routes to the engine. The welcome list reads stored projects asynchronously; only its newest refresh may publish rows. `AppControlHost.projectList` reports a store failure if project counts cannot be read, rather than presenting missing counts as zero.
 
