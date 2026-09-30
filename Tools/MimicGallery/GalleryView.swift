@@ -109,17 +109,16 @@ struct GalleryView: View {
         }
         .background(DSColors.window)
         .overlay(alignment: .bottomLeading) {
-            footer(entry: entry, hasReference: reference != nil)
+            footer(entry: entry, missingReference: reference == nil ? missingReferenceNote(for: entry) : nil)
         }
         .id("\(entry.id)-\(appearance.rawValue)")
     }
 
-    private func footer(entry: GalleryEntry, hasReference: Bool) -> some View {
+    private func footer(entry: GalleryEntry, missingReference: String?) -> some View {
         HStack(spacing: DSSpacing.md) {
             Text("\(entry.referenceID) \u{00B7} \(Int(entry.size.width)) \u{00D7} \(Int(entry.size.height)) pt")
-            if !hasReference {
-                Text("No design image. Run swift Scripts/export_design_references.swift.")
-                    .foregroundStyle(DSColors.warning)
+            if let missingReference {
+                Text(missingReference).foregroundStyle(DSColors.warning)
             }
             if let status { Text(status).foregroundStyle(DSColors.labelSecondary) }
         }
@@ -129,8 +128,18 @@ struct GalleryView: View {
         .padding(DSSpacing.md)
     }
 
+    /// Why an entry has no design image in the current appearance.
+    private func missingReferenceNote(for entry: GalleryEntry) -> String {
+        if let references, let section = references.section(entry.referenceID),
+           !references.draws(section, in: appearance.rawValue) {
+            return "The design draws this board in one appearance only. Switch appearance to compare."
+        }
+        return "No design image. Run swift Scripts/export_design_references.swift."
+    }
+
     private func referenceImage(for entry: GalleryEntry) -> NSImage? {
         guard let references, let section = references.section(entry.referenceID),
+              references.draws(section, in: appearance.rawValue),
               let image = references.image(for: section, theme: appearance.rawValue) else { return nil }
         return NSImage(cgImage: image, size: section.frame.size)
     }
@@ -139,6 +148,8 @@ struct GalleryView: View {
     private func exportReport() {
         let report = FidelityReport(directory: FidelityReport.defaultDirectory())
         for entry in entries {
+            if let catalog = references, let section = catalog.section(entry.referenceID),
+               !catalog.draws(section, in: appearance.rawValue) { continue }
             guard let actual = SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance)
             else { continue }
             let reference = references.flatMap { catalog in

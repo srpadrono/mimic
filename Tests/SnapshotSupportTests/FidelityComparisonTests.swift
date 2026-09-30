@@ -64,4 +64,30 @@ struct FidelityComparisonTests {
         let section = try JSONDecoder().decode(DesignReferenceCatalog.Section.self, from: Data(json.utf8))
         #expect(section.frame == CGRect(x: 8, y: 8, width: 264, height: 884))
     }
+
+    @Test("An unthemed board is compared only in its own appearance")
+    func unthemedBoardDrawsInOneAppearance() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manifest = #"""
+        {"scale": 2,
+         "boards": {
+           "Main": {"source": "Canvas/Main.dc.html", "width": 1440, "height": 900, "themes": ["dark", "light"]},
+           "Tokens": {"source": "Canvas/Tokens.dc.html", "width": 1440, "height": 820, "themes": [], "appearance": "dark"}
+         },
+         "sections": [
+           {"id": "nav", "board": "Main", "rect": [8, 8, 264, 884], "title": "Navigator"},
+           {"id": "colour", "board": "Tokens", "rect": [48, 48, 1344, 297], "title": "Colour"}
+         ]}
+        """#
+        try Data(manifest.utf8).write(to: directory.appendingPathComponent("sections.json"))
+        let catalog = try DesignReferenceCatalog(directory: directory)
+        let nav = try #require(catalog.section("nav"))
+        let colour = try #require(catalog.section("colour"))
+
+        #expect(catalog.draws(nav, in: "dark") && catalog.draws(nav, in: "light"))
+        #expect(catalog.draws(colour, in: "dark"))
+        #expect(!catalog.draws(colour, in: "light"))
+    }
 }

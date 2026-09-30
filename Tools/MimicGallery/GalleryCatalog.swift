@@ -94,7 +94,7 @@ enum GalleryCatalog {
     static let endpoints: [GalleryEntry] = [
         GalleryEntry("workspace.navigator", "Endpoint navigator", group: .endpoints,
                      size: CGSize(width: 264, height: 884)) {
-            GalleryEndpointNavigator()
+            GalleryNavigator(tab: .endpoints)
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
             GalleryWorkspaceWindow.editor
@@ -119,15 +119,7 @@ enum GalleryCatalog {
     static let journeys: [GalleryEntry] = [
         GalleryEntry("journeys.navigator", "Journey navigator", group: .journeys,
                      size: CGSize(width: 264, height: 884)) {
-            JourneyNavigatorList(
-                journeys: DesignFixtures.journeys,
-                activeJourneyID: DesignFixtures.paymentRetry.id,
-                selectedJourneyID: .constant(DesignFixtures.paymentRetry.id),
-                onActivate: { _ in },
-                onAdd: {},
-                onDuplicate: { _ in },
-                onDelete: { _ in }
-            )
+            GalleryNavigator(tab: .journeys)
         },
         GalleryEntry("journeys.editor", "Journey editor", group: .journeys, size: CGSize(width: 844, height: 836)) {
             JourneyEditorView(

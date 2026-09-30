@@ -2,6 +2,7 @@ import DesignSystem
 import Domain
 import EndpointsFeature
 import FeatureSupport
+import JourneysFeature
 import MimicFixtures
 import RequestLogFeature
 import ServerFeature
@@ -29,7 +30,7 @@ struct GalleryWorkspaceWindow: View {
             requestLogHeight: $requestLogHeight,
             isInspectorPresented: $isInspectorPresented,
             onToolbarLayoutChange: { toolbarLayout = $0 },
-            navigator: { GalleryEndpointNavigator() },
+            navigator: { GalleryNavigator() },
             jumpBar: {
                 BreadcrumbJumpBar(
                     crumbs: Self.crumbs,
@@ -134,13 +135,21 @@ struct GalleryWorkspaceWindow: View {
     }
 }
 
-/// The endpoint navigator column: the list between the window's own header and filter.
-struct GalleryEndpointNavigator: View {
-    @State private var selection: UUID? = DesignFixtures.products.id
+/// The navigator column as the window draws it: the window controls' row, the mode picker, the
+/// endpoint or journey list, and the pinned filter.
+struct GalleryNavigator: View {
+    @State private var tab: String
+    @State private var endpointSelection: UUID? = DesignFixtures.products.id
+    @State private var journeySelection: UUID? = DesignFixtures.paymentRetry.id
     @State private var filter = ""
     @State private var scope = SidebarView.anyMethodScopeID
     @State private var collapsed: Set<String> = []
-    @State private var tab = NavigatorTab.endpoints.id
+
+    init(tab: NavigatorTab = .endpoints) {
+        _tab = State(initialValue: tab.id)
+    }
+
+    private var showsJourneys: Bool { tab == NavigatorTab.journeys.id }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -150,29 +159,51 @@ struct GalleryEndpointNavigator: View {
                 modes: NavigatorTab.allCases.map { DSNavigatorMode(id: $0.id, title: $0.title, help: $0.help) },
                 selection: $tab
             )
-            SidebarView(
-                projectName: DesignFixtures.projectName,
-                endpoints: DesignFixtures.endpoints,
-                serverConfiguration: DesignFixtures.serverConfiguration,
-                selectedEndpointID: $selection,
-                onDeleteEndpoint: { _ in },
-                onDuplicateEndpoint: { _ in nil },
-                onAddEndpoint: {},
-                searchText: $filter,
-                methodScopeID: $scope,
-                collapsedSections: $collapsed
-            )
-            .frame(maxHeight: .infinity)
+            Group {
+                if showsJourneys {
+                    JourneyNavigatorList(
+                        journeys: DesignFixtures.journeys,
+                        activeJourneyID: DesignFixtures.paymentRetry.id,
+                        activeStatus: JourneyStatus.make(journey: DesignFixtures.paymentRetry, state: nil),
+                        selectedJourneyID: $journeySelection,
+                        onActivate: { _ in },
+                        onAdd: {},
+                        onDuplicate: { _ in },
+                        onDelete: { _ in },
+                        searchText: filter,
+                        collapsedGroups: $collapsed
+                    )
+                } else {
+                    SidebarView(
+                        projectName: DesignFixtures.projectName,
+                        endpoints: DesignFixtures.endpoints,
+                        serverConfiguration: DesignFixtures.serverConfiguration,
+                        selectedEndpointID: $endpointSelection,
+                        onDeleteEndpoint: { _ in },
+                        onDuplicateEndpoint: { _ in nil },
+                        onAddEndpoint: {},
+                        searchText: $filter,
+                        methodScopeID: $scope,
+                        collapsedSections: $collapsed
+                    )
+                }
+            }
+            .frame(minHeight: 0, maxHeight: .infinity)
             DSNavigatorFooter(
                 text: $filter,
                 scopeID: $scope,
-                scopes: SidebarView.methodScopes,
+                scopes: showsJourneys ? [] : SidebarView.methodScopes,
                 placeholder: "Filter",
-                label: "Filter endpoints",
+                label: showsJourneys ? "Filter journeys" : "Filter endpoints",
                 identifier: "gallery.navigatorFilter"
             ) {
-                EmptyView()
+                DSPanelHeaderButton(
+                    systemImage: "plus",
+                    help: showsJourneys ? "Add journey" : "Add endpoint",
+                    identifier: "gallery.navigatorAdd"
+                ) {}
             }
+            .id(tab)
         }
         .background(DSColors.window)
     }

@@ -13,6 +13,8 @@ public struct DesignReferenceCatalog: Sendable {
         public let width: Double
         public let height: Double
         public let themes: [String?]
+        /// The one appearance an unthemed board is drawn in, such as the Tokens board's dark canvas.
+        public let appearance: String?
     }
 
     public struct Section: Decodable, Sendable, Equatable, Identifiable {
@@ -65,6 +67,15 @@ public struct DesignReferenceCatalog: Sendable {
 
     public func section(_ id: String) -> Section? {
         sections.first { $0.id == id }
+    }
+
+    /// Whether the section's board was drawn in `theme`. A themed board is drawn in each of its themes;
+    /// an unthemed one only in its own appearance, so comparing it in any other would score the
+    /// background rather than the section.
+    public func draws(_ section: Section, in theme: String) -> Bool {
+        guard let board = boards[section.board] else { return false }
+        if board.themes.isEmpty { return (board.appearance ?? "dark") == theme }
+        return board.themes.contains(theme)
     }
 
     /// The file a board's image is exported to: `Main-dark.png`, or `Tokens.png` for an unthemed board.

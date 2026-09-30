@@ -114,7 +114,8 @@
       "source": "Canvas/Tokens.dc.html",
       "width": 1440,
       "height": 820,
-      "themes": []
+      "themes": [],
+      "appearance": "dark"
     }
   },
   "sections": [

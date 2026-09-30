@@ -39,6 +39,10 @@ struct DesignFidelityTests {
     func writeFidelityReport(appearance: SnapshotRenderer.Appearance) throws {
         let report = FidelityReport(directory: FidelityReport.defaultDirectory())
         for entry in GalleryCatalog.entries {
+            // The Tokens board is drawn on one dark canvas; scoring its sections in light would
+            // compare the background, not the tokens.
+            if let section = catalog.section(entry.referenceID),
+               !catalog.draws(section, in: appearance.rawValue) { continue }
             let image = try #require(
                 SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance),
                 "\(entry.id) drew nothing"
