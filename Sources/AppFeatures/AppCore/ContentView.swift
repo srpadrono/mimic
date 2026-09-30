@@ -165,9 +165,7 @@ struct ContentView: View {
     }
 }
 
-extension ImportKind: Identifiable {
-    var id: Self { self }
-
+extension ImportKind {
     /// The name of the project a welcome-window import creates. Renamed like any other.
     var newProjectName: String {
         switch self {

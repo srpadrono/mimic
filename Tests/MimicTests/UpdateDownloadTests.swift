@@ -1,6 +1,7 @@
 import Domain
 import Foundation
 import Testing
+import UpdatesFeature
 @testable import AppFeatures
 
 /// A URLSession transport fixture: no live feed, package, or installer is contacted.

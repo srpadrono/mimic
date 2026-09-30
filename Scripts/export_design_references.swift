@@ -73,7 +73,12 @@ final class Exporter: NSObject, WKNavigationDelegate {
             webView.loadHTMLString(html, baseURL: baseURL)
         }
         // Web fonts and images settle after `didFinish`; one more frame is enough for local files.
-        _ = try await webView.evaluateJavaScript("document.fonts.ready.then(() => true)")
+        // `evaluateJavaScript` cannot hand back a Promise; `callAsyncJavaScript` awaits it.
+        _ = try await webView.callAsyncJavaScript(
+            "await document.fonts.ready; return true;",
+            arguments: [:],
+            contentWorld: .page
+        )
         try await Task.sleep(for: .milliseconds(200))
 
         let snapshot = WKSnapshotConfiguration()

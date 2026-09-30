@@ -441,6 +441,7 @@ let project = Project(
             dependencies: [
                 .target(name: "ImportFeature"),
                 .target(name: "SpecImport"),
+                .target(name: "FeatureSupport"),
                 .target(name: "Domain"),
                 .target(name: "DesignSystem"),
             ]

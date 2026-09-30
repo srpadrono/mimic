@@ -47,7 +47,7 @@ public struct EndpointInspectorSettings: View {
             ?? context.backends.first
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             DSInspectorSectionHeader("Endpoint", identifier: "inspector.endpoint")
 

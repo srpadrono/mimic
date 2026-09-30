@@ -272,7 +272,13 @@ struct JourneyFeatureRenderingTests {
 
     @Test("The step form keeps its sheet margin when a scrollbar consumes width")
     func stepFormAlignsWithSheetMargin() async throws {
-        let controller = NSHostingController(rootView: JourneyStepSheet(step: nil) { _ in })
+        // A short screen, so the form is taller than its viewport. The overflow is what matters:
+        // SwiftUI narrows scroll content for a scroller only when the content needs one. Forcing a
+        // scroller onto a form that fits is a state no user reaches, and from macOS 27 SwiftUI no
+        // longer lays the content out again for it — the form kept its full width under the scroller.
+        var sheet = JourneyStepSheet(step: nil) { _ in }
+        sheet.visibleScreenHeight = DSFormMetrics.maximumTallSheetHeight
+        let controller = NSHostingController(rootView: sheet)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -312,6 +318,8 @@ struct JourneyFeatureRenderingTests {
 
         let outer = try #require(outerScroll)
         let editor = try #require(bodyScroll)
+        let document = try #require(outer.documentView)
+        try #require(document.frame.height > outer.contentSize.height, "The fixture's form must overflow its viewport")
         try #require(outer.contentSize.width < outer.bounds.width, "The fixture must reserve scrollbar width")
         // Let SwiftUI lay the form out with the narrower viewport before measuring its native child.
         try await Task.sleep(for: .milliseconds(10))

@@ -24,6 +24,9 @@ public struct JourneyStepSheet: View {
     let onCommit: (JourneyStepSpec) -> Void
     /// Offered only when editing an existing step.
     var onRemove: (() -> Void)? = nil
+    /// The visible screen height the sheet fits itself under. `nil` reads the main screen; a test
+    /// pins it to reach the short-screen layout, where the form scrolls.
+    var visibleScreenHeight: CGFloat? = nil
 
     private enum Kind: String, CaseIterable, Identifiable {
         case respond
@@ -151,7 +154,8 @@ public struct JourneyStepSheet: View {
         }
         .frame(width: DSSheetWidth.medium,
                height: min(DSFormMetrics.journeyStepHeight,
-                           (NSScreen.main?.visibleFrame.height ?? DSFormMetrics.maximumTallSheetHeight)
+                           (visibleScreenHeight ?? NSScreen.main?.visibleFrame.height
+                               ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .background(DSColors.sheet)
         .defaultFocus($pathIsFocused, true)

@@ -2,9 +2,11 @@ import Foundation
 
 /// Which kind of file an import reads. Shared so the welcome window can offer both imports without
 /// depending on the import workflow itself.
-public enum ImportKind: Sendable {
+public enum ImportKind: Sendable, Identifiable {
     case har
     case openAPI
+
+    public var id: Self { self }
 
     public var title: String {
         switch self {

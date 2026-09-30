@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Testing
 import Domain
+import FeatureSupport
 @testable import SpecImport
 @testable import ImportFeature
 

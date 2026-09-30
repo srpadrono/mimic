@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Testing
 import Domain
+import FeatureSupport
 import MockServerEngine
 import Persistence
 @testable import SpecImport

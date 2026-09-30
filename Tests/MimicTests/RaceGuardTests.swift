@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import Domain
+import FeatureSupport
 import Persistence
 import SpecImport
 @testable import AppFeatures
