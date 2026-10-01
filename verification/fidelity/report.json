@@ -1,0 +1,62 @@
+[
+  {
+    "appearance" : "light",
+    "id" : "journeys.window",
+    "score" : {
+      "meanDelta" : 0.0415769567497781,
+      "mismatchedFraction" : 0.11376967592592592,
+      "pixelsHigh" : 1800,
+      "pixelsWide" : 2880,
+      "sizesMatched" : true
+    },
+    "title" : "Journey editor window"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.navigator",
+    "score" : {
+      "meanDelta" : 0.0684899537137859,
+      "mismatchedFraction" : 0.0923220468257233,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 528,
+      "sizesMatched" : true
+    },
+    "title" : "Journey navigator"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.stepSheet",
+    "score" : {
+      "meanDelta" : 0.02858691298226253,
+      "mismatchedFraction" : 0.05636147443519619,
+      "pixelsHigh" : 1392,
+      "pixelsWide" : 1160,
+      "sizesMatched" : true
+    },
+    "title" : "Journey step sheet"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.inspector",
+    "score" : {
+      "meanDelta" : 0.06592210589615434,
+      "mismatchedFraction" : 0.0549000754147813,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 600,
+      "sizesMatched" : true
+    },
+    "title" : "Journey step inspector"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.editor",
+    "score" : {
+      "meanDelta" : 0.011821689689731081,
+      "mismatchedFraction" : 0.0365746672260142,
+      "pixelsHigh" : 1672,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Journey editor"
+  }
+]

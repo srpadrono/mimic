@@ -1,0 +1,29 @@
+Verification of e222859 (claude/next-module-proposal-in5x9z) on macOS, 2026-10-01T22:32:25Z
+All xcodebuild runs used MACOSX_DEPLOYMENT_TARGET=26.0. UI tests (MimicUITests) not run.
+
+1. Unit tests: scheme Mimic-Workspace, -only-testing DesignSystemTests, JourneysFeatureTests, MimicTests
+   Result: TEST SUCCEEDED, 268 tests in 28 suites passed, 0 failed (XCTest: 0 tests executed)
+   Compile errors: none
+
+2. DesignFidelityTests (TEST_RUNNER_MIMIC_SECTION=journeys, report in verification/fidelity/)
+   Result: TEST SUCCEEDED, 6 tests in 1 suite passed, 0 failed
+   Scores in report.json (it holds only the light pass; the dark pass's PNGs are in the folder
+   but report.json appears to be overwritten by the last appearance run):
+     journeys.window      light mismatched=11.4% meanDelta=0.042 sizesMatched=True
+     journeys.navigator   light mismatched=9.2% meanDelta=0.068 sizesMatched=True
+     journeys.stepSheet   light mismatched=5.6% meanDelta=0.029 sizesMatched=True
+     journeys.inspector   light mismatched=5.5% meanDelta=0.066 sizesMatched=True
+     journeys.editor      light mismatched=3.7% meanDelta=0.012 sizesMatched=True
+
+3. MimicGallery build: BUILD SUCCEEDED, no errors
+
+4. Screenshots (verification/screens/, captured with screencapture -o -l<windowid>):
+   journeys-window-dark.png / -light.png            MIMIC_GALLERY_OPEN=journeys.window (1440x900)
+   journeys-window-compact-900-dark.png             + MIMIC_GALLERY_WINDOW_WIDTH=900
+   journeys-stepSheet-dark.png / -light.png         see note
+   Note: MIMIC_GALLERY_OPEN=journeys.stepSheet shows "No window entry journeys.stepSheet"
+   (the step sheet is a canvas entry, not a window entry). I captured it from the main
+   gallery window instead, launched with MIMIC_SECTION=journeys.stepSheet.
+   Observation (compact 900): step paths are middle-truncated ("/ac…mary", "/pa…ents"),
+   "Served 1 of 1" is clipped at the right edge, and the "Drop connection after 5 s" chip
+   on step 3 is hidden.
