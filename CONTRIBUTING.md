@@ -39,6 +39,8 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic test \
   -only-testing:MimicUITests/EndpointEditorUITests/testPrettyPrintFormatsTheJSONBodyAndTheResultPersists
 ```
 
+macOS remembers privacy grants, such as access to your Documents folder, against the app's signature. Debug builds are signed ad hoc by default, so every rebuild asks again. To keep the grant, copy `Configs/Local.xcconfig.example` to `Configs/Local.xcconfig` (gitignored) and regenerate; your Debug builds are then signed with your Apple Development certificate. CI never has that file and stays ad hoc.
+
 The full UI suite runs only in CI's isolated shards. `Scripts/run_full_test_suite.sh` also requires a CI environment; it is not a local validation shortcut. For wider non-UI changes, use the workspace unit suites or the local gate:
 
 ```bash

@@ -21,10 +21,27 @@ let sharedSettings: Settings = .settings(
         "CURRENT_PROJECT_VERSION": "1",
     ],
     configurations: [
-        .debug(name: "Debug"),
+        // Configs/Debug.xcconfig optionally includes an untracked Configs/Local.xcconfig, where a
+        // developer can name a signing identity for their own Debug builds (see
+        // Configs/Local.xcconfig.example). Without one, Debug stays ad hoc, as CI builds it.
+        .debug(name: "Debug", xcconfig: "Configs/Debug.xcconfig"),
         .release(name: "Release"),
     ]
 )
+
+/// Every target signs with `MIMIC_CODE_SIGN_IDENTITY` when Configs/Local.xcconfig sets it, and ad hoc
+/// otherwise. An ad hoc signature changes with each build, so macOS treats every rebuild as a new app
+/// and asks for folder access again; a certificate-signed Debug build keeps the grant. Tuist's
+/// defaults write `CODE_SIGN_IDENTITY` on each target, which outranks any project-level xcconfig, so
+/// the variable is set per target. A target that names its own identity keeps it.
+func withLocalSigning(_ target: Target) -> Target {
+    var target = target
+    var settings = target.settings ?? .settings()
+    guard settings.base["CODE_SIGN_IDENTITY"] == nil else { return target }
+    settings.base["CODE_SIGN_IDENTITY"] = "$(MIMIC_CODE_SIGN_IDENTITY:default=-)"
+    target.settings = settings
+    return target
+}
 
 let project = Project(
     name: "Mimic",
@@ -683,8 +700,7 @@ let project = Project(
                 .target(name: "UpdatesFeature"),
             ]
         ),
-    ]
-    ,
+    ].map(withLocalSigning),
     schemes: [
         .scheme(
             name: "Mimic",
