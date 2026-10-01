@@ -672,7 +672,9 @@ final class NavigatorUITests: MimicUITestCase {
         journeys.deactivateButton.click()
         XCTAssertTrue(navigator.activeJourney.waitForNonExistence(timeout: 5))
         shell.endpointsTab.click()
-        XCTAssertTrue(navigator.row(named: "Create order").exists, "Endpoint method scope survives tab switching")
+        // Waited for, not read at once: the endpoints list redraws after the tab switch.
+        XCTAssertTrue(navigator.row(named: "Create order").waitForExistence(timeout: 5),
+                      "Endpoint method scope survives tab switching")
         XCTAssertEqual(navigator.endpointFilter.value as? String, "Create")
         XCTAssertEqual(navigator.methodScope.value as? String, "POST")
     }
