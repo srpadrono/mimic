@@ -1,0 +1,6 @@
+Design fidelity (dark), report in /Users/sergiopadron/Developer/mimic-fidelity/verification/fidelity:
+journeys.window dark: 86.8% within tolerance
+journeys.navigator dark: 89.8% within tolerance
+journeys.stepSheet dark: 95.6% within tolerance
+journeys.editor dark: 96.8% within tolerance
+journeys.inspector dark: 97.2% within tolerance

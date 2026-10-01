@@ -1,0 +1,6 @@
+Design fidelity (light), report in /Users/sergiopadron/Developer/mimic-fidelity/verification/fidelity:
+journeys.window light: 88.6% within tolerance
+journeys.navigator light: 90.8% within tolerance
+journeys.stepSheet light: 96.0% within tolerance
+journeys.editor light: 96.3% within tolerance
+journeys.inspector light: 96.6% within tolerance

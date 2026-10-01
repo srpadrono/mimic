@@ -1,0 +1,31 @@
+Verification round 2 - branch claude/next-module-proposal-in5x9z @ 651edb4
+All xcodebuild commands used MACOSX_DEPLOYMENT_TARGET=26.0. tuist generate --no-open: success.
+
+PASS  Unit tests (Mimic-Workspace, -only-testing): 400/400 passed, 0 failures
+      DesignSystemTests 107 tests / 12 suites; JourneysFeatureTests 25 / 2; MimicTests 268 / 28
+      ** TEST SUCCEEDED ** (log: unit-tests.log)
+PASS  DesignFidelityTests (MIMIC_SECTION=journeys): 6/6 tests passed (log: fidelity-tests.log)
+      Fidelity scores (% of pixels within tolerance):
+        section              dark    light
+        journeys.window      86.8%   88.6%
+        journeys.navigator   89.8%   90.8%
+        journeys.stepSheet   95.6%   96.0%
+        journeys.editor      96.8%   96.3%
+        journeys.inspector   97.2%   96.6%
+      Both appearances ran in one test invocation; report.json holds the light pass only
+      (every entry is tagged "light"), copied to fidelity/report-light.json. No separate
+      dark report.json exists; the dark scores are in fidelity/summary-dark.txt (from the log).
+      All dark and light actual/reference/difference PNGs are in fidelity/.
+PASS  MimicGallery build: ** BUILD SUCCEEDED ** (log: gallery-build.log)
+PASS  Screenshots (screencapture -o -l<windowid>), screens/:
+        journeys.window.dark.png        1440x900 window
+        journeys.window.light.png       1440x900 window
+        journeys.window.dark.w900.png   900x900 window (MIMIC_GALLERY_WINDOW_WIDTH=900)
+        journeys.stepSheet.dark.png     gallery window, MIMIC_SECTION=journeys.stepSheet
+        journeys.stepSheet.light.png
+        journeys.inspector.dark.png     gallery window, MIMIC_SECTION=journeys.inspector
+      Appearance set with MIMIC_GALLERY_APPEARANCE.
+
+Errors: none. The logs contain only the usual macOS noise
+("Unable to get synchronousRemoteObjectProxy ... com.apple.linkd.autoShortcut"), which does not affect results.
+UI tests (MimicUITests) were not run, as instructed.
