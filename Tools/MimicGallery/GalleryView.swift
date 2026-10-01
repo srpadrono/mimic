@@ -26,7 +26,7 @@ struct GalleryView: View {
 
     /// Every entry, or only the ones `MIMIC_SECTION` names.
     private let entries = GalleryCatalog.selected
-    private let references = try? DesignReferenceCatalog.inRepository()
+    private let references = try? DesignReferenceCatalog.inBundle()
 
     var body: some View {
         NavigationSplitView {
@@ -146,7 +146,7 @@ struct GalleryView: View {
            !references.draws(section, in: appearance.rawValue) {
             return "The design draws this board in one appearance only. Switch appearance to compare."
         }
-        return "No design image. Run swift Scripts/export_design_references.swift."
+        return "No design image. Run swift Scripts/export_design_references.swift, then rebuild the gallery."
     }
 
     private func referenceImage(for entry: GalleryEntry) -> NSImage? {

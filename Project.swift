@@ -536,6 +536,9 @@ let project = Project(
         // MimicGallery — a development tool, never shipped or archived: every component and section
         // on its own, drawn from MimicFixtures, with the design artboard over it. It carries no
         // server, store or AppState; a section that needs them to draw is a section that leaked.
+        // Design/Reference is copied into the app as a folder, so the gallery reads its artboards from
+        // its own bundle and never from the checkout, which may sit in a folder macOS guards (Documents).
+        // It signs like every other target, so Configs/Local.xcconfig keeps its privacy grants.
         .target(
             name: "MimicGallery",
             destinations: [.mac],
@@ -546,6 +549,7 @@ let project = Project(
                 "CFBundleShortVersionString": "$(MARKETING_VERSION)",
                 "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
             ]),
+            resources: [.folderReference(path: "Design/Reference")],
             buildableFolders: ["Tools/MimicGallery"],
             dependencies: [
                 .target(name: "Domain"),
@@ -563,10 +567,7 @@ let project = Project(
                 .target(name: "MimicFixtures"),
                 .target(name: "SnapshotSupport"),
             ],
-            settings: .settings(base: [
-                "ENABLE_APP_SANDBOX": "NO",
-                "CODE_SIGN_IDENTITY": "-",
-            ])
+            settings: .settings(base: ["ENABLE_APP_SANDBOX": "NO"])
         ),
         // DesignFidelityTests — renders every gallery entry and scores it against its artboard. The
         // scores are a report, never a failure; see the suite's own comment.

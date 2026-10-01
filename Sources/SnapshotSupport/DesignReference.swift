@@ -52,7 +52,16 @@ public struct DesignReferenceCatalog: Sendable {
         self.sections = manifest.sections
     }
 
-    /// The catalog next to this source file in a checkout, for tests and the gallery run from Xcode.
+    /// The catalog copied into `bundle` as its `Reference` folder, as the gallery app carries it.
+    /// Reading it there keeps the gallery out of the checkout, which macOS may guard (`~/Documents`).
+    public static func inBundle(_ bundle: Bundle = .main) throws -> DesignReferenceCatalog {
+        guard let directory = bundle.url(forResource: "Reference", withExtension: nil) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return try DesignReferenceCatalog(directory: directory)
+    }
+
+    /// The catalog next to this source file in a checkout, for tests that run outside the gallery.
     public static func inRepository(file: StaticString = #filePath) throws -> DesignReferenceCatalog {
         var url = URL(fileURLWithPath: "\(file)")
         while url.pathComponents.count > 1 {
