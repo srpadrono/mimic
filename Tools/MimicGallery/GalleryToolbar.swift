@@ -1,3 +1,4 @@
+import AppKit
 import DesignSystem
 import Domain
 import Foundation
@@ -110,9 +111,12 @@ struct GalleryToolbarStrip: View {
                 fixture.run
                     .buttonStyle(.borderless)
                     .frame(width: Self.itemHeight, height: Self.itemHeight)
-                    .glassEffect(.regular, in: Circle())
+                    .galleryGlass(in: Circle())
             }
+            // A toolbar item takes its content's own width; in an HStack the identity's maximum-width
+            // frame would instead stretch to that maximum and push the server well right.
             WorkspaceProjectIdentity(state: state)
+                .fixedSize(horizontal: true, vertical: false)
             WorkspaceToolbarStatus(state: state) { fixture.status }
             Spacer(minLength: 0)
             group {
@@ -153,6 +157,29 @@ struct GalleryToolbarStrip: View {
         .menuStyle(.button)
         .buttonStyle(.borderless)
         .padding(.horizontal, DSSpacing.xs)
-        .glassEffect(.regular, in: Capsule())
+        .galleryGlass(in: Capsule())
+    }
+}
+
+private extension View {
+    /// The toolbar's glass as the design draws it: a translucent fill and a hairline. `glassEffect`
+    /// draws only in a window, so the offscreen renders the fidelity report scores came out bare.
+    func galleryGlass(in shape: some InsettableShape) -> some View {
+        background(shape.fill(GalleryGlass.fill))
+            .overlay(shape.strokeBorder(GalleryGlass.border, lineWidth: 0.5))
+    }
+}
+
+/// The design canvas's `--glass` and `--glass-b`. The design system has no glass token: the real
+/// toolbar's glass is the system's.
+private enum GalleryGlass {
+    static let fill = dynamic(light: NSColor(srgbRed: 240 / 255, green: 240 / 255, blue: 243 / 255, alpha: 0.94),
+                              dark: NSColor(srgbRed: 46 / 255, green: 46 / 255, blue: 50 / 255, alpha: 0.9))
+    static let border = dynamic(light: NSColor(white: 0, alpha: 0.08), dark: NSColor(white: 1, alpha: 0.09))
+
+    private static func dynamic(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
     }
 }
