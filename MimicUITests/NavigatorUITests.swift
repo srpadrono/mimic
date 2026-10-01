@@ -465,23 +465,19 @@ final class NavigatorUITests: MimicUITestCase {
     }
 
     @MainActor
-    func testJourneyGroupsMatchEndpointSpacingAndSupportEditingAndReveal() async throws {
+    // Row height, group height and inset are checked by the `journeys.navigator` and
+    // `workspace.navigator` gallery snapshots (GallerySnapshotTests), not here: as frame assertions
+    // in a live window they failed three times on main with no product change.
+    func testJourneyGroupsSupportEditingAndReveal() async throws {
         try await launchFixture()
         let navigator = NavigatorPage(app: app)
         let shell = WorkspaceShellPage(app: app)
-        let endpointRowHeight = navigator.rowHeight(named: "Account summary")
-        let groupInset = navigator.group("Account").frame.minX - shell.panel("sidebar").frame.minX
-        let groupHeight = navigator.group("Account").frame.height
         try await command(["journeyUpdate": ["journey": ["name": "Payment succeeds after the second authorization attempt"], "spec": ["groupTag": "Checkout"]]])
         try await command(["journeyCreate": ["name": "Payment declined", "spec": ["groupTag": "Checkout"]]])
         try await command(["journeyCreate": ["name": "Session expired", "spec": ["groupTag": "Account"]]])
         shell.journeysTab.click()
         XCTAssertTrue(navigator.journeyGroup("Checkout").waitForExistence(timeout: 5))
         XCTAssertEqual(navigator.journeyGroup("Checkout").value as? String, "2 journeys")
-        XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
-        XCTAssertEqual(navigator.journeyGroup("Account").frame.height, groupHeight, accuracy: 1)
-        XCTAssertEqual(navigator.journeyGroup("Account").frame.minX - shell.panel("sidebar").frame.minX, groupInset, accuracy: 1)
-        XCTAssertEqual(navigator.row(named: "Payment declined").frame.midY - navigator.row(named: "Payment succeeds").frame.midY, endpointRowHeight, accuracy: 1)
         navigator.journeyGroup("Checkout").click()
         XCTAssertTrue(navigator.row(named: "Payment declined").waitForNonExistence(timeout: 5))
         shell.endpointsTab.click()
