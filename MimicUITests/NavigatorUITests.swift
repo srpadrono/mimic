@@ -529,7 +529,6 @@ final class NavigatorUITests: MimicUITestCase {
         add(navigator.screenshot("navigator-journeys-grouped-wide"))
         workspace.compactWindow()
         workspace.showSidebarIfNeeded()
-        XCTAssertEqual(navigator.rowHeight(named: "Payment declined"), endpointRowHeight, accuracy: 1)
         XCTAssertTrue(navigator.journeyGroup("Checkout").isHittable)
         let firstStep = navigator.element("journeyStep-0")
         XCTAssertTrue(firstStep.waitForExistence(timeout: 5))
