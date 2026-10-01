@@ -1,3 +1,4 @@
+import DesignSystem
 import SwiftUI
 
 /// A development tool, never shipped: every design-system component and UI section on its own,
@@ -12,5 +13,30 @@ struct MimicGalleryApp: App {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .defaultSize(width: 1680, height: 1040)
+
+        // A window entry on its own, where its toolbar can draw: "Open in a window" on the canvas.
+        WindowGroup("Gallery window", id: GalleryWindow.sceneID, for: String.self) { $id in
+            GalleryWindow(entryID: id)
+        }
+        .defaultSize(width: 1440, height: 900)
+    }
+}
+
+/// One window entry in a real window, so its toolbar draws in the title bar as the app's does.
+struct GalleryWindow: View {
+    static let sceneID = "gallery.window"
+
+    let entryID: String?
+
+    var body: some View {
+        if let entryID, let entry = GalleryCatalog.entries.first(where: { $0.id == entryID }), let window = entry.window {
+            window
+                .toolbar(removing: .title)
+                .navigationTitle(entry.title)
+                .frame(minWidth: 900, minHeight: 600)
+        } else {
+            Text("No window entry \(entryID ?? "")").foregroundStyle(DSColors.labelSecondary)
+                .frame(minWidth: 400, minHeight: 200)
+        }
     }
 }

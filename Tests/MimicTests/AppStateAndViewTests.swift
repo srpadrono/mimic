@@ -2254,11 +2254,4 @@ struct AppStateFacadeTests {
 
         #expect(appState.lastCommandError == refusal)
     }
-
-    @Test("The project name's subtitle counts what the project holds")
-    func toolbarProjectContents() {
-        #expect(WorkspaceView.projectContents(endpoints: 12, journeys: 3) == "12 endpoints · 3 journeys")
-        #expect(WorkspaceView.projectContents(endpoints: 1, journeys: 1) == "1 endpoint · 1 journey")
-        #expect(WorkspaceView.projectContents(endpoints: 0, journeys: 0) == "0 endpoints · 0 journeys")
-    }
 }

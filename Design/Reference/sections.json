@@ -116,6 +116,15 @@
       "height": 820,
       "themes": [],
       "appearance": "dark"
+    },
+    "Toolbar": {
+      "source": "Canvas/Toolbar.dc.html",
+      "width": 892,
+      "height": 328,
+      "themes": [
+        "dark",
+        "light"
+      ]
     }
   },
   "sections": [
@@ -150,7 +159,51 @@
         844,
         44
       ],
-      "title": "Toolbar over the centre column"
+      "title": "Toolbar over the centre column, as the canvas drew it before the toolbar proposal"
+    },
+    {
+      "id": "toolbar.running",
+      "board": "Toolbar",
+      "rect": [
+        24,
+        24,
+        844,
+        52
+      ],
+      "title": "Toolbar over the centre column, server running"
+    },
+    {
+      "id": "toolbar.stopped",
+      "board": "Toolbar",
+      "rect": [
+        24,
+        100,
+        844,
+        52
+      ],
+      "title": "Toolbar over the centre column, server stopped"
+    },
+    {
+      "id": "toolbar.restartRequired",
+      "board": "Toolbar",
+      "rect": [
+        24,
+        176,
+        844,
+        52
+      ],
+      "title": "Toolbar over the centre column, ports changed while running"
+    },
+    {
+      "id": "toolbar.compact",
+      "board": "Toolbar",
+      "rect": [
+        24,
+        252,
+        480,
+        52
+      ],
+      "title": "Toolbar over a narrow centre column"
     },
     {
       "id": "workspace.jumpBar",

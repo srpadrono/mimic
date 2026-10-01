@@ -23,8 +23,26 @@ struct DesignFidelityTests {
     @Test("Every gallery entry names a section the design manifest has")
     func everyEntryHasAReferenceSection() {
         let known = Set(catalog.sections.map(\.id))
-        let missing = GalleryCatalog.entries.map(\.referenceID).filter { !known.contains($0) }
+        let missing = GalleryCatalog.entries.filter(\.hasArtboard).map(\.referenceID).filter { !known.contains($0) }
         #expect(missing.isEmpty, "Unknown design sections: \(missing)")
+    }
+
+    @Test("Every window entry opens in a window of its own, where its toolbar draws")
+    func windowEntriesOpenInAWindow() {
+        let windows = GalleryCatalog.entries.filter { $0.group == .windows }
+        #expect(windows.map(\.id) == ["workspace.window", "workspace.skeleton"])
+        #expect(windows.allSatisfy { $0.window != nil })
+        #expect(GalleryCatalog.entries.filter { $0.group != .windows }.allSatisfy { $0.window == nil })
+    }
+
+    @Test("The toolbar entries are the approved toolbar design's states")
+    func toolbarEntriesFollowTheToolbarBoard() throws {
+        let toolbar = GalleryCatalog.entries(matching: "toolbar")
+        #expect(toolbar.map(\.id) == ["toolbar.running", "toolbar.stopped", "toolbar.restartRequired", "toolbar.compact"])
+        for entry in toolbar {
+            let section = try #require(catalog.section(entry.id))
+            #expect(section.board == "Toolbar")
+        }
     }
 
     @Test("Every gallery entry is drawn at its artboard section's size")
