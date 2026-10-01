@@ -125,7 +125,8 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.60, green: 0.42, blue: 0.92, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.78, green: 0.64, blue: 1.0, alpha: 1.0),
         backgroundColour: darkCanvas,
-        currentLineColour: NSColor(white: 1, alpha: 0.035),
+        // The design's code wells draw no current-line band, focused or not.
+        currentLineColour: .clear,
         selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.3),
         cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.30, green: 0.33, blue: 0.38, alpha: 1.0)
@@ -178,7 +179,7 @@ public struct DSJSONEditor: View {
         fieldColour: NSColor(srgbRed: 0.36, green: 0.15, blue: 0.60, alpha: 1.0),
         caseColour: NSColor(srgbRed: 0.18, green: 0.05, blue: 0.43, alpha: 1.0),
         backgroundColour: lightCanvas,
-        currentLineColour: NSColor(white: 0, alpha: 0.03),
+        currentLineColour: .clear,
         selectionColour: NSColor.controlAccentColor.withAlphaComponent(0.2),
         cursorColour: NSColor.controlAccentColor,
         invisiblesColour: NSColor(srgbRed: 0.84, green: 0.84, blue: 0.86, alpha: 1.0)

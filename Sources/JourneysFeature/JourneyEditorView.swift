@@ -164,25 +164,12 @@ public struct JourneyEditorView: View {
         .fixedSize()
     }
 
-    /// "Active" while the server runs, "Selected" when it will apply to the next run.
+    /// "Active" while the server runs, "Selected" when it will apply to the next run. The badge is
+    /// also the way out of the run, so the header stays the design's badge and two buttons: on hover
+    /// it reads "Deactivate", and a click hands the endpoints back.
     private var activeState: some View {
-        let title = model.serverState.runningPort == nil ? "Selected" : "Active"
-        let tint = model.serverState.runningPort == nil ? DSColors.labelSecondary : DSColors.success
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(tint)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
-            Text(title)
-                .font(DSTypography.caption.weight(.medium))
-                .accessibilityIdentifier("journeyEditor.activeBadge")
-        }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 7)
-        .frame(height: 18)
-        .overlay {
-            Capsule()
-                .strokeBorder(tint, lineWidth: DSStroke.hairline)
+        JourneyActiveBadge(isServing: model.serverState.runningPort != nil) {
+            model.activateJourney(id: nil)
         }
         // Centred on the 24pt buttons beside it.
         .frame(height: DSControlHeight.regular)
@@ -243,38 +230,37 @@ public struct JourneyEditorView: View {
             .accessibilityHidden(true)
     }
 
+    // Field-style menus, as the design draws them: the choice in a quiet field with one up-and-down
+    // chevron, not AppKit's bezelled pop-up button.
+
     private var matchModePicker: some View {
-        Picker("Order", selection: matchModeBinding) {
-            Text(JourneyEditorView.title(for: .orderedPerEndpoint)).tag(JourneyMatchMode.orderedPerEndpoint)
-            Text(JourneyEditorView.title(for: .strictSequence)).tag(JourneyMatchMode.strictSequence)
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
+        DSMenuField(
+            "Match mode",
+            selection: matchModeBinding,
+            options: [JourneyMatchMode.orderedPerEndpoint, .strictSequence].map { DSMenuOption(Self.title(for: $0), value: $0) },
+            identifier: "journeyEditor.matchModePicker"
+        )
         .help("Per endpoint: the next step for each route can answer. Strict sequence: only the current step can.")
-        .accessibilityIdentifier("journeyEditor.matchModePicker")
-        .accessibilityLabel("Match mode")
     }
 
     private var completionPicker: some View {
-        Picker("At the end", selection: completionBinding) {
-            Text("Stop").tag(JourneyCompletion.stop)
-            Text("Restart").tag(JourneyCompletion.restart)
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .accessibilityIdentifier("journeyEditor.completionPicker")
-        .accessibilityLabel("On completion")
+        DSMenuField(
+            "On completion",
+            selection: completionBinding,
+            options: [DSMenuOption("Stop", value: JourneyCompletion.stop), DSMenuOption("Restart", value: .restart)],
+            identifier: "journeyEditor.completionPicker"
+        )
     }
 
     private var unmatchedPicker: some View {
-        Picker("Unscripted requests", selection: unmatchedBinding) {
-            Text(JourneyEditorView.title(for: .fallThroughToEndpoints)).tag(JourneyUnmatchedBehavior.fallThroughToEndpoints)
-            Text(JourneyEditorView.title(for: .notFound)).tag(JourneyUnmatchedBehavior.notFound)
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .accessibilityIdentifier("journeyEditor.unmatchedPicker")
-        .accessibilityLabel("Unscripted requests")
+        DSMenuField(
+            "Unscripted requests",
+            selection: unmatchedBinding,
+            options: [JourneyUnmatchedBehavior.fallThroughToEndpoints, .notFound].map {
+                DSMenuOption(Self.title(for: $0), value: $0)
+            },
+            identifier: "journeyEditor.unmatchedPicker"
+        )
     }
 
     /// The design's names for the behaviours, shared with the inspector.

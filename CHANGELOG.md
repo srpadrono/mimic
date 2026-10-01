@@ -25,6 +25,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Selecting a logged request opens it beside the request log in the centre column, with headers
   and query items as two columns, Copy as cURL, and Create endpoint for an unmatched call. The log
   row's context menu adds Copy URL, Copy response body, Go to endpoint, and Show only this path.
+- The journeys screen matches its design: field-style menus in the editor and inspector, plain group
+  headings in the navigator that show a disclosure chevron on hover, and the journey glyph as drawn.
+  The "Active" badge ends the run when clicked, in place of a separate stop button.
+- The journey step sheet is laid out as designed, and its status field has a menu of common codes.
+- Code editors no longer highlight the current line.
 
 ## [0.13.0] — 2026-09-26
 

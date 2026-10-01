@@ -77,7 +77,8 @@ public struct JourneyNavigatorList: View {
                         DSNavigatorGroup(
                             name: name, count: groupedJourneys[name]?.count ?? 0, itemName: "journeys",
                             isCollapsed: collapsedGroups.contains(Self.groupSectionKey(name)),
-                            identifier: "journeys.group.\(name)"
+                            identifier: "journeys.group.\(name)",
+                            disclosure: .onHover
                         ) {
                             if collapsedGroups.contains(Self.groupSectionKey(name)) {
                                 collapsedGroups.remove(Self.groupSectionKey(name))
@@ -87,8 +88,10 @@ public struct JourneyNavigatorList: View {
                         }
                         .padding(.top, name == groupNames.first ? 0 : DSSpacing.sm)
                         if !collapsedGroups.contains(Self.groupSectionKey(name)) {
+                            // Level with their heading, as the design lists them: the heading is a
+                            // label over the rows, not a folder they sit inside.
                             ForEach(groupedJourneys[name] ?? []) { journey in
-                                journeyRow(journey, indented: true)
+                                journeyRow(journey)
                             }
                         }
                     }
@@ -96,7 +99,8 @@ public struct JourneyNavigatorList: View {
                         DSNavigatorGroup(
                             name: "Ungrouped", count: ungroupedJourneys.count, itemName: "journeys",
                             isCollapsed: collapsedGroups.contains(Self.ungroupedSectionKey),
-                            identifier: "journeys.group.ungrouped"
+                            identifier: "journeys.group.ungrouped",
+                            disclosure: .onHover
                         ) {
                             if collapsedGroups.contains(Self.ungroupedSectionKey) {
                                 collapsedGroups.remove(Self.ungroupedSectionKey)
@@ -108,7 +112,7 @@ public struct JourneyNavigatorList: View {
                     }
                     if groupNames.isEmpty || !collapsedGroups.contains(Self.ungroupedSectionKey) {
                         ForEach(ungroupedJourneys) { journey in
-                            journeyRow(journey, indented: !groupNames.isEmpty)
+                            journeyRow(journey)
                         }
                     }
                 }
@@ -218,7 +222,7 @@ public struct JourneyNavigatorList: View {
         return Self.groupSectionKey(group)
     }
 
-    private func journeyRow(_ journey: Journey, indented: Bool) -> some View {
+    private func journeyRow(_ journey: Journey) -> some View {
         JourneyNavigatorRow(
             journey: journey, isActive: journey.id == activeJourneyID,
             progress: journey.id == activeJourneyID ? activeStatus.flatMap(JourneyNavigatorRow.progressText) : nil,
@@ -227,7 +231,7 @@ public struct JourneyNavigatorList: View {
             onRename: { renameTarget = journey },
             onDuplicate: { onDuplicate(journey.id) }, onDelete: { deleteTarget = journey }
         )
-        .dsNavigatorRow(indented: indented)
+        .dsNavigatorRow()
         .tag(journey.id)
         .focusable()
         .focused($focusedJourneyID, equals: journey.id)
@@ -263,11 +267,9 @@ struct JourneyNavigatorRow: View {
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
-            Image(systemName: NavigatorTab.journeys.systemImage)
-                .font(.system(size: DSGlyph.control))
+            DSJourneyGlyph(size: DSGlyph.toolbar)
                 .foregroundStyle(iconStyle)
                 .frame(width: DSNavigatorMetrics.iconSlot)
-                .accessibilityHidden(true)
 
             Text(journey.name)
                 .font(DSTypography.body)

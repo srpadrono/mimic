@@ -54,9 +54,11 @@ struct GalleryToolbarFixture {
         WorkspaceToolbarState(
             layout: layout,
             projectName: projectName,
+            // The toolbar board's summary of Acme Storefront, which the welcome board repeats. The
+            // fixtures list only the rows the other boards draw, so their counts are not the summary.
             projectContents: WorkspaceProjectIdentity.contents(
-                endpoints: projectName == nil ? 0 : DesignFixtures.endpoints.count,
-                journeys: projectName == nil ? 0 : DesignFixtures.journeys.count
+                endpoints: projectName == nil ? 0 : 12,
+                journeys: projectName == nil ? 0 : 3
             ),
             restartRequired: serverState.runningPort != nil && boundConfiguration.map { bound in
                 configuration.map { !$0.hasSameListeners(as: bound) } ?? false
@@ -164,9 +166,10 @@ struct GalleryToolbarStrip: View {
     }
 }
 
-private extension View {
+extension View {
     /// The toolbar's glass as the design draws it: a translucent fill and a hairline. `glassEffect`
     /// draws only in a window, so the offscreen renders the fidelity report scores came out bare.
+    /// The floating sidebar and inspector panels are the same glass, at the design's 14pt radius.
     func galleryGlass(in shape: some InsettableShape) -> some View {
         background(shape.fill(GalleryGlass.fill))
             .overlay(shape.strokeBorder(GalleryGlass.border, lineWidth: 0.5))
