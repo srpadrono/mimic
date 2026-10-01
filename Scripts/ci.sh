@@ -98,6 +98,10 @@ step "UI shards cover every UI test method"
 python3 Scripts/check_ui_shards.py --self-test
 python3 Scripts/check_ui_shards.py
 
+step "Test selection covers every module"
+python3 Scripts/select_tests.py --self-test
+python3 Scripts/select_tests.py --check
+
 step "Script regressions"
 python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
 

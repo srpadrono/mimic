@@ -8,14 +8,16 @@ name: CodeQL
 # `macos-setup` action provides all three. Only the Debug app scheme is built: it compiles every
 # first-party module the release does, plus the `mimic` CLI.
 #
-# Runs on pull requests and main like CI, and weekly so new queries reach an unchanged tree.
+# Python and Actions run on pull requests and main. Swift needs a macOS runner and a full build from
+# scratch, and the account gets five macOS runners at a time, so Swift runs nightly (and on a manual
+# run) instead of taking a runner from every pull request's tests.
 
 on:
   push:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "17 4 * * 1"
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -38,20 +40,10 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Swift joins the matrix only on scheduled and manual runs. A static `include` entry cannot be
+      # left out conditionally (an unmatched include becomes its own leg), so the list is built here.
       matrix:
-        include:
-          - language: actions
-            build-mode: none
-            runner: ubuntu-latest
-            timeout: 15
-          - language: python
-            build-mode: none
-            runner: ubuntu-latest
-            timeout: 15
-          - language: swift
-            build-mode: manual
-            runner: macos-26
-            timeout: 90
+        include: ${{ fromJSON(format('[{0}{1}]', '{"language":"actions","build-mode":"none","runner":"ubuntu-latest","timeout":15},{"language":"python","build-mode":"none","runner":"ubuntu-latest","timeout":15}', (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && ',{"language":"swift","build-mode":"manual","runner":"macos-26","timeout":90}' || '')) }}
 
     env:
       DERIVED_DATA: .artifacts/DerivedData

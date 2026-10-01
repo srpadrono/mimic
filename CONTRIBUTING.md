@@ -63,6 +63,21 @@ Use the Release build after a manifest or dependency change. `./Scripts/ci.sh` r
 
 For documentation or script changes, run the applicable checks in `Scripts/`, including `python3 Scripts/check_doc_counts.py` for local links and test targets, `python3 -m unittest discover -s Scripts/tests -p 'test_*.py'` for script regressions, and `git diff --check`. A documentation edit does not need an XCUITest run. Coverage reports read existing result bundles; neither coverage nor source declaration counts prove that tests passed.
 
+### What CI runs
+
+A pull request or push runs only the tests its changes can break. CI's first job, `Scripts/select_tests.py`, reads the changed files and `Scripts/test_selection.json`:
+
+- a file in a module runs the unit test targets of that module and of every module that depends on it, plus the UI test classes `ui_classes_by_target` names for that module and the smoke shard;
+- a UI test file runs its own shards; a shared UI support file runs them all;
+- documentation and scripts run only the Linux job;
+- `Project.swift`, `Tuist/`, `Configs/`, `mise.toml`, the CI workflow and the selection itself run everything, and so does a file that belongs to no module.
+
+The full suite (every unit target, every UI shard and the Release build) and the coverage badges run nightly. Run it on demand from the CI workflow's **Run workflow** button with **full** ticked. The run's summary page lists what was selected and why.
+
+To reproduce a UI failure without the rest of the suite, run the CI workflow by hand with `only_testing` set to the failing tests (`EndpointEditorUITests/testMethodPickerCreatesAPostEndpoint`, or a class name) and, for a suspected flake, `iterations` above 1: it repeats them until one fails. It runs on the same macOS image as CI and does not take over your mouse.
+
+A new module the app links needs an entry in `ui_classes_by_target`, and a new UI test method needs a shard in `ui_shards`; `select_tests.py --check` and `check_ui_shards.py` fail until it has one.
+
 ## Adding behavior
 
 - Project-scoped operations belong in `Domain`'s `ProjectCommandExecutor`; host-scoped operations belong in the single `AppControlHost`. See [Architecture](docs/ARCHITECTURE.md).

@@ -22,7 +22,7 @@ This is the repository guidance for coding agents. `CLAUDE.md` delegates here. R
 
 **Operation:** add the `ControlCommand` and `CommandKind` cases, classify its scope, implement it in the executor or host, add samples in `HostCommandSweepTests.sample(for:)` and `ControlCommandSamples.all`, a `CommandCatalog` descriptor, the CLI verb and parsing coverage, and update [CLI](docs/CLI.md). Preserve stable error codes. The catalog and sweep tests check surface coverage.
 
-**View or navigation:** change the view in its section module and check it in the `MimicGallery` app against its artboard; add a gallery entry for a new view or state. Give interactive controls accessibility identifiers and labels; cover changed happy, error, empty, and edge flows with page-object XCUITests. Keep test hooks behind `#if DEBUG`. Use an isolated test database and defaults suite; never let a UI test open or delete the developer's `mimic.sqlite`.
+**View or navigation:** change the view in its section module and check it in the `MimicGallery` app against its artboard; add a gallery entry for a new view or state. Give interactive controls accessibility identifiers and labels; cover changed happy, error, empty, and edge flows with page-object XCUITests, and add new test methods to a shard in `Scripts/test_selection.json`. Keep test hooks behind `#if DEBUG`. Use an isolated test database and defaults suite; never let a UI test open or delete the developer's `mimic.sqlite`.
 
 **Test fixtures:** write expected external inputs as literals, independent of the function under test. Ask whether reverting that function would make the test fail. Use Swift Testing for new unit tests and XCTest for UI tests. UI tests wait for state with `waitForExistence(timeout:)` or `UITestApp.waitForAny`, not sleeps.
 
@@ -30,4 +30,5 @@ This is the repository guidance for coding agents. `CLAUDE.md` delegates here. R
 
 - SwiftUI: `@Observable` for new state, modern `.alert`, cancellable `Task.sleep`, and `@MainActor` for UI updates. Use sentence case inside the window and Title Case in the menu bar. Follow the `DS*` size and color tokens, including `DSGlyph` with an 8 pt minimum; honor Reduce Motion for repeating animation.
 - Control API: bind only `127.0.0.1`. Keep the discovery file `0600`. Send a discovered token only to the advertised loopback port; remote or forwarded connections require an explicit token. Read [Security](SECURITY.md) and [CLI discovery](docs/CLI.md#finding-an-instance) before changing this path.
+- CI selects tests from the changed files (`Scripts/select_tests.py`, [What CI runs](CONTRIBUTING.md#what-ci-runs)); the full suite runs nightly. A new module needs an entry in `Scripts/test_selection.json`.
 - The module, compiler, lockfile, house-rule, and documentation checks live in `Scripts/`; run the relevant ones when their inputs change. Do not treat a green script as proof of UI behavior.
