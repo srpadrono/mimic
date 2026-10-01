@@ -2,7 +2,9 @@ import CoreGraphics
 
 /// Sheet widths. Forms of the same complexity keep one width.
 nonisolated public enum DSSheetWidth {
-    /// A short creation form: new project, new endpoint, rename.
+    /// A two-field form with a short hint: new project.
+    public static let short: CGFloat = 377
+    /// A short creation form: new endpoint, rename.
     public static let compact: CGFloat = 440
     /// A sheet with one list or explanation: update notes, templates.
     public static let medium: CGFloat = 560

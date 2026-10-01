@@ -31,6 +31,13 @@ For a change inside one UI section, run that section's own test target, which bu
 xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test -destination 'platform=macOS' -only-testing:EndpointsFeatureTests
 ```
 
+To score one section against its design, name it in `TEST_RUNNER_MIMIC_SECTION`; the report's path is printed at the end:
+
+```bash
+TEST_RUNNER_MIMIC_SECTION=journeys xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace test \
+  -destination 'platform=macOS' -only-testing:DesignFidelityTests
+```
+
 For UI changes, select the affected methods and wait for each run to finish before starting another. Add more `-only-testing` arguments when the changed flow needs several cases:
 
 ```bash

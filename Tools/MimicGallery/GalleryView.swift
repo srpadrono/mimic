@@ -16,14 +16,15 @@ enum OverlayMode: String, CaseIterable, Identifiable {
 /// The gallery: every component and section down the side, one on the canvas at its artboard
 /// size, and the artboard itself laid over it to compare.
 struct GalleryView: View {
-    @State private var selection: String? = GalleryCatalog.entries.first?.id
+    @State private var selection: String? = GalleryCatalog.selected.first?.id
     @State private var appearance: SnapshotRenderer.Appearance = .dark
     @State private var overlay: OverlayMode = .off
     @State private var opacity = 0.5
     @State private var zoom = 1.0
     @State private var status: String?
 
-    private let entries = GalleryCatalog.entries
+    /// Every entry, or only the ones `MIMIC_SECTION` names.
+    private let entries = GalleryCatalog.selected
     private let references = try? DesignReferenceCatalog.inRepository()
 
     var body: some View {

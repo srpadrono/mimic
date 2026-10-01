@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Debug only: the catalogue is for the gallery, previews and snapshot tests, and never ships.
@@ -89,7 +90,7 @@ public enum DSCatalog {
                 DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", actionTitle: "Try again",
                          identifier: "catalog.error") {}
                 DSBanner(.warning, message: "Restart to use the new port.", actionTitle: "Restart",
-                         identifier: "catalog.warning") {}
+                         systemImage: "arrow.counterclockwise", identifier: "catalog.warning") {}
                 DSBanner(.info, message: "This scenario isn\u{2019}t live.", actionTitle: "Make live",
                          identifier: "catalog.info") {}
             }
@@ -124,12 +125,13 @@ public enum DSCatalog {
     public static let tokens: [Entry] = [
         Entry(id: "tokens.colour", title: "Colour", referenceID: "tokens.colour",
               size: CGSize(width: 1344, height: 297)) {
-            DSCatalogCard("Colour") {
-                HStack(spacing: DSSpacing.md) {
-                    ForEach(DSCatalogSwatch.surfaces) { $0 }
+            DSCatalogCard("Colour", detail: "Each swatch shows light on the left and dark on the right. The accent "
+                          + "and focus ring come from the system setting; blue is only the default.") {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(DSCatalogSwatch.roles) { $0 }
                 }
-                HStack(spacing: DSSpacing.md) {
-                    ForEach(DSCatalogSwatch.semantic) { $0 }
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(DSCatalogSwatch.inks) { $0 }
                 }
             }
         },
@@ -269,44 +271,113 @@ struct DSCatalogSegments: View {
     }
 }
 
+/// One colour role as a light and dark pair, with what it resolves to underneath.
 struct DSCatalogSwatch: View, Identifiable {
+    enum Fill {
+        /// An adaptive role, drawn as it resolves in each appearance.
+        case role(Color)
+        /// A role that only means something under Increase Contrast.
+        case highContrast(Color)
+        /// The system material behind glass panels, which has no fixed value.
+        case material
+    }
+
     let id: String
-    let color: Color
+    let fill: Fill
+    /// What to print under the name instead of the resolved hex pair, for roles that are not one colour.
+    let caption: String?
+    var monospacedName = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
-                .fill(color)
-                .frame(width: 72, height: 44)
-                .overlay {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
-                        .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
-                }
-            Text(id).font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 0) {
+                half(dark: false)
+                half(dark: true)
+            }
+            .frame(width: 96, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
+                    .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+            }
+            Text(id)
+                .font(monospacedName ? DSTypography.method : DSTypography.captionSemibold)
+                .foregroundStyle(DSColors.labelPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(caption ?? hexPair)
+                .font(DSTypography.caption.monospaced())
+                .foregroundStyle(DSColors.labelTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 96, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func half(dark: Bool) -> some View {
+        switch fill {
+        case .role(let color), .highContrast(let color):
+            Rectangle().fill(Color(nsColor: resolved(color, dark: dark)))
+        case .material:
+            Rectangle().fill(.regularMaterial).environment(\.colorScheme, dark ? .dark : .light)
         }
     }
 
-    static let surfaces: [DSCatalogSwatch] = [
-        .init(id: "Window", color: DSColors.window),
-        .init(id: "Content", color: DSColors.content),
-        .init(id: "Raised", color: DSColors.raised),
-        .init(id: "Field", color: DSColors.field),
-        .init(id: "Code", color: DSColors.code),
-        .init(id: "Separator", color: DSColors.separator),
-        .init(id: "Accent", color: DSColors.accent),
-        .init(id: "Selection", color: DSColors.selectionSoft),
+    private func resolved(_ color: Color, dark: Bool) -> NSColor {
+        let highContrast: Bool
+        if case .highContrast = fill { highContrast = true } else { highContrast = false }
+        let name: NSAppearance.Name = switch (dark, highContrast) {
+        case (false, false): .aqua
+        case (true, false): .darkAqua
+        case (false, true): .accessibilityHighContrastAqua
+        case (true, true): .accessibilityHighContrastDarkAqua
+        }
+        let dynamic = NSColor(color)
+        var value = dynamic
+        NSAppearance(named: name)?.performAsCurrentDrawingAppearance {
+            value = dynamic.usingColorSpace(.sRGB) ?? dynamic
+        }
+        return value
+    }
+
+    /// `#F6F6F7 · #1E1E20`, read from the role itself so the board cannot drift from the tokens.
+    private var hexPair: String {
+        guard case .role(let color) = fill else { return "" }
+        return "\(Self.hex(resolved(color, dark: false))) \u{00B7} \(Self.hex(resolved(color, dark: true)))"
+    }
+
+    private static func hex(_ color: NSColor) -> String {
+        let srgb = color.usingColorSpace(.sRGB) ?? color
+        let channels = [srgb.redComponent, srgb.greenComponent, srgb.blueComponent]
+            .map { Int(($0 * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", channels[0], channels[1], channels[2])
+    }
+
+    /// Surfaces, text and status: the first row of the design's colour board.
+    static let roles: [DSCatalogSwatch] = [
+        .init(id: "Window", fill: .role(DSColors.window), caption: nil),
+        .init(id: "Content", fill: .role(DSColors.content), caption: nil),
+        .init(id: "Glass panel", fill: .material, caption: "system material"),
+        .init(id: "Code", fill: .role(DSColors.code), caption: nil),
+        .init(id: "Label", fill: .role(DSColors.labelPrimary), caption: "labelColor"),
+        .init(id: "Secondary", fill: .role(DSColors.labelSecondary), caption: "secondaryLabel"),
+        .init(id: "Accent", fill: .role(DSColors.accent), caption: "controlAccent"),
+        .init(id: "Success \u{00B7} 2xx", fill: .role(DSColors.success), caption: nil),
+        .init(id: "Warning \u{00B7} 4xx", fill: .role(DSColors.warning), caption: nil),
+        .init(id: "Error \u{00B7} 5xx", fill: .role(DSColors.error), caption: nil),
     ]
 
-    static let semantic: [DSCatalogSwatch] = [
-        .init(id: "GET", color: DSColors.methodColor(for: "GET")),
-        .init(id: "POST", color: DSColors.methodColor(for: "POST")),
-        .init(id: "PUT", color: DSColors.methodColor(for: "PUT")),
-        .init(id: "PATCH", color: DSColors.methodColor(for: "PATCH")),
-        .init(id: "DELETE", color: DSColors.methodColor(for: "DELETE")),
-        .init(id: "Success", color: DSColors.success),
-        .init(id: "Redirect", color: DSColors.redirect),
-        .init(id: "Warning", color: DSColors.warning),
-        .init(id: "Error", color: DSColors.error),
+    /// Methods, JSON syntax and separators: the second row.
+    static let inks: [DSCatalogSwatch] = [
+        .init(id: "GET", fill: .role(DSColors.methodColor(for: "GET")), caption: nil, monospacedName: true),
+        .init(id: "POST", fill: .role(DSColors.methodColor(for: "POST")), caption: nil, monospacedName: true),
+        .init(id: "PUT", fill: .role(DSColors.methodColor(for: "PUT")), caption: nil, monospacedName: true),
+        .init(id: "PATCH", fill: .role(DSColors.methodColor(for: "PATCH")), caption: nil, monospacedName: true),
+        .init(id: "DELETE", fill: .role(DSColors.methodColor(for: "DELETE")), caption: nil, monospacedName: true),
+        .init(id: "JSON key", fill: .role(DSColors.Syntax.key), caption: nil),
+        .init(id: "JSON string", fill: .role(DSColors.Syntax.string), caption: nil),
+        .init(id: "JSON number", fill: .role(DSColors.Syntax.number), caption: nil),
+        .init(id: "Separator", fill: .role(DSColors.separator), caption: "1 px, not 0.5 pt"),
+        .init(id: "Separator, high contrast", fill: .highContrast(DSColors.separator), caption: "Increase Contrast"),
     ]
 }
 
