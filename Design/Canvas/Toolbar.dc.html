@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mimic toolbar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#101216;--win:#1e1e20;--content:#1b1b1d;--glass:rgba(46,46,50,.9);--glass-b:rgba(255,255,255,.09);--raised:#2c2c2f;--field:rgba(255,255,255,.065);--field-b:rgba(255,255,255,.08);--code:#161618;--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--accent-t:#4aa3ff;--sel:#0a6ce0;--sel-soft:rgba(10,132,255,.22);--unsel:rgba(255,255,255,.10);--zebra:rgba(255,255,255,.028);--segon:rgba(255,255,255,.16);--get:#5aa9ff;--post:#4fd07b;--put:#ffa94d;--patch:#c79bff;--del:#ff6b66;--head:#a1a1aa;--ok:#34d06c;--redir:#5aa9ff;--warn:#ffb340;--err:#ff5f57;--jk:#c490ff;--js:#4fd1c5;--jn:#ffb14e;--jl:#5aa9ff;--shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 .5px rgba(255,255,255,.14);--dim:rgba(0,0,0,.45);color-scheme:dark}
+.light{--desk:#e8eaee;--win:#f6f6f7;--content:#ffffff;--glass:rgba(240,240,243,.94);--glass-b:rgba(0,0,0,.08);--raised:#ffffff;--field:rgba(0,0,0,.045);--field-b:rgba(0,0,0,.12);--code:#fbfbfc;--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--accent-t:#0064d2;--sel:#0a74f0;--sel-soft:rgba(0,122,255,.12);--unsel:rgba(0,0,0,.08);--zebra:rgba(0,0,0,.025);--segon:#ffffff;--get:#0a62cc;--post:#18823a;--put:#a85a00;--patch:#8433c4;--del:#c42b27;--head:#62626a;--ok:#1d8a3e;--redir:#0a62cc;--warn:#a86400;--err:#cc302b;--jk:#8a2fc4;--js:#00766f;--jn:#945a00;--jl:#0060d9;--shadow:0 24px 64px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.14);--dim:rgba(0,0,0,.18);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.m{font:600 11px/16px var(--mono);letter-spacing:.02em;width:44px;flex:none}
+.m-get{color:var(--get)}.m-post{color:var(--post)}.m-put{color:var(--put)}.m-patch{color:var(--patch)}.m-del{color:var(--del)}.m-head{color:var(--head)}
+.st{display:inline-flex;align-items:center;gap:6px;font:500 12px/16px var(--mono)}
+.st i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+.s2{color:var(--ok)}.s3{color:var(--redir)}.s4{color:var(--warn)}.s5{color:var(--err)}
+.path{font:400 12px/16px var(--mono);color:var(--l1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.glass{background:var(--glass);border:.5px solid var(--glass-b);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.cap{height:32px;border-radius:16px;display:flex;align-items:center;padding:0 2px}
+.cap button{all:unset;height:30px;min-width:30px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px;border-radius:15px;color:var(--l1);font-size:13px;font-weight:500}
+.field{height:24px;border-radius:7px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--l1)}
+.field.lg{height:32px;border-radius:10px;padding:0 10px}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--field)}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12px;line-height:16px;color:var(--l2);font-weight:500;white-space:nowrap}
+.seg .on{background:var(--segon);color:var(--l1);box-shadow:0 .5px 1.5px rgba(0,0,0,.25)}
+.btn{all:unset;height:24px;padding:0 12px;border-radius:12px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);color:var(--l1);white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.bl{all:unset;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--l2);height:24px;padding:0 6px;border-radius:6px}
+.sh{font-size:11px;line-height:14px;font-weight:600;color:var(--l3)}
+.lab{font-size:12px;color:var(--l2)}
+.sep{height:.5px;background:var(--sep);flex:none}
+.vsep{width:.5px;background:var(--sep);flex:none;align-self:stretch}
+.tl{width:12px;height:12px;border-radius:50%;display:block}
+.nav{height:28px;border-radius:7px;padding:0 8px;gap:8px;display:flex;align-items:center}
+.nav.sel{background:var(--sel);color:#fff}
+.nav.sel .m,.nav.sel .path,.nav.sel .st{color:#fff}
+.jk{color:var(--jk)}.js{color:var(--js)}.jn{color:var(--jn)}.jl{color:var(--jl)}.jp{color:var(--l2)}
+.code{font:400 12px/19px var(--mono);white-space:pre;color:var(--l1)}
+.gut{font:400 12px/19px var(--mono);color:var(--l3);text-align:right;white-space:pre;padding-right:12px;width:40px;flex:none}
+.th{font-size:11px;font-weight:600;color:var(--l2);height:24px;display:flex;align-items:center;padding:0 8px}
+.tr{height:24px;display:flex;align-items:center}
+.tr:nth-child(even){background:var(--zebra)}
+.td{padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.num{font:400 12px/16px var(--mono);font-variant-numeric:tabular-nums}
+.scen{height:28px;border-radius:7px;padding:0 8px;gap:10px;display:flex;align-items:center}
+.radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--l3);flex:none;display:flex;align-items:center;justify-content:center}
+.radio.on{border-color:var(--ok)}
+.radio.on::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.kv{display:flex;align-items:center;height:28px;gap:12px}
+.kv .k{width:88px;font-size:12px;color:var(--l2);flex:none}
+</style>
+</helmet>
+<!-- The toolbar over the centre column, from the approved toolbar proposal: Run as a round glass
+     button, the project over what it holds, the address over the server state, and import and
+     server settings in one glass group. The panel toggles sit in the inspector's header. -->
+<div class="mm {{theme}}" style="width: 892px; height: 328px; background: var(--desk); position: relative; overflow: hidden;">
+  <!-- Running, full width -->
+  <div class="row" style="position: absolute; left: 24px; top: 24px; width: 844px; height: 52px; gap: 12px; padding: 0 8px; background: var(--win);">
+    <div class="glass" style="width: 36px; height: 36px; border-radius: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--l1);"><svg class="ic" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.25" style="fill: currentColor; stroke: none;"/></svg></div><div class="col" style="gap: 1px; flex: none;"><span style="font-size: 13px; font-weight: 600;">Acme Storefront</span><span class="row l2" style="gap: 4px; font-size: 11px; line-height: 13px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/></svg>12 endpoints · 3 journeys</span></div><span style="width: 1px; height: 24px; background: var(--sep); flex: none;"></span><div class="col" style="gap: 1px; padding: 0 8px; flex: none;"><span class="row" style="gap: 4px; font-size: 13px;">localhost:18086<span class="l3">+1</span><svg class="ic l2" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span><span class="row" style="gap: 6px; font-size: 11px; line-height: 13px;"><span class="row" style="gap: 5px; color: var(--ok);"><i style="width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;"></i>Running</span><span class="l3">·</span><span class="l2">142 requests</span><span class="l3">·</span><span style="color: var(--warn);">3 unmatched</span></span></div><span class="grow"></span><div class="cap glass" style="height: 36px; border-radius: 18px;"><button aria-label="Import" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
+  </div>
+  <!-- Stopped -->
+  <div class="row" style="position: absolute; left: 24px; top: 100px; width: 844px; height: 52px; gap: 12px; padding: 0 8px; background: var(--win);">
+    <div class="glass" style="width: 36px; height: 36px; border-radius: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--l1);"><svg class="ic" viewBox="0 0 16 16"><path d="M5.5 3.75v8.5L12.25 8z" style="fill: currentColor; stroke: none;"/></svg></div><div class="col" style="gap: 1px; flex: none;"><span style="font-size: 13px; font-weight: 600;">Acme Storefront</span><span class="row l2" style="gap: 4px; font-size: 11px; line-height: 13px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/></svg>12 endpoints · 3 journeys</span></div><span style="width: 1px; height: 24px; background: var(--sep); flex: none;"></span><div class="col" style="gap: 1px; padding: 0 8px; flex: none;"><span class="row" style="gap: 4px; font-size: 13px;">localhost:18086<span class="l3">+1</span><svg class="ic l2" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span><span class="row" style="gap: 6px; font-size: 11px; line-height: 13px;"><span class="row l3" style="gap: 5px;"><i style="width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;"></i><span class="l2">Stopped</span></span></span></div><span class="grow"></span><div class="cap glass" style="height: 36px; border-radius: 18px;"><button aria-label="Import" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
+  </div>
+  <!-- Ports changed while running -->
+  <div class="row" style="position: absolute; left: 24px; top: 176px; width: 844px; height: 52px; gap: 12px; padding: 0 8px; background: var(--win);">
+    <div class="glass" style="width: 36px; height: 36px; border-radius: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--l1);"><svg class="ic" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.25" style="fill: currentColor; stroke: none;"/></svg></div><div class="col" style="gap: 1px; flex: none;"><span style="font-size: 13px; font-weight: 600;">Acme Storefront</span><span class="row l2" style="gap: 4px; font-size: 11px; line-height: 13px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/></svg>12 endpoints · 3 journeys</span></div><span style="width: 1px; height: 24px; background: var(--sep); flex: none;"></span><div class="col" style="gap: 1px; padding: 0 8px; flex: none;"><span class="row" style="gap: 4px; font-size: 13px;">localhost:18086<span class="l3">+1</span><svg class="ic l2" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span><span class="row" style="gap: 6px; font-size: 11px; line-height: 13px;"><span class="row" style="gap: 5px; color: var(--warn);"><i style="width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;"></i>Restart to apply 2 port changes</span></span></div><span class="grow"></span><div class="cap glass" style="height: 36px; border-radius: 18px;"><button aria-label="Import" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
+  </div>
+  <!-- Compact centre column -->
+  <div class="row" style="position: absolute; left: 24px; top: 252px; width: 480px; height: 52px; gap: 12px; padding: 0 8px; background: var(--win);">
+    <div class="glass" style="width: 36px; height: 36px; border-radius: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--l1);"><svg class="ic" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.25" style="fill: currentColor; stroke: none;"/></svg></div><div class="col" style="gap: 1px; flex: none;"><span style="font-size: 13px; font-weight: 600;">Acme Storefront</span></div><div class="col" style="gap: 1px; padding: 0 8px; flex: none;"><span class="row" style="gap: 4px; font-size: 13px;">localhost:18086<svg class="ic l2" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span><span class="row" style="gap: 6px; font-size: 11px; line-height: 13px;"><span class="row" style="gap: 5px; color: var(--ok);"><i style="width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;"></i>Running</span></span></div><span class="grow"></span><div class="cap glass" style="height: 36px; border-radius: 18px;"><button aria-label="More actions" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1" style="fill: currentColor; stroke: none;"/><circle cx="8" cy="8" r="1" style="fill: currentColor; stroke: none;"/><circle cx="12.5" cy="8" r="1" style="fill: currentColor; stroke: none;"/></svg></button></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":892,"height":328}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'dark' };
+  }
+}
+</script>
+</body>
+</html>

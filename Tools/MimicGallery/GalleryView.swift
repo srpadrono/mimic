@@ -16,6 +16,7 @@ enum OverlayMode: String, CaseIterable, Identifiable {
 /// The gallery: every component and section down the side, one on the canvas at its artboard
 /// size, and the artboard itself laid over it to compare.
 struct GalleryView: View {
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: String? = GalleryCatalog.selected.first?.id
     @State private var appearance: SnapshotRenderer.Appearance = .dark
     @State private var overlay: OverlayMode = .off
@@ -121,6 +122,13 @@ struct GalleryView: View {
             if let missingReference {
                 Text(missingReference).foregroundStyle(DSColors.warning)
             }
+            if entry.window != nil {
+                Button("Open in a window", systemImage: "macwindow") {
+                    openWindow(id: GalleryWindow.sceneID, value: entry.id)
+                }
+                .help("Open this window on its own, with its toolbar")
+                .accessibilityIdentifier("gallery.openInWindow")
+            }
             if let status { Text(status).foregroundStyle(DSColors.labelSecondary) }
         }
         .font(DSTypography.caption)
@@ -131,6 +139,9 @@ struct GalleryView: View {
 
     /// Why an entry has no design image in the current appearance.
     private func missingReferenceNote(for entry: GalleryEntry) -> String {
+        if !entry.hasArtboard {
+            return "The design has no artboard for this entry."
+        }
         if let references, let section = references.section(entry.referenceID),
            !references.draws(section, in: appearance.rawValue) {
             return "The design draws this board in one appearance only. Switch appearance to compare."

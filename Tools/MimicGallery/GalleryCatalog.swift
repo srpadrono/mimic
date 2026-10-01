@@ -19,6 +19,7 @@ struct GalleryEntry: Identifiable {
     enum Group: String, CaseIterable, Identifiable {
         case windows = "Windows"
         case workspace = "Workspace"
+        case toolbar = "Toolbar"
         case endpoints = "Endpoints"
         case journeys = "Journeys"
         case requestLog = "Request log"
@@ -37,25 +38,32 @@ struct GalleryEntry: Identifiable {
     let group: Group
     /// The section of `Design/Reference/sections.json` this entry is drawn to match.
     let referenceID: String
+    /// Whether the design draws this entry. The empty window skeleton has no artboard of its own.
+    let hasArtboard: Bool
     /// The artboard section's size in points, which is the size the entry is drawn at.
     let size: CGSize
     let content: @MainActor () -> AnyView
 
-    init(_ id: String, _ title: String, group: Group, reference: String? = nil, size: CGSize,
-         @ViewBuilder content: @escaping @MainActor () -> some View) {
+    init(_ id: String, _ title: String, group: Group, reference: String? = nil, hasArtboard: Bool = true,
+         size: CGSize, @ViewBuilder content: @escaping @MainActor () -> some View) {
         self.id = id
         self.title = title
         self.group = group
         self.referenceID = reference ?? id
+        self.hasArtboard = hasArtboard
         self.size = size
         self.content = { AnyView(content()) }
     }
+
+    /// The whole window with its real toolbar, for entries a window draws. A toolbar draws only in
+    /// a window's title bar, so the canvas shows these without one and offers to open them.
+    @MainActor var window: AnyView? { GalleryCatalog.window(for: id) }
 }
 
 @MainActor
 enum GalleryCatalog {
     static var entries: [GalleryEntry] {
-        windows + workspace + endpoints + journeys + requestLog + server + projects + importing + updates
+        windows + workspace + toolbar + endpoints + journeys + requestLog + server + projects + importing + updates
             + DSCatalog.components.map { component(from: $0, group: .components) }
             + DSCatalog.tokens.map { component(from: $0, group: .tokens) }
     }
@@ -96,7 +104,20 @@ enum GalleryCatalog {
                      size: CGSize(width: 1440, height: 900)) {
             GalleryWorkspaceWindow()
         },
+        GalleryEntry("workspace.skeleton", "Empty window skeleton", group: .windows, hasArtboard: false,
+                     size: CGSize(width: 1440, height: 900)) {
+            GalleryEmptyWindow()
+        },
     ]
+
+    /// The window entries with their toolbar installed, for the gallery's own window scene.
+    static func window(for id: String) -> AnyView? {
+        switch id {
+        case "workspace.window": AnyView(GalleryWorkspaceWindow(showsToolbar: true))
+        case "workspace.skeleton": AnyView(GalleryEmptyWindow(showsToolbar: true))
+        default: nil
+        }
+    }
 
     // MARK: - Workspace shell
 
@@ -109,6 +130,25 @@ enum GalleryCatalog {
                 onSelectOption: { _, _ in }
             )
             .background(DSColors.content)
+        },
+    ]
+
+    // MARK: - Toolbar
+
+    /// The toolbar over the centre column, in the states the approved toolbar design draws.
+    static let toolbar: [GalleryEntry] = [
+        GalleryEntry("toolbar.running", "Running", group: .toolbar, size: CGSize(width: 844, height: 52)) {
+            GalleryToolbarStrip(fixture: .running)
+        },
+        GalleryEntry("toolbar.stopped", "Stopped", group: .toolbar, size: CGSize(width: 844, height: 52)) {
+            GalleryToolbarStrip(fixture: .stopped)
+        },
+        GalleryEntry("toolbar.restartRequired", "Ports changed while running", group: .toolbar,
+                     size: CGSize(width: 844, height: 52)) {
+            GalleryToolbarStrip(fixture: .restartRequired)
+        },
+        GalleryEntry("toolbar.compact", "Narrow centre column", group: .toolbar, size: CGSize(width: 480, height: 52)) {
+            GalleryToolbarStrip(fixture: .compact)
         },
     ]
 

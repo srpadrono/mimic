@@ -395,70 +395,53 @@ struct WorkspaceView: View {
 
     private var usesCompactToolbarSummary: Bool { centerToolbarLayout.usesCompactSummary }
 
-    private var foldsRun: Bool { centerToolbarLayout.foldsRun }
-
     private var usesNarrowIdentity: Bool { centerToolbarLayout.usesNarrowIdentity }
 
-    private var usesToolbarOverflow: Bool { centerToolbarLayout.usesOverflow }
+    /// The toolbar's values, read from the session. `WorkspaceToolbar` lays them out.
+    private var toolbarState: WorkspaceToolbarState {
+        WorkspaceToolbarState(
+            layout: centerToolbarLayout,
+            projectName: appState.currentProject?.name,
+            projectContents: WorkspaceProjectIdentity.contents(
+                endpoints: currentEndpoints.count, journeys: appState.journeys.count
+            ),
+            restartRequired: appState.server.restartRequired,
+            unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
+            isRequestLogShown: isLogShown,
+            isInspectorPresented: isInspectorPresented,
+            canPresentInspector: canPresentInspector
+        )
+    }
 
-    private var projectIdentityMaximumWidth: CGFloat { centerToolbarLayout.projectIdentityMaximumWidth }
+    private var toolbarActions: WorkspaceToolbarActions {
+        WorkspaceToolbarActions(
+            importHAR: { showHARImport = true },
+            importOpenAPI: { showOpenAPIImport = true },
+            showServerSettings: { showBackendSettings = true },
+            toggleRequestLog: toggleRequestLog,
+            toggleInspector: toggleInspector,
+            showUnmatched: {
+                logPresentation.wrappedValue = true
+                showUnmatchedOnly = true
+            }
+        )
+    }
 
-    /// Run, the project, and the server's address and state lead; import and server settings trail
-    /// in one glass group. The panel toggles sit in the inspector's own toolbar section beside its
-    /// title, and come back to the end of this toolbar only while the inspector is hidden.
-    @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
-        if !foldsRun {
-            ToolbarItem(id: "workspace.run", placement: .navigation) {
-                ServerToggleButton(
-                    serverState: appState.serverState,
-                    onStart: appState.startServer,
-                    onStop: appState.stopServer
-                )
-            }
-        }
-
-        ToolbarItem(id: "workspace.identity", placement: .navigation) {
-            projectIdentity
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        ToolbarItem(id: "workspace.status", placement: .navigation) {
-            // Its own item, and wrapped rather than rooted at the well's `Button`. A bare button as
-            // an item's root is published as the item itself, and so is a button sharing an item
-            // with other views: the project name beside it then left the accessibility tree, and
-            // the well's details popover never reached it.
-            HStack(spacing: DSSpacing.md) {
-                if !usesNarrowIdentity {
-                    Rectangle()
-                        .fill(DSColors.separator)
-                        .frame(width: DSStroke.emphasis, height: 24)
-                        .accessibilityHidden(true)
-                }
-                serverSummary
-            }
-            .accessibilityElement(children: .contain)
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        // The actions keep to the column's trailing edge, clear of the address.
-        ToolbarSpacer(.flexible)
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            if usesToolbarOverflow {
-                overflowMenu
-            } else {
-                importMenu(inToolbar: true)
-                serverSettingsButton.labelStyle(.iconOnly)
-            }
-        }
-
-        if !usesToolbarOverflow, !isInspectorPresented {
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItemGroup(placement: .primaryAction) {
-                drawerToolbarButton.labelStyle(.iconOnly)
-                inspectorToolbarButton.labelStyle(.iconOnly)
-            }
+        WorkspaceToolbar(state: toolbarState, actions: toolbarActions) {
+            ServerToggleButton(
+                serverState: appState.serverState,
+                onStart: appState.startServer,
+                onStop: appState.stopServer
+            )
+        } runMenuItem: {
+            ServerToggleMenuItem(
+                serverState: appState.serverState,
+                onStart: appState.startServer,
+                onStop: appState.stopServer
+            )
+        } status: {
+            serverSummary
         }
     }
 
@@ -471,48 +454,6 @@ struct WorkspaceView: View {
             isNavigatingHistory = selectedEndpointID != target
             revealEndpoint(endpoint)
         }
-    }
-
-    /// The project's name over what it holds, "12 endpoints · 3 journeys". Narrow toolbars keep
-    /// the name alone.
-    private var projectIdentity: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(appState.currentProject?.name ?? "Mimic")
-                .font(DSTypography.bodySemibold)
-                .foregroundStyle(DSColors.labelPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(appState.currentProject?.name ?? "Mimic")
-                .accessibilityIdentifier("toolbar.projectName")
-            if !usesCompactToolbarSummary, appState.currentProject != nil {
-                HStack(spacing: DSSpacing.xs) {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: DSGlyph.disclosure))
-                        .accessibilityHidden(true)
-                    Text(projectContents)
-                        .monospacedDigit()
-                }
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("toolbar.projectContents")
-                .accessibilityLabel(projectContents)
-            }
-        }
-        .frame(maxWidth: projectIdentityMaximumWidth, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("toolbar.projectIdentity")
-    }
-
-    /// "12 endpoints · 3 journeys".
-    private var projectContents: String {
-        Self.projectContents(endpoints: currentEndpoints.count, journeys: appState.journeys.count)
-    }
-
-    nonisolated static func projectContents(endpoints: Int, journeys: Int) -> String {
-        "\(endpoints) \(endpoints == 1 ? "endpoint" : "endpoints") · \(journeys) \(journeys == 1 ? "journey" : "journeys")"
     }
 
     private var serverSummary: some View {
@@ -547,64 +488,6 @@ struct WorkspaceView: View {
         guard let failure = appState.serverStartFailure,
               failure.code == ControlErrorCode.serverPortInUse.rawValue else { return nil }
         return failure.details?["port"].flatMap { Int($0) }
-    }
-
-    /// The secondary actions, folded into one menu when the centre column is narrow. At the
-    /// narrowest width Run/Stop leads it, so AppKit never has to hide anything. The panel toggles
-    /// join it only while the inspector is hidden; otherwise they sit in the inspector's header.
-    private var overflowMenu: some View {
-        let unmatchedCount = RequestLogQuery.unmatchedCount(logs: appState.requestLogs)
-        let unmatchedDescription = "\(unmatchedCount) unmatched \(unmatchedCount == 1 ? "request" : "requests")"
-        return Menu {
-            if foldsRun {
-                ServerToggleMenuItem(
-                    serverState: appState.serverState,
-                    onStart: appState.startServer,
-                    onStop: appState.stopServer
-                )
-                Divider()
-            }
-            importMenu()
-            serverSettingsButton
-            if !isInspectorPresented {
-                Divider()
-                drawerToolbarButton
-                inspectorToolbarButton
-            }
-            if unmatchedCount > 0 {
-                Divider()
-                Button("Show unmatched requests (\(unmatchedCount))") {
-                    logPresentation.wrappedValue = true
-                    showUnmatchedOnly = true
-                }
-                .accessibilityIdentifier("toolbar.showUnmatched")
-                .accessibilityLabel("Show unmatched requests")
-            }
-        } label: {
-            Label("More", systemImage: appState.server.restartRequired
-                  ? "exclamationmark.arrow.circlepath" : "ellipsis")
-                .labelStyle(.iconOnly)
-        }
-        .menuIndicator(.hidden)
-        .help(foldsRun ? "Run, import, server settings, and more" : "Import, server settings, and more")
-        .accessibilityIdentifier("toolbar.overflow")
-        .accessibilityLabel("More actions")
-        .accessibilityValue(unmatchedCount > 0
-            ? unmatchedDescription
-            : (appState.server.restartRequired ? "Server restart required" : ""))
-    }
-
-    private var serverSettingsButton: some View {
-        Button { showBackendSettings = true } label: {
-            Label(
-                appState.server.restartRequired ? "Server settings, restart required" : "Server settings\u{2026}",
-                systemImage: appState.server.restartRequired ? "exclamationmark.arrow.circlepath" : "slider.horizontal.3"
-            )
-        }
-        .disabled(appState.currentProject == nil)
-        .help(appState.server.restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")
-        .accessibilityIdentifier("backend.settingsButton")
-        .accessibilityLabel("Server settings")
     }
 
     /// Whether there is anything for the inspector to show. A project with no endpoints and no
@@ -644,27 +527,6 @@ struct WorkspaceView: View {
         }
     }
 
-    private var drawerToolbarButton: some View {
-        Button { toggleRequestLog() } label: {
-            Label(isLogShown ? "Hide request log" : "Show request log", systemImage: "rectangle.bottomthird.inset.filled")
-        }
-        .help(isLogShown ? "Hide request log (⌥⌘L)" : "Show request log (⌥⌘L)")
-        .accessibilityIdentifier("toggleDrawerButton")
-        .accessibilityLabel(isLogShown ? "Hide request log" : "Show request log")
-    }
-
-    private var inspectorToolbarButton: some View {
-        Button { toggleInspector() } label: {
-            Label(isInspectorPresented ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right")
-        }
-        .disabled(!canPresentInspector)
-        .help(canPresentInspector
-            ? (isInspectorPresented ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
-            : "Add an endpoint or a journey to inspect it")
-        .accessibilityIdentifier("toggleInspectorButton")
-        .accessibilityLabel(isInspectorPresented ? "Hide inspector" : "Show inspector")
-    }
-
     private func toggleRequestLog() {
         logPresentation.wrappedValue.toggle()
     }
@@ -682,36 +544,6 @@ struct WorkspaceView: View {
                 if navigatorTab == .journeys { showJourneyDrawer = visible } else { showDrawer = visible }
             }
         )
-    }
-
-    /// Shared by the full toolbar and its compact overflow menu.
-    private func importMenu(inToolbar: Bool = false) -> some View {
-        Menu {
-            Button { showHARImport = true } label: {
-                Label("Import HAR file\u{2026}", systemImage: "doc.text")
-            }
-            .accessibilityIdentifier("importHARMenuItem")
-            .accessibilityLabel("Import HAR file")
-
-            Button { showOpenAPIImport = true } label: {
-                Label("Import OpenAPI spec\u{2026}", systemImage: "doc.badge.gearshape")
-            }
-            .accessibilityIdentifier("importOpenAPIMenuItem")
-            .accessibilityLabel("Import OpenAPI spec")
-        } label: {
-            if inToolbar {
-                Label("Import", systemImage: "square.and.arrow.down")
-                    .labelStyle(.iconOnly)
-            } else {
-                Label("Import", systemImage: "square.and.arrow.down")
-            }
-        }
-        .menuIndicator(.hidden)
-        .disabled(appState.currentProject == nil)
-        .help("Import a HAR file or an OpenAPI spec")
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("importMenuButton")
-        .accessibilityLabel("Import")
     }
 
     // MARK: - Breadcrumb
@@ -1061,8 +893,13 @@ struct WorkspaceView: View {
             journeyModel: appState,
             showsHeader: isInspectorPresented,
             panelToggles: InspectorPanelView.PanelToggles(
-                requestLog: AnyView(drawerToolbarButton.labelStyle(.iconOnly)),
-                inspector: AnyView(inspectorToolbarButton.labelStyle(.iconOnly))
+                requestLog: AnyView(
+                    WorkspaceRequestLogToggle(isShown: isLogShown, action: toggleRequestLog).labelStyle(.iconOnly)
+                ),
+                inspector: AnyView(
+                    WorkspaceInspectorToggle(isPresented: isInspectorPresented, canPresent: canPresentInspector,
+                                             action: toggleInspector).labelStyle(.iconOnly)
+                )
             ),
             endpointTraffic: endpoint.map {
                 EndpointTrafficQuery.logs(forEndpoint: $0.id, in: appState.requestLogs)
