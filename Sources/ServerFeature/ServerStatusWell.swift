@@ -15,7 +15,7 @@ public struct ServerStatusWell: View {
     let unmatchedCount: Int
     /// Narrow toolbars keep the state word and drop the request counts and the restart detail.
     var compact = false
-    /// "+1" after the address; the narrowest toolbars leave the count to the details popover.
+    /// "+1" after the address; compact toolbars leave the count to the details popover.
     var showsListenerCount = true
     var configuration: ServerConfiguration?
     var boundConfiguration: ServerConfiguration?
@@ -148,19 +148,19 @@ public struct ServerStatusWell: View {
             if showsListenerCount, address.others > 0 {
                 Text(verbatim: "+\(address.others)")
                     .font(DSTypography.body)
-                    .foregroundStyle(DSColors.labelSecondary)
+                    .foregroundStyle(DSColors.labelTertiary)
             }
             Image(systemName: "chevron.down")
-                .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                .font(.system(size: DSGlyph.minimum, weight: .semibold))
+                .imageScale(.small)
                 .foregroundStyle(DSColors.labelSecondary)
                 .accessibilityHidden(true)
         }
-        .monospacedDigit()
         .lineLimit(1)
     }
 
     private var statusLine: some View {
-        HStack(spacing: DSSpacing.xs + 1) {
+        HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
             stateLabel
             if !compact, isRunning, !restartRequired {
                 separatorDot
@@ -174,7 +174,6 @@ public struct ServerStatusWell: View {
             }
         }
         .font(DSTypography.caption)
-        .monospacedDigit()
         .lineLimit(1)
     }
 
@@ -189,7 +188,7 @@ public struct ServerStatusWell: View {
             default:
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
             }
             Text(stateTitle)

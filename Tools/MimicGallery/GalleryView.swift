@@ -18,7 +18,10 @@ enum OverlayMode: String, CaseIterable, Identifiable {
 struct GalleryView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var selection: String? = GalleryCatalog.selected.first?.id
-    @State private var appearance: SnapshotRenderer.Appearance = .dark
+    /// `MIMIC_GALLERY_APPEARANCE=light` starts the gallery light, for scripted captures.
+    @State private var appearance = SnapshotRenderer.Appearance(
+        rawValue: ProcessInfo.processInfo.environment["MIMIC_GALLERY_APPEARANCE"] ?? ""
+    ) ?? .dark
     @State private var overlay: OverlayMode = .off
     @State private var opacity = 0.5
     @State private var zoom = 1.0
@@ -53,6 +56,14 @@ struct GalleryView: View {
         .toolbar { controls }
         .onChange(of: appearance, initial: true) { _, appearance in
             NSApp.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
+        }
+        .task {
+            // `MIMIC_GALLERY_OPEN=toolbar.running` opens that window entry at launch, so a script
+            // can capture the real toolbar without driving the canvas.
+            if let id = ProcessInfo.processInfo.environment["MIMIC_GALLERY_OPEN"] {
+                openWindow(id: GalleryWindow.sceneID, value: id)
+                NSApp.activate()
+            }
         }
     }
 

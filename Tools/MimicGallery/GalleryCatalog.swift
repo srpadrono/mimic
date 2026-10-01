@@ -115,6 +115,12 @@ enum GalleryCatalog {
         switch id {
         case "workspace.window": AnyView(GalleryWorkspaceWindow(showsToolbar: true))
         case "workspace.skeleton": AnyView(GalleryEmptyWindow(showsToolbar: true))
+        // The toolbar states in the window that draws them, so the real toolbar can be checked
+        // against its strip. "Narrow centre column" needs a window narrow enough for that tier.
+        case "toolbar.running": AnyView(GalleryWorkspaceWindow(showsToolbar: true, toolbar: .running))
+        case "toolbar.stopped": AnyView(GalleryWorkspaceWindow(showsToolbar: true, toolbar: .stopped))
+        case "toolbar.restartRequired": AnyView(GalleryWorkspaceWindow(showsToolbar: true, toolbar: .restartRequired))
+        case "toolbar.compact": AnyView(GalleryWorkspaceWindow(showsToolbar: true, toolbar: .compact))
         default: nil
         }
     }

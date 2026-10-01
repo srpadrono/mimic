@@ -3,9 +3,9 @@ import CoreGraphics
 /// How much of the workspace toolbar fits over the centre column.
 ///
 /// Collapse in stages as the centre column narrows: first import, server settings and the panel
-/// toggles fold into one menu, then the server line drops its counts and the project name its
-/// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
-/// address and the state word always stay.
+/// toggles fold into one menu, then the server line drops its counts, the address its port count
+/// and divider, and the project name its subtitle, then the project name narrows, and last Run/Stop
+/// folds into the same menu. The address and the state word always stay.
 ///
 /// The last breakpoint is what the narrow tier needs: Run, the name (≤88pt), the address
 /// without its port count and the state, and "More", plus the toolbar's gaps and the column's
@@ -14,14 +14,19 @@ import CoreGraphics
 /// folds below 360pt, where every name fits.
 public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
     case expanded
-    /// The server line keeps only its state word and the project name drops its subtitle.
+    /// The server line keeps only its state word, the address drops its port count and divider, and
+    /// the project name drops its subtitle: the design's compact centre column.
     case compactSummary
     case overflow
-    /// The project identity narrows too, and the address drops its port count and divider.
+    /// The project identity narrows too.
     case narrow
     /// Run/Stop joins the "More actions" menu too, so the identity, the address and that one menu
     /// are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
     case minimal
+
+    /// Each trailing action's width in its glass group, as the design draws it: wider than the
+    /// toolbar's own icon buttons.
+    public static let actionWidth: CGFloat = 50
 
     public init(centerWidth: CGFloat) {
         guard centerWidth.isFinite else { self = .minimal; return }
