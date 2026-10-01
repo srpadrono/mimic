@@ -1141,7 +1141,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "The saved step should reopen")
         XCTAssertEqual(stepSheet.bodyField.value as? String, formattedBody,
                        "The formatted body should survive saving and reopening exactly")
-        stepSheet.reveal(stepSheet.bodyField, byScrollingUp: false)
+        // A reopened sheet starts at the top, so on a short screen the body sits below the viewport.
+        stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
         stepSheet.bodyField.click()
         stepSheet.bodyField.typeKey("a", modifierFlags: .command)
         stepSheet.bodyField.typeKey(.delete, modifierFlags: [])
