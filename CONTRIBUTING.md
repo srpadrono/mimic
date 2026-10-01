@@ -38,6 +38,8 @@ TEST_RUNNER_MIMIC_SECTION=journeys xcodebuild -workspace Mimic.xcworkspace -sche
   -destination 'platform=macOS' -only-testing:DesignFidelityTests
 ```
 
+Every gallery entry is also a snapshot test: `GallerySnapshotTests` (in `DesignFidelityTests`) renders each entry in light and dark and fails when it no longer matches its approved PNG in `Tests/DesignFidelityTests/Snapshots/`. Check sizes, spacing and colours there rather than in an XCUITest; it runs in seconds and does not take over the mouse. Baselines are recorded by CI, because fonts rasterise differently on another macOS version: when an entry is new or changed on purpose, the failing CI run uploads a `snapshots` artifact with the new renderings (and a difference image for each change). Copy the approved PNGs into `Snapshots/` and commit them.
+
 For UI changes, select the affected methods and wait for each run to finish before starting another. Add more `-only-testing` arguments when the changed flow needs several cases:
 
 ```bash
