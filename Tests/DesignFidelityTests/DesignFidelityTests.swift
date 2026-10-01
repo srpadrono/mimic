@@ -17,7 +17,8 @@ struct DesignFidelityTests {
     private let catalog: DesignReferenceCatalog
 
     init() throws {
-        catalog = try DesignReferenceCatalog.inRepository()
+        // The suite runs inside the gallery app, so it reads the artboards the gallery carries.
+        catalog = try DesignReferenceCatalog.inBundle()
     }
 
     @Test("Every gallery entry names a section the design manifest has")
