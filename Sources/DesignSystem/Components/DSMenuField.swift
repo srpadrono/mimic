@@ -24,6 +24,7 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
     @Binding private var selection: Value
     private let options: [DSMenuOption<Value>]
     private let indicator: Indicator
+    private let indicatorFollowsLabel: Bool
     private let height: CGFloat
     private let identifier: String
     private let label: (Value) -> Label
@@ -31,11 +32,14 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
     @Environment(\.isEnabled) private var isEnabled
 
     /// `title` names the choice for accessibility; `label` draws the chosen value inside the field.
+    /// `indicatorFollowsLabel` sets the chevron just after the label rather than at the trailing
+    /// edge, for a value drawn in a fixed column, as the design draws an HTTP method.
     public init(
         _ title: String,
         selection: Binding<Value>,
         options: [DSMenuOption<Value>],
         indicator: Indicator = .upDown,
+        indicatorFollowsLabel: Bool = false,
         height: CGFloat = DSControlHeight.regular,
         identifier: String,
         @ViewBuilder label: @escaping (Value) -> Label
@@ -44,6 +48,7 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
         self._selection = selection
         self.options = options
         self.indicator = indicator
+        self.indicatorFollowsLabel = indicatorFollowsLabel
         self.height = height
         self.identifier = identifier
         self.label = label
@@ -62,11 +67,14 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
             HStack(spacing: DSSpacing.sm) {
                 label(selection)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: indicatorFollowsLabel ? nil : .infinity, alignment: .leading)
                 Image(systemName: indicator.systemImage)
                     .font(.system(size: DSGlyph.minimum, weight: .semibold))
                     .foregroundStyle(DSColors.labelTertiary)
                     .accessibilityHidden(true)
+                if indicatorFollowsLabel {
+                    Spacer(minLength: 0)
+                }
             }
             .dsFieldChrome(height: height, isFocused: false)
             .opacity(isEnabled ? 1 : 0.5)

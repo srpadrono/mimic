@@ -107,13 +107,17 @@ public struct JourneyStepSheet: View {
     public var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                // Each line keeps the design's line height, not the font's own, so the form below
+                // starts where the design starts it.
                 Text(title)
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .frame(minHeight: 20)
                     .accessibilityIdentifier("stepSheet.title")
                 Text("Match a request, then choose what the client gets.")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .frame(minHeight: 16)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSSpacing.xl)
@@ -493,6 +497,8 @@ public struct JourneyStepSheet: View {
         Text(title)
             .font(DSTypography.captionSemibold)
             .foregroundStyle(DSColors.labelTertiary)
+            // The design's 16pt line, so the rows under it sit where the design puts them.
+            .frame(minHeight: 16)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("stepSheet.section.\(title)")
     }

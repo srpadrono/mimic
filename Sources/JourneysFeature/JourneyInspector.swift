@@ -288,7 +288,7 @@ private struct JourneyStepInspector: View {
 
     // MARK: Match
 
-    /// The method in its colour inside a field, with one down chevron, as the design draws it.
+    /// The method in its colour inside a field, with one down chevron after it, as the design draws it.
     private var methodPicker: some View {
         DSMenuField(
             "HTTP method",
@@ -298,11 +298,14 @@ private struct JourneyStepInspector: View {
             ),
             options: HTTPMethod.allCases.map { DSMenuOption($0.rawValue, value: $0) },
             indicator: .down,
+            indicatorFollowsLabel: true,
             identifier: "inspector.journeyStep.method"
         ) { method in
+            // The method column the step rows use, so the chevron sits where the design puts it.
             Text(method.rawValue)
                 .font(DSTypography.method)
                 .foregroundStyle(DSColors.methodColor(for: method.rawValue))
+                .frame(width: 44, alignment: .leading)
         }
     }
 
@@ -359,7 +362,6 @@ private struct JourneyStepInspector: View {
         }
         repeatRow
         JourneyInspectorNote("The body and headers are in Edit step\u{2026}")
-            .padding(.top, DSSpacing.xs)
     }
 
     @ViewBuilder
@@ -403,7 +405,6 @@ private struct JourneyStepInspector: View {
         }
         repeatRow
         JourneyInspectorNote("Clients often retry dropped requests. Raise Repeat if the failure must survive a retry.")
-            .padding(.top, DSSpacing.xs)
     }
 
     private var repeatRow: some View {
@@ -494,6 +495,8 @@ private struct JourneyInspectorFieldRow<Field: View>: View {
         }
         .padding(.horizontal, DSInspectorMetrics.inset)
         .frame(minHeight: 30)
+        // The design leaves 2pt between rows.
+        .padding(.vertical, 1)
     }
 }
 

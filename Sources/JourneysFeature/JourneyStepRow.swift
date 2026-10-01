@@ -122,8 +122,10 @@ struct JourneyStepRow: View {
     private static let readoutWidth: CGFloat = 120
 
     /// Chips, status and the run readout, whole. As the pane narrows the readout's column tightens
-    /// to its text, then the outcome chip goes, then the repeat chip; the status and the readout
-    /// ("Served 1 of 1", "Waiting", "Not reached") always stay.
+    /// to its text, then the outcome chip goes, then the repeat chip, then the status. The readout
+    /// ("Served 1 of 1", "Waiting", "Not reached") always stays: in a centre pane as narrow as a
+    /// 900pt window leaves with both side panels open, it is where the run stands, and a status the
+    /// inspector also shows would otherwise push it past the row's edge.
     private var trailingFacts: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: DSSpacing.md) {
@@ -147,6 +149,7 @@ struct JourneyStepRow: View {
                 statusLabel
                 readout(width: nil)
             }
+            readout(width: nil)
         }
     }
 
