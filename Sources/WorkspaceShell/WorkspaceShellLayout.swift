@@ -181,5 +181,8 @@ public struct WorkspaceShellLayout<
         }
         // Editor actions belong to this column, before the inspector divides the toolbar.
         .toolbar { toolbar }
+        // The toolbar sits on the window colour, as the design draws it. Left visible, AppKit
+        // backs this column's title bar with its own lighter material.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     }
 }

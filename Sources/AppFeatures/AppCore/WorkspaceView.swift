@@ -395,8 +395,6 @@ struct WorkspaceView: View {
 
     private var usesCompactToolbarSummary: Bool { centerToolbarLayout.usesCompactSummary }
 
-    private var usesNarrowIdentity: Bool { centerToolbarLayout.usesNarrowIdentity }
-
     /// The toolbar's values, read from the session. `WorkspaceToolbar` lays them out.
     private var toolbarState: WorkspaceToolbarState {
         WorkspaceToolbarState(
@@ -463,7 +461,7 @@ struct WorkspaceView: View {
             requestCount: appState.requestLogs.count,
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             compact: usesCompactToolbarSummary,
-            showsListenerCount: !usesNarrowIdentity,
+            showsListenerCount: !usesCompactToolbarSummary,
             configuration: appState.currentProject?.serverConfiguration,
             boundConfiguration: appState.server.boundConfiguration,
             runningSince: appState.server.runningSince,

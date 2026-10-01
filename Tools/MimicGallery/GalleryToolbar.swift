@@ -34,14 +34,16 @@ struct GalleryToolbarFixture {
                                                boundConfiguration: twoPorts)
     static let stopped = GalleryToolbarFixture(serverState: .stopped, layout: .expanded,
                                                requestCount: 0, unmatchedCount: 0)
-    /// Both ports moved while the server ran, so it serves the old ones until a restart.
+    /// Both ports moved while the server ran, so it serves 18086 and 18087 until a restart.
     static let restartRequired: GalleryToolbarFixture = {
-        var bound = twoPorts
-        bound.port = 18_090
-        bound.backends[0].port = 18_091
-        return GalleryToolbarFixture(serverState: .running(port: 18_090), layout: .expanded, boundConfiguration: bound)
+        var configured = twoPorts
+        configured.port = 18_090
+        configured.backends[0].port = 18_091
+        return GalleryToolbarFixture(serverState: .running(port: DesignFixtures.port), layout: .expanded,
+                                     configuration: configured, boundConfiguration: twoPorts)
     }()
-    static let compact = GalleryToolbarFixture(serverState: .running(port: DesignFixtures.port), layout: .narrow,
+    /// The design's compact centre column, 480pt wide: the tier the window uses at that width.
+    static let compact = GalleryToolbarFixture(serverState: .running(port: DesignFixtures.port), layout: .compactSummary,
                                                boundConfiguration: twoPorts)
     /// No project open: the window skeleton's toolbar.
     static let empty = GalleryToolbarFixture(serverState: .stopped, layout: .expanded, projectName: nil,
@@ -81,7 +83,7 @@ struct GalleryToolbarFixture {
             requestCount: requestCount,
             unmatchedCount: unmatchedCount,
             compact: layout.usesCompactSummary,
-            showsListenerCount: !layout.usesNarrowIdentity,
+            showsListenerCount: !layout.usesCompactSummary,
             configuration: configuration,
             boundConfiguration: boundConfiguration,
             runningSince: DesignFixtures.now.addingTimeInterval(-14 * 60),
@@ -106,7 +108,8 @@ struct GalleryToolbarStrip: View {
     private var state: WorkspaceToolbarState { fixture.state }
 
     var body: some View {
-        HStack(spacing: DSSpacing.md) {
+        // The window's toolbar spaces its items 8pt apart; the items bring any extra space themselves.
+        HStack(spacing: DSSpacing.sm) {
             if !state.layout.foldsRun {
                 fixture.run
                     .buttonStyle(.borderless)
@@ -152,7 +155,7 @@ struct GalleryToolbarStrip: View {
     private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 0) {
             content()
-                .frame(minWidth: Self.itemHeight + DSSpacing.sm, minHeight: Self.itemHeight)
+                .frame(minWidth: WorkspaceToolbarLayout.actionWidth, minHeight: Self.itemHeight)
         }
         .menuStyle(.button)
         .buttonStyle(.borderless)

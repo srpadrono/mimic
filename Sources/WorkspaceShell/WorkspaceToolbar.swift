@@ -138,13 +138,18 @@ public struct WorkspaceToolbar<Run: View, RunMenuItem: View, Status: View>: Tool
         ToolbarItemGroup(placement: .primaryAction) {
             if state.layout.usesOverflow {
                 WorkspaceOverflowMenu(state: state, actions: actions) { runMenuItem }
+                    .buttonStyle(.borderless)
+                    .frame(width: WorkspaceToolbarLayout.actionWidth)
             } else {
                 WorkspaceImportMenu(inToolbar: true, actions: actions)
                     .disabled(!state.hasProject)
+                    .buttonStyle(.borderless)
+                    .frame(width: WorkspaceToolbarLayout.actionWidth)
                 WorkspaceServerSettingsButton(restartRequired: state.restartRequired,
                                               action: actions.showServerSettings)
                     .disabled(!state.hasProject)
                     .labelStyle(.iconOnly)
+                    .frame(width: WorkspaceToolbarLayout.actionWidth)
             }
         }
 
@@ -174,7 +179,7 @@ public struct WorkspaceToolbarStatus<Status: View>: View {
 
     public var body: some View {
         HStack(spacing: DSSpacing.md) {
-            if !state.layout.usesNarrowIdentity {
+            if !state.layout.usesCompactSummary {
                 Rectangle()
                     .fill(DSColors.separator)
                     .frame(width: DSStroke.emphasis, height: 24)
@@ -208,11 +213,11 @@ public struct WorkspaceProjectIdentity: View {
                 .accessibilityIdentifier("toolbar.projectName")
             if !state.layout.usesCompactSummary, state.hasProject {
                 HStack(spacing: DSSpacing.xs) {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: DSGlyph.disclosure))
+                    Image(systemName: "rectangle.grid.1x2")
+                        .font(.system(size: DSGlyph.minimum))
+                        .imageScale(.small)
                         .accessibilityHidden(true)
                     Text(state.projectContents)
-                        .monospacedDigit()
                 }
                 .font(DSTypography.caption)
                 .foregroundStyle(DSColors.labelSecondary)
@@ -224,6 +229,8 @@ public struct WorkspaceProjectIdentity: View {
         }
         .frame(maxWidth: state.layout.projectIdentityMaximumWidth, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+        // The toolbar spaces its items 8pt apart; the design leaves 12pt either side of the name.
+        .padding(.horizontal, DSSpacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("toolbar.projectIdentity")
     }
@@ -287,7 +294,9 @@ public struct WorkspaceServerSettingsButton: View {
         Button(action: action) {
             Label(
                 restartRequired ? "Server settings, restart required" : "Server settings\u{2026}",
-                systemImage: restartRequired ? "exclamationmark.arrow.circlepath" : "slider.horizontal.3"
+                // The same sliders while a restart is pending: the server line under the address
+                // already says so, in the warning colour.
+                systemImage: "slider.horizontal.3"
             )
         }
         .help(restartRequired ? "Restart the server to apply local port changes" : "Configure local ports and real backends")

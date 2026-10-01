@@ -15,13 +15,16 @@ struct GalleryWorkspaceWindow: View {
     /// Whether the toolbar is installed. Only in its own window: on the gallery canvas the items
     /// would land in the gallery's own toolbar instead.
     let showsToolbar: Bool
+    /// The toolbar state this window draws; the layout follows the window's width.
+    let toolbarState: GalleryToolbarFixture
     @State private var isRequestLogPresented = true
     @State private var requestLogHeight: CGFloat = 319
     @State private var isInspectorPresented = true
     @State private var toolbarLayout: WorkspaceToolbarLayout = .expanded
 
-    init(showsToolbar: Bool = false) {
+    init(showsToolbar: Bool = false, toolbar: GalleryToolbarFixture = .running) {
         self.showsToolbar = showsToolbar
+        self.toolbarState = toolbar
     }
 
     var body: some View {
@@ -56,9 +59,9 @@ struct GalleryWorkspaceWindow: View {
         )
     }
 
-    /// The running toolbar, at whatever width the window gives the centre column.
+    /// The window's toolbar state, at whatever width the window gives the centre column.
     private var toolbarFixture: GalleryToolbarFixture {
-        var fixture = GalleryToolbarFixture.running
+        var fixture = toolbarState
         fixture.layout = toolbarLayout
         fixture.isInspectorPresented = isInspectorPresented
         return fixture

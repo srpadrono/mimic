@@ -1,3 +1,4 @@
+import AppKit
 import DesignSystem
 import SwiftUI
 
@@ -34,9 +35,29 @@ struct GalleryWindow: View {
                 .toolbar(removing: .title)
                 .navigationTitle(entry.title)
                 .frame(minWidth: 900, minHeight: 600)
+                .background(GalleryWindowWidth())
         } else {
             Text("No window entry \(entryID ?? "")").foregroundStyle(DSColors.labelSecondary)
                 .frame(minWidth: 400, minHeight: 200)
         }
     }
+}
+
+/// `MIMIC_GALLERY_WINDOW_WIDTH=980` sizes the window entry's window at launch, so a script can
+/// reach a narrower toolbar tier than the scene's default size.
+private struct GalleryWindowWidth: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        guard let width = ProcessInfo.processInfo.environment["MIMIC_GALLERY_WINDOW_WIDTH"].flatMap(Double.init)
+        else { return view }
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            var frame = window.frame
+            frame.size.width = width
+            window.setFrame(frame, display: true)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

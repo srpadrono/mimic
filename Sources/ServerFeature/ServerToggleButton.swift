@@ -55,7 +55,8 @@ public struct ServerToggleButton: View {
                 Text(stopIsCurrentAction ? "Stop" : "Run")
             } icon: {
                 Image(systemName: stopIsCurrentAction ? "stop.fill" : "play.fill")
-                    .font(.system(size: DSGlyph.field, weight: .semibold))
+                    .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                    .imageScale(.small)
                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     .symbolEffect(.pulse, options: .repeating, isActive: isTransitioning && !reduceMotion)
                     // play.fill and stop.fill differ in width; a fixed slot keeps the circle still.

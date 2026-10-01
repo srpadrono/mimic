@@ -27,12 +27,15 @@ struct DesignFidelityTests {
         #expect(missing.isEmpty, "Unknown design sections: \(missing)")
     }
 
-    @Test("Every window entry opens in a window of its own, where its toolbar draws")
+    @Test("Every window and toolbar entry opens in a window of its own, where its toolbar draws")
     func windowEntriesOpenInAWindow() {
         let windows = GalleryCatalog.entries.filter { $0.group == .windows }
         #expect(windows.map(\.id) == ["workspace.window", "workspace.skeleton"])
         #expect(windows.allSatisfy { $0.window != nil })
-        #expect(GalleryCatalog.entries.filter { $0.group != .windows }.allSatisfy { $0.window == nil })
+        // The toolbar strips are a re-layout; each state also opens in the window that draws it.
+        #expect(GalleryCatalog.entries.filter { $0.group == .toolbar }.allSatisfy { $0.window != nil })
+        #expect(GalleryCatalog.entries.filter { $0.group != .windows && $0.group != .toolbar }
+            .allSatisfy { $0.window == nil })
     }
 
     @Test("The toolbar entries are the approved toolbar design's states")
