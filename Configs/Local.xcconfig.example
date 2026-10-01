@@ -1,0 +1,16 @@
+// Copy to Configs/Local.xcconfig (gitignored) to sign Debug builds with your own certificate.
+//
+// Why: macOS remembers privacy grants such as "access files in your Documents folder" against the
+// app's signature. An ad hoc signature changes with every build, so each rebuild asks again. A build
+// signed with an Apple Development certificate keeps the same identity and keeps the grant.
+//
+// `security find-identity -v -p codesigning` lists the identities on this Mac. The certificate has to
+// belong to the team in DEVELOPMENT_TEAM (Project.swift); set it here as well if yours differs.
+// Manual style signs with the certificate alone, so no provisioning profile is needed.
+//
+// Command-line overrides still win: Scripts/ci.sh and CI pass CODE_SIGN_IDENTITY=- where they
+// need an ad hoc build.
+
+MIMIC_CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_STYLE = Manual
+// DEVELOPMENT_TEAM = XXXXXXXXXX

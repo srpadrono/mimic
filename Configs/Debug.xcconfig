@@ -1,0 +1,6 @@
+// Debug configuration for the Mimic project.
+//
+// Local.xcconfig is untracked and optional: `#include?` skips it when it is missing, which is the case
+// in CI and on a fresh clone, and Debug builds are then signed ad hoc. Copy Local.xcconfig.example to
+// Local.xcconfig to sign your own Debug builds with a certificate. Run `tuist generate` afterwards.
+#include? "Local.xcconfig"
