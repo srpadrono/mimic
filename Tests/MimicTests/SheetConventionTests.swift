@@ -31,19 +31,17 @@ struct SheetConventionTests {
         return renderedSize
     }
 
-    /// Both sheets open at one width, which is the part of "the shared sheet convention" that is a
-    /// number.
+    /// Each creation sheet opens at the width its artboard draws: the two-field new project sheet
+    /// at `DSSheetWidth.short`, the new endpoint sheet at `DSSheetWidth.compact`.
     ///
-    /// Both views size themselves from `DSSheetWidth.compact`, one as a fixed width and one as a
-    /// minimum and ideal width. Compared with each other first, so it is the agreement being asserted
-    /// and either sheet leaving it fails here, then against the compact sheet's 440pt floor.
-    @Test("The two creation sheets open at one width")
-    func creationSheetsShareOneWidth() {
+    /// The project sheet is a fixed width, so it must be exactly the design's. The endpoint sheet
+    /// takes the compact width as its minimum and ideal, so it is held to that floor.
+    @Test("The creation sheets open at their design widths")
+    func creationSheetsOpenAtTheirDesignWidths() {
         let endpointSheet = render(NewEndpointSheet(existingGroups: ["Account", "Catalog"]) { _ in })
         let projectSheet = render(NewProjectSheet { _, _ in })
 
-        #expect(endpointSheet.width == projectSheet.width)
-        // And it is the stated floor, not whatever the fields happened to measure.
+        #expect(projectSheet.width == 377)
         #expect(endpointSheet.width >= 440)
     }
 }

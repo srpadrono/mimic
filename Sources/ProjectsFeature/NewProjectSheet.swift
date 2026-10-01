@@ -54,7 +54,8 @@ public struct NewProjectSheet: View {
         self.init(initialProjectName: "", initialPortString: "8080", onConfirm: onConfirm)
     }
 
-    init(
+    /// Opens with the fields already filled, as a preview or the gallery shows it.
+    public init(
         initialProjectName: String,
         initialPortString: String,
         onConfirm: @escaping (String, Int) -> Void
@@ -73,7 +74,7 @@ public struct NewProjectSheet: View {
                 .foregroundStyle(DSColors.labelPrimary)
                 .accessibilityAddTraits(.isHeader)
 
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
+            VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 // `DSTextField` labels its own input; a label on the wrapper would hide the
                 // validation text from VoiceOver.
                 DSTextField(
@@ -149,7 +150,7 @@ public struct NewProjectSheet: View {
             .padding(.top, DSSpacing.sm)
         }
         .padding(DSSpacing.xl)
-        .frame(width: DSSheetWidth.compact)
+        .frame(width: DSSheetWidth.short)
         .background(DSColors.sheet)
         .defaultFocus($focusedField, .name)
         // Re-probed as the port is typed, after a pause so each keystroke is not a bind.

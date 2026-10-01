@@ -35,10 +35,28 @@ struct DesignFidelityTests {
         }
     }
 
+    @Test("A section filter keeps only the entries it names")
+    func sectionFilterMatchesIdsPrefixesAndGroups() {
+        let all = GalleryCatalog.entries
+        #expect(GalleryCatalog.entries(matching: nil).count == all.count)
+        #expect(GalleryCatalog.entries(matching: " ").count == all.count)
+
+        let journeys = GalleryCatalog.entries(matching: "journeys").map(\.id)
+        #expect(!journeys.isEmpty)
+        #expect(journeys.allSatisfy { $0.hasPrefix("journeys.") })
+
+        #expect(GalleryCatalog.entries(matching: "Journeys.Navigator").map(\.id) == ["journeys.navigator"])
+        #expect(GalleryCatalog.entries(matching: "journeys.navigator, tokens.colour").map(\.id)
+            == ["journeys.navigator", "tokens.colour"])
+        #expect(GalleryCatalog.entries(matching: "request log").map(\.id) == ["requestLog.drawer", "requestLog.detail"])
+        #expect(GalleryCatalog.entries(matching: "journey").isEmpty)
+    }
+
     @Test("Scoring every section against its artboard writes a report", arguments: SnapshotRenderer.Appearance.allCases)
     func writeFidelityReport(appearance: SnapshotRenderer.Appearance) throws {
         let report = FidelityReport(directory: FidelityReport.defaultDirectory())
-        for entry in GalleryCatalog.entries {
+        // `MIMIC_SECTION` narrows the report to one section; unset, every entry is scored.
+        for entry in GalleryCatalog.selected {
             // The Tokens board is drawn on one dark canvas; scoring its sections in light would
             // compare the background, not the tokens.
             if let section = catalog.section(entry.referenceID),

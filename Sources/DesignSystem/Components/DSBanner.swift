@@ -7,11 +7,12 @@ public struct DSBanner: View {
         case warning
         case error
 
+        /// Outline glyphs, as the design draws them: a filled shape reads heavier than the message.
         var systemImage: String {
             switch self {
-            case .info: "info.circle.fill"
-            case .warning: "exclamationmark.triangle.fill"
-            case .error: "exclamationmark.octagon.fill"
+            case .info: "info.circle"
+            case .warning: "exclamationmark.triangle"
+            case .error: "exclamationmark.circle"
             }
         }
 
@@ -33,14 +34,18 @@ public struct DSBanner: View {
     }
 
     private let kind: Kind
+    private let systemImage: String
     private let message: String
     private let actionTitle: String?
     private let action: (() -> Void)?
     private let identifier: String
 
-    public init(_ kind: Kind, message: String, actionTitle: String? = nil, identifier: String,
-                action: (() -> Void)? = nil) {
+    /// - Parameter systemImage: A glyph that names what the action does, such as a restart arrow,
+    ///   in place of the kind's own outline glyph. Keep it an outline symbol.
+    public init(_ kind: Kind, message: String, actionTitle: String? = nil, systemImage: String? = nil,
+                identifier: String, action: (() -> Void)? = nil) {
         self.kind = kind
+        self.systemImage = systemImage ?? kind.systemImage
         self.message = message
         self.actionTitle = actionTitle
         self.action = action
@@ -49,7 +54,7 @@ public struct DSBanner: View {
 
     public var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: kind.systemImage)
+            Image(systemName: systemImage)
                 .font(.system(size: DSGlyph.button, weight: .regular))
                 .foregroundStyle(kind.ink)
                 .accessibilityHidden(true)

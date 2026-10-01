@@ -60,6 +60,29 @@ enum GalleryCatalog {
             + DSCatalog.tokens.map { component(from: $0, group: .tokens) }
     }
 
+    /// The entries a section filter names: a comma-separated list of entry ids (`journeys.navigator`),
+    /// id prefixes (`journeys` for every `journeys.` entry) or group names (`Request log`), matched
+    /// without regard to case. An empty or missing filter keeps every entry.
+    static func entries(matching filter: String?) -> [GalleryEntry] {
+        let terms = (filter ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return entries }
+        return entries.filter { entry in
+            let id = entry.id.lowercased()
+            let group = entry.group.rawValue.lowercased()
+            return terms.contains { term in id == term || id.hasPrefix(term + ".") || group == term }
+        }
+    }
+
+    /// The entries `MIMIC_SECTION` names, so the gallery and the fidelity report can show one section.
+    /// Set it in the MimicGallery scheme's environment, or pass `TEST_RUNNER_MIMIC_SECTION` to
+    /// `xcodebuild test`.
+    static var selected: [GalleryEntry] {
+        entries(matching: ProcessInfo.processInfo.environment["MIMIC_SECTION"])
+    }
+
     private static func component(from entry: DSCatalog.Entry, group: GalleryEntry.Group) -> GalleryEntry {
         GalleryEntry(entry.id, entry.title, group: group, reference: entry.referenceID, size: entry.size) {
             entry.content()
@@ -193,7 +216,7 @@ enum GalleryCatalog {
         },
         GalleryEntry("projects.newProjectSheet", "New project sheet", group: .projects,
                      size: CGSize(width: 377, height: 227)) {
-            NewProjectSheet { _, _ in }
+            NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080") { _, _ in }
         },
     ]
 
