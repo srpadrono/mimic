@@ -1,19 +1,14 @@
-import SwiftUI
-import Domain
 import DesignSystem
+import Domain
+import EndpointsFeature
+import FeatureSupport
+import ImportFeature
+import JourneysFeature
 import Persistence
-
-nonisolated enum WorkspaceToolbarLayout: Equatable {
-    case expanded
-    /// The server line keeps only its state word and the project name drops its subtitle.
-    case compactSummary
-    case overflow
-    /// The project identity narrows too, and the address drops its port count and divider.
-    case narrow
-    /// Run/Stop joins the "More actions" menu too, so the identity, the address and that one menu
-    /// are all the toolbar holds and nothing ever reaches AppKit's own overflow chevron.
-    case minimal
-}
+import RequestLogFeature
+import ServerFeature
+import SwiftUI
+import WorkspaceShell
 
 /// The workspace: a full-height navigator, an editor column with the request log docked below it, and
 /// a full-height inspector. Both side panels are real `NavigationSplitView`/`.inspector` columns, so
@@ -121,149 +116,68 @@ struct WorkspaceView: View {
     }
 
     private var workspaceLayout: some View {
-        VStack(spacing: 0) {
-            NavigationSplitView {
-                navigator
-                    .navigationSplitViewColumnWidth(
-                        min: DSNavigatorMetrics.minimumWidth,
-                        ideal: DSNavigatorMetrics.idealWidth,
-                        max: DSNavigatorMetrics.maximumWidth
-                    )
-                    // `.contain` matters: a bare `.accessibilityIdentifier` on a container *overrides*
-                    // its descendants' identifiers. The search field survived this only because it used
-                    // to live inside a `List`, whose rows form their own accessibility elements; once it
-                    // was pinned above the list it inherited "sidebar" and `sidebar.searchField`
-                    // disappeared from the tree. Declaring a container keeps both.
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("sidebar")
-            } detail: {
-                // Xcode's arrangement, and for Xcode's reason. Both side panels own their full
-                // column top to bottom; the bottom panel is a tenant of the centre column only.
-                //
-                // Mimic had the inverse: the request log spanned the whole detail column, so the
-                // inspector had to stop short to make room for it. With the log at its default 220pt
-                // that cost the inspector 220pt of height — taken from the one panel whose job is
-                // showing you a payload, and given to a log that was not using the corner.
-                VStack(spacing: 0) {
-                    if !selectedLogIDs.isEmpty {
-                        // A selected request takes over the column: the log on the left, the request
-                        // on the right, and neither the editor nor the docked log beside them.
-                        // Deselecting — Escape in the list, the close button, picking an endpoint —
-                        // brings the editor back.
-                        requestLogPanel(showsDetail: true)
-                    } else {
-                        // Xcode's jump bar. Sits above the editor area rather than inside any one
-                        // editor, because it describes where you are, not what you are editing.
-                        BreadcrumbJumpBar(
-                            crumbs: breadcrumbs,
-                            autosaveStatus: appState.autosaveStatus,
-                            history: BreadcrumbJumpBar.History(
-                                canGoBack: endpointHistory.canGoBack(where: endpointExists),
-                                canGoForward: endpointHistory.canGoForward(where: endpointExists),
-                                onBack: { goThroughHistory(forward: false) },
-                                onForward: { goThroughHistory(forward: true) }
-                            ),
-                            onSelectOption: handleBreadcrumbSelection
-                        )
-                        Rectangle()
-                            .fill(DSColors.separator)
-                            .frame(height: DSStroke.hairline)
-                            .accessibilityHidden(true)
-
-                        // The pair that shares the space below the jump bar, as one `NSSplitViewItem`
-                        // pair — so the divider between them is the same divider the navigator and the
-                        // inspector already wear, and the centre pane's floor is a constraint AppKit
-                        // enforces rather than a ceiling this view recomputes from a measured container.
-                        DSSplitPane(
-                            axis: .vertical,
-                            isSecondaryPresented: logPresentation,
-                            secondaryThickness: $drawerHeight,
-                            minimumPrimaryThickness: PanelLayoutStore.Bounds.minimumCentreHeight,
-                            minimumSecondaryThickness: PanelLayoutStore.Bounds.minimumRequestLogHeight,
-                            defaultSecondaryThickness: PanelLayout.default.requestLogHeight,
-                            preferredPrimaryThickness: centreContentHeight,
-                            identifier: "requestLog"
-                        ) {
-                            CenterPaneView(
-                                content: CenterPaneContent.forTab(
-                                    navigatorTab,
-                                    endpointID: selectedEndpointID,
-                                    journeyID: appState.selectedJourneyID
-                                ),
-                                onRenameEndpoint: beginEndpointRename,
-                                onEditEndpointRequest: beginEndpointRequestEdit,
-                                onAddEndpoint: { appState.showNewEndpointSheet = true },
-                                onImportHAR: { showHARImport = true },
-                                onImportOpenAPI: { showOpenAPIImport = true },
-                                onContentHeightChange: { height in
-                                    guard centreContentHeight != height else { return }
-                                    centreContentHeight = height
-                                }
-                            )
-                            // Anchored to the top, not centred. A pane is exactly as tall as the split
-                            // view gives it, and an editor taller than that — the journey editor has no
-                            // scroll view — is centred by default, which pushes its *first* row above the
-                            // pane and out of sight under the toolbar. That row carries "Add step", so on
-                            // a short window the control was drawn nowhere and clicked nothing: two UI
-                            // tests failed on it, and a user with a small window would have seen the same.
-                            // Clipping the bottom of a long editor is recoverable; losing the top is not.
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            // Re-injected because the pane is hosted: `NSHostingController` starts a new
-                            // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
-                            // this the editor traps on a missing `AppState` the moment it appears.
-                            .environment(appState)
-                            // Paired, like every other container identifier in this window. Naming a
-                            // container without `.contain` renames every descendant, which would take
-                            // the whole editor out of the accessibility tree.
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("centerPane")
-                        } secondary: {
-                            requestLogPanel(showsDetail: false)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        }
+        WorkspaceShellLayout(
+            metrics: WorkspacePanelMetrics(
+                minimumCentreHeight: PanelLayoutStore.Bounds.minimumCentreHeight,
+                minimumRequestLogHeight: PanelLayoutStore.Bounds.minimumRequestLogHeight,
+                defaultRequestLogHeight: PanelLayout.default.requestLogHeight,
+                minimumInspectorWidth: PanelLayoutStore.Bounds.minimumInspectorWidth,
+                idealInspectorWidth: PanelLayoutStore.Bounds.idealInspectorWidth
+            ),
+            isRequestLogPresented: logPresentation,
+            requestLogHeight: $drawerHeight,
+            preferredCenterHeight: centreContentHeight,
+            isInspectorPresented: inspectorColumnPresentation,
+            // A selected request takes over the column: the log on the left, the request on the
+            // right, and neither the editor nor the docked log beside them. Deselecting — Escape in
+            // the list, the close button, picking an endpoint — brings the editor back.
+            showsTakeover: !selectedLogIDs.isEmpty,
+            onToolbarLayoutChange: { centerToolbarLayout = $0 },
+            navigator: { navigator },
+            jumpBar: {
+                BreadcrumbJumpBar(
+                    crumbs: breadcrumbs,
+                    autosaveStatus: appState.autosaveStatus,
+                    history: BreadcrumbJumpBar.History(
+                        canGoBack: endpointHistory.canGoBack(where: endpointExists),
+                        canGoForward: endpointHistory.canGoForward(where: endpointExists),
+                        onBack: { goThroughHistory(forward: false) },
+                        onForward: { goThroughHistory(forward: true) }
+                    ),
+                    onSelectOption: handleBreadcrumbSelection
+                )
+            },
+            center: {
+                CenterPaneView(
+                    content: CenterPaneContent.forTab(
+                        navigatorTab,
+                        endpointID: selectedEndpointID,
+                        journeyID: appState.selectedJourneyID
+                    ),
+                    onRenameEndpoint: beginEndpointRename,
+                    onEditEndpointRequest: beginEndpointRequestEdit,
+                    onAddEndpoint: { appState.showNewEndpointSheet = true },
+                    onImportHAR: { showHARImport = true },
+                    onImportOpenAPI: { showOpenAPIImport = true },
+                    onContentHeightChange: { height in
+                        guard centreContentHeight != height else { return }
+                        centreContentHeight = height
                     }
-                }
-                // The one content surface: a rounded card inset from the window, under the toolbar.
-                .background(DSColors.content)
-                .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.panel, style: .continuous)
-                        .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
-                }
-                .padding(.top, DSSpacing.xs)
-                .padding([.horizontal, .bottom], DSLayout.panelInset)
-                .background(DSColors.window.ignoresSafeArea())
-                .onGeometryChange(for: WorkspaceToolbarLayout.self) {
-                    Self.toolbarLayout(centerWidth: $0.size.width)
-                } action: { layout in
-                    // The toolbar changes its intrinsic width at each breakpoint. During a live
-                    // window resize, animating that change lets the Run button and its neighbours
-                    // occupy the same space for a frame while AppKit rearranges native items.
-                    var transaction = Transaction(animation: nil)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { centerToolbarLayout = layout }
-                }
-                // Editor actions belong to this column, before the inspector divides the toolbar.
-                .toolbar { workspaceToolbar }
-            }
-            .navigationSplitViewStyle(.balanced)
-            // Outside the navigation structure, the inspector owns a full-height column and its
-            // own toolbar section, which holds its header (`InspectorPanelView`). That section is
-            // what keeps the centre column's actions over the centre column.
-            .inspector(isPresented: inspectorColumnPresentation) {
+                )
+                // Re-injected because the pane is hosted: `NSHostingController` starts a new
+                // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
+                // this the editor traps on a missing `AppState` the moment it appears.
+                .environment(appState)
+            },
+            requestLog: { requestLogPanel(showsDetail: false) },
+            takeover: { requestLogPanel(showsDetail: true) },
+            inspector: {
                 inspectorPanel
-                    // The journey inspector edits through `AppState`; stated so the column never
-                    // depends on how the inspector happens to be hosted.
+                    // Stated so the column never depends on how the inspector happens to be hosted.
                     .environment(appState)
-                    .inspectorColumnWidth(
-                        min: PanelLayoutStore.Bounds.minimumInspectorWidth,
-                        ideal: PanelLayoutStore.Bounds.idealInspectorWidth,
-                        max: DSLayout.inspectorMaximumWidth
-                    )
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("inspector")
-            }
-        }
+            },
+            toolbar: { workspaceToolbar }
+        )
     }
 
     private var workspaceWithToolbar: some View {
@@ -368,8 +282,7 @@ struct WorkspaceView: View {
             .disabled(appState.updates.isPreparingInstallation)
         }
         .sheet(isPresented: $showBackendSettings) {
-            BackendSettingsView(configuration: appState.serverConfiguration)
-                .environment(appState)
+            BackendSettingsView(configuration: appState.serverConfiguration, model: appState)
         }
         // OpenAPI import sheet
         .sheet(isPresented: $showOpenAPIImport) {
@@ -480,75 +393,15 @@ struct WorkspaceView: View {
 
     // MARK: - Toolbar
 
-    /// Collapse in stages as the centre column narrows: first import, server settings and the panel
-    /// toggles fold into one menu, then the server line drops its counts and the project name its
-    /// subtitle, then the project name narrows, and last Run/Stop folds into the same menu. The
-    /// address and the state word always stay.
-    ///
-    /// The last breakpoint is what the narrow tier needs: Run, the name (≤88pt), the address
-    /// without its port count and the state, and "More", plus the toolbar's gaps and the column's
-    /// insets. A 900pt window with both side panels open leaves about 330pt: enough for a short
-    /// project name, but a longer one pushed "More" behind AppKit's own chevron there, so Run
-    /// folds below 360pt, where every name fits.
-    nonisolated static func toolbarLayout(centerWidth: CGFloat) -> WorkspaceToolbarLayout {
-        guard centerWidth.isFinite else { return .minimal }
-        if centerWidth < 360 { return .minimal }
-        if centerWidth < 460 { return .narrow }
-        if centerWidth < 620 { return .compactSummary }
-        if centerWidth < 780 { return .overflow }
-        return .expanded
-    }
+    private var usesCompactToolbarSummary: Bool { centerToolbarLayout.usesCompactSummary }
 
-    nonisolated static func toolbarUsesCompactSummary(centerWidth: CGFloat) -> Bool {
-        switch toolbarLayout(centerWidth: centerWidth) {
-        case .compactSummary, .narrow, .minimal: true
-        case .expanded, .overflow: false
-        }
-    }
+    private var foldsRun: Bool { centerToolbarLayout.foldsRun }
 
-    /// Import, server settings, and the panel toggles (while the inspector is hidden) move into one
-    /// menu; Run joins them only in the minimal tier (`toolbarFoldsRun`).
-    nonisolated static func toolbarUsesOverflow(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) != .expanded
-    }
+    private var usesNarrowIdentity: Bool { centerToolbarLayout.usesNarrowIdentity }
 
-    nonisolated static func toolbarUsesNarrowIdentity(centerWidth: CGFloat) -> Bool {
-        let layout = toolbarLayout(centerWidth: centerWidth)
-        return layout == .narrow || layout == .minimal
-    }
+    private var usesToolbarOverflow: Bool { centerToolbarLayout.usesOverflow }
 
-    /// Run/Stop leads the "More actions" menu instead of the toolbar.
-    nonisolated static func toolbarFoldsRun(centerWidth: CGFloat) -> Bool {
-        toolbarLayout(centerWidth: centerWidth) == .minimal
-    }
-
-    private var usesCompactToolbarSummary: Bool {
-        switch centerToolbarLayout {
-        case .compactSummary, .narrow, .minimal: true
-        case .expanded, .overflow: false
-        }
-    }
-
-    private var foldsRun: Bool {
-        centerToolbarLayout == .minimal
-    }
-
-    private var usesNarrowIdentity: Bool {
-        centerToolbarLayout == .narrow || centerToolbarLayout == .minimal
-    }
-
-    private var usesToolbarOverflow: Bool {
-        centerToolbarLayout != .expanded
-    }
-
-    /// The identity's widest extent at each stage, so the centre column's items fit its section.
-    private var projectIdentityMaximumWidth: CGFloat {
-        switch centerToolbarLayout {
-        case .expanded, .overflow: 220
-        case .compactSummary: 140
-        case .narrow, .minimal: 88
-        }
-    }
+    private var projectIdentityMaximumWidth: CGFloat { centerToolbarLayout.projectIdentityMaximumWidth }
 
     /// Run, the project, and the server's address and state lead; import and server settings trail
     /// in one glass group. The panel toggles sit in the inspector's own toolbar section beside its
@@ -1205,6 +1058,7 @@ struct WorkspaceView: View {
                                          progress: activeJourneyProgress, serverState: appState.serverState,
                                          selectedStepID: appState.selectedJourneyStepID)
             },
+            journeyModel: appState,
             showsHeader: isInspectorPresented,
             panelToggles: InspectorPanelView.PanelToggles(
                 requestLog: AnyView(drawerToolbarButton.labelStyle(.iconOnly)),

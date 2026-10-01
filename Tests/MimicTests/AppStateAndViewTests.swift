@@ -2,11 +2,14 @@ import AppKit
 import SwiftUI
 import Testing
 import Domain
+import FeatureSupport
 import MockServerEngine
 import Persistence
 @testable import SpecImport
 @testable import AppFeatures
 @testable import Mimic
+@testable import ImportFeature
+@testable import JourneysFeature
 
 @Suite("AppState And Views")
 @MainActor
@@ -398,7 +401,7 @@ struct AppStateAndViewTests {
     ///
     /// `nonisolated` because `MimicTests` compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
     /// so an unannotated type here is `@MainActor` — and `ProjectRepository` is a nonisolated protocol
-    /// declared in `Domain`. Same reason `NavigationHistory` carries it in `AppFeatures`.
+    /// declared in `Domain`. Same reason `NavigationHistory` carries it in `WorkspaceShell`.
     private nonisolated struct RefusingRepository: ProjectRepository {
         struct Refused: Error, LocalizedError {
             var errorDescription: String? { "the store refused the write" }
@@ -2250,47 +2253,6 @@ struct AppStateFacadeTests {
         appState.commitImportedCandidates([makeCandidate(isSelected: false)])
 
         #expect(appState.lastCommandError == refusal)
-    }
-
-    @Test("Editor toolbar overflow follows the space between the side panels")
-    func toolbarOverflowFollowsCenterWidth() {
-        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 619))
-        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 620))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 779))
-        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 780))
-        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 459))
-        #expect(!WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 460))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 460))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 620))
-        #expect(!WorkspaceView.toolbarUsesCompactSummary(centerWidth: 700))
-        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 500))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 500))
-        #expect(!WorkspaceView.toolbarUsesOverflow(centerWidth: 1400))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 0))
-        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: .infinity))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .infinity))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: .nan))
-    }
-
-    @Test("The narrowest centre column folds Run into the More menu, never past it")
-    func toolbarFoldsRunOnlyWhenTheNarrowTierCannotFit() {
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 300) == .minimal)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 359) == .minimal)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 360) == .narrow)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 331) == .minimal,
-                "A 900pt window with both side panels open folds Run, so a long project name still fits")
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 459) == .narrow)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 460) == .compactSummary)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 620) == .overflow)
-        #expect(WorkspaceView.toolbarLayout(centerWidth: 780) == .expanded)
-        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 315))
-        #expect(!WorkspaceView.toolbarFoldsRun(centerWidth: 450),
-                "CI's filled 1024pt window leaves about 450pt and keeps Run inline")
-        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: 0))
-        #expect(WorkspaceView.toolbarFoldsRun(centerWidth: .nan))
-        #expect(WorkspaceView.toolbarUsesNarrowIdentity(centerWidth: 300))
-        #expect(WorkspaceView.toolbarUsesCompactSummary(centerWidth: 300))
-        #expect(WorkspaceView.toolbarUsesOverflow(centerWidth: 300))
     }
 
     @Test("The project name's subtitle counts what the project holds")

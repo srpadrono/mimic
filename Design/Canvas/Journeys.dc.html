@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Journey editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#101216;--win:#1e1e20;--content:#1b1b1d;--glass:rgba(46,46,50,.9);--glass-b:rgba(255,255,255,.09);--raised:#2c2c2f;--field:rgba(255,255,255,.065);--field-b:rgba(255,255,255,.08);--code:#161618;--sep:rgba(255,255,255,.08);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--accent-t:#4aa3ff;--sel:#0a6ce0;--sel-soft:rgba(10,132,255,.22);--unsel:rgba(255,255,255,.10);--zebra:rgba(255,255,255,.028);--segon:rgba(255,255,255,.16);--get:#5aa9ff;--post:#4fd07b;--put:#ffa94d;--patch:#c79bff;--del:#ff6b66;--head:#a1a1aa;--ok:#34d06c;--redir:#5aa9ff;--warn:#ffb340;--err:#ff5f57;--jk:#c490ff;--js:#4fd1c5;--jn:#ffb14e;--jl:#5aa9ff;color-scheme:dark}
+.light{--desk:#e8eaee;--win:#f6f6f7;--content:#ffffff;--glass:rgba(240,240,243,.94);--glass-b:rgba(0,0,0,.08);--raised:#ffffff;--field:rgba(0,0,0,.045);--field-b:rgba(0,0,0,.12);--code:#fbfbfc;--sep:rgba(0,0,0,.09);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--accent-t:#0064d2;--sel:#0a74f0;--sel-soft:rgba(0,122,255,.12);--unsel:rgba(0,0,0,.08);--zebra:rgba(0,0,0,.025);--segon:#ffffff;--get:#0a62cc;--post:#18823a;--put:#a85a00;--patch:#8433c4;--del:#c42b27;--head:#62626a;--ok:#1d8a3e;--redir:#0a62cc;--warn:#a86400;--err:#cc302b;--jk:#8a2fc4;--js:#00766f;--jn:#945a00;--jl:#0060d9;color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.m{font:600 11px/16px var(--mono);letter-spacing:.02em;width:44px;flex:none}
+.m-get{color:var(--get)}.m-post{color:var(--post)}.m-put{color:var(--put)}.m-patch{color:var(--patch)}.m-del{color:var(--del)}
+.st{display:inline-flex;align-items:center;gap:6px;font:500 12px/16px var(--mono)}
+.st i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+.s2{color:var(--ok)}.s3{color:var(--redir)}.s4{color:var(--warn)}.s5{color:var(--err)}
+.path{font:400 12px/16px var(--mono);color:var(--l1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.glass{background:var(--glass);border:.5px solid var(--glass-b);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.cap{height:32px;border-radius:16px;display:flex;align-items:center;padding:0 2px}
+.cap button{all:unset;height:30px;min-width:30px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px;border-radius:15px;color:var(--l1);font-size:13px;font-weight:500}
+.field{height:24px;border-radius:7px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--l1)}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--field)}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12px;line-height:16px;color:var(--l2);font-weight:500;white-space:nowrap}
+.seg .on{background:var(--segon);color:var(--l1);box-shadow:0 .5px 1.5px rgba(0,0,0,.25)}
+.btn{all:unset;height:24px;padding:0 12px;border-radius:12px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);color:var(--l1);white-space:nowrap}
+.bl{all:unset;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--l2);height:24px;padding:0 6px;border-radius:6px}
+.sh{font-size:11px;line-height:14px;font-weight:600;color:var(--l3)}
+.lab{font-size:12px;color:var(--l2)}
+.sep{height:.5px;background:var(--sep);flex:none}
+.tl{width:12px;height:12px;border-radius:50%;display:block}
+.nav{height:28px;border-radius:7px;padding:0 8px;gap:8px;display:flex;align-items:center}
+.nav.sel{background:var(--sel);color:#fff}
+.num{font:400 12px/16px var(--mono);font-variant-numeric:tabular-nums}
+.step{display:flex;align-items:center;gap:12px;height:48px;padding:0 14px;border-radius:10px}
+.node{width:22px;height:22px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font:600 11px var(--font);border:1.5px solid var(--l3);color:var(--l2)}
+.node.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.node.cur{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--sel-soft)}
+.pill{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:9px;background:var(--field);font-size:11px;color:var(--l2);gap:4px}
+.kv{display:flex;align-items:center;height:30px;gap:12px}
+.kv .k{width:96px;font-size:12px;color:var(--l2);flex:none}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 1440px; height: 900px; background: var(--win); display: flex; padding: 8px; overflow: hidden; border-radius: 18px;">
+  <aside class="glass col" style="width: 264px; flex: none; border-radius: 14px; overflow: hidden;">
+    <div class="row" style="height: 44px; padding: 0 12px; gap: 8px;"><span class="tl" style="background: #ff5f57;"></span><span class="tl" style="background: #febc2e;"></span><span class="tl" style="background: #28c840;"></span></div>
+    <div class="row" style="padding: 0 12px 10px;"><div class="seg grow" style="display: flex;"><span style="flex: 1; text-align: center;">Endpoints</span><span class="on" style="flex: 1; text-align: center;">Journeys</span></div></div>
+    <div class="col grow" style="padding: 0 8px; gap: 2px;">
+      <div class="row sh" style="height: 24px; padding: 0 8px;">Checkout</div>
+      <div class="nav sel"><svg class="ic" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Payment retry</span><span style="font-size: 11px; opacity: .85;">3/5</span></div>
+      <div class="nav"><svg class="ic l2" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Card declined twice</span></div>
+      <div class="row sh" style="height: 24px; padding: 0 8px; margin-top: 8px;">Account</div>
+      <div class="nav"><svg class="ic l2" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Session expiry</span></div>
+      <div class="nav"><svg class="ic l2" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Retry after failure</span></div>
+      <div class="row sh" style="height: 24px; padding: 0 8px; margin-top: 8px;">Resilience</div>
+      <div class="nav"><svg class="ic l2" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Offline recovery</span></div>
+      <div class="nav"><svg class="ic l2" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><span class="grow">Maintenance window</span></div>
+    </div>
+    <div class="sep"></div>
+    <div class="row" style="height: 44px; padding: 0 10px; gap: 8px;">
+      <div class="field grow" style="border-radius: 12px;"><svg class="ic l3" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2L13.5 13.5"/></svg><span class="l3" style="font-size: 12px;">Filter</span></div>
+      <button class="bl" aria-label="New journey"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+    </div>
+  </aside>
+
+  <main class="col grow" style="padding-left: 8px;">
+    <div class="row" style="height: 44px; gap: 10px; flex: none;">
+      <div class="cap glass"><button aria-label="Back"><svg class="ic" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg></button><button aria-label="Forward" style="color: var(--l3);"><svg class="ic" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></svg></button></div>
+      <div class="col" style="gap: 1px;"><span style="font-weight: 600;">Acme Storefront</span><span class="l2" style="font-size: 11px; line-height: 13px;">localhost:18086</span></div>
+      <span class="grow"></span>
+      <div class="cap glass" style="padding: 0 14px; gap: 10px; font-size: 12px;">
+        <span class="st s2" style="font-family: var(--font);"><i></i>Running</span><span class="l3">·</span><span class="l2">Payment retry, step 3 of 5</span>
+      </div>
+      <span class="grow"></span>
+      <div class="cap glass"><button><svg class="ic" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" style="fill: currentColor; stroke: none;"/></svg>Stop</button></div>
+      <div class="cap glass"><button aria-label="Import"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
+      <div class="cap glass"><button aria-label="Show request log"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M2 9.5h12"/></svg></button><button aria-label="Hide inspector"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M10 3v10"/></svg></button></div>
+    </div>
+
+    <div class="col grow" style="margin-top: 4px; background: var(--content); border-radius: 12px; border: .5px solid var(--sep); overflow: hidden;">
+      <div class="row" style="height: 30px; padding: 0 14px; gap: 6px; font-size: 12px;">
+        <span class="l2">Checkout</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M6 3l5 5-5 5"/></svg><span style="font-weight: 500;">Payment retry</span>
+        <span class="grow"></span><span class="l3" style="font-size: 11px;">Saved</span>
+      </div>
+      <div class="sep"></div>
+      <div class="col" style="padding: 20px 24px 0; gap: 16px;">
+        <div class="row" style="gap: 12px;">
+          <div class="col grow" style="gap: 4px;">
+            <span style="font-size: 20px; line-height: 24px; font-weight: 600;">Payment retry</span>
+            <span class="l2">The first payment drops the connection, the retry succeeds.</span>
+          </div>
+          <div class="row" style="gap: 8px;">
+            <span class="pill" style="color: var(--ok); background: transparent; border: .5px solid var(--ok);"><span class="st s2" style="font-family: var(--font); font-size: 11px;"><i></i>Active</span></span>
+            <button class="btn"><svg class="ic" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 3v2.5h2.5"/></svg>Restart</button>
+            <button class="btn"><svg class="ic" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><path d="M4 3.5v9l6-4.5zM12 3.5v9"/></svg>Next step</button>
+          </div>
+        </div>
+        <div class="row" style="gap: 6px;">
+          <span style="flex: 1; height: 4px; border-radius: 2px; background: var(--ok);"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--ok);"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--accent);"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--field);"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--field);"></span>
+        </div>
+        <div class="row" style="gap: 20px; flex-wrap: wrap;">
+          <div class="row" style="gap: 8px;"><span class="lab">Order</span><div class="field" style="width: 176px;"><span class="grow" style="font-size: 12px;">Per endpoint</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+          <div class="row" style="gap: 8px;"><span class="lab">Unscripted requests</span><div class="field" style="width: 176px;"><span class="grow" style="font-size: 12px;">Use endpoints</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+          <div class="row" style="gap: 8px;"><span class="lab">At the end</span><div class="field" style="width: 140px;"><span class="grow" style="font-size: 12px;">Stop</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+        </div>
+        <div class="sep"></div>
+        <div class="row"><span style="font-weight: 600;">Steps</span><span class="l3" style="margin-left: 8px; font-size: 12px;">5</span><span class="grow"></span><button class="bl"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><path d="M3 4h10M3 8h10M3 12h6"/></svg>Capture from log</button><button class="bl"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><path d="M8 3v10M3 8h10"/></svg>Add step</button></div>
+      </div>
+      <div class="col" style="padding: 8px 16px; gap: 2px;">
+        <div class="step" style="opacity: .6;"><span class="node done"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px; stroke-width: 2;"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="m m-post">POST</span><span class="path grow">/login</span><span class="st s2"><i></i>200</span><span class="l3 num" style="width: 120px; text-align: right;">Served 1 of 1</span></div>
+        <div class="step" style="opacity: .6;"><span class="node done"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px; stroke-width: 2;"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="m m-get">GET</span><span class="path grow">/account-summary</span><span class="st s2"><i></i>200</span><span class="l3 num" style="width: 120px; text-align: right;">Served 1 of 1</span></div>
+        <div class="step" style="background: var(--sel-soft); box-shadow: inset 0 0 0 1px var(--accent);"><span class="node cur">3</span><span class="m m-post">POST</span><span class="path grow">/payments</span><span class="pill"><svg class="ic" viewBox="0 0 16 16" style="width: 11px; height: 11px;"><path d="M2 8h4M10 8h4M6 5l4 6"/></svg>Drop connection after 5 s</span><span class="l2 num" style="width: 120px; text-align: right;">Waiting</span></div>
+        <div class="step"><span class="node">4</span><span class="m m-post">POST</span><span class="path grow">/payments</span><span class="st s2"><i></i>201</span><span class="l3 num" style="width: 120px; text-align: right;">Not reached</span></div>
+        <div class="step"><span class="node">5</span><span class="m m-get">GET</span><span class="path grow">/payments/:id</span><span class="pill">× 3</span><span class="st s2"><i></i>200</span><span class="l3 num" style="width: 120px; text-align: right;">Not reached</span></div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="glass col" style="width: 300px; flex: none; margin-left: 8px; border-radius: 14px; overflow: hidden;">
+    <div class="row" style="height: 44px; padding: 0 16px;"><span style="font-weight: 600;">Step 3</span><span class="grow"></span><button class="bl" aria-label="More step actions"><svg class="ic" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" style="fill: currentColor;"/><circle cx="8" cy="8" r=".9" style="fill: currentColor;"/><circle cx="12.5" cy="8" r=".9" style="fill: currentColor;"/></svg></button></div>
+    <div class="col" style="padding: 0 16px; gap: 2px;">
+      <span class="sh" style="margin-bottom: 4px;">Match</span>
+      <div class="kv"><span class="k">Method</span><div class="field grow"><span class="m m-post grow">POST</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></div></div>
+      <div class="kv"><span class="k">Path</span><div class="field grow"><span class="path grow">/payments</span></div></div>
+      <div class="row l3" style="font-size: 11px; gap: 6px; padding-left: 108px; height: 18px;"><svg class="ic" viewBox="0 0 16 16" style="width: 11px; height: 11px; color: var(--ok);"><path d="M3.5 8.5l3 3 6-7"/></svg>Matches POST /payments</div>
+    </div>
+    <div class="sep" style="margin: 14px 16px;"></div>
+    <div class="col" style="padding: 0 16px; gap: 2px;">
+      <span class="sh" style="margin-bottom: 6px;">Outcome</span>
+      <div class="seg" style="display: flex; margin-bottom: 8px;"><span style="flex: 1; text-align: center;">Response</span><span class="on" style="flex: 1; text-align: center;">Connection failure</span></div>
+      <div class="kv"><span class="k">Failure</span><div class="field grow"><span class="grow" style="font-size: 12px;">Hold, then drop</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div></div>
+      <div class="kv"><span class="k">Hold for</span><div class="field grow"><span class="num grow">5000</span><span class="l3" style="font-size: 12px;">ms</span></div></div>
+      <div class="kv"><span class="k">Repeat</span><div class="field grow"><span class="num grow">1</span><span class="l3" style="font-size: 12px;">time</span></div></div>
+      <span class="l3" style="font-size: 11px; line-height: 15px; padding-left: 108px; margin-top: 4px;">Clients often retry dropped requests. Raise Repeat if the failure must survive a retry.</span>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

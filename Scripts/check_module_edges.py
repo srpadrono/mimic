@@ -40,6 +40,34 @@ FORBIDDEN = [
     ("Project.swift", "ControlPlane", "MockServerEngine", "ControlPlane holds no host of its own"),
 ]
 
+# The UI sections. Each is built, tested and previewed on its own, so none may reach the app's
+# composition root, the server, the store or the control plane, and none may reach another section:
+# a section that needs one of those to draw has stopped being workable in isolation. See
+# docs/ARCHITECTURE.md, "UI sections".
+SECTIONS = [
+    "WorkspaceShell", "EndpointsFeature", "JourneysFeature", "RequestLogFeature",
+    "ServerFeature", "ImportFeature", "ProjectsFeature", "UpdatesFeature",
+]
+SECTION_FORBIDDEN = ["AppFeatures", "Persistence", "MockServerEngine", "ControlPlane", "Vapor", "GRDB"]
+FORBIDDEN += [
+    ("Project.swift", section, module, "a UI section works in isolation")
+    for section in SECTIONS + ["FeatureSupport"]
+    for module in SECTION_FORBIDDEN + [other for other in SECTIONS if other != section]
+]
+FORBIDDEN += [
+    ("Project.swift", section, "SpecImport", "only the import section drives the parsers")
+    for section in SECTIONS + ["FeatureSupport"] if section != "ImportFeature"
+]
+FORBIDDEN += [
+    ("Project.swift", "DesignSystem", "Domain", "the design system knows no Mimic model"),
+    ("Project.swift", "MimicFixtures", "AppFeatures", "fixtures are values, not a session"),
+    ("Project.swift", "SnapshotSupport", "Domain", "the snapshot harness is independent of Mimic"),
+    ("Project.swift", "MimicGallery", "AppFeatures", "the gallery draws sections without the app"),
+    ("Project.swift", "Mimic", "MimicGallery", "the gallery is a development tool and never ships"),
+    ("Project.swift", "Mimic", "MimicFixtures", "fixtures never ship"),
+    ("Project.swift", "Mimic", "SnapshotSupport", "the snapshot harness never ships"),
+]
+
 # (manifest, target, direct dependency). These are what make the absences above mean something:
 # each of the three forbidden module names is required to appear on some edge in the same manifest,
 # so a parser that stopped seeing `.external(name:)`, `.product(name:)` or the bare-string shorthand
@@ -66,6 +94,12 @@ REQUIRED_EDGES = [
     ("Project.swift", "AppFeatures", "MockServerEngine"),
     ("Project.swift", "Persistence", "GRDB"),
     ("Project.swift", "AppFeatures", "SpecImport"),
+    # The composition root assembles every section, and the import section is the one that parses.
+    *[("Project.swift", "AppFeatures", section) for section in SECTIONS],
+    ("Project.swift", "ImportFeature", "SpecImport"),
+    ("Project.swift", "EndpointsFeature", "FeatureSupport"),
+    ("Project.swift", "MimicGallery", "MimicFixtures"),
+    ("Project.swift", "MimicGallery", "SnapshotSupport"),
 ]
 
 

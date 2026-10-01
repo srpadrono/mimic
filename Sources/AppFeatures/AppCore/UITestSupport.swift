@@ -4,6 +4,7 @@ import Domain
 import Foundation
 import Persistence
 import SwiftUI
+import FeatureSupport
 
 /// Test-only support for deterministic XCUITest launches.
 ///

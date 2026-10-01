@@ -3,8 +3,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Testing
 import Domain
+import FeatureSupport
 @testable import SpecImport
-@testable import AppFeatures
+@testable import ImportFeature
 
 @Suite("ImportFeature Rendering")
 @MainActor

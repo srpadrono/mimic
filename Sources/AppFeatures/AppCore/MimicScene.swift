@@ -2,6 +2,7 @@ import AppKit
 import Domain
 import Persistence
 import SwiftUI
+import FeatureSupport
 
 public struct MimicScene: Scene {
     @State private var appState: AppState

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Import review sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.mm{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:var(--l1);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.mm *{box-sizing:border-box}
+.dark{--desk:#141518;--sheet:#2a2a2d;--content:#212124;--field:rgba(255,255,255,.07);--field-b:rgba(255,255,255,.1);--sep:rgba(255,255,255,.08);--zebra:rgba(255,255,255,.025);--l1:rgba(255,255,255,.92);--l2:rgba(235,235,245,.62);--l3:rgba(235,235,245,.38);--accent:#0a84ff;--segon:rgba(255,255,255,.16);--get:#5aa9ff;--post:#4fd07b;--put:#ffa94d;--del:#ff6b66;--ok:#34d06c;--redir:#5aa9ff;--warn:#ffb340;--err:#ff5f57;--warn-bg:rgba(255,179,64,.14);--shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.12);color-scheme:dark}
+.light{--desk:#d9dbe0;--sheet:#f7f7f8;--content:#ffffff;--field:#ffffff;--field-b:rgba(0,0,0,.14);--sep:rgba(0,0,0,.09);--zebra:rgba(0,0,0,.025);--l1:rgba(0,0,0,.88);--l2:rgba(60,60,67,.72);--l3:rgba(60,60,67,.48);--accent:#007aff;--segon:#ffffff;--get:#0a62cc;--post:#18823a;--put:#a85a00;--del:#c42b27;--ok:#1d8a3e;--redir:#0a62cc;--warn:#a86400;--err:#cc302b;--warn-bg:rgba(255,159,10,.14);--shadow:0 24px 60px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.14);color-scheme:light}
+.row{display:flex;align-items:center}
+.col{display:flex;flex-direction:column}
+.grow{flex:1 1 auto;min-width:0}
+.l2{color:var(--l2)}.l3{color:var(--l3)}
+.ic{width:16px;height:16px;flex:none;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.field{height:26px;border-radius:13px;background:var(--field);border:.5px solid var(--field-b);display:flex;align-items:center;gap:6px;padding:0 10px}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--field)}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12px;line-height:16px;color:var(--l2);font-weight:500}
+.seg .on{background:var(--segon);color:var(--l1);box-shadow:0 .5px 1.5px rgba(0,0,0,.25)}
+.btn{all:unset;height:28px;padding:0 16px;border-radius:14px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;background:var(--field);border:.5px solid var(--field-b);white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+.m{font:600 11px/16px var(--mono);width:52px;flex:none}
+.path{font:400 12px/16px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{display:inline-flex;align-items:center;gap:6px;font:500 12px var(--mono)}
+.st i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+.th{font-size:11px;font-weight:600;color:var(--l2);padding:0 8px;height:26px;display:flex;align-items:center}
+.tr{height:28px;display:flex;align-items:center}
+.tr:nth-child(even){background:var(--zebra)}
+.td{padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.num{font:400 12px var(--mono);font-variant-numeric:tabular-nums}
+.cb{width:14px;height:14px;border-radius:4px;border:1px solid var(--l3);flex:none}
+.cb.on{background:var(--accent);border-color:var(--accent);display:flex;align-items:center;justify-content:center}
+.chip{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:9px;font-size:11px;font-weight:500;background:var(--warn-bg);color:var(--warn)}
+.chip.n{background:var(--field);color:var(--l2)}
+.off{opacity:.45}
+</style>
+</helmet>
+<div class="mm {{theme}}" style="width: 1120px; height: 760px; background: var(--desk); display: flex; justify-content: center; padding-top: 32px; border-radius: 18px;">
+  <div class="col" style="width: 1000px; height: 696px; background: var(--sheet); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden;">
+    <div class="row" style="padding: 20px 20px 14px; gap: 12px;">
+      <div class="col grow" style="gap: 3px;">
+        <span style="font-size: 15px; line-height: 20px; font-weight: 600;">Import from HAR</span>
+        <span class="l2" style="font-size: 12px;">checkout-session.har · 214 requests from 5 hosts</span>
+      </div>
+      <button class="btn" style="height: 24px; padding: 0 12px; font-size: 12px;">Choose another file…</button>
+    </div>
+    <div class="row" style="padding: 0 20px 12px; gap: 10px;">
+      <div class="field" style="width: 260px;"><svg class="ic l3" viewBox="0 0 16 16" style="width: 13px; height: 13px;"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2L13.5 13.5"/></svg><span class="l3" style="font-size: 12px;">Filter by path</span></div>
+      <div class="field" style="border-radius: 8px;"><span style="font-size: 12px;">api.acme.shop</span><span class="l3" style="font-size: 12px;">+1 host</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></div>
+      <div class="seg"><span class="on">All</span><span>Selected 48</span><span>Needs review <span style="color: var(--warn);">6</span></span></div>
+      <span class="grow"></span>
+      <span class="l2" style="font-size: 12px;">48 of 214 selected</span>
+    </div>
+    <div class="col grow" style="background: var(--content); border-top: .5px solid var(--sep); border-bottom: .5px solid var(--sep);">
+      <div class="row" style="padding: 0 12px; border-bottom: .5px solid var(--sep);">
+        <span class="th" style="width: 36px;"><span class="cb on" style="width: 14px; height: 14px;"><svg class="ic" viewBox="0 0 16 16" style="width: 8px; height: 8px; color: #fff; stroke-width: 3;"><path d="M4 8h8"/></svg></span></span>
+        <span class="th" style="width: 68px;">Method</span><span class="th grow">Path</span><span class="th" style="width: 170px;">Host</span><span class="th" style="width: 80px;">Status</span><span class="th" style="width: 80px; justify-content: flex-end;">Size</span><span class="th" style="width: 170px;">Note</span>
+      </div>
+      <div class="col" style="padding: 0 12px;">
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/products</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num l2" style="width: 80px; text-align: right;">12.4 KB</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/products/42</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num l2" style="width: 80px; text-align: right;">1.8 KB</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--post);">POST</span></span><span class="td grow path">/cart</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>201</span></span><span class="td num l2" style="width: 80px; text-align: right;">312 B</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb"></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--post);">POST</span></span><span class="td grow path">/cart</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--warn);"><i></i>409</span></span><span class="td num l2" style="width: 80px; text-align: right;">140 B</span><span class="td" style="width: 170px;"><span class="chip n">Same route as row 3</span></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--post);">POST</span></span><span class="td grow path">/payments</span><span class="td l2" style="width: 170px;">pay.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--err);"><i></i>503</span></span><span class="td num l2" style="width: 80px; text-align: right;">180 B</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb"></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/media/hero-autumn.jpg</span><span class="td l2" style="width: 170px;">cdn.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num" style="width: 80px; text-align: right; color: var(--warn);">2.3 MB</span><span class="td" style="width: 170px;"><span class="chip">Binary body</span></span></div>
+        <div class="tr off"><span class="td" style="width: 36px;"><span class="cb"></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--post);">POST</span></span><span class="td grow path">/v1/track</span><span class="td l2" style="width: 170px;">events.segment.io</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num l2" style="width: 80px; text-align: right;">41 B</span><span class="td" style="width: 170px;"><span class="l3" style="font-size: 11px;">Host hidden</span></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/account-summary</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num l2" style="width: 80px; text-align: right;">2.1 KB</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--put);">PUT</span></span><span class="td grow path">/account/address</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num l2" style="width: 80px; text-align: right;">388 B</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb"></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/orders/export.csv</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>200</span></span><span class="td num" style="width: 80px; text-align: right; color: var(--warn);">3.8 MB</span><span class="td" style="width: 170px;"><span class="chip">Over 1 MB</span></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb on"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px; color: #fff; stroke-width: 2.5;"><path d="M3.5 8.5l3 3 6-7"/></svg></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--del);">DELETE</span></span><span class="td grow path">/session</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="st" style="color: var(--ok);"><i></i>204</span></span><span class="td num l2" style="width: 80px; text-align: right;">0 B</span><span class="td" style="width: 170px;"></span></div>
+        <div class="tr"><span class="td" style="width: 36px;"><span class="cb"></span></span><span class="td" style="width: 68px;"><span class="m" style="color: var(--get);">GET</span></span><span class="td grow path">/recommendations</span><span class="td l2" style="width: 170px;">api.acme.shop</span><span class="td" style="width: 80px;"><span class="l3 num">—</span></span><span class="td num l2" style="width: 80px; text-align: right;">—</span><span class="td" style="width: 170px;"><span class="chip">Response incomplete</span></span></div>
+      </div>
+    </div>
+    <div class="row" style="padding: 14px 20px; gap: 8px;">
+      <svg class="ic l3" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><circle cx="8" cy="8" r="6"/><path d="M8 7.5v3.5M8 5v.2"/></svg>
+      <span class="l2 grow" style="font-size: 12px;">Rows marked in orange are unselected. Select one to import it without its body.</span>
+      <button class="btn">Cancel</button><button class="btn pri">Import 48 endpoints</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1120,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

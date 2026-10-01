@@ -1,0 +1,563 @@
+{
+  "_comment": "Where each section sits on its artboard, in points. Reference images are exported at 2x by Scripts/export_design_references.swift; see Design/README.md.",
+  "scale": 2,
+  "boards": {
+    "Main": {
+      "source": "Canvas/Main.dc.html",
+      "width": 1440,
+      "height": 900,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "RequestDetail": {
+      "source": "Canvas/RequestDetail.dc.html",
+      "width": 1440,
+      "height": 900,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Journeys": {
+      "source": "Canvas/Journeys.dc.html",
+      "width": 1440,
+      "height": 900,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "EmptyStates": {
+      "source": "Canvas/EmptyStates.dc.html",
+      "width": 1440,
+      "height": 900,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Alerts": {
+      "source": "Canvas/Alerts.dc.html",
+      "width": 1440,
+      "height": 900,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Welcome": {
+      "source": "Canvas/Welcome.dc.html",
+      "width": 880,
+      "height": 560,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "NewEndpoint": {
+      "source": "Canvas/NewEndpoint.dc.html",
+      "width": 880,
+      "height": 640,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "JourneyStep": {
+      "source": "Canvas/JourneyStep.dc.html",
+      "width": 880,
+      "height": 760,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Import": {
+      "source": "Canvas/Import.dc.html",
+      "width": 1120,
+      "height": 760,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Settings": {
+      "source": "Canvas/Settings.dc.html",
+      "width": 880,
+      "height": 640,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Update": {
+      "source": "Canvas/Update.dc.html",
+      "width": 720,
+      "height": 560,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Components": {
+      "source": "Canvas/Components.dc.html",
+      "width": 1440,
+      "height": 1720,
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    "Tokens": {
+      "source": "Canvas/Tokens.dc.html",
+      "width": 1440,
+      "height": 820,
+      "themes": [],
+      "appearance": "dark"
+    }
+  },
+  "sections": [
+    {
+      "id": "workspace.window",
+      "board": "Main",
+      "rect": [
+        0,
+        0,
+        1440,
+        900
+      ],
+      "title": "The whole endpoint editor window"
+    },
+    {
+      "id": "workspace.navigator",
+      "board": "Main",
+      "rect": [
+        8,
+        8,
+        264,
+        884
+      ],
+      "title": "Endpoint navigator column"
+    },
+    {
+      "id": "workspace.toolbar",
+      "board": "Main",
+      "rect": [
+        280,
+        8,
+        844,
+        44
+      ],
+      "title": "Toolbar over the centre column"
+    },
+    {
+      "id": "workspace.jumpBar",
+      "board": "Main",
+      "rect": [
+        280,
+        56,
+        844,
+        32
+      ],
+      "title": "Jump bar under the toolbar"
+    },
+    {
+      "id": "endpoints.editor",
+      "board": "Main",
+      "rect": [
+        280,
+        88,
+        844,
+        485
+      ],
+      "title": "Endpoint editor"
+    },
+    {
+      "id": "requestLog.drawer",
+      "board": "Main",
+      "rect": [
+        280,
+        573,
+        844,
+        319
+      ],
+      "title": "Request log docked under the editor"
+    },
+    {
+      "id": "endpoints.inspector",
+      "board": "Main",
+      "rect": [
+        1132,
+        8,
+        300,
+        884
+      ],
+      "title": "Scenario inspector"
+    },
+    {
+      "id": "journeys.window",
+      "board": "Journeys",
+      "rect": [
+        0,
+        0,
+        1440,
+        900
+      ],
+      "title": "The whole journey editor window"
+    },
+    {
+      "id": "journeys.navigator",
+      "board": "Journeys",
+      "rect": [
+        8,
+        8,
+        264,
+        884
+      ],
+      "title": "Journey navigator column"
+    },
+    {
+      "id": "journeys.editor",
+      "board": "Journeys",
+      "rect": [
+        280,
+        56,
+        844,
+        836
+      ],
+      "title": "Journey editor"
+    },
+    {
+      "id": "journeys.inspector",
+      "board": "Journeys",
+      "rect": [
+        1132,
+        8,
+        300,
+        884
+      ],
+      "title": "Journey step inspector"
+    },
+    {
+      "id": "requestLog.detail",
+      "board": "RequestDetail",
+      "rect": [
+        280,
+        56,
+        1152,
+        836
+      ],
+      "title": "Request log with a request open"
+    },
+    {
+      "id": "endpoints.firstRun",
+      "board": "EmptyStates",
+      "rect": [
+        280,
+        56,
+        1152,
+        836
+      ],
+      "title": "First-endpoint chooser"
+    },
+    {
+      "id": "endpoints.emptyNavigator",
+      "board": "EmptyStates",
+      "rect": [
+        8,
+        8,
+        264,
+        884
+      ],
+      "title": "Navigator with no endpoints"
+    },
+    {
+      "id": "feedback.alerts",
+      "board": "Alerts",
+      "rect": [
+        0,
+        0,
+        1440,
+        900
+      ],
+      "title": "Alerts, banners and popovers"
+    },
+    {
+      "id": "server.statusPopover",
+      "board": "Alerts",
+      "rect": [
+        520,
+        504,
+        320,
+        234
+      ],
+      "title": "Server status popover"
+    },
+    {
+      "id": "projects.welcome",
+      "board": "Welcome",
+      "rect": [
+        0,
+        0,
+        880,
+        560
+      ],
+      "title": "Welcome window"
+    },
+    {
+      "id": "projects.newProjectSheet",
+      "board": "NewEndpoint",
+      "rect": [
+        32,
+        48,
+        377,
+        227
+      ],
+      "title": "New project sheet"
+    },
+    {
+      "id": "endpoints.newEndpointSheet",
+      "board": "NewEndpoint",
+      "rect": [
+        441,
+        48,
+        407,
+        376
+      ],
+      "title": "New endpoint sheet"
+    },
+    {
+      "id": "journeys.stepSheet",
+      "board": "JourneyStep",
+      "rect": [
+        150,
+        32,
+        580,
+        696
+      ],
+      "title": "Journey step sheet"
+    },
+    {
+      "id": "import.review",
+      "board": "Import",
+      "rect": [
+        60,
+        32,
+        1000,
+        696
+      ],
+      "title": "Import review sheet"
+    },
+    {
+      "id": "server.settings",
+      "board": "Settings",
+      "rect": [
+        60,
+        32,
+        760,
+        576
+      ],
+      "title": "Server settings sheet"
+    },
+    {
+      "id": "updates.sheet",
+      "board": "Update",
+      "rect": [
+        80,
+        32,
+        560,
+        480
+      ],
+      "title": "Update sheet"
+    },
+    {
+      "id": "ds.methodLabel",
+      "board": "Components",
+      "rect": [
+        48,
+        48,
+        432,
+        220
+      ],
+      "title": "Method label"
+    },
+    {
+      "id": "ds.status",
+      "board": "Components",
+      "rect": [
+        504,
+        48,
+        432,
+        220
+      ],
+      "title": "Status label"
+    },
+    {
+      "id": "ds.buttons",
+      "board": "Components",
+      "rect": [
+        48,
+        292,
+        432,
+        239
+      ],
+      "title": "Buttons"
+    },
+    {
+      "id": "ds.toolbar",
+      "board": "Components",
+      "rect": [
+        504,
+        292,
+        432,
+        239
+      ],
+      "title": "Toolbar controls"
+    },
+    {
+      "id": "ds.serverStatus",
+      "board": "Components",
+      "rect": [
+        960,
+        292,
+        432,
+        239
+      ],
+      "title": "Server status"
+    },
+    {
+      "id": "ds.fields",
+      "board": "Components",
+      "rect": [
+        48,
+        555,
+        432,
+        368
+      ],
+      "title": "Fields"
+    },
+    {
+      "id": "ds.segmented",
+      "board": "Components",
+      "rect": [
+        504,
+        555,
+        432,
+        368
+      ],
+      "title": "Segmented control and toggles"
+    },
+    {
+      "id": "ds.sidebarRow",
+      "board": "Components",
+      "rect": [
+        960,
+        555,
+        432,
+        368
+      ],
+      "title": "Sidebar row"
+    },
+    {
+      "id": "ds.scenarioRow",
+      "board": "Components",
+      "rect": [
+        48,
+        947,
+        432,
+        229
+      ],
+      "title": "Scenario row"
+    },
+    {
+      "id": "ds.journeyStep",
+      "board": "Components",
+      "rect": [
+        504,
+        947,
+        432,
+        229
+      ],
+      "title": "Journey step row"
+    },
+    {
+      "id": "ds.banners",
+      "board": "Components",
+      "rect": [
+        960,
+        947,
+        432,
+        229
+      ],
+      "title": "Banners"
+    },
+    {
+      "id": "ds.table",
+      "board": "Components",
+      "rect": [
+        48,
+        1200,
+        888,
+        208
+      ],
+      "title": "Table"
+    },
+    {
+      "id": "ds.codeEditor",
+      "board": "Components",
+      "rect": [
+        960,
+        1200,
+        432,
+        208
+      ],
+      "title": "Code editor"
+    },
+    {
+      "id": "ds.jumpBarAndEmptyState",
+      "board": "Components",
+      "rect": [
+        48,
+        1432,
+        888,
+        269
+      ],
+      "title": "Jump bar and empty state"
+    },
+    {
+      "id": "tokens.colour",
+      "board": "Tokens",
+      "rect": [
+        48,
+        48,
+        1344,
+        297
+      ],
+      "title": "Colour tokens"
+    },
+    {
+      "id": "tokens.type",
+      "board": "Tokens",
+      "rect": [
+        48,
+        369,
+        660,
+        267
+      ],
+      "title": "Type scale"
+    },
+    {
+      "id": "tokens.spacing",
+      "board": "Tokens",
+      "rect": [
+        732,
+        369,
+        660,
+        267
+      ],
+      "title": "Spacing, radius and size"
+    }
+  ]
+}

@@ -4,6 +4,9 @@ import Testing
 import Domain
 import DesignSystem
 @testable import AppFeatures
+@testable import EndpointsFeature
+@testable import RequestLogFeature
+@testable import ServerFeature
 
 @Suite("WorkspaceFeature Rendering")
 @MainActor

@@ -3,6 +3,7 @@ import Foundation
 import Persistence
 import Testing
 @testable import AppFeatures
+@testable import UpdatesFeature
 
 // MARK: - Preferences
 
@@ -154,7 +155,7 @@ struct UpdateServiceTests {
     /// The service owns its `Task` privately — deliberately, since nothing outside it should be able
     /// to interleave with a check — so a test polls the published phase rather than awaiting a
     /// handle. Bounded, so a hang fails the test instead of hanging the suite.
-    private func settle(_ service: UpdateService, until predicate: (UpdateService.Phase) -> Bool) async {
+    private func settle(_ service: UpdateService, until predicate: (UpdatePhase) -> Bool) async {
         for _ in 0..<200 where !predicate(service.phase) {
             try? await Task.sleep(for: .milliseconds(10))
         }

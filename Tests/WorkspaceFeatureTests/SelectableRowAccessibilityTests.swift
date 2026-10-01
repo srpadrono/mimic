@@ -3,6 +3,8 @@ import SwiftUI
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
+@testable import RequestLogFeature
 
 /// What the window's two selectable rows say, and what they carry, for somebody who is being read
 /// them rather than looking at them.

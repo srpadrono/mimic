@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 import Testing
 import DesignSystem
-@testable import AppFeatures
+@testable import ImportFeature
 
 /// The two appearances a macOS window can be drawn in.
 ///

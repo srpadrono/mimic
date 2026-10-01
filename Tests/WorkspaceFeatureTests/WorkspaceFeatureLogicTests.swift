@@ -3,6 +3,11 @@ import SwiftUI
 import Testing
 import Domain
 @testable import AppFeatures
+@testable import EndpointsFeature
+@testable import JourneysFeature
+@testable import RequestLogFeature
+@testable import ServerFeature
+@testable import WorkspaceShell
 
 @Suite("WorkspaceFeature Logic")
 @MainActor
