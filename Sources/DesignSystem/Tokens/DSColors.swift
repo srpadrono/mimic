@@ -87,6 +87,10 @@ public nonisolated enum DSColors {
     /// A grouped settings card in a sheet: white in light, a step above the sheet in dark.
     public static let formGroup = Color(light: Ink(0xFFFFFF), dark: Ink(white: 1, alpha: 0.045))
 
+    /// A well of read-only text inside a sheet, such as release notes: white in light, a step below
+    /// the sheet in dark.
+    public static let sheetWell = Color(light: Ink(0xFFFFFF), dark: Ink(white: 0, alpha: 0.2))
+
     /// A settings switch's track while off.
     public static let switchTrack = Color(light: Ink(white: 0, alpha: 0.14), dark: Ink(white: 1, alpha: 0.18))
 
