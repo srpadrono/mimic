@@ -58,7 +58,7 @@ struct DSCheckboxBox: View {
     enum Mark { case off, on, mixed }
 
     static let size: CGFloat = 14
-    static let radius: CGFloat = 4
+    static let radius: CGFloat = DSCornerRadius.mark
 
     let mark: Mark
 

@@ -345,6 +345,10 @@ struct DSCatalogSegments: View {
             HStack(spacing: 18) {
                 switchSpecimen("On", isOn: true)
                 switchSpecimen("Off", isOn: false)
+                HStack(spacing: DSSpacing.sm) {
+                    DSCheckboxBox(mark: .on)
+                    Text("Checkbox").font(DSTypography.callout).foregroundStyle(DSColors.labelPrimary)
+                }
             }
         }
     }

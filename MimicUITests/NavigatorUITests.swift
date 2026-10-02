@@ -778,7 +778,9 @@ final class NavigatorUITests: MimicUITestCase {
         // A 401 is served, not an error: the section counts 5xx and failures as errors.
         let served = panel.trafficServed
         XCTAssertTrue(served.waitForExistence(timeout: 10))
-        XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { served.label.hasPrefix("32") },
+        // On a busy CI runner the accessibility tree caught up with the 32nd request just after a
+        // 10 s wait; the count itself is never wrong, so this waits as long as a slow runner needs.
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 30) { served.label.hasPrefix("32") },
                       "Served count: \(panel.spoken(served))")
         XCTAssertTrue(panel.spoken(panel.trafficErrors).hasPrefix("0"), panel.spoken(panel.trafficErrors))
         for _ in 0..<4 where !served.isHittable {

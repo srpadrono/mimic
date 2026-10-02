@@ -696,13 +696,7 @@ private struct ImportNoteChip: View {
     }
 
     var body: some View {
-        Text(title)
-            .font(DSTypography.caption.weight(.medium))
-            .foregroundStyle(isWarning ? ImportRow.warningInk : DSColors.labelSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .frame(height: 18)
-            .background(Capsule().fill(isWarning ? DSColors.warningBackground : DSColors.field))
+        DSPill(title, tone: isWarning ? .warning : .neutral, weight: .medium)
             .accessibilityIdentifier(identifier)
     }
 }
