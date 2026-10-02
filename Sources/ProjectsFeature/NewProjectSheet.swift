@@ -36,6 +36,8 @@ struct NewProjectFormState {
 /// port is explained under the port field rather than in an alert.
 public struct NewProjectSheet: View {
     let onConfirm: (String, Int) -> Void
+    /// Draws the Name field focused without keyboard focus, for the gallery's off-screen render.
+    let showsNameFocus: Bool
 
     @Environment(\.dismiss) private var dismiss
 
@@ -54,23 +56,32 @@ public struct NewProjectSheet: View {
         self.init(initialProjectName: "", initialPortString: "8080", onConfirm: onConfirm)
     }
 
-    /// Opens with the fields already filled, as a preview or the gallery shows it.
+    /// Opens with the fields already filled, as a preview or the gallery shows it. `showsNameFocus`
+    /// draws the Name field's focus ring, as the design does, where no window can hold focus.
     public init(
         initialProjectName: String,
         initialPortString: String,
+        showsNameFocus: Bool = false,
         onConfirm: @escaping (String, Int) -> Void
     ) {
         self.onConfirm = onConfirm
+        self.showsNameFocus = showsNameFocus
         _form = State(initialValue: NewProjectFormState(
             projectName: initialProjectName,
             portString: initialPortString
         ))
     }
 
+    /// The board's 15/20 title line.
+    private static let titleLineHeight: CGFloat = 20
+    /// The board's `.btn` is content-box: a 28pt capsule and its hairline border make a 29pt row.
+    private static let buttonRowHeight: CGFloat = DSControlHeight.large + 1
+
     public var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text("New project")
                 .font(DSTypography.headline)
+                .frame(height: Self.titleLineHeight)
                 .foregroundStyle(DSColors.labelPrimary)
                 .accessibilityAddTraits(.isHeader)
 
@@ -84,10 +95,11 @@ public struct NewProjectSheet: View {
                     identifier: "newProject.name"
                 )
                 .accessibilityIdentifier("projectNameField")
+                .environment(\.dsShowsFocus, showsNameFocus)
                 .focused($focusedField, equals: .name)
                 .onSubmit { confirmIfValid() }
 
-                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                VStack(alignment: .leading, spacing: DSFormMetrics.sheetHintGap) {
                     DSFormRow("Port", alignment: .top) {
                         HStack(alignment: .top, spacing: DSSpacing.md) {
                             DSTextField(
@@ -96,7 +108,7 @@ public struct NewProjectSheet: View {
                                 placeholder: "8080",
                                 validation: portValidationMessage,
                                 validationIdentifier: "newProject.port.error",
-                                controlWidth: DSFormMetrics.portFieldWidth,
+                                controlWidth: DSFormMetrics.sheetPortFieldWidth,
                                 inputIdentifier: "serverPortField",
                                 monospaced: true,
                                 labelPlacement: .hidden,
@@ -147,6 +159,7 @@ public struct NewProjectSheet: View {
                 .disabled(!form.canCreate)
                 .keyboardShortcut(.defaultAction)
             }
+            .frame(height: Self.buttonRowHeight)
             .padding(.top, DSSpacing.sm)
         }
         .padding(DSSpacing.xl)

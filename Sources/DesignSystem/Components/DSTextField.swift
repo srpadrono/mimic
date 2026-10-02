@@ -57,7 +57,7 @@ public struct DSTextField: View {
     public var body: some View {
         switch labelPlacement {
         case .leading:
-            DSFormRow(label, alignment: .top) { fieldStack }
+            DSFormRow(label, alignment: .top, controlHeight: height) { fieldStack }
         case .top:
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 Text(label)

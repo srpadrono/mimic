@@ -3,6 +3,10 @@ import SwiftUI
 public enum DSFormMetrics {
     /// A local port needs five digits, not half the width of a settings sheet.
     public static let portFieldWidth: CGFloat = 80
+    /// The new project sheet's port, wider than the settings field, as the NewEndpoint board draws it.
+    public static let sheetPortFieldWidth: CGFloat = 96
+    /// From a sheet field to the hint under it: the boards' 16pt row gap less the hint's 6pt pull.
+    public static let sheetHintGap: CGFloat = 10
     /// A multi-section sheet keeps enough width for code and aligned inputs.
     public static let multiSectionWidth: CGFloat = DSSheetWidth.medium
     public static let minimumTallSheetHeight: CGFloat = 500
