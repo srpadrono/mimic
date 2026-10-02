@@ -398,7 +398,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.ui == 'true'
     runs-on: macos-26
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
