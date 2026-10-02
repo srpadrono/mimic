@@ -15,8 +15,6 @@ private enum EditorMetrics {
     static let bodyMaxHeight: CGFloat = 440
     /// Enough lines to reach `bodyMaxHeight`; counting stops there.
     static let bodyMaxLines = 40
-    /// Codes offered by the status field's menu; any other code can be typed.
-    static let commonStatusCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]
 }
 
 /// The endpoint editor: the request it answers, the scenario being edited, and that scenario's response.
@@ -392,53 +390,17 @@ public struct EndpointEditorView: View {
 
     /// The status well at the design's `width`, or, with `nil`, filling what the row offers.
     private func statusControl(width: CGFloat?) -> some View {
-        let code = Self.statusCodeValue(from: statusCodeString)
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
-            TextField("200", text: $statusCodeString)
-                .textFieldStyle(.plain)
-                .font(DSTypography.status)
-                .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
-                .frame(width: 30)
-                .focused($isStatusFocused)
-                .accessibilityIdentifier("endpointEditor.statusCode")
-                .accessibilityLabel("Status code")
-                .onSubmit { commitStatusCode() }
-            if let code {
-                Text(HTTPStatusText.reasonPhrase(for: code))
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .accessibilityIdentifier("endpointEditor.statusDescription")
-            }
-            Spacer(minLength: 0)
-            Menu {
-                ForEach(EditorMetrics.commonStatusCodes, id: \.self) { option in
-                    Button("\(option) \(HTTPStatusText.reasonPhrase(for: option))") {
-                        statusCodeString = String(option)
-                        commitStatusCode()
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .frame(width: 16, height: DSControlHeight.regular)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Choose a common status code")
-            .accessibilityIdentifier("endpointEditor.statusMenu")
-            .accessibilityLabel("Common status codes")
-        }
-        .dsFieldChrome(isFocused: isStatusFocused, isInvalid: statusCodeError != nil)
+        StatusCodeField(
+            text: $statusCodeString,
+            code: Self.statusCodeValue(from: statusCodeString),
+            size: .panel,
+            isInvalid: statusCodeError != nil,
+            isFocused: $isStatusFocused,
+            fieldIdentifier: "endpointEditor.statusCode",
+            menuIdentifier: "endpointEditor.statusMenu",
+            reasonIdentifier: "endpointEditor.statusDescription",
+            onCommit: commitStatusCode
+        )
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
     }

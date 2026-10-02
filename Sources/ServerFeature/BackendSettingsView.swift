@@ -208,11 +208,8 @@ public struct BackendSettingsView: View {
                         .foregroundStyle(isSelected ? Color.white : DSColors.error)
                         .accessibilityHidden(true)
                 } else if restartPending {
-                    Circle()
-                        .fill(DSColors.warning)
-                        .frame(width: 7, height: 7)
+                    DSStatusDot(DSColors.warning)
                         .help("Needs a restart")
-                        .accessibilityHidden(true)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: DSFormMetrics.groupRowHeight, alignment: .leading)

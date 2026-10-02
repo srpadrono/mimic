@@ -186,10 +186,7 @@ public struct ServerStatusWell: View {
                     .controlSize(.mini)
                     .frame(width: 10, height: 10)
             default:
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
+                DSStatusDot(statusColor)
             }
             Text(stateTitle)
                 .foregroundStyle(stateTitleColor)

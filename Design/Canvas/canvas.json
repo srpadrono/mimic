@@ -18,7 +18,7 @@
     "Settings.dc.html": {"x": 0, "y": 3760, "w": 880, "h": 640, "title": "Server settings sheet"},
     "Update.dc.html": {"x": 960, "y": 3760, "w": 720, "h": 560, "title": "Update sheet"},
     "Toolbar.dc.html": {"x": 1760, "y": 3760, "w": 892, "h": 328, "title": "Toolbar states"},
-    "Components.dc.html": {"x": 0, "y": 4800, "w": 1440, "h": 1500, "title": "Components"},
+    "Components.dc.html": {"x": 0, "y": 4800, "w": 1440, "h": 1720, "title": "Components"},
     "Tokens.dc.html": {"x": 1520, "y": 4800, "w": 1440, "h": 820, "title": "Tokens"}
   },
   "order": ["Main.dc.html", "WorkspaceLight.dc.html", "RequestDetail.dc.html", "Journeys.dc.html", "EmptyStates.dc.html", "Alerts.dc.html", "Welcome.dc.html", "NewEndpoint.dc.html", "JourneyStep.dc.html", "Import.dc.html", "Settings.dc.html", "Update.dc.html", "Toolbar.dc.html", "Components.dc.html", "Tokens.dc.html"],

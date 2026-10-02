@@ -520,7 +520,7 @@
         48,
         947,
         432,
-        229
+        235
       ],
       "title": "Scenario row"
     },
@@ -531,7 +531,7 @@
         504,
         947,
         432,
-        229
+        235
       ],
       "title": "Journey step row"
     },
@@ -542,7 +542,7 @@
         960,
         947,
         432,
-        229
+        235
       ],
       "title": "Banners"
     },
@@ -551,7 +551,7 @@
       "board": "Components",
       "rect": [
         48,
-        1200,
+        1206,
         888,
         208
       ],
@@ -562,7 +562,7 @@
       "board": "Components",
       "rect": [
         960,
-        1200,
+        1206,
         432,
         208
       ],
@@ -573,11 +573,22 @@
       "board": "Components",
       "rect": [
         48,
-        1432,
+        1438,
         888,
         269
       ],
       "title": "Jump bar and empty state"
+    },
+    {
+      "id": "ds.pills",
+      "board": "Components",
+      "rect": [
+        960,
+        1438,
+        432,
+        269
+      ],
+      "title": "Pills"
     },
     {
       "id": "tokens.colour",

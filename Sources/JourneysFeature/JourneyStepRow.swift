@@ -198,24 +198,8 @@ struct JourneyStepRow: View {
 
     /// A quiet neutral fact about the step, shown whole or not at all (see `trailingFacts`).
     private func chip(_ text: String, systemImage: String? = nil) -> some View {
-        HStack(spacing: DSSpacing.xs) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: DSGlyph.disclosure))
-                    .accessibilityHidden(true)
-            }
-            Text(text)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .font(DSTypography.caption)
-        .foregroundStyle(DSColors.labelSecondary)
-        .padding(.horizontal, 7)
-        .frame(height: 18)
-        .background {
-            RoundedRectangle(cornerRadius: DSCornerRadius.card).fill(DSColors.field)
-        }
-        .help(text)
+        DSPill(text, systemImage: systemImage)
+            .help(text)
     }
 
     // MARK: - Text

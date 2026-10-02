@@ -67,6 +67,11 @@ body{margin:0}
 .cb{width:14px;height:14px;border-radius:4px;border:1px solid var(--l3);flex:none;display:flex;align-items:center;justify-content:center}
 .cb.on{background:var(--accent);border-color:var(--accent)}
 .banner{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 12px;border-radius:10px;font-size:12px}
+.step{display:flex;align-items:center;gap:12px;height:48px;padding:0 14px;margin:0 -14px;border-radius:10px}
+.pill{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:9px;background:var(--field);font-size:11px;color:var(--l2);gap:4px;white-space:nowrap;flex:none}
+.pill.warn{background:var(--warn-bg);color:var(--warn);font-weight:500}
+.pill.out{background:transparent;box-shadow:inset 0 0 0 .5px currentColor;font-weight:500;gap:6px}
+.pill.out i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
 .node{width:22px;height:22px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font:600 11px var(--font);border:1.5px solid var(--l3);color:var(--l2)}
 .node.done{background:var(--ok);border-color:var(--ok);color:#fff}
 .node.cur{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--sel-soft)}
@@ -76,7 +81,7 @@ body{margin:0}
 .icon{border-radius:22%;display:flex;align-items:center;justify-content:center;flex:none}
 </style>
 </helmet>
-<div class="mm {{theme}}" style="width: 1440px; height: 1500px; background: var(--bg); padding: 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; align-content: start; border-radius: 18px;">
+<div class="mm {{theme}}" style="width: 1440px; height: 1720px; background: var(--bg); padding: 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; align-content: start; border-radius: 18px;">
 
   <div class="sec">
     <span class="t">Method label</span>
@@ -195,10 +200,10 @@ body{margin:0}
   <div class="sec">
     <span class="t">Journey step</span>
     <span class="d">Numbered nodes show progress. The current step is ringed.</span>
-    <div class="col" style="gap: 4px;">
-      <div class="row" style="gap: 10px; height: 36px;"><span class="node done"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px; stroke-width: 2;"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="m" style="color: var(--post); width: 44px;">POST</span><span class="path grow">/login</span><span class="st s2"><i></i>200</span></div>
-      <div class="row" style="gap: 10px; height: 36px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; background: var(--sel-soft);"><span class="node cur">2</span><span class="m" style="color: var(--post); width: 44px;">POST</span><span class="path grow">/payments</span><span class="l2" style="font-size: 11px;">Drop after 5 s</span></div>
-      <div class="row" style="gap: 10px; height: 36px;"><span class="node">3</span><span class="m" style="color: var(--get); width: 44px;">GET</span><span class="path grow">/payments/:id</span><span class="l3" style="font-size: 11px;">× 3</span><span class="st s2"><i></i>200</span></div>
+    <div class="col" style="gap: 2px;">
+      <div class="step"><span class="node done"><svg class="ic" viewBox="0 0 16 16" style="width: 12px; height: 12px; stroke-width: 2;"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="m" style="color: var(--post); width: 44px;">POST</span><span class="path grow">/login</span><span class="st s2"><i></i>200</span></div>
+      <div class="step" style="background: var(--sel-soft); box-shadow: inset 0 0 0 1px var(--accent);"><span class="node cur">2</span><span class="m" style="color: var(--post); width: 44px;">POST</span><span class="path grow">/payments</span><span class="pill"><svg class="ic" viewBox="0 0 16 16" style="width: 11px; height: 11px;"><path d="M2 8h4M10 8h4M6 5l4 6"/></svg>Drop after 5 s</span></div>
+      <div class="step"><span class="node">3</span><span class="m" style="color: var(--get); width: 44px;">GET</span><span class="path grow">/payments/:id</span><span class="pill">× 3</span><span class="st s2"><i></i>200</span></div>
     </div>
   </div>
 
@@ -251,9 +256,17 @@ body{margin:0}
       <div class="row" style="gap: 8px; margin-top: 4px;"><button class="btn sm pri">New journey</button><button class="btn sm">Start from a template</button></div>
     </div>
   </div>
+  <div class="sec">
+    <span class="t">Pills</span>
+    <span class="d">A short fact beside a row. 18 pt capsule, 11 pt text, 7 pt in from each end.</span>
+    <div class="row" style="gap: 10px;"><span class="cap-l">Neutral</span><span class="pill">× 3</span><span class="pill"><svg class="ic" viewBox="0 0 16 16" style="width: 11px; height: 11px;"><path d="M2 8h4M10 8h4M6 5l4 6"/></svg>Drop after 5 s</span></div>
+    <div class="row" style="gap: 10px;"><span class="cap-l">Warning</span><span class="pill warn">Same route as row 4</span></div>
+    <div class="row" style="gap: 10px;"><span class="cap-l">State</span><span class="pill out" style="color: var(--ok);"><i></i>Active</span><span class="pill out l2"><i></i>Selected</span></div>
+    <div class="row" style="gap: 10px;"><span class="cap-l">Journey glyph</span><svg class="ic l2" viewBox="0 0 16 16" style="width: 15px; height: 15px;"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg><svg class="ic l2" viewBox="0 0 16 16" style="width: 22px; height: 22px;"><circle cx="4" cy="4" r="1.75"/><circle cx="12" cy="12" r="1.75"/><path d="M5.75 4H10a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h4.25"/></svg></div>
+  </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1720}}'>
 class Component extends DCLogic {
   renderVals() { return { theme: this.props.theme ?? 'dark' }; }
 }

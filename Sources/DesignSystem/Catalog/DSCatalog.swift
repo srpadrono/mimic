@@ -85,7 +85,7 @@ public enum DSCatalog {
             DSCatalogSegments()
         },
         Entry(id: "ds.banners", title: "Banners", referenceID: "ds.banners",
-              size: CGSize(width: 432, height: 229)) {
+              size: CGSize(width: 432, height: 235)) {
             DSCatalogCard("Banners", detail: "Inline, above the content they concern, with one action.") {
                 DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", actionTitle: "Try again",
                          identifier: "catalog.error") {}
@@ -120,6 +120,27 @@ public enum DSCatalog {
                 ) {}
             }
         },
+        Entry(id: "ds.pills", title: "Pills", referenceID: "ds.pills",
+              size: CGSize(width: 432, height: 269)) {
+            DSCatalogCard("Pills", detail: "A short fact beside a row. 18 pt capsule, 11 pt text, 7 pt in from each end.") {
+                catalogSpecimen("Neutral") {
+                    DSPill("\u{00D7} 3")
+                    DSPill("Drop after 5 s", systemImage: "bolt.horizontal")
+                }
+                catalogSpecimen("Warning") {
+                    DSPill("Same route as row 4", tone: .warning, weight: .medium)
+                }
+                catalogSpecimen("State") {
+                    catalogStatePill("Active", tint: DSColors.success)
+                    catalogStatePill("Selected", tint: DSColors.labelSecondary)
+                }
+                catalogSpecimen("Journey glyph") {
+                    DSJourneyGlyph(size: DSGlyph.control)
+                    DSJourneyGlyph(size: DSGlyph.card)
+                }
+                .foregroundStyle(DSColors.labelSecondary)
+            }
+        },
     ]
 
     public static let tokens: [Entry] = [
@@ -150,8 +171,8 @@ public enum DSCatalog {
               size: CGSize(width: 660, height: 267)) {
             DSCatalogCard("Spacing, radius and size") {
                 HStack(alignment: .bottom, spacing: DSSpacing.lg) {
-                    ForEach([DSSpacing.xs, DSSpacing.sm, DSSpacing.md, DSSpacing.lg, DSSpacing.xl, DSSpacing.xxl],
-                            id: \.self) { value in
+                    ForEach([DSSpacing.xs, DSSpacing.sm, DSSpacing.md, DSSpacing.lg, DSSpacing.xl, DSSpacing.xxl,
+                             DSSpacing.xxxl], id: \.self) { value in
                         VStack(spacing: DSSpacing.xs) {
                             Rectangle().fill(DSColors.accent).frame(width: value, height: value)
                             Text("\(Int(value))").font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
@@ -159,11 +180,14 @@ public enum DSCatalog {
                     }
                 }
                 HStack(spacing: DSSpacing.lg) {
-                    ForEach([DSCornerRadius.field, DSCornerRadius.card, DSCornerRadius.panel, DSCornerRadius.sheet],
-                            id: \.self) { radius in
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .strokeBorder(DSColors.fieldBorder, lineWidth: DSStroke.hairline * 2)
-                            .frame(width: 48, height: 32)
+                    ForEach(radii, id: \.name) { radius in
+                        VStack(spacing: DSSpacing.xs) {
+                            RoundedRectangle(cornerRadius: radius.value, style: .continuous)
+                                .strokeBorder(DSColors.fieldBorder, lineWidth: DSStroke.hairline * 2)
+                                .frame(width: 48, height: 32)
+                            Text("\(Int(radius.value)) \(radius.name)")
+                                .font(DSTypography.caption).foregroundStyle(DSColors.labelSecondary)
+                        }
                     }
                 }
             }
@@ -171,6 +195,41 @@ public enum DSCatalog {
     ]
 
     public static var all: [Entry] { components + tokens }
+
+    /// Every corner radius, named for the shape it rounds, as the Tokens board lists them.
+    private static let radii: [NamedRadius] = [
+        NamedRadius(name: "mark", value: DSCornerRadius.mark),
+        NamedRadius(name: "field", value: DSCornerRadius.field),
+        NamedRadius(name: "segment", value: DSCornerRadius.segment),
+        NamedRadius(name: "card", value: DSCornerRadius.card),
+        NamedRadius(name: "panel", value: DSCornerRadius.panel),
+        NamedRadius(name: "sheet", value: DSCornerRadius.sheet),
+    ]
+
+    private struct NamedRadius {
+        let name: String
+        let value: CGFloat
+    }
+
+    /// A specimen row: its caption in the board's 84 pt column, then the specimens.
+    private static func catalogSpecimen(_ caption: String, @ViewBuilder content: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            Text(caption)
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.labelTertiary)
+                .frame(width: 84, alignment: .leading)
+            content()
+        }
+    }
+
+    /// A state drawn as a pill: the dot and word in the state's colour, outlined.
+    private static func catalogStatePill(_ title: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            DSStatusDot(tint)
+            Text(title).font(DSTypography.caption.weight(.medium))
+        }
+        .dsPill(.outline(tint))
+    }
 
     private static func catalogRoute(_ method: String, _ path: String) -> some View {
         HStack(spacing: DSSpacing.sm) {
@@ -227,6 +286,7 @@ struct DSCatalogFields: View {
     @State private var invalid = "80"
     @State private var filter = ""
     @State private var scope = "any"
+    @State private var format = "json"
 
     var body: some View {
         DSCatalogCard("Fields") {
@@ -236,6 +296,10 @@ struct DSCatalogFields: View {
                         identifier: "catalog.invalid")
             DSFilterField(text: $filter, scopeID: $scope, scopes: [], placeholder: "Filter",
                           identifier: "catalog.filter")
+            DSMenuField("Pop-up", selection: $format,
+                        options: [DSMenuOption("JSON", value: "json"), DSMenuOption("Text", value: "text")],
+                        identifier: "catalog.popup")
+                .frame(width: 160)
         }
     }
 }
@@ -243,6 +307,7 @@ struct DSCatalogFields: View {
 struct DSCatalogSegments: View {
     @State private var navigator = "endpoints"
     @State private var log = "all"
+    @State private var pane = "body"
 
     var body: some View {
         DSCatalogCard("Segmented control and toggles") {
@@ -267,6 +332,30 @@ struct DSCatalogSegments: View {
                 selection: $log,
                 identifier: "catalog.log"
             )
+            DSSegmentedControl(
+                "Pane",
+                segments: [
+                    DSSegmentedControl<String>.Segment("Body", value: "body", identifier: "catalog.body"),
+                    DSSegmentedControl<String>.Segment("Headers", value: "headers", count: 2,
+                                                       countColor: DSColors.labelTertiary, identifier: "catalog.headers"),
+                ],
+                selection: $pane,
+                identifier: "catalog.pane"
+            )
+            HStack(spacing: 18) {
+                switchSpecimen("On", isOn: true)
+                switchSpecimen("Off", isOn: false)
+            }
+        }
+    }
+}
+
+extension DSCatalogSegments {
+    /// The switch as the board draws it: the track, then its word.
+    private func switchSpecimen(_ title: String, isOn: Bool) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            DSSwitchTrack(isOn: isOn)
+            Text(title).font(DSTypography.callout).foregroundStyle(DSColors.labelPrimary)
         }
     }
 }

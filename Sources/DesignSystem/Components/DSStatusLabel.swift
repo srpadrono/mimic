@@ -40,10 +40,7 @@ public struct DSStatusLabel: View {
     public var body: some View {
         HStack(spacing: 6) {
             if showsDot {
-                Circle()
-                    .fill(ink)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
+                DSStatusDot(ink)
             }
             Text(text)
                 .font(style == .code ? DSTypography.status : DSTypography.calloutMedium)
@@ -57,5 +54,24 @@ public struct DSStatusLabel: View {
 
     private var ink: Color {
         prominence == .increased ? .white : color
+    }
+}
+
+/// The 7 pt dot a status wears beside its code or word, in the status's colour.
+public struct DSStatusDot: View {
+    /// 7 pt: the dot's diameter.
+    public static let diameter: CGFloat = 7
+
+    private let color: Color
+
+    public init(_ color: Color) {
+        self.color = color
+    }
+
+    public var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: Self.diameter, height: Self.diameter)
+            .accessibilityHidden(true)
     }
 }
