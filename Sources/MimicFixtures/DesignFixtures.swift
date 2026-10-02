@@ -160,6 +160,21 @@ public enum DesignFixtures {
                             primaryName: "Storefront")
     }
 
+    /// The server settings board: Storefront, plus a Payments port moved to 18087 that the running
+    /// server picks up on its next restart.
+    public static var serverSettingsConfiguration: ServerConfiguration {
+        ServerConfiguration(port: port, globalDelayMs: 0, upstreamURL: "https://api.acme.shop",
+                            backends: [BackendConfiguration(id: uuid(950), name: "Payments", port: 18_087)],
+                            primaryName: "Storefront")
+    }
+
+    /// What the running server bound before Payments moved.
+    public static var serverSettingsBoundConfiguration: ServerConfiguration {
+        var configuration = serverSettingsConfiguration
+        configuration.backends[0].port = 18_088
+        return configuration
+    }
+
     /// The whole project, as the workspace artboards show it.
     public static var project: MockProject {
         MockProject(

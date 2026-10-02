@@ -89,6 +89,7 @@ public struct EndpointRequestSheet: View {
         .padding(DSSpacing.xl)
         .frame(width: DSSheetWidth.compact)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .onAppear { pathIsFocused = true }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("endpointRequest")

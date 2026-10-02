@@ -355,7 +355,7 @@ struct DSComponentRenderingTests {
     @Test("Every button variant stands on its size's rung")
     func buttonVariantsShareTheirSizeRung() {
         let measure = CGSize(width: 240, height: 80)
-        let expected: [(DSButtonSize, CGFloat)] = [(.small, 20), (.medium, 24), (.large, 28)]
+        let expected: [(DSButtonSize, CGFloat)] = [(.small, 20), (.inline, 22), (.medium, 24), (.large, 28)]
         for (size, height) in expected {
             #expect(size.height == height)
             for variant in DSButtonVariant.allCases {
@@ -366,6 +366,15 @@ struct DSComponentRenderingTests {
                 )
                 #expect(button.height == height, "\(variant) at \(size)")
             }
+        }
+    }
+
+    /// The settings switch is the board's 32 × 18 pt whichever way it is set, so a row never shifts.
+    @Test("The settings switch is 32 by 18, on or off")
+    func switchKeepsTheBoardSize() {
+        for isOn in [true, false] {
+            let size = render(DSSwitchTrack(isOn: isOn), size: CGSize(width: 80, height: 40))
+            #expect(size == CGSize(width: 32, height: 18), "on: \(isOn)")
         }
     }
 
@@ -587,6 +596,7 @@ struct DSComponentRenderingTests {
         #expect(DSBarHeight.footer == 44)
 
         #expect(DSControlHeight.small == 20)
+        #expect(DSControlHeight.inline == 22)
         #expect(DSControlHeight.regular == 24)
         #expect(DSControlHeight.large == 28)
         #expect(DSControlHeight.prominent == 32)

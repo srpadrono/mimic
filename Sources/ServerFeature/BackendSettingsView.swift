@@ -27,11 +27,13 @@ public struct BackendSettingsView: View {
                 Text("Server settings")
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .frame(height: BackendSettingsGeometry.titleLineHeight)
                     .accessibilityAddTraits(.isHeader)
                 Text(model.projectName ?? "Local ports and pass-through")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
+                    .frame(height: DSFormMetrics.lineHeight)
             }
             .padding(.horizontal, DSSpacing.xl)
             .padding(.top, DSSpacing.xl)
@@ -52,13 +54,13 @@ public struct BackendSettingsView: View {
             }
             .frame(maxHeight: .infinity)
 
-            DSDivider(identifier: "backend.footer")
             footer
+                .overlay(alignment: .top) { DSDivider(identifier: "backend.footer") }
         }
         .frame(width: DSSheetWidth.split,
-               height: BackendSettingsGeometry.height(backend: draft.backend(id: selectedBackendID),
-                                                      visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900))
+               height: BackendSettingsGeometry.height(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900))
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .onChange(of: draft) { _, _ in clearIssue() }
         .onChange(of: portText) { _, _ in clearIssue() }
         .accessibilityElement(children: .contain)
@@ -107,6 +109,7 @@ public struct BackendSettingsView: View {
             Text("Ports")
                 .font(DSTypography.captionSemibold)
                 .foregroundStyle(DSColors.labelTertiary)
+                .frame(height: DSFormMetrics.lineHeight)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
@@ -143,7 +146,7 @@ public struct BackendSettingsView: View {
             .accessibilityLabel("Add port")
 
             Rectangle()
-                .fill(DSColors.fieldBorder)
+                .fill(DSSurface.sheet.fieldBorder)
                 .frame(width: DSStroke.hairline, height: 22)
                 .accessibilityHidden(true)
 
@@ -162,11 +165,11 @@ public struct BackendSettingsView: View {
             .accessibilityIdentifier("backend.delete.\(selectedBackendID)")
             .accessibilityLabel("Remove selected port")
         }
-        .background(DSColors.field)
+        .background(DSSurface.sheet.fieldFill)
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.field))
         .overlay {
             RoundedRectangle(cornerRadius: DSCornerRadius.field)
-                .strokeBorder(DSColors.fieldBorder, lineWidth: DSStroke.hairline)
+                .strokeBorder(DSSurface.sheet.fieldBorder, lineWidth: DSStroke.hairline)
                 .allowsHitTesting(false)
         }
     }
@@ -278,7 +281,7 @@ public struct BackendSettingsView: View {
                         .lineLimit(1)
                         .textSelection(.enabled)
                         .accessibilityIdentifier(prefix + ".localURL")
-                    DSButton("Copy", variant: .secondary, size: .small, identifier: prefix + ".copy") {
+                    DSButton("Copy", variant: .secondary, size: .inline, identifier: prefix + ".copy") {
                         guard let validPort else { return }
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString("http://localhost:\(validPort)", forType: .string)
@@ -465,15 +468,14 @@ private struct FieldIssue {
 
 private enum BackendSettingsGeometry {
     static let listWidth: CGFloat = 208
+    /// The title's line, as the design sets it; the subtitle and headings sit on 16 pt lines.
+    static let titleLineHeight: CGFloat = 20
+    /// The design's height. It holds every state of the form, so the sheet doesn't jump as the
+    /// switches change; on a short screen the form scrolls.
+    static let designHeight: CGFloat = 576
 
-    static func height(backend: BackendConfiguration?, visibleScreenHeight: CGFloat) -> CGFloat {
-        let contentHeight: CGFloat
-        if backend?.passthroughEnabled == true {
-            contentHeight = backend?.captureResponses == true ? 580 : 520
-        } else {
-            contentHeight = 460
-        }
-        return min(contentHeight, max(440, visibleScreenHeight - DSFormMetrics.screenVerticalAllowance))
+    static func height(visibleScreenHeight: CGFloat) -> CGFloat {
+        min(designHeight, max(440, visibleScreenHeight - DSFormMetrics.screenVerticalAllowance))
     }
 }
 

@@ -55,6 +55,7 @@ public struct RenameItemSheet: View {
         .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .onAppear { nameIsFocused = true }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)

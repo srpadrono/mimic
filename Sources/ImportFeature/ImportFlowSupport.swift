@@ -347,6 +347,7 @@ struct ImportWorkflowScreen: View {
         }
         .frame(minWidth: DSSheetWidth.wide, minHeight: 360)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         // Paired so the controls inside keep their own identifiers.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(kind.rootAccessibilityIdentifier)
