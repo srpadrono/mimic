@@ -28,6 +28,25 @@ struct DesignFidelityTests {
         #expect(missing.isEmpty, "Unknown design sections: \(missing)")
     }
 
+    /// Sections the design draws that no gallery entry is scored against, each with its reason. A
+    /// section belongs here only when the app cannot draw it offscreen or it has no app counterpart
+    /// yet; anything else needs an entry. Empty today: every section has one.
+    static let referenceOnlySections: [String: String] = [:]
+
+    /// The other direction of `everyEntryHasAReferenceSection`: a section nobody draws sits in the
+    /// manifest unscored, and nothing else would notice.
+    @Test("Every design section has a gallery entry, or says why it has none")
+    func everySectionHasAnEntry() {
+        let drawn = Set(GalleryCatalog.entries.filter(\.hasArtboard).map(\.referenceID))
+        let unscored = catalog.sections.map(\.id)
+            .filter { !drawn.contains($0) && Self.referenceOnlySections[$0] == nil }
+        #expect(unscored.isEmpty, "Design sections with no gallery entry: \(unscored)")
+        // An allowance for a section that has since gained an entry, or left the manifest, is stale.
+        let known = Set(catalog.sections.map(\.id))
+        let stale = Self.referenceOnlySections.keys.filter { drawn.contains($0) || !known.contains($0) }.sorted()
+        #expect(stale.isEmpty, "Reference-only sections that no longer need the allowance: \(stale)")
+    }
+
     @Test("Every window and toolbar entry opens in a window of its own, where its toolbar draws")
     func windowEntriesOpenInAWindow() {
         let windows = GalleryCatalog.entries.filter { $0.group == .windows }

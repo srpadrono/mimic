@@ -325,17 +325,22 @@ struct GalleryEndpointInspectorPanel: View {
 /// endpoint or journey list, and the pinned filter.
 struct GalleryNavigator: View {
     @State private var tab: String
-    @State private var endpointSelection: UUID? = DesignFixtures.products.id
+    @State private var endpointSelection: UUID?
     @State private var journeySelection: UUID? = DesignFixtures.paymentRetry.id
     @State private var filter = ""
     @State private var scope = SidebarView.anyMethodScopeID
     @State private var collapsed: Set<String> = []
     /// Whether the column paints the window colour behind itself. A panel draws glass instead.
     private let drawsBackground: Bool
+    /// The endpoints the list shows; none draws the empty navigator.
+    private let endpoints: [Endpoint]
 
-    init(tab: NavigatorTab = .endpoints, drawsBackground: Bool = true) {
+    init(tab: NavigatorTab = .endpoints, drawsBackground: Bool = true,
+         endpoints: [Endpoint] = DesignFixtures.endpoints) {
         _tab = State(initialValue: tab.id)
+        _endpointSelection = State(initialValue: endpoints.first { $0.id == DesignFixtures.products.id }?.id)
         self.drawsBackground = drawsBackground
+        self.endpoints = endpoints
     }
 
     private var showsJourneys: Bool { tab == NavigatorTab.journeys.id }
@@ -365,7 +370,7 @@ struct GalleryNavigator: View {
                 } else {
                     SidebarView(
                         projectName: DesignFixtures.projectName,
-                        endpoints: DesignFixtures.endpoints,
+                        endpoints: endpoints,
                         serverConfiguration: DesignFixtures.serverConfiguration,
                         selectedEndpointID: $endpointSelection,
                         onDeleteEndpoint: { _ in },
@@ -402,9 +407,10 @@ struct GalleryNavigator: View {
 /// controls over it. In a window, the split view draws both, so `GalleryNavigator` leaves them out.
 struct GalleryNavigatorPanel: View {
     let tab: NavigatorTab
+    var endpoints: [Endpoint] = DesignFixtures.endpoints
 
     var body: some View {
-        GalleryNavigator(tab: tab, drawsBackground: false)
+        GalleryNavigator(tab: tab, drawsBackground: false, endpoints: endpoints)
             .overlay(alignment: .top) { GalleryWindowControls() }
             .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

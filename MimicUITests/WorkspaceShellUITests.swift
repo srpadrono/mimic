@@ -2098,7 +2098,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// SRVRUN-04, SRVRUN-05, SRVRUN-06, SRVWELL-07.
     ///
     /// Both alert buttons are matched by identifier *or* label. The identifier is the stable handle
-    /// the window deliberately added — "Try port <n+1>" interpolates the arithmetic under test — and
+    /// the window deliberately added — "Use port <n+1>" interpolates the arithmetic under test — and
     /// the label is kept as a fallback so a query cannot silently find nothing.
     @MainActor
     func testStartingOnAnOccupiedPortOffersTheNextPort() throws {
@@ -2116,14 +2116,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
             NSPredicate(
                 format: "identifier == %@ OR label == %@",
                 "portConflict.keepStoppedButton",
-                "Keep server stopped"
+                "Keep stopped"
             )
         ).firstMatch
         let tryNextPort = app.buttons.matching(
             NSPredicate(
                 format: "identifier == %@ OR label == %@",
                 "portConflict.tryPortButton",
-                "Try port \(port + 1)"
+                "Use port \(port + 1)"
             )
         ).firstMatch
 

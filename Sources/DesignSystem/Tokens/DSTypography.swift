@@ -33,6 +33,8 @@ public enum DSTypography {
     public static let method: Font = .system(size: 11, weight: .semibold, design: .monospaced)
     /// SF Mono 12 medium — a status code beside its dot.
     public static let status: Font = .system(size: 12, weight: .medium, design: .monospaced)
+    /// SF Mono 11 medium — a status code at the end of a navigator row.
+    public static let statusCompact: Font = .system(size: 11, weight: .medium, design: .monospaced)
 
     // MARK: - Figures
 
@@ -43,6 +45,9 @@ public enum DSTypography {
         /// 15pt semibold — summary figures in the inspector.
         public static let large: Font = Font.system(size: 15, weight: .semibold, design: .monospaced)
             .monospacedDigit()
+        /// SF Pro 15 semibold with tabular digits — the server popover's request counts, which the
+        /// design sets in the text face rather than the inspector's mono.
+        public static let largeText: Font = Font.system(size: 15, weight: .semibold).monospacedDigit()
     }
 
     /// Line spacing for wrapped text. SwiftUI adds this gap between lines.

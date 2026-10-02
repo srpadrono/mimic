@@ -155,9 +155,23 @@ struct GalleryToolbarStrip: View {
 
     /// Buttons that share one glass capsule, as a `ToolbarItemGroup` draws them.
     private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        GalleryToolbarGroup(content: content)
+    }
+}
+
+/// Toolbar buttons that share one glass capsule, as a `ToolbarItemGroup` draws them. The strip and
+/// the Components board's toolbar card draw the same capsule.
+struct GalleryToolbarGroup<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
         HStack(spacing: 0) {
-            content()
-                .frame(minWidth: WorkspaceToolbarLayout.actionWidth, minHeight: Self.itemHeight)
+            content
+                .frame(minWidth: WorkspaceToolbarLayout.actionWidth, minHeight: GalleryToolbarStrip.itemHeight)
         }
         .menuStyle(.button)
         .buttonStyle(.borderless)

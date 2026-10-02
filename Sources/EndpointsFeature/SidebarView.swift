@@ -29,6 +29,10 @@ public struct SidebarView: View {
     struct EndpointDeleteTarget: Identifiable {
         let id: UUID
         let name: String
+        /// `Delete “GET /products”?`: the route, which is what the list shows.
+        let title: String
+        /// What goes with it, and that it is final.
+        let message: String
     }
 
     public init(
@@ -115,14 +119,14 @@ public struct SidebarView: View {
         .onChange(of: methodScopeID) { _, _ in updateSections() }
         .onChange(of: endpoints) { _, _ in updateSections() }
         .alert(
-            "Delete \"\(deleteTarget?.name ?? "")\"?",
+            deleteTarget?.title ?? "",
             isPresented: Binding(
                 get: { deleteTarget != nil },
                 set: { if !$0 { deleteTarget = nil } }
             ),
             presenting: deleteTarget
         ) { target in
-            Button("Delete", role: .destructive) {
+            Button("Delete endpoint", role: .destructive) {
                 selectedEndpointID = Self.performDelete(
                     targetID: target.id,
                     selectedEndpointID: selectedEndpointID,
@@ -130,8 +134,8 @@ public struct SidebarView: View {
                 )
             }
             Button("Cancel", role: .cancel) { }
-        } message: { _ in
-            Text("This will remove the endpoint and all its scenarios. This can't be undone.")
+        } message: { target in
+            Text(target.message)
         }
     }
 
@@ -355,7 +359,23 @@ public struct SidebarView: View {
     static func clearedSearchText() -> String { "" }
 
     static func deleteTarget(for endpoint: Endpoint) -> EndpointDeleteTarget {
-        EndpointDeleteTarget(id: endpoint.id, name: endpoint.name)
+        EndpointDeleteTarget(
+            id: endpoint.id,
+            name: endpoint.name,
+            title: deleteTitle(for: endpoint),
+            message: deleteMessage(scenarioCount: endpoint.scenarios.count)
+        )
+    }
+
+    /// The confirmation's title, as the design words it: `Delete “GET /products”?`.
+    nonisolated static func deleteTitle(for endpoint: Endpoint) -> String {
+        "Delete \u{201C}\(endpoint.method.rawValue) \(endpoint.path)\u{201D}?"
+    }
+
+    /// "This removes the endpoint and its 5 scenarios. You can’t undo this."
+    nonisolated static func deleteMessage(scenarioCount: Int) -> String {
+        let scenarios = scenarioCount == 1 ? "its scenario" : "its \(scenarioCount) scenarios"
+        return "This removes the endpoint and \(scenarios). You can\u{2019}t undo this."
     }
 
     static func performDuplicate(endpointID: UUID, onDuplicate: (UUID) -> UUID?) -> UUID? {
@@ -448,11 +468,21 @@ enum SidebarQuery {
 }
 
 /// Compact method and route, with names shown when otherwise identical routes need disambiguation.
-struct EndpointSidebarRow: View {
+public struct EndpointSidebarRow: View {
     let endpoint: Endpoint
     var isSelected: Bool = false
     var backendName: String? = nil
     var showsName: Bool = false
+
+    /// `.increased` on a focused list's selection, where the code goes white and drops its dot.
+    @Environment(\.backgroundProminence) private var prominence
+
+    public init(endpoint: Endpoint, isSelected: Bool = false, backendName: String? = nil, showsName: Bool = false) {
+        self.endpoint = endpoint
+        self.isSelected = isSelected
+        self.backendName = backendName
+        self.showsName = showsName
+    }
 
     nonisolated static func subtitle(for endpoint: Endpoint) -> String? {
         let name = endpoint.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -476,11 +506,11 @@ struct EndpointSidebarRow: View {
         return live.statusCode
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: DSSpacing.sm) {
             DSMethodLabel(endpoint.method.rawValue, fixedWidth: false,
                           identifier: "navigator.\(endpoint.id.uuidString)")
-                .frame(width: 46, alignment: .leading)
+                .frame(width: DSLayout.rowMethodColumn, alignment: .leading)
 
             Text(endpoint.graphqlOperation.flatMap { $0.isEmpty ? nil : $0 } ?? endpoint.path)
                 .font(DSTypography.code)
@@ -498,8 +528,9 @@ struct EndpointSidebarRow: View {
             }
 
             if let status = Self.liveStatusCode(for: endpoint) {
-                DSStatusLabel(statusCode: status)
-                    .scaleEffect(0.92, anchor: .trailing)
+                // 11pt, as the navigator design draws it. On the focused selection the code is white
+                // and stands alone; the unfocused selection keeps its coloured dot.
+                DSStatusLabel(statusCode: status, showsDot: prominence != .increased, size: .compact)
             }
         }
         .help("\(endpoint.method.rawValue) \(endpoint.path)\n\(endpoint.name)"

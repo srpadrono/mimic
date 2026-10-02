@@ -1955,8 +1955,9 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// EPDEL-05, EPDEL-06.
     ///
     /// A different path from the editor's more-menu delete, and a different confirmation: the
-    /// sidebar's names the endpoint (`Delete "Orders"?`) where the editor's is the generic "Delete
-    /// endpoint?". The interpolated name is what tells the two apart, so it is what is asserted.
+    /// sidebar's names the endpoint's route (`Delete “GET /api/orders”?`) where the editor's is the
+    /// generic "Delete endpoint?". The interpolated route is what tells the two apart, so it is what
+    /// is asserted.
     @MainActor
     func testSidebarContextMenuDeleteConfirmationNamesTheEndpoint() throws {
         launchApp()
@@ -1978,9 +1979,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         // The title may arrive as the sheet's own label or as a `StaticText` inside it, so both are
         // polled — which of the two AppKit uses for an alert title is not something to guess at.
         let namesTheEndpoint = UITestApp.waitUntil(timeout: 4) {
-            sheet.label.contains("Orders")
+            sheet.label.contains("/api/orders")
                 || sheet.staticTexts.matching(
-                    NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Orders", "Orders")
+                    NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "/api/orders", "/api/orders")
                 ).firstMatch.exists
         }
         XCTAssertTrue(namesTheEndpoint,
@@ -1999,8 +2000,8 @@ final class EndpointEditorUITests: MimicUITestCase {
         secondDelete.click()
 
         let confirmSheet = app.sheets.firstMatch
-        XCTAssertTrue(confirmSheet.buttons["Delete"].waitForExistence(timeout: 5))
-        confirmSheet.buttons["Delete"].click()
+        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitForExistence(timeout: 5))
+        confirmSheet.buttons["Delete endpoint"].click()
 
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
                       "Deleting the last endpoint should return the sidebar to its empty state")

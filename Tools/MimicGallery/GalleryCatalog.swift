@@ -65,6 +65,7 @@ enum GalleryCatalog {
     static var entries: [GalleryEntry] {
         windows + workspace + toolbar + endpoints + journeys + requestLog + server + projects + importing + updates
             + DSCatalog.components.map { component(from: $0, group: .components) }
+            + componentsFromSections
             + DSCatalog.tokens.map { component(from: $0, group: .tokens) }
     }
 
@@ -142,6 +143,16 @@ enum GalleryCatalog {
             )
             .background(DSColors.content)
         },
+        // The jump bar's three save states side by side, on the Alerts board's desk.
+        GalleryEntry("feedback.autosave", "Autosave states", group: .workspace, size: CGSize(width: 197, height: 16)) {
+            HStack(spacing: 18) {
+                AutosaveStatusIndicator(status: .saved)
+                AutosaveStatusIndicator(status: .saving)
+                AutosaveStatusIndicator(status: .failed("The disk is full."))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(GalleryDesk.color)
+        },
     ]
 
     // MARK: - Toolbar
@@ -169,6 +180,10 @@ enum GalleryCatalog {
         GalleryEntry("workspace.navigator", "Endpoint navigator", group: .endpoints,
                      size: CGSize(width: 264, height: 884)) {
             GalleryNavigatorPanel(tab: .endpoints)
+        },
+        GalleryEntry("endpoints.emptyNavigator", "Navigator with no endpoints", group: .endpoints,
+                     size: CGSize(width: 264, height: 884)) {
+            GalleryNavigatorPanel(tab: .endpoints, endpoints: [])
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
             GalleryWorkspaceWindow.editor
@@ -249,6 +264,26 @@ enum GalleryCatalog {
         GalleryEntry("server.settings", "Server settings", group: .server, size: CGSize(width: 760, height: 576)) {
             BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server,
                                 visibleScreenHeight: GalleryModels.tallScreenHeight)
+        },
+        // The popover's content on a painted box; the board's figures, Storefront and Payments, and
+        // its 24-hour clock.
+        GalleryEntry("server.statusPopover", "Server status popover", group: .server,
+                     size: CGSize(width: 320, height: 234)) {
+            GalleryPopover {
+                ServerStatusDetails(
+                    serverState: .running(port: DesignFixtures.port),
+                    requestCount: 142,
+                    unmatchedCount: 3,
+                    configuration: DesignFixtures.serverSettingsConfiguration,
+                    boundConfiguration: DesignFixtures.serverSettingsConfiguration,
+                    runningSince: DesignFixtures.now.addingTimeInterval(-14 * 60),
+                    onShowUnmatched: {},
+                    onShowSettings: {},
+                    onToggleServer: {},
+                    onDismiss: {}
+                )
+            }
+            .environment(\.locale, Locale(identifier: "en_GB"))
         },
     ]
 

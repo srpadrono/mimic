@@ -81,4 +81,22 @@ struct DSStatusLabelTests {
         #expect(withDot.width - withoutDot.width == 13)
         #expect(withDot.height >= withoutDot.height)
     }
+
+    /// A focused navigator's selected row draws the code without its dot; the code keeps its place.
+    @Test("A code can drop its dot")
+    func codeWithoutDot() {
+        let withDot = render(DSStatusLabel(statusCode: 503))
+        let withoutDot = render(DSStatusLabel(statusCode: 503, showsDot: false))
+        #expect(withDot.width - withoutDot.width == 13)
+    }
+
+    /// The navigator draws its code at 11pt, so the compact label is narrower than a table's and
+    /// never taller.
+    @Test("A compact code is smaller than a regular one")
+    func compactCode() {
+        let regular = render(DSStatusLabel(statusCode: 503))
+        let compact = render(DSStatusLabel(statusCode: 503, size: .compact))
+        #expect(compact.width < regular.width)
+        #expect(compact.height <= regular.height)
+    }
 }

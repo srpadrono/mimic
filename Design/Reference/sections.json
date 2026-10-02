@@ -151,17 +151,6 @@
       "title": "Endpoint navigator column"
     },
     {
-      "id": "workspace.toolbar",
-      "board": "Main",
-      "rect": [
-        280,
-        8,
-        844,
-        44
-      ],
-      "title": "Toolbar over the centre column, as the canvas drew it before the toolbar proposal"
-    },
-    {
       "id": "toolbar.running",
       "board": "Toolbar",
       "rect": [
@@ -327,15 +316,15 @@
       "title": "Navigator with no endpoints"
     },
     {
-      "id": "feedback.alerts",
+      "id": "feedback.autosave",
       "board": "Alerts",
       "rect": [
-        0,
-        0,
-        1440,
-        900
+        976,
+        604,
+        197,
+        16
       ],
-      "title": "Alerts, banners and popovers"
+      "title": "Autosave states, in the jump bar"
     },
     {
       "id": "server.statusPopover",

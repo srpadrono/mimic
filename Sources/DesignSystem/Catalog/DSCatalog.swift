@@ -141,6 +141,29 @@ public enum DSCatalog {
                 .foregroundStyle(DSColors.labelSecondary)
             }
         },
+
+        // MARK: Table (shared by the request log and the import review)
+
+        Entry(id: "ds.table", title: "Table", referenceID: "ds.table",
+              size: CGSize(width: 888, height: 208)) {
+            DSCatalogCard("Table", detail: "Plain headers that sort, zebra rows, accent selection. "
+                          + "Used by the request log and import review.") {
+                VStack(spacing: 0) {
+                    DSTableHeader {
+                        DSTableColumnTitle("Time").dsTableCell(width: DSCatalogTableRow.time)
+                        DSTableColumnTitle("Method").dsTableCell(width: DSCatalogTableRow.method)
+                        DSTableColumnTitle("Path").dsTableCell(width: nil)
+                        DSTableColumnTitle("Status").dsTableCell(width: DSCatalogTableRow.status)
+                        DSTableColumnTitle("Scenario").dsTableCell(width: DSCatalogTableRow.scenario)
+                        DSTableColumnTitle("Duration").dsTableCell(width: DSCatalogTableRow.duration, alignment: .trailing)
+                        DSTableColumnTitle("Size").dsTableCell(width: DSCatalogTableRow.size, alignment: .trailing)
+                    }
+                    ForEach(Array(DSCatalogTableRow.rows.enumerated()), id: \.offset) { index, row in
+                        row.dsTableRow(index: index, isSelected: index == 2)
+                    }
+                }
+            }
+        },
     ]
 
     public static let tokens: [Entry] = [
@@ -495,5 +518,80 @@ struct DSCatalogSwatch: View, Identifiable {
     }
     .padding(48)
     .background(DSColors.window)
+}
+#endif
+
+#if DEBUG
+/// One row of the Table card, from the Main board's request log: literal values, so the card shows
+/// the shared table's look without the request log's types.
+struct DSCatalogTableRow: View {
+    static let time: CGFloat = 110
+    static let method: CGFloat = 64
+    static let status: CGFloat = 84
+    static let scenario: CGFloat = 150
+    static let duration: CGFloat = 84
+    static let size: CGFloat = 76
+
+    static let rows: [DSCatalogTableRow] = [
+        DSCatalogTableRow(time: "21:46:12.418", method: "GET", path: "/products", status: 503,
+                          scenario: "Out of stock", duration: "803 ms", size: "214 B"),
+        DSCatalogTableRow(time: "21:46:12.380", method: "GET", path: "/products/42", status: 200,
+                          scenario: "Default", duration: "8 ms", size: "640 B"),
+        DSCatalogTableRow(time: "21:46:10.155", method: "GET", path: "/recommendations?limit=4", status: 404,
+                          scenario: "Unmatched", scenarioColor: DSColors.warning, duration: "2 ms", size: "0 B"),
+        DSCatalogTableRow(time: "21:46:09.771", method: "POST", path: "/payments", status: 503,
+                          scenario: "Declined", duration: "1.2 s", size: "180 B"),
+    ]
+
+    let time: String
+    let method: String
+    let path: String
+    let status: Int
+    let scenario: String
+    var scenarioColor: Color = DSColors.labelPrimary
+    let duration: String
+    let size: String
+
+    /// White on the focused selection, as the request log's cells turn.
+    @Environment(\.backgroundProminence) var prominence
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(time)
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(ink(DSColors.labelSecondary))
+                .lineLimit(1)
+                .dsTableCell(width: Self.time)
+            DSMethodLabel(method, fixedWidth: false, identifier: "catalog.table.\(time)")
+                .dsTableCell(width: Self.method)
+            Text(path)
+                .font(DSTypography.code)
+                .foregroundStyle(ink(DSColors.labelPrimary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .dsTableCell(width: nil)
+            DSStatusLabel(statusCode: status)
+                .dsTableCell(width: Self.status)
+            Text(scenario)
+                .font(DSTypography.callout)
+                .foregroundStyle(ink(scenarioColor))
+                .lineLimit(1)
+                .dsTableCell(width: Self.scenario)
+            Text(duration)
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(ink(DSColors.labelSecondary))
+                .lineLimit(1)
+                .dsTableCell(width: Self.duration, alignment: .trailing)
+            Text(size)
+                .font(DSTypography.Figure.regular)
+                .foregroundStyle(ink(DSColors.labelSecondary))
+                .lineLimit(1)
+                .dsTableCell(width: Self.size, alignment: .trailing)
+        }
+    }
+
+    private func ink(_ color: Color) -> Color {
+        prominence == .increased ? .white : color
+    }
 }
 #endif

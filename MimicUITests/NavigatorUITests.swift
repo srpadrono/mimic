@@ -243,7 +243,7 @@ final class NavigatorUITests: MimicUITestCase {
         edited.click()
         app.typeKey(.delete, modifierFlags: [])
         let endpointDeleteSheet = app.sheets.firstMatch
-        XCTAssertTrue(endpointDeleteSheet.buttons["Delete"].waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointDeleteSheet.buttons["Delete endpoint"].waitForExistence(timeout: 5),
                       "Delete should confirm before removing the selected endpoint")
         endpointDeleteSheet.buttons["Cancel"].click()
         XCTAssertTrue(edited.exists)

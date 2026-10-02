@@ -617,6 +617,12 @@ struct WorkspaceFeatureLogicTests {
         var duplicatedID: UUID?
         #expect(SidebarView.clearedSearchText().isEmpty)
         #expect(SidebarView.deleteTarget(for: endpoint).name == "Accounts")
+        // The design's confirmation: the route in curly quotes, and what goes with it.
+        #expect(SidebarView.deleteTarget(for: endpoint).title == "Delete \u{201C}GET /accounts\u{201D}?")
+        #expect(SidebarView.deleteMessage(scenarioCount: 5)
+            == "This removes the endpoint and its 5 scenarios. You can\u{2019}t undo this.")
+        #expect(SidebarView.deleteMessage(scenarioCount: 1)
+            == "This removes the endpoint and its scenario. You can\u{2019}t undo this.")
         let duplicated = SidebarView.performDuplicate(endpointID: endpoint.id, onDuplicate: { id in
             duplicatedID = id
             return id
