@@ -50,6 +50,8 @@ public struct RequestLogDrawerView: View {
     /// Whether the table holds keyboard focus. The table is one focus target, like an AppKit table,
     /// and the arrow keys, Return, Escape and ⌘A below depend on it.
     @FocusState private var tableHasKeyboardFocus: Bool
+    /// Carries the Mac's 12- or 24-hour choice, which sizes the Time column.
+    @Environment(\.locale) private var locale
 
     private var filterText: String {
         get { table.filterText }
@@ -72,8 +74,23 @@ public struct RequestLogDrawerView: View {
         get { table.sortAscending }
         nonmutating set { table.sortAscending = newValue }
     }
+    /// The rows the table draws. Until the background pass has written any, they are worked out
+    /// here, so the first frame already lists the log rather than a count of 0 and "No matching
+    /// requests".
     private var sortedAndFilteredLogs: [RequestLog] {
-        get { table.rows }
+        get {
+            Self.displayedRows(
+                stored: table.rows,
+                logs: requestLogs,
+                endpoints: endpoints,
+                methodFilter: methodFilter,
+                filterText: filterText,
+                unmatchedOnly: unmatchedOnly,
+                errorsOnly: errorsOnly,
+                sortField: sortField,
+                sortAscending: sortAscending
+            )
+        }
         nonmutating set { table.rows = newValue }
     }
     /// Where a ⇧-click measures its range from: the last row clicked without ⇧.
@@ -236,7 +253,8 @@ public struct RequestLogDrawerView: View {
             } else {
                 GeometryReader { tableGeometry in
                     let tableWidth = max(tableGeometry.size.width, LogColumns.compactMinimumTableWidth)
-                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: compact)
+                    let pathWidth = LogColumns.pathWidth(tableWidth: tableWidth, compact: compact,
+                                                         twentyFourHour: twentyFourHour)
                     ScrollView(.horizontal) {
                         VStack(spacing: 0) {
                             tableHeader(compact: compact, pathWidth: pathWidth)
@@ -375,7 +393,8 @@ public struct RequestLogDrawerView: View {
             }
 
             if !requestLogs.isEmpty {
-                DSIconButton("Clear request log", systemImage: "trash", identifier: "clearRequestLogButton") {
+                DSIconButton("Clear request log", systemImage: "trash", identifier: "clearRequestLogButton",
+                             glyphSize: DSGlyph.paneAction, weight: .medium, width: DSControlHeight.large) {
                     selectedLogIDs = Self.performClear(onClear: onClear)
                     selectionAnchorID = nil
                 }
@@ -483,9 +502,6 @@ public struct RequestLogDrawerView: View {
                         .font(.system(size: DSGlyph.field, weight: .regular))
                         .foregroundStyle(DSColors.labelTertiary)
                 }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.minimum, weight: .bold))
-                    .foregroundStyle(DSColors.labelTertiary)
             }
             .frame(height: DSControlHeight.regular)
             .contentShape(Rectangle())
@@ -500,9 +516,15 @@ public struct RequestLogDrawerView: View {
         .accessibilityValue(methodFilter?.rawValue ?? "All")
     }
 
-    /// How many requests the table is showing, or `nil` for an empty log.
+    /// How many requests the log holds, whatever the filter shows, or `nil` for an empty log. The
+    /// scope control beside it counts what each filter would leave.
     private var shownCount: Int? {
-        requestLogs.isEmpty ? nil : sortedAndFilteredLogs.count
+        requestLogs.isEmpty ? nil : requestLogs.count
+    }
+
+    /// Whether the timestamps read on a 24-hour clock, which takes a narrower Time column.
+    private var twentyFourHour: Bool {
+        LogColumns.usesTwentyFourHourClock(locale)
     }
 
     /// "N requests", the count's spoken form.
@@ -571,7 +593,8 @@ public struct RequestLogDrawerView: View {
     @ViewBuilder
     private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            columnHeader("Time", field: .timestamp, width: LogColumns.timeWidth(compact: compact))
+            columnHeader("Time", field: .timestamp,
+                         width: LogColumns.timeWidth(compact: compact, twentyFourHour: twentyFourHour))
             columnHeader("Method", field: .method, width: LogColumns.method)
             columnHeader("Path", field: .path, width: pathWidth)
             columnHeader("Status", field: .status, width: LogColumns.status)
@@ -713,6 +736,32 @@ public struct RequestLogDrawerView: View {
     }
 
     // MARK: - Sorting & Filtering
+
+    /// The rows the background pass stored, or, before it has stored any, the same query run on
+    /// the spot. Unmatched wins over Errors, as in ``updateLogs(debounce:)``.
+    nonisolated static func displayedRows(
+        stored: [RequestLog]?,
+        logs: [RequestLog],
+        endpoints: [Endpoint],
+        methodFilter: HTTPMethod?,
+        filterText: String,
+        unmatchedOnly: Bool,
+        errorsOnly: Bool,
+        sortField: SortField,
+        sortAscending: Bool
+    ) -> [RequestLog] {
+        if let stored { return stored }
+        return RequestLogQuery.process(
+            logs: logs,
+            endpoints: endpoints,
+            methodFilter: methodFilter,
+            filterText: filterText,
+            unmatchedOnly: unmatchedOnly,
+            errorsOnly: errorsOnly && !unmatchedOnly,
+            sortField: sortField,
+            sortAscending: sortAscending
+        )
+    }
 
     private func updateLogs(debounce: Bool = false) {
         filterDebounceTask?.cancel()
@@ -1125,6 +1174,8 @@ struct RequestLogTableRow: View {
     let scenarioName: String?
     let onSelect: (RequestLogDrawerView.SelectionModifier) -> Void
     @State private var isHovered = false
+    /// Carries the Mac's 12- or 24-hour choice, which sizes the Time column.
+    @Environment(\.locale) private var locale
 
     /// What a capture acts on: the whole selection when this row belongs to a multi-row one,
     /// otherwise just this row. A right-click outside the selection never acts on the selection.
@@ -1140,7 +1191,8 @@ struct RequestLogTableRow: View {
                 .font(DSTypography.Figure.regular)
                 .foregroundStyle(ink(DSColors.labelSecondary))
                 .lineLimit(1)
-                .cell(width: LogColumns.timeWidth(compact: compact))
+                .cell(width: LogColumns.timeWidth(compact: compact,
+                                                  twentyFourHour: LogColumns.usesTwentyFourHourClock(locale)))
 
             // Keyed by the log entry, not the method, so every GET row has its own identifier.
             DSMethodLabel(log.method.rawValue, fixedWidth: false, identifier: log.id.uuidString)

@@ -51,5 +51,8 @@ public enum DSTypography {
         public static let callout: CGFloat = 5
         /// Code: 19pt lines at SF Mono 12.
         public static let code: CGFloat = 5
+        /// Short paragraphs on empty screens: 17pt lines at 12pt and 18pt at 13pt, measured against
+        /// the EmptyStates artboard. `callout` draws about 20pt lines at 12pt.
+        public static let tight: CGFloat = 2
     }
 }

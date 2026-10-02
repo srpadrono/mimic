@@ -176,6 +176,21 @@ struct WorkspaceFeatureLogicTests {
         #expect(groupedResult.ungrouped.count == 2)
     }
 
+    @Test("Sidebar groups keep the project's order, not the alphabet's")
+    func sidebarQueryKeepsProjectGroupOrder() {
+        let endpoints = [
+            makeEndpoint(name: "Products", path: "/products", groupTag: "Catalog"),
+            makeEndpoint(name: "Summary", path: "/account-summary", groupTag: "Account"),
+            makeEndpoint(name: "Cart", path: "/cart", method: .post, groupTag: "Catalog"),
+            makeEndpoint(name: "Pay", path: "/payments", method: .post, groupTag: "Payments"),
+        ]
+
+        let result = SidebarQuery.sections(endpoints: endpoints, searchText: "")
+
+        #expect(result.grouped.map(\.name) == ["Catalog", "Account", "Payments"])
+        #expect(result.grouped.first?.endpoints.map(\.name) == ["Products", "Cart"])
+    }
+
     /// The one test in this file whose only claim is that nothing trapped, and it says so in its name.
     ///
     /// Everything else here asserts on values, which is the right shape for logic — but a value test

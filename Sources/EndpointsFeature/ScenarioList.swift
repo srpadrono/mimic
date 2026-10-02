@@ -12,6 +12,9 @@ public struct EndpointInspectorContent: View {
     let onDuplicateScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onDeleteScenario: (_ endpointID: UUID, _ scenarioID: UUID) -> Void
     let onRenameScenario: (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void
+    /// The moment the Traffic chart ends at. `nil` follows the clock; the gallery pins it so its
+    /// fixture's requests stay inside the last fifteen minutes.
+    let now: Date?
 
     public init(
         endpoint: Endpoint,
@@ -20,7 +23,8 @@ public struct EndpointInspectorContent: View {
         onSetActiveScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDuplicateScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
         onDeleteScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID) -> Void,
-        onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void
+        onRenameScenario: @escaping (_ endpointID: UUID, _ scenarioID: UUID, _ name: String) -> Void,
+        now: Date? = nil
     ) {
         self.endpoint = endpoint
         self.endpointTraffic = traffic
@@ -29,6 +33,7 @@ public struct EndpointInspectorContent: View {
         self.onDuplicateScenario = onDuplicateScenario
         self.onDeleteScenario = onDeleteScenario
         self.onRenameScenario = onRenameScenario
+        self.now = now
     }
 
     public var body: some View {
@@ -57,7 +62,7 @@ public struct EndpointInspectorContent: View {
                     EndpointInspectorSettings(endpoint: endpoint, context: endpointSettings)
                 }
 
-                EndpointTrafficSummary(logs: endpointTraffic)
+                EndpointTrafficSummary(logs: endpointTraffic, now: now)
             }
             .padding(.bottom, DSSpacing.lg)
             // On the content group: XCUITest found no element for the identifier on the scroll view.

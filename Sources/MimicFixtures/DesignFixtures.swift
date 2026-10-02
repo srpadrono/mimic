@@ -248,6 +248,37 @@ public enum DesignFixtures {
         return Array(logs.reversed())
     }
 
+    /// The last fifteen minutes of `GET /products`, as the inspector's Traffic section draws them:
+    /// 128 served and 3 errors, at a 12 ms median, ending at `now`. Oldest minute first.
+    ///
+    /// The artboard's last three bars are red and about half the chart's height, which three errors
+    /// can't reach beside a 16-request minute; here each of those minutes holds one error.
+    public static var productsTraffic: [RequestLog] {
+        let minutes: [(served: Int, errors: Int)] = [
+            (5, 0), (8, 0), (7, 0), (11, 0), (9, 0), (13, 0), (11, 0), (14, 0),
+            (10, 0), (12, 0), (16, 0), (12, 0), (0, 1), (0, 1), (0, 1),
+        ]
+        var logs: [RequestLog] = []
+        for (index, minute) in minutes.enumerated() {
+            let minutesAgo = Double(minutes.count - 1 - index)
+            for request in 0..<(minute.served + minute.errors) {
+                let isError = request >= minute.served
+                logs.append(RequestLog(
+                    id: uuid(5_000 + logs.count),
+                    timestamp: now.addingTimeInterval(-(minutesAgo * 60 + 1 + Double(request))),
+                    method: .get,
+                    path: products.path,
+                    listenerPort: port,
+                    durationMs: 12,
+                    matchedEndpointID: products.id,
+                    matchedScenarioID: isError ? uuid(102) : uuid(101),
+                    responseStatusCode: isError ? 503 : 200
+                ))
+            }
+        }
+        return logs
+    }
+
     // MARK: - Helpers
 
     private static func journey(

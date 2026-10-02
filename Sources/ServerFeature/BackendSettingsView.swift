@@ -15,9 +15,14 @@ public struct BackendSettingsView: View {
     @State private var error: String?
     /// The last probe of each port typed, so the port row can say "Available" or "In use".
     @State private var portAvailability: [Int: Bool] = [:]
+    /// The visible screen height the sheet fits itself under. `nil` reads the main screen; the
+    /// gallery pins it so the sheet draws at the design's height on any screen.
+    private let visibleScreenHeight: CGFloat?
 
-    public init(configuration: ServerConfiguration, model: any ServerSettingsModel) {
+    public init(configuration: ServerConfiguration, model: any ServerSettingsModel,
+                visibleScreenHeight: CGFloat? = nil) {
         self.model = model
+        self.visibleScreenHeight = visibleScreenHeight
         _draft = State(initialValue: configuration)
     }
 
@@ -58,7 +63,8 @@ public struct BackendSettingsView: View {
                 .overlay(alignment: .top) { DSDivider(identifier: "backend.footer") }
         }
         .frame(width: DSSheetWidth.split,
-               height: BackendSettingsGeometry.height(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900))
+               height: BackendSettingsGeometry.height(
+                   visibleScreenHeight: visibleScreenHeight ?? NSScreen.main?.visibleFrame.height ?? 900))
         .background(DSColors.sheet)
         .dsSheetSurface()
         .onChange(of: draft) { _, _ in clearIssue() }

@@ -6,15 +6,23 @@ import Testing
 @MainActor
 struct CenterPaneLayoutTests {
 
-    @Test("Three cards share a row until they would be narrower than 168pt, then two, then one")
+    @Test("Three cards share a row until they would be narrower than 204pt, then two, then one")
     func cardsWrapOnlyWhenTooNarrow() {
-        // 3 × 168 + 2 × 16 = 536; 2 × 168 + 16 = 352.
-        #expect(FirstEndpointChooser.chooserColumns(forWidth: 692) == 3)
-        #expect(FirstEndpointChooser.chooserColumns(forWidth: 536) == 3)
-        #expect(FirstEndpointChooser.chooserColumns(forWidth: 535) == 2)
-        #expect(FirstEndpointChooser.chooserColumns(forWidth: 352) == 2)
-        #expect(FirstEndpointChooser.chooserColumns(forWidth: 351) == 1)
+        // A 204pt card is a 168pt text column in 18pt of padding.
+        // 3 × 204 + 2 × 16 = 644; 2 × 204 + 16 = 424.
+        #expect(FirstEndpointChooser.chooserColumns(forWidth: 800) == 3)
+        #expect(FirstEndpointChooser.chooserColumns(forWidth: 644) == 3)
+        #expect(FirstEndpointChooser.chooserColumns(forWidth: 643) == 2)
+        #expect(FirstEndpointChooser.chooserColumns(forWidth: 424) == 2)
+        #expect(FirstEndpointChooser.chooserColumns(forWidth: 423) == 1)
         #expect(FirstEndpointChooser.chooserColumns(forWidth: 0) == 1)
         #expect(FirstEndpointChooser.chooserColumns(forWidth: 5_000) == 3)
+    }
+
+    @Test("Cards fill rows in order, the last row holding what is left")
+    func cardsSplitIntoRows() {
+        #expect(FirstEndpointChooser.rows(of: [1, 2, 3], columns: 3) == [[1, 2, 3]])
+        #expect(FirstEndpointChooser.rows(of: [1, 2, 3], columns: 2) == [[1, 2], [3]])
+        #expect(FirstEndpointChooser.rows(of: [1, 2, 3], columns: 1) == [[1], [2], [3]])
     }
 }

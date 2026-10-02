@@ -15,6 +15,18 @@ import Domain
 @MainActor
 struct JourneyFeatureLogicTests {
 
+    @Test("Journey groups keep the project's order, not the alphabet's")
+    func navigatorGroupsKeepProjectOrder() {
+        let journeys = [
+            Journey(name: "Payment retry", groupTag: "Checkout"),
+            Journey(name: "Session expiry", groupTag: "Account"),
+            Journey(name: "Card declined twice", groupTag: "Checkout"),
+            Journey(name: "Scratch"),
+            Journey(name: "Offline recovery", groupTag: "Resilience"),
+        ]
+        #expect(JourneyNavigatorList.groupNames(of: journeys) == ["Checkout", "Account", "Resilience"])
+    }
+
     @Test("Capture preview refuses requests without an HTTP response")
     func capturePreviewExplainsTransportFailures() {
         let logs = [

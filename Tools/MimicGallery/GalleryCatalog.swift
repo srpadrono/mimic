@@ -168,23 +168,33 @@ enum GalleryCatalog {
     static let endpoints: [GalleryEntry] = [
         GalleryEntry("workspace.navigator", "Endpoint navigator", group: .endpoints,
                      size: CGSize(width: 264, height: 884)) {
-            GalleryNavigator(tab: .endpoints)
+            GalleryNavigatorPanel(tab: .endpoints)
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
             GalleryWorkspaceWindow.editor
         },
         GalleryEntry("endpoints.inspector", "Scenario inspector", group: .endpoints,
                      size: CGSize(width: 300, height: 884)) {
-            GalleryWorkspaceWindow.inspector
-                .background(DSColors.window)
+            GalleryEndpointInspectorPanel()
         },
         GalleryEntry("endpoints.firstRun", "First endpoint", group: .endpoints, size: CGSize(width: 1152, height: 836)) {
-            FirstEndpointChooser(port: 8080, onAddEndpoint: {}, onImportHAR: {}, onImportOpenAPI: {})
-                .background(DSColors.content)
+            // Over the empty request log, as a new project's window shows it: the chooser centres
+            // in what the log leaves. 250pt is the log's height on the EmptyStates artboard.
+            VStack(spacing: 0) {
+                FirstEndpointChooser(port: 8080, onAddEndpoint: {}, onImportHAR: {}, onImportOpenAPI: {})
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(height: DSStroke.hairline)
+                RequestLogDrawerView(requestLogs: [], endpoints: [], serverState: .stopped, onClear: {})
+                    .configuredPort(8080)
+                    .frame(height: 250)
+            }
+            .background(DSColors.content)
         },
         GalleryEntry("endpoints.newEndpointSheet", "New endpoint sheet", group: .endpoints,
                      size: CGSize(width: 407, height: 376)) {
-            NewEndpointSheet(existingGroups: ["Account", "Catalog", "Payments"]) { _ in }
+            NewEndpointSheet(existingGroups: ["Account", "Catalog", "Payments"],
+                             initialDraft: GalleryModels.newEndpointDraft) { _ in }
         },
     ]
 
@@ -193,7 +203,7 @@ enum GalleryCatalog {
     static let journeys: [GalleryEntry] = [
         GalleryEntry("journeys.navigator", "Journey navigator", group: .journeys,
                      size: CGSize(width: 264, height: 884)) {
-            GalleryNavigator(tab: .journeys)
+            GalleryNavigatorPanel(tab: .journeys)
         },
         // From the jump bar down, as the artboard's section is drawn.
         GalleryEntry("journeys.editor", "Journey editor", group: .journeys, size: CGSize(width: 844, height: 836)) {
@@ -216,7 +226,8 @@ enum GalleryCatalog {
                 backends: DesignFixtures.serverConfiguration.listeners,
                 endpoints: DesignFixtures.endpoints,
                 onCommit: { _ in },
-                onRemove: {}
+                onRemove: {},
+                visibleScreenHeight: GalleryModels.tallScreenHeight
             )
         },
     ]
@@ -236,7 +247,8 @@ enum GalleryCatalog {
 
     static let server: [GalleryEntry] = [
         GalleryEntry("server.settings", "Server settings", group: .server, size: CGSize(width: 760, height: 576)) {
-            BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server)
+            BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server,
+                                visibleScreenHeight: GalleryModels.tallScreenHeight)
         },
     ]
 
@@ -283,12 +295,9 @@ enum GalleryCatalog {
     // MARK: - Updates
 
     static let updates: [GalleryEntry] = [
-        GalleryEntry("updates.sheet", "Update sheet", group: .updates, size: CGSize(width: 560, height: 480)) {
-            // The sheet is shorter than its artboard; it hangs from the top on the sheet surface, as
-            // the design draws it, rather than floating centred over nothing.
+        GalleryEntry("updates.sheet", "Update sheet", group: .updates,
+                     size: CGSize(width: DSSheetWidth.medium, height: UpdateSheet.designHeight)) {
             UpdateSheet(service: GalleryModels.updates)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .background(DSColors.sheet)
         },
     ]
 }
@@ -308,6 +317,16 @@ enum GalleryModels {
         boundConfiguration: DesignFixtures.serverSettingsBoundConfiguration
     )
     static let updates = UpdateSheetPreviewModel()
+
+    /// A screen tall enough for every sheet to open at its design height. CI's runner screen is
+    /// short, and a sheet that fits itself under the real screen would render cut short there.
+    static let tallScreenHeight: CGFloat = 1_200
+
+    /// The new endpoint artboard: `GET /products/:id`, filed under Catalog.
+    static let newEndpointDraft = NewEndpointDraft(
+        name: "Get product", method: .get, path: "/products/:id", groupTag: "Catalog",
+        statusCode: 200, contentType: .json
+    )
 
     /// The rows the import review artboard lists, with the analytics host switched off.
     static let importCandidates: [ImportCandidate] = [

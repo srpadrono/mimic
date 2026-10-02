@@ -4,7 +4,9 @@ import CoreGraphics
 nonisolated public enum DSSheetWidth {
     /// A two-field form with a short hint: new project.
     public static let short: CGFloat = 377
-    /// A short creation form: new endpoint, rename.
+    /// A four-row creation form with a request field: new endpoint, at the new endpoint design's width.
+    public static let endpoint: CGFloat = 407
+    /// A short creation form: new scenario, rename.
     public static let compact: CGFloat = 440
     /// A sheet with one list or explanation: update notes, templates.
     public static let medium: CGFloat = 560

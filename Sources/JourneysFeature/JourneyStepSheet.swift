@@ -95,7 +95,8 @@ public struct JourneyStepSheet: View {
         globalDelayMs: Int = 0,
         endpoints: [Endpoint] = [],
         onCommit: @escaping (JourneyStepSpec) -> Void,
-        onRemove: (() -> Void)? = nil
+        onRemove: (() -> Void)? = nil,
+        visibleScreenHeight: CGFloat? = nil
     ) {
         self.step = step
         self.stepNumber = stepNumber
@@ -104,6 +105,7 @@ public struct JourneyStepSheet: View {
         self.endpoints = endpoints
         self.onCommit = onCommit
         self.onRemove = onRemove
+        self.visibleScreenHeight = visibleScreenHeight
     }
 
     public var body: some View {
