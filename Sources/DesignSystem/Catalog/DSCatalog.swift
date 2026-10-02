@@ -197,10 +197,19 @@ public enum DSCatalog {
     public static var all: [Entry] { components + tokens }
 
     /// Every corner radius, named for the shape it rounds, as the Tokens board lists them.
-    private static let radii: [(name: String, value: CGFloat)] = [
-        ("mark", DSCornerRadius.mark), ("field", DSCornerRadius.field), ("segment", DSCornerRadius.segment),
-        ("card", DSCornerRadius.card), ("panel", DSCornerRadius.panel), ("sheet", DSCornerRadius.sheet),
+    private static let radii: [NamedRadius] = [
+        NamedRadius(name: "mark", value: DSCornerRadius.mark),
+        NamedRadius(name: "field", value: DSCornerRadius.field),
+        NamedRadius(name: "segment", value: DSCornerRadius.segment),
+        NamedRadius(name: "card", value: DSCornerRadius.card),
+        NamedRadius(name: "panel", value: DSCornerRadius.panel),
+        NamedRadius(name: "sheet", value: DSCornerRadius.sheet),
     ]
+
+    private struct NamedRadius {
+        let name: String
+        let value: CGFloat
+    }
 
     /// A specimen row: its caption in the board's 84 pt column, then the specimens.
     private static func catalogSpecimen(_ caption: String, @ViewBuilder content: () -> some View) -> some View {
