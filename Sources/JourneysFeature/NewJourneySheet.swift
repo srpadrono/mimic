@@ -83,6 +83,7 @@ public struct NewJourneySheet: View {
         .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .defaultFocus($focusedField, .name)
     }
 

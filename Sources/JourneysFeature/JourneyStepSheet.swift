@@ -161,6 +161,7 @@ public struct JourneyStepSheet: View {
                                ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .dsFormLabelWidth(Self.labelWidth)
         .defaultFocus($pathIsFocused, true)
         .onAppear {

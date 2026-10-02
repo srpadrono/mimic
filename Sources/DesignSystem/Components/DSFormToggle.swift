@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A settings row: a title, an optional one-line explanation under it, and a small switch at the
-/// trailing edge.
+/// trailing edge. The whole row flips the switch.
 public struct DSFormToggle: View {
     private let title: String
     private let description: String?
@@ -31,9 +31,8 @@ public struct DSFormToggle: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, description == nil ? 0 : DSSpacing.sm)
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .tint(DSColors.accent)
+        .toggleStyle(DSSwitchToggleStyle())
+        .padding(.horizontal, DSFormMetrics.groupRowInset)
         .frame(maxWidth: .infinity, minHeight: DSFormMetrics.groupRowHeight)
         .accessibilityIdentifier(identifier)
         .accessibilityLabel(title)

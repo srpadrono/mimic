@@ -83,6 +83,7 @@ struct CaptureFromLogSheet: View {
         .padding(DSSpacing.xl)
         .frame(width: DSSheetWidth.medium)
         .background(DSColors.sheet)
+        .dsSheetSurface()
     }
 
     private func row(_ log: RequestLog) -> some View {

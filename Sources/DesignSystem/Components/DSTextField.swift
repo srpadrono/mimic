@@ -71,12 +71,18 @@ public struct DSTextField: View {
         }
     }
 
+    /// Code in a sheet's 28pt field is 13pt; in a 24pt field inside a settings row it is 12pt.
+    private var textFont: Font {
+        guard monospaced else { return DSTypography.body }
+        return height >= DSControlHeight.large ? DSTypography.codeLarge : DSTypography.code
+    }
+
     private var fieldStack: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: DSSpacing.xs) {
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
-                    .font(monospaced ? DSTypography.codeLarge : DSTypography.body)
+                    .font(textFont)
                     .focused($isFocused)
                     .accessibilityIdentifier(inputIdentifier ?? "ds.textfield.\(identifier)")
                     .accessibilityLabel(label)

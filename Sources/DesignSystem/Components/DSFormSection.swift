@@ -20,7 +20,8 @@ public enum DSFormMetrics {
 }
 
 /// A titled group of settings rows: an 11pt heading over a rounded card with hairline rules
-/// between its rows. Put ``DSFormGroupRow``s or ``DSFormToggle``s inside, separated by ``DSDivider``.
+/// across its full width between rows. Put ``DSFormGroupRow``s or ``DSFormToggle``s inside,
+/// separated by ``DSDivider``.
 public struct DSFormSection<Content: View>: View {
     private let title: String
     private let identifier: String
@@ -40,11 +41,11 @@ public struct DSFormSection<Content: View>: View {
                 .padding(.horizontal, DSSpacing.xs)
                 .accessibilityAddTraits(.isHeader)
 
+            // Each row insets its own content, so the rules between rows run edge to edge.
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DSFormMetrics.groupRowInset)
                 .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.panel).fill(DSColors.raised)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.panel).fill(DSColors.formGroup)
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: DSCornerRadius.panel)
@@ -77,6 +78,7 @@ public struct DSFormGroupRow<Content: View>: View {
             content
         }
         .padding(.vertical, DSSpacing.sm)
+        .padding(.horizontal, DSFormMetrics.groupRowInset)
         .frame(minHeight: DSFormMetrics.groupRowHeight)
     }
 }

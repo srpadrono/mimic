@@ -152,6 +152,7 @@ public struct NewProjectSheet: View {
         .padding(DSSpacing.xl)
         .frame(width: DSSheetWidth.short)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .defaultFocus($focusedField, .name)
         // Re-probed as the port is typed, after a pause so each keystroke is not a bind.
         .task(id: form.portString) {
