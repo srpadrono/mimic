@@ -236,7 +236,7 @@ enum GalleryCatalog {
 
     static let server: [GalleryEntry] = [
         GalleryEntry("server.settings", "Server settings", group: .server, size: CGSize(width: 760, height: 576)) {
-            BackendSettingsView(configuration: DesignFixtures.serverConfiguration, model: GalleryModels.server)
+            BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server)
         },
     ]
 
@@ -301,7 +301,7 @@ enum GalleryModels {
     static let server = ServerSettingsPreviewModel(
         projectName: DesignFixtures.projectName,
         serverState: .running(port: DesignFixtures.port),
-        boundConfiguration: DesignFixtures.serverConfiguration
+        boundConfiguration: DesignFixtures.serverSettingsBoundConfiguration
     )
     static let updates = UpdateSheetPreviewModel()
 

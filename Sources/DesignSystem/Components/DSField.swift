@@ -8,6 +8,7 @@ public struct DSFieldChrome: ViewModifier {
     private let isFocused: Bool
     private let isInvalid: Bool
     private let horizontalPadding: CGFloat
+    @Environment(\.dsSurface) private var surface
 
     public init(height: CGFloat = DSControlHeight.regular, cornerRadius: CGFloat = DSCornerRadius.field,
                 isFocused: Bool, isInvalid: Bool = false, horizontalPadding: CGFloat = DSSpacing.sm) {
@@ -23,7 +24,7 @@ public struct DSFieldChrome: ViewModifier {
             .padding(.horizontal, horizontalPadding)
             .frame(height: height)
             .background {
-                RoundedRectangle(cornerRadius: cornerRadius).fill(DSColors.field)
+                RoundedRectangle(cornerRadius: cornerRadius).fill(surface.fieldFill)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)
@@ -48,7 +49,7 @@ public struct DSFieldChrome: ViewModifier {
     private var border: Color {
         if isInvalid { return DSColors.error }
         if isFocused { return DSColors.accent }
-        return DSColors.fieldBorder
+        return surface.fieldBorder
     }
 }
 

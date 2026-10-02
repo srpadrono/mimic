@@ -41,6 +41,7 @@ public struct UpdateSheet: View {
         .padding(DSSpacing.xl)
         .frame(width: DSSheetWidth.medium)
         .background(DSColors.sheet)
+        .dsSheetSurface()
         .interactiveDismissDisabled(service.phase.isBusy)
     }
 

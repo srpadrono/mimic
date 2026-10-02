@@ -171,6 +171,36 @@ struct DSContrastTests {
         }
     }
 
+    /// The sheet boards draw fields white in light and a step above the sheet in dark, and lift a
+    /// settings group a smaller step off the sheet. Flattened onto the sheet, as they are drawn.
+    @Test("Sheet fields and settings groups match the sheet boards")
+    func sheetControlsMatchTheBoards() throws {
+        let expected: [Appearance: [String: UInt32]] = [
+            .light: ["field": 0xFFFFFF, "group": 0xFFFFFF],
+            .dark: ["field": 0x38383B, "group": 0x343436],
+        ]
+        for appearance in Appearance.allCases {
+            let sheet = try resolve(DSColors.sheet, in: appearance)
+            let readings: [(name: String, colour: Color)] = [
+                ("field", DSSurface.sheet.fieldFill),
+                ("group", DSColors.formGroup),
+            ]
+            for reading in readings {
+                let hex = try #require(expected[appearance]?[reading.name])
+                let flattened = try resolve(reading.colour, in: appearance).composited(over: sheet)
+                expectSame(flattened, RGBA(hex: hex), "\(reading.name) on a sheet, \(appearance)")
+            }
+        }
+    }
+
+    /// Outside a sheet a field keeps the window's quiet wash, so only sheets change.
+    @Test("Window fields keep the window wash")
+    func windowFieldsKeepTheWash() throws {
+        let light = try resolve(DSSurface.window.fieldFill, in: .light)
+        #expect(isClose(light.alpha, 0.045, within: componentTolerance))
+        #expect(light.red == 0)
+    }
+
     // MARK: - Labels
 
     /// The three label roles on the five surfaces, as measured. A change to any ink or surface moves
