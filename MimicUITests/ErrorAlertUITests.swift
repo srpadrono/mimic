@@ -265,7 +265,7 @@ final class ErrorAlertUITests: MimicUITestCase {
                 + alertText(messageIdentifier: "portConflict.message")
         )
         XCTAssertFalse(app.buttons["portConflict.tryPortButton"].exists)
-        alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep server stopped").click()
+        alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep stopped").click()
         XCTAssertTrue(waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "No higher port is available"))
         assertStartServerAvailable(after: "last-port-conflict")
         XCTAssertFalse(
@@ -298,7 +298,7 @@ final class ErrorAlertUITests: MimicUITestCase {
                 + "the window reads: " + alertText(messageIdentifier: "portConflict.message")
         )
 
-        alertButton(identifier: "portConflict.tryPortButton", label: "Try port \(port + 1)").click()
+        alertButton(identifier: "portConflict.tryPortButton", label: "Use port \(port + 1)").click()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port + 1, timeout: 20),
             "Accepting the suggestion should start the server on the next port"
@@ -329,7 +329,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         )
     }
 
-    /// ERRPORT-04 — "Keep server stopped" clears the alert and starts nothing.
+    /// ERRPORT-04 — "Keep stopped" clears the alert and starts nothing.
     @MainActor
     func testPortConflictKeepingTheServerStopped() throws {
         let port = try XCTUnwrap(
@@ -342,14 +342,14 @@ final class ErrorAlertUITests: MimicUITestCase {
         workspace.toggleServer()
 
         XCTAssertTrue(
-            waitForAlert(messageIdentifier: "portConflict.message", saying: "already in use", timeout: 20),
+            waitForAlert(messageIdentifier: "portConflict.message", saying: "is in use", timeout: 20),
             "A port another process holds should raise the conflict alert — the window reads: "
                 + alertText(messageIdentifier: "portConflict.message")
         )
-        alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep server stopped").click()
+        alertButton(identifier: "portConflict.keepStoppedButton", label: "Keep stopped").click()
 
         XCTAssertTrue(
-            waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "already in use"),
+            waitForAlertToClear(messageIdentifier: "portConflict.message", saying: "is in use"),
             "Declining the suggestion should dismiss the alert"
         )
         assertStartServerAvailable(after: "keep-stopped-conflict")

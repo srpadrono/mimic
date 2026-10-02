@@ -592,7 +592,7 @@ public struct RequestLogDrawerView: View {
 
     @ViewBuilder
     private func tableHeader(compact: Bool, pathWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        DSTableHeader(inset: LogColumns.tableInset) {
             columnHeader("Time", field: .timestamp,
                          width: LogColumns.timeWidth(compact: compact, twentyFourHour: twentyFourHour))
             columnHeader("Method", field: .method, width: LogColumns.method)
@@ -603,11 +603,6 @@ public struct RequestLogDrawerView: View {
                 staticColumnHeader("Duration", width: LogColumns.duration)
                 staticColumnHeader("Size", width: LogColumns.size)
             }
-        }
-        .padding(.horizontal, LogColumns.tableInset)
-        .frame(height: DSRowHeight.table)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(DSColors.separator).frame(height: DSStroke.hairline)
         }
     }
 
@@ -631,12 +626,8 @@ public struct RequestLogDrawerView: View {
 
     /// A numeric column that does not sort, right-aligned over its figures.
     private func staticColumnHeader(_ title: String, width: CGFloat) -> some View {
-        Text(title)
-            .font(DSTypography.captionSemibold)
-            .foregroundStyle(DSColors.labelSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, DSSpacing.sm)
-            .frame(width: width, alignment: .trailing)
+        DSTableColumnTitle(title)
+            .dsTableCell(width: width, alignment: .trailing)
     }
 
     // MARK: - Table Body
@@ -1113,22 +1104,11 @@ private struct SortableColumnHeader: View {
 
     var body: some View {
         Button(action: sort) {
-            HStack(spacing: DSSpacing.xxs) {
-                Text(title)
-                    .font(DSTypography.captionSemibold)
-                    .lineLimit(1)
-                    .foregroundStyle(isActive || isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-
-                if isActive {
-                    Image(systemName: isAscending ? "chevron.up" : "chevron.down")
-                        .font(.system(size: DSGlyph.minimum, weight: .bold))
-                        .foregroundStyle(DSColors.labelSecondary)
-                }
-            }
-            // The whole cell is the target, not only the word.
-            .padding(.horizontal, DSSpacing.sm)
-            .frame(width: width, height: DSRowHeight.table, alignment: .leading)
-            .contentShape(Rectangle())
+            DSTableColumnTitle(title, sort: sortIndicator, isHighlighted: isHovered)
+                // The whole cell is the target, not only the word.
+                .padding(.horizontal, DSTable.cellPadding)
+                .frame(width: width, height: DSRowHeight.table, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -1137,6 +1117,11 @@ private struct SortableColumnHeader: View {
         .accessibilityIdentifier(identifier)
         .accessibilityLabel("Sort by \(title.lowercased())")
         .accessibilityValue(sortStateAnnouncement)
+    }
+
+    private var sortIndicator: DSTableColumnTitle.Sort? {
+        guard isActive else { return nil }
+        return isAscending ? .ascending : .descending
     }
 
     private var sortStateAnnouncement: String {
@@ -1191,12 +1176,12 @@ struct RequestLogTableRow: View {
                 .font(DSTypography.Figure.regular)
                 .foregroundStyle(ink(DSColors.labelSecondary))
                 .lineLimit(1)
-                .cell(width: LogColumns.timeWidth(compact: compact,
-                                                  twentyFourHour: LogColumns.usesTwentyFourHourClock(locale)))
+                .dsTableCell(width: LogColumns.timeWidth(compact: compact,
+                                                         twentyFourHour: LogColumns.usesTwentyFourHourClock(locale)))
 
             // Keyed by the log entry, not the method, so every GET row has its own identifier.
             DSMethodLabel(log.method.rawValue, fixedWidth: false, identifier: log.id.uuidString)
-                .cell(width: LogColumns.method)
+                .dsTableCell(width: LogColumns.method)
 
             // Middle truncation keeps both the route's head and its last segment (often the id).
             Text(log.path)
@@ -1204,11 +1189,11 @@ struct RequestLogTableRow: View {
                 .foregroundStyle(ink(DSColors.labelPrimary))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .cell(width: pathWidth)
+                .dsTableCell(width: pathWidth)
 
             // `nil` is a transport failure, which the label draws as "Failed" in the error colour.
             DSStatusLabel(statusCode: log.responseStatusCode)
-                .cell(width: LogColumns.status)
+                .dsTableCell(width: LogColumns.status)
 
             if !compact {
                 // No per-cell identifiers: the row ignores its children for accessibility, and
@@ -1216,25 +1201,23 @@ struct RequestLogTableRow: View {
                 scenarioCell
                     .font(DSTypography.callout)
                     .lineLimit(1)
-                    .cell(width: LogColumns.scenario)
+                    .dsTableCell(width: LogColumns.scenario)
 
                 Text(log.durationMs.map(RequestLogQuery.formattedDuration) ?? "\u{2014}")
                     .font(DSTypography.Figure.regular)
                     .foregroundStyle(ink(DSColors.labelSecondary))
                     .lineLimit(1)
-                    .cell(width: LogColumns.duration, alignment: .trailing)
+                    .dsTableCell(width: LogColumns.duration, alignment: .trailing)
 
                 Text(RequestLogQuery.formattedSize(for: log) ?? "\u{2014}")
                     .font(DSTypography.Figure.regular)
                     .foregroundStyle(ink(DSColors.labelSecondary))
                     .lineLimit(1)
-                    .cell(width: LogColumns.size, alignment: .trailing)
+                    .dsTableCell(width: LogColumns.size, alignment: .trailing)
             }
         }
-        .frame(height: DSRowHeight.table)
-        .background(rowBackground)
-        // Method and status labels turn white on the accent fill.
-        .environment(\.backgroundProminence, isProminent ? .increased : .standard)
+        // Method and status labels turn white on the selection fill.
+        .dsTableRow(index: rowIndex, isSelected: isSelected, isEmphasized: isEmphasized, isHovered: isHovered)
         .padding(.horizontal, LogColumns.tableInset)
         .contentShape(Rectangle())
         .onTapGesture { onSelect(.current) }
@@ -1253,8 +1236,8 @@ struct RequestLogTableRow: View {
             )
         )
         // Attached after the element is formed, so the menu's items stay reachable as elements.
-        .alert("Save real response as mock?", isPresented: $showingSaveConfirmation) {
-            Button("Save mock") { onSaveAsMock?(log.id) }
+        .alert("Save response as scenario?", isPresented: $showingSaveConfirmation) {
+            Button("Save scenario") { onSaveAsMock?(log.id) }
                 .accessibilityIdentifier("requestLog.confirmSaveMock")
             Button("Cancel", role: .cancel) {}
                 .accessibilityIdentifier("requestLog.cancelSaveMock")
@@ -1282,21 +1265,16 @@ struct RequestLogTableRow: View {
             Divider()
 
             if log.outcome.isMissingConfiguration, let onCreateEndpoint {
-                Button {
+                Button("Create endpoint\u{2026}") {
                     onCreateEndpoint(log.method, RequestLogQuery.mockablePath(from: log.path))
-                } label: {
-                    Label(
-                        "Create endpoint for \(log.method.rawValue) \(RequestLogQuery.mockablePath(from: log.path))",
-                        systemImage: "plus.circle"
-                    )
                 }
+                .help("Create an endpoint for \(log.method.rawValue) \(RequestLogQuery.mockablePath(from: log.path))")
                 .accessibilityIdentifier("requestLog.createEndpoint.\(log.id.uuidString)")
             }
             if log.outcome == .passthrough, onSaveAsMock != nil {
-                Button("Save real response as mock") { showingSaveConfirmation = true }
+                Button("Save response as scenario\u{2026}") { showingSaveConfirmation = true }
                     .disabled((try? ResponseCapture.validate(log)) == nil)
                     .accessibilityIdentifier("requestLog.saveAsMock.\(log.id.uuidString)")
-                    .accessibilityLabel("Save real response as mock")
             }
 
             // A journey-answered request is already in one; offering it again would duplicate a step.
@@ -1343,12 +1321,6 @@ struct RequestLogTableRow: View {
     /// White on the accent selection, the given colour otherwise.
     private func ink(_ color: Color) -> Color {
         isProminent ? .white : color
-    }
-
-    private var rowBackground: Color {
-        if isSelected { return isEmphasized ? DSColors.accent : DSColors.selectionInactive }
-        if isHovered { return DSColors.hover }
-        return rowIndex % 2 == 0 ? .clear : DSColors.zebra
     }
 
     /// The scenario that answered or, when none did, what did: unmatched in the warning colour,
@@ -1451,16 +1423,5 @@ struct RequestLogTableRow: View {
         }
 
         return label
-    }
-}
-// MARK: - Cell geometry
-
-private extension View {
-    /// One table cell: `DSSpacing.sm` inside a fixed column, or the natural width when `nil`.
-    func cell(width: CGFloat?, alignment: Alignment = .leading) -> some View {
-        self
-            .padding(.horizontal, DSSpacing.sm)
-            .frame(width: width, alignment: alignment)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: alignment)
     }
 }

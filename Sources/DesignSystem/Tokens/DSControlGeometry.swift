@@ -42,12 +42,16 @@ nonisolated public enum DSLayout {
     public static let sheetLabelWidth: CGFloat = 104
     /// The method column: fits DELETE and OPTIONS in SF Mono 11.
     public static let methodColumn: CGFloat = 52
+    /// The method column in navigator and journey-step rows, where the route follows 8pt later.
+    public static let rowMethodColumn: CGFloat = 44
     /// Below this toolbar width the secondary actions collapse into one menu.
     public static let toolbarCollapseWidth: CGFloat = 720
     /// Below this width the server status drops its request counts.
     public static let toolbarStatusCompactWidth: CGFloat = 560
     /// The server status popover.
     public static let popoverWidth: CGFloat = 320
+    /// The inset inside a popover, all round.
+    public static let popoverPadding: CGFloat = 14
     /// Maximum readable width of an empty state's message.
     public static let emptyStateTextWidth: CGFloat = 360
 }

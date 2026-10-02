@@ -7,7 +7,7 @@ import SwiftUI
 /// The numbered node carries the run state by shape as well as colour: a tick when served, a ring
 /// with a halo when current, a plain ring otherwise. The current row gets a tinted fill and an accent
 /// border; the row the inspector shows gets a neutral fill.
-struct JourneyStepRow: View {
+public struct JourneyStepRow: View {
     let step: JourneyStep
     let index: Int
     /// Run progress for this step, when a run is in flight.
@@ -17,11 +17,21 @@ struct JourneyStepRow: View {
 
     @State private var isHovered = false
 
-    var body: some View {
+    public init(step: JourneyStep, index: Int, progress: JourneyStepProgress?, isSelected: Bool = false) {
+        self.step = step
+        self.index = index
+        self.progress = progress
+        self.isSelected = isSelected
+    }
+
+    /// The Journeys design's `.step` padding, from the row's edge to the node and from the last fact.
+    private static let horizontalInset: CGFloat = 14
+
+    public var body: some View {
         HStack(spacing: DSSpacing.md) {
             node
             DSMethodLabel(step.method.rawValue, fixedWidth: false, identifier: step.id.uuidString)
-                .frame(width: 44, alignment: .leading)
+                .frame(width: DSLayout.rowMethodColumn, alignment: .leading)
 
             // The route alone, as the design draws it; the step's name is in the tooltip, the
             // spoken label and the inspector. It takes what the trailing facts leave, down to a floor.
@@ -36,7 +46,7 @@ struct JourneyStepRow: View {
             trailingFacts
                 .layoutPriority(1)
         }
-        .padding(.horizontal, DSSpacing.md)
+        .padding(.horizontal, Self.horizontalInset)
         .frame(height: DSRowHeight.step)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.card)

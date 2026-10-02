@@ -187,6 +187,17 @@ struct ServerStatusWellTests {
         #expect(!text.contains("2023"), "only the time of day, not the date")
     }
 
+    /// The popover reads the environment's locale, so a 24-hour reader sees "since 21:32" whatever
+    /// the process's own locale, and the gallery can pin the design's clock.
+    @Test("The since time follows the locale it is given")
+    func sinceTextFollowsTheLocale() {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let british = ServerStatusWell.sinceText(date, locale: Locale(identifier: "en_GB"))
+        let american = ServerStatusWell.sinceText(date, locale: Locale(identifier: "en_US"))
+        #expect(!british.contains("AM") && !british.contains("PM"))
+        #expect(american.contains("AM") || american.contains("PM"))
+    }
+
     @Test("The toolbar address names the first listener and counts the others")
     func toolbarAddress() {
         let single = ServerConfiguration(port: 18086, globalDelayMs: 0)

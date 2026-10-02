@@ -171,7 +171,10 @@ public struct ScenarioRow: View {
     }
 
     public var body: some View {
-        HStack(spacing: 10) {
+        // The design measures from the radio itself: 8pt in from the row's edge and 10pt before the
+        // name. The radio is a 14pt glyph centred in a 20pt hit target, so the target starts 5pt in
+        // and the name follows it 7pt later: 5 + 3 = 8 and 3 + 7 = 10.
+        HStack(spacing: Self.radioGap) {
             Button(action: onMakeLive) {
                 DSLiveIndicator(isLive: isActive)
                     .frame(width: 20, height: DSRowHeight.list)
@@ -202,7 +205,7 @@ public struct ScenarioRow: View {
             .accessibilityLabel(Self.spokenLabel(scenario: scenario, isActive: isActive))
             .accessibilityValue(isActive ? "active" : "inactive")
         }
-        .padding(.leading, DSSpacing.xs)
+        .padding(.leading, Self.leadingInset)
         .padding(.trailing, DSSpacing.sm)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous)
@@ -229,6 +232,11 @@ public struct ScenarioRow: View {
     var rowTraits: AccessibilityTraits {
         isEdited ? [.isButton, .isSelected] : .isButton
     }
+
+    /// Where the radio's 20pt hit target starts, so the 14pt radio inside it sits 8pt in.
+    static let leadingInset: CGFloat = 5
+    /// From the hit target to the name, so the name sits 10pt after the radio's edge.
+    static let radioGap: CGFloat = 7
 
     nonisolated static func spokenLabel(scenario: Scenario, isActive: Bool) -> String {
         "\(scenario.name), status \(scenario.statusCode)\(isActive ? ", active" : "")"

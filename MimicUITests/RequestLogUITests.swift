@@ -1074,7 +1074,7 @@ final class RequestLogUITests: MimicUITestCase {
         let journeyItem = app.menuItems["Add to journey"]
         XCTAssertTrue(journeyItem.waitForExistence(timeout: 5), "The row's context menu should open")
         XCTAssertFalse(
-            app.menuItems["Create endpoint for GET /api/users"].exists,
+            app.menuItems["Create endpoint\u{2026}"].exists,
             "A row an endpoint already answered should not be offered a new endpoint"
         )
         app.typeKey(.escape, modifierFlags: [])
@@ -1092,7 +1092,7 @@ final class RequestLogUITests: MimicUITestCase {
                       "The request log toggle should show the log on the journeys screen")
 
         logRow(unmatchedID).rightClick()
-        let createItem = app.menuItems["Create endpoint for GET /api/orders"]
+        let createItem = app.menuItems["Create endpoint\u{2026}"]
         XCTAssertTrue(
             createItem.waitForExistence(timeout: 5),
             "An unmatched row should offer to create the endpoint it is missing"
