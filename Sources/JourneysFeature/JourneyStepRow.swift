@@ -182,8 +182,10 @@ struct JourneyStepRow: View {
                 chip("After \(Self.durationText(step.delayMs))", systemImage: "clock")
             }
         case let .networkFailure(failure):
-            chip(Self.failureDisplayText(failure, delayMs: step.delayMs),
-                 systemImage: failure == .connectionDrop ? "bolt.horizontal" : "hourglass")
+            let text = Self.failureDisplayText(failure, delayMs: step.delayMs)
+            DSPill(text, glyph: failure == .connectionDrop
+                       ? DSPillGlyph.connectionDrop : DSPillGlyph.system("hourglass"))
+                .help(text)
                 .help(Self.failureText(failure))
         }
     }

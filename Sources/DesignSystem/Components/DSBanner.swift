@@ -71,7 +71,9 @@ public struct DSBanner: View {
         }
         .padding(.leading, DSSpacing.md)
         .padding(.trailing, 10)
-        .padding(.vertical, DSSpacing.sm)
+        // The board's 20 pt button carries its hairline border outside its box, so the banner it
+        // sits in is 37 pt tall: 8 + 21 + 8. Half a point more here gives that height.
+        .padding(.vertical, DSSpacing.sm + DSStroke.hairline)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.card).fill(kind.fill)
         }
