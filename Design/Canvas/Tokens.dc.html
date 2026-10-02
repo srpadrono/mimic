@@ -10,19 +10,19 @@
 <helmet>
 <style>
 body{margin:0}
-.tk{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:rgba(255,255,255,.92);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.tk{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;--mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,monospace;font-family:var(--font);font-size:13px;line-height:16px;color:rgba(255,255,255,.92);--l3:rgba(235,235,245,.38);-webkit-font-smoothing:antialiased;box-sizing:border-box}
 .tk *{box-sizing:border-box}
 .row{display:flex;align-items:center}
 .col{display:flex;flex-direction:column}
 .sec{background:#1b1b1d;border:.5px solid rgba(255,255,255,.08);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px}
 .t{font-size:13px;font-weight:600}
-.d{font-size:11px;line-height:15px;color:rgba(235,235,245,.45);margin-top:-10px}
+.d{font-size:11px;line-height:15px;color:var(--l3);margin-top:-10px}
 .sw{display:flex;flex-direction:column;gap:5px;width:96px}
 .chip{height:40px;border-radius:8px;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14)}
 .nm{font-size:11px;font-weight:600}
-.hx{font:400 10.5px var(--mono);color:rgba(235,235,245,.5)}
+.hx{font:400 10.5px var(--mono);color:var(--l3)}
 .pair{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));height:40px;border-radius:8px;overflow:hidden;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14)}
-.lbl{font-size:11px;color:rgba(235,235,245,.45)}
+.lbl{font-size:11px;color:var(--l3)}
 .mono{font-family:var(--mono)}
 </style>
 </helmet>
@@ -39,8 +39,8 @@ body{margin:0}
       <div class="sw"><div class="pair"><span style="background: rgba(0,0,0,.88);"></span><span style="background: rgba(255,255,255,.92);"></span></div><span class="nm">Label</span><span class="hx">labelColor</span></div>
       <div class="sw"><div class="pair"><span style="background: rgba(60,60,67,.72);"></span><span style="background: rgba(235,235,245,.62);"></span></div><span class="nm">Secondary</span><span class="hx">secondaryLabel</span></div>
       <div class="sw"><div class="pair"><span style="background: #007aff;"></span><span style="background: #0a84ff;"></span></div><span class="nm">Accent</span><span class="hx">controlAccent</span></div>
-      <div class="sw"><div class="pair"><span style="background: #1d8a3e;"></span><span style="background: #34d06c;"></span></div><span class="nm">Success · 2xx</span><span class="hx">#1D8A3E · #34D06C</span></div>
-      <div class="sw"><div class="pair"><span style="background: #a86400;"></span><span style="background: #ffb340;"></span></div><span class="nm">Warning · 4xx</span><span class="hx">#A86400 · #FFB340</span></div>
+      <div class="sw"><div class="pair"><span style="background: #157a36;"></span><span style="background: #34d06c;"></span></div><span class="nm">Success · 2xx</span><span class="hx">#157A36 · #34D06C</span></div>
+      <div class="sw"><div class="pair"><span style="background: #965900;"></span><span style="background: #ffb340;"></span></div><span class="nm">Warning · 4xx</span><span class="hx">#965900 · #FFB340</span></div>
       <div class="sw"><div class="pair"><span style="background: #cc302b;"></span><span style="background: #ff5f57;"></span></div><span class="nm">Error · 5xx</span><span class="hx">#CC302B · #FF5F57</span></div>
     </div>
     <div class="row" style="gap: 14px; flex-wrap: wrap;">
