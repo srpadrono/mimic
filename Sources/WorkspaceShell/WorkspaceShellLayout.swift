@@ -120,6 +120,77 @@ public struct WorkspaceShellLayout<
     }
 
     private var detailColumn: some View {
+        WorkspaceDetailColumn(
+            metrics: metrics,
+            isRequestLogPresented: $isRequestLogPresented,
+            requestLogHeight: $requestLogHeight,
+            preferredCenterHeight: preferredCenterHeight,
+            showsTakeover: showsTakeover,
+            jumpBar: { jumpBar },
+            center: { center },
+            requestLog: { requestLog },
+            takeover: { takeover }
+        )
+        .onGeometryChange(for: WorkspaceToolbarLayout.self) {
+            WorkspaceToolbarLayout(centerWidth: $0.size.width)
+        } action: { layout in
+            // The toolbar changes its intrinsic width at each breakpoint. During a live window
+            // resize, animating that change lets the Run button and its neighbours occupy the same
+            // space for a frame while AppKit rearranges native items.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { onToolbarLayoutChange(layout) }
+        }
+        // Editor actions belong to this column, before the inspector divides the toolbar.
+        .toolbar { toolbar }
+        // The toolbar sits on the window colour, as the design draws it. Left visible, AppKit
+        // backs this column's title bar with its own lighter material.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+    }
+}
+
+/// The detail column on its own: the jump bar over the centre pane and its docked request log, or
+/// the takeover in their place, on the one rounded content card inset from the window.
+///
+/// `WorkspaceShellLayout` puts it in the split view's detail column. It is public so the gallery can
+/// lay the window out the way the boards draw it without the split view, whose glass sidebar and
+/// inspector an offscreen render cannot draw, and still use this card, its insets and its split pane.
+public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: View, Takeover: View>: View {
+    let metrics: WorkspacePanelMetrics
+    @Binding var isRequestLogPresented: Bool
+    @Binding var requestLogHeight: CGFloat
+    /// The centre content's own height, so the request log can sit right below it.
+    let preferredCenterHeight: CGFloat?
+    /// When set, the takeover replaces the jump bar, the editor, and the docked log.
+    let showsTakeover: Bool
+    let jumpBar: JumpBar
+    let center: Center
+    let requestLog: RequestLog
+    let takeover: Takeover
+
+    public init(
+        metrics: WorkspacePanelMetrics,
+        isRequestLogPresented: Binding<Bool>,
+        requestLogHeight: Binding<CGFloat>,
+        preferredCenterHeight: CGFloat? = nil,
+        showsTakeover: Bool = false,
+        @ViewBuilder jumpBar: () -> JumpBar,
+        @ViewBuilder center: () -> Center,
+        @ViewBuilder requestLog: () -> RequestLog,
+        @ViewBuilder takeover: () -> Takeover
+    ) {
+        self.metrics = metrics
+        self._isRequestLogPresented = isRequestLogPresented
+        self._requestLogHeight = requestLogHeight
+        self.preferredCenterHeight = preferredCenterHeight
+        self.showsTakeover = showsTakeover
+        self.jumpBar = jumpBar()
+        self.center = center()
+        self.requestLog = requestLog()
+        self.takeover = takeover()
+    }
+
+    public var body: some View {
         VStack(spacing: 0) {
             if showsTakeover {
                 takeover
@@ -169,20 +240,5 @@ public struct WorkspaceShellLayout<
         .padding(.top, DSSpacing.xs)
         .padding([.horizontal, .bottom], DSLayout.panelInset)
         .background(DSColors.window.ignoresSafeArea())
-        .onGeometryChange(for: WorkspaceToolbarLayout.self) {
-            WorkspaceToolbarLayout(centerWidth: $0.size.width)
-        } action: { layout in
-            // The toolbar changes its intrinsic width at each breakpoint. During a live window
-            // resize, animating that change lets the Run button and its neighbours occupy the same
-            // space for a frame while AppKit rearranges native items.
-            var transaction = Transaction(animation: nil)
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { onToolbarLayoutChange(layout) }
-        }
-        // Editor actions belong to this column, before the inspector divides the toolbar.
-        .toolbar { toolbar }
-        // The toolbar sits on the window colour, as the design draws it. Left visible, AppKit
-        // backs this column's title bar with its own lighter material.
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     }
 }

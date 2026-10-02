@@ -13,8 +13,9 @@ import WorkspaceShell
 /// The endpoint editor window assembled from its sections, the way the app assembles it, with the
 /// design fixtures in place of a session. Each slot is the same view its own gallery entry shows.
 struct GalleryWorkspaceWindow: View {
-    /// Whether the toolbar is installed. Only in its own window: on the gallery canvas the items
-    /// would land in the gallery's own toolbar instead.
+    /// Whether this is the real shell with its toolbar installed, in its own window. On the gallery
+    /// canvas the toolbar items would land in the gallery's own toolbar, and an offscreen render
+    /// draws the split view's glass blank, so the canvas draws `GalleryWindowCanvas` instead.
     let showsToolbar: Bool
     /// The toolbar state this window draws; the layout follows the window's width.
     let toolbarState: GalleryToolbarFixture
@@ -29,6 +30,27 @@ struct GalleryWorkspaceWindow: View {
     }
 
     var body: some View {
+        if showsToolbar {
+            shell
+        } else {
+            GalleryWindowCanvas(tab: .endpoints, toolbar: toolbarState) {
+                WorkspaceDetailColumn(
+                    metrics: Self.metrics,
+                    isRequestLogPresented: $isRequestLogPresented,
+                    requestLogHeight: $requestLogHeight,
+                    jumpBar: { Self.jumpBar },
+                    center: { Self.editor },
+                    requestLog: { Self.requestLog(showsDetail: false) },
+                    takeover: { EmptyView() }
+                )
+            } inspector: {
+                GalleryEndpointInspectorPanel()
+            }
+        }
+    }
+
+    /// The real shell, in its own window, where the split view's glass and the toolbar draw.
+    private var shell: some View {
         WorkspaceShellLayout(
             metrics: Self.metrics,
             isRequestLogPresented: $isRequestLogPresented,
@@ -36,15 +58,7 @@ struct GalleryWorkspaceWindow: View {
             isInspectorPresented: $isInspectorPresented,
             onToolbarLayoutChange: { toolbarLayout = $0 },
             navigator: { GalleryNavigator() },
-            jumpBar: {
-                BreadcrumbJumpBar(
-                    crumbs: Self.crumbs,
-                    autosaveStatus: .saved,
-                    history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false,
-                                                       onBack: {}, onForward: {}),
-                    onSelectOption: { _, _ in }
-                )
-            },
+            jumpBar: { Self.jumpBar },
             center: { Self.editor },
             requestLog: { Self.requestLog(showsDetail: false) },
             takeover: { EmptyView() },
@@ -92,6 +106,16 @@ struct GalleryWorkspaceWindow: View {
                   .init(id: $0.id, title: $0.name, isSelected: $0.id == DesignFixtures.editedScenario.id)
               }),
     ]
+
+    @MainActor
+    static var jumpBar: some View {
+        BreadcrumbJumpBar(
+            crumbs: crumbs,
+            autosaveStatus: .saved,
+            history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
+            onSelectOption: { _, _ in }
+        )
+    }
 
     @MainActor
     static var editor: some View {
@@ -170,6 +194,7 @@ struct GalleryWorkspaceWindow: View {
 /// The journey editor window, as the Journeys artboard draws it: the journey navigator, Payment
 /// retry three steps into its run, and step 3 in the inspector. The request log is closed, as there.
 struct GalleryJourneysWindow: View {
+    /// Whether this is the real shell in its own window; see `GalleryWorkspaceWindow.showsToolbar`.
     let showsToolbar: Bool
     @State private var isRequestLogPresented = false
     @State private var requestLogHeight: CGFloat = 319
@@ -181,6 +206,27 @@ struct GalleryJourneysWindow: View {
     }
 
     var body: some View {
+        if showsToolbar {
+            shell
+        } else {
+            GalleryWindowCanvas(tab: .journeys, toolbar: .running) {
+                WorkspaceDetailColumn(
+                    metrics: GalleryWorkspaceWindow.metrics,
+                    isRequestLogPresented: $isRequestLogPresented,
+                    requestLogHeight: $requestLogHeight,
+                    jumpBar: { Self.jumpBar },
+                    center: { Self.editor },
+                    requestLog: { GalleryWorkspaceWindow.requestLog(showsDetail: false) },
+                    takeover: { EmptyView() }
+                )
+            } inspector: {
+                GalleryJourneyInspectorPanel()
+            }
+        }
+    }
+
+    /// The real shell, in its own window, where the split view's glass and the toolbar draw.
+    private var shell: some View {
         WorkspaceShellLayout(
             metrics: GalleryWorkspaceWindow.metrics,
             isRequestLogPresented: $isRequestLogPresented,
@@ -283,16 +329,11 @@ struct GalleryJourneysWindow: View {
 struct GalleryJourneyInspectorPanel: View {
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                Text(GalleryJourneysWindow.inspectorContext.title)
-                    .font(DSTypography.bodySemibold)
-                    .foregroundStyle(DSColors.labelPrimary)
-                Spacer(minLength: DSSpacing.sm)
+            // The request log is closed on the Journeys board, so its toggle offers to show it.
+            GalleryInspectorPanelHeader(title: GalleryJourneysWindow.inspectorContext.title,
+                                        isRequestLogShown: false) {
                 GalleryJourneysWindow.stepActions
             }
-            .padding(.leading, DSSpacing.lg)
-            .padding(.trailing, DSSpacing.sm)
-            .frame(height: 44)
             GalleryJourneysWindow.inspector
                 .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -305,19 +346,106 @@ struct GalleryJourneyInspectorPanel: View {
 struct GalleryEndpointInspectorPanel: View {
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                Text("Scenarios")
-                    .font(DSTypography.bodySemibold)
-                    .foregroundStyle(DSColors.labelPrimary)
-                Spacer(minLength: DSSpacing.sm)
+            GalleryInspectorPanelHeader(title: "Scenarios", isRequestLogShown: true) {
                 GalleryWorkspaceWindow.addScenarioButton
             }
-            .padding(.horizontal, DSSpacing.lg)
-            .frame(height: 44)
             GalleryWorkspaceWindow.inspector
                 .frame(maxHeight: .infinity, alignment: .top)
         }
         .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// The inspector header as a strip, as the Main and Journeys boards draw it: the mode's title, its
+/// own action, and the window's panel toggles in one glass capsule. In a window, the inspector's
+/// toolbar section draws the same items (`GalleryInspectorHeader`).
+private struct GalleryInspectorPanelHeader<Action: View>: View {
+    let title: String
+    let isRequestLogShown: Bool
+    let action: Action
+
+    init(title: String, isRequestLogShown: Bool, @ViewBuilder action: () -> Action) {
+        self.title = title
+        self.isRequestLogShown = isRequestLogShown
+        self.action = action()
+    }
+
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Text(title)
+                .font(DSTypography.bodySemibold)
+                .foregroundStyle(DSColors.labelPrimary)
+            Spacer(minLength: DSSpacing.sm)
+            action
+            HStack(spacing: 0) {
+                WorkspaceRequestLogToggle(isShown: isRequestLogShown, action: {})
+                    .frame(width: Self.toggleWidth, height: Self.toggleHeight)
+                WorkspaceInspectorToggle(isPresented: true, canPresent: true, action: {})
+                    .frame(width: Self.toggleWidth, height: Self.toggleHeight)
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .font(.system(size: DSGlyph.toolbar))
+            .foregroundStyle(DSColors.labelPrimary)
+            .padding(.horizontal, DSSpacing.xxs)
+            .frame(height: Self.capsuleHeight)
+            .galleryGlass(in: Capsule())
+        }
+        .padding(.horizontal, DSSpacing.lg)
+        .frame(height: DSBarHeight.column)
+    }
+
+    /// The boards' toggle capsule: 32pt of glass, 2pt in from 30pt buttons that pad a 16pt glyph
+    /// by 8pt each side. Smaller than the toolbar's 36pt groups, as it sits in the 44pt header
+    /// rather than the 52pt toolbar row. (Computed: a generic type cannot store statics.)
+    private static var capsuleHeight: CGFloat { 32 }
+    private static var toggleHeight: CGFloat { 30 }
+    private static var toggleWidth: CGFloat { 32 }
+}
+
+/// The window as the boards draw it, for the canvas and the fidelity report: the floating navigator
+/// and inspector glass, the toolbar strip over the centre column, and the shell's own detail
+/// column (`WorkspaceDetailColumn`) between them. Glass and a title-bar toolbar draw only on screen,
+/// so an offscreen render of the real split view came out blank; "Open in a window" shows the real
+/// `WorkspaceShellLayout`.
+///
+/// At 1440 × 900 this puts the navigator at x 8–272, the toolbar at x 280–1124 and y 0–52, the
+/// content card at x 280–1124 and y 56–892, and the inspector at x 1132–1432, as the boards do.
+struct GalleryWindowCanvas<Detail: View, Inspector: View>: View {
+    let tab: NavigatorTab
+    let toolbar: GalleryToolbarFixture
+    let detail: Detail
+    let inspector: Inspector
+
+    init(
+        tab: NavigatorTab,
+        toolbar: GalleryToolbarFixture,
+        @ViewBuilder detail: () -> Detail,
+        @ViewBuilder inspector: () -> Inspector
+    ) {
+        self.tab = tab
+        self.toolbar = toolbar
+        self.detail = detail()
+        self.inspector = inspector()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            GalleryNavigatorPanel(tab: tab)
+                .frame(width: DSLayout.sidebarWidth)
+                .padding([.leading, .vertical], DSLayout.panelInset)
+            VStack(spacing: 0) {
+                GalleryToolbarStrip(fixture: toolbar)
+                    .frame(height: GalleryToolbarStrip.rowHeight)
+                    .padding(.horizontal, DSLayout.panelInset)
+                detail
+            }
+            inspector
+                .frame(width: DSLayout.inspectorWidth)
+                .padding([.trailing, .vertical], DSLayout.panelInset)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DSColors.window)
     }
 }
 

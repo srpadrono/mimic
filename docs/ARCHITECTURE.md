@@ -53,7 +53,7 @@ Each part of the window is its own framework, so it can be built, tested, previe
 
 | Module | Holds |
 | --- | --- |
-| `WorkspaceShell` | `WorkspaceShellLayout` (navigator, jump bar, centre, docked request log, inspector and toolbar as slots), the workspace toolbar (`WorkspaceToolbar`, with Run and the server well as slots) and its `WorkspaceToolbarLayout` tiers, the jump bar, autosave status, and the inspector overview. |
+| `WorkspaceShell` | `WorkspaceShellLayout` (navigator, jump bar, centre, docked request log, inspector and toolbar as slots) and its content card `WorkspaceDetailColumn`, the workspace toolbar (`WorkspaceToolbar`, with Run and the server well as slots) and its `WorkspaceToolbarLayout` tiers, the jump bar, autosave status, and the inspector overview. |
 | `EndpointsFeature` | Endpoint navigator, editor, scenario inspector, request and new-endpoint sheets, and the first-endpoint chooser. |
 | `JourneysFeature` | Journey navigator, editor, run controls, step inspector, and the step, capture and template sheets. |
 | `RequestLogFeature` | Request log table, filters and sorting, request detail, and export. |
