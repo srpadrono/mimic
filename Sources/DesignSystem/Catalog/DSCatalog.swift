@@ -307,6 +307,7 @@ struct DSCatalogFields: View {
 struct DSCatalogSegments: View {
     @State private var navigator = "endpoints"
     @State private var log = "all"
+    @State private var pane = "body"
 
     var body: some View {
         DSCatalogCard("Segmented control and toggles") {
@@ -331,6 +332,30 @@ struct DSCatalogSegments: View {
                 selection: $log,
                 identifier: "catalog.log"
             )
+            DSSegmentedControl(
+                "Pane",
+                segments: [
+                    DSSegmentedControl<String>.Segment("Body", value: "body", identifier: "catalog.body"),
+                    DSSegmentedControl<String>.Segment("Headers", value: "headers", count: 2,
+                                                       countColor: DSColors.labelTertiary, identifier: "catalog.headers"),
+                ],
+                selection: $pane,
+                identifier: "catalog.pane"
+            )
+            HStack(spacing: 18) {
+                switchSpecimen("On", isOn: true)
+                switchSpecimen("Off", isOn: false)
+            }
+        }
+    }
+}
+
+extension DSCatalogSegments {
+    /// The switch as the board draws it: the track, then its word.
+    private func switchSpecimen(_ title: String, isOn: Bool) -> some View {
+        HStack(spacing: DSSpacing.sm) {
+            DSSwitchTrack(isOn: isOn)
+            Text(title).font(DSTypography.callout).foregroundStyle(DSColors.labelPrimary)
         }
     }
 }
