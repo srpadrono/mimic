@@ -42,20 +42,16 @@ struct GalleryEntry: Identifiable {
     let hasArtboard: Bool
     /// The artboard section's size in points, which is the size the entry is drawn at.
     let size: CGSize
-    /// Whether a rendering shows its list focused in the key window, as the design draws a
-    /// sidebar. See `SnapshotRenderer.render(_:size:appearance:scale:settle:focusesList:)`.
-    let focusesList: Bool
     let content: @MainActor () -> AnyView
 
     init(_ id: String, _ title: String, group: Group, reference: String? = nil, hasArtboard: Bool = true,
-         size: CGSize, focusesList: Bool = false, @ViewBuilder content: @escaping @MainActor () -> some View) {
+         size: CGSize, @ViewBuilder content: @escaping @MainActor () -> some View) {
         self.id = id
         self.title = title
         self.group = group
         self.referenceID = reference ?? id
         self.hasArtboard = hasArtboard
         self.size = size
-        self.focusesList = focusesList
         self.content = { AnyView(content()) }
     }
 
@@ -171,7 +167,7 @@ enum GalleryCatalog {
 
     static let endpoints: [GalleryEntry] = [
         GalleryEntry("workspace.navigator", "Endpoint navigator", group: .endpoints,
-                     size: CGSize(width: 264, height: 884), focusesList: true) {
+                     size: CGSize(width: 264, height: 884)) {
             GalleryNavigatorPanel(tab: .endpoints)
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
@@ -196,7 +192,7 @@ enum GalleryCatalog {
 
     static let journeys: [GalleryEntry] = [
         GalleryEntry("journeys.navigator", "Journey navigator", group: .journeys,
-                     size: CGSize(width: 264, height: 884), focusesList: true) {
+                     size: CGSize(width: 264, height: 884)) {
             GalleryNavigatorPanel(tab: .journeys)
         },
         // From the jump bar down, as the artboard's section is drawn.

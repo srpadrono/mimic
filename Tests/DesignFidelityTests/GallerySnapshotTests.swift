@@ -41,8 +41,7 @@ struct GallerySnapshotTests {
         for entry in GalleryCatalog.selected {
             let name = "\(entry.id).\(appearance.rawValue).png"
             let image = try #require(
-                SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance,
-                                        focusesList: entry.focusesList),
+                SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance),
                 "\(entry.id) drew nothing"
             )
             let result = SnapshotBaseline.check(

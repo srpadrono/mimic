@@ -84,8 +84,7 @@ struct DesignFidelityTests {
             if let section = catalog.section(entry.referenceID),
                !catalog.draws(section, in: appearance.rawValue) { continue }
             let image = try #require(
-                SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance,
-                                        focusesList: entry.focusesList),
+                SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance),
                 "\(entry.id) drew nothing"
             )
             #expect(image.width == Int(entry.size.width * 2) && image.height == Int(entry.size.height * 2))

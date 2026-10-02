@@ -173,8 +173,7 @@ struct GalleryView: View {
         for entry in entries {
             if let catalog = references, let section = catalog.section(entry.referenceID),
                !catalog.draws(section, in: appearance.rawValue) { continue }
-            guard let actual = SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance,
-                                                       focusesList: entry.focusesList)
+            guard let actual = SnapshotRenderer.render(entry.content(), size: entry.size, appearance: appearance)
             else { continue }
             let reference = references.flatMap { catalog in
                 catalog.section(entry.referenceID).flatMap { catalog.image(for: $0, theme: appearance.rawValue) }

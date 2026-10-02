@@ -23,40 +23,32 @@ public enum SnapshotRenderer {
 
     /// Renders `view` at `size` points and `scale` pixels per point.
     ///
-    /// - Parameters:
-    ///   - settle: how long to let the run loop turn before drawing, so `onAppear`, `task` and
-    ///     AppKit's own deferred layout have happened.
-    ///   - focusesList: draws the view in the key window with its first list focused, the state a
-    ///     design draws a sidebar in. Off-screen windows are never key, so a list otherwise shows
-    ///     the grey selection of a list that doesn't have focus.
+    /// - Parameter settle: how long to let the run loop turn before drawing, so `onAppear`, `task`
+    ///   and AppKit's own deferred layout have happened.
     public static func render<Content: View>(
         _ view: Content,
         size: CGSize,
         appearance: Appearance,
         scale: CGFloat = 2,
-        settle: TimeInterval = 0.1,
-        focusesList: Bool = false
+        settle: TimeInterval = 0.1
     ) -> CGImage? {
         let root = view
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, appearance.colorScheme)
         let host = NSHostingView(rootView: root)
         host.frame = CGRect(origin: .zero, size: size)
-        let window: NSWindow = focusesList
-            ? KeyWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            : NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
         window.appearance = appearance.nsAppearance
         window.contentView = host
         window.orderBack(nil)
         defer { window.orderOut(nil) }
 
         host.layoutSubtreeIfNeeded()
-        if focusesList {
-            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
-            if let list = firstTableView(in: host) {
-                window.makeFirstResponder(list)
-            }
-        }
         RunLoop.main.run(until: Date().addingTimeInterval(settle))
         host.layoutSubtreeIfNeeded()
 
@@ -81,20 +73,5 @@ public enum SnapshotRenderer {
             drawn = bitmap.cgImage
         }
         return drawn
-    }
-
-    /// The first table or outline view under `view`, depth first: the view a SwiftUI `List` draws.
-    private static func firstTableView(in view: NSView) -> NSTableView? {
-        if let table = view as? NSTableView { return table }
-        for subview in view.subviews {
-            if let table = firstTableView(in: subview) { return table }
-        }
-        return nil
-    }
-
-    /// A window that reports itself key, so controls draw as they do in the window you're using.
-    private final class KeyWindow: NSWindow {
-        override var isKeyWindow: Bool { true }
-        override var canBecomeKey: Bool { true }
     }
 }
