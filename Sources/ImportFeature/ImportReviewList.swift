@@ -210,7 +210,7 @@ struct ImportReviewList: View {
         VStack(spacing: 0) {
             toolbar
                 .padding(.horizontal, DSSpacing.xl)
-                .padding(.bottom, DSSpacing.md)
+                .padding(.bottom, DSSpacing.md + 2)
 
             DSDivider(identifier: "import.summary")
 

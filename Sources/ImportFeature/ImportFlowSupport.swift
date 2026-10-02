@@ -360,7 +360,8 @@ struct ImportWorkflowScreen: View {
     /// Title, a subtitle naming the file under review, and a way to pick a different one.
     private var header: some View {
         HStack(alignment: .center, spacing: DSSpacing.md) {
-            VStack(alignment: .leading, spacing: 3) {
+            // Spaced as the design draws the review: title, subtitle, then the filter bar 22 pt below.
+            VStack(alignment: .leading, spacing: 5) {
                 Text(kind.title)
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
@@ -390,7 +391,7 @@ struct ImportWorkflowScreen: View {
         }
         .padding(.horizontal, DSSpacing.xl)
         .padding(.top, DSSpacing.xl)
-        .padding(.bottom, isReviewing ? DSSpacing.md : DSSpacing.lg)
+        .padding(.bottom, isReviewing ? DSSpacing.md + 2 : DSSpacing.lg)
     }
 
     /// "checkout-session.har · 214 requests from 5 hosts": the file, then what it holds.
