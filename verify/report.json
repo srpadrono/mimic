@@ -1,0 +1,379 @@
+[
+  {
+    "appearance" : "light",
+    "id" : "workspace.skeleton",
+    "title" : "Empty window skeleton"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.banners",
+    "score" : {
+      "meanDelta" : 0.04324701651375953,
+      "mismatchedFraction" : 0.20702682759178392,
+      "pixelsHigh" : 458,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Banners"
+  },
+  {
+    "appearance" : "light",
+    "id" : "import.review",
+    "score" : {
+      "meanDelta" : 0.11897867787919765,
+      "mismatchedFraction" : 0.17176077586206898,
+      "pixelsHigh" : 1392,
+      "pixelsWide" : 2000,
+      "sizesMatched" : true
+    },
+    "title" : "Import review"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.buttons",
+    "score" : {
+      "meanDelta" : 0.0630697146232841,
+      "mismatchedFraction" : 0.15357682473268247,
+      "pixelsHigh" : 478,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Buttons"
+  },
+  {
+    "appearance" : "light",
+    "id" : "projects.newProjectSheet",
+    "score" : {
+      "meanDelta" : 0.07966827959366674,
+      "mismatchedFraction" : 0.14976805057315462,
+      "pixelsHigh" : 454,
+      "pixelsWide" : 754,
+      "sizesMatched" : true
+    },
+    "title" : "New project sheet"
+  },
+  {
+    "appearance" : "light",
+    "id" : "endpoints.newEndpointSheet",
+    "score" : {
+      "meanDelta" : 0.053252134971471646,
+      "mismatchedFraction" : 0.12725279680066914,
+      "pixelsHigh" : 752,
+      "pixelsWide" : 814,
+      "sizesMatched" : true
+    },
+    "title" : "New endpoint sheet"
+  },
+  {
+    "appearance" : "light",
+    "id" : "workspace.jumpBar",
+    "score" : {
+      "meanDelta" : 0.0812913578741133,
+      "mismatchedFraction" : 0.12490743483412323,
+      "pixelsHigh" : 64,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Jump bar"
+  },
+  {
+    "appearance" : "light",
+    "id" : "endpoints.inspector",
+    "score" : {
+      "meanDelta" : 0.05614634410828182,
+      "mismatchedFraction" : 0.11841157616892911,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 600,
+      "sizesMatched" : true
+    },
+    "title" : "Scenario inspector"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.window",
+    "score" : {
+      "meanDelta" : 0.041630491002985555,
+      "mismatchedFraction" : 0.1139903549382716,
+      "pixelsHigh" : 1800,
+      "pixelsWide" : 2880,
+      "sizesMatched" : true
+    },
+    "title" : "Journey editor window"
+  },
+  {
+    "appearance" : "light",
+    "id" : "updates.sheet",
+    "score" : {
+      "meanDelta" : 0.05972332127295363,
+      "mismatchedFraction" : 0.11375558035714285,
+      "pixelsHigh" : 960,
+      "pixelsWide" : 1120,
+      "sizesMatched" : true
+    },
+    "title" : "Update sheet"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.fields",
+    "score" : {
+      "meanDelta" : 0.0415189751172208,
+      "mismatchedFraction" : 0.09461805555555555,
+      "pixelsHigh" : 736,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Fields"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.navigator",
+    "score" : {
+      "meanDelta" : 0.0684899537137859,
+      "mismatchedFraction" : 0.0923220468257233,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 528,
+      "sizesMatched" : true
+    },
+    "title" : "Journey navigator"
+  },
+  {
+    "appearance" : "light",
+    "id" : "requestLog.drawer",
+    "score" : {
+      "meanDelta" : 0.04069707607398791,
+      "mismatchedFraction" : 0.08360880417180466,
+      "pixelsHigh" : 638,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Request log"
+  },
+  {
+    "appearance" : "light",
+    "id" : "workspace.window",
+    "score" : {
+      "meanDelta" : 0.044676045449043814,
+      "mismatchedFraction" : 0.07880208333333333,
+      "pixelsHigh" : 1800,
+      "pixelsWide" : 2880,
+      "sizesMatched" : true
+    },
+    "title" : "Endpoint editor window"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.status",
+    "score" : {
+      "meanDelta" : 0.026344263715587245,
+      "mismatchedFraction" : 0.07351904461279461,
+      "pixelsHigh" : 440,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Status"
+  },
+  {
+    "appearance" : "light",
+    "id" : "endpoints.firstRun",
+    "score" : {
+      "meanDelta" : 0.01846675130323705,
+      "mismatchedFraction" : 0.0707457490198033,
+      "pixelsHigh" : 1672,
+      "pixelsWide" : 2304,
+      "sizesMatched" : true
+    },
+    "title" : "First endpoint"
+  },
+  {
+    "appearance" : "light",
+    "id" : "projects.welcome",
+    "score" : {
+      "meanDelta" : 0.04334221880039895,
+      "mismatchedFraction" : 0.07041852678571428,
+      "pixelsHigh" : 1120,
+      "pixelsWide" : 1760,
+      "sizesMatched" : true
+    },
+    "title" : "Welcome window"
+  },
+  {
+    "appearance" : "light",
+    "id" : "workspace.navigator",
+    "score" : {
+      "meanDelta" : 0.04535418425448702,
+      "mismatchedFraction" : 0.06866922905525846,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 528,
+      "sizesMatched" : true
+    },
+    "title" : "Endpoint navigator"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.methodLabel",
+    "score" : {
+      "meanDelta" : 0.024162554191148964,
+      "mismatchedFraction" : 0.06604061447811448,
+      "pixelsHigh" : 440,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Method label"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.jumpBarAndEmptyState",
+    "score" : {
+      "meanDelta" : 0.023831531619089023,
+      "mismatchedFraction" : 0.05709647844870893,
+      "pixelsHigh" : 538,
+      "pixelsWide" : 1776,
+      "sizesMatched" : true
+    },
+    "title" : "Empty state"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.codeEditor",
+    "score" : {
+      "meanDelta" : 0.02490090535561328,
+      "mismatchedFraction" : 0.05335759437321937,
+      "pixelsHigh" : 416,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Code editor"
+  },
+  {
+    "appearance" : "light",
+    "id" : "toolbar.running",
+    "score" : {
+      "meanDelta" : 0.015077371634034584,
+      "mismatchedFraction" : 0.04889719285453883,
+      "pixelsHigh" : 104,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Running"
+  },
+  {
+    "appearance" : "light",
+    "id" : "ds.segmented",
+    "score" : {
+      "meanDelta" : 0.021414294129487543,
+      "mismatchedFraction" : 0.048098455112721414,
+      "pixelsHigh" : 736,
+      "pixelsWide" : 864,
+      "sizesMatched" : true
+    },
+    "title" : "Segmented control and toggles"
+  },
+  {
+    "appearance" : "light",
+    "id" : "toolbar.restartRequired",
+    "score" : {
+      "meanDelta" : 0.013445417509572793,
+      "mismatchedFraction" : 0.04614017499088589,
+      "pixelsHigh" : 104,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Ports changed while running"
+  },
+  {
+    "appearance" : "light",
+    "id" : "requestLog.detail",
+    "score" : {
+      "meanDelta" : 0.01969017600921061,
+      "mismatchedFraction" : 0.04450212445175439,
+      "pixelsHigh" : 1672,
+      "pixelsWide" : 2304,
+      "sizesMatched" : true
+    },
+    "title" : "Request detail"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.stepSheet",
+    "score" : {
+      "meanDelta" : 0.018981378669184677,
+      "mismatchedFraction" : 0.04285634661117717,
+      "pixelsHigh" : 1392,
+      "pixelsWide" : 1160,
+      "sizesMatched" : true
+    },
+    "title" : "Journey step sheet"
+  },
+  {
+    "appearance" : "light",
+    "id" : "endpoints.editor",
+    "score" : {
+      "meanDelta" : 0.014839623867657517,
+      "mismatchedFraction" : 0.03901585479063859,
+      "pixelsHigh" : 970,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Endpoint editor"
+  },
+  {
+    "appearance" : "light",
+    "id" : "server.settings",
+    "score" : {
+      "meanDelta" : 0.014354548288613692,
+      "mismatchedFraction" : 0.03838061951754386,
+      "pixelsHigh" : 1152,
+      "pixelsWide" : 1520,
+      "sizesMatched" : true
+    },
+    "title" : "Server settings"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.editor",
+    "score" : {
+      "meanDelta" : 0.011821689689731081,
+      "mismatchedFraction" : 0.0365746672260142,
+      "pixelsHigh" : 1672,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Journey editor"
+  },
+  {
+    "appearance" : "light",
+    "id" : "journeys.inspector",
+    "score" : {
+      "meanDelta" : 0.06354387858713119,
+      "mismatchedFraction" : 0.03392816742081448,
+      "pixelsHigh" : 1768,
+      "pixelsWide" : 600,
+      "sizesMatched" : true
+    },
+    "title" : "Journey step inspector"
+  },
+  {
+    "appearance" : "light",
+    "id" : "toolbar.stopped",
+    "score" : {
+      "meanDelta" : 0.0110592857874709,
+      "mismatchedFraction" : 0.03378486146554867,
+      "pixelsHigh" : 104,
+      "pixelsWide" : 1688,
+      "sizesMatched" : true
+    },
+    "title" : "Stopped"
+  },
+  {
+    "appearance" : "light",
+    "id" : "toolbar.compact",
+    "score" : {
+      "meanDelta" : 0.008569449681582034,
+      "mismatchedFraction" : 0.02541065705128205,
+      "pixelsHigh" : 104,
+      "pixelsWide" : 960,
+      "sizesMatched" : true
+    },
+    "title" : "Narrow centre column"
+  }
+]
