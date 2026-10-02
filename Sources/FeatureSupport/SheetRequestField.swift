@@ -52,10 +52,7 @@ public struct SheetRequestField: View {
                         Text(method.rawValue)
                             .font(DSTypography.method)
                             .foregroundStyle(DSColors.methodColor(for: method.rawValue))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: DSGlyph.disclosure, weight: .semibold))
-                            .foregroundStyle(DSColors.labelTertiary)
-                            .accessibilityHidden(true)
+                        DSDisclosureChevron(.down)
                     }
                     .frame(height: DSControlHeight.regular)
                     .contentShape(Rectangle())

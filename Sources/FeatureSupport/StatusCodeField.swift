@@ -53,8 +53,10 @@ public struct StatusCodeField: View {
     public static let commonCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429,
                                      500, 502, 503, 504]
 
-    /// Wide enough for three SF Mono digits, so the reason phrase starts in one place.
-    private static let codeWidth: CGFloat = 32
+    /// Three SF Mono 12 medium digits (21.7pt) and a point for the caret, so the reason phrase
+    /// starts in one place, 6pt after the code as the boards draw it, and "Service Unavailable"
+    /// fits the editor's 196pt field.
+    private static let codeWidth: CGFloat = 23
 
     public var body: some View {
         HStack(spacing: DSSpacing.xs + DSSpacing.xxs) {
@@ -102,10 +104,9 @@ public struct StatusCodeField: View {
                 }
             }
         } label: {
-            Image(systemName: size == .panel ? "chevron.down" : "chevron.up.chevron.down")
-                .font(.system(size: size == .panel ? DSGlyph.disclosure - 1 : DSGlyph.minimum, weight: .semibold))
-                .foregroundStyle(DSColors.labelTertiary)
-                .frame(width: size == .panel ? 16 : 12, height: height)
+            // The boards' 10pt chevron box, 6pt after the reason phrase.
+            DSDisclosureChevron(size == .panel ? .down : .upDown)
+                .frame(width: DSGlyph.disclosure, height: height)
                 .contentShape(Rectangle())
         }
         .menuStyle(.button)

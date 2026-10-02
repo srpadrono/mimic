@@ -135,13 +135,22 @@ enum GalleryCatalog {
 
     static let workspace: [GalleryEntry] = [
         GalleryEntry("workspace.jumpBar", "Jump bar", group: .workspace, size: CGSize(width: 844, height: 32)) {
-            BreadcrumbJumpBar(
-                crumbs: GalleryWorkspaceWindow.crumbs,
-                autosaveStatus: .saved,
-                history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
-                onSelectOption: { _, _ in }
-            )
-            .background(DSColors.content)
+            // The artboard's rect is the top of the content surface: its border and rounded corners,
+            // the bar, and the line under it.
+            VStack(spacing: 0) {
+                BreadcrumbJumpBar(
+                    crumbs: GalleryWorkspaceWindow.crumbs,
+                    autosaveStatus: .saved,
+                    history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
+                    onSelectOption: { _, _ in }
+                )
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(height: DSStroke.hairline)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .gallerySurfaceSlice(includesTop: true)
         },
         // The jump bar's three save states side by side, on the Alerts board's desk.
         GalleryEntry("feedback.autosave", "Autosave states", group: .workspace, size: CGSize(width: 197, height: 16)) {
@@ -186,7 +195,9 @@ enum GalleryCatalog {
             GalleryNavigatorPanel(tab: .endpoints, endpoints: [])
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
+            // The artboard's rect takes in the content surface's side borders.
             GalleryWorkspaceWindow.editor
+                .gallerySurfaceSlice(includesTop: false)
         },
         GalleryEntry("endpoints.inspector", "Scenario inspector", group: .endpoints,
                      size: CGSize(width: 300, height: 884)) {

@@ -22,12 +22,16 @@ public enum DSButtonSize: CaseIterable {
     case inline
     case medium
     case large
+    /// The boards' bare link button beside content: 12pt regular in a 24pt slot, 6pt either side,
+    /// a 12pt glyph, and a rounded-square hover wash rather than a capsule. With `.ghost` it is the
+    /// editor's Format and Copy.
+    case compact
 
     public var height: CGFloat {
         switch self {
         case .small: DSControlHeight.small
         case .inline: DSControlHeight.inline
-        case .medium: DSControlHeight.regular
+        case .medium, .compact: DSControlHeight.regular
         case .large: DSControlHeight.large
         }
     }
@@ -37,6 +41,7 @@ public enum DSButtonSize: CaseIterable {
         case .small: DSTypography.caption.weight(.medium)
         case .inline: DSTypography.calloutMedium
         case .medium, .large: DSTypography.bodyMedium
+        case .compact: DSTypography.callout
         }
     }
 
@@ -46,6 +51,15 @@ public enum DSButtonSize: CaseIterable {
         case .inline: 10
         case .medium: DSSpacing.md
         case .large: DSSpacing.lg
+        case .compact: 6
+        }
+    }
+
+    /// The symbol beside the title.
+    var glyphFont: Font {
+        switch self {
+        case .compact: .system(size: DSGlyph.field, weight: .regular)
+        case .small, .inline, .medium, .large: .system(size: DSGlyph.button - 1, weight: .medium)
         }
     }
 }
@@ -82,7 +96,7 @@ public struct DSButton: View {
 
     public var body: some View {
         Button(role: variant == .destructive ? .destructive : nil, action: action) {
-            DSButtonLabel(title: title, systemImage: systemImage, showsTitle: showsTitle)
+            DSButtonLabel(title: title, systemImage: systemImage, showsTitle: showsTitle, size: size)
         }
         .buttonStyle(DSButtonStyle(variant, size: size))
         .accessibilityIdentifier("ds.button.\(identifier)")
@@ -95,18 +109,21 @@ public struct DSButtonLabel: View {
     let title: String
     let systemImage: String?
     let showsTitle: Bool
+    let size: DSButtonSize
 
-    public init(title: String, systemImage: String? = nil, showsTitle: Bool = true) {
+    /// `size` sets the symbol's size and weight; pass the size of the style the label is drawn in.
+    public init(title: String, systemImage: String? = nil, showsTitle: Bool = true, size: DSButtonSize = .medium) {
         self.title = title
         self.systemImage = systemImage
         self.showsTitle = showsTitle || systemImage == nil
+        self.size = size
     }
 
     public var body: some View {
         HStack(spacing: DSSpacing.xs + 1) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: DSGlyph.button - 1, weight: .medium))
+                    .font(size.glyphFont)
                     .accessibilityHidden(true)
             }
             if showsTitle {
@@ -141,23 +158,37 @@ public struct DSButtonStyle: ButtonStyle {
         @State private var isHovered = false
 
         var body: some View {
+            if size == .compact {
+                styled(RoundedRectangle(cornerRadius: DSCornerRadius.field, style: .continuous))
+            } else {
+                styled(Capsule())
+            }
+        }
+
+        private var horizontalPadding: CGFloat {
+            // A ghost button is a tool beside content, so it sits closer to it than a capsule does.
+            // The compact size states its own, the boards' link-button padding.
+            variant == .ghost && size != .compact ? DSSpacing.sm : size.horizontalPadding
+        }
+
+        private func styled<Outline: InsettableShape>(_ outline: Outline) -> some View {
             configuration.label
                 .font(size.font)
                 .foregroundStyle(ink)
-                .padding(.horizontal, variant == .ghost ? DSSpacing.sm : size.horizontalPadding)
+                .padding(.horizontal, horizontalPadding)
                 .frame(height: size.height)
                 .background {
-                    Capsule().fill(fill)
+                    outline.fill(fill)
                 }
                 .overlay {
                     if variant == .secondary {
-                        Capsule().strokeBorder(surface.fieldBorder, lineWidth: DSStroke.hairline)
+                        outline.strokeBorder(surface.fieldBorder, lineWidth: DSStroke.hairline)
                     }
                 }
                 .overlay {
-                    Capsule().fill(shade)
+                    outline.fill(shade)
                 }
-                .contentShape(Capsule())
+                .contentShape(outline)
                 .opacity(isEnabled ? 1 : 0.4)
                 .animation(.easeOut(duration: DSAnimation.fast), value: configuration.isPressed)
                 .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)

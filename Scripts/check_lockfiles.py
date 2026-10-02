@@ -2,7 +2,9 @@
 """Require identical pinned sources across the portable and app lockfiles.
 
 Compare kind, location and complete revision/version/branch state. Version labels alone cannot
-prove the same code was tested. Only the UI editor packages may appear exclusively in Tuist.
+prove the same code was tested. Only the UI editor's packages may appear exclusively in Tuist: the
+vendored CodeEditorView is a path dependency, which SwiftPM never pins, so only its Rearrange dependency
+appears.
 """
 
 import copy
@@ -11,7 +13,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TUIST_ONLY, ROOT_ONLY = {"codeeditorview", "rearrange"}, set()
+TUIST_ONLY, ROOT_ONLY = {"rearrange"}, set()
 
 
 def decoded_pins(document):

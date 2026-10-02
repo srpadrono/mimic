@@ -12,10 +12,10 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
         case upDown
         case down
 
-        var systemImage: String {
+        var direction: DSDisclosureChevron.Direction {
             switch self {
-            case .upDown: "chevron.up.chevron.down"
-            case .down: "chevron.down"
+            case .upDown: .upDown
+            case .down: .down
             }
         }
     }
@@ -68,10 +68,7 @@ public struct DSMenuField<Value: Hashable, Label: View>: View {
                 label(selection)
                     .lineLimit(1)
                     .frame(maxWidth: indicatorFollowsLabel ? nil : .infinity, alignment: .leading)
-                Image(systemName: indicator.systemImage)
-                    .font(.system(size: DSGlyph.minimum, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .accessibilityHidden(true)
+                DSDisclosureChevron(indicator.direction)
                 if indicatorFollowsLabel {
                     Spacer(minLength: 0)
                 }

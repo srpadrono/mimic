@@ -11,6 +11,7 @@ public struct DSIconMenu<Content: View>: View {
     private let help: String
     private let label: String
     private let identifier: String
+    private let width: CGFloat
     private let content: Content
 
     @Environment(\.isEnabled) private var isEnabled
@@ -18,17 +19,21 @@ public struct DSIconMenu<Content: View>: View {
 
     /// `label` names the chooser in accessibility and may differ from its hover `help` text.
     /// The journey chooser uses a name distinct from the empty state's direct add button.
+    /// `width` defaults to a panel header's square; the endpoint editor's scenario menu passes the
+    /// boards' 28pt link-button slot, a 16pt icon with 6pt either side.
     public init(
         systemImage: String,
         help: String,
         label: String? = nil,
         identifier: String,
+        width: CGFloat = DSControlHeight.regular,
         @ViewBuilder content: () -> Content
     ) {
         self.systemImage = systemImage
         self.help = help
         self.label = label ?? help
         self.identifier = identifier
+        self.width = width
         self.content = content()
     }
 
@@ -45,7 +50,7 @@ public struct DSIconMenu<Content: View>: View {
                 // is one you have to already know about to find. `DSPanelHeaderButton` records the
                 // same correction for the buttons this sits beside.
                 .foregroundStyle(isEnabled && isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
-                .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
+                .frame(width: width, height: DSControlHeight.regular)
                 .contentShape(Rectangle())
         }
         // `.plain` keeps the explicit glyph colour; the label's frame supplies the hit target.
@@ -54,7 +59,7 @@ public struct DSIconMenu<Content: View>: View {
         // The label above draws the whole control; the system indicator would be a second glyph in a
         // 26pt box that already holds one.
         .menuIndicator(.hidden)
-        .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
+        .frame(width: width, height: DSControlHeight.regular)
         .background {
             RoundedRectangle(cornerRadius: DSCornerRadius.field)
                 .fill(isEnabled && isHovered ? DSColors.hover : Color.clear)

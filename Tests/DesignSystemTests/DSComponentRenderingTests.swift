@@ -355,7 +355,8 @@ struct DSComponentRenderingTests {
     @Test("Every button variant stands on its size's rung")
     func buttonVariantsShareTheirSizeRung() {
         let measure = CGSize(width: 240, height: 80)
-        let expected: [(DSButtonSize, CGFloat)] = [(.small, 20), (.inline, 22), (.medium, 24), (.large, 28)]
+        let expected: [(DSButtonSize, CGFloat)] = [(.small, 20), (.inline, 22), (.medium, 24), (.large, 28),
+                                                   (.compact, 24)]
         for (size, height) in expected {
             #expect(size.height == height)
             for variant in DSButtonVariant.allCases {

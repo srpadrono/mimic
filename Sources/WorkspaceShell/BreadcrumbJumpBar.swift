@@ -22,10 +22,11 @@ import DesignSystem
 ///   actually are — takes the primary label colour at medium weight, as Xcode's does.
 /// - **A crumb with nowhere to go is not a control.** Zero options renders as plain text — no hover
 ///   response, no menu indicator — because a button that does nothing when clicked is worse than a
-///   label. A crumb that *does* have options says so before you hover, with the same
-///   `chevron.up.chevron.down` Xcode puts on its jump-bar segments.
-/// - **The separators are punctuation.** The chevrons between crumbs are 8pt, tertiary, and hidden
-///   from VoiceOver: they are the `▸` in the path, not something you can press.
+///   label. A crumb that *does* have options says so before you hover, with the up-and-down
+///   chevron Xcode puts on its jump-bar segments.
+/// - **The separators are punctuation.** The chevrons between crumbs are the boards' thin 10pt
+///   `DSDisclosureChevron`, tertiary, 6pt from each crumb, and hidden from VoiceOver: they are the
+///   `▸` in the path, not something you can press.
 /// - **The bar never widens the window.** At narrow centre widths, parent locations move into a
 ///   menu so the current endpoint and scenario remain readable without losing sideways navigation.
 /// The one bar under the toolbar: back and forward, then where you are as a trail of menus, with the
@@ -260,22 +261,20 @@ private struct BreadcrumbCrumbView: View {
         isLast ? DSColors.labelPrimary : DSColors.labelSecondary
     }
 
+    /// The title alone, then for the last crumb its up-and-down chevron 6pt after it, as the boards
+    /// space the whole trail. No side padding: the bar's own 6pt gaps are the boards' spacing.
     private func content(color: Color) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Text(crumb.title)
                 .font(isLast ? DSTypography.calloutMedium : DSTypography.callout)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
             if isLast, crumb.options.isEmpty == false {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .accessibilityHidden(true)
+                DSDisclosureChevron(.upDown)
             }
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 3)
         .frame(height: 22)
         .contentShape(.rect)
     }
@@ -284,12 +283,9 @@ private struct BreadcrumbCrumbView: View {
 
 private struct BreadcrumbSeparator: View {
     var body: some View {
-        Image(systemName: "chevron.right")
-            // `indicator` — a mark that annotates something else and never speaks on its own, which
-            // is exactly what punctuation between two crumbs is.
-            .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-            .foregroundStyle(DSColors.labelTertiary)
-            .accessibilityHidden(true)
+        // A mark that annotates something else and never speaks on its own, which is exactly what
+        // punctuation between two crumbs is. The chevron hides itself from accessibility.
+        DSDisclosureChevron(.right)
     }
 }
 

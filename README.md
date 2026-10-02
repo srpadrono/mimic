@@ -66,4 +66,4 @@ CI publishes coverage badges from merged unit and UI runs on `main`. Line covera
 - [Contributing](CONTRIBUTING.md) — build, test, and release commands
 - [Roadmap](docs/ROADMAP.md) and [Changelog](CHANGELOG.md) — current limits and release history
 
-MIT licensed. See [LICENSE](LICENSE).
+MIT licensed. See [LICENSE](LICENSE). The vendored code editor in `Vendor/CodeEditorView` keeps its Apache 2.0 licence; [Vendor](Vendor/README.md) says what Mimic changed.
