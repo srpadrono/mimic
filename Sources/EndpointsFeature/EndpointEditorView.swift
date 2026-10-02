@@ -143,11 +143,12 @@ public struct EndpointEditorView: View {
             refreshUneditedFields(from: previous)
         }
         .onChange(of: statusCodeString) { debounceStatusCode() }
-        .alert("Delete endpoint?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) { actions.onDelete() }
+        // Worded as the sidebar's confirmation, which the Alerts board draws.
+        .alert(SidebarView.deleteTitle(for: endpoint), isPresented: $showDeleteConfirmation) {
+            Button("Delete endpoint", role: .destructive) { actions.onDelete() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will remove the endpoint and all its scenarios. This can't be undone.")
+            Text(SidebarView.deleteMessage(scenarioCount: endpoint.scenarios.count))
         }
         .sheet(item: $renameScenarioTarget) { scenario in
             RenameItemSheet(

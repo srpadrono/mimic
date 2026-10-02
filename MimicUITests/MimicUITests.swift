@@ -491,9 +491,9 @@ final class MimicUITests: MimicUITestCase {
 
         // Confirmation dialog
         let confirmSheet = app.sheets.firstMatch
-        XCTAssertTrue(confirmSheet.buttons["Delete"].waitForExistence(timeout: 3),
+        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitForExistence(timeout: 3),
                       "Delete confirmation should appear")
-        confirmSheet.buttons["Delete"].click()
+        confirmSheet.buttons["Delete endpoint"].click()
 
         // Sidebar should return to empty state
         XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),

@@ -289,7 +289,7 @@ public enum DSCatalog {
     private static func catalogRoute(_ method: String, _ path: String) -> some View {
         HStack(spacing: DSSpacing.sm) {
             DSMethodLabel(method, fixedWidth: false, identifier: "catalog.route.\(method.lowercased())")
-                .frame(width: 44, alignment: .leading)
+                .frame(width: DSLayout.rowMethodColumn, alignment: .leading)
             Text(path).font(DSTypography.code).foregroundStyle(DSColors.labelPrimary)
             Spacer(minLength: 0)
         }

@@ -1954,10 +1954,8 @@ final class EndpointEditorUITests: MimicUITestCase {
 
     /// EPDEL-05, EPDEL-06.
     ///
-    /// A different path from the editor's more-menu delete, and a different confirmation: the
-    /// sidebar's names the endpoint's route (`Delete “GET /api/orders”?`) where the editor's is the
-    /// generic "Delete endpoint?". The interpolated route is what tells the two apart, so it is what
-    /// is asserted.
+    /// A different path from the editor's more-menu delete, with the same confirmation: it names
+    /// the endpoint's route (`Delete “GET /api/orders”?`), so the route is what is asserted.
     @MainActor
     func testSidebarContextMenuDeleteConfirmationNamesTheEndpoint() throws {
         launchApp()
