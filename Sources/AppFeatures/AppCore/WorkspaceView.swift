@@ -560,7 +560,8 @@ struct WorkspaceView: View {
             // "Checkout › Payment retry", as the design draws it: the group earns a crumb only when
             // the journey has one, and the journey crumb names the journey itself.
             if let group = selected?.groupTag, !group.isEmpty {
-                let groups = Set(journeys.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+                // In the navigator's order.
+                let groups = NavigatorGroupOrder.names(in: journeys.map(\.groupTag))
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(
                         id: "journeyGroup",
@@ -601,7 +602,8 @@ struct WorkspaceView: View {
             }
 
             // The group crumb only earns its place when there are groups to move between.
-            let groups = Set(endpoints.compactMap(\.groupTag).filter { !$0.isEmpty }).sorted()
+            // In the navigator's order.
+            let groups = NavigatorGroupOrder.names(in: endpoints.map(\.groupTag))
             if let group = endpoint.groupTag, !group.isEmpty {
                 crumbs.append(
                     BreadcrumbJumpBar.Crumb(

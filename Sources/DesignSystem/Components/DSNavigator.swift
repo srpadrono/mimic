@@ -5,15 +5,28 @@ import SwiftUI
 public enum DSNavigatorMetrics {
     public static let rowHeight = DSRowHeight.list
     public static let groupHeaderHeight: CGFloat = 24
+    /// The gap between neighbouring rows and headings, so rounded selections never touch.
+    public static let rowGap = DSSpacing.xxs
+    /// From one row's top to the next one's: the row and its share of the gaps either side.
+    public static let rowPitch = rowHeight + rowGap
     /// The sidebar's own inset; rows sit 8pt in so their rounded selection clears the glass edge.
     public static let inset = DSSpacing.md
-    public static let rowInset = DSSpacing.sm
+    /// What a row adds to the inset the sidebar list already gives its cells. The list draws a
+    /// row's content 16pt in from the panel edge, which is where the design puts it.
+    public static let rowInset: CGFloat = 0
+    /// How far the sidebar list draws its first row below its own top edge.
+    static let listTopInset: CGFloat = 8
+    /// The mode switch's space below it: the design's 10pt to the first heading, less what the
+    /// list and the first heading's half gap already add.
+    static let headerBottomPadding = 10 - listTopInset - rowGap / 2
     public static let indentation = DSSpacing.lg
     public static let iconSlot = DSSpacing.lg
     public static let footerHeight = DSBarHeight.footer
     public static let minimumWidth = DSLayout.sidebarMinimumWidth
     public static let idealWidth = DSLayout.sidebarWidth
     public static let maximumWidth = DSLayout.sidebarMaximumWidth
+
+    static let rowInsets = EdgeInsets(top: rowGap / 2, leading: rowInset, bottom: rowGap / 2, trailing: rowInset)
 }
 
 public struct DSNavigatorMode: Identifiable {
@@ -49,7 +62,7 @@ public struct DSNavigatorHeader: View {
             identifier: "navigator.mode"
         )
         .padding(.horizontal, DSNavigatorMetrics.inset)
-        .padding(.bottom, 10)
+        .padding(.bottom, DSNavigatorMetrics.headerBottomPadding)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("navigator.header")
@@ -104,16 +117,14 @@ public struct DSNavigatorFooter<Accessory: View>: View {
 }
 
 public extension View {
-    /// A 28pt navigator row. The list draws the rounded selection; the row supplies its insets.
+    /// A 28pt navigator row with half the row gap above and below it. The list draws the rounded
+    /// selection; the row supplies its insets.
     func dsNavigatorRow(indented: Bool = false) -> some View {
         self
             .frame(height: DSNavigatorMetrics.rowHeight)
             .padding(.leading, indented ? DSNavigatorMetrics.indentation : 0)
             .contentShape(Rectangle())
-            .listRowInsets(EdgeInsets(
-                top: 0, leading: DSNavigatorMetrics.rowInset,
-                bottom: 0, trailing: DSNavigatorMetrics.rowInset
-            ))
+            .listRowInsets(DSNavigatorMetrics.rowInsets)
             .listRowSeparator(.hidden)
     }
 
@@ -129,7 +140,9 @@ public extension View {
             // changes nothing else.
             .environment(\.sidebarRowSize, .small)
             .environment(\.defaultMinListRowHeight, DSNavigatorMetrics.rowHeight)
-            .contentMargins(.vertical, DSSpacing.xxs, for: .scrollContent)
+            // Nothing on top: the list's own top inset already clears the mode switch.
+            .contentMargins(.top, 0, for: .scrollContent)
+            .contentMargins(.bottom, DSSpacing.xxs, for: .scrollContent)
     }
 }
 
@@ -190,14 +203,12 @@ public struct DSNavigatorGroup: View {
                 }
             }
             .foregroundStyle(DSColors.labelTertiary)
-            .padding(.horizontal, DSSpacing.sm)
             .frame(height: DSNavigatorMetrics.groupHeaderHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .listRowInsets(EdgeInsets(top: 0, leading: DSNavigatorMetrics.rowInset,
-                                  bottom: 0, trailing: DSNavigatorMetrics.rowInset))
+        .listRowInsets(DSNavigatorMetrics.rowInsets)
         .listRowSeparator(.hidden)
         .selectionDisabled()
         .help(name)

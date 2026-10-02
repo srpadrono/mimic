@@ -1,3 +1,4 @@
+import AppKit
 import DesignSystem
 import Domain
 import EndpointsFeature
@@ -291,9 +292,12 @@ struct GalleryNavigator: View {
     @State private var filter = ""
     @State private var scope = SidebarView.anyMethodScopeID
     @State private var collapsed: Set<String> = []
+    /// Whether the column paints the window colour behind itself. A panel draws glass instead.
+    private let drawsBackground: Bool
 
-    init(tab: NavigatorTab = .endpoints) {
+    init(tab: NavigatorTab = .endpoints, drawsBackground: Bool = true) {
         _tab = State(initialValue: tab.id)
+        self.drawsBackground = drawsBackground
     }
 
     private var showsJourneys: Bool { tab == NavigatorTab.journeys.id }
@@ -352,8 +356,47 @@ struct GalleryNavigator: View {
             }
             .id(tab)
         }
-        .background(DSColors.window)
+        .background(drawsBackground ? DSColors.window : Color.clear)
     }
+}
+
+/// The navigator as the boards draw it, on its own: the floating glass column with the window's
+/// controls over it. In a window, the split view draws both, so `GalleryNavigator` leaves them out.
+struct GalleryNavigatorPanel: View {
+    let tab: NavigatorTab
+
+    var body: some View {
+        GalleryNavigator(tab: tab, drawsBackground: false)
+            .overlay(alignment: .top) { GalleryWindowControls() }
+            .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Stand-ins for what the window draws over the navigator: the close, minimise and zoom buttons,
+/// and the sidebar toggle, as the boards place them in the 44pt row above the mode switch.
+private struct GalleryWindowControls: View {
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            ForEach(Self.lights, id: \.self) { hex in
+                Circle()
+                    .fill(Color(nsColor: NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+                                                 green: CGFloat((hex >> 8) & 0xFF) / 255,
+                                                 blue: CGFloat(hex & 0xFF) / 255, alpha: 1)))
+                    .frame(width: 12, height: 12)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "sidebar.left")
+                .font(.system(size: DSGlyph.button))
+                .foregroundStyle(DSColors.labelSecondary)
+                .frame(width: 28, height: 24)
+        }
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: 44)
+    }
+
+    /// The system's traffic-light colours, as the boards paint them.
+    private static let lights: [UInt32] = [0xFF5F57, 0xFEBC2E, 0x28C840]
 }
 
 /// The window's skeleton with nothing in it: the navigator, the jump bar, the editor, the request

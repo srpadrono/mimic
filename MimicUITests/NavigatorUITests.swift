@@ -405,8 +405,8 @@ final class NavigatorUITests: MimicUITestCase {
         XCTAssertLessThanOrEqual(addEndpoint.frame.minX - navigator.endpointFilter.frame.maxX, 24,
                                  "Inactive journey controls must not leave an empty slot beside the filter")
         XCTAssertEqual(navigator.footer.frame.maxX - addEndpoint.frame.maxX, 10, accuracy: 1)
-        // `DSNavigatorMetrics.rowHeight`, which is `DSRowHeight.list`.
-        XCTAssertEqual(endpointRowHeight, 28, accuracy: 1)
+        // `DSNavigatorMetrics.rowPitch`: the 28pt `DSRowHeight.list` row and the 2pt gap between rows.
+        XCTAssertEqual(endpointRowHeight, 30, accuracy: 1)
         XCTAssertEqual(navigator.group("Account").frame.minX, navigator.row(named: "Account summary").frame.minX,
                        accuracy: 1, "Group headings and rows share the navigator's row inset")
         XCTAssertTrue(navigator.row(named: "Current orders").exists)

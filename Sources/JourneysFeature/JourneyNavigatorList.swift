@@ -200,7 +200,14 @@ public struct JourneyNavigatorList: View {
         Dictionary(grouping: filteredJourneys.filter { !($0.groupTag ?? "").isEmpty }) { $0.groupTag! }
     }
 
-    private var groupNames: [String] { groupedJourneys.keys.sorted() }
+    private var groupNames: [String] { Self.groupNames(of: filteredJourneys) }
+
+    /// The groups in the order their first journey appears in the project, as the design lists
+    /// them. A new group goes to the bottom.
+    static func groupNames(of journeys: [Journey]) -> [String] {
+        NavigatorGroupOrder.names(in: journeys.map(\.groupTag))
+    }
+
     private static let ungroupedSectionKey = "__ungrouped__"
     /// Prefixing named groups keeps a user-entered `__ungrouped__` group distinct from the
     /// ungrouped section's internal collapse state.
