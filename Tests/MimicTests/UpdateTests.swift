@@ -800,3 +800,33 @@ struct UnitTestStoreIsolationTests {
         #expect(UITestSupport.suppressesAutomaticUpdateChecks())
     }
 }
+
+@Suite("Update sheet layout")
+@MainActor
+struct UpdateSheetLayoutTests {
+    @Test("A release with no patch is named the way people say it")
+    func zeroPatchIsShortened() {
+        #expect(UpdateSheet.displayVersion(ReleaseVersion(major: 1, minor: 10, patch: 0)) == "1.10")
+        #expect(UpdateSheet.displayVersion(ReleaseVersion(major: 1, minor: 10, patch: 1)) == "1.10.1")
+        #expect(UpdateSheet.displayVersion(ReleaseVersion(major: 2, minor: 0, patch: 0, prerelease: ["beta", "1"]))
+            == "2.0.0-beta.1")
+    }
+
+    @Test("Only an offered update takes the design's height")
+    func onlyTheOfferIsTall() {
+        let release = UpdateSheetPreviewModel.release
+        #expect(UpdateSheet.height(for: .available(release)) == 480)
+        #expect(UpdateSheet.height(for: .checking) == nil)
+        #expect(UpdateSheet.height(for: .downloading(release, fraction: 0.5)) == nil)
+        #expect(UpdateSheet.height(for: .failed("offline")) == nil)
+    }
+
+    @Test("Notes are spaced like the board: 6 pt under a heading, 12 pt before one, 3 pt between items")
+    func notesSpacing() {
+        #expect(UpdateSheet.spacing(before: .heading("New"), after: nil) == 0)
+        #expect(UpdateSheet.spacing(before: .bullet("a"), after: .heading("New")) == 6)
+        #expect(UpdateSheet.spacing(before: .bullet("b"), after: .bullet("a")) == 3)
+        #expect(UpdateSheet.spacing(before: .text("c"), after: .bullet("b")) == 3)
+        #expect(UpdateSheet.spacing(before: .heading("Fixed"), after: .bullet("b")) == 12)
+    }
+}

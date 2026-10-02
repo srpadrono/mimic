@@ -80,7 +80,8 @@ final class UpdateUITests: MimicUITestCase {
 
         XCTAssertTrue(updateSheet.title.waitForExistence(timeout: 10), "the sheet should appear")
         let title = updateSheet.text(of: updateSheet.title)
-        XCTAssertTrue(title.contains("99.0.0"), "expected the fixture's version in the title, got \(title)")
+        XCTAssertTrue(title.contains("Mimic 99.0 is available"),
+                      "expected the fixture's version, without its zero patch, in the title, got \(title)")
         XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 5))
         XCTAssertTrue(updateSheet.skipButton.exists)
         XCTAssertTrue(updateSheet.laterButton.exists)
@@ -136,7 +137,7 @@ final class UpdateUITests: MimicUITestCase {
         updateSheet.openFromMenu()
         XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10),
                       "A manual check must offer the newer version even after it was skipped")
-        XCTAssertTrue(updateSheet.text(of: updateSheet.title).contains("99.0.0"))
+        XCTAssertTrue(updateSheet.text(of: updateSheet.title).contains("Mimic 99.0 is available"))
         XCTAssertFalse(updateSheet.upToDate.exists)
         captureUpdateEvidence("Skipped release offered by manual check")
     }

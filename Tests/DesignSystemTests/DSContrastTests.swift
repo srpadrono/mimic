@@ -171,19 +171,21 @@ struct DSContrastTests {
         }
     }
 
-    /// The sheet boards draw fields white in light and a step above the sheet in dark, and lift a
-    /// settings group a smaller step off the sheet. Flattened onto the sheet, as they are drawn.
-    @Test("Sheet fields and settings groups match the sheet boards")
+    /// The sheet boards draw fields white in light and a step above the sheet in dark, lift a
+    /// settings group a smaller step off the sheet, and sink a text well a step below it in dark.
+    /// Flattened onto the sheet, as they are drawn.
+    @Test("Sheet fields, settings groups and wells match the sheet boards")
     func sheetControlsMatchTheBoards() throws {
         let expected: [Appearance: [String: UInt32]] = [
-            .light: ["field": 0xFFFFFF, "group": 0xFFFFFF],
-            .dark: ["field": 0x38383B, "group": 0x343436],
+            .light: ["field": 0xFFFFFF, "group": 0xFFFFFF, "well": 0xFFFFFF],
+            .dark: ["field": 0x38383B, "group": 0x343436, "well": 0x222224],
         ]
         for appearance in Appearance.allCases {
             let sheet = try resolve(DSColors.sheet, in: appearance)
             let readings: [(name: String, colour: Color)] = [
                 ("field", DSSurface.sheet.fieldFill),
                 ("group", DSColors.formGroup),
+                ("well", DSColors.sheetWell),
             ]
             for reading in readings {
                 let hex = try #require(expected[appearance]?[reading.name])
