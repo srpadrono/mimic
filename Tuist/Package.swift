@@ -122,8 +122,10 @@ let package = Package(
         .package(url: "https://github.com/vapor/vapor", from: "4.76.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.33.1"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
-        // 0.16 fixes native typing after Unicode characters using UTF-16 text ranges.
-        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.16.0"),
+        // CodeEditorView 0.16.0, vendored so the editor can draw the design's 19pt lines and 40pt gutter;
+        // Vendor/README.md lists what changed. Its Rearrange dependency still resolves from its URL and is
+        // pinned here. (0.16 fixes native typing after Unicode characters using UTF-16 text ranges.)
+        .package(path: "../Vendor/CodeEditorView"),
         .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "6.4.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],

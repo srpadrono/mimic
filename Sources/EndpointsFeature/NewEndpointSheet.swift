@@ -159,9 +159,7 @@ public struct NewEndpointSheet: View {
                     Divider()
                     Button("No group") { groupTag = "" }
                 } label: {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: DSGlyph.minimum, weight: .medium))
-                        .foregroundStyle(DSColors.labelTertiary)
+                    DSDisclosureChevron(.upDown)
                         .frame(width: DSGlyph.field + DSSpacing.xs, height: DSControlHeight.regular)
                         .contentShape(Rectangle())
                 }
@@ -240,11 +238,8 @@ public struct NewEndpointSheet: View {
     }
 
     private var disclosureGlyph: some View {
-        // The design's pop-up mark is 10 pt overall, a quiet pair of 5 pt chevrons.
-        Image(systemName: "chevron.up.chevron.down")
-            .font(.system(size: DSGlyph.minimum, weight: .medium))
-            .foregroundStyle(DSColors.labelTertiary)
-            .accessibilityHidden(true)
+        // The design's pop-up mark: 10 pt overall, a quiet pair of chevrons.
+        DSDisclosureChevron(.upDown)
     }
 
     static func contentTypeTitle(_ contentType: Scenario.ContentType) -> String {

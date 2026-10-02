@@ -11,6 +11,7 @@ public struct DSJSONEditor: View {
     private let identifier: String
     private let documentID: String?
     private let minimumViewportHeight: CGFloat
+    private let gutter: CGFloat
     private let onValidationChanged: ((Bool) -> Void)?
 
     /// Update `documentID` together with the hydrated text when changing documents.
@@ -19,36 +20,47 @@ public struct DSJSONEditor: View {
     /// `minimumViewportHeight` is the least height of the text viewport itself. A `.frame(minHeight:)`
     /// on the editor bounds the whole card, which includes its vertical padding, so the text the
     /// person can see would be that padding shorter than the number the caller wrote.
+    ///
+    /// `gutterWidth` is where the code starts, line numbers included: the endpoint editor's 40pt,
+    /// or the journey step sheet's narrower 36pt.
+    ///
+    /// The editor is read-only under `.disabled(true)`, which keeps its colours.
     public init(
         text: Binding<String>,
         identifier: String,
         documentID: String? = nil,
         minimumViewportHeight: CGFloat = 0,
+        gutterWidth: CGFloat = DSJSONEditor.gutterWidth,
         onValidationChanged: ((Bool) -> Void)? = nil
     ) {
         self._text = text
         self.identifier = identifier
         self.documentID = documentID
         self.minimumViewportHeight = minimumViewportHeight
+        self.gutter = gutterWidth
         self.onValidationChanged = onValidationChanged
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             DSNativeTextEditor(text: $text, documentID: documentID ?? identifier,
-                               configurationID: colorScheme, identifier: "ds.jsoneditor.\(identifier)",
+                               configurationID: Configuration(colorScheme: colorScheme, gutterWidth: gutter),
+                               identifier: "ds.jsoneditor.\(identifier)",
                                label: "JSON editor") { session in
                 CodeEditor(text: session.textBinding,
                            position: session.positionBinding,
                            messages: session.messagesBinding,
                            language: Self.jsonLanguage)
-                    .environment(\.codeEditorLayoutConfiguration,
-                                 CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: true))
+                    .environment(\.codeEditorLayoutConfiguration, layout)
                     .environment(\.codeEditorTheme, colorScheme == .dark ? Self.darkTheme : Self.lightTheme)
                     .environment(\.colorScheme, colorScheme)
             }
             .frame(minHeight: minimumViewportHeight, maxHeight: .infinity)
-            .padding(.vertical, DSSpacing.sm)
+            // The boards centre each line's text in its 19pt line, 2pt of leading above and below.
+            // The native editor puts all 4pt above the text, so the card takes 2pt from the top and
+            // gives it to the bottom to draw the text where the boards do.
+            .padding(.top, Self.cardVerticalPadding / 2 - Self.halfLeading)
+            .padding(.bottom, Self.cardVerticalPadding / 2 + Self.halfLeading)
             .background(DSColors.code)
             .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))
             .overlay(
@@ -82,19 +94,49 @@ public struct DSJSONEditor: View {
         }
     }
 
+    /// What the wrapped editor needs to know besides the text, so a change rebuilds it.
+    private struct Configuration: Hashable {
+        let colorScheme: ColorScheme
+        let gutterWidth: CGFloat
+    }
+
+    private var layout: CodeEditor.LayoutConfiguration {
+        CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: true, lineHeight: Self.lineHeight,
+                                       gutterWidth: gutter,
+                                       lineNumberTrailingPadding: Self.lineNumberTrailingPadding)
+    }
+
     // MARK: - Metrics
 
     // Font metrics and both native editor themes share this face.
     static let editorFontName = "SFMono-Regular"
     static let editorFontSize: CGFloat = 12
 
+    /// SF Mono 12 on a 19pt line, as every board draws code: `DSTypography.Leading.code` over
+    /// SwiftUI's own line, fixed here because the native editor would otherwise use the font's 15pt.
+    public static let lineHeight: CGFloat = 19
+    /// Where the code starts in the endpoint editor's card, line numbers included.
+    public static let gutterWidth: CGFloat = 40
+    /// The space between a line number and its code.
+    public static let lineNumberTrailingPadding: CGFloat = 12
+    /// The card's padding above and below the text together: the boards' 10pt on each side.
+    public static let cardVerticalPadding: CGFloat = 20
+    /// Half a line's leading: the boards' 19pt line around the font's 15pt.
+    static let halfLeading: CGFloat = 2
+
     /// Height for logical lines. Wrapped lines may need more room; callers provide a minimum height.
     public static func height(forLines lines: Int) -> CGFloat {
-        let font = NSFont(name: editorFontName, size: editorFontSize)
-            ?? .monospacedSystemFont(ofSize: editorFontSize, weight: .regular)
-        let lineHeight = font.ascender - font.descender + font.leading
-        return CGFloat(max(1, lines)) * lineHeight.rounded(.up)
+        CGFloat(max(1, lines)) * lineHeight
     }
+
+    /// A whole card for logical lines, as the boards size one: the lines, 4pt below the last, and
+    /// the card's padding. The Main board's ten-line body is 214pt.
+    public static func cardHeight(forLines lines: Int) -> CGFloat {
+        height(forLines: lines) + cardSlack + cardVerticalPadding
+    }
+
+    /// The room the boards leave below a card's last line.
+    public static let cardSlack: CGFloat = 4
 
     /// Counts logical lines, including CRLF and trailing empty lines, for editor sizing.
     public static func lineCount(of text: String) -> Int {

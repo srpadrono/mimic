@@ -93,8 +93,9 @@ runs:
           ~/.cache/tuist
           Tuist/.build
         # Tuist/.build includes compiled manifests/plugins, so even fallback restores must match
-        # the compiler and architecture. mise.toml also invalidates a changed Tuist version.
-        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-${{ hashFiles('mise.toml', 'Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift') }}
+        # the compiler and architecture. mise.toml also invalidates a changed Tuist version, and a
+        # vendored package's manifest is one of the manifests Tuist compiles.
+        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-${{ hashFiles('mise.toml', 'Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift', 'Vendor/*/Package.swift') }}
         restore-keys: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-
 
     # The macOS half of the lockfile invariant. `tuist install` is a SwiftPM resolve behind another
