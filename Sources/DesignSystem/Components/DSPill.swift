@@ -18,6 +18,14 @@ public enum DSPillTone {
     }
 }
 
+/// The glyph a ``DSPill`` leads with.
+public nonisolated enum DSPillGlyph {
+    /// An SF Symbol at the pill's glyph size.
+    case system(String)
+    /// The design's dropped-connection glyph, ``DSConnectionDropGlyph``, at 11 pt.
+    case connectionDrop
+}
+
 /// A short fact beside a row, as the design draws it on the journey step and import review boards:
 /// an 18 pt capsule, 7 pt in from each end, 11 pt text.
 ///
@@ -25,24 +33,34 @@ public enum DSPillTone {
 /// ``SwiftUI/View/dsPill(_:)`` on that content instead.
 public struct DSPill: View {
     private let text: String
-    private let systemImage: String?
+    private let glyph: DSPillGlyph?
     private let tone: DSPillTone
     private let weight: Font.Weight
 
     public init(_ text: String, systemImage: String? = nil, tone: DSPillTone = .neutral,
                 weight: Font.Weight = .regular) {
+        self.init(text, glyph: systemImage.map { DSPillGlyph.system($0) }, tone: tone, weight: weight)
+    }
+
+    public init(_ text: String, glyph: DSPillGlyph?, tone: DSPillTone = .neutral,
+                weight: Font.Weight = .regular) {
         self.text = text
-        self.systemImage = systemImage
+        self.glyph = glyph
         self.tone = tone
         self.weight = weight
     }
 
     public var body: some View {
         HStack(spacing: DSSpacing.xs) {
-            if let systemImage {
-                Image(systemName: systemImage)
+            switch glyph {
+            case .system(let name):
+                Image(systemName: name)
                     .font(.system(size: DSGlyph.disclosure))
                     .accessibilityHidden(true)
+            case .connectionDrop:
+                DSConnectionDropGlyph(size: DSGlyph.paneAction)
+            case nil:
+                EmptyView()
             }
             Text(text)
                 .lineLimit(1)

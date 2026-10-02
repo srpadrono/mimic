@@ -141,10 +141,15 @@ public nonisolated enum DSColors {
 
     // MARK: - Separators
 
+    /// The separator under Increase Contrast, named so the token board can draw it without asking
+    /// AppKit for a high-contrast appearance, which it only gives while the system setting is on.
+    static let separatorHighContrastLightInk = Ink(white: 0, alpha: 0.2)
+    static let separatorHighContrastDarkInk = Ink(white: 1, alpha: 0.22)
+
     /// Every rule in the window: one pixel, never a heavier seam.
     public static let separator = Color(
         light: Ink(white: 0, alpha: 0.09), dark: Ink(white: 1, alpha: 0.08),
-        lightHighContrast: Ink(white: 0, alpha: 0.2), darkHighContrast: Ink(white: 1, alpha: 0.22)
+        lightHighContrast: separatorHighContrastLightInk, darkHighContrast: separatorHighContrastDarkInk
     )
 
     // MARK: - Accent

@@ -94,7 +94,8 @@ public struct DSEmptyState: View {
 
             Text(message)
                 .font(messageFont)
-                .lineSpacing(prominence == .compact ? 2 : 4)
+                // The boards set empty-state paragraphs on 17 pt lines at 12 pt and 18 pt at 13 pt.
+                .lineSpacing(DSTypography.Leading.tight)
                 .foregroundStyle(prominence == .compact ? DSColors.labelTertiary : DSColors.labelSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: prominence == .large ? 460 : DSLayout.emptyStateTextWidth)

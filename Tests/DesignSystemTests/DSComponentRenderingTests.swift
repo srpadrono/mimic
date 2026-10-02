@@ -378,6 +378,34 @@ struct DSComponentRenderingTests {
         }
     }
 
+    /// The dropped-connection glyph is drawn on the board's 16-unit grid, so it is exactly the size
+    /// asked for: 11 pt in a pill, where `bolt.horizontal` stood about 16 pt wide.
+    @Test("The connection-drop glyph is as wide and tall as its size")
+    func connectionDropGlyphKeepsItsSize() {
+        let measure = CGSize(width: 40, height: 40)
+        #expect(render(DSConnectionDropGlyph(), size: measure) == CGSize(width: 11, height: 11))
+        #expect(render(DSConnectionDropGlyph(size: 22), size: measure) == CGSize(width: 22, height: 22))
+    }
+
+    /// A pill is the board's 18 pt capsule whichever glyph leads it.
+    @Test("A pill is 18pt tall with a drawn glyph, a symbol or none")
+    func pillKeepsItsHeight() {
+        let measure = CGSize(width: 240, height: 40)
+        #expect(render(DSPill("Drop after 5 s", glyph: .connectionDrop), size: measure).height == 18)
+        #expect(render(DSPill("Time out after 5 s", systemImage: "hourglass"), size: measure).height == 18)
+        #expect(render(DSPill("\u{00D7} 3"), size: measure).height == 18)
+    }
+
+    /// The Components board's banner: 8 pt padding around a 20 pt button whose hairline border sits
+    /// outside its box, so 37 pt in all.
+    @Test("A banner with an action is 37pt tall")
+    func bannerMatchesTheBoardHeight() {
+        let banner = DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", actionTitle: "Try again",
+                              identifier: "banner") {}
+            .frame(width: 394)
+        #expect(render(banner, size: CGSize(width: 420, height: 80)).height == 37)
+    }
+
     /// The live radio holds its footprint when it fills, so a row's name does not shift sideways
     /// when a scenario goes live.
     @Test("The live indicator is one size, live or not")

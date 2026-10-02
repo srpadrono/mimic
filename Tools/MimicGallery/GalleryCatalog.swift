@@ -64,7 +64,7 @@ struct GalleryEntry: Identifiable {
 enum GalleryCatalog {
     static var entries: [GalleryEntry] {
         windows + workspace + toolbar + endpoints + journeys + requestLog + server + projects + importing + updates
-            + DSCatalog.components.map { component(from: $0, group: .components) }
+            + componentEntries
             + DSCatalog.tokens.map { component(from: $0, group: .tokens) }
     }
 
@@ -302,6 +302,54 @@ enum GalleryCatalog {
         GalleryEntry("updates.sheet", "Update sheet", group: .updates,
                      size: CGSize(width: DSSheetWidth.medium, height: UpdateSheet.designHeight)) {
             UpdateSheet(service: GalleryModels.updates)
+        },
+    ]
+
+    // MARK: - Components
+
+    /// The Components board in its own order: the design-system catalogue, with the cards that need a
+    /// feature module placed where the board draws them.
+    static var componentEntries: [GalleryEntry] {
+        let catalog = DSCatalog.components.map { component(from: $0, group: .components) }
+        let split = catalog.firstIndex { $0.id == "ds.pills" } ?? catalog.endIndex
+        return Array(catalog[..<split]) + components + Array(catalog[split...])
+    }
+
+    /// Components cards the design system cannot draw itself, because a specimen lives in a feature
+    /// module. The jump bar is WorkspaceShell's.
+    static let components: [GalleryEntry] = [
+        GalleryEntry("ds.jumpBarAndEmptyState", "Jump bar and empty state", group: .components,
+                     size: CGSize(width: 888, height: 269)) {
+            DSCatalogCard("Jump bar and empty state",
+                          detail: "The jump bar is the only bar under the toolbar. Empty states say what goes here "
+                              + "and offer the next step.") {
+                // The bar's anatomy, so no history buttons: those belong to the window's toolbar row.
+                BreadcrumbJumpBar(crumbs: GalleryWorkspaceWindow.crumbs, autosaveStatus: .saved, history: nil,
+                                  onSelectOption: { _, _ in })
+                    .overlay {
+                        RoundedRectangle(cornerRadius: DSCornerRadius.segment, style: .continuous)
+                            .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+                    }
+                DSEmptyState(
+                    heading: "No journeys yet",
+                    message: "A journey changes responses as a flow goes on, like a payment that fails once and "
+                        + "then succeeds.",
+                    actions: [
+                        DSEmptyStateAction("New journey", isPrimary: true, identifier: "catalog.empty.new") {},
+                        DSEmptyStateAction("Start from a template", identifier: "catalog.empty.template") {},
+                    ],
+                    prominence: .regular,
+                    identifier: "catalog.empty"
+                )
+                // The empty state pads 16 pt; the board's box pads 20 inside its dashed hairline.
+                .padding(DSSpacing.xs + DSStroke.hairline)
+                .fixedSize(horizontal: false, vertical: true)
+                .overlay {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                        .strokeBorder(DSColors.separator,
+                                      style: StrokeStyle(lineWidth: DSStroke.hairline, dash: [3, 3]))
+                }
+            }
         },
     ]
 }
