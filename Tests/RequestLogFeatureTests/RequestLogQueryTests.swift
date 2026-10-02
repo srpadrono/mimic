@@ -129,6 +129,38 @@ struct RequestLogQueryTests {
         #expect(RequestLogQuery.formattedBytes(1_024) == "1.0 KB")
         #expect(RequestLogQuery.formattedBytes(1_536) == "1.5 KB")
         #expect(RequestLogQuery.formattedBytes(1_048_576) == "1.0 MB")
+        // Whole numbers from 100 up, rounded down, so no reading outgrows the 76pt Size column.
+        #expect(RequestLogQuery.formattedBytes(102_297) == "99.9 KB")
+        #expect(RequestLogQuery.formattedBytes(102_400) == "100 KB")
+        #expect(RequestLogQuery.formattedBytes(319_590) == "312 KB")
+        #expect(RequestLogQuery.formattedBytes(1_048_575) == "1023 KB")
+        #expect(RequestLogQuery.formattedBytes(524_288_000) == "500 MB")
+    }
+
+    // MARK: - First frame
+
+    @Test("Before the background pass, the table works its rows out on the spot")
+    func firstFrameListsTheLog() {
+        let logs = [
+            Self.log(path: "/older", status: 200, at: 1),
+            Self.log(path: "/missing", status: 404, at: 2, outcome: .unmatched),
+            Self.log(path: "/newest", status: 500, at: 3),
+        ]
+        func rows(stored: [RequestLog]?, unmatchedOnly: Bool = false, errorsOnly: Bool = false) -> [String] {
+            RequestLogDrawerView.displayedRows(
+                stored: stored, logs: logs, endpoints: [], methodFilter: nil, filterText: "",
+                unmatchedOnly: unmatchedOnly, errorsOnly: errorsOnly, sortField: .timestamp, sortAscending: false
+            ).map(\.path)
+        }
+
+        // Nothing stored yet: the whole log, newest first, not an empty table.
+        #expect(rows(stored: nil) == ["/newest", "/missing", "/older"])
+        // Unmatched wins over Errors, as the background pass decides.
+        #expect(rows(stored: nil, unmatchedOnly: true, errorsOnly: true) == ["/missing"])
+        #expect(rows(stored: nil, errorsOnly: true) == ["/newest", "/missing"])
+        // Once the pass has stored rows, those are what the table draws, even an empty result.
+        #expect(rows(stored: [logs[0]]) == ["/older"])
+        #expect(rows(stored: []) == [])
     }
 
     @Test("A response's size comes from its logged body, else its Content-Length")

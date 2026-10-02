@@ -64,6 +64,12 @@ public struct DSSegmentedControl<Selection: Hashable>: View {
     }
 
     private struct SegmentButton: View {
+        /// The boards set a segment's count as a padded chip of its own inside the segment: a word
+        /// space plus 10pt before it, and 10pt after it on top of the segment's own padding.
+        /// Computed: a type nested in a generic one can't hold stored statics.
+        static var countSpacing: CGFloat { 13 }
+        static var countTrailingPadding: CGFloat { 10 }
+
         let segment: Segment
         let isSelected: Bool
         let fillsWidth: Bool
@@ -74,13 +80,14 @@ public struct DSSegmentedControl<Selection: Hashable>: View {
 
         var body: some View {
             Button(action: action) {
-                HStack(spacing: 4) {
+                HStack(spacing: Self.countSpacing) {
                     Text(segment.title)
                         .foregroundStyle(isSelected || isHovered ? DSColors.labelPrimary : DSColors.labelSecondary)
                     if let count = segment.count {
                         Text("\(count)")
                             .monospacedDigit()
                             .foregroundStyle(segment.countColor ?? DSColors.labelTertiary)
+                            .padding(.trailing, Self.countTrailingPadding)
                     }
                 }
                 .font(DSTypography.calloutMedium)

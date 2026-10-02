@@ -523,7 +523,7 @@ final class RequestLogUITests: MimicUITestCase {
         )
         XCTAssertTrue(
             headerCount("3 requests").waitForExistence(timeout: 5),
-            "The header should count what the log is showing"
+            "The header should count every request in the log"
         )
 
         let field = try filterField()
@@ -533,8 +533,8 @@ final class RequestLogUITests: MimicUITestCase {
         field.typeText("orders")
         XCTAssertTrue(waitForVisibleRowCount(2), "Filtering on a path fragment should leave the two /api/orders calls")
         XCTAssertTrue(
-            headerCount("2 requests").waitForExistence(timeout: 5),
-            "The header count should fall to what the filter left"
+            headerCount("3 requests").exists,
+            "The header count should keep counting the whole log while a filter narrows the rows"
         )
 
         // Status code — the second arm of the predicate.
@@ -753,7 +753,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
         XCTAssertTrue(
             headerCount("2 requests").waitForExistence(timeout: 5),
-            "The drawer header should count the requests it is showing"
+            "The drawer header should count the requests in the log"
         )
 
         // The cells exist only inside the composed label, so this is the assertion that the method,

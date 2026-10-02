@@ -133,18 +133,23 @@ struct GalleryWorkspaceWindow: View {
         )
     }
 
+    /// The log as the Main board docks it, or, with `showsDetail`, as the RequestDetail board
+    /// opens it: Unmatched on and the unmatched `/recommendations` call selected. In a 24-hour
+    /// locale, as both boards print their times.
     @MainActor
     static func requestLog(showsDetail: Bool) -> some View {
-        let logs = DesignFixtures.requestLogs
-        return RequestLogDrawerView(
-            requestLogs: logs,
-            endpoints: DesignFixtures.endpoints,
+        RequestLogDrawerView(
+            requestLogs: DesignFixtures.requestLogHistory,
+            endpoints: DesignFixtures.requestLogEndpoints,
             serverState: .running(port: DesignFixtures.port),
             onClear: {},
-            selectedLogIDs: .constant(showsDetail ? Set(logs.suffix(1).map(\.id)) : []),
+            selectedLogIDs: .constant(showsDetail ? [DesignFixtures.requestLogDetailID] : []),
+            unmatchedOnly: .constant(showsDetail),
+            onCreateEndpoint: { _, _ in },
             journeys: DesignFixtures.journeys,
             showsDetail: showsDetail
         )
+        .environment(\.locale, Locale(identifier: "en_GB"))
         .background(DSColors.content)
     }
 }

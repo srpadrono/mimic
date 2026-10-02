@@ -26,7 +26,7 @@ struct RequestLogColumnTests {
 
     @Test("Every fixed column has a positive width")
     func widthsArePositive() {
-        for width in [LogColumns.time, LogColumns.compactTime, LogColumns.method, LogColumns.status, LogColumns.scenario,
+        for width in [LogColumns.time, LogColumns.twentyFourHourTime, LogColumns.compactTime, LogColumns.method, LogColumns.status, LogColumns.scenario,
                       LogColumns.duration, LogColumns.size, LogColumns.minimumPath,
                       LogColumns.compactMinimumPath] {
             #expect(width > 0)
@@ -39,6 +39,17 @@ struct RequestLogColumnTests {
         // figure face. The widest reading it has to hold is a 12-hour one: "11:41:33.123 PM",
         // fifteen characters.
         #expect(LogColumns.time >= Self.columnWidth(forMonoCharacters: "11:41:33.123 PM".count))
+    }
+
+    @Test("A 24-hour clock takes the design's narrower time column")
+    func twentyFourHourTimeColumn() {
+        // "21:46:12.418", twelve characters, in a 110pt column as the Main board draws it.
+        #expect(LogColumns.twentyFourHourTime == 110)
+        #expect(LogColumns.twentyFourHourTime >= Self.columnWidth(forMonoCharacters: "21:46:12.418".count))
+        #expect(LogColumns.timeWidth(compact: false, twentyFourHour: true) == LogColumns.twentyFourHourTime)
+        #expect(LogColumns.timeWidth(compact: true, twentyFourHour: true) == LogColumns.compactTime)
+        #expect(LogColumns.usesTwentyFourHourClock(Locale(identifier: "en_GB")))
+        #expect(!LogColumns.usesTwentyFourHourClock(Locale(identifier: "en_US")))
     }
 
     @Test("The compact time column fits seconds without the day period")
@@ -57,8 +68,8 @@ struct RequestLogColumnTests {
         // Duration switches to seconds at 1000 ms, so "999 ms" is its widest millisecond reading.
         #expect(LogColumns.duration >= Self.columnWidth(forMonoCharacters: "999 ms".count))
         #expect(LogColumns.duration >= Self.columnWidth(forMonoCharacters: "59.9 s".count))
-        // Kilobytes run to "1023.9 KB" before the unit changes to megabytes.
-        #expect(LogColumns.size >= Self.columnWidth(forMonoCharacters: "1023.9 KB".count))
+        // Kilobytes run to "1023 KB" before the unit changes to megabytes, the widest reading.
+        #expect(LogColumns.size >= Self.columnWidth(forMonoCharacters: "1023 KB".count))
     }
 
     @Test("The scenario column is wider than the token columns beside it")
@@ -82,8 +93,10 @@ struct RequestLogColumnTests {
 
     @Test("Path takes what the fixed columns and the inset leave")
     func pathTakesTheRemainder() {
-        // Full: 128 + 64 + 84 + 150 + 84 + 84 = 594 fixed, plus 6 of inset each side.
-        #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: false) == 394)
+        // Full: 128 + 64 + 84 + 150 + 84 + 76 = 586 fixed, plus 6 of inset each side.
+        #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: false) == 402)
+        // A 24-hour clock gives Path the 18pt the Time column no longer needs.
+        #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: false, twentyFourHour: true) == 420)
         // Compact: 76 + 64 + 84 = 224 fixed, plus the same inset.
         #expect(LogColumns.pathWidth(tableWidth: 1_000, compact: true) == 764)
         // Never negative, however narrow the proposal.

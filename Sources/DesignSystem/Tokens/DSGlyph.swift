@@ -4,6 +4,9 @@ import CoreGraphics
 nonisolated public enum DSGlyph {
     /// 10pt — a disclosure or pop-up chevron beside a value, a jump-bar separator.
     public static let disclosure: CGFloat = 10
+    /// 11pt — a pane header's action drawn like the boards' 16-unit stroke icons, a 12pt mark at
+    /// medium weight: the request log's clear button.
+    public static let paneAction: CGFloat = 11
     /// 12pt — a glyph inside a field: search, a validation mark.
     public static let field: CGFloat = 12
     /// 14pt — a glyph inside a button beside its title: Format, Copy.
