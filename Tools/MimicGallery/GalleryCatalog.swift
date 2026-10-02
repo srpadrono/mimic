@@ -273,6 +273,8 @@ enum GalleryCatalog {
                 initialIsParsing: false,
                 initialSourceFileName: "checkout-session.har",
                 initialHiddenHosts: ["events.segment.io"],
+                // The artboard's height, whatever the screen that renders it.
+                height: ImportView.designHeight,
                 onCommitImport: { _ in }
             )
         },

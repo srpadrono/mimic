@@ -14,6 +14,7 @@ public struct ImportView: View {
     let existingEndpoints: [Endpoint]
     let initialState: ImportWorkflowState
     let onCommitImport: ([ImportCandidate]) -> Void
+    let height: CGFloat?
 
     public init(
         kind: ImportKind,
@@ -32,6 +33,7 @@ public struct ImportView: View {
 
     /// - Parameter initialSourceFileName: The file the initial candidates came from.
     /// - Parameter initialHiddenHosts: Hosts the review starts with switched off.
+    /// - Parameter height: A fixed height, for a rendering that must not depend on the screen.
     public init(
         kind: ImportKind,
         existingEndpoints: [Endpoint],
@@ -40,6 +42,7 @@ public struct ImportView: View {
         initialIsParsing: Bool,
         initialSourceFileName: String? = nil,
         initialHiddenHosts: Set<String> = [],
+        height: CGFloat? = nil,
         onCommitImport: @escaping ([ImportCandidate]) -> Void
     ) {
         self.kind = kind
@@ -52,6 +55,7 @@ public struct ImportView: View {
             hiddenHosts: initialHiddenHosts
         )
         self.onCommitImport = onCommitImport
+        self.height = height
     }
 
     public var body: some View {
@@ -67,10 +71,11 @@ public struct ImportView: View {
     }
 
     /// The design's height, on any screen tall enough to show it with room to spare.
-    static let designHeight: CGFloat = 696
+    public static let designHeight: CGFloat = 696
 
     private var preferredHeight: CGFloat {
-        Self.preferredHeight(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900)
+        if let height { return height }
+        return Self.preferredHeight(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900)
     }
 
     static func preferredHeight(visibleScreenHeight: CGFloat) -> CGFloat {
