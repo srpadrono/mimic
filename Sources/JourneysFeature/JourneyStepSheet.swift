@@ -85,6 +85,8 @@ public struct JourneyStepSheet: View {
     @FocusState private var focusedField: Field?
     /// The request field is shared with the endpoint sheets, which focus it with a plain flag.
     @FocusState private var pathIsFocused: Bool
+    /// The status field is shared with the endpoint editor, which focuses it the same way.
+    @FocusState private var statusIsFocused: Bool
 
     public init(
         step: JourneyStep? = nil,
@@ -143,10 +145,10 @@ public struct JourneyStepSheet: View {
                     withAnimation(reduceMotion ? nil : .default) {
                         scroll.scrollTo(validation.field, anchor: .center)
                     }
-                    if validation.field == .path {
-                        pathIsFocused = true
-                    } else {
-                        focusedField = validation.field
+                    switch validation.field {
+                    case .path: pathIsFocused = true
+                    case .statusCode: statusIsFocused = true
+                    default: focusedField = validation.field
                     }
                 }
             }
@@ -304,51 +306,16 @@ public struct JourneyStepSheet: View {
     /// Code, reason phrase and a status dot, in one 28pt field, with a menu of common codes at its
     /// trailing edge. The code stays typeable, as the endpoint editor's is.
     private var statusField: some View {
-        let code = Int(statusCode)
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelTertiary)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
-            TextField("200", text: $statusCode)
-                .textFieldStyle(.plain)
-                .font(DSTypography.status)
-                .foregroundStyle(code.map { DSColors.httpStatusColor(for: $0) } ?? DSColors.labelPrimary)
-                .frame(width: 32)
-                .focused($focusedField, equals: .statusCode)
-                .accessibilityIdentifier("stepSheet.statusField")
-                .accessibilityLabel("Status code")
-                .onChange(of: statusCode) { clearValidation(for: .statusCode) }
-            Text(Self.reasonPhrase(for: code))
-                .font(DSTypography.callout)
-                .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityHidden(true)
-            Menu {
-                ForEach(Self.commonStatusCodes, id: \.self) { option in
-                    Button("\(option) \(Self.reasonPhrase(for: option))") {
-                        statusCode = String(option)
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: DSGlyph.minimum, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
-                    .frame(width: 12, height: DSControlHeight.large)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Choose a common status code")
-            .accessibilityIdentifier("stepSheet.statusMenu")
-            .accessibilityLabel("Common status codes")
-        }
-        .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
-                       isFocused: focusedField == .statusCode,
-                       isInvalid: validation?.field == .statusCode, horizontalPadding: 10)
+        StatusCodeField(
+            text: $statusCode,
+            code: Int(statusCode).flatMap { (100..<600).contains($0) ? $0 : nil },
+            size: .sheet,
+            isInvalid: validation?.field == .statusCode,
+            isFocused: $statusIsFocused,
+            fieldIdentifier: "stepSheet.statusField",
+            menuIdentifier: "stepSheet.statusMenu"
+        )
+        .onChange(of: statusCode) { clearValidation(for: .statusCode) }
         .frame(width: 160)
         .id(Field.statusCode)
     }
@@ -472,9 +439,6 @@ public struct JourneyStepSheet: View {
     static let labelWidth: CGFloat = 80
     /// The design's rhythm down the form: 14pt between rows, sections and their dividers.
     private static let rowSpacing: CGFloat = 14
-    /// The codes the status menu offers; any other is typed.
-    static let commonStatusCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429,
-                                    500, 502, 503, 504]
 
     private var title: String {
         guard step != nil else { return "Add step" }
@@ -507,12 +471,6 @@ public struct JourneyStepSheet: View {
         headerText.split(whereSeparator: \.isNewline)
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .count
-    }
-
-    /// "Created" for 201, in the words the endpoint editor uses; empty for a code outside HTTP's range.
-    private static func reasonPhrase(for code: Int?) -> String {
-        guard let code, (100..<600).contains(code) else { return "" }
-        return HTTPStatusText.reasonPhrase(for: code)
     }
 
     private var trimmedPath: String {

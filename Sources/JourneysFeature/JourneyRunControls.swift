@@ -97,12 +97,7 @@ struct JourneyActiveBadge: View {
                 deactivate.hidden()
                 if isHovered { deactivate } else { state }
             }
-            .padding(.horizontal, 7)
-            .frame(height: 18)
-            .foregroundStyle(tint)
-            .overlay {
-                Capsule().strokeBorder(tint, lineWidth: DSStroke.hairline)
-            }
+            .dsPill(.outline(tint))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -124,9 +119,7 @@ struct JourneyActiveBadge: View {
 
     private var state: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(isServing ? DSColors.success : DSColors.labelSecondary)
-                .frame(width: 7, height: 7)
+            DSStatusDot(isServing ? DSColors.success : DSColors.labelSecondary)
             Text(title)
                 .font(DSTypography.caption.weight(.medium))
         }

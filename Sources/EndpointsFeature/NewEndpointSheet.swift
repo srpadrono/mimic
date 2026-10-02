@@ -176,10 +176,7 @@ public struct NewEndpointSheet: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(DSColors.httpStatusColor(for: statusCode))
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
+                DSStatusDot(DSColors.httpStatusColor(for: statusCode))
                 Text(verbatim: String(statusCode))
                     .font(DSTypography.status)
                     .foregroundStyle(DSColors.httpStatusColor(for: statusCode))
