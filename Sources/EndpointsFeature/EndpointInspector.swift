@@ -204,12 +204,13 @@ public struct EndpointInspectorSettings: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: DSSpacing.md) {
-            // The label column is wide enough for the longest label, "When unmatched".
+            // The design's 88 pt column: "When unmatched" wraps onto a second line, as it draws it.
             Text(label)
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
-                .lineLimit(1)
-                .frame(width: DSInspectorMetrics.labelColumn, alignment: .leading)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: DSInspectorMetrics.fieldLabelColumn, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -221,6 +222,8 @@ public struct EndpointInspectorSettings: View {
 /// The inspector's "Traffic" section: a small chart of the last fifteen minutes and three figures.
 struct EndpointTrafficSummary: View {
     let logs: [RequestLog]
+    /// A fixed end for the chart; `nil` follows the clock.
+    var now: Date? = nil
 
     nonisolated struct Bucket: Equatable {
         var served: Int
@@ -228,6 +231,7 @@ struct EndpointTrafficSummary: View {
     }
 
     nonisolated static let bucketCount = 15
+    nonisolated static let chartHeight: CGFloat = 44
 
     /// One bucket per minute, oldest first.
     nonisolated static func buckets(for logs: [RequestLog], now: Date) -> [Bucket] {
@@ -267,8 +271,12 @@ struct EndpointTrafficSummary: View {
 
             // The chart's frame and the three figures stand with no traffic too, at zero, so the
             // section keeps its shape as the first requests arrive.
-            TimelineView(.periodic(from: .now, by: 30)) { timeline in
-                chart(Self.buckets(for: logs, now: timeline.date))
+            if let now {
+                chart(Self.buckets(for: logs, now: now))
+            } else {
+                TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                    chart(Self.buckets(for: logs, now: timeline.date))
+                }
             }
             HStack(spacing: DSSpacing.lg) {
                 figure("\(logs.filter { !Self.isError($0) }.count)", caption: "served",
@@ -293,17 +301,20 @@ struct EndpointTrafficSummary: View {
 
     private func chart(_ buckets: [Bucket]) -> some View {
         let peak = max(1, buckets.map { $0.served + $0.errors }.max() ?? 1)
+        // The busiest minute reaches 90% of the chart, as the design draws it, so the tallest bar
+        // never touches the header above.
+        let tallest = Self.chartHeight * 0.9
         return HStack(alignment: .bottom, spacing: 3) {
             ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
                 let total = bucket.served + bucket.errors
                 RoundedRectangle(cornerRadius: 2)
                     .fill(bucket.errors > bucket.served ? DSColors.error.opacity(0.85) : DSColors.success.opacity(0.7))
-                    .frame(height: total == 0 ? 2 : max(3, 44 * CGFloat(total) / CGFloat(peak)))
+                    .frame(height: total == 0 ? 2 : max(3, tallest * CGFloat(total) / CGFloat(peak)))
                     .opacity(total == 0 ? 0.35 : 1)
                     .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 44, alignment: .bottom)
+        .frame(height: Self.chartHeight, alignment: .bottom)
         .accessibilityHidden(true)
     }
 

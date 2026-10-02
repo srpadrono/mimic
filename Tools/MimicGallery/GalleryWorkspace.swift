@@ -50,7 +50,10 @@ struct GalleryWorkspaceWindow: View {
             inspector: {
                 Self.inspector
                     .toolbar {
-                        if showsToolbar { GalleryInspectorHeader(title: "Scenarios", toolbar: toolbarFixture.state) }
+                        if showsToolbar {
+                            GalleryInspectorHeader(title: "Scenarios", toolbar: toolbarFixture.state,
+                                                   action: AnyView(Self.addScenarioButton))
+                        }
                     }
             },
             toolbar: {
@@ -110,13 +113,15 @@ struct GalleryWorkspaceWindow: View {
         .background(DSColors.content)
     }
 
+    /// The scenario inspector as the Main artboard draws it: two ports, so Port is a live menu, and
+    /// fifteen minutes of traffic ending at the fixtures' moment.
     @MainActor
     static var inspector: some View {
         let endpoint = DesignFixtures.products
-        let configuration = DesignFixtures.serverConfiguration
+        let configuration = DesignFixtures.serverSettingsConfiguration
         return EndpointInspectorContent(
             endpoint: endpoint,
-            traffic: EndpointTrafficQuery.logs(forEndpoint: endpoint.id, in: DesignFixtures.requestLogs),
+            traffic: EndpointTrafficQuery.logs(forEndpoint: endpoint.id, in: DesignFixtures.productsTraffic),
             settings: EndpointInspectorSettings.Context(
                 editedScenarioID: DesignFixtures.editedScenario.id,
                 onEditScenario: { _, _ in },
@@ -129,8 +134,15 @@ struct GalleryWorkspaceWindow: View {
             onSetActiveScenario: { _, _ in },
             onDuplicateScenario: { _, _ in },
             onDeleteScenario: { _, _ in },
-            onRenameScenario: { _, _, _ in }
+            onRenameScenario: { _, _, _ in },
+            now: DesignFixtures.now
         )
+    }
+
+    /// The header's add button, as the window's inspector title bar draws it.
+    @MainActor
+    static var addScenarioButton: some View {
+        DSPanelHeaderButton(systemImage: "plus", help: "Add scenario", identifier: "gallery.addScenario") {}
     }
 
     @MainActor
@@ -276,6 +288,27 @@ struct GalleryJourneyInspectorPanel: View {
             .padding(.trailing, DSSpacing.sm)
             .frame(height: 44)
             GalleryJourneysWindow.inspector
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// The scenario inspector off the window, for the canvas and the fidelity report: the header the
+/// window's toolbar draws above it, laid out as a strip, over the panel's glass.
+struct GalleryEndpointInspectorPanel: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                Text("Scenarios")
+                    .font(DSTypography.bodySemibold)
+                    .foregroundStyle(DSColors.labelPrimary)
+                Spacer(minLength: DSSpacing.sm)
+                GalleryWorkspaceWindow.addScenarioButton
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .frame(height: 44)
+            GalleryWorkspaceWindow.inspector
                 .frame(maxHeight: .infinity, alignment: .top)
         }
         .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))

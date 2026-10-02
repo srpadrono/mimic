@@ -45,9 +45,19 @@ public struct NewEndpointSheet: View {
     let existingGroups: [String]
     let onConfirm: (NewEndpointDraft) -> Void
 
-    public init(existingGroups: [String] = [], onConfirm: @escaping (NewEndpointDraft) -> Void) {
+    /// - Parameter initialDraft: what the form opens filled with; `nil` opens it empty on `GET /`.
+    public init(existingGroups: [String] = [], initialDraft: NewEndpointDraft? = nil,
+                onConfirm: @escaping (NewEndpointDraft) -> Void) {
         self.existingGroups = existingGroups
         self.onConfirm = onConfirm
+        if let initialDraft {
+            _name = State(initialValue: initialDraft.name)
+            _method = State(initialValue: initialDraft.method)
+            _path = State(initialValue: initialDraft.path)
+            _groupTag = State(initialValue: initialDraft.groupTag ?? "")
+            _statusCode = State(initialValue: initialDraft.statusCode)
+            _contentType = State(initialValue: initialDraft.contentType)
+        }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -123,7 +133,7 @@ public struct NewEndpointSheet: View {
                 .padding(.top, DSSpacing.sm)
         }
         .padding(DSSpacing.xl)
-        .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.compact)
+        .frame(width: DSSheetWidth.endpoint)
         .background(DSColors.sheet)
         .dsSheetSurface()
         .defaultFocus($pathIsFocused, true)
@@ -150,7 +160,7 @@ public struct NewEndpointSheet: View {
                     Button("No group") { groupTag = "" }
                 } label: {
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+                        .font(.system(size: DSGlyph.minimum, weight: .medium))
                         .foregroundStyle(DSColors.labelTertiary)
                         .frame(width: DSGlyph.field + DSSpacing.xs, height: DSControlHeight.regular)
                         .contentShape(Rectangle())
@@ -230,8 +240,9 @@ public struct NewEndpointSheet: View {
     }
 
     private var disclosureGlyph: some View {
+        // The design's pop-up mark is 10 pt overall, a quiet pair of 5 pt chevrons.
         Image(systemName: "chevron.up.chevron.down")
-            .font(.system(size: DSGlyph.disclosure, weight: .semibold))
+            .font(.system(size: DSGlyph.minimum, weight: .medium))
             .foregroundStyle(DSColors.labelTertiary)
             .accessibilityHidden(true)
     }

@@ -631,8 +631,10 @@ struct DSComponentRenderingTests {
         #expect(DSLayout.inspectorMaximumWidth == 480)
         #expect(DSLayout.panelInset == 8)
         #expect(DSLayout.methodColumn == 52)
+        #expect(DSLayout.inspectorFieldLabelWidth == 88)
 
         #expect(DSSheetWidth.short == 377)
+        #expect(DSSheetWidth.endpoint == 407)
         #expect(DSSheetWidth.compact == 440)
         #expect(DSSheetWidth.medium == 560)
         #expect(DSSheetWidth.form == 580)

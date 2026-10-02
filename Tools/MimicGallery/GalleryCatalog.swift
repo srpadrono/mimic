@@ -175,8 +175,7 @@ enum GalleryCatalog {
         },
         GalleryEntry("endpoints.inspector", "Scenario inspector", group: .endpoints,
                      size: CGSize(width: 300, height: 884)) {
-            GalleryWorkspaceWindow.inspector
-                .background(DSColors.window)
+            GalleryEndpointInspectorPanel()
         },
         GalleryEntry("endpoints.firstRun", "First endpoint", group: .endpoints, size: CGSize(width: 1152, height: 836)) {
             FirstEndpointChooser(port: 8080, onAddEndpoint: {}, onImportHAR: {}, onImportOpenAPI: {})
@@ -184,7 +183,8 @@ enum GalleryCatalog {
         },
         GalleryEntry("endpoints.newEndpointSheet", "New endpoint sheet", group: .endpoints,
                      size: CGSize(width: 407, height: 376)) {
-            NewEndpointSheet(existingGroups: ["Account", "Catalog", "Payments"]) { _ in }
+            NewEndpointSheet(existingGroups: ["Account", "Catalog", "Payments"],
+                             initialDraft: GalleryModels.newEndpointDraft) { _ in }
         },
     ]
 
@@ -216,7 +216,8 @@ enum GalleryCatalog {
                 backends: DesignFixtures.serverConfiguration.listeners,
                 endpoints: DesignFixtures.endpoints,
                 onCommit: { _ in },
-                onRemove: {}
+                onRemove: {},
+                visibleScreenHeight: GalleryModels.tallScreenHeight
             )
         },
     ]
@@ -236,7 +237,8 @@ enum GalleryCatalog {
 
     static let server: [GalleryEntry] = [
         GalleryEntry("server.settings", "Server settings", group: .server, size: CGSize(width: 760, height: 576)) {
-            BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server)
+            BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server,
+                                visibleScreenHeight: GalleryModels.tallScreenHeight)
         },
     ]
 
@@ -308,6 +310,16 @@ enum GalleryModels {
         boundConfiguration: DesignFixtures.serverSettingsBoundConfiguration
     )
     static let updates = UpdateSheetPreviewModel()
+
+    /// A screen tall enough for every sheet to open at its design height. CI's runner screen is
+    /// short, and a sheet that fits itself under the real screen would render cut short there.
+    static let tallScreenHeight: CGFloat = 1_200
+
+    /// The new endpoint artboard: `GET /products/:id`, filed under Catalog.
+    static let newEndpointDraft = NewEndpointDraft(
+        name: "Get product", method: .get, path: "/products/:id", groupTag: "Catalog",
+        statusCode: 200, contentType: .json
+    )
 
     /// The rows the import review artboard lists, with the analytics host switched off.
     static let importCandidates: [ImportCandidate] = [
