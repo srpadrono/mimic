@@ -388,9 +388,10 @@ struct DSComponentRenderingTests {
         #expect(render(DSLiveIndicator(isLive: true, size: 10), size: measure) == CGSize(width: 10, height: 10))
     }
 
-    /// Option cards line up in a row on the welcome screen, so each is 220pt wide and at least
-    /// 132pt tall whether it shows a shortcut or a footnote.
-    @Test("An option card is 220pt wide and keeps its minimum height")
+    /// The EmptyStates artboard's card: a 220pt text column in 18pt of padding, as tall as its text.
+    /// It used to hold a 132pt floor and a spacer that pushed its hint to the bottom, which left
+    /// empty space under short messages.
+    @Test("An option card is 256pt wide and as tall as its content")
     func optionCardGeometry() {
         let measure = CGSize(width: 400, height: 300)
         let shortcut = render(
@@ -404,10 +405,12 @@ struct DSComponentRenderingTests {
             size: measure
         )
 
-        #expect(shortcut.width == 220)
-        #expect(footnote.width == 220)
-        #expect(shortcut.height >= 132)
-        #expect(footnote.height >= 132)
+        #expect(DSOptionCard.width == 256)
+        #expect(shortcut.width == 256)
+        #expect(footnote.width == 256)
+        // Padding, title, one line of message and the hint, with 10pt between them: about 105pt.
+        #expect(shortcut.height > 80 && shortcut.height < 132)
+        #expect(footnote.height > 80 && footnote.height < 132)
     }
 
     /// "Controls sharing a row share their geometry", measured on the one control that spent longest

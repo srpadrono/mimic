@@ -50,26 +50,24 @@ public struct FirstEndpointChooser: View {
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelSecondary)
                     .multilineTextAlignment(.center)
-                    .lineSpacing(DSTypography.Leading.callout)
+                    .lineSpacing(DSTypography.Leading.tight)
                     .frame(maxWidth: 460)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("ds.empty.center.noSelection.message")
             }
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(
-                        .flexible(minimum: Self.cardMinimumWidth, maximum: Self.cardWidth),
-                        spacing: DSSpacing.lg,
-                        alignment: .top
-                    ),
-                    count: columns
-                ),
-                alignment: .center,
-                spacing: DSSpacing.lg
-            ) {
-                chooserCards
+            // A `Grid`, not a `LazyVGrid`: a grid row is as tall as its tallest card, and each card
+            // fills it, so a row of cards shares one height whatever their text.
+            Grid(horizontalSpacing: DSSpacing.lg, verticalSpacing: DSSpacing.lg) {
+                ForEach(Self.rows(of: Option.allCases, columns: columns), id: \.self) { row in
+                    GridRow(alignment: .top) {
+                        ForEach(row, id: \.self) { option in
+                            card(option)
+                        }
+                    }
+                }
             }
-            .frame(maxWidth: CGFloat(columns) * Self.cardWidth + CGFloat(columns - 1) * DSSpacing.lg)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: CGFloat(columns) * DSOptionCard.width + CGFloat(columns - 1) * DSSpacing.lg)
         }
         .padding(DSSpacing.xxl)
         .frame(maxWidth: .infinity)
@@ -79,29 +77,44 @@ public struct FirstEndpointChooser: View {
         .accessibilityIdentifier("ds.empty.center.noSelection")
     }
 
-    /// The design's card width, and the narrowest a card gets before the row wraps.
-    private static let cardWidth: CGFloat = 220
-    private static let cardMinimumWidth: CGFloat = 168
-
     /// Three cards to a row while they fit at their narrowest, then two, then one.
     public static func chooserColumns(forWidth width: CGFloat) -> Int {
-        let perCard = cardMinimumWidth + DSSpacing.lg
+        let perCard = DSOptionCard.minimumWidth + DSSpacing.lg
         let fitting = Int((width + DSSpacing.lg) / perCard)
         return min(3, max(1, fitting))
     }
 
+    /// `options` split into rows of `columns`, in order.
+    static func rows<Element>(of options: [Element], columns: Int) -> [[Element]] {
+        stride(from: 0, to: options.count, by: max(1, columns)).map {
+            Array(options[$0..<min($0 + max(1, columns), options.count)])
+        }
+    }
+
+    enum Option: CaseIterable, Hashable {
+        case addEndpoint, importHAR, importOpenAPI
+    }
+
     @ViewBuilder
-    private var chooserCards: some View {
-        // ⌥⌘N, the shortcut File ▸ New Endpoint… really has; ⌘N is New Project.
-        DSOptionCard("Add endpoint", systemImage: "plus",
-                     message: "Choose a method and path, then write the response.",
-                     shortcut: ["⌥", "⌘", "N"], isDefault: true, identifier: "empty.center.noSelection.cta",
-                     action: onAddEndpoint)
-        DSOptionCard("Import HAR", systemImage: "doc.text",
-                     message: "From Proxyman, Charles or browser DevTools.",
-                     footnote: "A .har file", identifier: "center.importHAR", action: onImportHAR)
-        DSOptionCard("Import OpenAPI", systemImage: "curlybraces",
-                     message: "Each operation becomes an endpoint with its example response.",
-                     footnote: "JSON or YAML", identifier: "center.importOpenAPI", action: onImportOpenAPI)
+    private func card(_ option: Option) -> some View {
+        switch option {
+        case .addEndpoint:
+            // ⌥⌘N, the shortcut File ▸ New Endpoint… really has; ⌘N is New Project.
+            DSOptionCard("Add endpoint", systemImage: "plus",
+                         message: "Choose a method and path, then write the response.",
+                         shortcut: ["⌥", "⌘", "N"], isDefault: true, fillsHeight: true,
+                         identifier: "empty.center.noSelection.cta", action: onAddEndpoint)
+        case .importHAR:
+            // The board's "Or drop a .har file here" waits for a drop target; nothing takes one yet.
+            DSOptionCard("Import HAR", systemImage: "doc.text",
+                         message: "From Proxyman, Charles or browser DevTools.",
+                         footnote: "A .har file", fillsHeight: true, identifier: "center.importHAR",
+                         action: onImportHAR)
+        case .importOpenAPI:
+            DSOptionCard("Import OpenAPI", systemImage: "curlybraces",
+                         message: "Each operation becomes an endpoint with its example response.",
+                         footnote: "JSON or YAML", fillsHeight: true, identifier: "center.importOpenAPI",
+                         action: onImportOpenAPI)
+        }
     }
 }
