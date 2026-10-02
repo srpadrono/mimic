@@ -577,20 +577,20 @@ private struct ImportCandidateRow: View {
             Spacer(minLength: 0)
 
             if let body = candidate.responseBody, !body.isEmpty {
-                // Shown on the row under the pointer or with keyboard focus, so the table rests as
-                // the design draws it.
+                // Drawn on the row under the pointer or with keyboard focus, so the table rests as
+                // the design draws it. The button itself stays, clear, for VoiceOver and the keyboard.
                 Button {
                     showingBodyPreview = true
                 } label: {
                     Image(systemName: "eye")
                         .font(.system(size: DSGlyph.field))
-                        .foregroundStyle(DSColors.labelTertiary)
+                        .foregroundStyle(isHovered || previewFocused || showingBodyPreview
+                                         ? DSColors.labelTertiary : Color.clear)
                         .frame(width: DSControlHeight.small, height: DSControlHeight.small)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.dsPlain)
                 .focused($previewFocused)
-                .opacity(isHovered || previewFocused || showingBodyPreview ? 1 : 0)
                 .help("Preview response body")
                 .accessibilityLabel("Preview response body for \(candidate.method.rawValue) \(candidate.path)")
                 .accessibilityIdentifier("import.candidate.index.\(rowIndex).preview")
