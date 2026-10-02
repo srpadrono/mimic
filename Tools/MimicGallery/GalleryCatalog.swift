@@ -264,12 +264,16 @@ enum GalleryCatalog {
                 onRequestNewProject: {},
                 onRequestImport: { _ in },
                 onRequestOpenExport: {},
-                onRequestSampleProject: {}
+                onRequestSampleProject: {},
+                showsOnLaunch: .constant(true),
+                now: DesignFixtures.now,
+                version: DesignFixtures.appVersion
             )
         },
         GalleryEntry("projects.newProjectSheet", "New project sheet", group: .projects,
                      size: CGSize(width: 377, height: 227)) {
-            NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080") { _, _ in }
+            NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080",
+                            showsNameFocus: true) { _, _ in }
         },
     ]
 

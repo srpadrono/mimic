@@ -65,6 +65,13 @@ public nonisolated enum DSColors {
     /// The source list down the side of a sheet, a step darker than the sheet in either scheme.
     public static let sheetSidebar = Color(light: Ink(0xEFEFF2), dark: Ink(0x242427))
 
+    /// The welcome window's identity column, with the app icon and start actions: the Welcome
+    /// board's `--win`.
+    public static let welcomeHero = Color(light: Ink(0xFFFFFF), dark: Ink(0x1E1E20))
+
+    /// The welcome window's recent-projects column: the Welcome board's `--side`.
+    public static let welcomeSide = Color(light: Ink(0xF3F3F5), dark: Ink(0x26262A))
+
     /// The fill inside a field, a segmented track, or a secondary button.
     public static let field = Color(light: Ink(white: 0, alpha: 0.045), dark: Ink(white: 1, alpha: 0.065))
 
@@ -154,6 +161,45 @@ public nonisolated enum DSColors {
     public static let focusRing = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor.keyboardFocusIndicatorColor.withAlphaComponent(appearance.isDark ? 0.5 : 0.4)
     })
+
+    static let selectionLightInk = Ink(0x0A74F0)
+    static let selectionDarkInk = Ink(0x0A6CE0)
+
+    /// A selected row's solid fill, under white text: the welcome window's recents, the sidebar row
+    /// and the shared table.
+    ///
+    /// With the default blue accent it is the boards' `--sel`, #0A74F0 light and #0A6CE0 dark, a
+    /// step deeper than the accent so white text reads on it. With any other accent, and under
+    /// Increase Contrast, it is the system's selected-content colour, so selection still follows
+    /// the user's choice. See ``isDefaultBlue(_:)`` for how the default is recognised.
+    public static let selection = Color(nsColor: NSColor(name: nil) { appearance in
+        DSColors.selectionColor(accent: NSColor.controlAccentColor, isDark: appearance.isDark,
+                                isHighContrast: appearance.isHighContrast)
+    })
+
+    /// The selection fill for one accent and appearance. Split out of ``selection`` so a test can
+    /// pass an accent rather than depend on the machine's setting.
+    static func selectionColor(accent: NSColor, isDark: Bool, isHighContrast: Bool) -> NSColor {
+        guard !isHighContrast, isDefaultBlue(accent) else {
+            return NSColor.selectedContentBackgroundColor
+        }
+        return (isDark ? selectionDarkInk : selectionLightInk).nsColor()
+    }
+
+    /// Whether `accent` is the default blue: the system blue (#007AFF light, #0A84FF dark), or
+    /// Mimic's own #0A84FF accent, which `controlAccentColor` returns when the system accent is
+    /// Multicolor.
+    ///
+    /// Recognised by hue, not by equality or by the `AppleAccentColor` default: the two blues differ
+    /// per appearance and per accent setting, the default's encoding is private, and a hue check
+    /// holds for each of them while every other accent (purple, pink, red, orange, yellow, green,
+    /// graphite) is at least 40 degrees away or unsaturated.
+    static func isDefaultBlue(_ accent: NSColor) -> Bool {
+        guard let srgb = accent.usingColorSpace(.sRGB) else { return false }
+        // System blue sits at about 211 degrees in both appearances.
+        let hueDegrees = srgb.hueComponent * 360
+        return abs(hueDegrees - 211) <= 8 && srgb.saturationComponent >= 0.7 && srgb.brightnessComponent >= 0.7
+    }
 
     // MARK: - Status
 

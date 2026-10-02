@@ -13,6 +13,8 @@ public enum DSTypography {
     public static let body: Font = .system(size: 13, weight: .regular)
     public static let bodyMedium: Font = .system(size: 13, weight: .medium)
     public static let bodySemibold: Font = .system(size: 13, weight: .semibold)
+    /// 13pt bold — the initials on a project's monogram tile.
+    public static let bodyBold: Font = .system(size: 13, weight: .bold)
 
     /// 12pt — secondary text, field values in dense rows, segment titles.
     public static let callout: Font = .system(size: 12, weight: .regular)

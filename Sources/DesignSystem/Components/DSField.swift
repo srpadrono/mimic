@@ -2,6 +2,9 @@ import SwiftUI
 
 /// The chrome every editable field shares: a quiet fill, a hairline, and an accent border with a halo
 /// while focused. Invalid fields keep a red border whether or not they are focused.
+///
+/// ``EnvironmentValues/dsShowsFocus`` draws the focused look without keyboard focus, for a gallery
+/// render whose off-screen window can never hold focus.
 public struct DSFieldChrome: ViewModifier {
     private let height: CGFloat
     private let cornerRadius: CGFloat
@@ -9,6 +12,7 @@ public struct DSFieldChrome: ViewModifier {
     private let isInvalid: Bool
     private let horizontalPadding: CGFloat
     @Environment(\.dsSurface) private var surface
+    @Environment(\.dsShowsFocus) private var showsFocus
 
     public init(height: CGFloat = DSControlHeight.regular, cornerRadius: CGFloat = DSCornerRadius.field,
                 isFocused: Bool, isInvalid: Bool = false, horizontalPadding: CGFloat = DSSpacing.sm) {
@@ -17,6 +21,11 @@ public struct DSFieldChrome: ViewModifier {
         self.isFocused = isFocused
         self.isInvalid = isInvalid
         self.horizontalPadding = horizontalPadding
+    }
+
+    /// Focused for real, or drawn as focused by the environment.
+    private var drawsFocus: Bool {
+        isFocused || showsFocus
     }
 
     public func body(content: Content) -> some View {
@@ -28,14 +37,14 @@ public struct DSFieldChrome: ViewModifier {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .strokeBorder(border, lineWidth: isFocused || isInvalid ? DSStroke.emphasis : DSStroke.hairline)
+                    .strokeBorder(border, lineWidth: drawsFocus || isInvalid ? DSStroke.emphasis : DSStroke.hairline)
                     // Drawn over the field's content, so it must not take the pointer: over an AppKit
                     // control, such as the request bar's method menu, SwiftUI otherwise keeps the
                     // click for the border and the control never sees it.
                     .allowsHitTesting(false)
             }
             .overlay {
-                if isFocused || isInvalid {
+                if drawsFocus || isInvalid {
                     RoundedRectangle(cornerRadius: cornerRadius + DSStroke.focusHalo / 2)
                         .stroke(isInvalid ? DSColors.errorBackground : DSColors.focusRing,
                                 lineWidth: DSStroke.focusHalo)
@@ -48,7 +57,7 @@ public struct DSFieldChrome: ViewModifier {
 
     private var border: Color {
         if isInvalid { return DSColors.error }
-        if isFocused { return DSColors.accent }
+        if drawsFocus { return DSColors.accent }
         return surface.fieldBorder
     }
 }
@@ -65,19 +74,25 @@ public extension View {
 /// A label column beside its control, as sheets and the inspector lay out forms.
 ///
 /// The label column is `labelWidth` when given, else the enclosing form's ``dsFormLabelWidth(_:)``.
+///
+/// With `.top` alignment, for a control that can grow a message underneath, the label is centred on
+/// the control's first `controlHeight` points, as the boards' `align-items: center` rows draw it.
 public struct DSFormRow<Content: View>: View {
     private let label: String
     private let labelWidth: CGFloat?
     private let alignment: VerticalAlignment
+    private let controlHeight: CGFloat
     private let content: Content
 
     @Environment(\.dsFormLabelWidth) private var formLabelWidth
 
     public init(_ label: String, labelWidth: CGFloat? = nil,
-                alignment: VerticalAlignment = .center, @ViewBuilder content: () -> Content) {
+                alignment: VerticalAlignment = .center, controlHeight: CGFloat = DSControlHeight.large,
+                @ViewBuilder content: () -> Content) {
         self.label = label
         self.labelWidth = labelWidth
         self.alignment = alignment
+        self.controlHeight = controlHeight
         self.content = content()
     }
 
@@ -87,8 +102,8 @@ public struct DSFormRow<Content: View>: View {
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
-                .frame(width: labelWidth ?? formLabelWidth, alignment: .trailing)
-                .padding(.top, alignment == .top ? 5 : 0)
+                .frame(width: labelWidth ?? formLabelWidth, height: alignment == .top ? controlHeight : nil,
+                       alignment: .trailing)
                 .accessibilityHidden(true)
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,7 +138,7 @@ public struct DSValidationMessage: View {
     }
 }
 
-/// A one-line hint under a form row, aligned with the controls.
+/// A one-line hint under a form row, aligned with the controls, on the sheet boards' 11/15 line.
 public struct DSFormHint: View {
     private let text: String
     private let indent: CGFloat
@@ -133,13 +148,31 @@ public struct DSFormHint: View {
         self.indent = indent
     }
 
+    /// The boards' `.hint { line-height: 15px }`.
+    static let lineHeight: CGFloat = 15
+
     public var body: some View {
         Text(text)
             .font(DSTypography.caption)
             .foregroundStyle(DSColors.labelTertiary)
+            .frame(minHeight: Self.lineHeight, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, indent)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private nonisolated struct DSShowsFocusKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+public nonisolated extension EnvironmentValues {
+    /// Draws every ``DSFieldChrome`` inside as focused. Only for a gallery or preview render, whose
+    /// off-screen window never becomes key, so `.defaultFocus` cannot show the design's focused
+    /// field. The app never sets it.
+    var dsShowsFocus: Bool {
+        get { self[DSShowsFocusKey.self] }
+        set { self[DSShowsFocusKey.self] = newValue }
     }
 }
 

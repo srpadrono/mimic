@@ -196,15 +196,21 @@ public enum DesignFixtures {
 
     // MARK: - Welcome
 
+    /// The version the welcome artboard shows.
+    public static let appVersion = "1.9"
+
     /// The welcome window's recent projects, as the artboard lists them.
+    ///
+    /// The ids pick each monogram tile's colour (`tileIndex` sums the id's bytes), so they are chosen
+    /// to give the artboard's blue, green, purple and orange in order.
     public static var recentProjects: [RecentProjectEntry] {
         let day: TimeInterval = 86_400
         return [
-            RecentProjectEntry(id: uuid(9_999), name: projectName, lastOpenedAt: now,
+            RecentProjectEntry(id: uuid(9_997), name: projectName, lastOpenedAt: now,
                                summary: .init(ports: [port], endpointCount: 12, journeyCount: 3)),
             RecentProjectEntry(id: uuid(9_998), name: "Weather API", lastOpenedAt: now.addingTimeInterval(-day),
                                summary: .init(ports: [8080], endpointCount: 4, journeyCount: 0)),
-            RecentProjectEntry(id: uuid(9_997), name: "Banking iOS", lastOpenedAt: now.addingTimeInterval(-7 * day),
+            RecentProjectEntry(id: uuid(9_999), name: "Banking iOS", lastOpenedAt: now.addingTimeInterval(-7 * day),
                                summary: .init(ports: [9000, 9001], endpointCount: 38, journeyCount: 7)),
             RecentProjectEntry(id: uuid(9_996), name: "GraphQL Gateway", lastOpenedAt: now.addingTimeInterval(-14 * day),
                                summary: .init(ports: [4000], endpointCount: 9, journeyCount: 0)),

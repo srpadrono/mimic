@@ -54,7 +54,8 @@ public struct DSMultilineField: View {
                 well
             }
         case .leading:
-            DSFormRow(title, alignment: .top) {
+            // Centred on a 24pt band, which keeps the label level with the well's first line.
+            DSFormRow(title, alignment: .top, controlHeight: DSControlHeight.regular) {
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
                     if let accessory {
                         HStack(spacing: DSSpacing.xs) {

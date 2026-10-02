@@ -22,6 +22,11 @@ public struct WelcomeWindow: View {
     let onRequestSampleProject: (() -> Void)?
     /// "Show this window when Mimic opens". The checkbox is shown only when this is provided.
     let showsOnLaunch: Binding<Bool>?
+    /// The moment the recents' "Today" and "Yesterday" are counted from. `nil` is the real now; the
+    /// gallery pins it to the fixtures' clock.
+    let now: Date?
+    /// The version line's number. `nil` reads it from the bundle; the gallery pins the design's.
+    let version: String?
 
     @State private var viewState: ViewState
     /// The row the keyboard is on. Kept out of `ViewState`, which holds only modal state.
@@ -64,7 +69,9 @@ public struct WelcomeWindow: View {
         onRequestImport: ((ImportKind) -> Void)? = nil,
         onRequestOpenExport: (() -> Void)? = nil,
         onRequestSampleProject: (() -> Void)? = nil,
-        showsOnLaunch: Binding<Bool>? = nil
+        showsOnLaunch: Binding<Bool>? = nil,
+        now: Date? = nil,
+        version: String? = nil
     ) {
         self.init(
             recentProjects: recentProjects,
@@ -77,6 +84,8 @@ public struct WelcomeWindow: View {
             onRequestOpenExport: onRequestOpenExport,
             onRequestSampleProject: onRequestSampleProject,
             showsOnLaunch: showsOnLaunch,
+            now: now,
+            version: version,
             initialDeleteTarget: nil
         )
     }
@@ -92,6 +101,8 @@ public struct WelcomeWindow: View {
         onRequestOpenExport: (() -> Void)? = nil,
         onRequestSampleProject: (() -> Void)? = nil,
         showsOnLaunch: Binding<Bool>? = nil,
+        now: Date? = nil,
+        version: String? = nil,
         initialDeleteTarget: DeleteTarget?
     ) {
         self.recentProjects = recentProjects
@@ -104,12 +115,15 @@ public struct WelcomeWindow: View {
         self.onRequestOpenExport = onRequestOpenExport
         self.onRequestSampleProject = onRequestSampleProject
         self.showsOnLaunch = showsOnLaunch
+        self.now = now
+        self.version = version
         _viewState = State(initialValue: ViewState(deleteTarget: initialDeleteTarget))
     }
 
     public var body: some View {
         GeometryReader { geometry in
-            let heroWidth = min(400, max(300, geometry.size.width * 0.45))
+            // The design's 400 at 880pt, the recents keeping 480; 300 at the 640pt minimum.
+            let heroWidth = min(400, max(300, geometry.size.width - 480))
             // 112 at the design's 560pt height, smaller in a short window so the actions still fit.
             let iconSize = min(112, max(64, geometry.size.height * 0.2))
 
@@ -117,14 +131,20 @@ public struct WelcomeWindow: View {
                 leftColumn(iconSize: iconSize, isShort: geometry.size.height < 520)
                     .frame(width: heroWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .background(DSColors.content)
-
-                DSDivider(axis: .vertical, identifier: "welcome.columns")
 
                 rightColumn
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(DSColors.sheet)
+                    .background(DSColors.welcomeSide)
+                    // The column's own left edge, as the design draws it, so the rule sits on the
+                    // recents' fill rather than over nothing.
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(DSColors.separator)
+                            .frame(width: DSStroke.hairline)
+                            .accessibilityHidden(true)
+                    }
             }
+            .background(DSColors.welcomeHero)
         }
         // The title bar is part of the columns rather than a band above them.
         .ignoresSafeArea(.container, edges: .top)
@@ -180,12 +200,13 @@ public struct WelcomeWindow: View {
                 .frame(width: iconSize, height: iconSize)
                 // App-icon squircle, not a control corner, so it scales with the icon.
                 .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous))
-                .shadow(color: .black.opacity(0.35), radius: 15, y: 10)
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 10)
                 // The title below says "Mimic"; VoiceOver should not read it twice.
                 .accessibilityHidden(true)
 
             Text("Mimic")
                 .font(DSTypography.largeTitle)
+                .frame(height: Self.titleLineHeight)
                 .foregroundStyle(DSColors.labelPrimary)
                 .padding(.top, DSSpacing.md + DSSpacing.xs + DSSpacing.xxs)
                 .accessibilityIdentifier("welcomeHeroTitle")
@@ -193,6 +214,7 @@ public struct WelcomeWindow: View {
             if let versionText {
                 Text(versionText)
                     .font(DSTypography.body)
+                    .frame(height: Self.lineHeight)
                     .foregroundStyle(DSColors.labelSecondary)
                     .padding(.top, DSSpacing.xs + DSSpacing.xxs)
                     .accessibilityIdentifier("welcomeVersionLabel")
@@ -259,14 +281,20 @@ public struct WelcomeWindow: View {
         }
     }
 
-    /// Read from the bundle. `nil` (no line) when the key is missing, as in a unit-test host.
+    /// The design's 28/34 title line.
+    private static let titleLineHeight: CGFloat = 34
+    /// The design's 16pt line for 13pt text and the 11pt header.
+    private static let lineHeight: CGFloat = 16
+
+    /// The pinned version, else the bundle's. `nil` (no line) when the key is missing, as in a
+    /// unit-test host.
     private var versionText: String? {
-        guard
-            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-            !version.isEmpty
-        else {
-            return nil
-        }
+        let bundled = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        return Self.versionLine(pinned: version, bundled: bundled)
+    }
+
+    static func versionLine(pinned: String?, bundled: String?) -> String? {
+        guard let version = pinned ?? bundled, !version.isEmpty else { return nil }
         return "Version \(version)"
     }
 
@@ -304,6 +332,7 @@ public struct WelcomeWindow: View {
     private var recentsHeader: some View {
         Text("Recent projects")
             .font(DSTypography.captionSemibold)
+            .frame(height: Self.lineHeight, alignment: .leading)
             .foregroundStyle(DSColors.labelTertiary)
             .accessibilityAddTraits(.isHeader)
             .padding(.horizontal, DSSpacing.md)
@@ -363,7 +392,7 @@ public struct WelcomeWindow: View {
     }
 
     private func recentRow(_ entry: RecentProjectEntry) -> some View {
-        RecentProjectRow(entry: entry, isSelected: entry.id == selectedRecentID)
+        RecentProjectRow(entry: entry, isSelected: entry.id == selectedRecentID, now: now ?? .now)
             // The whole row is clickable, not only its text.
             .contentShape(RoundedRectangle(cornerRadius: DSCornerRadius.card))
             .onTapGesture {
@@ -512,6 +541,8 @@ private struct WelcomeActionRow: View {
 private struct RecentProjectRow: View {
     let entry: RecentProjectEntry
     let isSelected: Bool
+    /// What "Today" and "Yesterday" are counted from.
+    let now: Date
     @State private var isHovered = false
 
     /// The design's row: 52pt, a 32pt monogram tile, the name over a summary, the date on the right.
@@ -520,7 +551,7 @@ private struct RecentProjectRow: View {
     var body: some View {
         HStack(spacing: DSSpacing.md) {
             Text(Self.initials(for: entry.name))
-                .font(DSTypography.bodySemibold)
+                .font(DSTypography.bodyBold)
                 .foregroundStyle(.white)
                 .frame(width: DSControlHeight.prominent, height: DSControlHeight.prominent)
                 .background(
@@ -545,7 +576,7 @@ private struct RecentProjectRow: View {
 
             Spacer(minLength: DSSpacing.sm)
 
-            Text(Self.stampText(for: entry.lastOpenedAt))
+            Text(Self.stampText(for: entry.lastOpenedAt, now: now))
                 .font(DSTypography.caption)
                 .foregroundStyle(isSelected ? Color.white.opacity(0.8) : DSColors.labelTertiary)
                 .lineLimit(1)
@@ -554,7 +585,7 @@ private struct RecentProjectRow: View {
         .frame(height: Self.height)
         .background(
             RoundedRectangle(cornerRadius: DSCornerRadius.card)
-                .fill(isSelected ? DSColors.accent : (isHovered ? DSColors.hover : .clear))
+                .fill(isSelected ? DSColors.selection : (isHovered ? DSColors.hover : .clear))
         )
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: DSAnimation.fast), value: isHovered)
