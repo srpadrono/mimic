@@ -111,6 +111,7 @@ public struct JourneyTemplatePicker: View {
         .padding(DSSpacing.xl)
         .frame(minWidth: DSSheetWidth.compact, idealWidth: DSSheetWidth.medium)
         .background(DSColors.sheet)
+        .dsSheetSurface()
     }
 
     /// Singular when there is one, as the journeys list spells it.

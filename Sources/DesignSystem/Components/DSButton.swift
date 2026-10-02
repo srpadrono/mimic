@@ -14,15 +14,19 @@ public nonisolated enum DSButtonVariant: CaseIterable {
     case ghost
 }
 
-/// Capsule heights: 28pt in sheets, 24pt in panels, 20pt inside a row or banner.
+/// Capsule heights: 28pt in sheets, 24pt in panels, 22pt beside a value in a settings row, 20pt
+/// inside a row or banner.
 public enum DSButtonSize: CaseIterable {
     case small
+    /// Beside a value inside a grouped settings row, such as Copy after a URL.
+    case inline
     case medium
     case large
 
     public var height: CGFloat {
         switch self {
         case .small: DSControlHeight.small
+        case .inline: DSControlHeight.inline
         case .medium: DSControlHeight.regular
         case .large: DSControlHeight.large
         }
@@ -31,6 +35,7 @@ public enum DSButtonSize: CaseIterable {
     var font: Font {
         switch self {
         case .small: DSTypography.caption.weight(.medium)
+        case .inline: DSTypography.calloutMedium
         case .medium, .large: DSTypography.bodyMedium
         }
     }
@@ -38,6 +43,7 @@ public enum DSButtonSize: CaseIterable {
     var horizontalPadding: CGFloat {
         switch self {
         case .small: 9
+        case .inline: 10
         case .medium: DSSpacing.md
         case .large: DSSpacing.lg
         }
@@ -131,6 +137,7 @@ public struct DSButtonStyle: ButtonStyle {
         let configuration: ButtonStyleConfiguration
 
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.dsSurface) private var surface
         @State private var isHovered = false
 
         var body: some View {
@@ -144,7 +151,7 @@ public struct DSButtonStyle: ButtonStyle {
                 }
                 .overlay {
                     if variant == .secondary {
-                        Capsule().strokeBorder(DSColors.fieldBorder, lineWidth: DSStroke.hairline)
+                        Capsule().strokeBorder(surface.fieldBorder, lineWidth: DSStroke.hairline)
                     }
                 }
                 .overlay {
@@ -172,7 +179,7 @@ public struct DSButtonStyle: ButtonStyle {
         private var fill: Color {
             switch variant {
             case .primary: DSColors.accent
-            case .secondary: DSColors.field
+            case .secondary: surface.fieldFill
             case .destructive, .ghost: isHovered ? DSColors.hover : .clear
             }
         }
@@ -230,6 +237,7 @@ public struct DSIconButtonStyle: ButtonStyle {
     private struct Surface: View {
         let configuration: ButtonStyleConfiguration
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.dsSurface) private var surface
         @State private var isHovered = false
 
         var body: some View {

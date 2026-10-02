@@ -6,6 +6,8 @@ nonisolated public enum DSControlHeight {
     public static let large: CGFloat = 28
     /// 24pt — buttons and fields in panels.
     public static let regular: CGFloat = 24
+    /// 22pt — a button beside a value inside a grouped settings row.
+    public static let inline: CGFloat = 22
     /// 20pt — inline buttons inside a row or banner.
     public static let small: CGFloat = 20
     /// 32pt — the request field at the top of the editor, and toolbar capsules.

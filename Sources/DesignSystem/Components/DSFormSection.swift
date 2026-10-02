@@ -17,10 +17,14 @@ public enum DSFormMetrics {
     public static let groupRowHeight: CGFloat = 40
     /// A row's side inset inside a grouped settings section.
     public static let groupRowInset: CGFloat = 14
+    /// The line every settings heading, title and explanation sits on, so rows keep the design's
+    /// rhythm whatever the font's own leading.
+    public static let lineHeight: CGFloat = 16
 }
 
 /// A titled group of settings rows: an 11pt heading over a rounded card with hairline rules
-/// between its rows. Put ``DSFormGroupRow``s or ``DSFormToggle``s inside, separated by ``DSDivider``.
+/// across its full width between rows. Put ``DSFormGroupRow``s or ``DSFormToggle``s inside,
+/// separated by ``DSDivider``.
 public struct DSFormSection<Content: View>: View {
     private let title: String
     private let identifier: String
@@ -37,14 +41,15 @@ public struct DSFormSection<Content: View>: View {
             Text(title)
                 .font(DSTypography.captionSemibold)
                 .foregroundStyle(DSColors.labelTertiary)
+                .frame(height: DSFormMetrics.lineHeight)
                 .padding(.horizontal, DSSpacing.xs)
                 .accessibilityAddTraits(.isHeader)
 
+            // Each row insets its own content, so the rules between rows run edge to edge.
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DSFormMetrics.groupRowInset)
                 .background {
-                    RoundedRectangle(cornerRadius: DSCornerRadius.panel).fill(DSColors.raised)
+                    RoundedRectangle(cornerRadius: DSCornerRadius.panel).fill(DSColors.formGroup)
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: DSCornerRadius.panel)
@@ -77,6 +82,7 @@ public struct DSFormGroupRow<Content: View>: View {
             content
         }
         .padding(.vertical, DSSpacing.sm)
+        .padding(.horizontal, DSFormMetrics.groupRowInset)
         .frame(minHeight: DSFormMetrics.groupRowHeight)
     }
 }

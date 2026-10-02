@@ -74,6 +74,25 @@ public nonisolated enum DSColors {
         lightHighContrast: Ink(white: 0, alpha: 0.4), darkHighContrast: Ink(white: 1, alpha: 0.4)
     )
 
+    /// A field or secondary button inside a sheet. Light sheets draw it white with a firmer hairline,
+    /// so it stands off the sheet's grey; dark sheets keep the window's field.
+    public static let sheetField = Color(light: Ink(0xFFFFFF), dark: Ink(white: 1, alpha: 0.065))
+
+    /// The hairline around a field or secondary button inside a sheet.
+    public static let sheetFieldBorder = Color(
+        light: Ink(white: 0, alpha: 0.14), dark: Ink(white: 1, alpha: 0.10),
+        lightHighContrast: Ink(white: 0, alpha: 0.4), darkHighContrast: Ink(white: 1, alpha: 0.4)
+    )
+
+    /// A grouped settings card in a sheet: white in light, a step above the sheet in dark.
+    public static let formGroup = Color(light: Ink(0xFFFFFF), dark: Ink(white: 1, alpha: 0.045))
+
+    /// A settings switch's track while off.
+    public static let switchTrack = Color(light: Ink(white: 0, alpha: 0.14), dark: Ink(white: 1, alpha: 0.18))
+
+    /// A settings switch's knob.
+    public static let switchKnob = Color(light: Ink(0xFFFFFF), dark: Ink(0xF2F2F2))
+
     /// The raised segment inside a segmented control.
     public static let segmentSelected = Color(light: Ink(0xFFFFFF), dark: Ink(white: 1, alpha: 0.16))
 
