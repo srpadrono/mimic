@@ -12,9 +12,10 @@ import Testing
 /// in the XCUITest suite, which were slow and the flakiest checks there.
 ///
 /// Baselines are recorded by CI, not on a developer Mac: fonts rasterise differently on another
-/// macOS version. When an entry is new or changed on purpose, the failing run uploads the new
-/// renderings as the `snapshots` artifact (`new/` and `changed/`, with a `difference/` image for
-/// each change). Copy the approved PNGs into `Snapshots/` and commit them.
+/// macOS version. When an entry is new or changed on purpose, the failing run pushes the new
+/// renderings to the `snapshots/<branch>` branch, laid out as they would be committed, with a
+/// difference image for each change under `Differences/`. Check out the approved PNGs from there
+/// into `Snapshots/` and commit them (CONTRIBUTING.md, Test gates).
 @Suite("Gallery snapshots", .serialized)
 @MainActor
 struct GallerySnapshotTests {
