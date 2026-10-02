@@ -589,7 +589,8 @@ final class EndpointEditorUITests: MimicUITestCase {
     // MARK: - 1. The two "Add endpoint" buttons are two buttons
 
     /// The first-endpoint chooser: the headline over three cards that share one row whenever the
-    /// pane is wide enough for three at their narrowest (168pt each, 16pt apart, 24pt padding).
+    /// pane is wide enough for three at their narrowest (204pt each, 16pt apart, 24pt padding), and
+    /// cards sharing a row share one height.
     @MainActor
     func testFirstEndpointCardsShareOneRowUnderTheHeadline() throws {
         launchApp()
@@ -609,13 +610,15 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         // The chooser fills the centre pane, so the pane's width is the room the cards have.
         let chooser = WorkspaceShellPage(app: app).panel("centerPane").frame
-        guard chooser.width - 48 >= 3 * 168 + 2 * 16 else {
+        guard chooser.width - 48 >= 3 * 204 + 2 * 16 else {
             throw XCTSkip("The centre is \(chooser.width)pt wide, too narrow for one row of three cards")
         }
         XCTAssertEqual(add.frame.minY, har.frame.minY, accuracy: 1, "Import HAR should sit beside Add endpoint")
         XCTAssertEqual(har.frame.minY, openAPI.frame.minY, accuracy: 1, "Import OpenAPI should share the row")
         XCTAssertLessThan(add.frame.maxX, har.frame.minX)
         XCTAssertLessThan(har.frame.maxX, openAPI.frame.minX)
+        XCTAssertEqual(add.frame.height, har.frame.height, accuracy: 1, "Cards in a row should share a height")
+        XCTAssertEqual(har.frame.height, openAPI.frame.height, accuracy: 1, "Cards in a row should share a height")
     }
 
     /// SIDEBAR-03, SIDEBAR-04.

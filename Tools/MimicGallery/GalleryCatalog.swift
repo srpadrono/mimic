@@ -178,8 +178,18 @@ enum GalleryCatalog {
             GalleryEndpointInspectorPanel()
         },
         GalleryEntry("endpoints.firstRun", "First endpoint", group: .endpoints, size: CGSize(width: 1152, height: 836)) {
-            FirstEndpointChooser(port: 8080, onAddEndpoint: {}, onImportHAR: {}, onImportOpenAPI: {})
-                .background(DSColors.content)
+            // Over the empty request log, as a new project's window shows it: the chooser centres
+            // in what the log leaves. 250pt is the log's height on the EmptyStates artboard.
+            VStack(spacing: 0) {
+                FirstEndpointChooser(port: 8080, onAddEndpoint: {}, onImportHAR: {}, onImportOpenAPI: {})
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(height: DSStroke.hairline)
+                RequestLogDrawerView(requestLogs: [], endpoints: [], serverState: .stopped, onClear: {})
+                    .configuredPort(8080)
+                    .frame(height: 250)
+            }
+            .background(DSColors.content)
         },
         GalleryEntry("endpoints.newEndpointSheet", "New endpoint sheet", group: .endpoints,
                      size: CGSize(width: 407, height: 376)) {
