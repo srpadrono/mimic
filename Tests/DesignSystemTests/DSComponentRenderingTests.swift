@@ -617,6 +617,7 @@ struct DSComponentRenderingTests {
         #expect(DSInspectorMetrics.footerHeight == DSBarHeight.footer)
         #expect(DSNavigatorMetrics.footerHeight == DSBarHeight.footer)
         #expect(DSNavigatorMetrics.rowHeight == DSRowHeight.list)
+        #expect(DSNavigatorMetrics.rowPitch == 30)
         #expect(DSInspectorMetrics.rowHeight == DSRowHeight.list)
     }
 

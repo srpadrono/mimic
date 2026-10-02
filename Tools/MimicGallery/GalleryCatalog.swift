@@ -168,7 +168,7 @@ enum GalleryCatalog {
     static let endpoints: [GalleryEntry] = [
         GalleryEntry("workspace.navigator", "Endpoint navigator", group: .endpoints,
                      size: CGSize(width: 264, height: 884)) {
-            GalleryNavigator(tab: .endpoints)
+            GalleryNavigatorPanel(tab: .endpoints)
         },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
             GalleryWorkspaceWindow.editor
@@ -193,7 +193,7 @@ enum GalleryCatalog {
     static let journeys: [GalleryEntry] = [
         GalleryEntry("journeys.navigator", "Journey navigator", group: .journeys,
                      size: CGSize(width: 264, height: 884)) {
-            GalleryNavigator(tab: .journeys)
+            GalleryNavigatorPanel(tab: .journeys)
         },
         // From the jump bar down, as the artboard's section is drawn.
         GalleryEntry("journeys.editor", "Journey editor", group: .journeys, size: CGSize(width: 844, height: 836)) {

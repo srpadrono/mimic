@@ -88,6 +88,11 @@ public struct SidebarView: View {
         _searchText = .constant(initialSearchText)
         _methodScopeID = .constant(Self.anyMethodScopeID)
         _collapsedSections = .constant(initialCollapsedSections)
+        // The first frame lists the endpoints rather than "No endpoints yet": grouping is a pass
+        // over the project, cheap enough to do before the list draws.
+        let sections = SidebarQuery.sections(endpoints: endpoints, searchText: initialSearchText)
+        _groupedSections = State(initialValue: sections.grouped)
+        _ungroupedEndpoints = State(initialValue: sections.ungrouped)
     }
 
     public var body: some View {
@@ -105,7 +110,7 @@ public struct SidebarView: View {
         }
         .navigationTitle(projectName ?? "Mimic")
         .frame(minWidth: DSNavigatorMetrics.minimumWidth)
-        .onAppear { updateSections() }
+        .onAppear { applySections() }
         .onChange(of: searchText) { _, _ in updateSections(debounce: true) }
         .onChange(of: methodScopeID) { _, _ in updateSections() }
         .onChange(of: endpoints) { _, _ in updateSections() }
@@ -308,6 +313,19 @@ public struct SidebarView: View {
 
     // MARK: - Data
 
+    /// Regroups straight away, for the bindings the list appears with. Typing goes through
+    /// `updateSections(debounce:)` instead, so a long project doesn't regroup on every keystroke.
+    private func applySections() {
+        searchDebounceTask?.cancel()
+        let result = SidebarQuery.sections(
+            endpoints: endpoints,
+            searchText: searchText,
+            methodScopeID: methodScopeID
+        )
+        groupedSections = result.grouped
+        ungroupedEndpoints = result.ungrouped
+    }
+
     private func updateSections(debounce: Bool = false) {
         searchDebounceTask?.cancel()
         
@@ -415,8 +433,10 @@ enum SidebarQuery {
             return !groupTag.isEmpty
         }) { $0.groupTag! }
 
-        let sections = grouped.keys.sorted().map { groupName in
-            SidebarView.EndpointGroup(name: groupName, endpoints: grouped[groupName] ?? [])
+        // Groups keep the project's order, the order their first endpoint appears in, as the
+        // design lists them. A new group goes to the bottom.
+        let sections = NavigatorGroupOrder.names(in: filteredEndpoints.map(\.groupTag)).compactMap { groupName in
+            grouped[groupName].map { SidebarView.EndpointGroup(name: groupName, endpoints: $0) }
         }
         let ungrouped = filteredEndpoints.filter {
             guard let groupTag = $0.groupTag else { return true }
