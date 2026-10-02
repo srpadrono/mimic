@@ -7,6 +7,9 @@ public struct ImportCandidate: Identifiable, Sendable {
     public var isSelected: Bool
     public let method: HTTPMethod
     public let path: String
+    /// The host the request went to, lowercased and without a port, or `nil` when the source does
+    /// not name one (a relative HAR URL, an OpenAPI server written as a path).
+    public let host: String?
     public let suggestedName: String
     public let suggestedGroupTag: String?
     public let statusCode: Int
@@ -37,6 +40,7 @@ public struct ImportCandidate: Identifiable, Sendable {
         isSelected: Bool,
         method: HTTPMethod,
         path: String,
+        host: String? = nil,
         suggestedName: String,
         suggestedGroupTag: String?,
         statusCode: Int,
@@ -54,6 +58,7 @@ public struct ImportCandidate: Identifiable, Sendable {
         self.isSelected = isSelected
         self.method = method
         self.path = path
+        self.host = host
         self.suggestedName = suggestedName
         self.suggestedGroupTag = suggestedGroupTag
         self.statusCode = statusCode
@@ -177,6 +182,7 @@ public enum HARParser {
         return ImportCandidateBuilder.makeCandidate(
             method: method,
             path: path,
+            host: extractHost(from: entry.request.url),
             suggestedName: operation.map { suggestName(operation: $0) }
                 ?? suggestName(method: method, path: path),
             suggestedGroupTag: operation != nil ? "GraphQL" : suggestGroupTag(path: path),
@@ -264,6 +270,20 @@ public enum HARParser {
         // *not* allowed in the path component." Undo it here too, or a captured `%3B` is a segment
         // the server can never hand the matcher.
         return routable.replacingOccurrences(of: "%3B", with: ";", options: .literal)
+    }
+
+    /// The host a captured URL names, by the same schemeless re-parse ``extractPath(from:)`` uses.
+    static func extractHost(from urlString: String) -> String? {
+        if let host = URLComponents(string: urlString)?.host, !host.isEmpty {
+            return host.lowercased()
+        }
+        guard let firstSegment = urlString.split(separator: "/", maxSplits: 1).first,
+              firstSegment.contains("."),
+              let withScheme = URLComponents(string: "http://\(urlString)"),
+              !withScheme.percentEncodedPath.isEmpty,
+              let host = withScheme.host, !host.isEmpty
+        else { return nil }
+        return host.lowercased()
     }
 
     /// Suggest a group tag from the first meaningful path segment.

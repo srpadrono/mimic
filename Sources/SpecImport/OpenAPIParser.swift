@@ -77,6 +77,12 @@ public enum OpenAPIParser {
 
     // MARK: - Swagger 2.0
 
+    /// Swagger 2's `host` may carry a port; the review sheet shows the host alone.
+    private static func swagger2Host(_ value: String) -> String? {
+        let host = URLComponents(string: "http://\(value)")?.host?.lowercased()
+        return host?.isEmpty == false ? host : nil
+    }
+
     private static func parseSwagger2(
         data: Data,
         existingEndpoints: [Endpoint]
@@ -147,6 +153,7 @@ public enum OpenAPIParser {
                     // by nothing: a spec saying `basePath: /v2` imported `/pet/{petId}` for a server
                     // that answers `/v2/pet/42`.
                     documentBasePath: doc.basePath,
+                    host: doc.host.flatMap(swagger2Host),
                     suggestedName: suggestedSwagger2Name(operation: operation),
                     statusCode: statusCode,
                     responseHeaders: [:],

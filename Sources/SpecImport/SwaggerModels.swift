@@ -6,6 +6,8 @@ import Foundation
 struct SwaggerDocument: Codable, Sendable {
     let swagger: String?
     let info: SwaggerInfo?
+    /// The host, and optionally port, the API is served from.
+    let host: String?
     let basePath: String?
     /// Document-level content types, which an operation may override with its own `produces`.
     ///

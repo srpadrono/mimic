@@ -271,6 +271,10 @@ enum GalleryCatalog {
                 initialCandidates: GalleryModels.importCandidates,
                 initialParseError: nil,
                 initialIsParsing: false,
+                initialSourceFileName: "checkout-session.har",
+                initialHiddenHosts: ["events.segment.io"],
+                // The artboard's height, whatever the screen that renders it.
+                height: ImportView.designHeight,
                 onCommitImport: { _ in }
             )
         },
@@ -305,28 +309,32 @@ enum GalleryModels {
     )
     static let updates = UpdateSheetPreviewModel()
 
-    /// The rows the import review artboard lists.
+    /// The rows the import review artboard lists, with the analytics host switched off.
     static let importCandidates: [ImportCandidate] = [
         candidate(.get, "/products", 200, bytes: 12_700),
         candidate(.get, "/products/42", 200, bytes: 1_840),
         candidate(.post, "/cart", 201, bytes: 312),
         candidate(.post, "/cart", 409, bytes: 140, selected: false, duplicate: true),
-        candidate(.post, "/payments", 503, bytes: 180),
-        candidate(.get, "/media/hero-autumn.jpg", 200, bytes: 2_400_000, selected: false, binary: true),
+        candidate(.post, "/payments", 503, bytes: 180, host: "pay.acme.shop"),
+        candidate(.get, "/media/hero-autumn.jpg", 200, bytes: 2_400_000, host: "cdn.acme.shop",
+                  selected: false, binary: true),
+        candidate(.post, "/v1/track", 200, bytes: 41, host: "events.segment.io", selected: false),
         candidate(.get, "/account-summary", 200, bytes: 2_150),
         candidate(.put, "/account/address", 200, bytes: 388),
-        candidate(.get, "/orders/export.csv", 200, bytes: 3_900_000, selected: false, overLimit: true),
+        candidate(.get, "/orders/export.csv", 200, bytes: 3_990_000, selected: false, overLimit: true),
         candidate(.delete, "/session", 204, bytes: 0),
+        candidate(.get, "/recommendations", 0, bytes: 0, selected: false),
     ]
 
     private static func candidate(
-        _ method: HTTPMethod, _ path: String, _ status: Int, bytes: Int,
+        _ method: HTTPMethod, _ path: String, _ status: Int, bytes: Int, host: String = "api.acme.shop",
         selected: Bool = true, duplicate: Bool = false, binary: Bool = false, overLimit: Bool = false
     ) -> ImportCandidate {
         ImportCandidate(
             isSelected: selected,
             method: method,
             path: path,
+            host: host,
             suggestedName: path,
             suggestedGroupTag: nil,
             statusCode: status,

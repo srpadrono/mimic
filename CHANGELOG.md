@@ -28,6 +28,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The journeys screen matches its design: field-style menus in the editor and inspector, plain group
   headings in the navigator that show a disclosure chevron on hover, and the journey glyph as drawn.
   The "Active" badge ends the run when clicked, in place of a separate stop button.
+- The import review matches its design: a Host column and a host menu that hides a host's rows
+  from the import, the file name and host count under the title, the design's checkboxes, a
+  duplicate's note naming the row it repeats, and one line of guidance in the footer. Select all
+  and Deselect all give way to the column header's checkbox, and the body preview button shows on
+  the row under the pointer.
 - The journey step sheet is laid out as designed, and its status field has a menu of common codes.
 - Code editors no longer highlight the current line.
 

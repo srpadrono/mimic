@@ -20,6 +20,32 @@ struct OpenAPIParserTests {
         }
     }
 
+    @Test("OpenAPI candidates take their host from the server URL; a relative server names none")
+    func openAPIHostComesFromServer() async throws {
+        let spec = """
+        {"openapi":"3.0.3","info":{"title":"Hosts","version":"1.0"},
+         "servers":[{"url":"https://Store.example.com/v2"}],
+         "paths":{
+           "/pets":{"get":{"responses":{"200":{"description":"ok"}}}},
+           "/local":{"servers":[{"url":"/base"}],"get":{"responses":{"200":{"description":"ok"}}}}
+         }}
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        let hosts = Dictionary(uniqueKeysWithValues: candidates.map { ($0.path, $0.host) })
+        #expect(hosts["/v2/pets"] == .some("store.example.com"))
+        #expect(hosts["/base/local"] == .some(nil))
+    }
+
+    @Test("Swagger 2 candidates take their host from the document's host, without its port")
+    func swagger2HostComesFromDocument() async throws {
+        let spec = """
+        {"swagger":"2.0","info":{"title":"Hosts","version":"1.0"},"host":"Petstore.example.com:8080",
+         "basePath":"/v1","paths":{"/pets":{"get":{"responses":{"200":{"description":"ok"}}}}}}
+        """
+        let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+        #expect(candidates.map(\.host) == ["petstore.example.com"])
+    }
+
     @Test("Unsupported OpenAPI declarations do not become unrelated metadata bodies")
     func unsupportedDeclarationsDoNotUseMetadataFallback() async throws {
         let spec = """

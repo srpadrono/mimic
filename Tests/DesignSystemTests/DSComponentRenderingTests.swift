@@ -638,7 +638,7 @@ struct DSComponentRenderingTests {
         #expect(DSSheetWidth.form == 580)
         #expect(DSSheetWidth.wide == 680)
         #expect(DSSheetWidth.split == 760)
-        #expect(DSSheetWidth.review == 860)
+        #expect(DSSheetWidth.review == 1000)
     }
 
     /// The glyph ladder, and the floor under it.

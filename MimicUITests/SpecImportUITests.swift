@@ -14,7 +14,7 @@ import XCTest
 /// **Three different targeting strategies live here, and which one a member uses is not arbitrary.**
 ///
 /// - *Identifier over `.any` descendants* for everything in the review list's own body and footer —
-///   `import.candidateList`, `import.importButton`, `import.duplicateWarning`, the
+///   `import.candidateList`, `import.importButton`, `import.footerNote`, the
 ///   `import.candidate.index.<n>` row cells. `ImportWorkflowScreen`'s root pairs its identifier with
 ///   `.accessibilityElement(children: .contain)` and its own note says nothing between it and these
 ///   leaves masks them, so their names reach the tree.
@@ -103,27 +103,18 @@ struct ImportSheetPage {
 
     var candidateList: XCUIElement { element(identifier: "import.candidateList") }
 
-    /// The review panel's header title.
-    var reviewHeader: XCUIElement { staticText(reading: "Endpoints found") }
+    /// The subtitle under the sheet title on the review screen: the file and what it holds.
+    var reviewHeader: XCUIElement { element(identifier: "\(rootIdentifier).subtitle") }
 
     /// The header's "n of m selected" count, as an assertion on the exact words.
     func selectionCount(_ text: String) -> XCUIElement { staticText(reading: text) }
 
-    var selectAllButton: XCUIElement {
-        app.buttons.matching(
+    /// The column header's checkbox, which selects or clears every row shown.
+    var selectShownCheckbox: XCUIElement {
+        app.checkBoxes.matching(
             NSPredicate(
-                format: "identifier == %@ OR identifier == %@ OR label == %@ OR label == %@",
-                "import.selectAll", "ds.button.import.selectAll", "Select all endpoints", "Select all"
-            )
-        ).firstMatch
-    }
-
-    var deselectAllButton: XCUIElement {
-        app.buttons.matching(
-            NSPredicate(
-                format: "identifier == %@ OR identifier == %@ OR label == %@ OR label == %@",
-                "import.deselectAll", "ds.button.import.deselectAll",
-                "Deselect all endpoints", "Deselect all"
+                format: "identifier == %@ OR label == %@",
+                "import.selectShown", "Select shown endpoints"
             )
         ).firstMatch
     }
@@ -153,7 +144,7 @@ struct ImportSheetPage {
         element(identifier: "import.candidate.index.\(index)")
     }
 
-    /// `operation`, `name`, `status` or `size` on the row at `index`.
+    /// `operation`, `host`, `status`, `size` or `preview` on the row at `index`.
     func candidateCell(_ field: String, at index: Int) -> XCUIElement {
         element(identifier: "import.candidate.index.\(index).\(field)")
     }
@@ -178,13 +169,8 @@ struct ImportSheetPage {
 
     // MARK: Footer
 
-    var duplicateNote: XCUIElement { element(identifier: "import.duplicateWarning") }
-    var bodySizeWarning: XCUIElement { element(identifier: "import.bodySizeWarning") }
-    var binaryBodyWarning: XCUIElement { element(identifier: "import.binaryBodyWarning") }
-    var unavailableBodyWarning: XCUIElement { element(identifier: "import.unavailableBodyWarning") }
-    var partialResponseWarning: XCUIElement { element(identifier: "import.partialResponseWarning") }
-    var invalidCandidateWarning: XCUIElement { element(identifier: "import.invalidCandidateWarning") }
-    var capturedBodyNotice: XCUIElement { element(identifier: "import.capturedBodyNotice") }
+    /// The footer's one line: why rows are held back, or how bodies are saved.
+    var footerNote: XCUIElement { element(identifier: "import.footerNote") }
     var bodyPreviewText: XCUIElement { element(identifier: "import.bodyPreview.text") }
     var closeBodyPreview: XCUIElement { element(identifier: "ds.button.import.bodyPreview.close") }
 
@@ -270,7 +256,7 @@ struct ImportSheetPage {
     /// Three candidates polled together, never `a.waitForExistence(t) || b.waitForExistence(t)` —
     /// that form waits out the first element's entire timeout before it looks at the second. Three
     /// rather than one because they fail independently: `import.candidateList` is a container
-    /// identifier, `import.candidate.index.0` is a row cell's, and "Endpoints found" is content. A
+    /// identifier, `import.candidate.index.0` is a row cell's, and the subtitle is the header's. A
     /// suite in which every test's first wait depends on one identifier landing is a suite that
     /// reports one broken identifier as a broken feature.
     @discardableResult
@@ -1150,24 +1136,24 @@ final class SpecImportUITests: MimicUITestCase {
         // IMPHAR-03 / IMPREV-01 — the sheet says which importer it is, and the panel beneath it says
         // what it found.
         assertExists(sheet.title, "The sheet heading \"Import from HAR\"")
-        assertExists(sheet.reviewHeader, "The review panel's \"Endpoints found\" header")
+        assertExists(sheet.reviewHeader, "The review subtitle naming what was found")
         assertExists(sheet.candidateList, "The candidate list")
 
-        // IMPREV-03 — a row's method, path, name, status and size. The method badge is the one cell
+        // IMPREV-03 — a row's method, path, host, status and size. The method badge is the one cell
         // with no index-addressable identifier (it is named `ds.method.<uuid>`); the other four are
         // pinned here, and the toggle asserted further down carries the method in its label.
         assertReads(sheet.candidatePath(at: 0), "/api/orders", "Row 0's path")
-        assertReads(sheet.candidateCell("name", at: 0), "Get Orders", "Row 0's suggested name")
+        assertReads(sheet.candidateCell("host", at: 0), "api.example.com", "Row 0's host")
         assertReads(sheet.candidateCell("status", at: 0), "200", "Row 0's status")
         assertReads(sheet.candidateCell("size", at: 0), "13 B", "Row 0's body size")
 
         assertReads(sheet.candidatePath(at: 1), "/api/orders", "Row 1's path")
-        assertReads(sheet.candidateCell("name", at: 1), "Create Orders", "Row 1's suggested name")
+        assertReads(sheet.candidateCell("host", at: 1), "api.example.com", "Row 1's host")
         assertReads(sheet.candidateCell("status", at: 1), "201", "Row 1's status")
         assertReads(sheet.candidateCell("size", at: 1), "9 B", "Row 1's body size")
 
         assertReads(sheet.candidatePath(at: 2), "/api/customers", "Row 2's path")
-        assertReads(sheet.candidateCell("name", at: 2), "Get Customers", "Row 2's suggested name")
+        assertReads(sheet.candidateCell("host", at: 2), "api.example.com", "Row 2's host")
         assertReads(sheet.candidateCell("size", at: 2), "16 B", "Row 2's body size")
 
         // IMPHAR-10 — four entries in, four rows out, and no fifth.
@@ -1185,17 +1171,16 @@ final class SpecImportUITests: MimicUITestCase {
         // `testReviewSelectionControlsDriveTheSelection`.
         assertExists(sheet.selectionCount("3 of 4 selected"), "The \"3 of 4 selected\" count")
 
-        // IMPREV-16 — and neither of the two warnings this capture does not earn.
-        assertExists(sheet.duplicateNote, "The \"Duplicates are deselected by default\" note")
-        assertAbsent(sheet.bodySizeWarning, "The body-size footer warning")
-        assertAbsent(sheet.binaryBodyWarning, "The binary-body footer warning")
+        // IMPREV-16 — the footer explains the repeat, and nothing about bodies this capture keeps.
+        assertReads(sheet.footerNote, "Repeated routes start unselected. Select one to import it as well.",
+                    "The footer note about repeated routes")
         let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         screenshot.name = "har-review-with-duplicate"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
 
-    /// Select all, deselect all, one checkbox, one row click — each read back off the count.
+    /// The header checkbox both ways, one checkbox, one row click — each read back off the count.
     ///
     /// The count is the assertion rather than a checkbox's `value` because it is the thing the screen
     /// actually promises, and because a checkbox reports its state as an `NSNumber`, a `String` or
@@ -1224,22 +1209,18 @@ final class SpecImportUITests: MimicUITestCase {
         XCTAssertLessThan(sheet.cancelButton.frame.maxX, sheet.importButton.frame.minX)
         XCTAssertLessThan(abs(sheet.cancelButton.frame.midY - sheet.importButton.frame.midY), 4)
 
-        // IMPREV-09 — select all takes the deselected duplicate with it.
-        assertEnabled(sheet.selectAllButton, "Select all, while a candidate is deselected")
-        sheet.selectAllButton.click()
-        assertExists(sheet.selectionCount("4 of 4 selected"), "The count after Select all")
-        // IMPREV-10
-        assertDisabled(sheet.selectAllButton, "Select all, once every candidate is selected")
-        assertEnabled(sheet.deselectAllButton, "Deselect all, while everything is selected")
+        // IMPREV-09 — the header checkbox is mixed, and selecting from it takes the deselected
+        // duplicate with it.
+        assertEnabled(sheet.selectShownCheckbox, "The header checkbox, while a candidate is deselected")
+        sheet.selectShownCheckbox.click()
+        assertExists(sheet.selectionCount("4 of 4 selected"), "The count after selecting every row shown")
 
-        // IMPREV-11
-        sheet.deselectAllButton.click()
-        assertExists(sheet.selectionCount("0 of 4 selected"), "The count after Deselect all")
+        // IMPREV-10 and IMPREV-11 — clicking it again clears every row.
+        sheet.selectShownCheckbox.click()
+        assertExists(sheet.selectionCount("0 of 4 selected"), "The count after clearing every row shown")
         assertReads(sheet.importButton, "0 selected", "The disabled commit button's accessible count")
         // IMPREV-12 and IMPREV-14 — a control that cannot change anything says so.
-        assertDisabled(sheet.deselectAllButton, "Deselect all, with nothing selected")
         assertDisabled(sheet.importButton, "The commit button, with nothing selected")
-        assertEnabled(sheet.selectAllButton, "Select all, with nothing selected")
 
         // IMPREV-06 — one checkbox, addressed by the label `ImportCandidateRow` composes for it.
         // `/api/customers` is the one route this capture visits exactly once, so the label is unique.
@@ -1288,7 +1269,7 @@ final class SpecImportUITests: MimicUITestCase {
         // IMPREV-25 — the sheet goes, and the three selected candidates arrive as endpoints. Three,
         // not four: the duplicate was deselected and must not have been committed.
         XCTAssertTrue(
-            sheet.waitForDismissal(showing: "Endpoints found"),
+            sheet.waitForDismissal(showing: sheet.sheetTitle),
             "The import sheet should dismiss once the import is confirmed"
         )
         assertEndpointRowCount(3)
@@ -1315,7 +1296,7 @@ final class SpecImportUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            sheet.waitForDismissal(showing: "Endpoints found"),
+            sheet.waitForDismissal(showing: sheet.sheetTitle),
             "Return should fire the review screen's default action and dismiss the sheet"
         )
         assertEndpointRowCount(3)
@@ -1362,13 +1343,11 @@ final class SpecImportUITests: MimicUITestCase {
         assertAbsent(sheet.candidateFlag("bodyDropped", at: 2), "A Body dropped flag on row 2")
         assertAbsent(sheet.candidateFlag("duplicate", at: 2), "A Duplicate flag on row 2")
 
-        // IMPREV-18 and IMPREV-20 — the footer says both things once, for the whole list.
-        assertExists(sheet.bodySizeWarning, "The \"exceed the 1 MB body limit\" footer warning")
-        assertExists(sheet.binaryBodyWarning, "The \"binary bodies\" footer warning")
-        // Nothing here repeats a route, so the third footer note must be absent.
-        assertAbsent(sheet.duplicateNote, "The duplicates footer note")
+        // IMPREV-18 and IMPREV-20 — the footer says it once, for the whole list.
+        assertReads(sheet.footerNote, "Rows marked in orange are unselected. Select one to import it without its body.",
+                    "The footer note about bodies that won't import")
 
-        sheet.selectAllButton.click()
+        sheet.selectShownCheckbox.click()
         assertExists(sheet.selectionCount("3 of 3 selected"), "Bodyless imports can be selected explicitly")
     }
 
@@ -1412,16 +1391,15 @@ final class SpecImportUITests: MimicUITestCase {
         assertReviewList(sheet, "The file should parse and the review screen should appear")
         // A browser writes `"status": 0` for a cancelled request. Review explains the refusal before
         // import and leaves it deselected, but selecting it explicitly still must not persist it.
-        assertReads(sheet.candidateCell("status", at: 1), "0", "Row 1's status")
-        assertExists(sheet.candidateFlag("invalid", at: 1), "The invalid-status flag")
-        assertExists(sheet.staticText(containing: "Invalid status code: 0"), "The row's refusal reason")
+        assertReads(sheet.candidateCell("status", at: 1), "No response", "Row 1's status")
+        assertExists(sheet.candidateFlag("noResponse", at: 1), "The Response incomplete flag")
         assertExists(sheet.selectionCount("1 of 2 selected"), "Only the usable row starts selected")
         sheet.candidatePath(at: 1).click()
         assertExists(sheet.selectionCount("2 of 2 selected"), "The selection count")
 
         sheet.importButton.click()
         XCTAssertTrue(
-            sheet.waitForDismissal(showing: "Endpoints found"),
+            sheet.waitForDismissal(showing: sheet.sheetTitle),
             "The import sheet should dismiss on commit even when a candidate is refused"
         )
 
@@ -1461,17 +1439,17 @@ final class SpecImportUITests: MimicUITestCase {
         assertExists(sheet.candidateFlag("partialResponse", at: 1), "The partial response flag")
         assertExists(sheet.candidateFlag("invalid", at: 2), "The invalid header flag")
         assertExists(sheet.staticText(containing: "Bad Header"), "The invalid header is named in the row")
-        assertExists(sheet.unavailableBodyWarning, "The bodyless-import disclosure")
-        assertExists(sheet.partialResponseWarning, "The partial-response refusal disclosure")
-        assertExists(sheet.invalidCandidateWarning, "The invalid-entry guidance")
-        assertExists(sheet.capturedBodyNotice, "The captured-text disclosure")
+        assertReads(sheet.footerNote, "Rows marked in orange are unselected. Select one to import it without its body.",
+                    "The bodyless-import disclosure")
         assertExists(sheet.importButton, "The footer action remains available with all warnings")
         XCTAssertTrue(sheet.importButton.isHittable)
         XCTAssertLessThan(sheet.cancelButton.frame.maxX, sheet.importButton.frame.minX)
         XCTAssertLessThan(abs(sheet.cancelButton.frame.midY - sheet.importButton.frame.midY), 4)
 
+        // The eye button shows on the row under the pointer.
         let preview = sheet.candidateCell("preview", at: 3)
         assertExists(preview, "The complete body's preview action")
+        sheet.candidatePath(at: 3).hover()
         preview.click()
         assertReads(sheet.bodyPreviewText, #"{"ok":true}"#, "The literal captured response in the preview")
         assertExists(sheet.closeBodyPreview, "The preview's Close action")
@@ -1483,7 +1461,7 @@ final class SpecImportUITests: MimicUITestCase {
         sheet.candidatePath(at: 1).click()
         assertExists(sheet.selectionCount("3 of 4 selected"), "The user's explicit bodyless and partial selections")
         sheet.importButton.click()
-        XCTAssertTrue(sheet.waitForDismissal(showing: "Endpoints found"))
+        XCTAssertTrue(sheet.waitForDismissal(showing: sheet.sheetTitle))
         assertExists(sheet.staticText(containing: "Partial responses (206) cannot be imported"), "The partial row is refused")
         let ok = app.buttons.matching(identifier: "commandError.okButton").firstMatch
         assertExists(ok, "The import report's OK action")
@@ -1513,20 +1491,18 @@ final class SpecImportUITests: MimicUITestCase {
 
         // IMPAPI-03 / IMPREV-01
         assertExists(sheet.title, "The sheet heading \"Import from OpenAPI\"")
-        assertExists(sheet.reviewHeader, "The review panel's \"Endpoints found\" header")
+        assertExists(sheet.reviewHeader, "The review subtitle naming what was found")
 
         // IMPAPI-09 — three operations across two paths, in the order the parser sorts them, each
         // carrying the document's `/v2` prefix and, for the last, Mimic's wildcard syntax.
         assertReads(sheet.candidatePath(at: 0), "/v2/orders", "Row 0's path")
-        assertReads(sheet.candidateCell("name", at: 0), "List Orders", "Row 0's suggested name")
+        assertReads(sheet.candidateCell("host", at: 0), "api.example.com", "Row 0's host, from the server URL")
         assertReads(sheet.candidateCell("status", at: 0), "200", "Row 0's status")
 
         assertReads(sheet.candidatePath(at: 1), "/v2/orders", "Row 1's path")
-        assertReads(sheet.candidateCell("name", at: 1), "Create an order", "Row 1's suggested name")
         assertReads(sheet.candidateCell("status", at: 1), "201", "Row 1's status")
 
         assertReads(sheet.candidatePath(at: 2), "/v2/orders/:orderId", "Row 2's path")
-        assertReads(sheet.candidateCell("name", at: 2), "Get one order", "Row 2's suggested name")
 
         assertAbsent(sheet.candidatePath(at: 3), "A fourth candidate row")
         assertExists(sheet.selectionCount("3 of 3 selected"), "The selection count")
@@ -1534,7 +1510,7 @@ final class SpecImportUITests: MimicUITestCase {
         // IMPREV-23 / IMPREV-25, from the other importer.
         sheet.importButton.click()
         XCTAssertTrue(
-            sheet.waitForDismissal(showing: "Endpoints found"),
+            sheet.waitForDismissal(showing: sheet.sheetTitle),
             "The OpenAPI import sheet should dismiss once the import is confirmed"
         )
         assertEndpointRowCount(3)
