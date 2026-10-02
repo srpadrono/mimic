@@ -27,11 +27,13 @@ public struct BackendSettingsView: View {
                 Text("Server settings")
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .frame(height: BackendSettingsGeometry.titleLineHeight)
                     .accessibilityAddTraits(.isHeader)
                 Text(model.projectName ?? "Local ports and pass-through")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
                     .lineLimit(1)
+                    .frame(height: DSFormMetrics.lineHeight)
             }
             .padding(.horizontal, DSSpacing.xl)
             .padding(.top, DSSpacing.xl)
@@ -107,6 +109,7 @@ public struct BackendSettingsView: View {
             Text("Ports")
                 .font(DSTypography.captionSemibold)
                 .foregroundStyle(DSColors.labelTertiary)
+                .frame(height: DSFormMetrics.lineHeight)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
@@ -465,6 +468,8 @@ private struct FieldIssue {
 
 private enum BackendSettingsGeometry {
     static let listWidth: CGFloat = 208
+    /// The title's line, as the design sets it; the subtitle and headings sit on 16 pt lines.
+    static let titleLineHeight: CGFloat = 20
     /// The design's height. It holds every state of the form, so the sheet doesn't jump as the
     /// switches change; on a short screen the form scrolls.
     static let designHeight: CGFloat = 576

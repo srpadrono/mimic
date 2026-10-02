@@ -17,6 +17,9 @@ public enum DSFormMetrics {
     public static let groupRowHeight: CGFloat = 40
     /// A row's side inset inside a grouped settings section.
     public static let groupRowInset: CGFloat = 14
+    /// The line every settings heading, title and explanation sits on, so rows keep the design's
+    /// rhythm whatever the font's own leading.
+    public static let lineHeight: CGFloat = 16
 }
 
 /// A titled group of settings rows: an 11pt heading over a rounded card with hairline rules
@@ -38,6 +41,7 @@ public struct DSFormSection<Content: View>: View {
             Text(title)
                 .font(DSTypography.captionSemibold)
                 .foregroundStyle(DSColors.labelTertiary)
+                .frame(height: DSFormMetrics.lineHeight)
                 .padding(.horizontal, DSSpacing.xs)
                 .accessibilityAddTraits(.isHeader)
 

@@ -21,11 +21,13 @@ public struct DSFormToggle: View {
                 Text(title)
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .frame(minHeight: DSFormMetrics.lineHeight)
                 if let description {
                     Text(description)
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.labelSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(minHeight: DSFormMetrics.lineHeight)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
