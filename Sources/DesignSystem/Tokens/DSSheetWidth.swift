@@ -14,6 +14,6 @@ nonisolated public enum DSSheetWidth {
     public static let wide: CGFloat = 680
     /// A source list beside a multi-section form: server settings.
     public static let split: CGFloat = 760
-    /// A review table: import.
-    public static let review: CGFloat = 860
+    /// A review table: import, at the import design's width.
+    public static let review: CGFloat = 1000
 }

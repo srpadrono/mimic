@@ -53,15 +53,23 @@ public struct ImportWorkflowState {
     public var candidates: [ImportCandidate]
     public var parseError: String?
     public var isParsing: Bool
+    /// The file under review, named in the sheet's subtitle.
+    public var sourceFileName: String?
+    /// Hosts switched off in the review's host menu. Their rows stay listed but are not imported.
+    public var hiddenHosts: Set<String>
 
     public init(
         candidates: [ImportCandidate] = [],
         parseError: String? = nil,
-        isParsing: Bool = false
+        isParsing: Bool = false,
+        sourceFileName: String? = nil,
+        hiddenHosts: Set<String> = []
     ) {
         self.candidates = candidates
         self.parseError = parseError
         self.isParsing = isParsing
+        self.sourceFileName = sourceFileName
+        self.hiddenHosts = hiddenHosts
     }
 }
 
@@ -92,6 +100,9 @@ public final class ImportWorkflow {
     /// The name of the file being reviewed, shown under the sheet title.
     private(set) var sourceFileName: String?
 
+    /// Hosts switched off in the review. See ``ImportHostFilter``.
+    var hiddenHosts: Set<String> = []
+
     public init(
         kind: ImportKind = .har,
         candidates: [ImportCandidate] = [],
@@ -111,12 +122,15 @@ public final class ImportWorkflow {
             parseError: state.parseError,
             isParsing: state.isParsing
         )
+        sourceFileName = state.sourceFileName
+        hiddenHosts = state.hiddenHosts
     }
 
     func beginParsing() {
         isParsing = true
         parseError = nil
         candidates = []
+        hiddenHosts = []
     }
 
     func finishParsing(with parsed: [ImportCandidate]) {
@@ -314,6 +328,7 @@ struct ImportWorkflowScreen: View {
             } else {
                 ImportReviewList(
                     candidates: $workflow.candidates,
+                    hiddenHosts: $workflow.hiddenHosts,
                     cancelIdentifier: kind.cancelAccessibilityIdentifier,
                     onCancel: dismiss.callAsFunction,
                     onImport: workflow.commitAction(onCommit: onCommitImport, dismiss: dismiss.callAsFunction)
@@ -352,15 +367,12 @@ struct ImportWorkflowScreen: View {
                     .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).title")
 
                 if isReviewing {
-                    HStack(spacing: 0) {
-                        // Its own `Text` so the words can be found exactly.
-                        Text("Endpoints found")
-                        Text(subtitleDetail)
-                    }
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.labelSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    Text(subtitle)
+                        .font(DSTypography.callout)
+                        .foregroundStyle(DSColors.labelSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .accessibilityIdentifier("\(kind.rootAccessibilityIdentifier).subtitle")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -381,17 +393,23 @@ struct ImportWorkflowScreen: View {
         .padding(.bottom, isReviewing ? DSSpacing.md : DSSpacing.lg)
     }
 
-    private var subtitleDetail: String {
-        let count = workflow.candidates.count
+    /// "checkout-session.har · 214 requests from 5 hosts": the file, then what it holds.
+    private var subtitle: String {
+        Self.subtitle(kind: kind, fileName: workflow.sourceFileName, candidates: workflow.candidates)
+    }
+
+    static func subtitle(kind: ImportKind, fileName: String?, candidates: [ImportCandidate]) -> String {
+        let count = candidates.count
         let noun: String
         switch kind {
         case .har: noun = count == 1 ? "request" : "requests"
         case .openAPI: noun = count == 1 ? "operation" : "operations"
         }
-        var parts = [String]()
-        if let name = workflow.sourceFileName, !name.isEmpty { parts.append(name) }
-        parts.append("\(count) \(noun)")
-        return " \u{00B7} " + parts.joined(separator: " \u{00B7} ")
+        var summary = "\(count) \(noun)"
+        let hosts = Set(candidates.compactMap(\.host)).count
+        if hosts > 1 { summary += " from \(hosts) hosts" }
+        guard let fileName, !fileName.isEmpty else { return summary }
+        return "\(fileName) \u{00B7} \(summary)"
     }
 
     private var cancelButton: some View {

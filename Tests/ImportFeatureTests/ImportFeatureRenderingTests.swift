@@ -89,7 +89,7 @@ struct ImportFeatureRenderingTests {
         let onImport: () -> Void
 
         var body: some View {
-            ImportReviewList(candidates: $candidates, onImport: onImport)
+            ImportReviewList(candidates: $candidates, hiddenHosts: .constant([]), onImport: onImport)
         }
     }
 
@@ -334,7 +334,7 @@ struct ImportFeatureRenderingTests {
 
     /// The sheet is one size in every state it can be in.
     ///
-    /// `ImportView` puts an 860pt width floor and a screen-aware height under the workflow, and does that
+    /// `ImportView` puts a 1000pt width floor and a screen-aware height under the workflow, and does that
     /// because a real HAR is a browsing session rather than three entries: at 450pt the review showed
     /// about a dozen rows while its own chrome took a fifth of the height. A floor only works if it is
     /// the floor in every state — a sheet that opened dialog-sized to say "parsing", then jumped to
@@ -342,7 +342,7 @@ struct ImportFeatureRenderingTests {
     /// for a checkbox.
     ///
     /// So the states are compared with each other, and the floor is checked against the screen's
-    /// available height. A 640pt-only assertion fails on compact CI displays even when the view is correct.
+    /// available height. A 696pt-only assertion fails on compact CI displays even when the view is correct.
     @Test("The import sheet is the same size parsing, failed, empty and populated")
     func importSheetKeepsOneSizeAcrossStates() {
         let candidates = [
@@ -386,8 +386,8 @@ struct ImportFeatureRenderingTests {
         // Assert the presentation contract independently of the view implementation. Compact
         // displays reserve 120pt for the surrounding window and menu bar.
         let availableHeight = NSScreen.main?.visibleFrame.height ?? 900
-        let expectedHeight = min(640, max(360, availableHeight - 120))
-        #expect(empty.width >= 860)
+        let expectedHeight = min(696, max(360, availableHeight - 120))
+        #expect(empty.width >= 1000)
         #expect(empty.height >= expectedHeight)
     }
 
@@ -455,7 +455,7 @@ struct ImportFeatureRenderingTests {
                 ],
                 onImport: {}
             ),
-            size: CGSize(width: 860, height: 520)
+            size: CGSize(width: 1000, height: 520)
         )
     }
 }

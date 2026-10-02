@@ -30,12 +30,16 @@ public struct ImportView: View {
         )
     }
 
+    /// - Parameter initialSourceFileName: The file the initial candidates came from.
+    /// - Parameter initialHiddenHosts: Hosts the review starts with switched off.
     public init(
         kind: ImportKind,
         existingEndpoints: [Endpoint],
         initialCandidates: [ImportCandidate],
         initialParseError: String?,
         initialIsParsing: Bool,
+        initialSourceFileName: String? = nil,
+        initialHiddenHosts: Set<String> = [],
         onCommitImport: @escaping ([ImportCandidate]) -> Void
     ) {
         self.kind = kind
@@ -43,7 +47,9 @@ public struct ImportView: View {
         self.initialState = ImportWorkflowState(
             candidates: initialCandidates,
             parseError: initialParseError,
-            isParsing: initialIsParsing
+            isParsing: initialIsParsing,
+            sourceFileName: initialSourceFileName,
+            hiddenHosts: initialHiddenHosts
         )
         self.onCommitImport = onCommitImport
     }
@@ -60,7 +66,14 @@ public struct ImportView: View {
                idealHeight: preferredHeight, maxHeight: preferredHeight)
     }
 
+    /// The design's height, on any screen tall enough to show it with room to spare.
+    static let designHeight: CGFloat = 696
+
     private var preferredHeight: CGFloat {
-        min(640, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 120))
+        Self.preferredHeight(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900)
+    }
+
+    static func preferredHeight(visibleScreenHeight: CGFloat) -> CGFloat {
+        min(designHeight, max(360, visibleScreenHeight - 120))
     }
 }

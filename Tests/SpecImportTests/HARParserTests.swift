@@ -6,6 +6,22 @@ import Domain
 @Suite("HARParser")
 struct HARParserTests {
 
+    // MARK: - Hosts
+
+    @Test("Each candidate keeps the host its request went to, lowercased and without a port")
+    func keepsRequestHost() async throws {
+        let harJSON = """
+        {"log":{"version":"1.2","creator":{"name":"Test","version":"1.0"},"entries":[
+          {"request":{"method":"GET","url":"https://API.acme.shop:8443/products"},"response":{"status":200}},
+          {"request":{"method":"POST","url":"https://pay.acme.shop/payments"},"response":{"status":201}},
+          {"request":{"method":"GET","url":"cdn.acme.shop/media/hero.jpg"},"response":{"status":200}},
+          {"request":{"method":"GET","url":"/relative/only"},"response":{"status":200}}
+        ]}}
+        """
+        let candidates = try await HARParser.parse(data: Data(harJSON.utf8))
+        #expect(candidates.map(\.host) == ["api.acme.shop", "pay.acme.shop", "cdn.acme.shop", nil])
+    }
+
     // MARK: - Valid HAR Parsing
 
     @Test("Parses a valid HAR file with one entry")

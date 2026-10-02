@@ -7,6 +7,8 @@ enum ImportCandidateBuilder {
     /// - Parameter documentBasePath: The prefix the source document declares for every route in it,
     ///   exactly as written — Swagger 2's `basePath`, or the first entry of OpenAPI 3's `servers`.
     ///   `nil` for a HAR, whose entries carry whole URLs and no document-level prefix.
+    /// - Parameter host: The host the source names for this route. `nil` derives it from
+    ///   `documentBasePath` when that is an absolute URL.
     /// - Parameter binaryBodySizeBytes: The byte count of a captured body that was bytes rather
     ///   than text, or `nil` when the body — if there is one — is text. Non-nil means the parser
     ///   could not produce a `String` for the body at all, so the caller passes
@@ -19,6 +21,7 @@ enum ImportCandidateBuilder {
         method: HTTPMethod,
         path: String,
         documentBasePath: String? = nil,
+        host: String? = nil,
         suggestedName: String? = nil,
         suggestedGroupTag: String? = nil,
         statusCode: Int,
@@ -74,6 +77,8 @@ enum ImportCandidateBuilder {
             isSelected: canReplay && !isDuplicate,
             method: method,
             path: route,
+            // A HAR names the host on every entry; a spec names it once, in the server URL.
+            host: host ?? documentBasePath.flatMap { URLComponents(string: $0)?.host?.lowercased() },
             suggestedName: suggestedName ?? suggestName(method: method, path: namingRoute),
             suggestedGroupTag: suggestedGroupTag ?? suggestGroupTag(path: namingRoute),
             statusCode: statusCode,
