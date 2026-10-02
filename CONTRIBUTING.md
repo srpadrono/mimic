@@ -38,6 +38,8 @@ TEST_RUNNER_MIMIC_SECTION=journeys xcodebuild -workspace Mimic.xcworkspace -sche
   -destination 'platform=macOS' -only-testing:DesignFidelityTests
 ```
 
+Every gallery entry is also a snapshot test: `GallerySnapshotTests` (in `DesignFidelityTests`) renders each entry in light and dark and fails when it no longer matches its approved PNG in `Tests/DesignFidelityTests/Snapshots/`. Check sizes, spacing and colours there rather than in an XCUITest; it runs in seconds and does not take over the mouse. Baselines are recorded by CI, because fonts rasterise differently on another macOS version: when an entry is new or changed on purpose, the failing CI run pushes the new renderings to the `snapshots/<your branch>` branch (with a difference image for each change under `Differences/`) and uploads them as the `snapshots` artifact. Look at them, then take the approved ones with `git fetch origin snapshots/<your branch>` and `git checkout FETCH_HEAD -- Tests/DesignFidelityTests/Snapshots`, and commit.
+
 For UI changes, select the affected methods and wait for each run to finish before starting another. Add more `-only-testing` arguments when the changed flow needs several cases:
 
 ```bash
@@ -62,6 +64,21 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Release \
 Use the Release build after a manifest or dependency change. `./Scripts/ci.sh` runs non-UI tests, Debug and Release builds, script checks, and the CLI end-to-end check with a disposable store and app copy. It does not replace CI's full UI gate. Read a script before changing its checks. `xcodebuild -workspace Mimic.xcworkspace -list` shows generated schemes; module schemes can run their own tests.
 
 For documentation or script changes, run the applicable checks in `Scripts/`, including `python3 Scripts/check_doc_counts.py` for local links and test targets, `python3 -m unittest discover -s Scripts/tests -p 'test_*.py'` for script regressions, and `git diff --check`. A documentation edit does not need an XCUITest run. Coverage reports read existing result bundles; neither coverage nor source declaration counts prove that tests passed.
+
+### What CI runs
+
+A pull request or push runs only the tests its changes can break. CI's first job, `Scripts/select_tests.py`, reads the changed files and `Scripts/test_selection.json`:
+
+- a file in a module runs the unit test targets of that module and of every module that depends on it, plus the UI test classes `ui_classes_by_target` names for that module and the smoke shard;
+- a UI test file runs its own shards; a shared UI support file runs them all;
+- documentation and scripts run only the Linux job;
+- `Project.swift`, `Tuist/`, `Configs/`, `mise.toml`, the CI workflow and the selection itself run everything, and so does a file that belongs to no module.
+
+The full suite (every unit target, every UI shard and the Release build) and the coverage badges run nightly. Run it on demand from the CI workflow's **Run workflow** button with **full** ticked. The run's summary page lists what was selected and why.
+
+To reproduce a UI failure without the rest of the suite, run the CI workflow by hand with `only_testing` set to the failing tests (`EndpointEditorUITests/testMethodPickerCreatesAPostEndpoint`, or a class name) and, for a suspected flake, `iterations` above 1: it repeats them until one fails. It runs on the same macOS image as CI and does not take over your mouse.
+
+A new module the app links needs an entry in `ui_classes_by_target`, and a new UI test method needs a shard in `ui_shards`; `select_tests.py --check` and `check_ui_shards.py` fail until it has one.
 
 ## Adding behavior
 

@@ -1,0 +1,327 @@
+{
+  "_comment": [
+    "Which tests a change runs. Read by Scripts/select_tests.py (CI's plan job) and Scripts/check_ui_shards.py.",
+    "ui_shards: the XCUITest split. Every UI test method must be selected by exactly one shard.",
+    "smoke_shard: added to every run that selects any UI shard.",
+    "ui_classes_by_target: for each module the app links, the UI test classes its changes run; \"all\" runs every shard.",
+    "full_paths: a change here runs everything (unit suites, every UI shard, the Release build).",
+    "linux_only_paths: a change here needs no macOS job; the Linux job always runs.",
+    "cli_paths: a change here runs the macOS build and CLI end-to-end checks without unit or UI tests.",
+    "Any path matched by none of these and owned by no Tuist target runs everything."
+  ],
+  "smoke_shard": 1,
+  "ui_classes_by_target": {
+    "Domain": "all",
+    "DesignSystem": "all",
+    "FeatureSupport": "all",
+    "AppFeatures": "all",
+    "Mimic": "all",
+    "WorkspaceShell": [
+      "WorkspaceShellUITests",
+      "NavigatorUITests",
+      "MimicUITests"
+    ],
+    "EndpointsFeature": [
+      "EndpointEditorUITests",
+      "NavigatorUITests"
+    ],
+    "JourneysFeature": [
+      "JourneyEditorUITests",
+      "JourneyUITests"
+    ],
+    "RequestLogFeature": [
+      "RequestLogUITests"
+    ],
+    "ServerFeature": [
+      "BackendSettingsUITests"
+    ],
+    "ImportFeature": [
+      "SpecImportUITests"
+    ],
+    "SpecImport": [
+      "SpecImportUITests"
+    ],
+    "ProjectsFeature": [
+      "WelcomeProjectUITests"
+    ],
+    "UpdatesFeature": [
+      "UpdateUITests"
+    ],
+    "ControlPlane": [
+      "ControlPlaneIsolationTests",
+      "BackendSettingsUITests"
+    ],
+    "MockServerEngine": [
+      "RequestLogUITests",
+      "JourneyUITests",
+      "BackendSettingsUITests"
+    ],
+    "Persistence": [
+      "MimicUITests",
+      "WelcomeProjectUITests",
+      "ErrorAlertUITests"
+    ]
+  },
+  "full_paths": [
+    "Project.swift",
+    "Tuist/**",
+    "mise.toml",
+    "Configs/**",
+    ".github/workflows/ci.yml",
+    ".github/actions/**",
+    "Scripts/select_tests.py",
+    "Scripts/test_selection.json"
+  ],
+  "linux_only_paths": [
+    "**/*.md",
+    "LICENSE",
+    "NOTICE",
+    "docs/**",
+    "Design/Canvas/**",
+    ".github/dependabot.yml",
+    ".github/workflows/codeql.yml",
+    ".gitignore",
+    "Package.swift",
+    "Package.resolved",
+    "Scripts/**"
+  ],
+  "cli_paths": [
+    "Scripts/run_cli_e2e.sh",
+    "Scripts/test_passthrough_e2e.py",
+    "Scripts/print_test_failures.sh"
+  ],
+  "ui_shards": [
+    {
+      "id": 1,
+      "name": "core window A",
+      "tests": [
+        "MimicUITests/testArrowKeysMoveThroughTheRequestLog",
+        "MimicUITests/testAutosaveIndicatorAppearsAfterEdit",
+        "MimicUITests/testCapturingSelectedRequestsAsJourney",
+        "MimicUITests/testClosingAProjectReturnsToWelcomeWithRecents",
+        "MimicUITests/testContextMenuOnRecentProject",
+        "MimicUITests/testCustomProjectPortPersistsAfterCloseAndReopen",
+        "MimicUITests/testDeleteProjectWithConfirmation",
+        "MimicUITests/testEditEndpointStatusCode",
+        "MimicUITests/testImportMenuOpensHARSheet",
+        "MimicUITests/testImportMenuOpensOpenAPISheet",
+        "MimicUITests/testRequestLogDrawerShowsHeaderAndEmptyState",
+        "MimicUITests/testReturnSubmitsNewProjectSheet",
+        "MimicUITests/testSelectingLoggedRequestShowsDetailBesideTheLog",
+        "MimicUITests/testSwitchActiveScenarioViaClick",
+        "MimicUITests/testToggleDrawerPanel",
+        "MimicUITests/testWelcomeScreenShowsHeroAndButtons",
+        "MimicUITests/testWorkspaceShowsFourPanelLayout"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "core window B",
+      "tests": [
+        "MimicUITests/testCancelButtonDismissesNewProjectSheet",
+        "MimicUITests/testCaptureEvidenceScreenshots",
+        "MimicUITests/testCloseAndReopenProjectFromRecents",
+        "MimicUITests/testCreateEndpointViaToolbar",
+        "MimicUITests/testCreateNewProject",
+        "MimicUITests/testDefaultScenarioVisibleInInspector",
+        "MimicUITests/testDeleteEndpointWithConfirmation",
+        "MimicUITests/testDuplicateProject",
+        "MimicUITests/testDuplicateScenario",
+        "MimicUITests/testEndpointPersistsAfterCloseAndReopen",
+        "MimicUITests/testEndpointStatusCodePersistsAfterCloseAndReopen",
+        "MimicUITests/testEscapeDismissesNewProjectSheet",
+        "MimicUITests/testNewProjectOpensTheSheetAndLeavesTheProjectOpen",
+        "MimicUITests/testPortValidationShowsInlineError",
+        "MimicUITests/testProjectEndpointAndJourneySurviveAppRelaunch",
+        "MimicUITests/testSidebarSearchFiltersEndpoints",
+        "MimicUITests/testToggleInspectorPanel"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "journeys and spec import",
+      "tests": [
+        "JourneyUITests",
+        "SpecImportUITests"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "updates and backend settings",
+      "tests": [
+        "UpdateUITests",
+        "ControlPlaneIsolationTests",
+        "BackendSettingsUITests"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "workspace shell A",
+      "tests": [
+        "WorkspaceShellUITests/testClickingALoggedRequestTakesOverTheCentreColumn",
+        "WorkspaceShellUITests/testInspectorOverviewAnswersForTheProject",
+        "WorkspaceShellUITests/testInspectorTrafficSectionSummarisesTheEndpointsRequests",
+        "WorkspaceShellUITests/testJourneyCrumbJumpsToAnotherJourney",
+        "WorkspaceShellUITests/testMenuBarGuardsTheCommandsThatNeedAProject",
+        "WorkspaceShellUITests/testNarrowJumpBarCollapsesEarlierLocations",
+        "WorkspaceShellUITests/testOverviewReportsUnmatchedTrafficAndSurvivesAMultiRowSelection",
+        "WorkspaceShellUITests/testOverviewShowsTheActiveJourneyAndSwitchesTheNavigator",
+        "WorkspaceShellUITests/testPanelArrangementSurvivesClosingAndReopeningTheProject",
+        "WorkspaceShellUITests/testPanelChordsToggleBothPanels",
+        "WorkspaceShellUITests/testScenarioCrumbSwitchesTheEditedScenario",
+        "WorkspaceShellUITests/testRequestLogSitsRightBelowTheEndpointEditor",
+        "WorkspaceShellUITests/testStartingOnAnOccupiedPortOffersTheNextPort",
+        "WorkspaceShellUITests/testToolbarPreservesIdentityAndCollapsesSecondaryActions",
+        "WorkspaceShellUITests/testWorkspaceShellNamesItsWindowAndFourPanels"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "workspace shell B",
+      "tests": [
+        "WorkspaceShellUITests/testAutosaveIndicatorClearsOnceTheSaveSettles",
+        "WorkspaceShellUITests/testAutosaveReportsAStoreThatRefusesTheWrite",
+        "WorkspaceShellUITests/testCompactOverflowMenuTogglesThePanels",
+        "WorkspaceShellUITests/testEndpointCrumbJumpsToASibling",
+        "WorkspaceShellUITests/testGroupCrumbJumpsToAnotherGroup",
+        "WorkspaceShellUITests/testJourneyRunCommandsAreDisabledWithoutAnActiveJourney",
+        "WorkspaceShellUITests/testJourneysMenuDrivesTheActiveJourney",
+        "WorkspaceShellUITests/testJumpBarHistoryWalksBackAndForward",
+        "WorkspaceShellUITests/testJumpBarSaysNoEndpointAndHasNowhereToGoYet",
+        "WorkspaceShellUITests/testNavigatorTabStripSwitchesTheNavigatorAndCentrePane",
+        "WorkspaceShellUITests/testReselectingTheSameEndpointStacksNoHistory",
+        "WorkspaceShellUITests/testSelectingAfterGoingBackDiscardsTheForwardStack",
+        "WorkspaceShellUITests/testServerMenuStartsStopsAndFlipsItsTitle",
+        "WorkspaceShellUITests/testServerWellReportsItsStateAndCopiesTheAddress",
+        "WorkspaceShellUITests/testUnmatchedBadgeOpensTheLogFilteredToUnmatched",
+        "WorkspaceShellUITests/testViewMenuAndShortcutSwitchNavigators"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "welcome projects A",
+      "tests": [
+        "WelcomeProjectUITests/testArrowKeysMoveTheRecentsSelectionAndReturnOpensIt",
+        "WelcomeProjectUITests/testCloseProjectIsDisabledWhileNoProjectIsOpen",
+        "WelcomeProjectUITests/testCreatingAProjectFromAnOpenProjectSwapsTheWorkspace",
+        "WelcomeProjectUITests/testDeleteConfirmationNamesTheProjectAndKeepProjectCancels",
+        "WelcomeProjectUITests/testDuplicateCarriesTheEndpointsIntoTheCopy",
+        "WelcomeProjectUITests/testDuplicatingTwiceProducesTwoCopies",
+        "WelcomeProjectUITests/testEscapeDismissesTheDeleteConfirmation",
+        "WelcomeProjectUITests/testEscapeDismissesTheRecentsContextMenu",
+        "WelcomeProjectUITests/testNewProjectSheetOpensFocusedOnTheNameFieldWithPortPrefilled"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "request log",
+      "tests": [
+        "RequestLogUITests"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "navigator",
+      "tests": [
+        "NavigatorUITests"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "endpoint editor A",
+      "tests": [
+        "EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance",
+        "EndpointEditorUITests/testClearingTheBodyPersistsWithoutChangingAnotherScenario",
+        "EndpointEditorUITests/testClickingAScenarioRowOpensItWithoutMakingItLive",
+        "EndpointEditorUITests/testChangingProjectsDismissesThePreviousEndpointDraft",
+        "EndpointEditorUITests/testControlUpdatesRefreshTheSelectedScenarioWithoutReplacingLocalDrafts",
+        "EndpointEditorUITests/testDeleteScenarioIsDisabledForTheOnlyScenarioAndRemovesOneOfSeveral",
+        "EndpointEditorUITests/testEditorDeleteConfirmationCancelKeepsTheEndpoint",
+        "EndpointEditorUITests/testEndpointDelayCommitsOnBlurAndRejectsANonNumericValue",
+        "EndpointEditorUITests/testFilterClearButtonRestoresTheListAfterANoMatchesQuery",
+        "EndpointEditorUITests/testGlobalDelayRowIsReadOnlyAndExplainsItself",
+        "EndpointEditorUITests/testGroupTagGathersTheEndpointIntoASidebarSection",
+        "EndpointEditorUITests/testInvalidJSONBodyWarnsAndDisablesFormat",
+        "EndpointEditorUITests/testMethodPickerCreatesAPostEndpoint",
+        "EndpointEditorUITests/testPrettyPrintFormatsTheJSONBodyAndTheResultPersists",
+        "EndpointEditorUITests/testScalarJSONBodyClearsWarningWithoutEnablingFormat",
+        "EndpointEditorUITests/testScenarioRowAnnouncesItsStatusCodeAndTracksEdits",
+        "EndpointEditorUITests/testSidebarContextMenuDuplicatesAnEndpoint"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "endpoint editor B",
+      "tests": [
+        "EndpointEditorUITests/testAGroupSectionKeepsItsEndpointListedWhileASiblingIsEdited",
+        "EndpointEditorUITests/testActivatingAScenarioMovesTheActiveMarkerOffThePreviousOne",
+        "EndpointEditorUITests/testAddScenarioSheetAddsAScenarioToTheInspectorList",
+        "EndpointEditorUITests/testAddingAResponseHeaderCommitsAndSurvivesReopening",
+        "EndpointEditorUITests/testEditorMoreMenuDuplicatesTheEndpoint",
+        "EndpointEditorUITests/testEmptyStateAndNavigatorAddEndpointButtonsAreDistinct",
+        "EndpointEditorUITests/testFormatStaysDisabledWhenValidDeepJSONExceedsOutputBudget",
+        "EndpointEditorUITests/testMethodScopeFilterRestrictsTheListAndNamesTheEmptyScope",
+        "EndpointEditorUITests/testNewEndpointSheetCancelsAndSubmitsOnReturn",
+        "EndpointEditorUITests/testNewEndpointSheetAppliesGroupStatusAndContentType",
+        "EndpointEditorUITests/testNewEndpointSheetRejectsAPathWithoutALeadingSlash",
+        "EndpointEditorUITests/testNewEndpointSheetRejectsUnservablePathsAndAcceptsEncodedParameters",
+        "EndpointEditorUITests/testNewScenarioSheetCancelsAndSubmitsOnReturn",
+        "EndpointEditorUITests/testRemovingAMiddleHeaderRowKeepsTheOthersIntact",
+        "EndpointEditorUITests/testSidebarContextMenuDeleteConfirmationNamesTheEndpoint",
+        "EndpointEditorUITests/testStatusCodeValidationNotesExplainWhyACodeWasRejected",
+        "EndpointEditorUITests/testFirstEndpointCardsShareOneRowUnderTheHeadline"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "alerts",
+      "tests": [
+        "ErrorAlertUITests"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "journey editor A",
+      "tests": [
+        "JourneyEditorUITests/testEditingAStepLoadsItsValuesAndSavesInPlace",
+        "JourneyEditorUITests/testNewJourneySheetExplainsItselfAndCreatesOnReturn",
+        "JourneyEditorUITests/testRunControlsAdvanceToCompletionAndRestart",
+        "JourneyEditorUITests/testStepSheetAuthorsARespondStepWithMethodHeadersAndBody",
+        "JourneyEditorUITests/testStepsEmptyStateAddsTheFirstStep",
+        "JourneyEditorUITests/testTemplateActivateToggleDecidesWhetherTheJourneyStartsAnswering",
+        "JourneyEditorUITests/testTemplateShelfListsEveryTemplateAndCancels"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "journey editor B",
+      "tests": [
+        "JourneyEditorUITests/testBehaviourControlsChangeTheJourneyAndSurviveReselection",
+        "JourneyEditorUITests/testDeleteJourneyConfirmsFirstAndCanBeCalledOff",
+        "JourneyEditorUITests/testDuplicateJourneyFromTheRowContextMenu",
+        "JourneyEditorUITests/testNavigatorIndicatorRevealsTheActiveJourneyWithoutChangingTheRun",
+        "JourneyEditorUITests/testOutcomePickerSwapsTheFieldsAndAuthorsADroppedConnection",
+        "JourneyEditorUITests/testStepContextMenuReordersAndRemovesSteps",
+        "JourneyEditorUITests/testStepSheetKeepsSaveDisabledUntilAPathIsTypedAndCancelsCleanly",
+        "JourneyEditorUITests/testStepSheetNamesTheRuleThatRefusedEachTime"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "welcome projects B",
+      "tests": [
+        "WelcomeProjectUITests/testOpenFromTheRecentsContextMenuOpensTheProject",
+        "WelcomeProjectUITests/testPortValidationMessageAppearsAndClearsWithTheField",
+        "WelcomeProjectUITests/testRecentProjectRowStatesWhenItWasLastOpened",
+        "WelcomeProjectUITests/testRecentsSelectionFallsBackAfterDeletingTheSelectedProject",
+        "WelcomeProjectUITests/testRenameFromRecentsSurvivesReopeningProject",
+        "WelcomeProjectUITests/testUpArrowMovesTheRecentsSelectionBackTowardTheTop",
+        "WelcomeProjectUITests/testWelcomeWindowShowsHeroVersionAndEmptyRecentsGuidance",
+        "WelcomeProjectUITests/testWhitespaceOnlyNameKeepsCreateDisabledAndReturnInert",
+        "WelcomeProjectUITests/testSampleProjectOpensWithItsEndpoints",
+        "WelcomeProjectUITests/testImportFromWelcomeAsksForTheFormatAndCancelCreatesNothing",
+        "WelcomeProjectUITests/testShowOnLaunchCheckboxStartsOffAndToggles"
+      ]
+    }
+  ]
+}
