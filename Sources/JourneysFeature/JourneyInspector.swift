@@ -288,21 +288,25 @@ private struct JourneyStepInspector: View {
 
     // MARK: Match
 
+    /// The method in its colour inside a field, with one down chevron after it, as the design draws it.
     private var methodPicker: some View {
-        Picker("Method", selection: Binding(
-            get: { step.method },
-            set: { update(JourneyStepSpec(method: $0)) }
-        )) {
-            ForEach(HTTPMethod.allCases, id: \.self) { method in
-                Text(method.rawValue).tag(method)
-            }
+        DSMenuField(
+            "HTTP method",
+            selection: Binding(
+                get: { step.method },
+                set: { update(JourneyStepSpec(method: $0)) }
+            ),
+            options: HTTPMethod.allCases.map { DSMenuOption($0.rawValue, value: $0) },
+            indicator: .down,
+            indicatorFollowsLabel: true,
+            identifier: "inspector.journeyStep.method"
+        ) { method in
+            // The method column the step rows use, so the chevron sits where the design puts it.
+            Text(method.rawValue)
+                .font(DSTypography.method)
+                .foregroundStyle(DSColors.methodColor(for: method.rawValue))
+                .frame(width: 44, alignment: .leading)
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .font(DSTypography.method)
-        .tint(DSColors.methodColor(for: step.method.rawValue))
-        .accessibilityIdentifier("inspector.journeyStep.method")
-        .accessibilityLabel("HTTP method")
     }
 
     /// Whether an endpoint serves the same route: useful to know, never required, since a journey
@@ -329,7 +333,7 @@ private struct JourneyStepInspector: View {
         .font(DSTypography.caption)
         .foregroundStyle(DSColors.labelTertiary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.md)
+        .padding(.leading, DSInspectorMetrics.inset + JourneyInspectorMetrics.labelColumn + DSSpacing.md)
         .padding(.trailing, DSInspectorMetrics.inset)
         .frame(minHeight: 18)
         .accessibilityElement(children: .combine)
@@ -358,26 +362,24 @@ private struct JourneyStepInspector: View {
         }
         repeatRow
         JourneyInspectorNote("The body and headers are in Edit step\u{2026}")
-            .padding(.top, DSSpacing.xs)
     }
 
     @ViewBuilder
     private func failureFields(_ failure: NetworkFailure) -> some View {
         JourneyInspectorFieldRow("Failure") {
-            Picker("Failure", selection: Binding(
-                get: { failure == .connectionDrop ? FailureKind.drop : FailureKind.timeout },
-                set: { kind in
-                    update(JourneyStepSpec(failure: kind == .drop
-                        ? .connectionDrop : .timeout(holdMs: NetworkFailure.defaultTimeoutHoldMs)))
-                }
-            )) {
-                Text("Hold, then drop").tag(FailureKind.drop)
-                Text("Time out").tag(FailureKind.timeout)
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .accessibilityIdentifier("inspector.journeyStep.failure")
-            .accessibilityLabel("Failure")
+            DSMenuField(
+                "Failure",
+                selection: Binding(
+                    get: { failure == .connectionDrop ? FailureKind.drop : FailureKind.timeout },
+                    set: { kind in
+                        update(JourneyStepSpec(failure: kind == .drop
+                            ? .connectionDrop : .timeout(holdMs: NetworkFailure.defaultTimeoutHoldMs)))
+                    }
+                ),
+                options: [DSMenuOption("Hold, then drop", value: FailureKind.drop),
+                          DSMenuOption("Time out", value: FailureKind.timeout)],
+                identifier: "inspector.journeyStep.failure"
+            )
         }
         JourneyInspectorFieldRow("Hold for") {
             switch failure {
@@ -403,7 +405,6 @@ private struct JourneyStepInspector: View {
         }
         repeatRow
         JourneyInspectorNote("Clients often retry dropped requests. Raise Repeat if the failure must survive a retry.")
-            .padding(.top, DSSpacing.xs)
     }
 
     private var repeatRow: some View {
@@ -465,6 +466,12 @@ private struct JourneyStepInspector: View {
 
 // MARK: - Shared rows
 
+/// The journeys design's inspector grid: a 96pt label column, 12pt short of the endpoint inspector's,
+/// so a step's longer values ("Matches POST /payments") fit their column on one line.
+private enum JourneyInspectorMetrics {
+    static let labelColumn: CGFloat = 96
+}
+
 /// A label column beside an editable control, on the inspector's rhythm.
 private struct JourneyInspectorFieldRow<Field: View>: View {
     let label: String
@@ -481,13 +488,15 @@ private struct JourneyInspectorFieldRow<Field: View>: View {
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
-                .frame(width: DSInspectorMetrics.labelColumn, alignment: .leading)
+                .frame(width: JourneyInspectorMetrics.labelColumn, alignment: .leading)
                 .accessibilityHidden(true)
             field
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, DSInspectorMetrics.inset)
         .frame(minHeight: 30)
+        // The design leaves 2pt between rows.
+        .padding(.vertical, 1)
     }
 }
 
@@ -504,7 +513,7 @@ private struct JourneyInspectorNote: View {
             .lineSpacing(2)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, DSInspectorMetrics.inset + DSInspectorMetrics.labelColumn + DSSpacing.md)
+            .padding(.leading, DSInspectorMetrics.inset + JourneyInspectorMetrics.labelColumn + DSSpacing.md)
             .padding(.trailing, DSInspectorMetrics.inset)
             .padding(.top, DSSpacing.xs)
     }

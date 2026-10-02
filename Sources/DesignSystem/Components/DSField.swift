@@ -62,13 +62,17 @@ public extension View {
 }
 
 /// A label column beside its control, as sheets and the inspector lay out forms.
+///
+/// The label column is `labelWidth` when given, else the enclosing form's ``dsFormLabelWidth(_:)``.
 public struct DSFormRow<Content: View>: View {
     private let label: String
-    private let labelWidth: CGFloat
+    private let labelWidth: CGFloat?
     private let alignment: VerticalAlignment
     private let content: Content
 
-    public init(_ label: String, labelWidth: CGFloat = DSLayout.sheetLabelWidth - DSSpacing.md,
+    @Environment(\.dsFormLabelWidth) private var formLabelWidth
+
+    public init(_ label: String, labelWidth: CGFloat? = nil,
                 alignment: VerticalAlignment = .center, @ViewBuilder content: () -> Content) {
         self.label = label
         self.labelWidth = labelWidth
@@ -82,7 +86,7 @@ public struct DSFormRow<Content: View>: View {
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(1)
-                .frame(width: labelWidth, alignment: .trailing)
+                .frame(width: labelWidth ?? formLabelWidth, alignment: .trailing)
                 .padding(.top, alignment == .top ? 5 : 0)
                 .accessibilityHidden(true)
             content
@@ -135,5 +139,25 @@ public struct DSFormHint: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, indent)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private nonisolated struct DSFormLabelWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = DSLayout.sheetLabelWidth - DSSpacing.md
+}
+
+public nonisolated extension EnvironmentValues {
+    /// The width of the label column ``DSFormRow`` draws, right-aligned before its 12pt gap.
+    var dsFormLabelWidth: CGFloat {
+        get { self[DSFormLabelWidthKey.self] }
+        set { self[DSFormLabelWidthKey.self] = newValue }
+    }
+}
+
+public extension View {
+    /// Sets the label column of every ``DSFormRow`` in this form, for a sheet whose design draws a
+    /// narrower or wider column than the sheets' usual 92pt.
+    func dsFormLabelWidth(_ width: CGFloat) -> some View {
+        environment(\.dsFormLabelWidth, width)
     }
 }

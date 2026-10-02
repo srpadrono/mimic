@@ -5,8 +5,8 @@ import SwiftUI
 /// Activate, rewind, and step a journey while it is serving.
 ///
 /// These act on the run, not the definition, so they sit to the right of the journey's title. An
-/// inactive journey offers Activate in that slot; an active one offers Restart and Next step, with a
-/// quiet stop glyph after them to hand the endpoints back.
+/// inactive journey offers Activate in that slot; an active one offers Restart and Next step. The
+/// "Active" badge before them is the way out of the run (see ``JourneyActiveBadge``).
 struct JourneyRunControls: View {
     let model: any JourneyEditingModel
 
@@ -52,22 +52,6 @@ struct JourneyRunControls: View {
                       : "Retire the current step without serving it.")
                 .accessibilityIdentifier("journeyRun.advanceButton")
                 .accessibilityLabel(isPrepared ? "Advance next journey run" : "Advance journey")
-
-                // Not in the design's row, which shows a run in progress; kept as a glyph so the
-                // everyday way out of a run stays one click away without a third titled button.
-                DSButton(
-                    "Deactivate",
-                    systemImage: "stop.circle",
-                    variant: .ghost,
-                    size: .medium,
-                    showsTitle: false,
-                    identifier: "journeyRun.deactivate"
-                ) {
-                    model.activateJourney(id: nil)
-                }
-                .help("Deactivate the journey. Endpoints answer for themselves again.")
-                .accessibilityIdentifier("journeyRun.deactivateButton")
-                .accessibilityLabel("Deactivate journey")
             } else {
                 DSButton(
                     "Activate",
@@ -92,6 +76,69 @@ struct JourneyRunControls: View {
     /// Active, but the server is stopped: the controls set up the next run.
     private var isPrepared: Bool {
         model.serverState.runningPort == nil
+    }
+}
+
+/// The "Active" badge that ends the run: green "Active" while the server runs, grey "Selected" while
+/// the journey waits for the next run. Hovering turns it into "Deactivate" and a click deactivates,
+/// so leaving a run stays one click away without a stop button the design does not draw.
+struct JourneyActiveBadge: View {
+    let isServing: Bool
+    let onDeactivate: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: onDeactivate) {
+            // Both wordings share one box, sized to the wider, so hovering never moves the buttons.
+            ZStack {
+                state.hidden()
+                deactivate.hidden()
+                if isHovered { deactivate } else { state }
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 18)
+            .foregroundStyle(tint)
+            .overlay {
+                Capsule().strokeBorder(tint, lineWidth: DSStroke.hairline)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: DSAnimation.fast)) { isHovered = hovering }
+        }
+        .help("Deactivate the journey. Endpoints answer for themselves again.")
+        .accessibilityIdentifier("journeyRun.deactivateButton")
+        .accessibilityLabel("Deactivate journey")
+        .accessibilityValue(title)
+    }
+
+    private var title: String { isServing ? "Active" : "Selected" }
+
+    private var tint: Color {
+        if isHovered { return DSColors.labelSecondary }
+        return isServing ? DSColors.success : DSColors.labelSecondary
+    }
+
+    private var state: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(isServing ? DSColors.success : DSColors.labelSecondary)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(DSTypography.caption.weight(.medium))
+        }
+    }
+
+    private var deactivate: some View {
+        HStack(spacing: DSSpacing.xs) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: DSGlyph.minimum, weight: .semibold))
+            Text("Deactivate")
+                .font(DSTypography.caption.weight(.medium))
+        }
     }
 }
 

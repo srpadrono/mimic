@@ -149,6 +149,139 @@ struct GalleryWorkspaceWindow: View {
     }
 }
 
+/// The journey editor window, as the Journeys artboard draws it: the journey navigator, Payment
+/// retry three steps into its run, and step 3 in the inspector. The request log is closed, as there.
+struct GalleryJourneysWindow: View {
+    let showsToolbar: Bool
+    @State private var isRequestLogPresented = false
+    @State private var requestLogHeight: CGFloat = 319
+    @State private var isInspectorPresented = true
+    @State private var toolbarLayout: WorkspaceToolbarLayout = .expanded
+
+    init(showsToolbar: Bool = false) {
+        self.showsToolbar = showsToolbar
+    }
+
+    var body: some View {
+        WorkspaceShellLayout(
+            metrics: GalleryWorkspaceWindow.metrics,
+            isRequestLogPresented: $isRequestLogPresented,
+            requestLogHeight: $requestLogHeight,
+            isInspectorPresented: $isInspectorPresented,
+            onToolbarLayoutChange: { toolbarLayout = $0 },
+            navigator: { GalleryNavigator(tab: .journeys) },
+            jumpBar: { Self.jumpBar },
+            center: { Self.editor },
+            requestLog: { GalleryWorkspaceWindow.requestLog(showsDetail: false) },
+            takeover: { EmptyView() },
+            inspector: {
+                Self.inspector
+                    .toolbar {
+                        if showsToolbar {
+                            GalleryInspectorHeader(title: Self.inspectorContext.title, toolbar: toolbarFixture.state,
+                                                   action: AnyView(Self.stepActions))
+                        }
+                    }
+            },
+            toolbar: {
+                if showsToolbar { toolbarFixture.toolbar }
+            }
+        )
+    }
+
+    private var toolbarFixture: GalleryToolbarFixture {
+        var fixture = GalleryToolbarFixture.running
+        fixture.layout = toolbarLayout
+        fixture.isInspectorPresented = isInspectorPresented
+        return fixture
+    }
+
+    /// "Checkout › Payment retry", built the way the window builds a journey's crumbs.
+    static var crumbs: [BreadcrumbJumpBar.Crumb] {
+        let journeys = DesignFixtures.journeys
+        let groups = Set(journeys.compactMap(\.groupTag)).sorted()
+        return [
+            .init(id: "journeyGroup", title: "Checkout",
+                  options: groups.compactMap { name in
+                      journeys.first { $0.groupTag == name }.map {
+                          BreadcrumbJumpBar.Option(id: $0.id, title: name, isSelected: name == "Checkout")
+                      }
+                  }),
+            .init(id: "journey", title: DesignFixtures.paymentRetry.name,
+                  options: journeys.map {
+                      .init(id: $0.id, title: $0.name, isSelected: $0.id == DesignFixtures.paymentRetry.id)
+                  }),
+        ]
+    }
+
+    @MainActor
+    static var jumpBar: some View {
+        BreadcrumbJumpBar(
+            crumbs: crumbs,
+            autosaveStatus: .saved,
+            history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
+            onSelectOption: { _, _ in }
+        )
+    }
+
+    @MainActor
+    static var editor: some View {
+        JourneyEditorView(
+            model: GalleryModels.journeys,
+            journey: DesignFixtures.paymentRetry,
+            isActive: true,
+            status: DesignFixtures.paymentRetryStatus
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(DSColors.content)
+    }
+
+    /// Step 3 selected, as the inspector artboard shows it.
+    static var inspectorContext: JourneyInspector.Context {
+        let status = DesignFixtures.paymentRetryStatus
+        return JourneyInspector.Context(
+            selected: DesignFixtures.paymentRetry,
+            active: DesignFixtures.paymentRetry,
+            progress: status.currentStepIndex.map { "Step \($0 + 1) of \(status.totalSteps)" },
+            serverState: .running(port: DesignFixtures.port),
+            selectedStepID: DesignFixtures.paymentRetry.steps[2].id
+        )
+    }
+
+    @MainActor
+    static var inspector: some View {
+        JourneyInspector(model: GalleryModels.journeys, context: inspectorContext)
+    }
+
+    @MainActor
+    static var stepActions: some View {
+        JourneyStepActionsMenu(model: GalleryModels.journeys, context: inspectorContext)
+    }
+}
+
+/// The inspector panel off the window, for the canvas and the fidelity report: the header the
+/// window's toolbar draws above it, laid out as a strip, over the panel's glass. "Open in a window"
+/// on the journeys window shows the real header.
+struct GalleryJourneyInspectorPanel: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                Text(GalleryJourneysWindow.inspectorContext.title)
+                    .font(DSTypography.bodySemibold)
+                    .foregroundStyle(DSColors.labelPrimary)
+                Spacer(minLength: DSSpacing.sm)
+                GalleryJourneysWindow.stepActions
+            }
+            .padding(.leading, DSSpacing.lg)
+            .padding(.trailing, DSSpacing.sm)
+            .frame(height: 44)
+            GalleryJourneysWindow.inspector
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .galleryGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 /// The navigator column as the window draws it: the window controls' row, the mode picker, the
 /// endpoint or journey list, and the pinned filter.
 struct GalleryNavigator: View {
@@ -178,7 +311,7 @@ struct GalleryNavigator: View {
                     JourneyNavigatorList(
                         journeys: DesignFixtures.journeys,
                         activeJourneyID: DesignFixtures.paymentRetry.id,
-                        activeStatus: JourneyStatus.make(journey: DesignFixtures.paymentRetry, state: nil),
+                        activeStatus: DesignFixtures.paymentRetryStatus,
                         selectedJourneyID: $journeySelection,
                         onActivate: { _ in },
                         onAdd: {},
@@ -296,6 +429,8 @@ struct GallerySlot: View {
 struct GalleryInspectorHeader: ToolbarContent {
     let title: String
     let toolbar: WorkspaceToolbarState
+    /// The mode's own action, after the spacer: the journey step's "…" menu.
+    var action: AnyView? = nil
 
     @ToolbarContentBuilder
     var body: some ToolbarContent {
@@ -308,6 +443,11 @@ struct GalleryInspectorHeader: ToolbarContent {
         .sharedBackgroundVisibility(.hidden)
 
         ToolbarSpacer(.flexible)
+
+        if let action {
+            ToolbarItem(id: "inspector.action") { action }
+                .sharedBackgroundVisibility(.hidden)
+        }
 
         ToolbarItemGroup {
             WorkspaceRequestLogToggle(isShown: toolbar.isRequestLogShown, action: {})

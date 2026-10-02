@@ -46,7 +46,9 @@ struct JourneysNavigatorPage {
     }
 
     var editorName: XCUIElement { app.staticTexts["journeyEditor.name"] }
-    var activeBadge: XCUIElement { app.staticTexts["journeyEditor.activeBadge"] }
+    /// The "Active" badge, which is also the button that deactivates the run; its value says which
+    /// of "Active" and "Selected" it reads.
+    var activeBadge: XCUIElement { app.buttons["journeyRun.deactivateButton"] }
     var addStepButton: XCUIElement { app.buttons["journeyEditor.addStepButton"] }
     var stepList: XCUIElement { app.tables["journeyEditor.stepList"].firstMatch }
 

@@ -104,6 +104,10 @@ enum GalleryCatalog {
                      size: CGSize(width: 1440, height: 900)) {
             GalleryWorkspaceWindow()
         },
+        GalleryEntry("journeys.window", "Journey editor window", group: .windows,
+                     size: CGSize(width: 1440, height: 900)) {
+            GalleryJourneysWindow()
+        },
         GalleryEntry("workspace.skeleton", "Empty window skeleton", group: .windows, hasArtboard: false,
                      size: CGSize(width: 1440, height: 900)) {
             GalleryEmptyWindow()
@@ -114,6 +118,7 @@ enum GalleryCatalog {
     static func window(for id: String) -> AnyView? {
         switch id {
         case "workspace.window": AnyView(GalleryWorkspaceWindow(showsToolbar: true))
+        case "journeys.window": AnyView(GalleryJourneysWindow(showsToolbar: true))
         case "workspace.skeleton": AnyView(GalleryEmptyWindow(showsToolbar: true))
         // The toolbar states in the window that draws them, so the real toolbar can be checked
         // against its strip. "Narrow centre column" needs a window narrow enough for that tier.
@@ -190,33 +195,23 @@ enum GalleryCatalog {
                      size: CGSize(width: 264, height: 884)) {
             GalleryNavigator(tab: .journeys)
         },
+        // From the jump bar down, as the artboard's section is drawn.
         GalleryEntry("journeys.editor", "Journey editor", group: .journeys, size: CGSize(width: 844, height: 836)) {
-            JourneyEditorView(
-                model: GalleryModels.journeys,
-                journey: DesignFixtures.paymentRetry,
-                isActive: true,
-                status: JourneyStatus.make(journey: DesignFixtures.paymentRetry, state: nil)
-            )
+            VStack(spacing: 0) {
+                GalleryJourneysWindow.jumpBar
+                GalleryJourneysWindow.editor
+            }
             .background(DSColors.content)
         },
         GalleryEntry("journeys.inspector", "Journey step inspector", group: .journeys,
                      size: CGSize(width: 300, height: 884)) {
-            JourneyInspector(
-                model: GalleryModels.journeys,
-                context: JourneyInspector.Context(
-                    selected: DesignFixtures.paymentRetry,
-                    active: DesignFixtures.paymentRetry,
-                    progress: "Step 3 of 4",
-                    serverState: .running(port: DesignFixtures.port),
-                    selectedStepID: DesignFixtures.paymentRetry.steps[2].id
-                )
-            )
-            .background(DSColors.window)
+            GalleryJourneyInspectorPanel()
         },
+        // The artboard edits Payment retry's fourth step under the title "Edit step 3".
         GalleryEntry("journeys.stepSheet", "Journey step sheet", group: .journeys,
                      size: CGSize(width: 580, height: 696)) {
             JourneyStepSheet(
-                step: DesignFixtures.paymentRetry.steps[2],
+                step: DesignFixtures.editedStep,
                 stepNumber: 3,
                 backends: DesignFixtures.serverConfiguration.listeners,
                 endpoints: DesignFixtures.endpoints,

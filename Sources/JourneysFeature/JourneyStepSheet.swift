@@ -107,13 +107,17 @@ public struct JourneyStepSheet: View {
     public var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                // Each line keeps the design's line height, not the font's own, so the form below
+                // starts where the design starts it.
                 Text(title)
                     .font(DSTypography.headline)
                     .foregroundStyle(DSColors.labelPrimary)
+                    .frame(minHeight: 20)
                     .accessibilityIdentifier("stepSheet.title")
                 Text("Match a request, then choose what the client gets.")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelSecondary)
+                    .frame(minHeight: 16)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSSpacing.xl)
@@ -121,15 +125,14 @@ public struct JourneyStepSheet: View {
 
             ScrollViewReader { scroll in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: DSSpacing.md) {
+                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
                         matchFields
                         DSDivider(identifier: "stepSheet.outcome")
-                            .padding(.vertical, DSSpacing.xxs)
                         outcomeFields
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, DSSpacing.xl)
-                    .padding(.vertical, DSSpacing.lg)
+                    .padding(.vertical, 18)
                 }
                 .task(id: validation) {
                     guard let validation else { return }
@@ -152,12 +155,13 @@ public struct JourneyStepSheet: View {
             DSDivider(identifier: "stepSheet.footer")
             footer
         }
-        .frame(width: DSSheetWidth.medium,
+        .frame(width: DSSheetWidth.form,
                height: min(DSFormMetrics.journeyStepHeight,
                            (visibleScreenHeight ?? NSScreen.main?.visibleFrame.height
                                ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .background(DSColors.sheet)
+        .dsFormLabelWidth(Self.labelWidth)
         .defaultFocus($pathIsFocused, true)
         .onAppear {
             loadExistingStep()
@@ -193,13 +197,13 @@ public struct JourneyStepSheet: View {
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, DSSpacing.xl)
-        .padding(.vertical, DSSpacing.md)
+        .padding(.vertical, Self.rowSpacing)
     }
 
     // MARK: - Match
 
     private var matchFields: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
             sectionTitle("Match")
             DSFormRow("Request", alignment: .top) {
                 SheetRequestField(
@@ -243,7 +247,7 @@ public struct JourneyStepSheet: View {
     // MARK: - Outcome
 
     private var outcomeFields: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
             sectionTitle("Outcome")
             // Neutral, like every segmented control in the app: the selection is a choice of form,
             // not an accent-coloured state.
@@ -262,7 +266,7 @@ public struct JourneyStepSheet: View {
             case .respond:
                 DSFormRow("Status", alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: DSSpacing.md) {
+                        HStack(spacing: DSSpacing.xl) {
                             statusField
                             inlineTimingFields
                         }
@@ -282,7 +286,7 @@ public struct JourneyStepSheet: View {
             case .timeout:
                 DSFormRow("Hold for", alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: DSSpacing.md) {
+                        HStack(spacing: DSSpacing.xl) {
                             numberField("Hold for (ms)", text: $holdMs, field: .hold, unit: "ms",
                                         width: 112, identifier: "stepSheet.holdField")
                             inlineTimingFields
@@ -297,7 +301,8 @@ public struct JourneyStepSheet: View {
         }
     }
 
-    /// Code, reason phrase and a status dot, in one 28pt field.
+    /// Code, reason phrase and a status dot, in one 28pt field, with a menu of common codes at its
+    /// trailing edge. The code stays typeable, as the endpoint editor's is.
     private var statusField: some View {
         let code = Int(statusCode)
         return HStack(spacing: 6) {
@@ -320,11 +325,31 @@ public struct JourneyStepSheet: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityHidden(true)
+            Menu {
+                ForEach(Self.commonStatusCodes, id: \.self) { option in
+                    Button("\(option) \(Self.reasonPhrase(for: option))") {
+                        statusCode = String(option)
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: DSGlyph.minimum, weight: .semibold))
+                    .foregroundStyle(DSColors.labelTertiary)
+                    .frame(width: 12, height: DSControlHeight.large)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Choose a common status code")
+            .accessibilityIdentifier("stepSheet.statusMenu")
+            .accessibilityLabel("Common status codes")
         }
         .dsFieldChrome(height: DSControlHeight.large, cornerRadius: DSCornerRadius.segment,
                        isFocused: focusedField == .statusCode,
                        isInvalid: validation?.field == .statusCode, horizontalPadding: 10)
-        .frame(width: 136)
+        .frame(width: 160)
         .id(Field.statusCode)
     }
 
@@ -333,7 +358,7 @@ public struct JourneyStepSheet: View {
     }
 
     private func timingFields(showsDelayLabel: Bool) -> some View {
-        HStack(spacing: DSSpacing.md) {
+        HStack(spacing: DSSpacing.xl) {
             HStack(spacing: DSSpacing.sm) {
                 if showsDelayLabel { inlineLabel("Delay") }
                 numberField("Delay (ms)", text: $delayMs, field: .delay, unit: "ms",
@@ -381,7 +406,7 @@ public struct JourneyStepSheet: View {
     /// Body and headers, aligned with the field column: a Body/Headers switch with a quiet Format
     /// beside it, then the same line-numbered JSON editor the endpoint body uses.
     private var bodyFields: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
             HStack(spacing: DSSpacing.sm) {
                 DSSegmentedControl(
                     "Response part",
@@ -438,11 +463,18 @@ public struct JourneyStepSheet: View {
                 .id(Field.headers)
             }
         }
-        .padding(.leading, DSLayout.sheetLabelWidth)
+        .padding(.leading, Self.labelWidth + DSSpacing.md)
     }
 
     /// The design's 200pt code well.
     private static let bodyHeight: CGFloat = 200
+    /// The journey step design's label column: 80pt, right-aligned, 12pt before the fields.
+    static let labelWidth: CGFloat = 80
+    /// The design's rhythm down the form: 14pt between rows, sections and their dividers.
+    private static let rowSpacing: CGFloat = 14
+    /// The codes the status menu offers; any other is typed.
+    static let commonStatusCodes = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 409, 422, 429,
+                                    500, 502, 503, 504]
 
     private var title: String {
         guard step != nil else { return "Add step" }
@@ -465,6 +497,8 @@ public struct JourneyStepSheet: View {
         Text(title)
             .font(DSTypography.captionSemibold)
             .foregroundStyle(DSColors.labelTertiary)
+            // The design's 16pt line, so the rows under it sit where the design puts them.
+            .frame(minHeight: 16)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("stepSheet.section.\(title)")
     }
@@ -475,12 +509,10 @@ public struct JourneyStepSheet: View {
             .count
     }
 
-    /// "Created" for 201; empty for a code HTTP does not name.
+    /// "Created" for 201, in the words the endpoint editor uses; empty for a code outside HTTP's range.
     private static func reasonPhrase(for code: Int?) -> String {
         guard let code, (100..<600).contains(code) else { return "" }
-        let phrase = HTTPURLResponse.localizedString(forStatusCode: code)
-        guard let first = phrase.first else { return "" }
-        return first.uppercased() + phrase.dropFirst()
+        return HTTPStatusText.reasonPhrase(for: code)
     }
 
     private var trimmedPath: String {

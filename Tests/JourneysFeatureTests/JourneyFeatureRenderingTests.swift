@@ -251,8 +251,8 @@ struct JourneyFeatureRenderingTests {
     /// The four journey sheets open at widths suited to their content.
     ///
     /// `NewJourneySheet` and `CaptureJourneySheet` are single-column dialogs at the 440pt compact
-    /// width. The template picker's list and the step editor's multi-section form both take the
-    /// 560pt medium width, so the step editor's multiline headers and body keep a useful width.
+    /// width. The template picker's list takes the 560pt medium width, and the step editor's
+    /// multi-section form the journey step design's 580pt, so its headers and body keep a useful width.
     @Test("Every journey sheet opens at the width its convention gives it")
     func journeySheetsShareTheSheetConvention() {
         let newJourney = render(NewJourneySheet { _ in })
@@ -264,7 +264,7 @@ struct JourneyFeatureRenderingTests {
         #expect(newJourney.width >= 440)
 
         #expect(templatePicker.width == 560)
-        #expect(stepSheet.width == 560)
+        #expect(stepSheet.width == 580)
 
         // And the two groups are genuinely different sheets, not four copies of one number.
         #expect(stepSheet.width > newJourney.width)
@@ -279,7 +279,7 @@ struct JourneyFeatureRenderingTests {
         var sheet = JourneyStepSheet(step: nil) { _ in }
         sheet.visibleScreenHeight = DSFormMetrics.maximumTallSheetHeight
         let controller = NSHostingController(rootView: sheet)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 696),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
@@ -326,10 +326,10 @@ struct JourneyFeatureRenderingTests {
         controller.view.layoutSubtreeIfNeeded()
         let frame = editor.convert(editor.bounds, to: outer.contentView)
         let viewport = outer.contentView.bounds
-        // The body sits in the field column: the 20pt sheet margin, then the 104pt label column. The
-        // JSON editor's card has no horizontal padding, so its viewport starts there and ends at the
-        // trailing sheet margin.
-        #expect(abs(frame.minX - viewport.minX - 124) < 0.5)
+        // The body sits in the field column: the 20pt sheet margin, then the 80pt label column and
+        // its 12pt gap. The JSON editor's card has no horizontal padding, so its viewport starts
+        // there and ends at the trailing sheet margin.
+        #expect(abs(frame.minX - viewport.minX - 112) < 0.5)
         #expect(abs(viewport.maxX - frame.maxX - 20) < 0.5)
     }
 

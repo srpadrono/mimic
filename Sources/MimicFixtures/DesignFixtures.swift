@@ -84,35 +84,73 @@ public enum DesignFixtures {
 
     // MARK: - Journeys
 
-    /// "Payment retry": the journey the journeys artboard is editing, three steps in.
+    /// "Payment retry": the journey the journeys artboard is editing. Its run is on step 3, after
+    /// the sign-in and the account summary were served once each.
     public static let paymentRetry = Journey(
         id: uuid(201),
         name: "Payment retry",
-        summary: "The first payment fails, the retry succeeds.",
+        summary: "The first payment drops the connection, the retry succeeds.",
         groupTag: "Checkout",
         steps: [
-            JourneyStep(id: uuid(211), name: "Add to cart", method: .post, path: "/cart",
-                        outcome: .respond(JourneyResponse(statusCode: 201, body: #"{"items":1}"#))),
-            JourneyStep(id: uuid(212), name: "Payment declined", method: .post, path: "/payments",
-                        outcome: .respond(JourneyResponse(statusCode: 402, body: #"{"error":"card_declined"}"#))),
-            JourneyStep(id: uuid(213), name: "Payment accepted", method: .post, path: "/payments",
-                        outcome: .respond(JourneyResponse(statusCode: 200, body: #"{"status":"paid"}"#)),
-                        delayMs: 250),
-            JourneyStep(id: uuid(214), name: "Order confirmed", method: .get, path: "/payments/:id",
-                        outcome: .respond(JourneyResponse(statusCode: 200, body: #"{"status":"confirmed"}"#))),
+            JourneyStep(id: uuid(211), name: "Sign in", method: .post, path: "/login",
+                        outcome: .respond(JourneyResponse(statusCode: 200, body: #"{"token":"t_1"}"#))),
+            JourneyStep(id: uuid(212), name: "Account summary", method: .get, path: "/account-summary",
+                        outcome: .respond(JourneyResponse(statusCode: 200, body: #"{"balance":2400}"#))),
+            JourneyStep(id: uuid(213), name: "Payment dropped", method: .post, path: "/payments",
+                        outcome: .networkFailure(.connectionDrop), delayMs: 5_000),
+            editedStep,
+            JourneyStep(id: uuid(215), name: "Receipt", method: .get, path: "/payments/:id",
+                        outcome: .respond(JourneyResponse(statusCode: 200, body: #"{"status":"succeeded"}"#)),
+                        repeatCount: 3),
         ]
     )
 
+    /// The retry that succeeds: Payment retry's fourth step, as the journey step artboard's sheet
+    /// edits it. The artboard titles that sheet "Edit step 3".
+    public static let editedStep = JourneyStep(
+        id: uuid(214),
+        name: "",
+        method: .post,
+        path: "/payments",
+        outcome: .respond(JourneyResponse(
+            statusCode: 201,
+            headers: ["Content-Type": "application/json"],
+            body: """
+            {
+              "id": "pay_8Hf2kQ",
+              "status": "succeeded",
+              "amount": 2400,
+              "currency": "eur",
+              "retried": true,
+              "receiptUrl": null
+            }
+            """
+        ))
+    )
+
+    /// Payment retry's run as the artboard shows it: steps 1 and 2 served once, step 3 waiting.
+    public static let paymentRetryRun = JourneyRunState(
+        journeyID: paymentRetry.id,
+        cursor: 2,
+        servedCountsByStepID: [uuid(211).uuidString: 1, uuid(212).uuidString: 1],
+        forceAdvancedStepIDs: [],
+        isComplete: false,
+        totalServed: 2
+    )
+
+    /// Where Payment retry's run has got to, as the editor, inspector and navigator draw it.
+    public static var paymentRetryStatus: JourneyStatus {
+        JourneyStatus.make(journey: paymentRetry, state: paymentRetryRun)
+    }
+
+    /// The journey list, in the artboard's order: Checkout, then Account, then Resilience.
     public static let journeys: [Journey] = [
         paymentRetry,
-        Journey(id: uuid(202), name: "Guest checkout", groupTag: "Checkout", steps: [
-            JourneyStep(id: uuid(221), name: "Add to cart", method: .post, path: "/cart",
-                        outcome: .respond(JourneyResponse(statusCode: 201))),
-        ]),
-        Journey(id: uuid(203), name: "Session expiry", groupTag: "Account", steps: [
-            JourneyStep(id: uuid(231), name: "Profile rejected", method: .patch, path: "/account/profile",
-                        outcome: .respond(JourneyResponse(statusCode: 401))),
-        ]),
+        journey(202, "Card declined twice", group: "Checkout", .post, "/payments", status: 402),
+        journey(203, "Session expiry", group: "Account", .patch, "/account/profile", status: 401),
+        journey(204, "Retry after failure", group: "Account", .get, "/account-summary", status: 500),
+        journey(205, "Offline recovery", group: "Resilience", .get, "/products", status: 503),
+        journey(206, "Maintenance window", group: "Resilience", .get, "/status", status: 503),
     ]
 
     // MARK: - Project
@@ -196,6 +234,22 @@ public enum DesignFixtures {
     }
 
     // MARK: - Helpers
+
+    private static func journey(
+        _ number: Int,
+        _ name: String,
+        group: String,
+        _ method: HTTPMethod,
+        _ path: String,
+        status: Int
+    ) -> Journey {
+        Journey(id: uuid(number), name: name, groupTag: group, steps: [
+            JourneyStep(id: uuid(number * 10 + 1), name: name, method: method, path: path,
+                        outcome: .respond(JourneyResponse(statusCode: status))),
+            JourneyStep(id: uuid(number * 10 + 2), name: "Recovered", method: method, path: path,
+                        outcome: .respond(JourneyResponse(statusCode: 200))),
+        ])
+    }
 
     private static func endpoint(
         _ number: Int,

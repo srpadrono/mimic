@@ -134,41 +134,60 @@ public extension View {
 }
 
 /// A group heading: disclosure chevron, 11pt semibold name, and a trailing count.
+///
+/// `.onHover` draws the name alone, as the journeys design does, and brings in a trailing chevron
+/// while the pointer is over the heading, or while the group is collapsed, the way the Finder's
+/// sidebar sections do. The heading toggles on a click either way.
 public struct DSNavigatorGroup: View {
+    public enum Disclosure {
+        /// A leading chevron and a trailing count, always.
+        case always
+        /// The name alone at rest; a trailing chevron on hover or while collapsed.
+        case onHover
+    }
+
     public let name: String
     public let count: Int
     public let itemName: String
     public let isCollapsed: Bool
     public let identifier: String
+    public let disclosure: Disclosure
     public let toggle: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
 
     public init(name: String, count: Int, itemName: String, isCollapsed: Bool,
-                identifier: String, toggle: @escaping () -> Void) {
+                identifier: String, disclosure: Disclosure = .always, toggle: @escaping () -> Void) {
         self.name = name
         self.count = count
         self.itemName = itemName
         self.isCollapsed = isCollapsed
         self.identifier = identifier
+        self.disclosure = disclosure
         self.toggle = toggle
     }
 
     public var body: some View {
         Button(action: toggle) {
             HStack(spacing: 6) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-                    .animation(reduceMotion ? nil : .easeOut(duration: DSAnimation.fast), value: isCollapsed)
-                    .frame(width: 10)
+                if disclosure == .always {
+                    chevron
+                }
                 Text(name)
                     .font(DSTypography.captionSemibold)
                     .lineLimit(1)
                 Spacer(minLength: DSSpacing.sm)
-                Text("\(count)")
-                    .font(DSTypography.caption.weight(.medium))
-                    .monospacedDigit()
+                switch disclosure {
+                case .always:
+                    Text("\(count)")
+                        .font(DSTypography.caption.weight(.medium))
+                        .monospacedDigit()
+                case .onHover:
+                    chevron
+                        .opacity(isHovered || isCollapsed ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeOut(duration: DSAnimation.fast), value: isHovered)
+                }
             }
             .foregroundStyle(DSColors.labelTertiary)
             .padding(.horizontal, DSSpacing.sm)
@@ -176,6 +195,7 @@ public struct DSNavigatorGroup: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
         .listRowInsets(EdgeInsets(top: 0, leading: DSNavigatorMetrics.rowInset,
                                   bottom: 0, trailing: DSNavigatorMetrics.rowInset))
         .listRowSeparator(.hidden)
@@ -185,5 +205,13 @@ public struct DSNavigatorGroup: View {
         .accessibilityLabel("\(isCollapsed ? "Expand" : "Collapse") \(name)")
         .accessibilityValue("\(count) \(itemName)")
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.down")
+            .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+            .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+            .animation(reduceMotion ? nil : .easeOut(duration: DSAnimation.fast), value: isCollapsed)
+            .frame(width: 10)
     }
 }
