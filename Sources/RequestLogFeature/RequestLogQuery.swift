@@ -14,14 +14,16 @@ enum LogColumns {
 
     /// Fits a 12-hour timestamp with milliseconds ("11:41:33.123 PM") in the mono figure face.
     static let time: CGFloat = 128
+    /// Fits a 24-hour timestamp with milliseconds ("21:46:12.418"), the width the design draws.
+    static let twentyFourHourTime: CGFloat = 110
     /// The compact table's time: seconds, no milliseconds and no day period ("11:41:33").
     static let compactTime: CGFloat = 76
     static let method: CGFloat = 64
     static let status: CGFloat = 84
     static let scenario: CGFloat = 150
     static let duration: CGFloat = 84
-    /// Fits "1023.9 KB", the widest reading below a megabyte.
-    static let size: CGFloat = 84
+    /// Fits "1023 KB", the widest reading ``RequestLogQuery/formattedBytes(_:)`` produces.
+    static let size: CGFloat = 76
 
     /// The narrowest Path worth drawing before the full table gives way to the compact one.
     static let minimumPath: CGFloat = 160
@@ -29,15 +31,23 @@ enum LogColumns {
     /// Small on purpose: in a narrow drawer Status staying on screen matters more than more path.
     static let compactMinimumPath: CGFloat = 56
 
-    /// Below this the table drops Scenario, Duration and Size and shortens Time.
+    /// Below this the table drops Scenario, Duration and Size and shortens Time. Measured with the
+    /// wider 12-hour time, so the switch happens at one width whatever the clock.
     static let minimumTableWidth = time + method + minimumPath + status + scenario + duration + size
         + tableInset * 2
 
     /// Below this even the compact table scrolls sideways.
     static let compactMinimumTableWidth = compactTime + method + compactMinimumPath + status + tableInset * 2
 
-    static func timeWidth(compact: Bool) -> CGFloat {
-        compact ? compactTime : time
+    static func timeWidth(compact: Bool, twentyFourHour: Bool = false) -> CGFloat {
+        if compact { return compactTime }
+        return twentyFourHour ? twentyFourHourTime : time
+    }
+
+    /// Whether `locale` reads the time on a 24-hour clock. The environment's locale carries the
+    /// Mac's own 12- or 24-hour choice, which the timestamps follow.
+    static func usesTwentyFourHourClock(_ locale: Locale) -> Bool {
+        locale.hourCycle == .zeroToTwentyThree || locale.hourCycle == .oneToTwentyFour
     }
 
     /// The list beside an open request: Time, Method, Path and Status.
@@ -51,10 +61,10 @@ enum LogColumns {
 
     /// Header and rows must receive the same resolved path width, or a vertical scrollbar in the
     /// rows would shift every column after Path.
-    static func pathWidth(tableWidth: CGFloat, compact: Bool) -> CGFloat {
+    static func pathWidth(tableWidth: CGFloat, compact: Bool, twentyFourHour: Bool = false) -> CGFloat {
         let fixedWidth = compact
             ? compactTime + method + status
-            : time + method + status + scenario + duration + size
+            : timeWidth(compact: false, twentyFourHour: twentyFourHour) + method + status + scenario + duration + size
         return max(0, tableWidth - fixedWidth - tableInset * 2)
     }
 }
@@ -81,8 +91,10 @@ public final class RequestLogTableState {
     var errorsOnly: Bool
     var sortField: SortField
     var sortAscending: Bool
-    /// The filtered, sorted rows, written by the table once its background pass finishes.
-    var rows: [RequestLog] = []
+    /// The filtered, sorted rows, written by the table once its background pass finishes. `nil`
+    /// until the first pass has run; the table works its first rows out on the spot meanwhile, so
+    /// it never opens on an empty frame.
+    var rows: [RequestLog]?
     var selectionAnchorID: UUID?
     /// The detail's tab, kept as the selection moves from one request to the next.
     var detailTab: RequestDetailTab = .request
@@ -280,8 +292,15 @@ public enum RequestLogQuery {
 
     nonisolated static func formattedBytes(_ bytes: Int) -> String {
         if bytes < 1024 { return "\(bytes) B" }
-        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
-        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+        if bytes < 1024 * 1024 { return scaled(Double(bytes) / 1024, unit: "KB") }
+        return scaled(Double(bytes) / (1024 * 1024), unit: "MB")
+    }
+
+    /// One decimal below 100 ("68.4 KB"), whole numbers from there ("312 KB"), so no reading is
+    /// wider than seven characters and the Size column stays at the design's width. Rounded down,
+    /// so 1023.9 KB reads "1023 KB" rather than a "1024 KB" that ought to be "1.0 MB".
+    private nonisolated static func scaled(_ value: Double, unit: String) -> String {
+        value < 99.95 ? String(format: "%.1f \(unit)", value) : "\(Int(value)) \(unit)"
     }
 
     nonisolated static func endpointName(for endpointID: UUID?, endpoints: [Endpoint]) -> String? {

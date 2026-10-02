@@ -652,6 +652,7 @@ struct DSComponentRenderingTests {
     @Test("The glyph ladder is the measured values, and nothing sits below the floor")
     func glyphLadderIsPinned() {
         #expect(DSGlyph.disclosure == 10)
+        #expect(DSGlyph.paneAction == 11)
         #expect(DSGlyph.field == 12)
         #expect(DSGlyph.button == 14)
         #expect(DSGlyph.control == 15)
@@ -663,6 +664,7 @@ struct DSComponentRenderingTests {
 
         let ladder = [
             DSGlyph.disclosure,
+            DSGlyph.paneAction,
             DSGlyph.field,
             DSGlyph.button,
             DSGlyph.control,

@@ -86,10 +86,7 @@ public struct DSNavigatorFooter<Accessory: View>: View {
         HStack(spacing: DSSpacing.sm) {
             DSFilterField(
                 text: $text, scopeID: $scopeID, scopes: scopes,
-                placeholder: placeholder, label: label, identifier: identifier, focusRequest: focusRequest,
-                // One navigator has a scope menu and the other does not; both filters start their
-                // text at the same x.
-                reservesScopeSlot: true
+                placeholder: placeholder, label: label, identifier: identifier, focusRequest: focusRequest
             )
             accessory
         }

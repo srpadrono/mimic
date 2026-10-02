@@ -204,20 +204,30 @@ public struct DSIconButton: View {
     private let systemImage: String
     private let label: String
     private let identifier: String
+    private let glyphSize: CGFloat
+    private let weight: Font.Weight
+    private let width: CGFloat
     private let action: () -> Void
 
-    public init(_ label: String, systemImage: String, identifier: String, action: @escaping () -> Void) {
+    /// `glyphSize`, `weight` and `width` default to a panel header's icon button; the request log's
+    /// clear button passes the smaller, heavier glyph and wider hit area its board draws.
+    public init(_ label: String, systemImage: String, identifier: String,
+                glyphSize: CGFloat = DSGlyph.control, weight: Font.Weight = .regular,
+                width: CGFloat = DSControlHeight.regular, action: @escaping () -> Void) {
         self.label = label
         self.systemImage = systemImage
         self.identifier = identifier
+        self.glyphSize = glyphSize
+        self.weight = weight
+        self.width = width
         self.action = action
     }
 
     public var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: DSGlyph.control, weight: .regular))
-                .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
+                .font(.system(size: glyphSize, weight: weight))
+                .frame(width: width, height: DSControlHeight.regular)
         }
         .buttonStyle(DSIconButtonStyle())
         .help(label)
