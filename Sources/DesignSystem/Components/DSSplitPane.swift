@@ -589,6 +589,13 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 /// **This class must not touch Auto Layout in its initialiser**, and the controller that installs it
 /// must guard `splitView(_:shouldHideDividerAt:)` — see the note there.
 final class DSHairlineSplitView: NSSplitView {
+    /// Whether the pane after the first divider is collapsed.
+    static func isTrailingPaneCollapsed(in splitView: NSSplitView) -> Bool {
+        let panes = splitView.arrangedSubviews
+        guard panes.count > 1 else { return false }
+        return splitView.isSubviewCollapsed(panes[1]) || panes[1].isHidden
+    }
+
     /// Wide enough to grab without hunting, and no wider than the panel padding it hides inside.
     static let bandThickness: CGFloat = 10
 
@@ -600,6 +607,11 @@ final class DSHairlineSplitView: NSSplitView {
         // AppKit would paint the whole band as divider and the window would grow a gutter.
         NSColor(DSColors.content).setFill()
         rect.fill()
+
+        // With the pane after it collapsed, the band sits at the edge with nothing to separate, and a
+        // seam there read as a strip of a panel that was meant to be gone. Drawn blank instead of
+        // hidden: hiding a divider changes the split view's layout, and that is AppKit's to decide.
+        guard !Self.isTrailingPaneCollapsed(in: self) else { return }
 
         // `DSStroke.hairline` in `DSColors.separator`, the same pairing `DSDivider` draws, so the
         // seam and every other rule in the window stay the same weight and colour.

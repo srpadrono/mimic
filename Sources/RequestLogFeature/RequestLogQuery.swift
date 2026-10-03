@@ -53,6 +53,18 @@ enum LogColumns {
     /// The list beside an open request: Time, Method, Path and Status.
     static let splitList: CGFloat = 520
 
+    /// The least the request detail needs beside the list: its header's actions, which wrap under the
+    /// title when they must, and 170pt of value beside the 150pt name column. Small enough that the
+    /// compact 900pt window keeps the list beside the request.
+    static let splitDetailMinimum: CGFloat = 320
+
+    /// Whether the list and the open request fit side by side. Below this the request takes the
+    /// whole column, and closing it brings the list back; squeezed in beside the list, the detail ran
+    /// off the column's edge, cutting its actions and values short.
+    static func showsListBesideDetail(totalWidth: CGFloat) -> Bool {
+        totalWidth >= compactMinimumTableWidth + splitDetailMinimum
+    }
+
     /// The list's width beside an open request: 520pt, as drawn, giving way on a narrow window so
     /// the detail keeps at least half the column, but never narrower than the compact table.
     static func splitListWidth(totalWidth: CGFloat) -> CGFloat {

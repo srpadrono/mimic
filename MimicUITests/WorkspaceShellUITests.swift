@@ -2465,8 +2465,8 @@ final class WorkspaceShellUITests: MimicUITestCase {
         )
     }
 
-    /// The endpoint editor is as tall as its content, and the request log starts right below it and
-    /// takes the rest of the column.
+    /// The request log starts right below the endpoint editor and takes the rest of the column; the
+    /// body card is what stretches to meet it.
     @MainActor
     func testRequestLogSitsRightBelowTheEndpointEditor() throws {
         launchShell()
@@ -2489,7 +2489,16 @@ final class WorkspaceShellUITests: MimicUITestCase {
             },
             "The request log should start right below the editor — body \(body.frame), log \(drawer.frame)"
         )
-        XCTAssertLessThan(body.frame.height, 200, "A short body keeps its card short")
+        // The card meets the log rather than leaving empty pane between them, so hiding the log
+        // gives the body its room.
+        let shownHeight = body.frame.height
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { body.frame.height > shownHeight + 100 },
+            "Hiding the request log should grow the body card — \(shownHeight)pt before, \(body.frame.height)pt after"
+        )
+        app.typeKey("l", modifierFlags: [.command, .option])
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "⌥⌘L should bring the log back")
         // The log is the split's second pane, so the split's bottom is the log's. The log's own
         // element is a `.contain` container, which reports the union of what it draws — an empty
         // log's header and curl hint — rather than the pane it fills.
@@ -2499,6 +2508,69 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertGreaterThan(split.frame.maxY, window.maxY - 24,
                              "The request log takes the rest of the column — split \(split.frame), window \(window)")
         XCTAssertLessThan(split.frame.minY, body.frame.minY, "The editor is the split's first pane")
+    }
+
+    /// Switching between Body and Headers, or between the Endpoints and Journeys screens, never moves
+    /// or closes the request log: the panel stays where the person left it.
+    @MainActor
+    func testRequestLogKeepsItsPlaceAcrossEditorTabsAndScreens() throws {
+        launchShell()
+        createProjectViaUI(name: "Steady Log")
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        workspace.fillWindow()
+
+        let split = app.descendants(matching: .any).matching(identifier: "ds.splitpane.requestLog").firstMatch
+        let drawer = shell.panel("drawer")
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The request log starts open")
+        UITestApp.waitForStableFrame(drawer)
+        let top = drawer.frame.minY
+
+        endpointEditor.showHeaders()
+        UITestApp.waitForStableFrame(drawer)
+        XCTAssertEqual(drawer.frame.minY, top, accuracy: 1, "Headers should not move the log — \(drawer.frame)")
+        endpointEditor.showBody()
+        UITestApp.waitForStableFrame(drawer)
+        XCTAssertEqual(drawer.frame.minY, top, accuracy: 1, "Body should not move the log — \(drawer.frame)")
+
+        shell.journeysTab.click()
+        XCTAssertTrue(split.waitForExistence(timeout: 5), "The journeys screen keeps the editor and log split")
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The journeys screen keeps the request log open")
+        UITestApp.waitForStableFrame(drawer)
+        XCTAssertEqual(drawer.frame.minY, top, accuracy: 1, "Journeys should not move the log — \(drawer.frame)")
+        XCTAssertTrue(app.toolbars.buttons["Hide request log"].firstMatch.exists,
+                      "The toggle should still say the log is open")
+
+        shell.endpointsTab.click()
+        UITestApp.waitForStableFrame(drawer)
+        XCTAssertEqual(drawer.frame.minY, top, accuracy: 1, "Coming back should not move the log — \(drawer.frame)")
+    }
+
+    /// With the inspector hidden the window still stops at a width that holds the editor and a
+    /// toolbar that fits. It used to shrink to the navigator alone, or to 16pt with a request open.
+    @MainActor
+    func testWindowKeepsAUsableMinimumWithTheInspectorHidden() throws {
+        launchShell()
+        createProjectViaUI(name: "Floor")
+        createEndpointViaUI(name: "Users", path: "/api/users")
+        workspace.fillWindow()
+
+        let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
+        if inspectorHeader.exists {
+            app.typeKey("i", modifierFlags: [.command, .option])
+            XCTAssertTrue(inspectorHeader.waitForNonExistence(timeout: 5), "⌥⌘I should hide the inspector")
+        }
+        let window = app.windows.firstMatch
+        app.typeKey("n", modifierFlags: [.command, .option, .control])
+        UITestApp.waitForStableFrame(window)
+
+        let centre = shell.panel("centerPane")
+        XCTAssertTrue(centre.waitForExistence(timeout: 5), "The editor should still be in the window")
+        XCTAssertGreaterThanOrEqual(window.frame.width, 680,
+                                    "The narrowest window keeps a usable editor — window \(window.frame)")
+        XCTAssertGreaterThanOrEqual(centre.frame.width, 300, "The editor keeps its room — \(centre.frame)")
+        XCTAssertLessThanOrEqual(centre.frame.maxX, window.frame.maxX, "The editor stays inside the window")
+        XCTAssertTrue(app.toolbars.buttons["Hide Sidebar"].firstMatch.isHittable,
+                      "The toolbar keeps its controls rather than an overflow chevron")
     }
 
     /// PANEL-11. A clicked request takes over the centre column — the log on the left, the request

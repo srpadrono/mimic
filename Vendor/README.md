@@ -26,6 +26,7 @@ Everything is opt-in. With the new values left at their defaults, the editor lay
 - `CodeView.swift`:
   - `tile()` takes the gutter width from `gutterWidth`. That width runs up to where the text starts, so it includes the line-fragment padding.
   - The code view passes `lineHeight` to its code storage when the view is created and again whenever the layout configuration changes.
+- `CodeEditor.swift` (macOS): the scroll view sets `autohidesScrollers`, so a legacy scroller is not drawn beside text that fits.
 - `GutterView.swift`: line numbers are drawn on the same fixed line height as the code. With a `gutterWidth` set, they end `lineNumberTrailingPadding` before the text.
 
 TextKit puts a fixed line's extra height above the glyphs. `DSJSONEditor` therefore shifts its card padding by 2 pt (8 pt above, 12 pt below) so the text sits where the boards draw it.

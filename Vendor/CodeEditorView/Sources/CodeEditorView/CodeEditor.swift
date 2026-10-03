@@ -6,7 +6,8 @@
 //  SwiftUI 'CodeEditor' view
 //
 //  Modified for Mimic (see Vendor/README.md): `LayoutConfiguration` gained `lineHeight`, `gutterWidth` and
-//  `lineNumberTrailingPadding`, with an explicit equality that compares them.
+//  `lineNumberTrailingPadding`, with an explicit equality that compares them. The macOS scroll view hides
+//  its scroller while the text fits.
 
 import Combine
 import SwiftUI
@@ -735,6 +736,9 @@ extension CodeEditor: NSViewRepresentable {
     let scrollView = NSScrollView(frame: CGRect(x: 0, y: 0, width: 100, height: 40))
     scrollView.borderType          = .noBorder
     scrollView.hasVerticalScroller = true
+    // Mimic: with legacy scrollers (a mouse attached, or "Always" in System Settings) AppKit otherwise draws
+    // a scroller whose knob fills its track beside a body that fits.
+    scrollView.autohidesScrollers  = true
     scrollView.hasHorizontalRuler  = false
     scrollView.autoresizingMask    = [.width, .height]
 

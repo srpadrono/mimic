@@ -24,10 +24,6 @@ public struct JourneyEditorView: View {
 
     @State private var showNewStepSheet = false
     @State private var showCaptureSheet = false
-    @State private var overviewContentHeight: CGFloat = .infinity
-
-    /// Two steps and the list's margins: the least of the list a short pane keeps on screen.
-    public static let minimumStepListHeight: CGFloat = DSRowHeight.step * 2 + DSSpacing.sm * 2 + DSSpacing.xs
 
     public var body: some View {
         editorStack
@@ -63,39 +59,59 @@ public struct JourneyEditorView: View {
             }
     }
 
+    /// Everything scrolls as one: the title, run and behaviour, then the steps.
+    ///
+    /// This used to be two scroll views stacked — the overview at its natural height above a step
+    /// list that kept a two-step minimum. In a pane shortened by the request log the overview's
+    /// scroll view was cut wherever its share ended, so a row of controls showed as a two-point
+    /// sliver above "Steps", and each half carried its own scroller. One list has one scroller and
+    /// clips nothing it cannot scroll to.
+    @ViewBuilder
     private var editorStack: some View {
-        VStack(spacing: 0) {
-            // Title, run and behaviour, in one scroll view that takes its natural height in a tall
-            // pane and gives way in a short one. The steps are what the editor is for, so they keep
-            // `minimumStepListHeight` whatever the pane: without it a narrow window laid the list out
-            // at zero height with every step in the tree and none of them clickable.
+        if journey.steps.isEmpty {
             ScrollView {
-                VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                    header
-                    JourneyRunProgress(model: model, journey: journey, isActive: isActive, status: status)
-                    behaviorRow
-                }
-                .padding(.top, DSSpacing.xl)
-                .padding(.horizontal, DSSpacing.xxl)
-                .padding(.bottom, DSSpacing.lg)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    overviewContentHeight = height
+                VStack(spacing: 0) {
+                    overview
+                    DSEmptyState(
+                        heading: "No steps yet",
+                        message: "Add the requests this flow makes, in order. The same route can appear more "
+                            + "than once \u{2014} that is how a call fails and then succeeds.",
+                        identifier: "journeyEditor.steps"
+                    )
+                    .padding(.vertical, DSSpacing.xxl)
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
-            .frame(minHeight: 0, maxHeight: overviewContentHeight)
-            // Offered everything the step list's minimum leaves, before the list takes the rest.
-            .layoutPriority(1)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("journeyEditor.settingsScroll")
-
-            DSDivider(identifier: "journeyEditor.run")
-                .padding(.horizontal, DSSpacing.xxl)
-            stepsHeader
+        } else {
             stepList
-                .frame(minHeight: Self.minimumStepListHeight, maxHeight: .infinity)
         }
     }
+
+    /// Title, run, behaviour and the Steps header: the part above the steps.
+    private var overview: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: DSSpacing.lg) {
+                header
+                JourneyRunProgress(model: model, journey: journey, isActive: isActive, status: status)
+                behaviorRow
+            }
+            .padding(.top, DSSpacing.xl)
+            .padding(.horizontal, Self.horizontalInset)
+            .padding(.bottom, DSSpacing.lg)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("journeyEditor.settings")
+
+            DSDivider(identifier: "journeyEditor.run")
+                .padding(.horizontal, Self.horizontalInset)
+            stepsHeader
+                // The list's old top margin, now that the header is inside the list.
+                .padding(.bottom, DSSpacing.sm)
+        }
+    }
+
+    /// The editor's side inset: the same 20pt as the endpoint editor and the request detail, so
+    /// switching tabs does not move the content's edge.
+    static let horizontalInset: CGFloat = DSSpacing.xl
 
     /// Binding shim so a step can be presented as a sheet item by id. The id lives in the window's
     /// presentation state, so the inspector's "Edit step…" opens the same sheet.
@@ -326,7 +342,7 @@ public struct JourneyEditorView: View {
             .accessibilityIdentifier("journeyEditor.addStepButton")
             .accessibilityLabel("Add step")
         }
-        .padding(.horizontal, DSSpacing.xxl)
+        .padding(.horizontal, Self.horizontalInset)
         .padding(.top, DSSpacing.lg)
         .padding(.bottom, DSSpacing.xs)
         .accessibilityElement(children: .contain)
@@ -351,58 +367,58 @@ public struct JourneyEditorView: View {
         .buttonStyle(.dsPlain)
     }
 
-    @ViewBuilder
     private var stepList: some View {
-        if journey.steps.isEmpty {
-            DSEmptyState(
-                heading: "No steps yet",
-                message: "Add the requests this flow makes, in order. The same route can appear more "
-                    + "than once \u{2014} that is how a call fails and then succeeds.",
-                identifier: "journeyEditor.steps"
-            )
-        } else {
-            List {
-                ForEach(Array(journey.steps.enumerated()), id: \.element.id) { index, step in
-                    JourneyStepRow(
-                        step: step,
-                        index: index,
-                        progress: status?.steps.first { $0.id == step.id },
-                        isSelected: model.selectedJourneyStepID == step.id
-                    )
-                    .contentShape(Rectangle())
-                    // One click shows the step in the inspector; a second opens the sheet, as a
-                    // double-click opens a file from Finder's selection.
-                    .onTapGesture(count: 2) {
-                        model.selectedJourneyStepID = step.id
-                        model.editingJourneyStepID = step.id
-                    }
-                    .onTapGesture {
-                        model.selectedJourneyStepID = model.selectedJourneyStepID == step.id ? nil : step.id
-                    }
-                    // A tap gesture carries no trait, so restore the button trait for VoiceOver.
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityAction(named: "Edit step") { model.editingJourneyStepID = step.id }
-                    .listRowInsets(EdgeInsets(top: 1, leading: DSSpacing.lg, bottom: 1, trailing: DSSpacing.lg))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .contextMenu { stepContextMenu(step: step, index: index) }
+        List {
+            // The overview rides in the list as its first row, so it scrolls with the steps. It
+            // sits outside the `ForEach` that carries `onMove`, so it can be neither dragged nor
+            // dropped onto.
+            overview
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            ForEach(Array(journey.steps.enumerated()), id: \.element.id) { index, step in
+                JourneyStepRow(
+                    step: step,
+                    index: index,
+                    progress: status?.steps.first { $0.id == step.id },
+                    isSelected: model.selectedJourneyStepID == step.id
+                )
+                .contentShape(Rectangle())
+                // One click shows the step in the inspector; a second opens the sheet, as a
+                // double-click opens a file from Finder's selection.
+                .onTapGesture(count: 2) {
+                    model.selectedJourneyStepID = step.id
+                    model.editingJourneyStepID = step.id
                 }
-                .onMove { source, destination in
-                    // SwiftUI reports the destination as an insertion index.
-                    guard let from = source.first else { return }
-                    let step = journey.steps[from]
-                    let target = destination > from ? destination - 1 : destination
-                    model.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: target)
+                .onTapGesture {
+                    model.selectedJourneyStepID = model.selectedJourneyStepID == step.id ? nil : step.id
                 }
+                // A tap gesture carries no trait, so restore the button trait for VoiceOver.
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Edit step") { model.editingJourneyStepID = step.id }
+                .listRowInsets(EdgeInsets(top: 1, leading: Self.horizontalInset, bottom: 1, trailing: Self.horizontalInset))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .contextMenu { stepContextMenu(step: step, index: index) }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, DSRowHeight.step)
-            .contentMargins(.vertical, DSSpacing.sm, for: .scrollContent)
-            // `.contain` before the identifier so rows keep their own `journeyStep-n` names.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("journeyEditor.stepList")
+            .onMove { source, destination in
+                // SwiftUI reports the destination as an insertion index.
+                guard let from = source.first else { return }
+                let step = journey.steps[from]
+                let target = destination > from ? destination - 1 : destination
+                model.moveJourneyStep(journeyID: journey.id, stepID: step.id, to: target)
+            }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, DSRowHeight.step)
+        // No side margin of the list's own: the overview row and the steps set their insets, so
+        // the editor's content starts on the same 20pt line as the endpoint editor's.
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .contentMargins(.bottom, DSSpacing.sm, for: .scrollContent)
+        // `.contain` before the identifier so rows keep their own `journeyStep-n` names.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("journeyEditor.stepList")
     }
 
     @ViewBuilder

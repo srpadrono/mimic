@@ -177,6 +177,10 @@ public struct WelcomeWindow: View {
     // MARK: - Left column
 
     /// From the top of the window: 16pt of padding, the 20pt traffic-light row, then 36pt of air.
+    /// The size the Welcome board draws the window at. The window shares its frame with the workspace,
+    /// so `ContentView` sizes it to this while the welcome screen shows.
+    public static let idealSize = CGSize(width: 880, height: 560)
+
     private static let heroTopInset: CGFloat = DSSpacing.lg + DSSpacing.xl + DSSpacing.xxxl + DSSpacing.xs
 
     private func leftColumn(iconSize: CGFloat, isShort: Bool) -> some View {

@@ -42,8 +42,6 @@ public struct WorkspaceShellLayout<
     let metrics: WorkspacePanelMetrics
     @Binding var isRequestLogPresented: Bool
     @Binding var requestLogHeight: CGFloat
-    /// The centre content's own height, so the request log can sit right below it.
-    let preferredCenterHeight: CGFloat?
     @Binding var isInspectorPresented: Bool
     /// When set, the takeover replaces the jump bar, the editor, and the docked log.
     let showsTakeover: Bool
@@ -61,12 +59,20 @@ public struct WorkspaceShellLayout<
 
     @State private var windowWidth: CGFloat = .infinity
     @State private var isNavigatorHidden = false
+    /// Where the detail column ends, which is where the inspector starts. Kept in a reference rather
+    /// than in state: it changes on every frame of a divider drag, and re-rendering the shell for each
+    /// one fought the drag. Measuring the inspector's own content had the same effect, and stopped the
+    /// divider moving at all.
+    @State private var detailColumnEdge = DetailColumnEdge()
+    /// The inspector's ideal width once it has been hidden. SwiftUI re-presents an inspector at its
+    /// ideal, so with a constant there a panel dragged to 480pt came back at 300pt after being
+    /// hidden, while the navigator beside it kept its width. Set only as the panel hides.
+    @State private var restoredInspectorWidth: CGFloat?
 
     public init(
         metrics: WorkspacePanelMetrics,
         isRequestLogPresented: Binding<Bool>,
         requestLogHeight: Binding<CGFloat>,
-        preferredCenterHeight: CGFloat? = nil,
         isInspectorPresented: Binding<Bool>,
         showsTakeover: Bool = false,
         onToolbarLayoutChange: @escaping (WorkspaceToolbarLayout) -> Void = { _ in },
@@ -82,7 +88,6 @@ public struct WorkspaceShellLayout<
         self.metrics = metrics
         self._isRequestLogPresented = isRequestLogPresented
         self._requestLogHeight = requestLogHeight
-        self.preferredCenterHeight = preferredCenterHeight
         self._isInspectorPresented = isInspectorPresented
         self.showsTakeover = showsTakeover
         self.onToolbarLayoutChange = onToolbarLayoutChange
@@ -119,11 +124,17 @@ public struct WorkspaceShellLayout<
             inspector
                 .inspectorColumnWidth(
                     min: metrics.minimumInspectorWidth,
-                    ideal: metrics.idealInspectorWidth,
+                    ideal: restoredInspectorWidth ?? metrics.idealInspectorWidth,
                     max: DSLayout.inspectorMaximumWidth
                 )
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("inspector")
+        }
+        .onChange(of: isInspectorPresented) { _, isPresented in
+            guard !isPresented, windowWidth.isFinite else { return }
+            let width = (windowWidth - detailColumnEdge.maxX).rounded()
+            guard width >= metrics.minimumInspectorWidth, width <= DSLayout.inspectorMaximumWidth else { return }
+            restoredInspectorWidth = width
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .onChange(of: hasRoomForInspector, initial: true) { _, room in onInspectorRoomChange(room) }
@@ -131,7 +142,9 @@ public struct WorkspaceShellLayout<
 
     private var hasRoomForInspector: Bool {
         WorkspaceToolbarLayout.leavesRoomForInspector(
-            windowWidth: windowWidth, inspectorWidth: metrics.idealInspectorWidth, isNavigatorHidden: isNavigatorHidden
+            windowWidth: windowWidth,
+            inspectorWidth: restoredInspectorWidth ?? metrics.idealInspectorWidth,
+            isNavigatorHidden: isNavigatorHidden
         )
     }
 
@@ -140,7 +153,6 @@ public struct WorkspaceShellLayout<
             metrics: metrics,
             isRequestLogPresented: $isRequestLogPresented,
             requestLogHeight: $requestLogHeight,
-            preferredCenterHeight: preferredCenterHeight,
             showsTakeover: showsTakeover,
             jumpBar: { jumpBar },
             center: { center },
@@ -157,6 +169,7 @@ public struct WorkspaceShellLayout<
             transaction.disablesAnimations = true
             withTransaction(transaction) { onToolbarLayoutChange(layout) }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: { detailColumnEdge.maxX = $0 }
         // The detail column starts at the window's edge, under the traffic lights, only while the
         // navigator is hidden.
         .onGeometryChange(for: Bool.self) {
@@ -180,8 +193,6 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
     let metrics: WorkspacePanelMetrics
     @Binding var isRequestLogPresented: Bool
     @Binding var requestLogHeight: CGFloat
-    /// The centre content's own height, so the request log can sit right below it.
-    let preferredCenterHeight: CGFloat?
     /// When set, the takeover replaces the jump bar, the editor, and the docked log.
     let showsTakeover: Bool
     let jumpBar: JumpBar
@@ -193,7 +204,6 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
         metrics: WorkspacePanelMetrics,
         isRequestLogPresented: Binding<Bool>,
         requestLogHeight: Binding<CGFloat>,
-        preferredCenterHeight: CGFloat? = nil,
         showsTakeover: Bool = false,
         @ViewBuilder jumpBar: () -> JumpBar,
         @ViewBuilder center: () -> Center,
@@ -203,7 +213,6 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
         self.metrics = metrics
         self._isRequestLogPresented = isRequestLogPresented
         self._requestLogHeight = requestLogHeight
-        self.preferredCenterHeight = preferredCenterHeight
         self.showsTakeover = showsTakeover
         self.jumpBar = jumpBar()
         self.center = center()
@@ -215,6 +224,9 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
         VStack(spacing: 0) {
             if showsTakeover {
                 takeover
+                    // The floor the editor and its log keep, so a short window leaves the log in
+                    // the takeover at least its own minimum rather than a few rows under it.
+                    .frame(minHeight: metrics.minimumCentreHeight)
             } else {
                 // Xcode's jump bar. Sits above the editor area rather than inside any one editor,
                 // because it describes where you are, not what you are editing.
@@ -234,7 +246,6 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
                     minimumPrimaryThickness: metrics.minimumCentreHeight,
                     minimumSecondaryThickness: metrics.minimumRequestLogHeight,
                     defaultSecondaryThickness: metrics.defaultRequestLogHeight,
-                    preferredPrimaryThickness: preferredCenterHeight,
                     identifier: "requestLog"
                 ) {
                     center
@@ -265,4 +276,9 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
         .padding([.horizontal, .bottom], DSLayout.panelInset)
         .background(DSColors.window.ignoresSafeArea())
     }
+}
+
+/// The detail column's trailing edge in window coordinates, written without invalidating any view.
+private final class DetailColumnEdge {
+    var maxX: CGFloat = .infinity
 }

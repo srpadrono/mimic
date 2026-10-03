@@ -106,6 +106,36 @@ final class WelcomeProjectUITests: MimicUITestCase {
         add(screenshot)
     }
 
+    /// The welcome screen takes its board's size, and the workspace gets its own frame back. The two
+    /// share one window, which used to keep whatever frame it last had: a welcome screen in the top
+    /// half of a window built for three panels.
+    @MainActor
+    func testWelcomeScreenAndWorkspaceKeepTheirOwnWindowSizes() throws {
+        launchApp()
+        XCTAssertTrue(welcome.waitForHeroTitle(timeout: 5), "The welcome screen should show first")
+        let window = app.windows.firstMatch
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
+            abs(window.frame.width - 880) <= 1 && abs(window.frame.height - 560) <= 1
+        }, "The welcome screen should be 880×560 — it is \(window.frame.size)")
+
+        createProjectViaUI(name: "Sized Workspace")
+        workspace.fillWindow()
+        let workspaceFrame = window.frame
+        XCTAssertGreaterThan(workspaceFrame.width, 880, "The workspace should be larger than the welcome screen")
+
+        closeProjectViaMenu()
+        XCTAssertTrue(welcome.assertVisible())
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { abs(window.frame.width - 880) <= 1 },
+                      "Closing the project should give the welcome screen its own size — \(window.frame.size)")
+
+        let row = recentsRow(named: "Sized Workspace")
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The project should be listed in recents")
+        row.click()
+        XCTAssertTrue(workspace.assertVisible(), "The project should reopen")
+        XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { abs(window.frame.width - workspaceFrame.width) <= 1 },
+                      "Reopening should give the workspace back its frame — \(window.frame), was \(workspaceFrame)")
+    }
+
     /// WELC-10 — a row says when its project was last opened and what it holds.
     @MainActor
     func testRecentProjectRowStatesWhenItWasLastOpened() throws {

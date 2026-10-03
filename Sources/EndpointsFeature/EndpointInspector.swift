@@ -198,13 +198,15 @@ public struct EndpointInspectorSettings: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: DSSpacing.md) {
-            // The design's 88 pt column: "When unmatched" wraps onto a second line, as it draws it.
+            // The inspector's one label column, the Overview's too, so the fields start on the line its
+            // values do and "When unmatched" fits on one line. The design's 88pt field column wrapped
+            // that label alone, making its row the only two-line one in the section.
             Text(label)
                 .font(DSTypography.callout)
                 .foregroundStyle(DSColors.labelSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: DSInspectorMetrics.fieldLabelColumn, alignment: .leading)
+                .frame(width: DSInspectorMetrics.labelColumn, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

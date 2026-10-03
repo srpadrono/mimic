@@ -747,4 +747,32 @@ struct WorkspaceFeatureLogicTests {
         let fits = CGRect(x: 60, y: 100, width: 900, height: 600)
         #expect(WindowScreenFit.fittedFrame(fits, visible: visible, minimum: minimum) == nil)
     }
+
+    @Test("The welcome screen takes its own size, centred where the workspace was and kept on screen")
+    func welcomeFrameIsCentredAndOnScreen() {
+        let visible = CGRect(x: 0, y: 60, width: 1920, height: 990)
+        let size = CGSize(width: 880, height: 560)
+        // Centred on a 1280×988 workspace at the top left.
+        #expect(WindowRoleFrame.welcomeFrame(around: CGRect(x: 0, y: 62, width: 1280, height: 988),
+                                             size: size, visible: visible)
+                == CGRect(x: 200, y: 276, width: 880, height: 560))
+        // A workspace hard against the right edge keeps the welcome screen on screen.
+        #expect(WindowRoleFrame.welcomeFrame(around: CGRect(x: 1800, y: 62, width: 300, height: 988),
+                                             size: size, visible: visible).maxX == visible.maxX)
+        // A screen smaller than the board shrinks the window to fit it.
+        let small = CGRect(x: 0, y: 0, width: 800, height: 500)
+        #expect(WindowRoleFrame.welcomeFrame(around: small, size: size, visible: small) == small)
+    }
+
+    @Test("An open request sits beside the list only when both fit")
+    func requestDetailBesideTheListOnlyWhenBothFit() {
+        let both = LogColumns.compactMinimumTableWidth + LogColumns.splitDetailMinimum
+        #expect(LogColumns.showsListBesideDetail(totalWidth: both))
+        #expect(!LogColumns.showsListBesideDetail(totalWidth: both - 1))
+        // The compact 900pt window, its 264pt navigator and the inspector stepping aside leave about
+        // 620pt: the list still sits beside the request there.
+        #expect(LogColumns.showsListBesideDetail(totalWidth: 620))
+        #expect(!LogColumns.showsListBesideDetail(totalWidth: 488), "The narrowest window shows the request alone")
+    }
 }
+

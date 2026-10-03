@@ -205,9 +205,11 @@ public struct RequestLogDrawerView: View {
                 // selected one is in the detail beside it.
                 DSDivider(identifier: "requestLog.split")
                 HStack(spacing: 0) {
-                    logList(compact: true)
-                        .frame(width: LogColumns.splitListWidth(totalWidth: width))
-                    DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                    if LogColumns.showsListBesideDetail(totalWidth: width) {
+                        logList(compact: true)
+                            .frame(width: LogColumns.splitListWidth(totalWidth: width))
+                        DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                    }
                     selectedRequestDetail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }

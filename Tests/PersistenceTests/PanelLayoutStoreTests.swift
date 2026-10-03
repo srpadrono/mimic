@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 import Testing
 @testable import Persistence
 
@@ -188,4 +191,27 @@ struct PanelLayoutStoreTests {
         #expect(defaults.double(forKey: "panel.requestLog.height") == 220)
         #expect(PanelLayoutStore(defaults: defaults).load().requestLogHeight == 220)
     }
+
+    @Test("The workspace's window frame survives a save and reload")
+    func workspaceFrameRoundTrip() {
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(PanelLayoutStore(defaults: defaults).loadWorkspaceFrame() == nil, "Nothing stored is nothing")
+        PanelLayoutStore(defaults: defaults).saveWorkspaceFrame(CGRect(x: 40, y: 60, width: 1280, height: 900))
+        #expect(PanelLayoutStore(defaults: defaults).loadWorkspaceFrame()
+                == CGRect(x: 40, y: 60, width: 1280, height: 900))
+    }
+
+    @Test("A nonsensical stored frame is ignored rather than applied to the window")
+    func nonsensicalWorkspaceFrameIsIgnored() {
+        let (defaults, suite) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([0.0, 0.0, 0.0, 900.0], forKey: "window.workspace.frame")
+        #expect(PanelLayoutStore(defaults: defaults).loadWorkspaceFrame() == nil)
+        defaults.set("not a frame", forKey: "window.workspace.frame")
+        #expect(PanelLayoutStore(defaults: defaults).loadWorkspaceFrame() == nil)
+        defaults.set([0.0, 0.0, 99_999.0, 900.0], forKey: "window.workspace.frame")
+        #expect(PanelLayoutStore(defaults: defaults).loadWorkspaceFrame() == nil)
+    }
 }
+

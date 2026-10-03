@@ -87,4 +87,26 @@ struct DSSplitPaneLayoutTests {
             #expect(split.arrangedSubviews[0].frame.height == height)
         }
     }
+
+    @Test("A collapsed pane leaves no seam behind")
+    func collapsedPaneHidesItsDivider() throws {
+        let pane = DSSplitPane(
+            axis: .vertical,
+            isSecondaryPresented: .constant(false),
+            secondaryThickness: .constant(150),
+            minimumPrimaryThickness: 120,
+            minimumSecondaryThickness: 80,
+            defaultSecondaryThickness: 150,
+            identifier: "collapsed"
+        ) {
+            Color.clear
+        } secondary: {
+            Color.clear
+        }
+        try host(pane) { splitView in
+            // Its band draws no seam: left in, it stayed at the bottom edge as a strip of the panel.
+            #expect(DSHairlineSplitView.isTrailingPaneCollapsed(in: splitView))
+        }
+    }
 }
+

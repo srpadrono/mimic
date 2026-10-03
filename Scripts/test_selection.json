@@ -176,6 +176,8 @@
         "WorkspaceShellUITests/testPanelChordsToggleBothPanels",
         "WorkspaceShellUITests/testScenarioCrumbSwitchesTheEditedScenario",
         "WorkspaceShellUITests/testRequestLogSitsRightBelowTheEndpointEditor",
+        "WorkspaceShellUITests/testRequestLogKeepsItsPlaceAcrossEditorTabsAndScreens",
+        "WorkspaceShellUITests/testWindowKeepsAUsableMinimumWithTheInspectorHidden",
         "WorkspaceShellUITests/testStartingOnAnOccupiedPortOffersTheNextPort",
         "WorkspaceShellUITests/testToolbarPreservesIdentityAndCollapsesSecondaryActions",
         "WorkspaceShellUITests/testWorkspaceShellNamesItsWindowAndFourPanels"
@@ -208,6 +210,7 @@
       "name": "welcome projects A",
       "tests": [
         "WelcomeProjectUITests/testArrowKeysMoveTheRecentsSelectionAndReturnOpensIt",
+        "WelcomeProjectUITests/testWelcomeScreenAndWorkspaceKeepTheirOwnWindowSizes",
         "WelcomeProjectUITests/testCloseProjectIsDisabledWhileNoProjectIsOpen",
         "WelcomeProjectUITests/testCreatingAProjectFromAnOpenProjectSwapsTheWorkspace",
         "WelcomeProjectUITests/testDeleteConfirmationNamesTheProjectAndKeepProjectCancels",
