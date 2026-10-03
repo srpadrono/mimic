@@ -19,10 +19,17 @@ import Testing
 @Suite("Gallery snapshots", .serialized)
 @MainActor
 struct GallerySnapshotTests {
-    /// The baselines sit beside this file in the checkout the tests were built from.
-    private static let baselines = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .appendingPathComponent("Snapshots", isDirectory: true)
+    /// The approved PNG for `name`, copied into this test bundle from `Snapshots/` at build time.
+    ///
+    /// Read from the bundle, never from the checkout: the suite runs inside the gallery app, and a
+    /// checkout under `~/Documents` would make macOS ask the gallery for the Documents folder.
+    private static func baseline(named name: String) -> URL? {
+        let bundle = Bundle(for: BundleToken.self)
+        return bundle.url(forResource: name, withExtension: nil)
+            ?? bundle.url(forResource: name, withExtension: nil, subdirectory: "Snapshots")
+    }
+
+    private final class BundleToken {}
 
     /// Where new and changed renderings go: `$MIMIC_SNAPSHOT_OUTPUT`, else the temporary directory.
     private static var output: URL {
@@ -46,7 +53,7 @@ struct GallerySnapshotTests {
             )
             let result = SnapshotBaseline.check(
                 actual: image,
-                baseline: PNG.read(Self.baselines.appendingPathComponent(name))
+                baseline: Self.baseline(named: name).flatMap(PNG.read)
             )
             switch result.verdict {
             case .matches:
