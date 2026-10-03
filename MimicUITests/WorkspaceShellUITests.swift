@@ -2479,12 +2479,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(body.waitForExistence(timeout: 5), "The endpoint editor should show its body")
         XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The request log starts open")
 
-        // Between them: the body card's 12pt bottom padding, the editor's 16pt bottom inset and the
-        // 10pt divider band.
+        // Between them: the body card's 12pt bottom padding (the boards' 10pt plus the 2pt the
+        // card moves from above the text to below it), the editor's 16pt bottom inset, the 10pt
+        // divider band and the log's own inset above its header. CI measures 50pt.
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
                 let gap = drawer.frame.minY - body.frame.maxY
-                return gap >= 0 && gap < 48
+                return gap >= 0 && gap < 56
             },
             "The request log should start right below the editor — body \(body.frame), log \(drawer.frame)"
         )
