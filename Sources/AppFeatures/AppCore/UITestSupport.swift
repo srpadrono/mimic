@@ -39,11 +39,16 @@ enum UITestSupport {
     private static let activationRetryDelay = Duration.milliseconds(200)
     private static var hasResetCurrentProcess = false
 
-    /// The two window sizes UI tests work at: the screen's whole visible frame, and a compact
-    /// width that folds the toolbar while keeping all three panels.
+    /// The window sizes UI tests work at: the screen's whole visible frame, a compact width that
+    /// folds the toolbar while keeping all three panels, and the two smallest the window allows,
+    /// which the layout audit (`LayoutAuditUITests`) sweeps.
     enum TestWindowSize {
         case fill
         case compact
+        /// As narrow as the window's minimum size allows, at the screen's full height.
+        case minimum
+        /// As short as the window's minimum size allows, at the screen's full width.
+        case short
     }
 
     /// Under 1180pt, where the toolbar folds its secondary actions, and wide enough for the
@@ -58,12 +63,29 @@ enum UITestSupport {
               let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
         else { return }
         var frame = visible
-        if size == .compact {
+        switch size {
+        case .fill:
+            break
+        case .compact:
             // Against the right edge, so menus the toolbar opens stay inside the window's screenshot.
             frame.size.width = min(compactTestWindowWidth, visible.width)
             frame.origin.x = visible.maxX - frame.width
+        case .minimum:
+            frame.size.width = min(minimumFrameSize(of: window).width, visible.width)
+            frame.origin.x = visible.maxX - frame.width
+        case .short:
+            frame.size.height = min(minimumFrameSize(of: window).height, visible.height)
+            frame.origin.y = visible.maxY - frame.height
         }
         window.setFrame(frame, display: true, animate: false)
+    }
+
+    /// The smallest frame the window accepts: the larger of its own `minSize` and the frame around
+    /// the content minimum SwiftUI derives from the panels' floors. `setFrame` enforces neither, so
+    /// asking for less would draw a window no person could make by dragging.
+    private static func minimumFrameSize(of window: NSWindow) -> CGSize {
+        let content = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).size
+        return CGSize(width: max(window.minSize.width, content.width, 1), height: max(window.minSize.height, content.height, 1))
     }
 
     static var isRunningUITests: Bool {
@@ -574,6 +596,10 @@ struct UITestWindowCommands: Commands {
                     .keyboardShortcut("f", modifiers: [.command, .option, .control])
                 Button("Test: Compact Window") { UITestSupport.resizeMainWindow(to: .compact) }
                     .keyboardShortcut("c", modifiers: [.command, .option, .control])
+                Button("Test: Narrowest Window") { UITestSupport.resizeMainWindow(to: .minimum) }
+                    .keyboardShortcut("n", modifiers: [.command, .option, .control])
+                Button("Test: Shortest Window") { UITestSupport.resizeMainWindow(to: .short) }
+                    .keyboardShortcut("t", modifiers: [.command, .option, .control])
             }
         }
     }

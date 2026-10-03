@@ -19,21 +19,26 @@
     "WorkspaceShell": [
       "WorkspaceShellUITests",
       "NavigatorUITests",
-      "MimicUITests"
+      "MimicUITests",
+      "LayoutAuditUITests"
     ],
     "EndpointsFeature": [
       "EndpointEditorUITests",
-      "NavigatorUITests"
+      "NavigatorUITests",
+      "LayoutAuditUITests"
     ],
     "JourneysFeature": [
       "JourneyEditorUITests",
-      "JourneyUITests"
+      "JourneyUITests",
+      "LayoutAuditUITests"
     ],
     "RequestLogFeature": [
-      "RequestLogUITests"
+      "RequestLogUITests",
+      "LayoutAuditUITests"
     ],
     "ServerFeature": [
-      "BackendSettingsUITests"
+      "BackendSettingsUITests",
+      "LayoutAuditUITests"
     ],
     "ImportFeature": [
       "SpecImportUITests"
@@ -42,7 +47,8 @@
       "SpecImportUITests"
     ],
     "ProjectsFeature": [
-      "WelcomeProjectUITests"
+      "WelcomeProjectUITests",
+      "LayoutAuditUITests"
     ],
     "UpdatesFeature": [
       "UpdateUITests"
@@ -321,6 +327,13 @@
         "WelcomeProjectUITests/testSampleProjectOpensWithItsEndpoints",
         "WelcomeProjectUITests/testImportFromWelcomeAsksForTheFormatAndCancelCreatesNothing",
         "WelcomeProjectUITests/testShowOnLaunchCheckboxStartsOffAndToggles"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "layout audit",
+      "tests": [
+        "LayoutAuditUITests"
       ]
     }
   ]
