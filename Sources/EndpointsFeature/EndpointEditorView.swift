@@ -258,13 +258,13 @@ public struct EndpointEditorView: View {
             // frames its glyph. A label with text is flattened into the pop-up button's title, and
             // AppKit then sizes the control to that title — a 14pt target — whatever the frame says.
             // The method is drawn behind it, inside the pop-up's frame.
-            Label {
-                Text("Endpoint actions")
-            } icon: {
-                DSDisclosureChevron(.down)
-            }
-            .labelStyle(.iconOnly)
-            .frame(width: endpointMenuWidth, height: DSControlHeight.regular, alignment: .trailing)
+            // It stays an SF Symbol: AppKit's pop-up button takes only an image from the label, and a
+            // drawn shape left the control without one, so it vanished from accessibility.
+            Label("Endpoint actions", systemImage: "chevron.down")
+                .labelStyle(.iconOnly)
+                .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
+                .foregroundStyle(DSColors.labelTertiary)
+                .frame(width: endpointMenuWidth, height: DSControlHeight.regular, alignment: .trailing)
             .contentShape(Rectangle())
         }
         .menuStyle(.button)
