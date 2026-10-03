@@ -33,7 +33,7 @@ public enum DSCatalog {
 
     public static let components: [Entry] = [
         Entry(id: "ds.methodLabel", title: "Method label", referenceID: "ds.methodLabel",
-              size: CGSize(width: 432, height: 220)) {
+              size: CGSize(width: 432, height: 219)) {
             // The board leaves its last word alone on the second line; SwiftUI would carry "both"
             // down with it.
             DSCatalogCard("Method label",
@@ -50,7 +50,7 @@ public enum DSCatalog {
             }
         },
         Entry(id: "ds.status", title: "Status", referenceID: "ds.status",
-              size: CGSize(width: 432, height: 220)) {
+              size: CGSize(width: 432, height: 219)) {
             DSCatalogCard("Status", detail: "One style everywhere: a dot and the code in one colour. No fills.") {
                 HStack(spacing: 14) {
                     ForEach([200, 204, 302, 401, 404, 429, 500, 503], id: \.self) { code in
@@ -70,7 +70,7 @@ public enum DSCatalog {
             }
         },
         Entry(id: "ds.buttons", title: "Buttons", referenceID: "ds.buttons",
-              size: CGSize(width: 432, height: 239)) {
+              size: CGSize(width: 432, height: 238)) {
             DSCatalogCard("Buttons",
                           detail: "Capsules. One primary per view. 28 pt in sheets, 24 pt in panels, 20 pt\ninline.") {
                 // The board's first row wraps Import onto a line of its own, 8 pt below.
@@ -95,15 +95,15 @@ public enum DSCatalog {
             }
         },
         Entry(id: "ds.fields", title: "Fields", referenceID: "ds.fields",
-              size: CGSize(width: 432, height: 368)) {
+              size: CGSize(width: 432, height: 367)) {
             DSCatalogFields()
         },
         Entry(id: "ds.segmented", title: "Segmented control and toggles", referenceID: "ds.segmented",
-              size: CGSize(width: 432, height: 368)) {
+              size: CGSize(width: 432, height: 367)) {
             DSCatalogSegments()
         },
         Entry(id: "ds.banners", title: "Banners", referenceID: "ds.banners",
-              size: CGSize(width: 432, height: 235)) {
+              size: CGSize(width: 432, height: 234)) {
             DSCatalogCard("Banners", detail: "Inline, above the content they concern, with one action.") {
                 DSBanner(.error, message: "Changes couldn\u{2019}t be saved.", actionTitle: "Try again",
                          identifier: "catalog.error") {}
@@ -114,11 +114,11 @@ public enum DSCatalog {
             }
         },
         Entry(id: "ds.codeEditor", title: "Code editor", referenceID: "ds.codeEditor",
-              size: CGSize(width: 432, height: 208)) {
+              size: CGSize(width: 432, height: 206.5)) {
             DSCatalogCodeEditor()
         },
         Entry(id: "ds.pills", title: "Pills", referenceID: "ds.pills",
-              size: CGSize(width: 432, height: 269)) {
+              size: CGSize(width: 432, height: 266)) {
             DSCatalogCard("Pills", detail: "A short fact beside a row. 18 pt capsule, 11 pt text, 7 pt in from each end.") {
                 catalogSpecimen("Neutral") {
                     DSPill("\u{00D7} 3")
@@ -142,7 +142,7 @@ public enum DSCatalog {
         // MARK: Table (shared by the request log and the import review)
 
         Entry(id: "ds.table", title: "Table", referenceID: "ds.table",
-              size: CGSize(width: 888, height: 208)) {
+              size: CGSize(width: 888, height: 206.5)) {
             DSCatalogCard("Table", detail: "Plain headers that sort, zebra rows, accent selection. "
                           + "Used by the request log and import review.") {
                 VStack(spacing: 0) {

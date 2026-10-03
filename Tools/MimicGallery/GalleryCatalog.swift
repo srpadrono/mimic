@@ -365,7 +365,7 @@ enum GalleryCatalog {
     /// module. The jump bar is WorkspaceShell's.
     static let components: [GalleryEntry] = [
         GalleryEntry("ds.jumpBarAndEmptyState", "Jump bar and empty state", group: .components,
-                     size: CGSize(width: 888, height: 269)) {
+                     size: CGSize(width: 888, height: 266)) {
             DSCatalogCard("Jump bar and empty state",
                           detail: "The jump bar is the only bar under the toolbar. Empty states say what goes here "
                               + "and offer the next step.") {
