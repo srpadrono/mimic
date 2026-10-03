@@ -16,8 +16,8 @@ private enum ImportColumns {
     static let note: CGFloat = 170
     // path is flexible and takes the remaining space
 
-    /// The padding inside every cell.
-    static let cellPadding = DSSpacing.sm
+    /// The padding inside every cell, the shared table's.
+    static let cellPadding = DSTable.cellPadding
     /// The inset of the header and the rows from the table's edges.
     static let inset = DSSpacing.md
 }
@@ -48,10 +48,10 @@ enum ImportRow {
     /// How far a row from a hidden host fades.
     static let hiddenOpacity = 0.45
 
-    /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing.
+    /// The fill a row wears: the pointer's wash, the zebra stripe, or nothing. The review has no
+    /// selection, only checkboxes, so it takes the shared table's fill without one.
     static func background(isHovered: Bool, rowIndex: Int) -> Color {
-        if isHovered { return DSColors.hover }
-        return rowIndex % 2 == 0 ? .clear : DSColors.zebra
+        DSTable.rowFill(index: rowIndex, isHovered: isHovered)
     }
 
     /// Whether a candidate carries anything the reviewer should look at before importing.
@@ -362,10 +362,7 @@ struct ImportReviewList: View {
     }
 
     private func columnTitle(_ title: String) -> some View {
-        Text(title)
-            .font(DSTypography.captionSemibold)
-            .foregroundStyle(DSColors.labelSecondary)
-            .lineLimit(1)
+        DSTableColumnTitle(title)
             .accessibilityHidden(true)
     }
 

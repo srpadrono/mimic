@@ -15,6 +15,13 @@ private enum EditorMetrics {
     static let bodyMaxHeight: CGFloat = 440
     /// Enough lines to reach `bodyMaxHeight`; counting stops there.
     static let bodyMaxLines = 40
+    /// The scenario title row: as tall as the boards' Make live button, 24pt with a half-point
+    /// border above and below (`.btn` is content-box).
+    static let titleRowHeight: CGFloat = 25
+    /// The boards' link-button slot for an icon: 14pt mark, 6pt either side.
+    static let copyURLWidth: CGFloat = 26
+    /// The scenario menu's slot: the boards' 16pt icon with 6pt either side.
+    static let scenarioMenuWidth: CGFloat = 28
 }
 
 /// The endpoint editor: the request it answers, the scenario being edited, and that scenario's response.
@@ -43,6 +50,8 @@ public struct EndpointEditorView: View {
     @State private var statusCodeError: String?
     @State private var delayError: String?
     @State private var formatCandidate: (source: String, output: String)?
+    /// The body as the model last filled it in, which needs no settling before Format can use it.
+    @State private var lastSyncedBody: String?
     @State private var showDeleteConfirmation = false
     @State private var renameScenarioTarget: Scenario?
     @State private var didCopyURL = false
@@ -134,11 +143,12 @@ public struct EndpointEditorView: View {
             refreshUneditedFields(from: previous)
         }
         .onChange(of: statusCodeString) { debounceStatusCode() }
-        .alert("Delete endpoint?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) { actions.onDelete() }
+        // Worded as the sidebar's confirmation, which the Alerts board draws.
+        .alert(SidebarView.deleteTitle(for: endpoint), isPresented: $showDeleteConfirmation) {
+            Button("Delete endpoint", role: .destructive) { actions.onDelete() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will remove the endpoint and all its scenarios. This can't be undone.")
+            Text(SidebarView.deleteMessage(scenarioCount: endpoint.scenarios.count))
         }
         .sheet(item: $renameScenarioTarget) { scenario in
             RenameItemSheet(
@@ -188,10 +198,12 @@ public struct EndpointEditorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: copyURL) {
-                Image(systemName: didCopyURL ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: DSGlyph.button - 1))
+                // The boards' link button: the two-squares copy mark at the compact button's glyph
+                // size, in a 26pt slot.
+                Image(systemName: didCopyURL ? "checkmark" : "square.on.square")
+                    .font(.system(size: DSGlyph.field))
                     .contentTransition(.symbolEffect(.replace))
-                    .frame(width: DSControlHeight.regular, height: DSControlHeight.regular)
+                    .frame(width: EditorMetrics.copyURLWidth, height: DSControlHeight.regular)
             }
             .buttonStyle(DSIconButtonStyle())
             .help("Copy the URL")
@@ -246,12 +258,14 @@ public struct EndpointEditorView: View {
             // frames its glyph. A label with text is flattened into the pop-up button's title, and
             // AppKit then sizes the control to that title — a 14pt target — whatever the frame says.
             // The method is drawn behind it, inside the pop-up's frame.
+            // It stays an SF Symbol: AppKit's pop-up button takes only an image from the label, and a
+            // drawn shape left the control without one, so it vanished from accessibility.
             Label("Endpoint actions", systemImage: "chevron.down")
                 .labelStyle(.iconOnly)
                 .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
                 .foregroundStyle(DSColors.labelTertiary)
                 .frame(width: endpointMenuWidth, height: DSControlHeight.regular, alignment: .trailing)
-                .contentShape(Rectangle())
+            .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -312,7 +326,8 @@ public struct EndpointEditorView: View {
                 .help("Serve this scenario on every request")
             }
 
-            DSIconMenu(systemImage: "ellipsis", help: "Scenario actions", identifier: "endpointEditor.scenarioMenu") {
+            DSIconMenu(systemImage: "ellipsis", help: "Scenario actions", identifier: "endpointEditor.scenarioMenu",
+                       width: EditorMetrics.scenarioMenuWidth) {
                 Button("Rename scenario\u{2026}", systemImage: "pencil") { renameScenarioTarget = scenario }
                     .accessibilityIdentifier("endpointEditor.scenarioMenu.rename")
                 Button("Duplicate scenario", systemImage: "doc.on.doc") { actions.onDuplicateScenario(scenario.id) }
@@ -325,7 +340,7 @@ public struct EndpointEditorView: View {
                 .accessibilityIdentifier("endpointEditor.scenarioMenu.delete")
             }
         }
-        .frame(minHeight: DSControlHeight.large)
+        .frame(minHeight: EditorMetrics.titleRowHeight)
     }
 
     // MARK: - Response fields
@@ -443,9 +458,7 @@ public struct EndpointEditorView: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
+                DSDisclosureChevron(.down)
             }
             .dsFieldChrome(isFocused: false)
             .contentShape(Rectangle())
@@ -491,7 +504,7 @@ public struct EndpointEditorView: View {
         HStack(spacing: DSSpacing.sm) {
             switch pane {
             case .body:
-                DSButton("Format", systemImage: "text.alignleft", variant: .ghost, size: .medium,
+                DSButton("Format", systemImage: "text.alignleft", variant: .ghost, size: .compact,
                          showsTitle: showsTitles, identifier: "endpointEditor.format") {
                     if let formatCandidate, formatCandidate.source == responseBody {
                         responseBody = formatCandidate.output
@@ -502,7 +515,7 @@ public struct EndpointEditorView: View {
                 .help("Pretty-print the JSON body")
                 .accessibilityIdentifier("endpointEditor.prettyPrintButton")
                 .accessibilityLabel("Pretty-print JSON")
-                DSButton("Copy", systemImage: "doc.on.doc", variant: .ghost, size: .medium,
+                DSButton("Copy", systemImage: "square.on.square", variant: .ghost, size: .compact,
                          showsTitle: showsTitles, identifier: "endpointEditor.copyBody") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(responseBody, forType: .string)
@@ -510,7 +523,7 @@ public struct EndpointEditorView: View {
                 .disabled(responseBody.isEmpty)
                 .help("Copy the response body")
             case .headers:
-                DSButton("Add header", systemImage: "plus", variant: .ghost, size: .medium,
+                DSButton("Add header", systemImage: "plus", variant: .ghost, size: .compact,
                          showsTitle: showsTitles, identifier: "endpointEditor.addHeader") {
                     headers.append(HeaderEntry(key: "", value: ""))
                 }
@@ -531,7 +544,11 @@ public struct EndpointEditorView: View {
             .onChange(of: responseBody) { debounceBody() }
             .task(id: responseBody) {
                 let source = responseBody
-                do { try await Task.sleep(for: Self.settling) } catch { return }
+                // A body read from the model is already settled, so Format is ready as soon as the
+                // scenario shows; only typing waits for the person to pause.
+                if source != lastSyncedBody {
+                    do { try await Task.sleep(for: Self.settling) } catch { return }
+                }
                 let output = await Task.detached(priority: .userInitiated) {
                     DSJSONEditor.prettyPrint(source)
                 }.value
@@ -613,15 +630,17 @@ public struct EndpointEditorView: View {
     // MARK: - Derived state
 
     /// The body card's height: its lines plus the card's padding, between the minimum and the most
-    /// it grows before scrolling. Wrapped lines scroll rather than grow the card.
+    /// it grows before scrolling, as `DSJSONEditor.cardHeight(forLines:)` sizes the boards' cards.
+    /// Wrapped lines scroll rather than grow the card.
     private var bodyCardHeight: CGFloat {
         var lines = 1
         for byte in responseBody.utf8 where byte == 0x0A {
             lines += 1
             if lines >= EditorMetrics.bodyMaxLines { break }
         }
-        let viewport = DSJSONEditor.height(forLines: lines) + DSSpacing.sm
-        return min(max(viewport, EditorMetrics.bodyMinHeight), EditorMetrics.bodyMaxHeight) + DSSpacing.sm * 2
+        let viewport = DSJSONEditor.height(forLines: lines) + DSJSONEditor.cardSlack
+        return min(max(viewport, EditorMetrics.bodyMinHeight), EditorMetrics.bodyMaxHeight)
+            + DSJSONEditor.cardVerticalPadding
     }
 
     /// The headers card's height: one row per header, within the body card's bounds.
@@ -694,6 +713,7 @@ public struct EndpointEditorView: View {
         guard let synced = Self.syncedValues(endpoint: endpoint, activeScenario: activeScenario) else { return }
         statusCodeString = synced.statusCodeString
         responseBody = synced.responseBody
+        lastSyncedBody = synced.responseBody
         bodyDocumentID = activeScenario.map { "\(endpoint.id.uuidString):\($0.id.uuidString)" }
         delayString = synced.delayString
         groupTag = synced.groupTag
@@ -722,6 +742,7 @@ public struct EndpointEditorView: View {
            responseBody == (previousScenario.body ?? "") {
             pendingEdits.cancel(.body)
             responseBody = activeScenario.body ?? ""
+            lastSyncedBody = responseBody
         }
         if previousScenario.headers != activeScenario.headers,
            headers.count == previousScenario.headers.count,

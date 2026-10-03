@@ -64,7 +64,8 @@ struct GalleryEntry: Identifiable {
 enum GalleryCatalog {
     static var entries: [GalleryEntry] {
         windows + workspace + toolbar + endpoints + journeys + requestLog + server + projects + importing + updates
-            + DSCatalog.components.map { component(from: $0, group: .components) }
+            + componentEntries
+            + componentsFromSections
             + DSCatalog.tokens.map { component(from: $0, group: .tokens) }
     }
 
@@ -134,13 +135,32 @@ enum GalleryCatalog {
 
     static let workspace: [GalleryEntry] = [
         GalleryEntry("workspace.jumpBar", "Jump bar", group: .workspace, size: CGSize(width: 844, height: 32)) {
-            BreadcrumbJumpBar(
-                crumbs: GalleryWorkspaceWindow.crumbs,
-                autosaveStatus: .saved,
-                history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
-                onSelectOption: { _, _ in }
-            )
-            .background(DSColors.content)
+            // The artboard's rect is the top of the content surface: its border and rounded corners,
+            // the bar, and the line under it.
+            VStack(spacing: 0) {
+                BreadcrumbJumpBar(
+                    crumbs: GalleryWorkspaceWindow.crumbs,
+                    autosaveStatus: .saved,
+                    history: BreadcrumbJumpBar.History(canGoBack: true, canGoForward: false, onBack: {}, onForward: {}),
+                    onSelectOption: { _, _ in }
+                )
+                Rectangle()
+                    .fill(DSColors.separator)
+                    .frame(height: DSStroke.hairline)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .gallerySurfaceSlice(includesTop: true)
+        },
+        // The jump bar's three save states side by side, on the Alerts board's desk.
+        GalleryEntry("feedback.autosave", "Autosave states", group: .workspace, size: CGSize(width: 197, height: 16)) {
+            HStack(spacing: 18) {
+                AutosaveStatusIndicator(status: .saved)
+                AutosaveStatusIndicator(status: .saving)
+                AutosaveStatusIndicator(status: .failed("The disk is full."))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(GalleryDesk.color)
         },
     ]
 
@@ -170,8 +190,14 @@ enum GalleryCatalog {
                      size: CGSize(width: 264, height: 884)) {
             GalleryNavigatorPanel(tab: .endpoints)
         },
+        GalleryEntry("endpoints.emptyNavigator", "Navigator with no endpoints", group: .endpoints,
+                     size: CGSize(width: 264, height: 884)) {
+            GalleryNavigatorPanel(tab: .endpoints, endpoints: [])
+        },
         GalleryEntry("endpoints.editor", "Endpoint editor", group: .endpoints, size: CGSize(width: 844, height: 485)) {
+            // The artboard's rect takes in the content surface's side borders.
             GalleryWorkspaceWindow.editor
+                .gallerySurfaceSlice(includesTop: false)
         },
         GalleryEntry("endpoints.inspector", "Scenario inspector", group: .endpoints,
                      size: CGSize(width: 300, height: 884)) {
@@ -250,6 +276,26 @@ enum GalleryCatalog {
             BackendSettingsView(configuration: DesignFixtures.serverSettingsConfiguration, model: GalleryModels.server,
                                 visibleScreenHeight: GalleryModels.tallScreenHeight)
         },
+        // The popover's content on a painted box; the board's figures, Storefront and Payments, and
+        // its 24-hour clock.
+        GalleryEntry("server.statusPopover", "Server status popover", group: .server,
+                     size: CGSize(width: 320, height: 234)) {
+            GalleryPopover {
+                ServerStatusDetails(
+                    serverState: .running(port: DesignFixtures.port),
+                    requestCount: 142,
+                    unmatchedCount: 3,
+                    configuration: DesignFixtures.serverSettingsConfiguration,
+                    boundConfiguration: DesignFixtures.serverSettingsConfiguration,
+                    runningSince: DesignFixtures.now.addingTimeInterval(-14 * 60),
+                    onShowUnmatched: {},
+                    onShowSettings: {},
+                    onToggleServer: {},
+                    onDismiss: {}
+                )
+            }
+            .environment(\.locale, Locale(identifier: "en_GB"))
+        },
     ]
 
     // MARK: - Projects
@@ -264,12 +310,16 @@ enum GalleryCatalog {
                 onRequestNewProject: {},
                 onRequestImport: { _ in },
                 onRequestOpenExport: {},
-                onRequestSampleProject: {}
+                onRequestSampleProject: {},
+                showsOnLaunch: .constant(true),
+                now: DesignFixtures.now,
+                version: DesignFixtures.appVersion
             )
         },
         GalleryEntry("projects.newProjectSheet", "New project sheet", group: .projects,
                      size: CGSize(width: 377, height: 227)) {
-            NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080") { _, _ in }
+            NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080",
+                            showsNameFocus: true) { _, _ in }
         },
     ]
 
@@ -298,6 +348,54 @@ enum GalleryCatalog {
         GalleryEntry("updates.sheet", "Update sheet", group: .updates,
                      size: CGSize(width: DSSheetWidth.medium, height: UpdateSheet.designHeight)) {
             UpdateSheet(service: GalleryModels.updates)
+        },
+    ]
+
+    // MARK: - Components
+
+    /// The Components board in its own order: the design-system catalogue, with the cards that need a
+    /// feature module placed where the board draws them.
+    static var componentEntries: [GalleryEntry] {
+        let catalog = DSCatalog.components.map { component(from: $0, group: .components) }
+        let split = catalog.firstIndex { $0.id == "ds.pills" } ?? catalog.endIndex
+        return Array(catalog[..<split]) + components + Array(catalog[split...])
+    }
+
+    /// Components cards the design system cannot draw itself, because a specimen lives in a feature
+    /// module. The jump bar is WorkspaceShell's.
+    static let components: [GalleryEntry] = [
+        GalleryEntry("ds.jumpBarAndEmptyState", "Jump bar and empty state", group: .components,
+                     size: CGSize(width: 888, height: 269)) {
+            DSCatalogCard("Jump bar and empty state",
+                          detail: "The jump bar is the only bar under the toolbar. Empty states say what goes here "
+                              + "and offer the next step.") {
+                // The bar's anatomy, so no history buttons: those belong to the window's toolbar row.
+                BreadcrumbJumpBar(crumbs: GalleryWorkspaceWindow.crumbs, autosaveStatus: .saved, history: nil,
+                                  onSelectOption: { _, _ in })
+                    .overlay {
+                        RoundedRectangle(cornerRadius: DSCornerRadius.segment, style: .continuous)
+                            .strokeBorder(DSColors.separator, lineWidth: DSStroke.hairline)
+                    }
+                DSEmptyState(
+                    heading: "No journeys yet",
+                    message: "A journey changes responses as a flow goes on, like a payment that fails once and "
+                        + "then succeeds.",
+                    actions: [
+                        DSEmptyStateAction("New journey", isPrimary: true, identifier: "catalog.empty.new") {},
+                        DSEmptyStateAction("Start from a template", identifier: "catalog.empty.template") {},
+                    ],
+                    prominence: .regular,
+                    identifier: "catalog.empty"
+                )
+                // The empty state pads 16 pt; the board's box pads 20 inside its dashed hairline.
+                .padding(DSSpacing.xs + DSStroke.hairline)
+                .fixedSize(horizontal: false, vertical: true)
+                .overlay {
+                    RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous)
+                        .strokeBorder(DSColors.separator,
+                                      style: StrokeStyle(lineWidth: DSStroke.hairline, dash: [3, 3]))
+                }
+            }
         },
     ]
 }

@@ -77,9 +77,7 @@ public struct EndpointInspectorSettings: View {
                                 commitGroup()
                             }
                         } label: {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                                .foregroundStyle(DSColors.labelTertiary)
+                            DSDisclosureChevron(.down)
                                 .frame(width: 14, height: DSControlHeight.regular)
                                 .contentShape(Rectangle())
                         }
@@ -127,9 +125,7 @@ public struct EndpointInspectorSettings: View {
                             .foregroundStyle(DSColors.labelPrimary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                            .foregroundStyle(DSColors.labelTertiary)
+                        DSDisclosureChevron(.down)
                     }
                     .dsFieldChrome(isFocused: false)
                     .contentShape(Rectangle())
@@ -173,9 +169,7 @@ public struct EndpointInspectorSettings: View {
                     .foregroundStyle(DSColors.labelPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: DSGlyph.disclosure - 1, weight: .semibold))
-                    .foregroundStyle(DSColors.labelTertiary)
+                DSDisclosureChevron(.down)
             }
             .dsFieldChrome(isFocused: false)
             .contentShape(Rectangle())

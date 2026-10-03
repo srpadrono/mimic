@@ -96,29 +96,17 @@ body{margin:0}
 
   <!-- Centre -->
   <main class="col grow" style="padding: 0 0 0 8px;">
-    <!-- Toolbar -->
-    <div class="row" style="height: 44px; gap: 10px; flex: none;">
-      <div class="cap glass"><button aria-label="Back"><svg class="ic" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg></button><button aria-label="Forward" style="color: var(--l3);"><svg class="ic" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></svg></button></div>
-      <div class="col" style="gap: 1px;">
-        <span style="font-size: 13px; font-weight: 600;">Acme Storefront</span>
-        <span class="l2" style="font-size: 11px; line-height: 13px;">localhost:18086</span>
-      </div>
-      <span class="grow"></span>
-      <div class="cap glass" style="padding: 0 14px; gap: 10px; font-size: 12px;">
-        <span class="st s2" style="font-family: var(--font); font-weight: 500;"><i></i>Running</span>
-        <span class="l3">·</span><span class="l2">142 requests</span>
-        <span class="l3">·</span><span class="st s4" style="font-family: var(--font); font-weight: 500;"><i></i>3 unmatched</span>
-      </div>
-      <span class="grow"></span>
-      <div class="cap glass"><button><svg class="ic" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" style="fill: currentColor; stroke: none;"/></svg>Stop</button></div>
-      <div class="cap glass"><button aria-label="Import"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
-      <div class="cap glass"><button aria-label="Hide request log"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M2 9.5h12"/></svg></button><button aria-label="Hide inspector"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M10 3v10"/></svg></button></div>
+    <!-- Toolbar: the Toolbar board's running strip (approved toolbar proposal), 52 pt from the
+         window's top edge, so the content surface still starts at y 56. -->
+    <div class="row" style="height: 52px; margin-top: -8px; gap: 12px; padding: 0 8px; flex: none;">
+    <div class="glass" style="width: 36px; height: 36px; border-radius: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--l1);"><svg class="ic" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.25" style="fill: currentColor; stroke: none;"/></svg></div><div class="col" style="gap: 1px; flex: none;"><span style="font-size: 13px; font-weight: 600;">Acme Storefront</span><span class="row l2" style="gap: 4px; font-size: 11px; line-height: 13px;"><svg class="ic" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/></svg>12 endpoints · 3 journeys</span></div><span style="width: 1px; height: 24px; background: var(--sep); flex: none;"></span><div class="col" style="gap: 1px; padding: 0 8px; flex: none;"><span class="row" style="gap: 4px; font-size: 13px;">localhost:18086<span class="l3">+1</span><svg class="ic l2" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M4 6l4 4 4-4"/></svg></span><span class="row" style="gap: 6px; font-size: 11px; line-height: 13px;"><span class="row" style="gap: 5px; color: var(--ok);"><i style="width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;"></i>Running</span><span class="l3">·</span><span class="l2">142 requests</span><span class="l3">·</span><span style="color: var(--warn);">3 unmatched</span></span></div><span class="grow"></span><div class="cap glass" style="height: 36px; border-radius: 18px;"><button aria-label="Import" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v7M5 6.5L8 9.5l3-3"/><path d="M2.5 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg></button><button aria-label="Server settings" style="height: 34px; border-radius: 17px; padding: 0 10px;"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="11" r="1.5"/></svg></button></div>
     </div>
 
     <!-- Content surface -->
     <div class="col grow" style="margin-top: 4px; background: var(--content); border-radius: 12px; border: .5px solid var(--sep); overflow: hidden;">
       <!-- Jump bar -->
-      <div class="row" style="height: 30px; padding: 0 14px; gap: 6px; font-size: 12px; flex: none;">
+      <div class="row" style="height: 30px; padding: 0 14px 0 8px; gap: 6px; font-size: 12px; flex: none;">
+        <span class="row" style="gap: 2px; flex: none;"><button class="bl" aria-label="Back" style="width: 22px; height: 22px; padding: 0; justify-content: center;"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><path d="M10 3L5 8l5 5"/></svg></button><button class="bl" aria-label="Forward" style="width: 22px; height: 22px; padding: 0; justify-content: center; color: var(--l3);"><svg class="ic" viewBox="0 0 16 16" style="width: 14px; height: 14px;"><path d="M6 3l5 5-5 5"/></svg></button></span><span style="width: .5px; height: 14px; margin: 0 4px; background: var(--sep); flex: none;"></span>
         <span class="l2">Catalog</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M6 3l5 5-5 5"/></svg>
         <span class="l2">GET /products</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M6 3l5 5-5 5"/></svg>
         <span style="font-weight: 500;">Out of stock</span><svg class="ic l3" viewBox="0 0 16 16" style="width: 10px; height: 10px;"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>
@@ -218,12 +206,12 @@ body{margin:0}
     <div class="row" style="height: 44px; padding: 0 16px;">
       <span style="font-size: 13px; font-weight: 600;">Scenarios</span>
       <span class="grow"></span>
-      <button class="bl" aria-label="Add scenario" style="color: var(--l2);"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+      <button class="bl" aria-label="Add scenario" style="color: var(--l2);"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button><div class="cap glass" style="margin-left: 8px;"><button aria-label="Hide request log"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M2 9.5h12"/></svg></button><button aria-label="Hide inspector"><svg class="ic" viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M10 3v10"/></svg></button></div>
     </div>
     <div class="col" style="padding: 0 8px; gap: 2px;">
       <div class="scen"><span class="radio on" title="Live"></span><span class="grow">Default</span><span class="st s2"><i></i>200</span></div>
       <div class="scen" style="background: var(--sel-soft);"><span class="radio"></span><span class="grow" style="font-weight: 500;">Out of stock</span><span class="st s5"><i></i>503</span></div>
-      <div class="scen"><span class="radio"></span><span class="grow">Slow catalogue</span><span class="l3 num" style="font-size: 11px;">2 s</span><span class="st s2"><i></i>200</span></div>
+      <div class="scen"><span class="radio"></span><span class="grow">Slow catalogue</span><span class="st s2"><i></i>200</span></div>
       <div class="scen"><span class="radio"></span><span class="grow">Empty catalogue</span><span class="st s2"><i></i>200</span></div>
       <div class="scen"><span class="radio"></span><span class="grow">Rate limited</span><span class="st s4"><i></i>429</span></div>
     </div>

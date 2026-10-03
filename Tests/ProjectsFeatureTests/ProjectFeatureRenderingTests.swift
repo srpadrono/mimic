@@ -229,6 +229,16 @@ struct ProjectFeatureRenderingTests {
         #expect(window.currentViewState.deleteTarget?.name == entry.name)
     }
 
+    /// The gallery pins the design's version; the app reads its bundle; a host without one shows
+    /// no version line at all.
+    @Test("The version line prefers a pinned version over the bundle's")
+    func versionLinePrefersThePinnedVersion() {
+        #expect(WelcomeWindow.versionLine(pinned: "1.9", bundled: "0.13.0") == "Version 1.9")
+        #expect(WelcomeWindow.versionLine(pinned: nil, bundled: "0.13.0") == "Version 0.13.0")
+        #expect(WelcomeWindow.versionLine(pinned: nil, bundled: nil) == nil)
+        #expect(WelcomeWindow.versionLine(pinned: nil, bundled: "") == nil)
+    }
+
     /// A bad port is explained under the field, so the sheet has to grow to hold the explanation.
     ///
     /// `DSTextField` puts its validation row in the same stack as the control rather than over it —

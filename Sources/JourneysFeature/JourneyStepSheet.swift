@@ -412,8 +412,10 @@ public struct JourneyStepSheet: View {
 
             switch pane {
             case .body:
+                // The JourneyStep board's narrower gutter: `.gut{width:36px}`.
                 DSJSONEditor(text: $responseBody, identifier: "stepSheet.body",
-                             documentID: "stepSheet.body.\(step?.id.uuidString ?? "new")")
+                             documentID: "stepSheet.body.\(step?.id.uuidString ?? "new")",
+                             gutterWidth: 36)
                     .frame(height: JourneyStepSheet.bodyHeight)
                     .id(Field.body)
             case .headers:

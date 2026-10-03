@@ -153,11 +153,29 @@ struct GalleryToolbarStrip: View {
     /// The round Run button and the glass groups beside it.
     static let itemHeight: CGFloat = 36
 
+    /// The toolbar row's height, as the Toolbar board draws it. No design token: `DSBarHeight.column`
+    /// is the 44pt panel header, and the real toolbar's height is the title bar's.
+    static let rowHeight: CGFloat = 52
+
     /// Buttons that share one glass capsule, as a `ToolbarItemGroup` draws them.
     private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        GalleryToolbarGroup(content: content)
+    }
+}
+
+/// Toolbar buttons that share one glass capsule, as a `ToolbarItemGroup` draws them. The strip and
+/// the Components board's toolbar card draw the same capsule.
+struct GalleryToolbarGroup<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
         HStack(spacing: 0) {
-            content()
-                .frame(minWidth: WorkspaceToolbarLayout.actionWidth, minHeight: Self.itemHeight)
+            content
+                .frame(minWidth: WorkspaceToolbarLayout.actionWidth, minHeight: GalleryToolbarStrip.itemHeight)
         }
         .menuStyle(.button)
         .buttonStyle(.borderless)

@@ -29,8 +29,6 @@ public struct ServerStatusWell: View {
 
     @State private var showingDetails = false
     @State private var isHovered = false
-    @State private var copiedPort: Int?
-    @State private var copyResetTask: Task<Void, Never>?
 
     private var isRunning: Bool { serverState.runningPort != nil }
     private var restartRequired: Bool {
@@ -48,12 +46,7 @@ public struct ServerStatusWell: View {
                              requestCount: requestCount, unmatchedCount: unmatchedCount, compact: compact)
     }
     var statusColor: Color {
-        if restartRequired { return DSColors.warning }
-        switch serverState {
-        case .running: return DSColors.success
-        case .error: return DSColors.error
-        case .stopped, .starting, .stopping: return DSColors.labelTertiary
-        }
+        Self.statusColor(serverState: serverState, restartRequired: restartRequired)
     }
     private var canShowDetails: Bool { isEnabled && (configuration != nil || isRunning) }
     private var detailsDescription: String {
@@ -120,9 +113,20 @@ public struct ServerStatusWell: View {
         .accessibilityIdentifier("serverStatusWell.url")
         .accessibilityLabel("Server details, \(Self.stateDescription(serverState))")
         .accessibilityValue(detailsDescription)
-        .popover(isPresented: $showingDetails, arrowEdge: .bottom) { serverDetails }
-        .onChange(of: serverState) { _, _ in copiedPort = nil }
-        .onDisappear { copyResetTask?.cancel() }
+        .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+            ServerStatusDetails(
+                serverState: serverState,
+                requestCount: requestCount,
+                unmatchedCount: unmatchedCount,
+                configuration: configuration,
+                boundConfiguration: boundConfiguration,
+                runningSince: runningSince,
+                onShowUnmatched: onShowUnmatched,
+                onShowSettings: onShowSettings,
+                onToggleServer: onToggleServer,
+                onDismiss: { showingDetails = false }
+            )
+        }
     }
 
     /// Two lines of text and a little air, on the 32pt prominent rung plus one spacing step.
@@ -218,196 +222,21 @@ public struct ServerStatusWell: View {
                                       conflictingPort: conflictingPort, compact: compact)
     }
 
-    private var serverDetails: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            HStack(spacing: DSSpacing.sm) {
-                DSStatusLabel(restartRequired ? "Restart required" : Self.shortState(serverState),
-                              color: statusColor)
-                if isRunning, let runningSince {
-                    Text(Self.sinceText(runningSince))
-                        .font(DSTypography.callout)
-                        .foregroundStyle(DSColors.labelTertiary)
-                        .accessibilityIdentifier("serverStatusWell.since")
-                }
-                Spacer(minLength: DSSpacing.sm)
-                if let onToggleServer {
-                    DSButton(isRunning ? "Stop" : "Run", variant: .secondary, size: .medium,
-                             identifier: "serverStatusWell.toggle") {
-                        onToggleServer()
-                    }
-                }
-            }
-
-            if case .error(let message) = serverState {
-                Text(verbatim: message)
-                    .font(DSTypography.callout)
-                    .foregroundStyle(DSColors.error)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("serverStatusWell.error")
-            }
-
-            DSDivider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                    ForEach(backends) { backend in
-                        backendRow(backend)
-                    }
-                    if restartRequired, let configuration {
-                        Text("After a restart")
-                            .font(DSTypography.captionSemibold)
-                            .foregroundStyle(DSColors.labelTertiary)
-                            .padding(.top, DSSpacing.xs)
-                        ForEach(configuration.listeners) { backend in
-                            HStack {
-                                Text(verbatim: backend.name)
-                                Spacer(minLength: DSSpacing.sm)
-                                Text(verbatim: "localhost:\(backend.port)")
-                                    .font(DSTypography.code)
-                                    .foregroundStyle(DSColors.warning)
-                            }
-                            .font(DSTypography.body)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityIdentifier("serverStatusWell.configuredPort.\(backend.port)")
-                        }
-                    }
-                }
-            }
-            .frame(maxHeight: 180)
-            .fixedSize(horizontal: false, vertical: true)
-
-            DSDivider()
-
-            // The counts keep their 18pt gap between themselves only; around the spacer the gap is
-            // the ordinary one, so "Show unmatched" has room for its whole label.
-            HStack(alignment: .bottom, spacing: DSSpacing.sm) {
-                HStack(alignment: .bottom, spacing: 18) {
-                    figure("\(requestCount)", caption: requestCount == 1 ? "request" : "requests",
-                           color: DSColors.labelPrimary)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(Self.requestCountLabel(requestCount))
-                        .accessibilityIdentifier("serverStatusWell.requestCount")
-                    figure("\(unmatchedCount)", caption: "unmatched",
-                           color: unmatchedCount > 0 ? DSColors.warning : DSColors.labelPrimary)
-                }
-                Spacer(minLength: 0)
-                // Always offered, as the design has it: with nothing unmatched it opens the log on
-                // an Unmatched scope that says so.
-                if let onShowUnmatched {
-                    DSButton("Show unmatched", variant: .secondary, size: .medium,
-                             identifier: "serverStatusWell.unmatchedButton") {
-                        showingDetails = false
-                        onShowUnmatched()
-                    }
-                    // Its whole label, always; the counts and the spacer give way instead.
-                    .fixedSize()
-                    .layoutPriority(1)
-                    .accessibilityIdentifier("serverStatusWell.unmatched")
-                    .accessibilityLabel(unmatchedCount > 0
-                        ? Self.unmatchedLabel(unmatchedCount, actionable: true) : "Show unmatched")
-                    .help("Show requests no endpoint or journey answered")
-                }
-            }
-
-            if let onShowSettings {
-                DSDivider()
-                Button("Server settings\u{2026}") {
-                    showingDetails = false
-                    onShowSettings()
-                }
-                .buttonStyle(.plain)
-                .font(DSTypography.callout)
-                .foregroundStyle(DSColors.accent)
-                .accessibilityIdentifier("serverStatusWell.settings")
-                .accessibilityLabel("Server settings")
-            }
-        }
-        .padding(DSSpacing.lg)
-        .frame(width: DSLayout.popoverWidth)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("serverStatusWell.portList")
-    }
-
-    private func figure(_ value: String, caption: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: value)
-                .font(DSTypography.Figure.large)
-                .foregroundStyle(color)
-            Text(caption)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColors.labelSecondary)
-        }
-    }
-
-    private func backendRow(_ backend: BackendConfiguration) -> some View {
-        HStack(spacing: DSSpacing.sm) {
-            Text(verbatim: backend.name)
-                .font(DSTypography.body)
-                .lineLimit(1)
-                .frame(minWidth: 88, alignment: .leading)
-            Text(verbatim: "localhost:\(backend.port)")
-                .font(DSTypography.code)
-                .foregroundStyle(DSColors.labelPrimary)
-                .textSelection(.enabled)
-                .accessibilityIdentifier(isRunning
-                    ? "serverStatusWell.listeningPort.\(backend.port)"
-                    : "serverStatusWell.configuredPort.\(backend.port)")
-            Spacer(minLength: DSSpacing.sm)
-            portButton(systemImage: "safari", help: "Open \(backend.localURL) in your browser") {
-                openInBrowser(backend)
-            }
-            .accessibilityIdentifier("serverStatusWell.openPort.\(backend.port)")
-            .accessibilityLabel("Open \(backend.name) in browser, port \(String(backend.port))")
-            portButton(systemImage: copiedPort == backend.port ? "checkmark" : "doc.on.doc",
-                       help: "Copy \(backend.localURL)") {
-                copyURL(for: backend)
-            }
-            .accessibilityIdentifier("serverStatusWell.copyPort.\(backend.port)")
-            .accessibilityLabel("Copy \(backend.name) URL, port \(String(backend.port))")
-            .accessibilityValue(copiedPort == backend.port ? "Copied" : "")
-        }
-    }
-
-    /// A port's quiet icon action. Both need a listener, so both wait for the server.
-    private func portButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: DSGlyph.field, weight: .regular))
-                .foregroundStyle(DSColors.labelSecondary)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                .frame(width: 22, height: 22)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .dsHoverHighlight()
-        .disabled(!isRunning)
-        .help(help)
-    }
-
-    private func openInBrowser(_ backend: BackendConfiguration) {
-        guard isRunning, let url = URL(string: backend.localURL) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func copyURL(for backend: BackendConfiguration) {
-        guard isRunning, backends.contains(where: { $0.id == backend.id && $0.port == backend.port }) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(backend.localURL, forType: .string)
-        copiedPort = backend.port
-        copyResetTask?.cancel()
-        copyResetTask = Task {
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard !Task.isCancelled else { return }
-            copiedPort = nil
-        }
-    }
-
     // MARK: - Presentation rules
 
     /// "since 21:32": the time of day the server started, in the reader's clock.
-    nonisolated static func sinceText(_ date: Date) -> String {
-        "since \(date.formatted(date: .omitted, time: .shortened))"
+    nonisolated static func sinceText(_ date: Date, locale: Locale = .current) -> String {
+        "since \(date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)))"
+    }
+
+    /// The state's tone: warning while a restart is owed, success running, error failed.
+    nonisolated static func statusColor(serverState: ServerState, restartRequired: Bool) -> Color {
+        if restartRequired { return DSColors.warning }
+        switch serverState {
+        case .running: return DSColors.success
+        case .error: return DSColors.error
+        case .stopped, .starting, .stopping: return DSColors.labelTertiary
+        }
     }
 
     /// Only the runtime snapshot may advertise active listeners. Names may change without a restart.

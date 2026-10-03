@@ -11,7 +11,7 @@ xcodebuild -workspace Mimic.xcworkspace -scheme Mimic -configuration Debug \
   -derivedDataPath .artifacts/DerivedData build
 ```
 
-If mise is not activated in your shell, run Tuist through `mise exec --`. If Command Line Tools are selected, set `DEVELOPER_DIR` to the installed Xcode path. Re-run Tuist after changing `Project.swift` or `Tuist/Package.swift`; never patch a generated Xcode project.
+If mise is not activated in your shell, run Tuist through `mise exec --`. If Command Line Tools are selected, set `DEVELOPER_DIR` to the installed Xcode path. Re-run Tuist after changing `Project.swift`, `Tuist/Package.swift` or a vendored package's manifest under `Vendor/` ([Vendor](Vendor/README.md)); never patch a generated Xcode project.
 
 `Package.swift` builds the portable modules from the same source folders as Tuist. Add a new target to both manifests; a new source file inside an existing buildable folder is picked up automatically. `swift test` runs the portable suites, including on Linux with SQLite development headers available. `Scripts/check_lockfiles.py`, `check_compiler_settings.py`, and `check_module_edges.py` guard the manifest contract.
 

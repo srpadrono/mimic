@@ -9,15 +9,26 @@ public struct DSStatusLabel: View {
         case text
     }
 
+    /// How large a code is drawn.
+    public enum Size {
+        /// SF Mono 12: rows, tables and the inspector.
+        case regular
+        /// SF Mono 11: the end of a navigator row, where the code is a footnote to the route.
+        case compact
+    }
+
     private let text: String
     private let color: Color
     private let showsDot: Bool
     private let style: Style
+    private let size: Size
 
     @Environment(\.backgroundProminence) private var prominence
 
     /// An HTTP status, optionally followed by its reason phrase. `nil` is a transport failure.
-    public init(statusCode: Int?, reason: String? = nil) {
+    /// A focused navigator's selected row draws the code alone, white on the selection, so it passes
+    /// `showsDot: false` there.
+    public init(statusCode: Int?, reason: String? = nil, showsDot: Bool = true, size: Size = .regular) {
         if let statusCode {
             text = reason.map { "\(statusCode) \($0)" } ?? "\(statusCode)"
             color = DSColors.httpStatusColor(for: statusCode)
@@ -25,8 +36,9 @@ public struct DSStatusLabel: View {
             text = reason ?? "Failed"
             color = DSColors.error
         }
-        showsDot = true
+        self.showsDot = showsDot
         style = .code
+        self.size = size
     }
 
     /// A state in words, coloured by its tone.
@@ -35,6 +47,7 @@ public struct DSStatusLabel: View {
         self.color = color
         self.showsDot = showsDot
         self.style = style
+        size = .regular
     }
 
     public var body: some View {
@@ -43,13 +56,21 @@ public struct DSStatusLabel: View {
                 DSStatusDot(ink)
             }
             Text(text)
-                .font(style == .code ? DSTypography.status : DSTypography.calloutMedium)
+                .font(font)
                 .monospacedDigit()
                 .lineLimit(1)
         }
         .foregroundStyle(ink)
         .fixedSize()
         .accessibilityElement(children: .combine)
+    }
+
+    private var font: Font {
+        switch (style, size) {
+        case (.code, .regular): DSTypography.status
+        case (.code, .compact): DSTypography.statusCompact
+        case (.text, _): DSTypography.calloutMedium
+        }
     }
 
     private var ink: Color {

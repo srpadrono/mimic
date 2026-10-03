@@ -17,6 +17,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Improved
 
 - JSON keys have their own colour in the body editor.
+- The body editor draws code on the design's 19 pt lines with a 40 pt gutter, and its chevrons,
+  Format and Copy buttons, and status field match the design.
 - The request log's empty state offers a curl command while the server is stopped.
 - "When unmatched" in the endpoint inspector is a menu that switches forwarding for the listener.
 - The server status popover says since when the server has been running.

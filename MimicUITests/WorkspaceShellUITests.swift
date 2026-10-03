@@ -2098,7 +2098,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// SRVRUN-04, SRVRUN-05, SRVRUN-06, SRVWELL-07.
     ///
     /// Both alert buttons are matched by identifier *or* label. The identifier is the stable handle
-    /// the window deliberately added — "Try port <n+1>" interpolates the arithmetic under test — and
+    /// the window deliberately added — "Use port <n+1>" interpolates the arithmetic under test — and
     /// the label is kept as a fallback so a query cannot silently find nothing.
     @MainActor
     func testStartingOnAnOccupiedPortOffersTheNextPort() throws {
@@ -2116,14 +2116,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
             NSPredicate(
                 format: "identifier == %@ OR label == %@",
                 "portConflict.keepStoppedButton",
-                "Keep server stopped"
+                "Keep stopped"
             )
         ).firstMatch
         let tryNextPort = app.buttons.matching(
             NSPredicate(
                 format: "identifier == %@ OR label == %@",
                 "portConflict.tryPortButton",
-                "Try port \(port + 1)"
+                "Use port \(port + 1)"
             )
         ).firstMatch
 
@@ -2479,12 +2479,13 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(body.waitForExistence(timeout: 5), "The endpoint editor should show its body")
         XCTAssertTrue(drawer.waitForExistence(timeout: 5), "The request log starts open")
 
-        // Between them: the body card's 8pt padding, the editor's 16pt bottom inset and the 10pt
-        // divider band.
+        // Between them: the body card's 12pt bottom padding (the boards' 10pt plus the 2pt the
+        // card moves from above the text to below it), the editor's 16pt bottom inset, the 10pt
+        // divider band and the log's own inset above its header. CI measures 50pt.
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
                 let gap = drawer.frame.minY - body.frame.maxY
-                return gap >= 0 && gap < 48
+                return gap >= 0 && gap < 56
             },
             "The request log should start right below the editor — body \(body.frame), log \(drawer.frame)"
         )

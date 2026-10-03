@@ -3,6 +3,31 @@ import SwiftUI
 import Testing
 @testable import DesignSystem
 
+@Suite("DSJSONEditor metrics")
+struct DSJSONEditorMetricsTests {
+    /// The boards draw code as SF Mono 12 on a 19pt line, in every code card.
+    @Test("Every line is 19pt, at least one line")
+    func linesAreNineteenPoints() {
+        #expect(DSJSONEditor.lineHeight == 19)
+        #expect(DSJSONEditor.height(forLines: 1) == 19)
+        #expect(DSJSONEditor.height(forLines: 10) == 190)
+        #expect(DSJSONEditor.height(forLines: 0) == 19)
+    }
+
+    /// The Main board's response body: ten lines in a 214pt card with 10pt padding top and bottom.
+    @Test("A ten-line card is the Main board's 214pt")
+    func tenLineCardMatchesTheMainBoard() {
+        #expect(DSJSONEditor.cardHeight(forLines: 10) == 214)
+    }
+
+    /// `.gut{width:40px;padding-right:12px}` on the Main board: numbers end 28pt in, code starts at 40.
+    @Test("Code starts 40pt in, 12pt after its line number")
+    func gutterMatchesTheMainBoard() {
+        #expect(DSJSONEditor.gutterWidth == 40)
+        #expect(DSJSONEditor.lineNumberTrailingPadding == 12)
+    }
+}
+
 @Suite("DSJSONEditor validation")
 struct DSJSONEditorTests {
     // MARK: - validateJSON
