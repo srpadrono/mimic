@@ -366,7 +366,10 @@ public struct DSCatalogCard<Content: View>: View {
         }
         // The board pads 18 pt inside its hairline border.
         .padding(18 + DSStroke.hairline)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The card is the size it is given, its content set from the top as the board sets it.
+        // Without the zero minimums, content taller than the card came out centred, which lifted
+        // the title several points above the board's.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(DSColors.content, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
