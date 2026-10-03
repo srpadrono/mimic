@@ -316,14 +316,15 @@ final class NavigatorUITests: MimicUITestCase {
         let centre = shell.panel("centerPane")
         XCTAssertTrue(endpointEditor.bodyEditor.waitForExistence(timeout: 5))
         XCTAssertTrue(endpointEditor.bodyTab.isSelected, "The editor opens on the Body pane")
-        // The editor pads its content by `DSSpacing.xl` (20pt) on both sides.
-        // Five lines sit inside the card's 120pt minimum, so the card stays at it rather than
-        // stretching down the pane: it is as tall as its content.
+        // The editor pads its content by `DSSpacing.xl` (20pt) on both sides and `DSSpacing.lg`
+        // (16pt) below, and the card pads its text inside that. With the request log hidden, the
+        // body takes the pane down to those margins however few lines it holds, so hiding the log
+        // leaves no empty space under it.
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
             self.endpointEditor.bodyEditor.frame.width >= centre.frame.width - 42
                 && self.endpointEditor.bodyEditor.frame.height >= 110
-                && self.endpointEditor.bodyEditor.frame.height < 200
-        }, "The body should span the pane's width and hug its content's height — it is "
+                && centre.frame.maxY - self.endpointEditor.bodyEditor.frame.maxY <= 40
+        }, "The body should span the pane's width and reach down to its bottom margin — it is "
             + "\(endpointEditor.bodyEditor.frame) in a centre pane of \(centre.frame)")
         XCTAssertEqual(endpointEditor.bodyEditor.frame.minX - centre.frame.minX, 20, accuracy: 1)
         XCTAssertEqual(centre.frame.maxX - endpointEditor.bodyEditor.frame.maxX, 20, accuracy: 1)

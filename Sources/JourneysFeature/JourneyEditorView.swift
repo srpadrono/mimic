@@ -65,24 +65,14 @@ public struct JourneyEditorView: View {
     /// list that kept a two-step minimum. In a pane shortened by the request log the overview's
     /// scroll view was cut wherever its share ended, so a row of controls showed as a two-point
     /// sliver above "Steps", and each half carried its own scroller. One list has one scroller and
-    /// clips nothing it cannot scroll to.
-    @ViewBuilder
+    /// clips nothing it cannot scroll to. It is a list with or without steps: a plain `ScrollView`
+    /// took its content's minimum width, so a pane narrower than the behaviour row was drawn under
+    /// the inspector, with "Add step" beneath the scroller. A list fits the pane and clips instead.
+    ///
+    /// Wrapped so the list keeps its own identifier: as the pane's outermost view it took the
+    /// centre pane's name instead, and the steps lost the container that tests and VoiceOver use.
     private var editorStack: some View {
-        if journey.steps.isEmpty {
-            ScrollView {
-                VStack(spacing: 0) {
-                    overview
-                    DSEmptyState(
-                        heading: "No steps yet",
-                        message: "Add the requests this flow makes, in order. The same route can appear more "
-                            + "than once \u{2014} that is how a call fails and then succeeds.",
-                        identifier: "journeyEditor.steps"
-                    )
-                    .padding(.vertical, DSSpacing.xxl)
-                }
-            }
-            .scrollBounceBehavior(.basedOnSize)
-        } else {
+        VStack(spacing: 0) {
             stepList
         }
     }
@@ -376,6 +366,18 @@ public struct JourneyEditorView: View {
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            if journey.steps.isEmpty {
+                DSEmptyState(
+                    heading: "No steps yet",
+                    message: "Add the requests this flow makes, in order. The same route can appear more "
+                        + "than once \u{2014} that is how a call fails and then succeeds.",
+                    identifier: "journeyEditor.steps"
+                )
+                .padding(.vertical, DSSpacing.xxl)
+                .listRowInsets(EdgeInsets(top: 0, leading: Self.horizontalInset, bottom: 0, trailing: Self.horizontalInset))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
             ForEach(Array(journey.steps.enumerated()), id: \.element.id) { index, step in
                 JourneyStepRow(
                     step: step,

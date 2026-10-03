@@ -753,15 +753,27 @@ struct WorkspaceFeatureLogicTests {
         let visible = CGRect(x: 0, y: 60, width: 1920, height: 990)
         let size = CGSize(width: 880, height: 560)
         // Centred on a 1280×988 workspace at the top left.
-        #expect(WindowRoleFrame.welcomeFrame(around: CGRect(x: 0, y: 62, width: 1280, height: 988),
+        #expect(WindowRoleFrame.centredFrame(around: CGRect(x: 0, y: 62, width: 1280, height: 988),
                                              size: size, visible: visible)
                 == CGRect(x: 200, y: 276, width: 880, height: 560))
         // A workspace hard against the right edge keeps the welcome screen on screen.
-        #expect(WindowRoleFrame.welcomeFrame(around: CGRect(x: 1800, y: 62, width: 300, height: 988),
+        #expect(WindowRoleFrame.centredFrame(around: CGRect(x: 1800, y: 62, width: 300, height: 988),
                                              size: size, visible: visible).maxX == visible.maxX)
         // A screen smaller than the board shrinks the window to fit it.
         let small = CGRect(x: 0, y: 0, width: 800, height: 500)
-        #expect(WindowRoleFrame.welcomeFrame(around: small, size: size, visible: small) == small)
+        #expect(WindowRoleFrame.centredFrame(around: small, size: size, visible: small) == small)
+    }
+
+    @Test("A first workspace opens wide enough for the inspector, even on a 1024pt screen")
+    func firstWorkspaceFrameLeavesRoomForTheInspector() {
+        // The welcome screen centred on a 1024×705 visible frame, as on a 1024×768 display.
+        let visible = CGRect(x: 0, y: 63, width: 1024, height: 705)
+        let welcome = CGRect(x: 72, y: 136, width: 880, height: 560)
+        let first = WindowRoleFrame.centredFrame(around: welcome, size: WindowRoleFrame.defaultWorkspaceSize,
+                                                 visible: visible)
+        #expect(first == CGRect(x: 0, y: 63, width: 1024, height: 705))
+        // The navigator at its widest, the centre's floor beside it and the inspector at its least.
+        #expect(first.width >= 976)
     }
 
     @Test("An open request sits beside the list only when both fit")

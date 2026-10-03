@@ -204,14 +204,28 @@ public struct RequestLogDrawerView: View {
                 // The list keeps the four columns that identify a call; everything else about the
                 // selected one is in the detail beside it.
                 DSDivider(identifier: "requestLog.split")
-                HStack(spacing: 0) {
-                    if LogColumns.showsListBesideDetail(totalWidth: width) {
+                if LogColumns.showsListBesideDetail(totalWidth: width) {
+                    HStack(spacing: 0) {
                         logList(compact: true)
                             .frame(width: LogColumns.splitListWidth(totalWidth: width))
                         DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                        selectedRequestDetail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
+                } else {
+                    // The request on its own takes the list's focus and keys, so the arrows still
+                    // step through the log and Escape brings the list back.
+                    let displayOrder = sortedAndFilteredLogs.map(\.id)
                     selectedRequestDetail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .focusable()
+                        .focusEffectDisabled()
+                        .focused($tableHasKeyboardFocus)
+                        // The row that was clicked went away with the list; its focus moves here.
+                        .onAppear { tableHasKeyboardFocus = true }
+                        .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape, "a"], phases: [.down, .repeat]) { press in
+                            handleKeyPress(press, displayOrder: displayOrder, proxy: nil)
+                        }
                 }
             } else {
                 logList(compact: width < LogColumns.minimumTableWidth)
@@ -703,7 +717,7 @@ public struct RequestLogDrawerView: View {
     private func handleKeyPress(
         _ press: KeyPress,
         displayOrder: [UUID],
-        proxy: ScrollViewProxy
+        proxy: ScrollViewProxy?
     ) -> KeyPress.Result {
         guard let key = Self.selectionKey(key: press.key, modifiers: press.modifiers),
               let result = Self.nextSelection(
@@ -722,7 +736,7 @@ public struct RequestLogDrawerView: View {
 
         // Unanimated, so the row is on screen before the next repeated key press arrives.
         if let reveal = result.reveal {
-            proxy.scrollTo(reveal)
+            proxy?.scrollTo(reveal)
         }
 
         return .handled
