@@ -143,6 +143,9 @@ jobs:
       - name: Coverage writer self-test
         run: python3 Scripts/update_readme_coverage.py --self-test
 
+      - name: Layout audit report self-test
+        run: python3 Scripts/layout_audit_report.py --self-test
+
       - name: Cache SwiftPM dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -471,6 +474,8 @@ jobs:
           EXTRA: ${{ matrix.extra }}
           RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
           BUILD_LOG: .artifacts/ui-tests-${{ matrix.id }}.log
+          # LayoutAuditUITests writes its frames here (the runner reads it without the prefix).
+          TEST_RUNNER_MIMIC_LAYOUT_AUDIT_DIR: ${{ github.workspace }}/.artifacts/layout-audit
         run: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
@@ -507,6 +512,36 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # The layout audit's frames, as a contact sheet: thumbnails, index.html and the summary.
+      - name: Layout audit contact sheet
+        id: audit
+        if: ${{ !cancelled() && hashFiles('.artifacts/layout-audit/*/frames.jsonl') != '' }}
+        run: |
+          set -euo pipefail
+          root=.artifacts/layout-audit
+          find "$root" -path "$root/thumbs" -prune -o -name '*.png' -print | while read -r png; do
+            relative="${png#"$root"/}"
+            mkdir -p "$root/thumbs/$(dirname "$relative")"
+            sips -s format jpeg -s formatOptions 70 -Z 1200 "$png" \
+              --out "$root/thumbs/${relative%.png}.jpg" >/dev/null
+          done
+          python3 Scripts/layout_audit_report.py "$root"
+          cat "$root/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the layout audit
+        if: ${{ !cancelled() && steps.audit.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: layout-audit
+          path: |
+            .artifacts/layout-audit/index.html
+            .artifacts/layout-audit/summary.md
+            .artifacts/layout-audit/thumbs
+            .artifacts/layout-audit/*/frames.jsonl
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Package the coverage bundle
         if: ${{ !cancelled() && needs.plan.outputs.coverage == 'true' }}
         env:
@@ -528,6 +563,53 @@ jobs:
           path: .artifacts/UITests-${{ matrix.id }}.xcresult.tar.gz
           retention-days: 1
           if-no-files-found: warn
+
+  # Like publish-snapshots: the contact sheet goes to `layout-audit/<branch>`, one `git fetch` away
+  # for a session that cannot download artifacts. Not a required check.
+  publish-layout-audit:
+    name: Publish the layout audit
+    needs: [plan, macos-ui]
+    if: >-
+      ${{ !cancelled() && needs.plan.outputs.ui == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the layout audit
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: layout-audit
+          path: ${{ runner.temp }}/layout-audit
+
+      - name: Push it to a branch
+        if: steps.download.outcome == 'success'
+        env:
+          SOURCE: ${{ runner.temp }}/layout-audit
+          BRANCH: layout-audit/${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git checkout --quiet --orphan "$BRANCH"
+          git rm -r --quiet --cached .
+          git clean -fdxq
+          cp -R "$SOURCE"/. .
+          git add -A
+          git commit --quiet -m "chore: layout audit for $GITHUB_SHA"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          {
+            echo '### Layout audit contact sheet'
+            echo
+            echo "Pushed to \`$BRANCH\`: open \`index.html\` after \`git fetch origin $BRANCH && git checkout FETCH_HEAD -- .\` in an empty folder."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # A required status check: it passes when every selected shard passed, or when the plan selected
   # none. Shards the plan wanted that never ran are a failure, not a pass.

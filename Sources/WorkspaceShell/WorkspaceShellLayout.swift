@@ -48,6 +48,9 @@ public struct WorkspaceShellLayout<
     /// When set, the takeover replaces the jump bar, the editor, and the docked log.
     let showsTakeover: Bool
     let onToolbarLayoutChange: (WorkspaceToolbarLayout) -> Void
+    /// Whether the window has room for the inspector; see
+    /// ``WorkspaceToolbarLayout/leavesRoomForInspector(windowWidth:inspectorWidth:isNavigatorHidden:)``.
+    let onInspectorRoomChange: (Bool) -> Void
     let navigator: Navigator
     let jumpBar: JumpBar
     let center: Center
@@ -55,6 +58,9 @@ public struct WorkspaceShellLayout<
     let takeover: Takeover
     let inspector: Inspector
     let toolbar: Toolbar
+
+    @State private var windowWidth: CGFloat = .infinity
+    @State private var isNavigatorHidden = false
 
     public init(
         metrics: WorkspacePanelMetrics,
@@ -64,6 +70,7 @@ public struct WorkspaceShellLayout<
         isInspectorPresented: Binding<Bool>,
         showsTakeover: Bool = false,
         onToolbarLayoutChange: @escaping (WorkspaceToolbarLayout) -> Void = { _ in },
+        onInspectorRoomChange: @escaping (Bool) -> Void = { _ in },
         @ViewBuilder navigator: () -> Navigator,
         @ViewBuilder jumpBar: () -> JumpBar,
         @ViewBuilder center: () -> Center,
@@ -79,6 +86,7 @@ public struct WorkspaceShellLayout<
         self._isInspectorPresented = isInspectorPresented
         self.showsTakeover = showsTakeover
         self.onToolbarLayoutChange = onToolbarLayoutChange
+        self.onInspectorRoomChange = onInspectorRoomChange
         self.navigator = navigator()
         self.jumpBar = jumpBar()
         self.center = center()
@@ -117,6 +125,14 @@ public struct WorkspaceShellLayout<
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("inspector")
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        .onChange(of: hasRoomForInspector, initial: true) { _, room in onInspectorRoomChange(room) }
+    }
+
+    private var hasRoomForInspector: Bool {
+        WorkspaceToolbarLayout.leavesRoomForInspector(
+            windowWidth: windowWidth, inspectorWidth: metrics.idealInspectorWidth, isNavigatorHidden: isNavigatorHidden
+        )
     }
 
     private var detailColumn: some View {
@@ -141,6 +157,11 @@ public struct WorkspaceShellLayout<
             transaction.disablesAnimations = true
             withTransaction(transaction) { onToolbarLayoutChange(layout) }
         }
+        // The detail column starts at the window's edge, under the traffic lights, only while the
+        // navigator is hidden.
+        .onGeometryChange(for: Bool.self) {
+            $0.frame(in: .global).minX < WorkspaceToolbarLayout.leadingWindowChrome / 2
+        } action: { isNavigatorHidden = $0 }
         // Editor actions belong to this column, before the inspector divides the toolbar.
         .toolbar { toolbar }
         // The toolbar sits on the window colour, as the design draws it. Left visible, AppKit
@@ -219,9 +240,12 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
                     center
                         // Anchored to the top, not centred. An editor taller than its pane is
                         // centred by default, which pushes its first row out of sight under the
-                        // toolbar. Clipping the bottom of a long editor is recoverable; losing the
-                        // top is not.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        // jump bar. Clipping the bottom of a long editor is recoverable; losing the
+                        // top is not. The zero minimums make the frame take the pane's size even
+                        // when the editor wants more, so the top alignment holds and the overflow
+                        // is clipped at the bottom instead of sliding the header under the jump bar.
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
+                        .clipped()
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("centerPane")
                 } secondary: {
